@@ -367,6 +367,12 @@ impl ValueClass {
                 account_id,
             } => serializer.write(*account_id).write(link_id.as_slice()),
             ValueClass::CalendarPublishLinkLookup { link_id } => {
+                // Single-byte prefix → 17-byte keys. CalendarPublishLink keys are
+                // always 20 bytes (u32 account_id + uuid), so these never collide —
+                // including when account_id is u32::MAX (JMAP id `d333333`, the
+                // calendars primary account). Do NOT use u32::MAX as a 4-byte prefix:
+                // that made lookup keys identical to CalendarPublishLink keys for
+                // that account and overwrote the archived link with the u32 account id.
                 serializer.write(0u8).write(link_id.as_slice())
             }
             ValueClass::SearchIndex(index) => match &index.typ {

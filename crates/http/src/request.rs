@@ -450,6 +450,26 @@ impl ParseHttp for Server {
                 }
             }
             "ics" => {
+                // Prefer an operator-registered WebApplication at "/ics" (if any) so this
+                // built-in route never permanently shadows a pre-existing custom mount.
+                if let Some(resource) = self
+                    .inner
+                    .data
+                    .applications
+                    .serve(
+                        "ics",
+                        req.uri().path().get("ics".len() + 2..).unwrap_or_default(),
+                    )
+                    .await?
+                {
+                    let response = resource.resource.into_http_response();
+                    return Ok(if !resource.no_cache {
+                        response.with_immutable_cache()
+                    } else {
+                        response.with_no_cache()
+                    });
+                }
+
                 self.is_http_anonymous_request_allowed(session.remote_ip)
                     .await?;
 

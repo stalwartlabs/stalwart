@@ -4,23 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Server;
-use groupware::calendar::publish_http::CalendarPublishStore;
+use common::{Server, auth::AccessToken};
+use groupware::{cache::GroupwareCache, calendar::publish_http::CalendarPublishStore};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::calendar_publish_link::{
         self, CalendarPublishLinkProperty, CalendarPublishLinkValue, PublishAccess,
         PublishVisibility,
     },
-    request::{IntoValid, MaybeInvalid},
+    request::MaybeInvalid,
 };
 use jmap_tools::{Map, Value};
-use types::id::Id;
+use types::{collection::SyncCollection, id::Id};
+
+use super::set::assert_calendar_publish_acl;
 
 pub trait CalendarPublishLinkGet: Sync + Send {
     fn calendar_publish_link_get(
         &self,
         request: GetRequest<calendar_publish_link::CalendarPublishLink>,
+        access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<GetResponse<calendar_publish_link::CalendarPublishLink>>> + Send;
 }
 
@@ -28,6 +31,7 @@ impl CalendarPublishLinkGet for Server {
     async fn calendar_publish_link_get(
         &self,
         mut request: GetRequest<calendar_publish_link::CalendarPublishLink>,
+        access_token: &AccessToken,
     ) -> trc::Result<GetResponse<calendar_publish_link::CalendarPublishLink>> {
         let properties = request.unwrap_properties(&[
             CalendarPublishLinkProperty::Id,
@@ -41,44 +45,53 @@ impl CalendarPublishLinkGet for Server {
             CalendarPublishLinkProperty::ExpiresAt,
         ]);
 
+        let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let account_id = request.account_id.document_id();
-        let filter_ids = request.ids.take().map(|ids| {
-            ids.unwrap()
-                .into_valid()
-                .map(|id| id.document_id())
-                .collect::<std::collections::HashSet<_>>()
-        });
 
-        let links = self.list_publish_links(account_id).await?;
+        let cache = self
+            .fetch_dav_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::Calendar,
+            )
+            .await?;
+        let links: Vec<_> = self
+            .list_publish_links(account_id)
+            .await?
+            .into_iter()
+            .filter(|link| {
+                assert_calendar_publish_acl(access_token, account_id, link.calendar_id, &cache)
+                    .is_ok()
+            })
+            .collect();
+
+        let ids = if let Some(ids) = ids {
+            ids
+        } else {
+            links
+                .iter()
+                .take(self.core.jmap.get_max_objects)
+                .map(|link| Id::from(link.document_id))
+                .collect::<Vec<_>>()
+        };
+
         let mut response = GetResponse {
             account_id: request.account_id.into(),
             state: None,
-            list: Vec::new(),
-            not_found: vec![],
+            list: Vec::with_capacity(ids.len()),
+            not_found: not_found_ids,
         };
 
-        for link in &links {
-            if filter_ids
-                .as_ref()
-                .is_some_and(|ids| !ids.contains(&link.document_id))
-            {
-                continue;
-            }
-            if response.list.len() >= self.core.jmap.get_max_objects {
-                break;
-            }
-            response.list.push(build_publish_link_object(
-                link,
-                &properties,
-                self.build_publish_url(link, None),
-            ));
-        }
-
-        if let Some(ids) = filter_ids {
-            for document_id in ids {
-                if !links.iter().any(|l| l.document_id == document_id) {
-                    response.not_found.push(MaybeInvalid::Value(Id::from(document_id)));
-                }
+        for id in ids {
+            let document_id = id.document_id();
+            if let Some(link) = links.iter().find(|l| l.document_id == document_id) {
+                response.list.push(build_publish_link_object(
+                    link,
+                    &properties,
+                    self.build_publish_url(link, None),
+                ));
+            } else {
+                response.not_found.push(MaybeInvalid::Value(id));
             }
         }
 

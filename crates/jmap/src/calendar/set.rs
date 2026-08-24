@@ -15,6 +15,7 @@ use groupware::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ALL,
         CALENDAR_AVAILABILITY_ATTENDING, CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE,
         CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
+        publish_http::{CalendarPublishStore, clear_publish_link},
     },
 };
 use http_proto::HttpSessionData;
@@ -239,6 +240,10 @@ impl CalendarSet for Server {
                 .caused_by(trc::location!())?;
             let on_destroy_remove_events =
                 request.arguments.on_destroy_remove_events.unwrap_or(false);
+            let publish_links = self
+                .list_publish_links(account_id)
+                .await
+                .caused_by(trc::location!())?;
             for id in will_destroy {
                 let document_id = id.document_id();
 
@@ -308,6 +313,12 @@ impl CalendarSet for Server {
 
                 if default_calendar_id == Some(document_id) {
                     reset_default_calendar = true;
+                }
+
+                // Revoke any ICS publish links for this calendar so their secrets
+                // don't keep serving data after the calendar itself is gone.
+                for link in publish_links.iter().filter(|l| l.calendar_id == document_id) {
+                    clear_publish_link(&mut batch, account_id, link.link_id);
                 }
 
                 response.destroyed.push(id);

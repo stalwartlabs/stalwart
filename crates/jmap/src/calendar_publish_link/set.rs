@@ -28,7 +28,11 @@ use jmap_proto::{
 use jmap_tools::{Key, Map, Value};
 use store::write::{BatchBuilder, now};
 use trc::AddContext;
-use types::{acl::Acl, collection::SyncCollection, id::Id};
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+    id::Id,
+};
 use utils::map::bitmap::Bitmap;
 
 pub trait CalendarPublishLinkSet: Sync + Send {
@@ -56,13 +60,7 @@ impl CalendarPublishLinkSet for Server {
                 SyncCollection::Calendar,
             )
             .await?;
-        let existing_links = self.list_publish_links(account_id).await?;
-        let mut next_document_id = existing_links
-            .iter()
-            .map(|l| l.document_id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
+        let mut existing_links = self.list_publish_links(account_id).await?;
         let mut batch = BatchBuilder::new();
 
         'create: for (id, object) in request.unwrap_create() {
@@ -185,8 +183,11 @@ impl CalendarPublishLinkSet for Server {
                 (None, None)
             };
 
-            let document_id = next_document_id;
-            next_document_id = next_document_id.saturating_add(1);
+            let document_id = self
+                .store()
+                .assign_document_ids(account_id, Collection::None, 1)
+                .await
+                .caused_by(trc::location!())?;
 
             let link = CalendarPublishLink::new(
                 document_id,
@@ -199,6 +200,7 @@ impl CalendarPublishLinkSet for Server {
                 expires_at,
             );
             self.store_publish_link(&mut batch, account_id, &link)?;
+            existing_links.push(link.clone());
             let url = self.build_publish_url(&link, secret_token.as_deref());
             let mut created = Map::with_capacity(4);
             created.insert_unchecked(
@@ -313,7 +315,7 @@ impl CalendarPublishLinkSet for Server {
     }
 }
 
-fn assert_calendar_publish_acl(
+pub(crate) fn assert_calendar_publish_acl(
     access_token: &AccessToken,
     account_id: u32,
     calendar_id: u32,

@@ -377,10 +377,10 @@ fn apply_publish_visibility(ical: &mut ICalendar, visibility: PublishVisibility)
         }
         let is_private = component.entries.iter().any(|entry| {
             entry.name == ICalendarProperty::Class
-                && entry
-                    .values
-                    .first()
-                    .is_some_and(|v| matches!(v, ICalendarValue::Text(t) if t.eq_ignore_ascii_case("PRIVATE")))
+                && entry.values.first().is_some_and(|v| {
+                    matches!(v, ICalendarValue::Text(t)
+                        if t.eq_ignore_ascii_case("PRIVATE") || t.eq_ignore_ascii_case("CONFIDENTIAL"))
+                })
         });
         if visibility == PublishVisibility::Busy || is_private {
             redact_event_to_busy(component);

@@ -373,7 +373,7 @@ impl RequestHandler for Server {
                     resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
                     access_token.assert_has_access(req.account_id, Collection::Calendar)?;
 
-                    self.calendar_publish_link_get(*req).await?.into()
+                    self.calendar_publish_link_get(*req, access_token).await?.into()
                 }
                 GetRequestMethod::Registry(mut req) => {
                     resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
