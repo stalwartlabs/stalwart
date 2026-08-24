@@ -327,12 +327,14 @@ pub(crate) fn assert_calendar_publish_acl(
     if access_token.is_member(account_id) {
         return Ok(());
     }
-    let required = Bitmap::from_iter([Acl::ModifyItems, Acl::Modify]);
+    // Publishing an unauthenticated subscribe URL is a sharing act (same
+    // family as shareWith), not a write act — ModifyItems alone must not mint feeds.
+    let required = Bitmap::from_iter([Acl::Share]);
     if cache.has_access_to_container(access_token, calendar_id, required) {
         Ok(())
     } else {
         Err(SetError::forbidden().with_description(
-            "Write or admin access to the calendar is required.",
+            "Share access to the calendar is required to manage publish links.",
         ))
     }
 }

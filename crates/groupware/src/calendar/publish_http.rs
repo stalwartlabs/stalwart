@@ -342,6 +342,10 @@ fn is_resource_in_time_range(resource: &DavResource, filter: &TimeRange) -> bool
 }
 
 fn merge_events_into_calendar(target: &mut ICalendar, source: &ICalendar) {
+    // Non-IANA / embedded zones live in VTIMEZONE siblings; without these,
+    // subscribers see floating or wrong local times for those events.
+    target.copy_timezones(source);
+
     let mut push_vevent = |component: &calcard::icalendar::ICalendarComponent| {
         if component.component_type != ICalendarComponentType::VEvent {
             return;
