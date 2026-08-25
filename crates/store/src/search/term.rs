@@ -156,21 +156,25 @@ impl AccountIndexer {
         let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u16;
         let terms = &mut self.terms;
         let mut scratch = Vec::new();
-        deserialize_term_fields(current_document, &mut scratch, |term_hash, mut field_mask| {
-            let fields = terms.entry(term_hash).or_default();
-            while field_mask != 0 {
-                let item = 31 - field_mask.leading_zeros();
-                field_mask ^= 1 << item;
-                let map = fields
-                    .entry(item as u8)
-                    .or_default()
-                    .entry(block_id)
-                    .or_default();
-                if map.remove(&document_id).is_none() {
-                    map.insert(document_id, false);
+        deserialize_term_fields(
+            current_document,
+            &mut scratch,
+            |term_hash, mut field_mask| {
+                let fields = terms.entry(term_hash).or_default();
+                while field_mask != 0 {
+                    let item = 31 - field_mask.leading_zeros();
+                    field_mask ^= 1 << item;
+                    let map = fields
+                        .entry(item as u8)
+                        .or_default()
+                        .entry(block_id)
+                        .or_default();
+                    if map.remove(&document_id).is_none() {
+                        map.insert(document_id, false);
+                    }
                 }
-            }
-        })
+            },
+        )
         .ok_or_else(|| trc::Error::corrupted_key(current_document, None, trc::location!()))
     }
 
@@ -180,20 +184,24 @@ impl AccountIndexer {
         let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u16;
         let terms = &mut self.terms;
         let mut scratch = Vec::new();
-        deserialize_term_fields(current_document, &mut scratch, |term_hash, mut field_mask| {
-            while field_mask != 0 {
-                let item = 31 - field_mask.leading_zeros();
-                field_mask ^= 1 << item;
-                terms
-                    .entry(term_hash)
-                    .or_default()
-                    .entry(item as u8)
-                    .or_default()
-                    .entry(block_id)
-                    .or_default()
-                    .insert(document_id, false);
-            }
-        })
+        deserialize_term_fields(
+            current_document,
+            &mut scratch,
+            |term_hash, mut field_mask| {
+                while field_mask != 0 {
+                    let item = 31 - field_mask.leading_zeros();
+                    field_mask ^= 1 << item;
+                    terms
+                        .entry(term_hash)
+                        .or_default()
+                        .entry(item as u8)
+                        .or_default()
+                        .entry(block_id)
+                        .or_default()
+                        .insert(document_id, false);
+                }
+            },
+        )
         .ok_or_else(|| trc::Error::corrupted_key(current_document, None, trc::location!()))
     }
 

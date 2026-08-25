@@ -10,13 +10,12 @@ use crate::{
     backend::postgres::into_pool_error,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        ValueClass, ValueOp,
+        ValueClass, ValueOp, commit_backoff,
     },
 };
 use ahash::AHashMap;
 use deadpool_postgres::Object;
-use rand::RngExt;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio_postgres::{IsolationLevel, error::SqlState};
 
 #[derive(Debug)]
@@ -65,8 +64,7 @@ impl PostgresStore {
                         }*/
                     }
 
-                    let backoff = rand::rng().random_range(50..=300);
-                    tokio::time::sleep(Duration::from_millis(backoff)).await;
+                    tokio::time::sleep(commit_backoff(retry_count)).await;
                     retry_count += 1;
                 }
             }

@@ -82,9 +82,13 @@ pub async fn test(test: &TestServer) {
                         .add(ValueClass::MailboxUid, rand::random());
                 }
 
-                for (idx, value_size) in [16, 128, 1024, 2056, 102400].into_iter().enumerate() {
+                for (idx, value_size) in [16, 128, 1024, 2056].into_iter().enumerate() {
                     batch.set(ValueClass::Property(idx as u8), random_bytes(value_size));
                 }
+                batch.set(
+                    ValueClass::Property(Field::ARCHIVE.into()),
+                    random_bytes(102400),
+                );
 
                 for grant_account_id in 0u32..10u32 {
                     if account_id != grant_account_id {

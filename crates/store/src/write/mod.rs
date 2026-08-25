@@ -8,11 +8,7 @@ use self::assert::AssertValue;
 use crate::{Subspace, backend::MAX_TOKEN_LENGTH};
 use log::ChangeLogBuilder;
 use nlp::tokenizers::word::WordTokenizer;
-use std::{
-    collections::HashSet,
-    hash::Hash,
-    time::SystemTime,
-};
+use std::{collections::HashSet, hash::Hash, time::SystemTime};
 use types::{
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection, VanishedCollection},
@@ -101,6 +97,9 @@ pub struct ChangeId {
 ))]
 pub(crate) use commit_limits::{MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME};
 
+#[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+pub(crate) use commit_limits::commit_backoff;
+
 #[cfg(any(
     feature = "rocks",
     feature = "postgres",
@@ -108,10 +107,12 @@ pub(crate) use commit_limits::{MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME};
     feature = "foundation"
 ))]
 mod commit_limits {
+    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+    use rand::RngExt;
     use std::time::Duration;
 
     #[cfg(not(feature = "test_mode"))]
-    pub(crate) const MAX_COMMIT_ATTEMPTS: u32 = 10;
+    pub(crate) const MAX_COMMIT_ATTEMPTS: u32 = 24;
     #[cfg(not(feature = "test_mode"))]
     pub(crate) const MAX_COMMIT_TIME: Duration = Duration::from_secs(10);
 
@@ -119,6 +120,21 @@ mod commit_limits {
     pub(crate) const MAX_COMMIT_ATTEMPTS: u32 = 1000;
     #[cfg(feature = "test_mode")]
     pub(crate) const MAX_COMMIT_TIME: Duration = Duration::from_secs(3600);
+
+    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+    const MIN_COMMIT_BACKOFF_US: u64 = 250;
+    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+    const MAX_COMMIT_BACKOFF_US: u64 = 50_000;
+    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+    const MAX_COMMIT_BACKOFF_SHIFT: u32 = 8;
+
+    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+    pub(crate) fn commit_backoff(attempt: u32) -> Duration {
+        let ceiling = (MIN_COMMIT_BACKOFF_US << attempt.min(MAX_COMMIT_BACKOFF_SHIFT))
+            .min(MAX_COMMIT_BACKOFF_US);
+
+        Duration::from_micros(rand::rng().random_range(0..=ceiling))
+    }
 }
 
 #[derive(Debug)]

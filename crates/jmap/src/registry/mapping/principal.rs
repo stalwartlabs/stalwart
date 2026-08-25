@@ -460,16 +460,8 @@ pub(crate) async fn schedule_account_destruction(
     let status = TaskStatus::now();
 
     let (account_domain_id, account_name, account_type) = match account {
-        Account::User(account) => (
-            account.domain_id,
-            account.name.clone(),
-            AccountType::User,
-        ),
-        Account::Group(account) => (
-            account.domain_id,
-            account.name.clone(),
-            AccountType::Group,
-        ),
+        Account::User(account) => (account.domain_id, account.name.clone(), AccountType::User),
+        Account::Group(account) => (account.domain_id, account.name.clone(), AccountType::Group),
     };
 
     let mut batch = BatchBuilder::new();

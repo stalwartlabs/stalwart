@@ -10,58 +10,55 @@ use crate::{
     backend::deserialize_i64_le,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        ValueClass, ValueOp,
+        ValueClass, ValueOp, commit_backoff,
     },
 };
-use rand::RngExt;
 use rocksdb::{
     BoundColumnFamily, ErrorKind, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, WriteOptions,
 };
-use std::{
-    sync::Arc,
-    thread::sleep,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Instant};
 
 impl RocksDbStore {
     pub(crate) async fn write(&self, mut batch: Batch<'_>) -> trc::Result<AssignedIds> {
         let db = self.db.clone();
+        let mut retry_count = 0;
+        let start = Instant::now();
 
-        self.spawn_worker(move || {
-            let mut txn = RocksDBTransaction {
-                db: &db,
-                cf_indexes: db.cf_handle(CF_INDEXES).unwrap(),
-                cf_logs: db.cf_handle(CF_LOGS).unwrap(),
-                txn_opts: OptimisticTransactionOptions::default(),
-                batch: &mut batch,
-            };
-            txn.txn_opts.set_snapshot(true);
+        loop {
+            let attempt = self
+                .spawn_worker(|| {
+                    let mut txn = RocksDBTransaction {
+                        db: &db,
+                        cf_indexes: db.cf_handle(CF_INDEXES).unwrap(),
+                        cf_logs: db.cf_handle(CF_LOGS).unwrap(),
+                        txn_opts: OptimisticTransactionOptions::default(),
+                        batch: &mut batch,
+                    };
+                    txn.txn_opts.set_snapshot(true);
 
-            // Begin write
-            let mut retry_count = 0;
-            let start = Instant::now();
-            loop {
-                match txn.commit() {
-                    Ok(result) => {
-                        return Ok(result);
+                    match txn.commit() {
+                        Ok(result) => Ok(Ok(result)),
+                        Err(CommitError::Internal(err)) => Err(err),
+                        Err(CommitError::RocksDB(err)) => Ok(Err(err)),
                     }
-                    Err(CommitError::Internal(err)) => return Err(err),
-                    Err(CommitError::RocksDB(err)) => match err.kind() {
-                        ErrorKind::Busy | ErrorKind::MergeInProgress | ErrorKind::TryAgain
-                            if retry_count < MAX_COMMIT_ATTEMPTS
-                                && start.elapsed() < MAX_COMMIT_TIME =>
-                        {
-                            let backoff = rand::rng().random_range(50..=300);
-                            sleep(Duration::from_millis(backoff));
-                            retry_count += 1;
-                        }
-                        _ => return Err(into_error(err)),
-                    },
-                }
+                })
+                .await?;
+
+            match attempt {
+                Ok(result) => return Ok(result),
+                Err(err) => match err.kind() {
+                    ErrorKind::Busy | ErrorKind::MergeInProgress | ErrorKind::TryAgain
+                        if retry_count < MAX_COMMIT_ATTEMPTS
+                            && start.elapsed() < MAX_COMMIT_TIME =>
+                    {
+                        tokio::time::sleep(commit_backoff(retry_count)).await;
+                        retry_count += 1;
+                    }
+                    _ => return Err(into_error(err)),
+                },
             }
-        })
-        .await
+        }
     }
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {

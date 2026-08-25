@@ -456,19 +456,21 @@ pub async fn test(test: &TestServer) {
         // Overwriting a chunked value with a shorter one must not leave orphaned chunks behind
         println!("Running FoundationDB orphaned chunk test...");
         const ORPHAN_FIELD: u8 = 200;
+        const CHUNKED_ACCOUNT: u32 = 0x7FFF_FF00;
+        let chunked_field = u8::from(types::field::Field::ARCHIVE);
         let orphan_range = |document_id: u32| ValueKey {
-            account_id: 0,
+            account_id: CHUNKED_ACCOUNT,
             collection: 0,
             document_id,
-            class: ValueClass::Property(ORPHAN_FIELD),
+            class: ValueClass::Property(chunked_field),
         };
         let marker = value_gen([(b'z', 16)]);
         db.write(
             BatchBuilder::new()
-                .with_account_id(0)
+                .with_account_id(CHUNKED_ACCOUNT)
                 .with_collection(Collection::Email)
                 .with_document(1)
-                .set(ValueClass::Property(ORPHAN_FIELD), marker.clone())
+                .set(ValueClass::Property(chunked_field), marker.clone())
                 .build_all(),
         )
         .await
@@ -487,10 +489,10 @@ pub async fn test(test: &TestServer) {
             let value = value_gen([(byte, size)]);
             db.write(
                 BatchBuilder::new()
-                    .with_account_id(0)
+                    .with_account_id(CHUNKED_ACCOUNT)
                     .with_collection(Collection::Email)
                     .with_document(0)
-                    .set(ValueClass::Property(ORPHAN_FIELD), value.clone())
+                    .set(ValueClass::Property(chunked_field), value.clone())
                     .build_all(),
             )
             .await
@@ -609,6 +611,53 @@ pub async fn test(test: &TestServer) {
         db.delete_range(orphan_range(0), orphan_range(u32::MAX))
             .await
             .unwrap();
+
+        // Variable-length keys must never be chunk-cleared: a lookup key one byte longer than
+        // another is a distinct key, not a chunk of it
+        println!("Running FoundationDB in-memory sibling key test...");
+        use store::write::InMemoryClass;
+        let in_memory_key = |key: &[u8]| {
+            ValueClass::InMemory(InMemoryClass::Key(
+                [b"sibling".as_slice(), key].concat().to_vec(),
+            ))
+        };
+        db.write(
+            BatchBuilder::new()
+                .set(in_memory_key(b""), value_gen([(b'p', 64)]))
+                .set(in_memory_key(b"x"), marker.clone())
+                .build_all(),
+        )
+        .await
+        .unwrap();
+
+        for op in 0..2 {
+            let mut batch = BatchBuilder::new();
+            if op == 0 {
+                batch.set(in_memory_key(b""), value_gen([(b'q', 8)]));
+            } else {
+                batch.clear(in_memory_key(b""));
+            }
+            db.write(batch.build_all()).await.unwrap();
+
+            assert_eq!(
+                db.get_value::<store::write::serialize::RawValue>(ValueKey::from(in_memory_key(
+                    b"x"
+                )))
+                .await
+                .unwrap()
+                .map(|v| v.0),
+                Some(marker.clone()),
+                "sibling lookup key was destroyed by a chunk range clear"
+            );
+        }
+
+        db.write(
+            BatchBuilder::new()
+                .clear(in_memory_key(b"x"))
+                .build_all(),
+        )
+        .await
+        .unwrap();
 
         if std::env::var("SLOW_FDB_TRX").is_ok() {
             println!("Running FoundationDB slow transaction tests...");
@@ -928,6 +977,8 @@ pub async fn test(test: &TestServer) {
     assert_eq!(change_ids, assigned_ids);
 
     println!("Running chunking tests...");
+    const CHUNK_FIELD: u8 = 50;
+    debug_assert_eq!(CHUNK_FIELD, u8::from(types::field::Field::ARCHIVE));
     for (test_num, value) in [
         vec![b'A'; 0],
         vec![b'A'; 1],
@@ -955,7 +1006,7 @@ pub async fn test(test: &TestServer) {
                 .with_account_id(0)
                 .with_collection(Collection::Email)
                 .with_document(0)
-                .set(ValueClass::Property(1), value.as_slice())
+                .set(ValueClass::Property(CHUNK_FIELD), value.as_slice())
                 .set(ValueClass::Property(0), "check1".as_bytes())
                 .set(ValueClass::Property(2), "check2".as_bytes())
                 .build_all(),
@@ -970,7 +1021,7 @@ pub async fn test(test: &TestServer) {
                 account_id: 0,
                 collection: 0,
                 document_id: 0,
-                class: ValueClass::Property(1),
+                class: ValueClass::Property(CHUNK_FIELD),
             })
             .await
             .unwrap()
@@ -984,7 +1035,7 @@ pub async fn test(test: &TestServer) {
                 .with_account_id(0)
                 .with_collection(Collection::Email)
                 .with_document(0)
-                .clear(ValueClass::Property(1))
+                .clear(ValueClass::Property(CHUNK_FIELD))
                 .build_all(),
         )
         .await
@@ -997,7 +1048,7 @@ pub async fn test(test: &TestServer) {
                 account_id: 0,
                 collection: 0,
                 document_id: 0,
-                class: ValueClass::Property(1),
+                class: ValueClass::Property(CHUNK_FIELD),
             })
             .await
             .unwrap()

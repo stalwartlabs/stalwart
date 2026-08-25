@@ -11,8 +11,7 @@ use super::{
 use crate::{
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, IndexPropertyClass, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult,
-        Operation, QueueClass, RegistryClass, SearchIndexClass, TaskQueueClass, TelemetryClass,
+        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
         ValueClass, ValueOp, key::KeySerializer,
     },
     *,
@@ -22,12 +21,7 @@ use foundationdb::{
     options::{self, MutationType},
 };
 use futures::TryStreamExt;
-use rand::RngExt;
-use std::{
-    borrow::Cow,
-    cmp::Ordering,
-    time::{Duration, Instant},
-};
+use std::{borrow::Cow, cmp::Ordering, time::Instant};
 use trc::AddContext;
 
 impl FdbStore {
@@ -82,7 +76,6 @@ impl FdbStore {
                         document_id = *document_id_;
                     }
                     Operation::Value { class, op } => {
-                        let subspace = class.subspace(collection);
                         key_buf.clear();
                         class.serialize_into(
                             &mut key_buf,
@@ -94,9 +87,7 @@ impl FdbStore {
 
                         match op {
                             ValueOp::Set(value) => {
-                                if !chunk_value(&trx, &mut key_buf, value, subspace, class, None)
-                                    .await
-                                {
+                                if !chunk_value(&trx, &mut key_buf, value, class, None).await {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
                                         .ctx(trc::Key::Reason, "Value is too large"));
@@ -104,9 +95,7 @@ impl FdbStore {
                             }
                             ValueOp::SetFnc { payload, fnc } => {
                                 (fnc.0)(&result, payload)?;
-                                if !chunk_value(&trx, &mut key_buf, payload, subspace, class, None)
-                                    .await
-                                {
+                                if !chunk_value(&trx, &mut key_buf, payload, class, None).await {
                                     trx.cancel();
                                     return Err(trc::StoreEvent::FoundationdbError
                                         .ctx(trc::Key::Reason, "Value is too large"));
@@ -148,7 +137,6 @@ impl FdbStore {
                                             &trx,
                                             &mut key_buf,
                                             &value,
-                                            subspace,
                                             class,
                                             Some(prev_num_chunks),
                                         )
@@ -184,7 +172,7 @@ impl FdbStore {
                                 result.push_counter_id(num);
                             }
                             ValueOp::Clear => {
-                                if is_chunked_value(subspace, class) {
+                                if class.may_be_chunked() {
                                     clear_chunks(&trx, &key_buf, None).await;
                                 } else {
                                     trx.clear(&key_buf);
@@ -263,8 +251,6 @@ impl FdbStore {
             {
                 return Ok(result);
             } else {
-                let backoff = rand::rng().random_range(50..=100);
-                tokio::time::sleep(Duration::from_millis(backoff)).await;
                 retry_count += 1;
             }
         }
@@ -353,40 +339,6 @@ impl FdbStore {
     }
 }
 
-fn is_chunked_subspace(subspace: Subspace) -> bool {
-    matches!(
-        subspace,
-        Subspace::Property
-            | Subspace::Immutable
-            | Subspace::IndexProperty
-            | Subspace::SearchDocument
-            | Subspace::QueueMessage
-            | Subspace::TaskQueue
-            | Subspace::Directory
-            | Subspace::Registry
-            | Subspace::DeletedItems
-            | Subspace::SpamSamples
-            | Subspace::ReportIn
-            | Subspace::ReportOut
-            | Subspace::TelemetrySpan
-    )
-}
-
-fn is_chunked_value(subspace: Subspace, class: &ValueClass) -> bool {
-    is_chunked_subspace(subspace)
-        && matches!(
-            class,
-            ValueClass::Property(_)
-                | ValueClass::Immutable(_)
-                | ValueClass::IndexProperty(IndexPropertyClass::Hash { .. })
-                | ValueClass::Registry(RegistryClass::Item { .. })
-                | ValueClass::Queue(QueueClass::Message(_))
-                | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
-                | ValueClass::Telemetry(TelemetryClass::Span(_))
-                | ValueClass::SearchIndex(SearchIndexClass::Document { .. })
-        )
-}
-
 async fn clear_chunks(trx: &Transaction, key: &[u8], from_chunk: Option<u8>) {
     let to = KeySerializer::new(key.len() + 1)
         .write(key)
@@ -430,7 +382,6 @@ async fn chunk_value(
     trx: &Transaction,
     key: &mut Vec<u8>,
     value: &[u8],
-    subspace: Subspace,
     class: &ValueClass,
     prev_num_chunks: Option<usize>,
 ) -> bool {
@@ -444,7 +395,13 @@ async fn chunk_value(
         return false;
     }
 
-    if is_chunked_value(subspace, class)
+    debug_assert!(
+        num_chunks == 1 || class.may_be_chunked() || matches!(class, ValueClass::Any(_)),
+        "{class:?} was split into {num_chunks} chunks but is not declared chunkable, \
+         stale chunks will be spliced onto a later shorter value"
+    );
+
+    if class.may_be_chunked()
         && prev_num_chunks.is_none_or(|prev_num_chunks| prev_num_chunks > num_chunks)
     {
         clear_chunks(trx, key, Some((num_chunks - 1) as u8)).await;

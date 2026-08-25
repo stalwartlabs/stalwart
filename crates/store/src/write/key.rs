@@ -707,6 +707,25 @@ impl ValueClass {
             ValueClass::Any(any) => any.subspace,
         }
     }
+
+    pub fn may_be_chunked(&self) -> bool {
+        match self {
+            ValueClass::Property(field) => *field == u8::from(Field::ARCHIVE),
+            ValueClass::Immutable(field) => *field == u8::from(EmailField::Metadata),
+            ValueClass::IndexProperty(IndexPropertyClass::Hash { .. })
+            | ValueClass::Registry(RegistryClass::Item { .. })
+            | ValueClass::Queue(QueueClass::Message(_))
+            | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
+            | ValueClass::Telemetry(TelemetryClass::Span(_)) => true,
+            ValueClass::SearchIndex(search) => matches!(
+                search,
+                SearchIndexClass::Document { .. }
+                    | SearchIndexClass::GlobalDocument { .. }
+                    | SearchIndexClass::GlobalDocumentId { .. }
+            ),
+            _ => false,
+        }
+    }
 }
 
 impl From<ValueClass> for ValueKey<ValueClass> {

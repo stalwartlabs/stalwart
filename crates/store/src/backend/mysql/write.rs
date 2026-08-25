@@ -9,13 +9,12 @@ use crate::{
     IndexKey, Key, LogKey, Shape, Subspace,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        ValueClass, ValueOp,
+        ValueClass, ValueOp, commit_backoff,
     },
 };
 use ahash::AHashMap;
 use mysql_async::{Conn, Error, IsolationLevel, TxOpts, params, prelude::Queryable};
-use rand::RngExt;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Debug)]
 enum CommitError {
@@ -60,8 +59,7 @@ impl MysqlStore {
                 }
             }
 
-            let backoff = rand::rng().random_range(50..=300);
-            tokio::time::sleep(Duration::from_millis(backoff)).await;
+            tokio::time::sleep(commit_backoff(retry_count)).await;
             retry_count += 1;
         }
     }
