@@ -140,7 +140,9 @@ impl HasQueueQuota for Server {
                     .core
                     .storage
                     .data
-                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaSize(key))))
+                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaSize(
+                        key,
+                    ))))
                     .await
                     .unwrap_or(0) as u64;
                 if used_size + size > max_size {
@@ -155,7 +157,9 @@ impl HasQueueQuota for Server {
                     .core
                     .storage
                     .data
-                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaCount(key))))
+                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaCount(
+                        key,
+                    ))))
                     .await
                     .unwrap_or(0) as u64;
                 if total_messages + 1 > max_messages {

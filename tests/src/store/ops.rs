@@ -651,13 +651,9 @@ pub async fn test(test: &TestServer) {
             );
         }
 
-        db.write(
-            BatchBuilder::new()
-                .clear(in_memory_key(b"x"))
-                .build_all(),
-        )
-        .await
-        .unwrap();
+        db.write(BatchBuilder::new().clear(in_memory_key(b"x")).build_all())
+            .await
+            .unwrap();
 
         if std::env::var("SLOW_FDB_TRX").is_ok() {
             println!("Running FoundationDB slow transaction tests...");

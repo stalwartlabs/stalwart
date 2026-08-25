@@ -148,6 +148,10 @@ impl SyncCollection {
             _ => None,
         }
     }
+
+    pub fn is_prefixed(&self) -> bool {
+        matches!(self, SyncCollection::Email)
+    }
 }
 
 impl From<Collection> for SyncCollection {

@@ -409,6 +409,7 @@ impl BatchBuilder {
                 }
 
                 // Serialize changes
+                let mut scratch = Vec::new();
                 for (collection, changes) in changelog.changes.into_iter() {
                     let cc = self.changed_collections.get_mut_or_insert(account_id);
                     if changes.has_container_changes() {
@@ -420,7 +421,7 @@ impl BatchBuilder {
 
                     self.ops.push(Operation::Log {
                         collection: LogCollection::Sync(collection),
-                        set: changes.serialize(),
+                        set: changes.serialize(collection.is_prefixed(), &mut scratch),
                     });
                 }
 
