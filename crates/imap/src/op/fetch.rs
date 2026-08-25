@@ -48,7 +48,7 @@ use store::{
 };
 use types::{
     acl::Acl,
-    collection::{Collection, SyncCollection, VanishedCollection},
+    collection::{Collection, SyncCollection},
     field::EmailField,
     id::Id,
     keyword::Keyword,
@@ -214,22 +214,13 @@ impl<T: SessionStream> SessionData<T> {
                 let vanished = self
                     .server
                     .store()
-                    .vanished::<(u32, u32)>(
+                    .vanished_uids(
                         account_id,
-                        VanishedCollection::Email.into(),
+                        mailbox.id.mailbox_id,
                         Query::from_modseq(changed_since),
                     )
                     .await
-                    .imap_ctx(&arguments.tag, trc::location!())?
-                    .into_iter()
-                    .filter_map(|(mailbox_id, uid)| {
-                        if mailbox.id.mailbox_id == mailbox_id {
-                            Some(uid)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
+                    .imap_ctx(&arguments.tag, trc::location!())?;
 
                 if !vanished.is_empty() {
                     let mut buf = Vec::with_capacity(vanished.len() * 3);

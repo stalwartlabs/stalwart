@@ -429,7 +429,7 @@ impl BatchBuilder {
                 for (collection, vanished) in changelog.vanished.into_iter() {
                     self.ops.push(Operation::Log {
                         collection: LogCollection::Vanished(collection),
-                        set: vanished.serialize(),
+                        set: vanished.serialize(collection.is_named(), &mut scratch),
                     });
                 }
             }

@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::key::KeySerializer;
-use crate::{SerializeInfallible, U64_LEN};
+use crate::U16_LEN;
 use ahash::AHashSet;
 use types::collection::{SyncCollection, VanishedCollection};
 use utils::{codec::leb128::Leb128Vec, map::vec_map::VecMap};
@@ -152,7 +151,6 @@ pub(crate) struct ChangeLogBuilder {
 pub enum VanishedItem {
     Name(String),
     Id(u64),
-    IdPair(u32, u32),
 }
 
 #[derive(Default, Debug)]
@@ -376,12 +374,6 @@ impl From<String> for VanishedItem {
     }
 }
 
-impl From<u64> for VanishedItem {
-    fn from(value: u64) -> Self {
-        VanishedItem::Id(value)
-    }
-}
-
 impl From<(u32, u32)> for VanishedItem {
     fn from(value: (u32, u32)) -> Self {
         VanishedItem::Id((value.0 as u64) << 32 | value.1 as u64)
@@ -391,27 +383,67 @@ impl From<(u32, u32)> for VanishedItem {
 impl VanishedItem {
     pub fn serialized_size(&self) -> usize {
         match self {
-            VanishedItem::Name(name) => name.len() + 1,
-            VanishedItem::Id(_) | VanishedItem::IdPair(..) => U64_LEN,
+            VanishedItem::Name(name) => name.len() + U16_LEN,
+            VanishedItem::Id(_) => U16_LEN,
         }
     }
 }
 
-impl SerializeInfallible for VanishedItems {
-    fn serialize(&self) -> Vec<u8> {
-        let mut buf = KeySerializer::new(64);
+impl VanishedItems {
+    pub fn serialize(&self, is_named: bool, scratch: &mut Vec<u64>) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(self.0.len() * 4 + 8);
 
-        for item in &self.0 {
-            buf = match item {
-                VanishedItem::Name(name) => buf.write(name.as_bytes()).write(0u8),
-                VanishedItem::Id(id) => buf.write(id.to_be_bytes().as_slice()),
-                VanishedItem::IdPair(a, b) => buf
-                    .write(a.to_be_bytes().as_slice())
-                    .write(b.to_be_bytes().as_slice()),
-            };
+        if is_named {
+            for item in &self.0 {
+                match item {
+                    VanishedItem::Name(name) => {
+                        buf.push_leb128(name.len());
+                        buf.extend_from_slice(name.as_bytes());
+                    }
+                    VanishedItem::Id(_) => {
+                        debug_assert!(false, "id logged for a name-based vanished collection");
+                    }
+                }
+            }
+
+            return buf;
         }
 
-        buf.finalize()
+        scratch.clear();
+        scratch.extend(self.0.iter().filter_map(|item| match item {
+            VanishedItem::Id(id) => Some(*id),
+            VanishedItem::Name(_) => {
+                debug_assert!(false, "name logged for an id-based vanished collection");
+                None
+            }
+        }));
+        scratch.sort_unstable();
+        scratch.dedup();
+
+        let mut pos = 0;
+        let mut prev_group = 0u64;
+        while pos < scratch.len() {
+            let group = scratch[pos] >> 32;
+            let mut end = pos;
+            while end < scratch.len() && scratch[end] >> 32 == group {
+                end += 1;
+            }
+
+            buf.push_leb128(group - prev_group);
+            buf.push_leb128(end - pos);
+
+            let mut prev_id = 0u64;
+            for id in &scratch[pos..end] {
+                let id = *id & u32::MAX as u64;
+                buf.push_leb128(id - prev_id);
+                prev_id = id;
+            }
+
+            prev_group = group;
+            pos = end;
+        }
+
+        buf
     }
 }
 
@@ -690,5 +722,133 @@ mod tests {
             }
             roundtrip(&changes, false);
         }
+    }
+
+    fn vanished_ids_roundtrip(ids: &[u64]) {
+        let mut scratch = Vec::new();
+        let items = VanishedItems(ids.iter().map(|id| VanishedItem::Id(*id)).collect());
+        let bytes = items.serialize(false, &mut scratch);
+
+        let mut decoded = Vec::new();
+        <(u32, u32) as crate::query::log::DeserializeVanished>::deserialize_vanished(
+            &bytes,
+            &mut decoded,
+        )
+        .expect("failed to decode vanished ids");
+
+        let mut want: Vec<(u32, u32)> = ids
+            .iter()
+            .map(|id| ((*id >> 32) as u32, (*id & u32::MAX as u64) as u32))
+            .collect();
+        want.sort_unstable();
+        want.dedup();
+
+        let mut got = decoded.clone();
+        got.sort_unstable();
+        assert_eq!(want, got, "vanished id roundtrip failed");
+
+        for mailbox_id in want.iter().map(|(m, _)| *m).chain([0, 1, 7, u32::MAX]) {
+            let mut uids = Vec::new();
+            crate::query::log::decode_vanished_uids(&bytes, mailbox_id, &mut uids)
+                .expect("failed to skip-decode");
+            uids.sort_unstable();
+
+            let mut expected: Vec<u32> = want
+                .iter()
+                .filter(|(m, _)| *m == mailbox_id)
+                .map(|(_, u)| *u)
+                .collect();
+            expected.sort_unstable();
+            assert_eq!(expected, uids, "skip-decode disagreed for mailbox {mailbox_id}");
+        }
+    }
+
+    #[test]
+    fn vanished_ids_boundaries() {
+        let mut lcg = Lcg(0xbeef);
+
+        for ids in [
+            vec![],
+            vec![0u64],
+            vec![u64::MAX],
+            vec![(u32::MAX as u64) << 32],
+            vec![u32::MAX as u64],
+            vec![((7u64) << 32) | 1, (7u64 << 32) | 2, (7u64 << 32) | 3],
+            vec![(1u64 << 32) | 500, (2u64 << 32) | 20],
+            vec![(9u64 << 32) | 5, (9u64 << 32) | 5],
+            vec![(3u64 << 32) | 9, (1u64 << 32) | 4, (2u64 << 32) | 77],
+        ] {
+            vanished_ids_roundtrip(&ids);
+        }
+
+        for _ in 0..200 {
+            let n = (lcg.next() % 60) as usize;
+            let ids: Vec<u64> = (0..n)
+                .map(|_| {
+                    let mailbox = lcg.next() % 8;
+                    let uid = lcg.next() % 5_000;
+                    (mailbox << 32) | uid
+                })
+                .collect();
+            vanished_ids_roundtrip(&ids);
+        }
+    }
+
+    #[test]
+    fn vanished_names_roundtrip() {
+        let mut scratch = Vec::new();
+
+        for names in [
+            vec![],
+            vec![String::new()],
+            vec!["/dav/cal/john.doe/personal/aB3xK9qLm7".to_string()],
+            vec![
+                "/dav/cal/john.doe/personal/aB3xK9qLm7".to_string(),
+                "/dav/cal/john.doe/personal/".to_string(),
+                "x".repeat(200),
+                "unicode-\u{1F600}-name".to_string(),
+            ],
+        ] {
+            let items = VanishedItems(
+                names
+                    .iter()
+                    .map(|name| VanishedItem::Name(name.clone()))
+                    .collect(),
+            );
+            let bytes = items.serialize(true, &mut scratch);
+
+            let mut decoded = Vec::new();
+            <String as crate::query::log::DeserializeVanished>::deserialize_vanished(
+                &bytes,
+                &mut decoded,
+            )
+            .expect("failed to decode vanished names");
+
+            assert_eq!(names, decoded, "vanished name roundtrip failed");
+        }
+    }
+
+    #[test]
+    fn vanished_names_survive_embedded_nul() {
+        let mut scratch = Vec::new();
+        let names = vec![
+            "before\u{0}after".to_string(),
+            "/dav/file/john.doe/a\u{0}b".to_string(),
+        ];
+        let items = VanishedItems(
+            names
+                .iter()
+                .map(|name| VanishedItem::Name(name.clone()))
+                .collect(),
+        );
+
+        let mut decoded = Vec::new();
+        <String as crate::query::log::DeserializeVanished>::deserialize_vanished(
+            &items.serialize(true, &mut scratch),
+            &mut decoded,
+        )
+        .expect("failed to decode names containing NUL");
+
+        assert_eq!(names, decoded, "a NUL byte must not split a path");
     }
 }

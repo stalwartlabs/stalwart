@@ -70,6 +70,17 @@ pub enum VanishedCollection {
     FileNode = 254,
 }
 
+impl VanishedCollection {
+    pub fn is_named(&self) -> bool {
+        match self {
+            VanishedCollection::Email => false,
+            VanishedCollection::Calendar
+            | VanishedCollection::AddressBook
+            | VanishedCollection::FileNode => true,
+        }
+    }
+}
+
 impl Collection {
     pub const MAX: usize = Collection::None as usize;
 

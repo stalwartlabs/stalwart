@@ -9,7 +9,7 @@ use types::collection::{SyncCollection, VanishedCollection};
 use utils::codec::leb128::Leb128Iterator;
 
 use crate::{
-    IterateParams, LogKey, Store, U32_LEN, U64_LEN,
+    IterateParams, LogKey, Store, U64_LEN,
     write::{
         LogCollection,
         key::DeserializeBigEndian,
@@ -56,7 +56,7 @@ pub enum Query {
 }
 
 pub trait DeserializeVanished: Sized + Sync + Send {
-    fn deserialize_vanished<'x>(bytes: &mut impl Iterator<Item = &'x u8>) -> Option<Self>;
+    fn deserialize_vanished(bytes: &[u8], items: &mut Vec<Self>) -> Option<()>;
 }
 
 impl Default for Changes {
@@ -187,20 +187,10 @@ impl Store {
             IterateParams::new(from_key, to_key).ascending(),
             |key, value| {
                 let change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
-                if is_inclusive || change_id != from_change_id {
-                    let mut iter = value.iter().peekable();
-
-                    while iter.peek().is_some() {
-                        if let Some(item) = T::deserialize_vanished(&mut iter) {
-                            vanished.push(item);
-                        } else {
-                            return Err(trc::Error::corrupted_key(
-                                key,
-                                value.into(),
-                                trc::location!(),
-                            ));
-                        }
-                    }
+                if (is_inclusive || change_id != from_change_id)
+                    && T::deserialize_vanished(value, &mut vanished).is_none()
+                {
+                    return Err(trc::Error::corrupted_key(key, value.into(), trc::location!()));
                 }
                 Ok(true)
             },
@@ -209,6 +199,52 @@ impl Store {
         .caused_by(trc::location!())?;
 
         Ok(vanished)
+    }
+
+    pub async fn vanished_uids(
+        &self,
+        account_id: u32,
+        mailbox_id: u32,
+        query: Query,
+    ) -> trc::Result<Vec<u32>> {
+        let collection = u8::from(LogCollection::Vanished(VanishedCollection::Email));
+        let (is_inclusive, from_change_id, to_change_id) = match query {
+            Query::All => (true, 0, u64::MAX),
+            Query::Since(change_id) => (false, change_id, u64::MAX),
+            Query::SinceInclusive(change_id) => (true, change_id, u64::MAX),
+            Query::RangeInclusive(from_change_id, to_change_id) => {
+                (true, from_change_id, to_change_id)
+            }
+        };
+        let from_key = LogKey {
+            account_id,
+            collection,
+            change_id: from_change_id,
+        };
+        let to_key = LogKey {
+            account_id,
+            collection,
+            change_id: to_change_id,
+        };
+
+        let mut uids = Vec::new();
+
+        self.iterate(
+            IterateParams::new(from_key, to_key).ascending(),
+            |key, value| {
+                let change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
+                if (is_inclusive || change_id != from_change_id)
+                    && decode_vanished_uids(value, mailbox_id, &mut uids).is_none()
+                {
+                    return Err(trc::Error::corrupted_key(key, value.into(), trc::location!()));
+                }
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
+        Ok(uids)
     }
 
     pub async fn get_last_change_id(
@@ -463,40 +499,65 @@ impl Change {
     }
 }
 
-impl DeserializeVanished for u64 {
-    fn deserialize_vanished<'x>(bytes: &mut impl Iterator<Item = &'x u8>) -> Option<Self> {
-        let mut num = [0u8; U64_LEN];
-        for i in num.iter_mut() {
-            *i = *bytes.next()?;
+pub(crate) fn decode_vanished_uids(bytes: &[u8], mailbox_id: u32, uids: &mut Vec<u32>) -> Option<()> {
+    let mut bytes_it = bytes.iter();
+    let mut group = 0u64;
+
+    while let Some(group_delta) = bytes_it.next_leb128::<u64>() {
+        group += group_delta;
+        let count: usize = bytes_it.next_leb128()?;
+
+        if group as u32 != mailbox_id {
+            for _ in 0..count {
+                bytes_it.next_leb128::<u64>()?;
+            }
+            continue;
         }
-        Some(u64::from_be_bytes(num))
+
+        let mut uid = 0u64;
+        for _ in 0..count {
+            uid += bytes_it.next_leb128::<u64>()?;
+            uids.push(uid as u32);
+        }
     }
+
+    Some(())
 }
 
 impl DeserializeVanished for (u32, u32) {
-    fn deserialize_vanished<'x>(bytes: &mut impl Iterator<Item = &'x u8>) -> Option<Self> {
-        let mut num1 = [0u8; U32_LEN];
-        let mut num2 = [0u8; U32_LEN];
-        for i in num1.iter_mut().chain(num2.iter_mut()) {
-            *i = *bytes.next()?;
+    fn deserialize_vanished(bytes: &[u8], items: &mut Vec<Self>) -> Option<()> {
+        let mut bytes_it = bytes.iter();
+        let mut group = 0u64;
+
+        while let Some(group_delta) = bytes_it.next_leb128::<u64>() {
+            group += group_delta;
+            let count: usize = bytes_it.next_leb128()?;
+
+            let mut id = 0u64;
+            for _ in 0..count {
+                id += bytes_it.next_leb128::<u64>()?;
+                items.push((group as u32, id as u32));
+            }
         }
-        Some((u32::from_be_bytes(num1), u32::from_be_bytes(num2)))
+
+        Some(())
     }
 }
 
 impl DeserializeVanished for String {
-    fn deserialize_vanished<'x>(bytes: &mut impl Iterator<Item = &'x u8>) -> Option<Self> {
-        let mut name = Vec::with_capacity(16);
+    fn deserialize_vanished(bytes: &[u8], items: &mut Vec<Self>) -> Option<()> {
+        let mut pos = 0;
 
-        loop {
-            let byte = bytes.next()?;
-            if *byte != 0 {
-                name.push(*byte);
-            } else {
-                break;
-            }
+        while pos < bytes.len() {
+            let mut bytes_it = bytes.get(pos..)?.iter();
+            let len: usize = bytes_it.next_leb128()?;
+            let start = bytes.len() - bytes_it.len();
+            let end = start.checked_add(len)?;
+
+            items.push(std::str::from_utf8(bytes.get(start..end)?).ok()?.to_string());
+            pos = end;
         }
 
-        String::from_utf8(name).ok()
+        Some(())
     }
 }
