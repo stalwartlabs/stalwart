@@ -5,7 +5,6 @@
  */
 
 use std::{cell::RefCell, sync::LazyLock};
-
 use zstd::{
     bulk::{Compressor, Decompressor},
     dict::{DecoderDictionary, EncoderDictionary},
@@ -16,16 +15,18 @@ use zstd::{
 };
 
 pub const COMPRESSION_LEVEL: i32 = 3;
+pub const TERM_COMPRESSION_LEVEL: i32 = 6;
 pub const COMPRESS_WATERMARK: usize = 256;
 pub const COMPRESS_WATERMARK_DICTIONARY: usize = 64;
 pub const MAX_ARCHIVE_SIZE: usize = 64 * 1024 * 1024;
 
-const DICTIONARIES: [&[u8]; 5] = [
+const DICTIONARIES: [&[u8]; 6] = [
     include_bytes!("../../../../resources/zstd/common-v1.dict"),
     include_bytes!("../../../../resources/zstd/email-v1.dict"),
     include_bytes!("../../../../resources/zstd/calendar-v1.dict"),
     include_bytes!("../../../../resources/zstd/contact-v1.dict"),
     include_bytes!("../../../../resources/zstd/sieve-v1.dict"),
+    include_bytes!("../../../../resources/zstd/term-v1.dict"),
 ];
 
 const ALL_DICTIONARIES: [Dictionary; DICTIONARIES.len()] = [
@@ -34,6 +35,7 @@ const ALL_DICTIONARIES: [Dictionary; DICTIONARIES.len()] = [
     Dictionary::Calendar,
     Dictionary::Contact,
     Dictionary::Sieve,
+    Dictionary::Term,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +45,7 @@ pub enum Dictionary {
     Calendar,
     Contact,
     Sieve,
+    Term,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +71,15 @@ impl Dictionary {
             Dictionary::Calendar => 2,
             Dictionary::Contact => 3,
             Dictionary::Sieve => 4,
+            Dictionary::Term => 5,
+        }
+    }
+
+    #[inline(always)]
+    const fn level(self) -> i32 {
+        match self {
+            Dictionary::Term => TERM_COMPRESSION_LEVEL,
+            _ => COMPRESSION_LEVEL,
         }
     }
 }
@@ -84,7 +96,8 @@ pub const fn compress_watermark(dictionary: Option<Dictionary>) -> usize {
 static ENCODER_DICTIONARIES: LazyLock<Vec<EncoderDictionary<'static>>> = LazyLock::new(|| {
     DICTIONARIES
         .iter()
-        .map(|dict| EncoderDictionary::copy(dict, COMPRESSION_LEVEL))
+        .zip(ALL_DICTIONARIES)
+        .map(|(dict, dictionary)| EncoderDictionary::copy(dict, dictionary.level()))
         .collect()
 });
 
@@ -159,38 +172,46 @@ pub fn compress(
     Ok(output)
 }
 
-pub fn decompress(frame: &[u8]) -> std::io::Result<Vec<u8>> {
-    let slot = match get_dict_id_from_frame(frame).map(|id| id.get()) {
-        Some(id) => {
-            DECODER_DICTIONARIES
-                .iter()
-                .position(|(known, _)| *known == id)
-                .ok_or_else(|| {
-                    std::io::Error::other(format!("unknown compression dictionary {id}"))
-                })?
-                + 1
-        }
-        None => 0,
-    };
+fn decoder_slot(frame: &[u8]) -> std::io::Result<usize> {
+    match get_dict_id_from_frame(frame).map(|id| id.get()) {
+        Some(id) => DECODER_DICTIONARIES
+            .iter()
+            .position(|(known, _)| *known == id)
+            .map(|slot| slot + 1)
+            .ok_or_else(|| std::io::Error::other(format!("unknown compression dictionary {id}"))),
+        None => Ok(0),
+    }
+}
 
-    let capacity = match get_frame_content_size(frame) {
-        Ok(Some(size)) if size <= MAX_ARCHIVE_SIZE as u64 => size as usize,
-        Ok(Some(size)) => {
-            return Err(std::io::Error::other(format!(
-                "archive of {size} bytes exceeds the {MAX_ARCHIVE_SIZE} byte limit"
-            )));
-        }
-        Ok(None) => {
-            return Err(std::io::Error::other(
-                "compression frame declares no content size",
-            ));
-        }
-        Err(err) => {
-            return Err(std::io::Error::other(format!(
-                "malformed compression frame header: {err}"
-            )));
-        }
-    };
+fn frame_capacity(frame: &[u8], limit: usize) -> std::io::Result<usize> {
+    match get_frame_content_size(frame) {
+        Ok(Some(size)) if size <= limit as u64 => Ok(size as usize),
+        Ok(Some(size)) => Err(std::io::Error::other(format!(
+            "archive of {size} bytes exceeds the {limit} byte limit"
+        ))),
+        Ok(None) => Err(std::io::Error::other(
+            "compression frame declares no content size",
+        )),
+        Err(err) => Err(std::io::Error::other(format!(
+            "malformed compression frame header: {err}"
+        ))),
+    }
+}
+
+pub fn decompress(frame: &[u8]) -> std::io::Result<Vec<u8>> {
+    let slot = decoder_slot(frame)?;
+    let capacity = frame_capacity(frame, MAX_ARCHIVE_SIZE)?;
 
     DECOMPRESSORS.with_borrow_mut(|decompressors| decompressors[slot].decompress(frame, capacity))
+}
+
+pub fn decompress_into(frame: &[u8], output: &mut Vec<u8>, limit: usize) -> std::io::Result<()> {
+    let slot = decoder_slot(frame)?;
+    let capacity = frame_capacity(frame, limit)?;
+
+    output.clear();
+    output.reserve(capacity);
+    DECOMPRESSORS
+        .with_borrow_mut(|decompressors| decompressors[slot].decompress_to_buffer(frame, output))
+        .map(|_| ())
 }

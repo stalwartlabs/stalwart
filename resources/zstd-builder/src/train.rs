@@ -1,8 +1,6 @@
 use std::ffi::CStr;
 
-use store::write::compress::{
-    COMPRESS_WATERMARK, COMPRESS_WATERMARK_DICTIONARY, COMPRESSION_LEVEL,
-};
+use store::write::compress::{COMPRESS_WATERMARK, COMPRESS_WATERMARK_DICTIONARY};
 use zstd::{
     bulk::{Compressor, Decompressor},
     dict::{DecoderDictionary, EncoderDictionary},
@@ -18,7 +16,22 @@ const DICT_MAGIC: u32 = 0xEC30A437;
 const DICT_ID_FLOOR: u32 = 32768;
 const DICT_ID_CEILING: u32 = 65536;
 const KNEE_TOLERANCE: f64 = 0.5;
-const ARCHIVE_HASH_LEN: usize = 4;
+
+#[derive(Clone, Copy)]
+pub struct Overhead {
+    pub plain: usize,
+    pub compressed: usize,
+}
+
+pub const ARCHIVE_OVERHEAD: Overhead = Overhead {
+    plain: 4,
+    compressed: 0,
+};
+
+pub const TERM_OVERHEAD: Overhead = Overhead {
+    plain: 1,
+    compressed: 1,
+};
 
 pub struct Split {
     pub train: Vec<Vec<u8>>,
@@ -27,7 +40,7 @@ pub struct Split {
 
 pub fn split(corpus: Corpus, core_only: bool) -> Split {
     let mut train = Vec::with_capacity(corpus.len() - corpus.len() / 4);
-    let mut dev = Vec::with_capacity(corpus.len() / 4);
+    let mut dev = Vec::with_capacity(corpus.len() / 4 + corpus.dev_only.len());
     for (index, (scrubbed, real)) in corpus.scrubbed.into_iter().zip(corpus.real).enumerate() {
         if index % 4 == 3 {
             dev.push(real);
@@ -35,6 +48,7 @@ pub fn split(corpus: Corpus, core_only: bool) -> Split {
             train.push(scrubbed);
         }
     }
+    dev.extend(corpus.dev_only);
     if !core_only {
         train.extend(corpus.train_only);
     }
@@ -58,7 +72,7 @@ impl Samples {
     }
 }
 
-pub fn train(samples: &Samples, capacity: usize) -> Result<Vec<u8>, String> {
+pub fn train(samples: &Samples, capacity: usize, level: i32) -> Result<Vec<u8>, String> {
     use zstd::zstd_safe::zstd_sys;
 
     let mut params = zstd_sys::ZDICT_cover_params_t {
@@ -70,7 +84,7 @@ pub fn train(samples: &Samples, capacity: usize) -> Result<Vec<u8>, String> {
         shrinkDict: 0,
         shrinkDictMaxRegression: 0,
         zParams: zstd_sys::ZDICT_params_t {
-            compressionLevel: COMPRESSION_LEVEL,
+            compressionLevel: level,
             notificationLevel: 0,
             dictID: 0,
         },
@@ -141,10 +155,10 @@ impl Score {
     }
 }
 
-fn new_compressor<'a>(dictionary: Option<&'a EncoderDictionary<'a>>) -> Compressor<'a> {
+fn new_compressor<'a>(dictionary: Option<&'a EncoderDictionary<'a>>, level: i32) -> Compressor<'a> {
     let mut compressor = match dictionary {
         Some(dictionary) => Compressor::with_prepared_dictionary(dictionary).unwrap(),
-        None => Compressor::new(COMPRESSION_LEVEL).unwrap(),
+        None => Compressor::new(level).unwrap(),
     };
     compressor
         .set_parameter(CParameter::ChecksumFlag(true))
@@ -155,9 +169,15 @@ fn new_compressor<'a>(dictionary: Option<&'a EncoderDictionary<'a>>) -> Compress
     compressor
 }
 
-pub fn evaluate(dict: Option<&[u8]>, dev: &[Vec<u8>], typical: usize) -> Score {
-    let prepared = dict.map(|dict| EncoderDictionary::copy(dict, COMPRESSION_LEVEL));
-    let mut compressor = new_compressor(prepared.as_ref());
+pub fn evaluate(
+    dict: Option<&[u8]>,
+    dev: &[Vec<u8>],
+    typical: usize,
+    level: i32,
+    overhead: Overhead,
+) -> Score {
+    let prepared = dict.map(|dict| EncoderDictionary::copy(dict, level));
+    let mut compressor = new_compressor(prepared.as_ref(), level);
     let watermark = if dict.is_some() {
         COMPRESS_WATERMARK_DICTIONARY
     } else {
@@ -175,17 +195,18 @@ pub fn evaluate(dict: Option<&[u8]>, dev: &[Vec<u8>], typical: usize) -> Score {
     let mut output = Vec::new();
     for sample in dev {
         score.raw += sample.len();
+        let plain = sample.len() + overhead.plain;
         let stored = if sample.len() < watermark {
-            sample.len() + ARCHIVE_HASH_LEN
+            plain
         } else {
             output.clear();
             output.reserve(compress_bound(sample.len()));
-            let len = compressor.compress_to_buffer(sample, &mut output).unwrap();
-            if len < sample.len() {
+            let len = compressor.compress_to_buffer(sample, &mut output).unwrap() + overhead.compressed;
+            if len < plain {
                 score.compressed_values += 1;
                 len
             } else {
-                sample.len() + ARCHIVE_HASH_LEN
+                plain
             }
         };
         score.stored += stored;
@@ -197,13 +218,182 @@ pub fn evaluate(dict: Option<&[u8]>, dev: &[Vec<u8>], typical: usize) -> Score {
     score
 }
 
-pub fn verify(dict: &[u8], dev: &[Vec<u8>]) -> Result<u32, String> {
+pub struct Timing {
+    pub score: Score,
+    pub encode: std::time::Duration,
+    pub decode: std::time::Duration,
+    pub decoded_bytes: usize,
+}
+
+impl Timing {
+    pub fn encode_throughput(&self) -> f64 {
+        self.decoded_bytes as f64 / self.encode.as_secs_f64() / (1024.0 * 1024.0)
+    }
+
+    pub fn decode_throughput(&self) -> f64 {
+        self.decoded_bytes as f64 / self.decode.as_secs_f64() / (1024.0 * 1024.0)
+    }
+}
+
+pub fn measure(
+    dict: Option<&[u8]>,
+    dev: &[Vec<u8>],
+    typical: usize,
+    level: i32,
+    overhead: Overhead,
+) -> Timing {
+    let encoder = dict.map(|dict| EncoderDictionary::copy(dict, level));
+    let decoder = dict.map(DecoderDictionary::copy);
+    let mut compressor = new_compressor(encoder.as_ref(), level);
+    let mut decompressor = match decoder.as_ref() {
+        Some(decoder) => Decompressor::with_prepared_dictionary(decoder).unwrap(),
+        None => Decompressor::new().unwrap(),
+    };
+    let watermark = if dict.is_some() {
+        COMPRESS_WATERMARK_DICTIONARY
+    } else {
+        COMPRESS_WATERMARK
+    };
+
+    let mut score = Score {
+        raw: 0,
+        stored: 0,
+        typical_raw: 0,
+        typical_stored: 0,
+        compressed_values: 0,
+        samples: dev.len(),
+    };
+    let mut frames: Vec<(Vec<u8>, usize)> = Vec::with_capacity(dev.len());
+    let mut encode = std::time::Duration::ZERO;
+    let mut output = Vec::new();
+
+    for sample in dev {
+        score.raw += sample.len();
+        let plain = sample.len() + overhead.plain;
+        let stored = if sample.len() < watermark {
+            plain
+        } else {
+            output.clear();
+            output.reserve(compress_bound(sample.len()));
+            let started = std::time::Instant::now();
+            let len = compressor.compress_to_buffer(sample, &mut output).unwrap();
+            encode += started.elapsed();
+            if len + overhead.compressed < plain {
+                score.compressed_values += 1;
+                frames.push((output[..len].to_vec(), sample.len()));
+                len + overhead.compressed
+            } else {
+                plain
+            }
+        };
+        score.stored += stored;
+        if sample.len() <= typical {
+            score.typical_raw += sample.len();
+            score.typical_stored += stored;
+        }
+    }
+
+    let mut scratch = Vec::new();
+    let mut decoded_bytes = 0;
+    let started = std::time::Instant::now();
+    for (frame, size) in &frames {
+        scratch.clear();
+        scratch.reserve(*size);
+        decompressor
+            .decompress_to_buffer(frame, &mut scratch)
+            .unwrap();
+        decoded_bytes += scratch.len();
+    }
+    let decode = started.elapsed();
+
+    Timing {
+        score,
+        encode,
+        decode,
+        decoded_bytes,
+    }
+}
+
+pub struct Bucket {
+    pub upper: usize,
+    pub samples: usize,
+    pub raw: usize,
+    pub stored: usize,
+    pub compressed_values: usize,
+}
+
+impl Bucket {
+    pub fn ratio(&self) -> f64 {
+        100.0 * self.stored as f64 / self.raw.max(1) as f64
+    }
+}
+
+pub fn evaluate_buckets(
+    dict: Option<&[u8]>,
+    dev: &[Vec<u8>],
+    level: i32,
+    overhead: Overhead,
+    bounds: &[usize],
+) -> Vec<Bucket> {
+    let prepared = dict.map(|dict| EncoderDictionary::copy(dict, level));
+    let mut compressor = new_compressor(prepared.as_ref(), level);
+    let watermark = if dict.is_some() {
+        COMPRESS_WATERMARK_DICTIONARY
+    } else {
+        COMPRESS_WATERMARK
+    };
+
+    let mut buckets: Vec<Bucket> = bounds
+        .iter()
+        .map(|upper| Bucket {
+            upper: *upper,
+            samples: 0,
+            raw: 0,
+            stored: 0,
+            compressed_values: 0,
+        })
+        .collect();
+
+    let mut output = Vec::new();
+    for sample in dev {
+        let Some(bucket) = buckets
+            .iter_mut()
+            .find(|bucket| sample.len() < bucket.upper)
+        else {
+            continue;
+        };
+
+        let plain = sample.len() + overhead.plain;
+        let stored = if sample.len() < watermark {
+            plain
+        } else {
+            output.clear();
+            output.reserve(compress_bound(sample.len()));
+            let len =
+                compressor.compress_to_buffer(sample, &mut output).unwrap() + overhead.compressed;
+            if len < plain {
+                bucket.compressed_values += 1;
+                len
+            } else {
+                plain
+            }
+        };
+
+        bucket.samples += 1;
+        bucket.raw += sample.len();
+        bucket.stored += stored;
+    }
+
+    buckets
+}
+
+pub fn verify(dict: &[u8], dev: &[Vec<u8>], level: i32) -> Result<u32, String> {
     let id = get_dict_id_from_dict(dict)
         .ok_or_else(|| "dictionary carries no identifier".to_string())?
         .get();
-    let encoder = EncoderDictionary::copy(dict, COMPRESSION_LEVEL);
+    let encoder = EncoderDictionary::copy(dict, level);
     let decoder = DecoderDictionary::copy(dict);
-    let mut compressor = new_compressor(Some(&encoder));
+    let mut compressor = new_compressor(Some(&encoder), level);
     let mut decompressor = Decompressor::with_prepared_dictionary(&decoder)
         .map_err(|err| format!("decompressor: {err}"))?;
 
@@ -242,14 +432,16 @@ pub fn sweep(
     sizes: &[usize],
     typical: usize,
     fraction: usize,
+    level: i32,
+    overhead: Overhead,
 ) -> (Vec<Candidate>, usize) {
     let keep = (split.train.len() * fraction / 100).max(1);
     let samples = Samples::new(&split.train[..keep.min(split.train.len())]);
     let mut candidates = Vec::new();
     for &size in sizes {
-        match train(&samples, size) {
+        match train(&samples, size, level) {
             Ok(dict) => {
-                let score = evaluate(Some(&dict), &split.dev, typical);
+                let score = evaluate(Some(&dict), &split.dev, typical, level, overhead);
                 candidates.push(Candidate { size, dict, score });
             }
             Err(err) => {

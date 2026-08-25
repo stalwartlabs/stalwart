@@ -154,8 +154,10 @@ impl AccountIndexer {
 
     pub fn diff(&mut self, current_document: &[u8], document_id: u32) -> trc::Result<()> {
         let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u16;
-        deserialize_term_fields(current_document, |term_hash, mut field_mask| {
-            let fields = self.terms.entry(term_hash).or_default();
+        let terms = &mut self.terms;
+        let mut scratch = Vec::new();
+        deserialize_term_fields(current_document, &mut scratch, |term_hash, mut field_mask| {
+            let fields = terms.entry(term_hash).or_default();
             while field_mask != 0 {
                 let item = 31 - field_mask.leading_zeros();
                 field_mask ^= 1 << item;
@@ -176,11 +178,13 @@ impl AccountIndexer {
         self.documents.insert(document_id, None);
 
         let block_id = (document_id >> ACCOUNT_BLOCK_SHIFT) as u16;
-        deserialize_term_fields(current_document, |term_hash, mut field_mask| {
+        let terms = &mut self.terms;
+        let mut scratch = Vec::new();
+        deserialize_term_fields(current_document, &mut scratch, |term_hash, mut field_mask| {
             while field_mask != 0 {
                 let item = 31 - field_mask.leading_zeros();
                 field_mask ^= 1 << item;
-                self.terms
+                terms
                     .entry(term_hash)
                     .or_default()
                     .entry(item as u8)
@@ -525,8 +529,8 @@ impl Document {
     }
 }
 
-impl Serialize for Document {
-    fn serialize(&self) -> trc::Result<Vec<u8>> {
+impl Document {
+    pub(crate) fn encode(&self) -> codec::Writer {
         let mut writer =
             codec::Writer::with_capacity(self.terms.len() * (CheekyHash::HASH_SIZE + U32_LEN));
         writer.push_leb128(self.terms.len());
@@ -543,18 +547,25 @@ impl Serialize for Document {
             }
         }
 
-        Ok(writer.into_inner())
+        writer
+    }
+}
+
+impl Serialize for Document {
+    fn serialize(&self) -> trc::Result<Vec<u8>> {
+        Ok(self.encode().into_document())
     }
 }
 
 pub(crate) fn matches_phrase(
-    bytes: &[u8],
+    stored: &[u8],
+    scratch: &mut Vec<u8>,
     field: u8,
     words: &[CheekyHash],
     ordinals: &mut Vec<u32>,
     failure: &mut Vec<usize>,
 ) -> Option<bool> {
-    let mut reader = codec::Reader::new(bytes);
+    let mut reader = codec::Reader::new(codec::read_document(stored, scratch)?);
 
     let items = reader.leb128::<usize>()?;
     ordinals.clear();
@@ -625,10 +636,11 @@ pub(crate) fn matches_phrase(
 }
 
 pub(crate) fn deserialize_term_fields(
-    bytes: &[u8],
+    stored: &[u8],
+    scratch: &mut Vec<u8>,
     mut cb: impl FnMut(CheekyHash, u32),
 ) -> Option<()> {
-    let mut reader = codec::Reader::new(bytes);
+    let mut reader = codec::Reader::new(codec::read_document(stored, scratch)?);
 
     let items = reader.leb128::<usize>()?;
 

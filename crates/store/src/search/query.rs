@@ -485,6 +485,7 @@ impl AccountContext<'_> {
         let mut result = RoaringBitmap::new();
         let mut ordinals = Vec::new();
         let mut failure = Vec::new();
+        let mut scratch = Vec::new();
         let store = self.store;
         let mut candidate_iter = candidates.iter().peekable();
 
@@ -510,6 +511,7 @@ impl AccountContext<'_> {
                         .map(u32::from_be_bytes)
                         .zip(matches_phrase(
                             value,
+                            &mut scratch,
                             field,
                             &words,
                             &mut ordinals,

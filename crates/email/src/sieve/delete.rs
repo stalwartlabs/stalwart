@@ -12,7 +12,7 @@ use store::{
     write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
-use types::{collection::Collection, field::SieveField};
+use types::collection::Collection;
 
 pub trait SieveScriptDelete: Sync + Send {
     fn sieve_script_delete(
@@ -47,7 +47,6 @@ impl SieveScriptDelete for Server {
                 .with_account_id(account_id)
                 .with_collection(Collection::SieveScript)
                 .with_document(document_id)
-                .clear(SieveField::Ids)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()
                         .with_current(

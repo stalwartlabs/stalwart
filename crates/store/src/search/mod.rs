@@ -27,6 +27,7 @@ pub(crate) const GLOBAL_BUCKET_BITS: u32 = 16;
 pub(crate) const GLOBAL_BUCKET_SHIFT: u32 = u64::BITS - GLOBAL_BUCKET_BITS;
 pub(crate) const ACCOUNT_BLOCK_SHIFT: u32 = 16;
 pub(crate) const MAX_DOCUMENT_SIZE: usize = 1024 * 1024;
+pub(crate) const MAX_STORED_DOCUMENT_SIZE: usize = MAX_DOCUMENT_SIZE * 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SearchField {

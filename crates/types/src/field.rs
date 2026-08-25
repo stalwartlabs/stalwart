@@ -54,7 +54,6 @@ pub enum MailboxField {
 #[repr(u8)]
 pub enum SieveField {
     Name,
-    Ids,
     Archive,
 }
 
@@ -136,7 +135,6 @@ impl From<SieveField> for u8 {
     fn from(value: SieveField) -> Self {
         match value {
             SieveField::Name => 13,
-            SieveField::Ids => 84,
             SieveField::Archive => ARCHIVE_FIELD,
         }
     }

@@ -173,6 +173,7 @@ pub struct Corpus {
     pub scrubbed: Vec<Vec<u8>>,
     pub real: Vec<Vec<u8>>,
     pub train_only: Vec<Vec<u8>>,
+    pub dev_only: Vec<Vec<u8>>,
 }
 
 impl Corpus {
@@ -194,12 +195,16 @@ impl Corpus {
         self.train_only.push(sample);
     }
 
+    pub fn push_dev_only(&mut self, sample: Vec<u8>) {
+        self.dev_only.push(sample);
+    }
+
     pub fn len(&self) -> usize {
-        self.real.len()
+        self.real.len() + self.dev_only.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.real.is_empty()
+        self.real.is_empty() && self.dev_only.is_empty()
     }
 }
 

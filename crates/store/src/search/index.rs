@@ -173,6 +173,7 @@ impl Store {
             ((last_bucket as u64) << GLOBAL_BUCKET_SHIFT) | ((1 << GLOBAL_BUCKET_SHIFT) - 1);
         let mut delete_terms = AHashSet::new();
         let mut has_documents = false;
+        let mut scratch = Vec::new();
 
         self.iterate(
             IterateParams::new(
@@ -187,7 +188,7 @@ impl Store {
             ),
             |key, value| {
                 has_documents = true;
-                deserialize_term_fields(value, |term_hash, mut field_mask| {
+                deserialize_term_fields(value, &mut scratch, |term_hash, mut field_mask| {
                     while field_mask != 0 {
                         let item = 31 - field_mask.leading_zeros();
                         field_mask ^= 1 << item;
@@ -257,5 +258,19 @@ impl Store {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "test_mode")]
+impl IndexDocument {
+    pub fn into_term_document(self, document_id: u32) -> Vec<u8> {
+        let mut indexer = AccountIndexer::default();
+        indexer.insert(self, document_id);
+        indexer
+            .documents
+            .remove(&document_id)
+            .flatten()
+            .map(|document| document.encode().into_plain())
+            .unwrap_or_default()
     }
 }

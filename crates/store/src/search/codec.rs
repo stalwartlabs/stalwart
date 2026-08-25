@@ -6,8 +6,11 @@
 
 use crate::{
     Subspace, U16_LEN, U32_LEN,
-    search::SearchField,
-    write::{AnyKey, SearchIndex},
+    search::{MAX_STORED_DOCUMENT_SIZE, SearchField},
+    write::{
+        AnyKey, Dictionary, SearchIndex,
+        compress::{COMPRESS_WATERMARK_DICTIONARY, compress, decompress_into},
+    },
 };
 use std::slice::Iter;
 use utils::{
@@ -16,6 +19,8 @@ use utils::{
 };
 
 const RANGE_PADDING: [u8; 22] = [u8::MAX; 22];
+const DOCUMENT_PLAIN: u8 = 0;
+const DOCUMENT_ZSTD: u8 = 1;
 
 pub(crate) const ACCOUNT_TERM_BASE_LEN: usize = U32_LEN + 2;
 pub(crate) const GLOBAL_TERM_BASE_LEN: usize = 2;
@@ -63,12 +68,29 @@ impl<'x> Reader<'x> {
 impl Writer {
     pub fn with_capacity(capacity: usize) -> Self {
         Writer {
-            buf: Vec::with_capacity(capacity),
+            buf: Vec::with_capacity(capacity + 1),
         }
     }
 
-    pub fn into_inner(self) -> Vec<u8> {
+    #[cfg(feature = "test_mode")]
+    pub fn into_plain(self) -> Vec<u8> {
         self.buf
+    }
+
+    pub fn into_document(self) -> Vec<u8> {
+        let mut plain = self.buf;
+
+        if plain.len() >= COMPRESS_WATERMARK_DICTIONARY
+            && let Ok(mut compressed) = compress(Some(Dictionary::Term), &plain, 1)
+            && compressed.len() < plain.len()
+        {
+            compressed.push(DOCUMENT_ZSTD);
+            return compressed;
+        }
+
+        plain.reserve_exact(1);
+        plain.push(DOCUMENT_PLAIN);
+        plain
     }
 
     pub fn push_leb128<T: Leb128_>(&mut self, value: T) {
@@ -82,6 +104,18 @@ impl Writer {
     pub fn push_term(&mut self, term: &CheekyHash) {
         self.buf.push(term.len() as u8);
         self.buf.extend_from_slice(term.as_key());
+    }
+}
+
+pub(crate) fn read_document<'x>(stored: &'x [u8], scratch: &'x mut Vec<u8>) -> Option<&'x [u8]> {
+    let (marker, payload) = stored.split_last()?;
+
+    match *marker {
+        DOCUMENT_PLAIN => Some(payload),
+        DOCUMENT_ZSTD => decompress_into(payload, scratch, MAX_STORED_DOCUMENT_SIZE)
+            .ok()
+            .map(|_| scratch.as_slice()),
+        _ => None,
     }
 }
 
@@ -238,6 +272,90 @@ mod tests {
         Key, ValueKey,
         write::{SearchIndexClass, ValueClass},
     };
+
+    fn document(terms: &[&str]) -> Writer {
+        let mut writer = Writer::with_capacity(0);
+        writer.push_leb128(terms.len());
+        for (index, term) in terms.iter().enumerate() {
+            writer.push_term(&CheekyHash::new(term.as_bytes()));
+            writer.push_leb128(1u32 << (index % 8));
+        }
+        writer.push_leb128(1usize);
+        writer.push_u8(8);
+        writer.push_leb128(terms.len());
+        for index in 0..terms.len() {
+            writer.push_leb128(index as u32);
+        }
+        writer
+    }
+
+    #[test]
+    fn small_documents_are_stored_plain() {
+        let plain = document(&["hello", "world"]).buf;
+        let stored = document(&["hello", "world"]).into_document();
+
+        assert!(plain.len() < COMPRESS_WATERMARK_DICTIONARY);
+        assert_eq!(stored.last(), Some(&DOCUMENT_PLAIN));
+        assert_eq!(stored.len(), plain.len() + 1);
+
+        let mut scratch = Vec::new();
+        assert_eq!(read_document(&stored, &mut scratch), Some(plain.as_slice()));
+    }
+
+    #[test]
+    fn large_documents_round_trip_through_zstd() {
+        let words = [
+            "message",
+            "delivery",
+            "subject",
+            "received",
+            "important",
+            "attachment",
+            "calendar",
+            "invitation",
+            "reminder",
+            "signature",
+            "unsubscribe",
+            "newsletter",
+            "conversation",
+            "participant",
+            "notification",
+            "confirmation",
+        ];
+        let terms = (0..400)
+            .map(|index| words[index % words.len()])
+            .collect::<Vec<_>>();
+
+        let plain = document(&terms).buf;
+        let stored = document(&terms).into_document();
+
+        assert!(plain.len() >= COMPRESS_WATERMARK_DICTIONARY);
+        assert_eq!(stored.last(), Some(&DOCUMENT_ZSTD));
+        assert!(
+            stored.len() < plain.len(),
+            "{} vs {}",
+            stored.len(),
+            plain.len()
+        );
+
+        let mut scratch = Vec::new();
+        assert_eq!(read_document(&stored, &mut scratch), Some(plain.as_slice()));
+    }
+
+    #[test]
+    fn a_damaged_document_is_rejected() {
+        let mut scratch = Vec::new();
+        assert_eq!(read_document(&[], &mut scratch), None);
+
+        let mut stored = document(&["hello"]).into_document();
+        *stored.last_mut().unwrap() = 9;
+        assert_eq!(read_document(&stored, &mut scratch), None);
+
+        let mut stored = document(&["hello"]).into_document();
+        let last = stored.len() - 1;
+        stored[last] = DOCUMENT_ZSTD;
+        assert_eq!(read_document(&stored, &mut scratch), None);
+    }
 
     #[test]
     fn test_account_term_keys() {

@@ -41,7 +41,7 @@ pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
     Ok(corpus)
 }
 
-fn unescape_mbox(raw: &[u8]) -> Vec<u8> {
+pub fn unescape_mbox(raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(raw.len());
     for line in raw.split_inclusive(|byte| *byte == b'\n') {
         let mut line = line;
@@ -57,14 +57,14 @@ fn unescape_mbox(raw: &[u8]) -> Vec<u8> {
     out
 }
 
-fn with_ingest_headers(raw: &[u8]) -> Vec<u8> {
+pub fn with_ingest_headers(raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(raw.len() + INGEST_HEADERS.len());
     out.extend_from_slice(INGEST_HEADERS.as_bytes());
     out.extend_from_slice(raw);
     out
 }
 
-fn split_mbox(raw: &[u8]) -> Vec<&[u8]> {
+pub fn split_mbox(raw: &[u8]) -> Vec<&[u8]> {
     if !raw.starts_with(b"From ") {
         return vec![raw];
     }
@@ -93,7 +93,7 @@ fn split_mbox(raw: &[u8]) -> Vec<&[u8]> {
     messages
 }
 
-fn metadata(parser: &MessageParser, raw: &[u8]) -> Option<MessageMetadata> {
+pub fn metadata(parser: &MessageParser, raw: &[u8]) -> Option<MessageMetadata> {
     let message = parser.parse(raw)?;
     if message.parts.is_empty() {
         return None;

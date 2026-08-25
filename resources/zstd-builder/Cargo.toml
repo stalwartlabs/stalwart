@@ -11,8 +11,9 @@ common = { path = "../../crates/common" }
 email = { path = "../../crates/email" }
 groupware = { path = "../../crates/groupware" }
 jmap_proto = { path = "../../crates/jmap-proto" }
+nlp = { path = "../../crates/nlp" }
 smtp = { path = "../../crates/smtp" }
-store = { path = "../../crates/store" }
+store = { path = "../../crates/store", features = ["test_mode"] }
 types = { path = "../../crates/types" }
 utils = { path = "../../crates/utils" }
 calcard = { version = "0.3", features = ["rkyv"] }

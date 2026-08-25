@@ -4,6 +4,7 @@ mod contact;
 mod corpus;
 mod metadata;
 mod script;
+mod terms;
 mod testsuite;
 mod synthetic;
 mod train;
@@ -12,13 +13,30 @@ mod vacation;
 use std::path::{Path, PathBuf};
 
 use corpus::{Corpus, Stats};
-use train::{CANDIDATE_SIZES, Candidate, MIN_DICTIONARY_SIZE, evaluate, split, sweep, verify};
+use store::write::compress::{COMPRESSION_LEVEL, TERM_COMPRESSION_LEVEL};
+use train::{
+    ARCHIVE_OVERHEAD, CANDIDATE_SIZES, Candidate, MIN_DICTIONARY_SIZE, Overhead, TERM_OVERHEAD,
+    evaluate, evaluate_buckets, measure, split, sweep, verify,
+};
 
 const DEFAULT_COMMON_SAMPLES: usize = 24000;
+const DEFAULT_TERM_SAMPLES: usize = 60000;
+const SWEEP_LEVELS: [i32; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15];
+const SIZE_BUCKETS: [usize; 8] = [
+    128,
+    256,
+    512,
+    1024,
+    4096,
+    16384,
+    65536,
+    usize::MAX,
+];
 
 struct Options {
     dictionary: String,
     input: Option<PathBuf>,
+    words: Option<PathBuf>,
     output: PathBuf,
     size: Option<usize>,
     samples: usize,
@@ -26,6 +44,8 @@ struct Options {
     core_only: bool,
     force: bool,
     fraction: usize,
+    level: i32,
+    levels: bool,
 }
 
 fn main() {
@@ -42,8 +62,48 @@ fn main() {
         read: 0,
         skipped: 0,
     };
+    let overhead = if options.dictionary == "term" {
+        TERM_OVERHEAD
+    } else {
+        ARCHIVE_OVERHEAD
+    };
     let corpus = match options.dictionary.as_str() {
         "common" => synthetic::build(options.samples, &mut stats),
+        "term" => {
+            let mut word_stats = Stats {
+                read: 0,
+                skipped: 0,
+            };
+            let vocabulary = match terms::Vocabulary::load(words(&options), &mut word_stats) {
+                Ok(vocabulary) if !vocabulary.is_empty() => vocabulary,
+                Ok(_) => {
+                    eprintln!(
+                        "no usable frequency list found in {}",
+                        words(&options).display()
+                    );
+                    std::process::exit(1);
+                }
+                Err(err) => {
+                    eprintln!(
+                        "failed to read frequency lists from {}: {err}",
+                        words(&options).display()
+                    );
+                    std::process::exit(1);
+                }
+            };
+            println!("vocabulary: {}", vocabulary.summary());
+            read(
+                &options,
+                "message",
+                terms::build(
+                    input(&options),
+                    &vocabulary,
+                    options.samples,
+                    options.keep_text,
+                    &mut stats,
+                ),
+            )
+        }
         "calendar" => read(
             &options,
             "ics",
@@ -77,8 +137,9 @@ fn main() {
         std::process::exit(1);
     }
 
-    let total: usize = corpus.real.iter().map(Vec::len).sum();
-    let mut sizes: Vec<usize> = corpus.real.iter().map(Vec::len).collect();
+    let measured = || corpus.real.iter().chain(corpus.dev_only.iter());
+    let total: usize = measured().map(Vec::len).sum();
+    let mut sizes: Vec<usize> = measured().map(Vec::len).collect();
     sizes.sort_unstable();
     let at = |p: f64| sizes[((sizes.len() - 1) as f64 * p) as usize];
     println!(
@@ -109,7 +170,7 @@ fn main() {
         split.dev.len()
     );
 
-    let baseline = evaluate(None, &split.dev, typical);
+    let baseline = evaluate(None, &split.dev, typical, options.level, overhead);
     println!(
         "{:>9}  {:>13}  {:>10}  {:>12}  {:>10}",
         "size", "typical", "all bytes", "mean stored", "compressed"
@@ -124,7 +185,7 @@ fn main() {
     );
 
     let sizes = options.size.map_or(CANDIDATE_SIZES.to_vec(), |size| vec![size]);
-    let (candidates, knee) = sweep(&split, &sizes, typical, options.fraction);
+    let (candidates, knee) = sweep(&split, &sizes, typical, options.fraction, options.level, overhead);
     if candidates.is_empty() {
         eprintln!("no candidate could be trained");
         std::process::exit(1);
@@ -143,11 +204,91 @@ fn main() {
     }
 
     let chosen = &candidates[knee];
-    finish(chosen, &split.dev, &options.output, options.force);
+    if options.levels {
+        report_levels(chosen, &split.dev, typical, overhead);
+        report_buckets(chosen, &split.dev, options.level, overhead);
+    }
+    finish(
+        chosen,
+        &split.dev,
+        &options.output,
+        options.force,
+        options.level,
+    );
 }
 
-fn finish(candidate: &Candidate, dev: &[Vec<u8>], output: &Path, force: bool) {
-    let id = match verify(&candidate.dict, dev) {
+fn report_levels(candidate: &Candidate, dev: &[Vec<u8>], typical: usize, overhead: Overhead) {
+    println!(
+        "\nlevel sweep at {}K, held out set only\n",
+        candidate.size / 1024
+    );
+    level_table(Some(&candidate.dict), dev, typical, overhead);
+    println!("\nsame sweep without a dictionary\n");
+    level_table(None, dev, typical, overhead);
+}
+
+fn level_table(dict: Option<&[u8]>, dev: &[Vec<u8>], typical: usize, overhead: Overhead) {
+    println!(
+        "{:>9}  {:>13}  {:>10}  {:>12}  {:>13}  {:>13}",
+        "level", "typical", "all bytes", "mean stored", "encode MB/s", "decode MB/s"
+    );
+    for level in SWEEP_LEVELS {
+        let timing = measure(dict, dev, typical, level, overhead);
+        println!(
+            "{:>9}  {:>12.2}%  {:>9.2}%  {:>10} B  {:>13.0}  {:>13.0}",
+            level,
+            timing.score.typical_ratio(),
+            timing.score.ratio(),
+            timing.score.mean_stored(),
+            timing.encode_throughput(),
+            timing.decode_throughput()
+        );
+    }
+}
+
+fn report_buckets(candidate: &Candidate, dev: &[Vec<u8>], level: i32, overhead: Overhead) {
+    let with = evaluate_buckets(Some(&candidate.dict), dev, level, overhead, &SIZE_BUCKETS);
+    let without = evaluate_buckets(None, dev, level, overhead, &SIZE_BUCKETS);
+
+    println!(
+        "\nby document size at level {level}, {}K dictionary against none\n",
+        candidate.size / 1024
+    );
+    println!(
+        "{:>12}  {:>8}  {:>11}  {:>11}  {:>11}  {:>9}",
+        "size", "count", "raw bytes", "dictionary", "no dictionary", "saved"
+    );
+    for (with, without) in with.iter().zip(without.iter()) {
+        if with.samples == 0 {
+            continue;
+        }
+        let label = if with.upper == usize::MAX {
+            "64K and up".to_string()
+        } else {
+            format!("under {}", human(with.upper))
+        };
+        println!(
+            "{:>12}  {:>8}  {:>11}  {:>10.2}%  {:>12.2}%  {:>8.2}%",
+            label,
+            with.samples,
+            with.raw,
+            with.ratio(),
+            without.ratio(),
+            without.ratio() - with.ratio()
+        );
+    }
+}
+
+fn human(bytes: usize) -> String {
+    if bytes >= 1024 {
+        format!("{}K", bytes / 1024)
+    } else {
+        format!("{bytes}")
+    }
+}
+
+fn finish(candidate: &Candidate, dev: &[Vec<u8>], output: &Path, force: bool, level: i32) {
+    let id = match verify(&candidate.dict, dev, level) {
         Ok(id) => id,
         Err(err) => {
             eprintln!("\nverification failed: {err}");
@@ -222,6 +363,14 @@ fn input(options: &Options) -> &Path {
     })
 }
 
+fn words(options: &Options) -> &Path {
+    options.words.as_deref().unwrap_or_else(|| {
+        eprintln!("{} requires --words <dir>\n", options.dictionary);
+        usage();
+        std::process::exit(1)
+    })
+}
+
 fn read(options: &Options, kind: &str, result: std::io::Result<Corpus>) -> Corpus {
     match result {
         Ok(corpus) => corpus,
@@ -243,16 +392,29 @@ fn parse_args() -> Result<Options, String> {
         std::process::exit(0);
     }
 
+    let dictionary_is_term = dictionary == "term";
+    let samples = if dictionary_is_term {
+        DEFAULT_TERM_SAMPLES
+    } else {
+        DEFAULT_COMMON_SAMPLES
+    };
     let mut options = Options {
         output: PathBuf::from(format!("../zstd/{dictionary}-v1.dict")),
         dictionary,
         input: None,
+        words: None,
         size: None,
-        samples: DEFAULT_COMMON_SAMPLES,
+        samples,
         keep_text: false,
         core_only: false,
         force: false,
         fraction: 100,
+        level: if dictionary_is_term {
+            TERM_COMPRESSION_LEVEL
+        } else {
+            COMPRESSION_LEVEL
+        },
+        levels: false,
     };
 
     while let Some(arg) = args.next() {
@@ -278,6 +440,17 @@ fn parse_args() -> Result<Options, String> {
                     .parse()
                     .map_err(|_| "--samples is not a number")?;
             }
+            "--words" => {
+                options.words = Some(args.next().ok_or("--words needs a path")?.into());
+            }
+            "--level" => {
+                options.level = args
+                    .next()
+                    .ok_or("--level needs a number")?
+                    .parse()
+                    .map_err(|_| "--level is not a number")?;
+            }
+            "--levels" => options.levels = true,
             "--keep-text" => options.keep_text = true,
             "--core-only" => options.core_only = true,
             "--force" => options.force = true,
@@ -312,12 +485,22 @@ dictionaries:
   contact    ContactCard, from a directory of .vcf files
   sieve      SieveScript, from a directory of .sieve and .svtest files
   email      MessageMetadata, from a directory of .eml files or mbox archives
+  term       search index term documents, from a directory of messages plus the word
+             frequency lists named by --words
 
 options:
   --out <path>      where to write the dictionary (default ../zstd/<dictionary>-v1.dict)
+  --words <dir>     directory of \"<iso639>.txt\" word frequency lists, one \"word count\"
+                    pair per line, most frequent first (term only). The lists published
+                    at https://github.com/hermitdave/FrequencyWords are in this format.
+  --level <n>       zstd level to train and score at (default {COMPRESSION_LEVEL}, or
+                    {TERM_COMPRESSION_LEVEL} for term)
+  --levels          after picking a dictionary, score the held out set at every level
   --size <bytes>    train one size instead of sweeping
-  --samples <n>     synthetic archives to generate (common only, default {DEFAULT_COMMON_SAMPLES})
-  --keep-text       train on sample free text instead of neutralising it (calendar, contact)
+  --samples <n>     synthetic samples to generate (common default {DEFAULT_COMMON_SAMPLES},
+                    term default {DEFAULT_TERM_SAMPLES})
+  --keep-text       train on sample free text instead of neutralising it (calendar, contact);
+                    for term, also train on the real messages instead of holding them all out
   --core-only       drop the training only material, leaving the held out set unchanged
   --force           overwrite an existing dictionary that carries a different identifier
   --train-fraction <percent>
