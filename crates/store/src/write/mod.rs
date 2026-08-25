@@ -97,7 +97,12 @@ pub struct ChangeId {
 ))]
 pub(crate) use commit_limits::{MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME};
 
-#[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "rocks",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "foundation"
+))]
 pub(crate) use commit_limits::commit_backoff;
 
 #[cfg(any(
@@ -107,7 +112,6 @@ pub(crate) use commit_limits::commit_backoff;
     feature = "foundation"
 ))]
 mod commit_limits {
-    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
     use rand::RngExt;
     use std::time::Duration;
 
@@ -121,14 +125,10 @@ mod commit_limits {
     #[cfg(feature = "test_mode")]
     pub(crate) const MAX_COMMIT_TIME: Duration = Duration::from_secs(3600);
 
-    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
     const MIN_COMMIT_BACKOFF_US: u64 = 250;
-    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
     const MAX_COMMIT_BACKOFF_US: u64 = 50_000;
-    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
     const MAX_COMMIT_BACKOFF_SHIFT: u32 = 8;
 
-    #[cfg(any(feature = "rocks", feature = "postgres", feature = "mysql"))]
     pub(crate) fn commit_backoff(attempt: u32) -> Duration {
         let ceiling = (MIN_COMMIT_BACKOFF_US << attempt.min(MAX_COMMIT_BACKOFF_SHIFT))
             .min(MAX_COMMIT_BACKOFF_US);
@@ -351,8 +351,8 @@ pub enum RegistryClass {
 pub enum QueueClass {
     Message(u64),
     MessageEvent(QueueEvent),
-    QuotaCount(Vec<u8>),
-    QuotaSize(Vec<u8>),
+    QuotaCount(u128),
+    QuotaSize(u128),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

@@ -118,8 +118,8 @@ pub struct MessageWrapper {
     serde::Deserialize,
 )]
 pub enum Metadata {
-    QueueSize { key: Box<[u8]>, id: u64 },
-    QueueCount { key: Box<[u8]>, id: u64 },
+    QueueSize { key: u128, id: u64 },
+    QueueCount { key: u128, id: u64 },
     Headers { value: Box<[u8]>, id: u64 },
 }
 

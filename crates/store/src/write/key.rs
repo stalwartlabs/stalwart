@@ -407,8 +407,8 @@ impl ValueClass {
                     .write(event.due)
                     .write(event.queue_id)
                     .write(event.queue_name.as_slice()),
-                QueueClass::QuotaCount(key) => serializer.write(0u8).write(key.as_slice()),
-                QueueClass::QuotaSize(key) => serializer.write(1u8).write(key.as_slice()),
+                QueueClass::QuotaCount(key) => serializer.write(0u8).write(*key),
+                QueueClass::QuotaSize(key) => serializer.write(1u8).write(*key),
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span(span_id) => serializer.write(*span_id),
@@ -606,7 +606,7 @@ impl ValueClass {
             ValueClass::Queue(q) => match q {
                 QueueClass::Message(_) => U64_LEN,
                 QueueClass::MessageEvent(_) => U64_LEN * 3,
-                QueueClass::QuotaCount(v) | QueueClass::QuotaSize(v) => v.len() + 1,
+                QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => U128_LEN + 1,
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN,

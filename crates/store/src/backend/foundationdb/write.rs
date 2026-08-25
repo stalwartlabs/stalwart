@@ -12,7 +12,7 @@ use crate::{
     backend::deserialize_i64_le,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        ValueClass, ValueOp, key::KeySerializer,
+        ValueClass, ValueOp, commit_backoff, key::KeySerializer,
     },
     *,
 };
@@ -251,6 +251,7 @@ impl FdbStore {
             {
                 return Ok(result);
             } else {
+                tokio::time::sleep(commit_backoff(retry_count)).await;
                 retry_count += 1;
             }
         }

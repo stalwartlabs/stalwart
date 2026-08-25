@@ -446,14 +446,6 @@ pub struct ThrottleKey {
     pub hash: [u8; 32],
 }
 
-#[derive(Default)]
-pub struct ThrottleKeyHasher {
-    hash: u64,
-}
-
-#[derive(Clone, Default)]
-pub struct ThrottleKeyHasherBuilder {}
-
 impl PartialEq for MessageUid {
     fn eq(&self, other: &Self) -> bool {
         self.mailbox_id == other.mailbox_id

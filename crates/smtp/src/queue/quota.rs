@@ -134,24 +134,19 @@ impl HasQueueQuota for Server {
                 .await
                 .unwrap_or(false)
         {
-            let key = quota.new_key(envelope, "");
+            let key = quota.new_key(envelope, "").quota_key();
             if let Some(max_size) = quota.size {
                 let used_size = self
                     .core
                     .storage
                     .data
-                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaSize(
-                        key.as_ref().to_vec(),
-                    ))))
+                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaSize(key))))
                     .await
                     .unwrap_or(0) as u64;
                 if used_size + size > max_size {
                     return false;
                 } else {
-                    refs.push(Metadata::QueueSize {
-                        key: key.as_ref().into(),
-                        id,
-                    });
+                    refs.push(Metadata::QueueSize { key, id });
                 }
             }
 
@@ -160,18 +155,13 @@ impl HasQueueQuota for Server {
                     .core
                     .storage
                     .data
-                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaCount(
-                        key.as_ref().to_vec(),
-                    ))))
+                    .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaCount(key))))
                     .await
                     .unwrap_or(0) as u64;
                 if total_messages + 1 > max_messages {
                     return false;
                 } else {
-                    refs.push(Metadata::QueueCount {
-                        key: key.as_ref().into(),
-                        id,
-                    });
+                    refs.push(Metadata::QueueCount { key, id });
                 }
             }
         }
@@ -180,14 +170,14 @@ impl HasQueueQuota for Server {
 }
 
 impl MessageWrapper {
-    pub fn release_quota(&mut self, batch: &mut BatchBuilder) {
+    pub fn release_quota(&mut self, batch: &mut BatchBuilder) -> Vec<u64> {
         if !self.message.metadata.iter().any(|metadata| {
             matches!(
                 metadata,
                 Metadata::QueueSize { .. } | Metadata::QueueCount { .. }
             )
         }) {
-            return;
+            return Vec::new();
         }
         let mut quota_ids = Vec::with_capacity(self.message.recipients.len());
 
@@ -209,14 +199,11 @@ impl MessageWrapper {
             for entry in std::mem::take(&mut self.message.metadata) {
                 match entry {
                     Metadata::QueueCount { id, key } if quota_ids.contains(&id) => {
-                        batch.add(
-                            ValueClass::Queue(QueueClass::QuotaCount(key.into_vec())),
-                            -1,
-                        );
+                        batch.add(ValueClass::Queue(QueueClass::QuotaCount(key)), -1);
                     }
                     Metadata::QueueSize { id, key } if quota_ids.contains(&id) => {
                         batch.add(
-                            ValueClass::Queue(QueueClass::QuotaSize(key.into_vec())),
+                            ValueClass::Queue(QueueClass::QuotaSize(key)),
                             -(self.message.size as i64),
                         );
                     }
@@ -227,5 +214,7 @@ impl MessageWrapper {
             }
             self.message.metadata = metadata.into_boxed_slice();
         }
+
+        quota_ids
     }
 }

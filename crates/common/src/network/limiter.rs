@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{ThrottleKey, ThrottleKeyHasher, ThrottleKeyHasherBuilder};
+use crate::ThrottleKey;
 use std::{
-    hash::{BuildHasher, Hasher},
+    hash::Hasher,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -102,26 +102,8 @@ impl AsRef<[u8]> for ThrottleKey {
     }
 }
 
-impl Hasher for ThrottleKeyHasher {
-    fn finish(&self) -> u64 {
-        self.hash
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        debug_assert!(
-            bytes.len() >= std::mem::size_of::<u64>(),
-            "ThrottleKeyHasher: input too short {bytes:?}"
-        );
-        self.hash = bytes
-            .get(0..std::mem::size_of::<u64>())
-            .map_or(0, |b| u64::from_ne_bytes(b.try_into().unwrap()));
-    }
-}
-
-impl BuildHasher for ThrottleKeyHasherBuilder {
-    type Hasher = ThrottleKeyHasher;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        ThrottleKeyHasher::default()
+impl ThrottleKey {
+    pub fn quota_key(&self) -> u128 {
+        u128::from_be_bytes(self.hash[..std::mem::size_of::<u128>()].try_into().unwrap())
     }
 }

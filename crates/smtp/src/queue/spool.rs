@@ -479,11 +479,11 @@ impl MessageWrapper {
         for metadata in &self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
-                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.to_vec())), 1);
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(*key)), 1);
                 }
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
-                        ValueClass::Queue(QueueClass::QuotaSize(key.to_vec())),
+                        ValueClass::Queue(QueueClass::QuotaSize(*key)),
                         self.message.size as i64,
                     );
                 }
@@ -669,7 +669,7 @@ impl MessageWrapper {
     pub async fn save_changes(mut self, server: &Server, prev_event: Option<u64>) -> bool {
         // Release quota for completed deliveries
         let mut batch = BatchBuilder::new();
-        self.release_quota(&mut batch);
+        let released_quotas = self.release_quota(&mut batch);
 
         // Update message queue
         if let Some(prev_event) = prev_event {
@@ -722,6 +722,21 @@ impl MessageWrapper {
                             .filter(|(_, rcpt)| rcpt.queue == queue_name)
                         {
                             cur_message.recipients[rcpt_idx] = rcpt.clone();
+                        }
+
+                        if !released_quotas.is_empty() {
+                            cur_message.metadata = cur_message
+                                .metadata
+                                .iter()
+                                .filter(|entry| match entry {
+                                    Metadata::QueueCount { id, .. }
+                                    | Metadata::QueueSize { id, .. } => {
+                                        !released_quotas.contains(id)
+                                    }
+                                    Metadata::Headers { .. } => true,
+                                })
+                                .cloned()
+                                .collect();
                         }
 
                         Archiver::new(cur_message)
@@ -795,11 +810,11 @@ impl MessageWrapper {
         for metadata in self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
-                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.to_vec())), -1);
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key)), -1);
                 }
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
-                        ValueClass::Queue(QueueClass::QuotaSize(key.to_vec())),
+                        ValueClass::Queue(QueueClass::QuotaSize(key)),
                         -(self.message.size as i64),
                     );
                 }
@@ -833,7 +848,7 @@ impl MessageWrapper {
         modified_rcpts: AHashSet<usize>,
     ) -> bool {
         let mut batch = BatchBuilder::new();
-        self.release_quota(&mut batch);
+        let released_quotas = self.release_quota(&mut batch);
 
         for (queue_name, due) in prev_events {
             batch.clear(ValueClass::Queue(QueueClass::MessageEvent(
@@ -885,6 +900,19 @@ impl MessageWrapper {
                         }
                     }
 
+                    if !released_quotas.is_empty() {
+                        cur_message.metadata = cur_message
+                            .metadata
+                            .iter()
+                            .filter(|entry| match entry {
+                                Metadata::QueueCount { id, .. }
+                                | Metadata::QueueSize { id, .. } => !released_quotas.contains(id),
+                                Metadata::Headers { .. } => true,
+                            })
+                            .cloned()
+                            .collect();
+                    }
+
                     Archiver::new(cur_message)
                         .serialize()
                         .caused_by(trc::location!())
@@ -931,11 +959,11 @@ impl MessageWrapper {
         for metadata in self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
-                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.to_vec())), -1);
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key)), -1);
                 }
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
-                        ValueClass::Queue(QueueClass::QuotaSize(key.to_vec())),
+                        ValueClass::Queue(QueueClass::QuotaSize(key)),
                         -(self.message.size as i64),
                     );
                 }
