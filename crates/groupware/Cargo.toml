@@ -1,6 +1,6 @@
 [package]
 name = "groupware"
-version = "0.16.19"
+version = "0.16.20"
 edition = "2024"
 
 [dependencies]
@@ -19,7 +19,11 @@ rkyv.workspace = true
 percent-encoding = "2.3.2"
 compact_str = "0.10.0"
 ahash = { version = "0.8" }
-chrono = "0.4.45"
+indexmap = "2.14.0"
+chrono = { version = "0.4.45", features = ["unstable-locales"] }
+icu_locale_core = "2"
+icu_plurals = "2"
+icu_provider = { version = "2", features = ["sync"] }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 

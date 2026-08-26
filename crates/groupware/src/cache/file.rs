@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    DavResourceName, RFC_3986,
+    DavResourceName, RFC_3986, encode_path_segment,
     file::{ArchivedFileNode, FileNode},
 };
 use common::{DavPath, DavResource, DavResourceMetadata, DavResources, Server, UpdateLock};
@@ -85,7 +85,7 @@ pub(super) fn build_nested_hierarchy(resources: &mut DavResources) {
             names.insert(
                 resource.document_id,
                 DavPath {
-                    path: resource.container_name().unwrap().to_string(),
+                    path: encode_path_segment(resource.container_name().unwrap()).into_owned(),
                     parent_id,
                     hierarchy_seq: 0,
                     resource_idx,
@@ -226,6 +226,40 @@ mod tests {
         assert!(hierarchy_seq(&files, "docs") < hierarchy_seq(&files, "docs/reports"));
         assert!(
             hierarchy_seq(&files, "docs/reports") < hierarchy_seq(&files, "docs/reports/q1.txt")
+        );
+    }
+
+    #[test]
+    fn nested_hierarchy_percent_encodes_paths() {
+        let files = build(vec![
+            folder(0, "My Documents", None),
+            folder(1, "Berichte 2026", Some(0)),
+            file(2, "Ünterlagen Q1.txt", Some(1)),
+            folder(3, "My%20Folder", None),
+            file(4, "file(1)+a:b.txt", Some(3)),
+        ]);
+
+        assert_eq!(
+            sorted_paths(&files),
+            [
+                "My%20Documents",
+                "My%20Documents/Berichte%202026",
+                "My%20Documents/Berichte%202026/%C3%9Cnterlagen%20Q1.txt",
+                "My%20Folder",
+                "My%20Folder/file(1)+a:b.txt",
+            ]
+        );
+        assert_eq!(
+            files.format_resource(files.by_path("My%20Documents").unwrap()),
+            "/dav/file/john/My%20Documents/"
+        );
+        assert_eq!(
+            files.format_resource(
+                files
+                    .by_path("My%20Documents/Berichte%202026/%C3%9Cnterlagen%20Q1.txt")
+                    .unwrap()
+            ),
+            "/dav/file/john/My%20Documents/Berichte%202026/%C3%9Cnterlagen%20Q1.txt"
         );
     }
 

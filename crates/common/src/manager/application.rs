@@ -24,11 +24,23 @@ use types::blob_hash::BlobHash;
 
 const APP_BLOB_PREFIX: &str = "STALWART_APP_";
 const MAX_APP_SIZE: usize = 100 * 1024 * 1024;
+const BASE_HREF: &str = "<base href=\"/\"";
+const OAUTH_CLIENT_ID: &str = "<meta name=\"oauth-client-id\" content=\"\"";
+
+enum IndexEdit<'x> {
+    BaseHref(&'x str),
+    OAuthClientId(&'x str),
+}
 
 #[allow(clippy::type_complexity)]
 pub struct WebApplications {
     applications: ArcSwap<Vec<WebApplicationManager>>,
-    routes: ArcSwap<AHashMap<String, Arc<AHashMap<String, Resource<PathBuf>>>>>,
+    routes: ArcSwap<AHashMap<String, Arc<AppRoutes>>>,
+}
+
+pub struct AppRoutes {
+    resources: AHashMap<String, Resource<PathBuf>>,
+    oauth_client_id_meta: Option<String>,
 }
 
 #[derive(Clone)]
@@ -39,6 +51,7 @@ pub struct WebApplicationManager {
     url: String,
     expiry: u64,
     blob_key: BlobHash,
+    oauth_client_id: Option<String>,
 }
 
 #[derive(Default, Clone)]
@@ -72,17 +85,17 @@ impl WebApplications {
     pub async fn serve(&self, prefix: &str, path: &str) -> trc::Result<Option<AppResource>> {
         if let Some(routes) = self.routes.load().get(prefix)
             && let Some((is_index, resource)) = routes
+                .resources
                 .get(path)
                 .map(|res| (path == "index.html", res))
-                .or_else(|| routes.get("index.html").map(|res| (true, res)))
+                .or_else(|| routes.resources.get("index.html").map(|res| (true, res)))
         {
             tokio::fs::read(&resource.contents)
                 .await
                 .map(|mut contents| {
                     if is_index && let Ok(html) = std::str::from_utf8(&contents) {
-                        contents = html
-                            .replace("<base href=\"/\"", &format!("<base href=\"/{prefix}/\""))
-                            .into_bytes();
+                        contents =
+                            rewrite_index(html, prefix, routes.oauth_client_id_meta.as_deref());
                     }
 
                     Some(AppResource {
@@ -129,8 +142,14 @@ impl WebApplications {
                 );
             }
             match app.unpack(server).await {
-                Ok(app_routes) => {
-                    let app_routes = Arc::new(app_routes);
+                Ok(resources) => {
+                    let app_routes = Arc::new(AppRoutes {
+                        resources,
+                        oauth_client_id_meta: app
+                            .oauth_client_id
+                            .as_deref()
+                            .map(oauth_client_id_meta),
+                    });
 
                     for prefix in &app.prefixes {
                         routes.insert(prefix.clone(), app_routes.clone());
@@ -168,6 +187,7 @@ impl WebApplicationManager {
             url: app.object.resource_url,
             description: app.object.description,
             expiry: app.object.auto_update_frequency.as_secs(),
+            oauth_client_id: app.object.oauth_client_id,
             prefixes: app
                 .object
                 .url_prefix
@@ -364,5 +384,234 @@ impl Drop for TempDir {
 impl Default for WebApplications {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn rewrite_index(html: &str, prefix: &str, oauth_client_id_meta: Option<&str>) -> Vec<u8> {
+    let mut edits = [
+        html.find(BASE_HREF)
+            .map(|at| (at, BASE_HREF.len(), IndexEdit::BaseHref(prefix))),
+        oauth_client_id_meta.and_then(|meta| {
+            html.find(OAUTH_CLIENT_ID)
+                .map(|at| (at, OAUTH_CLIENT_ID.len(), IndexEdit::OAuthClientId(meta)))
+        }),
+    ];
+
+    if edits.iter().all(Option::is_none) {
+        return html.as_bytes().to_vec();
+    }
+    edits.sort_unstable_by_key(|edit| edit.as_ref().map_or(usize::MAX, |(at, _, _)| *at));
+
+    let mut out =
+        String::with_capacity(html.len() + prefix.len() + oauth_client_id_meta.map_or(0, str::len));
+    let mut pos = 0;
+
+    for (at, len, edit) in edits.into_iter().flatten() {
+        out.push_str(&html[pos..at]);
+        match edit {
+            IndexEdit::BaseHref(prefix) => {
+                out.push_str("<base href=\"/");
+                out.push_str(prefix);
+                out.push_str("/\"");
+            }
+            IndexEdit::OAuthClientId(meta) => out.push_str(meta),
+        }
+        pos = at + len;
+    }
+    out.push_str(&html[pos..]);
+    out.into_bytes()
+}
+
+fn oauth_client_id_meta(client_id: &str) -> String {
+    let mut meta = String::with_capacity(OAUTH_CLIENT_ID.len() + client_id.len());
+    meta.push_str("<meta name=\"oauth-client-id\" content=\"");
+    for ch in client_id.chars() {
+        match ch {
+            '&' => meta.push_str("&amp;"),
+            '"' => meta.push_str("&quot;"),
+            '<' => meta.push_str("&lt;"),
+            '>' => meta.push_str("&gt;"),
+            _ => meta.push(ch),
+        }
+    }
+    meta.push('"');
+    meta
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INDEX: &str = concat!(
+        "<!doctype html>\n<html lang=\"en\">\n\n<head>\n  <meta charset=\"UTF-8\" />\n",
+        "  <base href=\"/\" />\n  <meta name=\"oauth-client-id\" content=\"\" />\n",
+        "  <title>Portal</title>\n</head>\n\n<body></body>\n\n</html>\n"
+    );
+
+    #[test]
+    fn index_is_rewritten_with_the_prefix_and_client_id() {
+        let meta = oauth_client_id_meta("stalwart-webui");
+        let html = String::from_utf8(rewrite_index(INDEX, "admin", Some(&meta))).unwrap();
+
+        assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
+        assert!(
+            html.contains("<meta name=\"oauth-client-id\" content=\"stalwart-webui\" />"),
+            "{html}"
+        );
+        assert!(html.contains("<title>Portal</title>"), "{html}");
+        assert!(html.starts_with("<!doctype html>"), "{html}");
+        assert!(html.ends_with("</html>\n"), "{html}");
+    }
+
+    #[test]
+    fn index_keeps_the_empty_placeholder_when_no_client_id_is_configured() {
+        let html = String::from_utf8(rewrite_index(INDEX, "account", None)).unwrap();
+
+        assert!(html.contains("<base href=\"/account/\" />"), "{html}");
+        assert!(
+            html.contains("<meta name=\"oauth-client-id\" content=\"\" />"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn index_without_a_placeholder_is_left_alone() {
+        let bundle = "<head>\n  <base href=\"/\" />\n</head>";
+        let meta = oauth_client_id_meta("stalwart-webui");
+        let html = String::from_utf8(rewrite_index(bundle, "admin", Some(&meta))).unwrap();
+
+        assert_eq!(html, "<head>\n  <base href=\"/admin/\" />\n</head>");
+    }
+
+    #[test]
+    fn edits_are_applied_in_document_order() {
+        let bundle = concat!(
+            "<head><meta name=\"oauth-client-id\" content=\"\" />",
+            "<base href=\"/\" /></head>"
+        );
+        let meta = oauth_client_id_meta("app");
+        let html = String::from_utf8(rewrite_index(bundle, "admin", Some(&meta))).unwrap();
+
+        assert_eq!(
+            html,
+            concat!(
+                "<head><meta name=\"oauth-client-id\" content=\"app\" />",
+                "<base href=\"/admin/\" /></head>"
+            )
+        );
+    }
+
+    #[test]
+    fn client_ids_are_escaped_for_the_attribute() {
+        let meta = oauth_client_id_meta("a\"b&c<d>");
+
+        assert_eq!(
+            meta,
+            "<meta name=\"oauth-client-id\" content=\"a&quot;b&amp;c&lt;d&gt;\""
+        );
+    }
+
+    async fn fixture(name: &str, client_id: Option<&str>) -> (WebApplications, TempDir) {
+        let dir = TempDir::new(std::env::temp_dir().join(format!("stalwart-app-{name}")));
+        dir.clean().await.unwrap();
+        tokio::fs::write(dir.path.join("index.html"), INDEX)
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path.join("app.js"), "export const x = 1;\n")
+            .await
+            .unwrap();
+
+        let mut resources = AHashMap::new();
+        resources.insert(
+            "index.html".to_string(),
+            Resource::new("text/html", dir.path.join("index.html")),
+        );
+        resources.insert(
+            "app.js".to_string(),
+            Resource::new("text/javascript", dir.path.join("app.js")),
+        );
+
+        let routes = Arc::new(AppRoutes {
+            resources,
+            oauth_client_id_meta: client_id.map(oauth_client_id_meta),
+        });
+
+        let mut map = AHashMap::new();
+        map.insert("admin".to_string(), routes.clone());
+        map.insert("account".to_string(), routes);
+
+        let apps = WebApplications::new();
+        apps.routes.store(Arc::new(map));
+
+        (apps, dir)
+    }
+
+    async fn serve_html(apps: &WebApplications, prefix: &str, path: &str) -> String {
+        let served = apps.serve(prefix, path).await.unwrap().unwrap();
+        assert!(served.no_cache, "index responses must not be cached");
+        assert_eq!(served.resource.content_type.as_ref(), "text/html");
+        String::from_utf8(served.resource.contents).unwrap()
+    }
+
+    #[tokio::test]
+    async fn serving_index_injects_the_prefix_and_client_id() {
+        let (apps, _dir) = fixture("serve-configured", Some("pocket-id-client")).await;
+
+        let html = serve_html(&apps, "admin", "index.html").await;
+        assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
+        assert!(
+            html.contains("<meta name=\"oauth-client-id\" content=\"pocket-id-client\" />"),
+            "{html}"
+        );
+
+        let html = serve_html(&apps, "account", "index.html").await;
+        assert!(html.contains("<base href=\"/account/\" />"), "{html}");
+        assert!(
+            html.contains("<meta name=\"oauth-client-id\" content=\"pocket-id-client\" />"),
+            "{html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_paths_fall_back_to_a_rewritten_index() {
+        let (apps, _dir) = fixture("serve-fallback", Some("pocket-id-client")).await;
+
+        let html = serve_html(&apps, "admin", "settings/directory").await;
+        assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
+        assert!(
+            html.contains("<meta name=\"oauth-client-id\" content=\"pocket-id-client\" />"),
+            "{html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn assets_and_unknown_prefixes_are_untouched() {
+        let (apps, _dir) = fixture("serve-assets", Some("pocket-id-client")).await;
+
+        let served = apps.serve("admin", "app.js").await.unwrap().unwrap();
+        assert_eq!(served.resource.contents, b"export const x = 1;\n");
+        assert_eq!(served.resource.content_type.as_ref(), "text/javascript");
+        assert!(!served.no_cache);
+
+        assert!(apps.serve("unknown", "index.html").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn serving_index_without_a_client_id_keeps_the_placeholder() {
+        let (apps, _dir) = fixture("serve-unconfigured", None).await;
+
+        let html = serve_html(&apps, "admin", "index.html").await;
+        assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
+        assert!(
+            html.contains("<meta name=\"oauth-client-id\" content=\"\" />"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn an_unmodified_document_is_returned_verbatim() {
+        let bundle = "<head><title>x</title></head>";
+
+        assert_eq!(rewrite_index(bundle, "admin", None), bundle.as_bytes());
     }
 }

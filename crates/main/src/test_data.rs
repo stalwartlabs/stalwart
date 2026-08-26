@@ -30,8 +30,8 @@ use registry::{
 use smtp::{
     queue::{
         Error, ErrorDetails, FROM_AUTHENTICATED, FROM_DSN, FROM_REPORT, HostResponse, Message,
-        MessageWrapper, RCPT_DSN_SENT, RCPT_SPAM_PAYLOAD, Recipient, Schedule, Status,
-        UnexpectedResponse,
+        MessageWrapper, RCPT_DSN_SENT, Recipient, Schedule, Status, UnexpectedResponse,
+        rcpt_spam_flag,
     },
     reporting::index::{ExternalReportIndex, InternalReportIndex},
 };
@@ -234,7 +234,7 @@ fn sample_queued_messages(blob_hashes: Vec<BlobHash>) -> Vec<Message> {
                     entity: "mx.bigcorp.com".into(),
                     details: Error::ConnectionError("Rejected by policy".into()),
                 })),
-                flags: RCPT_SPAM_PAYLOAD,
+                flags: rcpt_spam_flag(72),
                 orcpt: None,
             }],
             received_from_ip: std::net::IpAddr::V4(Ipv4Addr::new(172, 16, 0, 5)),

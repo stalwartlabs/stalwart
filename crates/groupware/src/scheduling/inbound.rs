@@ -395,12 +395,15 @@ fn handle_reply(
                         }
                     }
 
-                    if has_request_status {
-                        remove_parameters.push(ICalendarParameterName::ScheduleStatus);
-                        add_parameters.push(ICalendarParameter::schedule_status(
-                            itip_snapshot.request_status.join(","),
-                        ));
-                    }
+                    // RFC 6638 3.2.5: the status defaults to 2.0 when the reply carries none
+                    remove_parameters.push(ICalendarParameterName::ScheduleStatus);
+                    add_parameters.push(ICalendarParameter::schedule_status(
+                        if has_request_status {
+                            itip_snapshot.request_status.join(",")
+                        } else {
+                            "2.0".to_string()
+                        },
+                    ));
 
                     merge_actions.push(MergeAction::RemoveParameters {
                         component_id: snapshot.comp_id,

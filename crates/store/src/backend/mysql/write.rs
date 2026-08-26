@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{MysqlStore, into_error};
+use super::{DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, MysqlStore, into_error, is_timeout_error};
 use crate::{
     IndexKey, Key, LogKey, Shape, Subspace,
     write::{
@@ -401,11 +401,7 @@ impl MysqlStore {
             .copied()
             .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
         {
-            let s = conn
-                .prep(format!("DELETE FROM {} WHERE v = 0", subspace.name()))
-                .await
-                .map_err(into_error)?;
-            conn.exec_drop(&s, ()).await.map_err(into_error)?;
+            purge_table(&mut conn, subspace.name()).await?;
         }
 
         Ok(())
@@ -413,17 +409,127 @@ impl MysqlStore {
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
+        let table = from.subspace().name();
+        let mut from = from.serialize(0);
+        let to = to.serialize(0);
 
-        let s = conn
+        let delete = conn
+            .prep(format!("DELETE FROM {table} WHERE k >= ? AND k < ?"))
+            .await
+            .map_err(into_error)?;
+
+        match conn.exec_drop(&delete, (&from, &to)).await {
+            Ok(_) => return Ok(()),
+            Err(err) if is_timeout_error(&err) => (),
+            Err(err) => return Err(into_error(err)),
+        }
+
+        let mut chunk_size = DELETE_CHUNK_SIZE;
+
+        loop {
+            let boundary = conn
+                .prep(format!(
+                    "SELECT k FROM {table} WHERE k >= ? AND k < ? ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
+                ))
+                .await
+                .map_err(into_error)?;
+
+            loop {
+                let next = match conn
+                    .exec_first::<Vec<u8>, _, _>(&boundary, (&from, &to))
+                    .await
+                {
+                    Ok(next) => next,
+                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
+                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                        break;
+                    }
+                    Err(err) => return Err(into_error(err)),
+                };
+
+                match conn
+                    .exec_drop(&delete, (&from, next.as_ref().unwrap_or(&to)))
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
+                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                        break;
+                    }
+                    Err(err) => return Err(into_error(err)),
+                }
+
+                match next {
+                    Some(next) => from = next,
+                    None => return Ok(()),
+                }
+            }
+        }
+    }
+}
+
+async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
+    let s = conn
+        .prep(format!("DELETE FROM {table} WHERE v = 0"))
+        .await
+        .map_err(into_error)?;
+
+    match conn.exec_drop(&s, ()).await {
+        Ok(_) => return Ok(()),
+        Err(err) if is_timeout_error(&err) => (),
+        Err(err) => return Err(into_error(err)),
+    }
+
+    let purge = conn
+        .prep(format!(
+            "DELETE FROM {table} WHERE v = 0 AND k >= ? AND k < ?"
+        ))
+        .await
+        .map_err(into_error)?;
+    let purge_last = conn
+        .prep(format!("DELETE FROM {table} WHERE v = 0 AND k >= ?"))
+        .await
+        .map_err(into_error)?;
+    let mut chunk_size = DELETE_CHUNK_SIZE;
+    let mut from = Vec::new();
+
+    loop {
+        let boundary = conn
             .prep(format!(
-                "DELETE FROM {} WHERE k >= ? AND k < ?",
-                from.subspace().name(),
+                "SELECT k FROM {table} WHERE k >= ? ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
             ))
             .await
             .map_err(into_error)?;
-        conn.exec_drop(&s, (&from.serialize(0), &to.serialize(0)))
-            .await
-            .map_err(into_error)
+
+        loop {
+            let next = match conn.exec_first::<Vec<u8>, _, _>(&boundary, (&from,)).await {
+                Ok(next) => next,
+                Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
+                    chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                    break;
+                }
+                Err(err) => return Err(into_error(err)),
+            };
+
+            let result = match &next {
+                Some(next) => conn.exec_drop(&purge, (&from, next)).await,
+                None => conn.exec_drop(&purge_last, (&from,)).await,
+            };
+
+            match result {
+                Ok(_) => (),
+                Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
+                    chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                    break;
+                }
+                Err(err) => return Err(into_error(err)),
+            }
+
+            match next {
+                Some(next) => from = next,
+                None => return Ok(()),
+            }
+        }
     }
 }
 

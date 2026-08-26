@@ -5,24 +5,19 @@
  */
 
 use crate::task_manager::TaskResult;
-use calcard::{
-    common::timezone::Tz,
-    icalendar::{
-        ICalendarDay, ICalendarFrequency, ICalendarMonth, ICalendarParticipationStatus,
-        ICalendarProperty, ICalendarRecurrenceRule, ICalendarWeekday,
-    },
-};
-use chrono::{DateTime, Locale};
+use calcard::icalendar::{ICalendarParticipationStatus, ICalendarProperty};
 use common::{
     DEFAULT_LOGO_BASE64, Server,
     auth::AccountInfo,
     config::groupware::CalendarTemplateVariable,
-    i18n,
     network::{ServerInstance, stream::NullIo},
 };
 use groupware::{
     calendar::itip::ItipIngest,
-    scheduling::{ItipSummary, ItipValue},
+    scheduling::{
+        ItipSummary, ItipValue,
+        format::{TextFormatter, hyperlink},
+    },
 };
 use mail_builder::{
     MessageBuilder,
@@ -33,7 +28,7 @@ use mail_parser::decoders::html::html_to_text;
 use registry::{schema::structs::TaskCalendarItipMessage, types::EnumImpl};
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use store::{ahash::AHashMap, write::now};
 use trc::AddContext;
 use utils::template::{Variable, Variables};
@@ -166,7 +161,7 @@ async fn send_imip(
                 &summary,
                 &logo_cid,
             )
-            .await;
+            .await?;
             let txt_body = html_to_text(&tpl.body);
 
             // Build message
@@ -326,7 +321,7 @@ pub async fn build_itip_template(
     to: &str,
     summary: &ItipSummary,
     logo_cid: &str,
-) -> Details {
+) -> trc::Result<Details> {
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
@@ -340,8 +335,8 @@ pub async fn build_itip_template(
     // SPDX-SnippetEnd
     #[cfg(not(feature = "enterprise"))]
     let template = &server.core.groupware.itip_template;
-    let locale = i18n::locale_or_default(account_info.locale().as_str());
-    let chrono_locale = Locale::from_str(account_info.locale().as_str()).unwrap_or(Locale::en_US);
+    let formatter = TextFormatter::new(account_info.locale().as_str())?;
+    let locale = formatter.locale;
 
     let mut variables = Variables::new();
     let mut subject;
@@ -426,63 +421,79 @@ pub async fn build_itip_template(
         ICalendarProperty::Rrule,
         ICalendarProperty::Dtstart,
         ICalendarProperty::Location,
+        ICalendarProperty::Conference,
     ] {
-        let Some(entry) = fields.iter().find(|e| e.name == field) else {
-            continue;
-        };
-        let field_name = match &field {
-            ICalendarProperty::Summary => locale.calendar_summary,
-            ICalendarProperty::Description => locale.calendar_description,
-            ICalendarProperty::Rrule => {
-                has_rrule = true;
-                locale.calendar_when
-            }
-            ICalendarProperty::Dtstart if !has_rrule => locale.calendar_when,
-            ICalendarProperty::Location => locale.calendar_location,
-            _ => continue,
-        };
-        let value = format_field(
-            &entry.value,
-            locale.calendar_date_template_long,
-            chrono_locale,
-        );
+        let mut old_entries = old_fields.into_iter().flatten().filter(|e| e.name == field);
 
-        match &field {
-            ICalendarProperty::Summary => {
-                subject.push_str(&value);
-            }
-            ICalendarProperty::Dtstart | ICalendarProperty::Rrule => {
-                subject.push_str(" @ ");
-                subject.push_str(&value);
-            }
-            _ => (),
-        }
+        for entry in fields.iter().filter(|e| e.name == field) {
+            let field_name = match &field {
+                ICalendarProperty::Summary => locale.calendar_summary,
+                ICalendarProperty::Description => locale.calendar_description,
+                ICalendarProperty::Rrule => {
+                    has_rrule = true;
+                    locale.calendar_when
+                }
+                ICalendarProperty::Dtstart if !has_rrule => locale.calendar_when,
+                ICalendarProperty::Location => locale.calendar_location,
+                ICalendarProperty::Conference => locale.calendar_conference,
+                _ => continue,
+            };
+            let value = formatter.field_to_string(&entry.value, locale.calendar_date_template_long);
 
-        let mut fields = AHashMap::with_capacity(3);
-        fields.insert(CalendarTemplateVariable::Key, field_name.to_string());
-        fields.insert(CalendarTemplateVariable::Value, value);
-        if let Some(old_entry) =
-            old_fields.and_then(|fields| fields.iter().find(|e| e.name == field))
-        {
-            fields.insert(
-                CalendarTemplateVariable::Changed,
-                locale.calendar_changed.to_string(),
-            );
-            fields.insert(
-                CalendarTemplateVariable::OldValue,
-                format_field(
-                    &old_entry.value,
-                    locale.calendar_date_template,
-                    chrono_locale,
-                ),
-            );
+            let old_entry = old_entries.next();
+
+            match &field {
+                ICalendarProperty::Summary => {
+                    subject.push_str(&value);
+                }
+                ICalendarProperty::Dtstart | ICalendarProperty::Rrule => {
+                    subject.push_str(" @ ");
+                    subject.push_str(&value);
+                }
+                _ => (),
+            }
+
+            if let ICalendarProperty::Summary | ICalendarProperty::Description = &field {
+                let variable = if matches!(field, ICalendarProperty::Summary) {
+                    CalendarTemplateVariable::EventTitle
+                } else {
+                    CalendarTemplateVariable::EventDescription
+                };
+
+                if old_entry.is_none() {
+                    variables.insert_single(variable, value);
+                    continue;
+                }
+                variables.insert_single(variable, value.clone());
+            }
+
+            let mut detail = AHashMap::with_capacity(4);
+            detail.insert(CalendarTemplateVariable::Key, field_name.to_string());
+            if matches!(field, ICalendarProperty::Conference)
+                && let Some(link) = hyperlink(&value)
+            {
+                detail.insert(CalendarTemplateVariable::Link, link.to_string());
+            }
+            detail.insert(CalendarTemplateVariable::Value, value);
+            if let Some(old_entry) = old_entry {
+                detail.insert(
+                    CalendarTemplateVariable::Changed,
+                    locale.calendar_changed.to_string(),
+                );
+                detail.insert(
+                    CalendarTemplateVariable::OldValue,
+                    formatter.field_to_string(&old_entry.value, locale.calendar_date_template),
+                );
+            }
+            details.push(detail);
         }
-        details.push(fields);
     }
-    variables.items.insert(
-        CalendarTemplateVariable::EventDetails,
-        Variable::Block(details),
-    );
+    if !details.is_empty() {
+        variables.items.insert(
+            CalendarTemplateVariable::EventDetails,
+            Variable::Block(details),
+        );
+    }
     variables.insert_single(CalendarTemplateVariable::PageTitle, subject.clone());
     variables.insert_single(CalendarTemplateVariable::LogoCid, format!("cid:{logo_cid}"));
 
@@ -572,296 +583,8 @@ pub async fn build_itip_template(
         ],
     );
 
-    Details {
+    Ok(Details {
         subject,
         body: template.eval(&variables),
-    }
-}
-
-fn format_field(value: &ItipValue, template: &str, chrono_locale: Locale) -> String {
-    match value {
-        ItipValue::Text(text) => text.to_string(),
-        ItipValue::Time(time) => {
-            use chrono::TimeZone;
-            let tz = Tz::from_id(time.tz_id).unwrap_or(Tz::UTC);
-            format!(
-                "{} ({})",
-                tz.from_utc_datetime(
-                    &DateTime::from_timestamp(time.start, 0)
-                        .unwrap_or_default()
-                        .naive_local()
-                )
-                .format_localized(template, chrono_locale),
-                tz.name().unwrap_or_default()
-            )
-        }
-        ItipValue::Rrule(rrule) => RecurrenceFormatter.format(rrule),
-        ItipValue::Participants(_) => String::new(), // Handled separately
-    }
-}
-
-#[derive(Default)]
-pub struct RecurrenceFormatter;
-
-impl RecurrenceFormatter {
-    pub fn format(&self, rule: &ICalendarRecurrenceRule) -> String {
-        let mut parts = Vec::new();
-
-        // Format frequency and interval
-        let freq_part = self.format_frequency(&rule.freq, rule.interval.unwrap_or(1));
-        parts.push(freq_part);
-
-        // Format day constraints
-        if !rule.byday.is_empty() {
-            parts.push(self.format_by_day(&rule.byday));
-        }
-
-        // Format time constraints
-        if !rule.byhour.is_empty() || !rule.byminute.is_empty() {
-            parts.push(self.format_time_constraints(&rule.byhour, &rule.byminute));
-        }
-
-        // Format month day constraints
-        if !rule.bymonthday.is_empty() {
-            parts.push(self.format_month_days(&rule.bymonthday));
-        }
-
-        // Format month constraints
-        if !rule.bymonth.is_empty() {
-            parts.push(self.format_months(&rule.bymonth));
-        }
-
-        // Format year day constraints
-        if !rule.byyearday.is_empty() {
-            parts.push(self.format_year_days(&rule.byyearday));
-        }
-
-        // Format week number constraints
-        if !rule.byweekno.is_empty() {
-            parts.push(self.format_week_numbers(&rule.byweekno));
-        }
-
-        // Format set position constraints
-        if !rule.bysetpos.is_empty() {
-            parts.push(self.format_set_positions(&rule.bysetpos));
-        }
-
-        // Format termination (until/count)
-        /*if let Some(until) = &rule.until {
-            parts.push(format!("until {}", self.format_datetime(until)));
-        } else*/
-        if let Some(count) = rule.count.as_ref() {
-            let times = if *count == 1 { "time" } else { "times" };
-            parts.push(format!("for {} {}", count, times));
-        }
-
-        parts.join(" ")
-    }
-
-    fn format_frequency(&self, freq: &ICalendarFrequency, interval: u16) -> String {
-        let (singular, plural) = match freq {
-            ICalendarFrequency::Daily => ("day", "days"),
-            ICalendarFrequency::Weekly => ("week", "weeks"),
-            ICalendarFrequency::Monthly => ("month", "months"),
-            ICalendarFrequency::Yearly => ("year", "years"),
-            ICalendarFrequency::Hourly => ("hour", "hours"),
-            ICalendarFrequency::Minutely => ("minute", "minutes"),
-            ICalendarFrequency::Secondly => ("second", "seconds"),
-        };
-
-        if interval == 1 {
-            format!("Every {}", singular)
-        } else {
-            format!("Every {} {}", interval, plural)
-        }
-    }
-
-    fn format_by_day(&self, days: &[ICalendarDay]) -> String {
-        let day_names: Vec<String> = days.iter().map(|day| self.format_day(day)).collect();
-
-        format!("on {}", self.format_list(&day_names))
-    }
-
-    fn format_day(&self, day: &ICalendarDay) -> String {
-        let day_name = match day.weekday {
-            ICalendarWeekday::Monday => "Monday",
-            ICalendarWeekday::Tuesday => "Tuesday",
-            ICalendarWeekday::Wednesday => "Wednesday",
-            ICalendarWeekday::Thursday => "Thursday",
-            ICalendarWeekday::Friday => "Friday",
-            ICalendarWeekday::Saturday => "Saturday",
-            ICalendarWeekday::Sunday => "Sunday",
-        };
-
-        if let Some(occurrence) = day.ordwk {
-            if occurrence > 0 {
-                format!("the {} {}", self.ordinal(occurrence as u32), day_name)
-            } else {
-                format!(
-                    "the {} {} from the end",
-                    self.ordinal((-occurrence) as u32),
-                    day_name
-                )
-            }
-        } else {
-            day_name.to_string()
-        }
-    }
-
-    fn format_time_constraints(&self, hours: &[u8], minutes: &[u8]) -> String {
-        let mut time_parts = Vec::new();
-
-        if !hours.is_empty() && !minutes.is_empty() {
-            // Combine hours and minutes
-            for &hour in hours {
-                for &minute in minutes {
-                    time_parts.push(format!("{}:{:02}", self.format_hour(hour), minute));
-                }
-            }
-        } else if !hours.is_empty() {
-            for &hour in hours {
-                time_parts.push(self.format_hour(hour));
-            }
-        } else if !minutes.is_empty() {
-            for &minute in minutes {
-                time_parts.push(format!(":{:02}", minute));
-            }
-        }
-
-        if !time_parts.is_empty() {
-            format!("at {}", self.format_list(&time_parts))
-        } else {
-            String::new()
-        }
-    }
-
-    fn format_hour(&self, hour: u8) -> String {
-        match hour {
-            0 => "12:00 AM".to_string(),
-            1..=11 => format!("{}:00 AM", hour),
-            12 => "12:00 PM".to_string(),
-            13..=23 => format!("{}:00 PM", hour - 12),
-            _ => format!("{:02}:00", hour),
-        }
-    }
-
-    fn format_month_days(&self, days: &[i8]) -> String {
-        let day_strings: Vec<String> = days
-            .iter()
-            .map(|&day| {
-                if day > 0 {
-                    self.ordinal(day as u32)
-                } else {
-                    format!("{} from the end", self.ordinal((-day) as u32))
-                }
-            })
-            .collect();
-
-        format!("on the {}", self.format_list(&day_strings))
-    }
-
-    fn format_months(&self, months: &[ICalendarMonth]) -> String {
-        let month_names: Vec<String> = months
-            .iter()
-            .map(|month| self.month_name(month.month()))
-            .collect();
-
-        format!("in {}", self.format_list(&month_names))
-    }
-
-    fn format_year_days(&self, days: &[i16]) -> String {
-        let day_strings: Vec<String> = days
-            .iter()
-            .map(|&day| {
-                if day > 0 {
-                    format!("day {} of the year", day)
-                } else {
-                    format!("day {} from the end of the year", -day)
-                }
-            })
-            .collect();
-
-        format!("on {}", self.format_list(&day_strings))
-    }
-
-    fn format_week_numbers(&self, weeks: &[i8]) -> String {
-        let week_strings: Vec<String> = weeks
-            .iter()
-            .map(|&week| {
-                if week > 0 {
-                    format!("week {}", week)
-                } else {
-                    format!("week {} from the end", -week)
-                }
-            })
-            .collect();
-
-        format!("in {}", self.format_list(&week_strings))
-    }
-
-    fn format_set_positions(&self, positions: &[i32]) -> String {
-        let pos_strings: Vec<String> = positions
-            .iter()
-            .map(|&pos| {
-                if pos > 0 {
-                    self.ordinal(pos as u32)
-                } else {
-                    format!("{} from the end", self.ordinal((-pos) as u32))
-                }
-            })
-            .collect();
-
-        format!(
-            "limited to the {} occurrence",
-            self.format_list(&pos_strings)
-        )
-    }
-
-    fn format_list(&self, items: &[String]) -> String {
-        match items.len() {
-            0 => String::new(),
-            1 => items[0].clone(),
-            2 => format!("{} and {}", items[0], items[1]),
-            _ => {
-                let rest = &items[..items.len() - 1];
-                format!("{}, and {}", rest.join(", "), items.last().unwrap())
-            }
-        }
-    }
-
-    fn ordinal(&self, n: u32) -> String {
-        let suffix = match n % 100 {
-            11..=13 => "th",
-            _ => match n % 10 {
-                1 => "st",
-                2 => "nd",
-                3 => "rd",
-                _ => "th",
-            },
-        };
-        format!("{}{}", n, suffix)
-    }
-
-    fn month_name(&self, month: u8) -> String {
-        match month {
-            1 => "January",
-            2 => "February",
-            3 => "March",
-            4 => "April",
-            5 => "May",
-            6 => "June",
-            7 => "July",
-            8 => "August",
-            9 => "September",
-            10 => "October",
-            11 => "November",
-            12 => "December",
-            _ => "Unknown",
-        }
-        .to_string()
-    }
-
-    /*fn format_datetime(&self, dt: &PartialDateTime) -> String {
-        format!("{:?}", dt)
-    }*/
+    })
 }

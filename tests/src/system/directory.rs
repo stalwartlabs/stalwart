@@ -553,6 +553,54 @@ pub async fn test(test: &TestServer) {
         RcptResolution::Rewrite("johndoe@example.com".into())
     );
 
+    // Catch-all addresses have to be resolved rather than accepted verbatim
+    let domain_3_id = account
+        .registry_create_object(Domain {
+            name: "list-catch-all.com".to_string(),
+            is_enabled: true,
+            certificate_management: CertificateManagement::Manual,
+            dns_management: DnsManagement::Manual,
+            dkim_management: DkimManagement::Manual,
+            catch_all_address: Some("newsletter@example.com".to_string()),
+            ..Default::default()
+        })
+        .await;
+    let domain_4_id = account
+        .registry_create_object(Domain {
+            name: "subaddress-catch-all.com".to_string(),
+            is_enabled: true,
+            certificate_management: CertificateManagement::Manual,
+            dns_management: DnsManagement::Manual,
+            dkim_management: DkimManagement::Manual,
+            catch_all_address: Some("jdoe+catchall@example.com".to_string()),
+            ..Default::default()
+        })
+        .await;
+    assert_eq!(
+        test.server
+            .rcpt_resolve("unknown@list-catch-all.com", true, 0)
+            .await
+            .unwrap(),
+        RcptResolution::Expand(Arc::from(Box::from_iter([
+            "jdoe@example.com".into(),
+            "sales@example.com".into()
+        ])))
+    );
+    assert_eq!(
+        test.server
+            .rcpt_resolve("unknown@subaddress-catch-all.com", true, 0)
+            .await
+            .unwrap(),
+        RcptResolution::Rewrite("jdoe@example.com".into())
+    );
+    assert_eq!(
+        test.server
+            .rcpt_resolve("unknown@list-catch-all.com", false, 0)
+            .await
+            .unwrap(),
+        RcptResolution::UnknownRecipient
+    );
+
     // Query tests
     assert_eq!(
         account
@@ -592,9 +640,12 @@ pub async fn test(test: &TestServer) {
         .await
         .assert_destroyed(&[group_id, account_id, account_2_id]);
     account
-        .registry_destroy(ObjectType::Domain, [domain_id, domain_2_id])
+        .registry_destroy(
+            ObjectType::Domain,
+            [domain_id, domain_2_id, domain_3_id, domain_4_id],
+        )
         .await
-        .assert_destroyed(&[domain_id, domain_2_id]);
+        .assert_destroyed(&[domain_id, domain_2_id, domain_3_id, domain_4_id]);
     assert!(
         test.server
             .try_list(list_id.document_id())

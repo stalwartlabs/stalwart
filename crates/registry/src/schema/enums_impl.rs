@@ -14562,3 +14562,53 @@ impl<'de> serde::Deserialize<'de> for UserRolesType {
         Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
     }
 }
+
+impl EnumImpl for VCardVersion {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map! {
+            value.as_bytes(),
+            b"v4" => VCardVersion::V4,
+            b"v3" => VCardVersion::V3,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            VCardVersion::V4 => "v4",
+            VCardVersion::V3 => "v3",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(VCardVersion::V4),
+            1 => Some(VCardVersion::V3),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for VCardVersion {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for VCardVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}

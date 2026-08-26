@@ -16,6 +16,7 @@ use common::{
 use mail_parser::{HeaderName, MimeHeaders, PartType};
 use nlp::tokenizers::types::TokenType;
 
+use super::mime_types::{MimeMatch, mime_match};
 use crate::{SpamFilterContext, TextPart};
 
 pub trait SpamFilterAnalyzeMime: Sync + Send {
@@ -368,12 +369,16 @@ impl SpamFilterAnalyzeMime for Server {
                 if ct_full != "application/octet-stream"
                     && let Some(t) = infer::get(part.contents())
                 {
-                    if t.mime_type() == ct_full {
-                        // Known content-type
-                        ctx.result.add_tag("MIME_GOOD");
-                    } else {
-                        // Known bad content-type
-                        ctx.result.add_tag("MIME_BAD");
+                    match mime_match(t.mime_type(), &ct_full) {
+                        MimeMatch::Equal => {
+                            // Known content-type
+                            ctx.result.add_tag("MIME_GOOD");
+                        }
+                        MimeMatch::Mismatch => {
+                            // Known bad content-type
+                            ctx.result.add_tag("MIME_BAD");
+                        }
+                        MimeMatch::Compatible => (),
                     }
                 }
             }

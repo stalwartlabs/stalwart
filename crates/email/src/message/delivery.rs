@@ -31,7 +31,14 @@ pub struct IngestMessage {
 pub struct IngestRecipient {
     pub address: String,
     pub orcpt: Option<String>,
-    pub is_spam: bool,
+    pub spam_percentage: Option<u8>,
+}
+
+impl IngestRecipient {
+    pub fn is_spam(&self) -> bool {
+        self.spam_percentage
+            .is_some_and(|percentage| percentage >= 50)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,7 +179,7 @@ impl MailDelivery for Server {
                                 source: IngestSource::Smtp {
                                     deliver_to: &rcpt.address,
                                     is_sender_authenticated: message.sender_authenticated,
-                                    is_spam: rcpt.is_spam,
+                                    is_spam: rcpt.is_spam(),
                                 },
                                 session_id: message.session_id,
                             })

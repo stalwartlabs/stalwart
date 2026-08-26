@@ -96,11 +96,14 @@ impl MysqlStore {
                         Subspace::Blobs | Subspace::Immutable => "LONGBLOB",
                         _ => "MEDIUMBLOB",
                     };
-                    format!("k TINYBLOB, v {value_type} NOT NULL, PRIMARY KEY (k(255))")
+                    format!(
+                        "k VARBINARY(255) NOT NULL, v {value_type} NOT NULL, PRIMARY KEY (k)"
+                    )
                 }
                 Shape::Presence => "k BLOB, PRIMARY KEY (k(400))".to_string(),
                 Shape::Counter => {
-                    "k TINYBLOB, v BIGINT NOT NULL DEFAULT 0, PRIMARY KEY (k(255))".to_string()
+                    "k VARBINARY(255) NOT NULL, v BIGINT NOT NULL DEFAULT 0, PRIMARY KEY (k)"
+                        .to_string()
                 }
             };
 

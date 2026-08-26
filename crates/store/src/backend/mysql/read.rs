@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{MysqlStore, into_error};
+use super::{MysqlStore, into_error, is_timeout_error};
 use crate::{Deserialize, IterateParams, Key, ValueKey, write::ValueClass};
 use futures::TryStreamExt;
 use mysql_async::{IsolationLevel, Row, TxOpts, prelude::Queryable};
@@ -83,40 +83,69 @@ impl MysqlStore {
             })
             .await
             .map_err(into_error)?;
-        let mut rows = conn
-            .exec_stream::<Row, _, _>(&s, (begin, end))
-            .await
-            .map_err(into_error)?;
+        let mut from = begin;
+        let mut to = end;
+        let mut resume_key = None;
 
-        if params.values {
-            while let Some(mut row) = rows.try_next().await.map_err(into_error)? {
-                let value = row
-                    .take_opt::<Vec<u8>, _>(1)
-                    .unwrap_or_else(|| Ok(vec![]))
-                    .map_err(into_error)?;
-                let key = row
-                    .take_opt::<Vec<u8>, _>(0)
-                    .unwrap_or_else(|| Ok(vec![]))
+        loop {
+            let mut last_key = None;
+            let mut timed_out = false;
+
+            {
+                let mut rows = conn
+                    .exec_stream::<Row, _, _>(&s, (from.clone(), to.clone()))
+                    .await
                     .map_err(into_error)?;
 
-                if !cb(&key, &value)? {
-                    break;
+                loop {
+                    match rows.try_next().await {
+                        Ok(Some(mut row)) => {
+                            let value = if params.values {
+                                row.take_opt::<Vec<u8>, _>(1)
+                                    .unwrap_or_else(|| Ok(vec![]))
+                                    .map_err(into_error)?
+                            } else {
+                                vec![]
+                            };
+                            let key = row
+                                .take_opt::<Vec<u8>, _>(0)
+                                .unwrap_or_else(|| Ok(vec![]))
+                                .map_err(into_error)?;
+
+                            if resume_key.take().is_some_and(|resumed| resumed == key) {
+                                continue;
+                            }
+
+                            if !cb(&key, &value)? {
+                                return Ok(());
+                            }
+
+                            last_key = Some(key);
+                        }
+                        Ok(None) => break,
+                        Err(err) => {
+                            if params.first || last_key.is_none() || !is_timeout_error(&err) {
+                                return Err(into_error(err));
+                            }
+                            timed_out = true;
+                            break;
+                        }
+                    }
                 }
             }
-        } else {
-            while let Some(mut row) = rows.try_next().await.map_err(into_error)? {
-                if !cb(
-                    &row.take_opt::<Vec<u8>, _>(0)
-                        .unwrap_or_else(|| Ok(vec![]))
-                        .map_err(into_error)?,
-                    b"",
-                )? {
-                    break;
+
+            match last_key {
+                Some(last_key) if timed_out => {
+                    if params.ascending {
+                        from.clone_from(&last_key);
+                    } else {
+                        to.clone_from(&last_key);
+                    }
+                    resume_key = Some(last_key);
                 }
+                _ => return Ok(()),
             }
         }
-
-        Ok(())
     }
 
     pub(crate) async fn iterate_many<T: Key>(
@@ -128,6 +157,10 @@ impl MysqlStore {
 
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let table = ranges[0].begin.subspace().name();
+        let bounds = ranges
+            .iter()
+            .map(|params| (params.begin.serialize(0), params.end.serialize(0)))
+            .collect::<Vec<_>>();
 
         type RangeCallback<'y> =
             &'y mut (dyn for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Send + Sync);
@@ -147,75 +180,134 @@ impl MysqlStore {
             query
         };
 
-        fn build_params<T: Key>(chunk: &[IterateParams<T>]) -> Vec<mysql_async::Value> {
-            chunk
-                .iter()
-                .flat_map(|range| {
-                    [
-                        mysql_async::Value::Bytes(range.begin.serialize(0)),
-                        mysql_async::Value::Bytes(range.end.serialize(0)),
-                    ]
-                })
-                .collect()
-        }
-
         async fn emit<Q: Queryable>(
             q: &mut Q,
             query: &str,
-            params: Vec<mysql_async::Value>,
+            bounds: &[(Vec<u8>, Vec<u8>)],
+            resume_key: &mut Option<Vec<u8>>,
             cb: RangeCallback<'_>,
-        ) -> trc::Result<bool> {
+        ) -> trc::Result<Emitted> {
             let s = q.prep(query).await.map_err(into_error)?;
+            let params = bounds
+                .iter()
+                .flat_map(|(begin, end)| {
+                    [
+                        mysql_async::Value::Bytes(begin.clone()),
+                        mysql_async::Value::Bytes(end.clone()),
+                    ]
+                })
+                .collect::<Vec<_>>();
             let mut rows = q
                 .exec_stream::<Row, _, _>(&s, params)
                 .await
                 .map_err(into_error)?;
-            while let Some(mut row) = rows.try_next().await.map_err(into_error)? {
-                let value = row
-                    .take_opt::<Vec<u8>, _>(1)
-                    .unwrap_or_else(|| Ok(vec![]))
-                    .map_err(into_error)?;
-                let key = row
-                    .take_opt::<Vec<u8>, _>(0)
-                    .unwrap_or_else(|| Ok(vec![]))
-                    .map_err(into_error)?;
-                if !cb(&key, &value)? {
-                    return Ok(false);
+            let mut last_key = None;
+
+            loop {
+                match rows.try_next().await {
+                    Ok(Some(mut row)) => {
+                        let value = row
+                            .take_opt::<Vec<u8>, _>(1)
+                            .unwrap_or_else(|| Ok(vec![]))
+                            .map_err(into_error)?;
+                        let key = row
+                            .take_opt::<Vec<u8>, _>(0)
+                            .unwrap_or_else(|| Ok(vec![]))
+                            .map_err(into_error)?;
+
+                        if resume_key.take().is_some_and(|resumed| resumed == key) {
+                            continue;
+                        }
+
+                        if !cb(&key, &value)? {
+                            return Ok(Emitted::Stopped);
+                        }
+
+                        last_key = Some(key);
+                    }
+                    Ok(None) => return Ok(Emitted::Done),
+                    Err(err) => {
+                        return match last_key {
+                            Some(last_key) if is_timeout_error(&err) => {
+                                Ok(Emitted::TimedOut(last_key))
+                            }
+                            _ => Err(into_error(err)),
+                        };
+                    }
                 }
             }
-            Ok(true)
         }
 
-        if ranges.len() <= MAX_RANGES_PER_STMT {
-            emit(
-                &mut conn,
-                &build_query(ranges.len()),
-                build_params(&ranges),
-                &mut cb,
-            )
-            .await?;
-        } else {
-            let mut tx_opts = TxOpts::default();
-            tx_opts
-                .with_consistent_snapshot(true)
-                .with_isolation_level(IsolationLevel::RepeatableRead);
-            let mut trx = conn.start_transaction(tx_opts).await.map_err(into_error)?;
-            for chunk in ranges.chunks(MAX_RANGES_PER_STMT) {
-                if !emit(
-                    &mut trx,
-                    &build_query(chunk.len()),
-                    build_params(chunk),
+        if bounds.len() <= MAX_RANGES_PER_STMT {
+            let mut pending = bounds;
+            let mut resume_key = None;
+
+            loop {
+                match emit(
+                    &mut conn,
+                    &build_query(pending.len()),
+                    &pending,
+                    &mut resume_key,
                     &mut cb,
                 )
                 .await?
                 {
-                    break;
+                    Emitted::Done | Emitted::Stopped => return Ok(()),
+                    Emitted::TimedOut(last_key) => {
+                        pending = resume_from(&pending, &last_key);
+                        resume_key = Some(last_key);
+                    }
                 }
             }
-            trx.commit().await.map_err(into_error)?;
-        }
+        } else {
+            let mut chunk_start = 0;
+            let mut pending = None;
+            let mut resume_key = None;
 
-        Ok(())
+            loop {
+                let mut tx_opts = TxOpts::default();
+                tx_opts
+                    .with_consistent_snapshot(true)
+                    .with_isolation_level(IsolationLevel::RepeatableRead);
+                let mut trx = conn.start_transaction(tx_opts).await.map_err(into_error)?;
+                let mut timed_out = false;
+
+                while chunk_start < bounds.len() {
+                    let chunk: Vec<(Vec<u8>, Vec<u8>)> = pending.take().unwrap_or_else(|| {
+                        bounds[chunk_start..bounds.len().min(chunk_start + MAX_RANGES_PER_STMT)]
+                            .to_vec()
+                    });
+
+                    match emit(
+                        &mut trx,
+                        &build_query(chunk.len()),
+                        &chunk,
+                        &mut resume_key,
+                        &mut cb,
+                    )
+                    .await?
+                    {
+                        Emitted::Done => {
+                            resume_key = None;
+                            chunk_start += MAX_RANGES_PER_STMT;
+                        }
+                        Emitted::Stopped => return Ok(()),
+                        Emitted::TimedOut(last_key) => {
+                            pending = Some(resume_from(&chunk, &last_key));
+                            resume_key = Some(last_key);
+                            timed_out = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !timed_out {
+                    return trx.commit().await.map(|_| ()).map_err(into_error);
+                }
+
+                trx.rollback().await.map_err(into_error)?;
+            }
+        }
     }
 
     pub(crate) async fn get_counter(
@@ -236,4 +328,27 @@ impl MysqlStore {
             Err(e) => Err(into_error(e)),
         }
     }
+}
+
+enum Emitted {
+    Done,
+    Stopped,
+    TimedOut(Vec<u8>),
+}
+
+fn resume_from(bounds: &[(Vec<u8>, Vec<u8>)], last_key: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    bounds
+        .iter()
+        .filter(|(_, end)| end.as_slice() >= last_key)
+        .map(|(begin, end)| {
+            (
+                if begin.as_slice() < last_key {
+                    last_key.to_vec()
+                } else {
+                    begin.clone()
+                },
+                end.clone(),
+            )
+        })
+        .collect()
 }

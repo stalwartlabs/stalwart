@@ -14,7 +14,7 @@ pub mod storage;
 use calcard::icalendar::{
     ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarDuration, ICalendarEntry,
 };
-use common::{DavName, auth::AccessToken};
+use common::DavName;
 use types::{acl::AclGrant, dead_property::DeadProperty};
 use utils::map::bitmap::BitmapItem;
 
@@ -212,11 +212,10 @@ pub enum Timezone {
 }
 
 impl Calendar {
-    pub fn preferences(&self, access_token: &AccessToken) -> &CalendarPreferences {
+    pub fn preferences(&self, account_id: u32) -> &CalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.account_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -225,8 +224,7 @@ impl Calendar {
         }
     }
 
-    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut CalendarPreferences {
-        let account_id = access_token.account_id();
+    pub fn preferences_mut(&mut self, account_id: u32) -> &mut CalendarPreferences {
         let idx = if let Some(idx) = self
             .preferences
             .iter()
@@ -247,20 +245,19 @@ impl Calendar {
 impl ArchivedCalendar {
     pub fn default_alerts(
         &self,
-        access_token: &AccessToken,
+        account_id: u32,
         with_time: bool,
     ) -> impl Iterator<Item = &ArchivedDefaultAlert> {
-        self.preferences(access_token)
+        self.preferences(account_id)
             .default_alerts
             .iter()
             .filter(move |a| (a.flags & ALERT_WITH_TIME != 0) == with_time)
     }
 
-    pub fn preferences(&self, access_token: &AccessToken) -> &ArchivedCalendarPreferences {
+    pub fn preferences(&self, account_id: u32) -> &ArchivedCalendarPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
         } else {
-            let account_id = access_token.account_id();
             self.preferences
                 .iter()
                 .find(|p| p.account_id == account_id)
@@ -271,14 +268,11 @@ impl ArchivedCalendar {
 }
 
 impl CalendarEvent {
-    pub fn preferences(&self, access_token: &AccessToken) -> Option<&EventPreferences> {
-        self.preferences
-            .iter()
-            .find(|p| p.account_id == access_token.account_id())
+    pub fn preferences(&self, account_id: u32) -> Option<&EventPreferences> {
+        self.preferences.iter().find(|p| p.account_id == account_id)
     }
 
-    pub fn preferences_mut(&mut self, access_token: &AccessToken) -> &mut EventPreferences {
-        let account_id = access_token.account_id();
+    pub fn preferences_mut(&mut self, account_id: u32) -> &mut EventPreferences {
         let idx = if let Some(idx) = self
             .preferences
             .iter()
@@ -331,10 +325,8 @@ impl CalendarEvent {
 }
 
 impl ArchivedCalendarEvent {
-    pub fn preferences(&self, access_token: &AccessToken) -> Option<&ArchivedEventPreferences> {
-        self.preferences
-            .iter()
-            .find(|p| p.account_id == access_token.account_id())
+    pub fn preferences(&self, account_id: u32) -> Option<&ArchivedEventPreferences> {
+        self.preferences.iter().find(|p| p.account_id == account_id)
     }
 }
 

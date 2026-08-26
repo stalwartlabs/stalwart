@@ -97,7 +97,8 @@ impl CalendarSet for Server {
             };
 
             // Process changes
-            if let Err(err) = update_calendar(None, object, &mut calendar, access_token) {
+            if let Err(err) = update_calendar(None, object, &mut calendar, access_token, account_id)
+            {
                 response.not_created.append(id, err);
                 continue 'create;
             }
@@ -178,14 +179,19 @@ impl CalendarSet for Server {
                 .caused_by(trc::location!())?;
 
             // Apply changes
-            let has_acl_changes =
-                match update_calendar(Some(id), object, &mut new_calendar, access_token) {
-                    Ok(has_acl_changes_) => has_acl_changes_,
-                    Err(err) => {
-                        response.not_updated.append(id, err);
-                        continue 'update;
-                    }
-                };
+            let has_acl_changes = match update_calendar(
+                Some(id),
+                object,
+                &mut new_calendar,
+                access_token,
+                account_id,
+            ) {
+                Ok(has_acl_changes_) => has_acl_changes_,
+                Err(err) => {
+                    response.not_updated.append(id, err);
+                    continue 'update;
+                }
+            };
 
             // Validate ACL
             if is_shared {
@@ -414,7 +420,9 @@ fn update_calendar(
     updates: Value<'_, CalendarProperty, CalendarValue>,
     calendar: &mut Calendar,
     access_token: &AccessToken,
+    account_id: u32,
 ) -> Result<bool, SetError<CalendarProperty>> {
+    let personal_id = access_token.personal_id(account_id, Collection::Calendar);
     let mut has_acl_changes = false;
 
     for (property, value) in updates.into_expanded_object() {
@@ -426,48 +434,48 @@ fn update_calendar(
 
         match (property, value) {
             (CalendarProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
-                calendar.preferences_mut(access_token).name = value.into_owned();
+                calendar.preferences_mut(personal_id).name = value.into_owned();
             }
             (CalendarProperty::Description, Value::Str(value)) if value.len() < 255 => {
-                calendar.preferences_mut(access_token).description = value.into_owned().into();
+                calendar.preferences_mut(personal_id).description = value.into_owned().into();
             }
             (CalendarProperty::Description, Value::Null) => {
-                calendar.preferences_mut(access_token).description = None;
+                calendar.preferences_mut(personal_id).description = None;
             }
             (CalendarProperty::Color, Value::Str(value)) if value.len() < 16 => {
-                calendar.preferences_mut(access_token).color = value.into_owned().into();
+                calendar.preferences_mut(personal_id).color = value.into_owned().into();
             }
             (CalendarProperty::Color, Value::Null) => {
-                calendar.preferences_mut(access_token).color = None;
+                calendar.preferences_mut(personal_id).color = None;
             }
             (CalendarProperty::TimeZone, Value::Element(CalendarValue::Timezone(tz))) => {
-                calendar.preferences_mut(access_token).time_zone = Timezone::IANA(tz.as_id());
+                calendar.preferences_mut(personal_id).time_zone = Timezone::IANA(tz.as_id());
             }
             (CalendarProperty::TimeZone, Value::Null) => {
-                calendar.preferences_mut(access_token).time_zone = Timezone::Default;
+                calendar.preferences_mut(personal_id).time_zone = Timezone::Default;
             }
             (CalendarProperty::SortOrder, Value::Number(value)) => {
-                calendar.preferences_mut(access_token).sort_order = value.cast_to_u64() as u32;
+                calendar.preferences_mut(personal_id).sort_order = value.cast_to_u64() as u32;
             }
             (CalendarProperty::IsSubscribed, Value::Bool(subscribe)) => {
                 if subscribe {
-                    calendar.preferences_mut(access_token).flags |= CALENDAR_SUBSCRIBED;
+                    calendar.preferences_mut(personal_id).flags |= CALENDAR_SUBSCRIBED;
                 } else {
-                    calendar.preferences_mut(access_token).flags &= !CALENDAR_SUBSCRIBED;
+                    calendar.preferences_mut(personal_id).flags &= !CALENDAR_SUBSCRIBED;
                 }
             }
             (CalendarProperty::IsVisible, Value::Bool(visible)) => {
                 if visible {
-                    calendar.preferences_mut(access_token).flags &= !CALENDAR_INVISIBLE;
+                    calendar.preferences_mut(personal_id).flags &= !CALENDAR_INVISIBLE;
                 } else {
-                    calendar.preferences_mut(access_token).flags |= CALENDAR_INVISIBLE;
+                    calendar.preferences_mut(personal_id).flags |= CALENDAR_INVISIBLE;
                 }
             }
             (
                 CalendarProperty::IncludeInAvailability,
                 Value::Element(CalendarValue::IncludeInAvailability(availability)),
             ) => {
-                let flags = &mut calendar.preferences_mut(access_token).flags;
+                let flags = &mut calendar.preferences_mut(personal_id).flags;
 
                 match availability {
                     IncludeInAvailability::All => {
@@ -490,7 +498,7 @@ fn update_calendar(
                 Value::Object(value),
             ) => {
                 let with_time = matches!(property, CalendarProperty::DefaultAlertsWithTime);
-                let alerts = &mut calendar.preferences_mut(access_token).default_alerts;
+                let alerts = &mut calendar.preferences_mut(personal_id).default_alerts;
 
                 alerts.retain(|alert| (alert.flags & ALERT_WITH_TIME != 0) != with_time);
 
@@ -535,7 +543,7 @@ fn update_calendar(
                             };
                             let with_time =
                                 matches!(property, CalendarProperty::DefaultAlertsWithTime);
-                            let alerts = &mut calendar.preferences_mut(access_token).default_alerts;
+                            let alerts = &mut calendar.preferences_mut(personal_id).default_alerts;
                             alerts.retain(|alert| {
                                 (alert.flags & ALERT_WITH_TIME != 0) != with_time || alert.id != id
                             });
@@ -573,7 +581,7 @@ fn update_calendar(
     }
 
     // Validate name
-    if calendar.preferences(access_token).name.is_empty() {
+    if calendar.preferences(personal_id).name.is_empty() {
         return Err(SetError::invalid_properties()
             .with_property(CalendarProperty::Name)
             .with_description("Missing name."));

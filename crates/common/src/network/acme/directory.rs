@@ -229,6 +229,12 @@ impl<L, T> AcmeResponse<L, T> {
         if let Some(retry_after) = self.retry_after
             && retry_after > Duration::from_secs(10 * 60)
         {
+            trc::event!(
+                Acme(trc::AcmeEvent::RenewBackoff),
+                Elapsed = retry_after,
+                Reason = "ACME server requested an excessively long Retry-After",
+            );
+
             return Err(AcmeError::Backoff {
                 max_retries,
                 wait: retry_after.into(),

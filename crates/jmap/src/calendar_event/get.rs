@@ -66,6 +66,7 @@ impl CalendarEventGet for Server {
             .is_none_or(|v| matches!(v, MaybeResultReference::Value(v) if v.is_empty()));
         let properties = request.unwrap_properties(&[]);
         let account_id = request.account_id.document_id();
+        let personal_id = access_token.personal_id(account_id, Collection::Calendar);
         let cache = self
             .fetch_dav_resources(
                 access_token.account_id(),
@@ -590,7 +591,7 @@ impl CalendarEventGet for Server {
                                 JSCalendarProperty::UseDefaultAlerts,
                                 Value::Bool(
                                     calendar_event
-                                        .preferences(access_token)
+                                        .preferences(personal_id)
                                         .is_none_or(|v| v.flags & PREF_USE_DEFAULT_ALERTS != 0),
                                 ),
                             );

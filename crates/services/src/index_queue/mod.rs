@@ -63,7 +63,37 @@ pub(crate) enum PartitionOutcome {
     Completed,
     Locked,
     Incomplete,
-    Failed(String),
+    Failed(PartitionFailure),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PartitionFailure {
+    reason: String,
+    retry_at: Option<u64>,
+}
+
+impl PartitionFailure {
+    fn into_parts(self) -> (String, Option<u64>) {
+        (self.reason, self.retry_at)
+    }
+
+    fn deferred(reason: String, err: &trc::Error) -> Self {
+        PartitionFailure {
+            reason,
+            retry_at: err
+                .value(trc::Key::NextRetry)
+                .and_then(|value| value.to_uint()),
+        }
+    }
+}
+
+impl From<String> for PartitionFailure {
+    fn from(reason: String) -> Self {
+        PartitionFailure {
+            reason,
+            retry_at: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -89,7 +119,7 @@ pub(crate) enum Sink {
 pub(crate) struct BulkRequest {
     documents: Vec<IndexDocument>,
     deletions: Vec<Deletion>,
-    ack: oneshot::Sender<Result<(), String>>,
+    ack: oneshot::Sender<Result<(), PartitionFailure>>,
 }
 
 impl Partition {

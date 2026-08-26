@@ -76,6 +76,10 @@ impl DkimSignature {
         }
     }
 
+    pub fn is_published(&self) -> bool {
+        !matches!(self.stage(), DkimRotationStage::Retired)
+    }
+
     pub fn selector(&self) -> &str {
         match self {
             DkimSignature::Dkim1Ed25519Sha256(sign) => &sign.selector,

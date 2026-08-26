@@ -3537,6 +3537,14 @@ pub enum UserRolesType {
     Custom = 2,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum VCardVersion {
+    #[default]
+    V4 = 0,
+    V3 = 1,
+}
+
 pub static HTTP_VARIABLE: &[ExpressionVariable] = &[
     ExpressionVariable::Listener,
     ExpressionVariable::RemoteIp,

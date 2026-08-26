@@ -419,6 +419,7 @@ impl PropFindRequestHandler for Server {
             .caused_by(trc::location!())?;
         'outer: for item in paths {
             let account_id = item.account_id;
+            let personal_id = access_token.personal_id(account_id, collection_container);
             let document_id = item.document_id;
             let collection = if item.is_container {
                 collection_container
@@ -503,7 +504,7 @@ impl PropFindRequestHandler for Server {
                             ));
                         }
                         WebDavProperty::DisplayName => {
-                            if let Some(name) = archive.display_name(access_token) {
+                            if let Some(name) = archive.display_name(personal_id) {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
                                     DavValue::String(name.to_string()),
@@ -795,7 +796,7 @@ impl PropFindRequestHandler for Server {
                             ArchivedResource::AddressBook(book),
                         ) => {
                             if let Some(desc) =
-                                book.inner.preferences(access_token).description.as_deref()
+                                book.inner.preferences(personal_id).description.as_deref()
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -852,7 +853,7 @@ impl PropFindRequestHandler for Server {
                                     properties,
                                     (*version)
                                         .or(query.vcard_version)
-                                        .or_else(|| card.inner.card.version()),
+                                        .unwrap_or(self.core.groupware.vcard_version),
                                 )),
                             ));
                         }
@@ -869,7 +870,7 @@ impl PropFindRequestHandler for Server {
                         ) => {
                             if let Some(desc) = calendar
                                 .inner
-                                .preferences(access_token)
+                                .preferences(personal_id)
                                 .description
                                 .as_deref()
                             {
@@ -886,7 +887,7 @@ impl PropFindRequestHandler for Server {
                             ArchivedResource::Calendar(calendar),
                         ) => {
                             if let ArchivedTimezone::Custom(tz) =
-                                &calendar.inner.preferences(access_token).time_zone
+                                &calendar.inner.preferences(personal_id).time_zone
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -898,7 +899,7 @@ impl PropFindRequestHandler for Server {
                         }
                         (CalDavProperty::TimezoneId, ArchivedResource::Calendar(calendar)) => {
                             if let ArchivedTimezone::IANA(tz) =
-                                &calendar.inner.preferences(access_token).time_zone
+                                &calendar.inner.preferences(personal_id).time_zone
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),

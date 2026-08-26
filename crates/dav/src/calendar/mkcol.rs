@@ -104,7 +104,7 @@ impl CalendarMkColRequestHandler for Server {
             let mut prop_stat = PropStatBuilder::default();
             is_mkcalendar = mkcol.is_mkcalendar;
             if !self.apply_calendar_properties(
-                access_token,
+                access_token.personal_id(account_id, Collection::Calendar),
                 &mut calendar,
                 false,
                 mkcol.props,

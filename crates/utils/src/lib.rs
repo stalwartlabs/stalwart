@@ -147,6 +147,7 @@ pub async fn wait_for_shutdown() {
 
 pub trait DomainPart {
     fn to_lowercase_address(&self, lower_local: bool) -> String;
+    fn to_canonical_address(&self) -> Cow<'_, str>;
     fn domain_part(&self) -> &str;
     fn try_domain_part(&self) -> Option<&str>;
     fn try_local_part(&self) -> Option<&str>;
@@ -185,6 +186,19 @@ impl<T: AsRef<str>> DomainPart for T {
         }
     }
 
+    fn to_canonical_address(&self) -> Cow<'_, str> {
+        let address = self.as_ref();
+
+        if address
+            .bytes()
+            .any(|ch| !ch.is_ascii() || ch.is_ascii_uppercase())
+        {
+            Cow::Owned(address.to_lowercase_address(true))
+        } else {
+            Cow::Borrowed(address)
+        }
+    }
+
     #[inline(always)]
     fn try_domain_part(&self) -> Option<&str> {
         self.as_ref().rsplit_once('@').map(|(_, d)| d)
@@ -207,10 +221,12 @@ impl<T: AsRef<str>> DomainPart for T {
     fn to_ascii_domain(&self) -> Option<Cow<'_, str>> {
         let domain = self.as_ref();
 
-        if domain.is_ascii() {
-            Some(Cow::Borrowed(domain))
-        } else {
+        if !domain.is_ascii() {
             idna::domain_to_ascii(domain).ok().map(Cow::Owned)
+        } else if domain.bytes().any(|ch| ch.is_ascii_uppercase()) {
+            Some(Cow::Owned(domain.to_ascii_lowercase()))
+        } else {
+            Some(Cow::Borrowed(domain))
         }
     }
 }

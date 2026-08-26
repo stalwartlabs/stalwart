@@ -45,41 +45,62 @@ async fn acme_management(server: &Server, task: &TaskDomainManagement) -> trc::R
     for retry in 0..MAX_RETRIES {
         last_temporary_error = match Box::pin(server.acme_renew(task.domain_id)).await {
             Ok(tasks) => return Ok(TaskResult::Success(tasks)),
-            Err(err) => match err {
-                AcmeError::Crypto(_)
-                | AcmeError::Invalid(_)
-                | AcmeError::NotDue(_)
-                | AcmeError::ChallengeNotSupported { .. }
-                | AcmeError::OrderInvalid(_)
-                | AcmeError::Json(_)
-                | AcmeError::Registry(_) => return Ok(TaskResult::permanent(err.to_string())),
-                AcmeError::Http(_)
-                | AcmeError::HttpStatus(_)
-                | AcmeError::Dns(_)
-                | AcmeError::AuthInvalid(_) => Ok(TaskResult::temporary(err.to_string())),
-                AcmeError::OrderTimeout { max_retries }
-                | AcmeError::AuthTimeout { max_retries } => Ok(TaskResult::Failure {
-                    typ: TaskFailureType::Temporary,
-                    message: err.to_string(),
-                    max_attempts: (max_retries as u64).into(),
-                }),
-                AcmeError::Backoff { max_retries, wait } => {
-                    return if let Some(wait) = wait {
-                        Ok(TaskResult::Failure {
-                            typ: TaskFailureType::Retry(now() + wait.as_secs()),
-                            message: err.to_string(),
-                            max_attempts: (max_retries as u64).into(),
-                        })
-                    } else {
-                        Ok(TaskResult::Failure {
-                            typ: TaskFailureType::Temporary,
-                            message: err.to_string(),
-                            max_attempts: (max_retries as u64).into(),
-                        })
-                    };
+            Err(err) => {
+                if !matches!(
+                    err,
+                    AcmeError::NotDue(_)
+                        | AcmeError::Internal(_)
+                        | AcmeError::AuthInvalid(_)
+                        | AcmeError::OrderInvalid(_)
+                        | AcmeError::AuthTimeout { .. }
+                        | AcmeError::Backoff { .. }
+                ) {
+                    trc::event!(
+                        Acme(trc::AcmeEvent::Error),
+                        Id = task.domain_id.to_string(),
+                        Total = retry as u64,
+                        Reason = err.to_string(),
+                    );
                 }
-                AcmeError::Internal(error) => return Err(error),
-            },
+
+                match err {
+                    AcmeError::Crypto(_)
+                    | AcmeError::Invalid(_)
+                    | AcmeError::NotDue(_)
+                    | AcmeError::ChallengeNotSupported { .. } => {
+                        return Ok(TaskResult::permanent(err.to_string()));
+                    }
+                    AcmeError::OrderInvalid(_) | AcmeError::Json(_) | AcmeError::Registry(_) => {
+                        return Ok(TaskResult::perpetual(err.to_string()));
+                    }
+                    AcmeError::Http(_)
+                    | AcmeError::HttpStatus(_)
+                    | AcmeError::Dns(_)
+                    | AcmeError::AuthInvalid(_) => Ok(TaskResult::temporary(err.to_string())),
+                    AcmeError::OrderTimeout { max_retries }
+                    | AcmeError::AuthTimeout { max_retries } => Ok(TaskResult::Failure {
+                        typ: TaskFailureType::Temporary,
+                        message: err.to_string(),
+                        max_attempts: (max_retries as u64).into(),
+                    }),
+                    AcmeError::Backoff { max_retries, wait } => {
+                        return if let Some(wait) = wait {
+                            Ok(TaskResult::Failure {
+                                typ: TaskFailureType::Retry(now() + wait.as_secs()),
+                                message: err.to_string(),
+                                max_attempts: (max_retries as u64).into(),
+                            })
+                        } else {
+                            Ok(TaskResult::Failure {
+                                typ: TaskFailureType::Temporary,
+                                message: err.to_string(),
+                                max_attempts: (max_retries as u64).into(),
+                            })
+                        };
+                    }
+                    AcmeError::Internal(error) => return Err(error),
+                }
+            }
         };
 
         #[cfg(not(feature = "test_mode"))]

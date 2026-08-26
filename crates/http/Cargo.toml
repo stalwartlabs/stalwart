@@ -1,6 +1,6 @@
 [package]
 name = "http"
-version = "0.16.19"
+version = "0.16.20"
 edition = "2024"
 
 [dependencies]
@@ -47,6 +47,7 @@ compact_str = "0.10.0"
 hashify = { version = "0.2" }
 
 [dev-dependencies]
+flate2 = "1.1"
 
 [features]
 test_mode = []

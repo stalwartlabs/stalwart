@@ -5,7 +5,7 @@
  */
 
 use crate::scheduling::{
-    Email, InstanceId, ItipEntry, ItipEntryValue, ItipError, ItipMessage, ItipSnapshot,
+    Email, InstanceId, ItipEntries, ItipEntryValue, ItipError, ItipMessage, ItipSnapshot,
     ItipSnapshots, ItipSummary,
     itip::{
         ItipExportAs, can_attendee_modify_property, itip_add_tz, itip_build_envelope,
@@ -363,9 +363,7 @@ pub(crate) fn attendee_decline<'x>(
     })
 }
 
-fn count_entry_names<'a>(
-    entries: &'a AHashSet<ItipEntry<'a>>,
-) -> AHashMap<&'a ICalendarProperty, usize> {
+fn count_entry_names<'x>(entries: &'x ItipEntries<'x>) -> AHashMap<&'x ICalendarProperty, usize> {
     let mut counts = AHashMap::with_capacity(entries.len());
     for entry in entries {
         *counts.entry(entry.name).or_insert(0) += 1;

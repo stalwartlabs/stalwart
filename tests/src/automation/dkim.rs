@@ -10,7 +10,7 @@ use common::{config::smtp::auth::Dkim1Signer, network::dns::update::DNS_RECORDS}
 use dns_update::{DnsRecord, NamedDnsRecord};
 use registry::{
     schema::{
-        enums::DkimRotationStage,
+        enums::{DkimRotationStage, DnsRecordType},
         prelude::ObjectType,
         structs::{
             CertificateManagement, Dkim1Signature, DkimManagement, DkimManagementProperties,
@@ -21,6 +21,7 @@ use registry::{
     types::duration::Duration,
 };
 use store::write::now;
+use types::id::Id;
 
 pub async fn test(test: &TestServer) {
     println!("Running DKIM Management tests...");
@@ -151,6 +152,15 @@ pub async fn test(test: &TestServer) {
     assert_key_has_dns_record(&records, &rot3_signatures.v1_rsa[0]);
     assert_key_has_dns_record(&records, &rot3_signatures.v1_ed25519[0]);
 
+    // Make sure the DNS management task does not republish the retired keys
+    let (published, zone_file) = test.published_dkim_records(domain_id).await;
+    assert_key_has_no_dns_record(&published, &rot1_signatures.v1_rsa[0]);
+    assert_key_has_no_dns_record(&published, &rot1_signatures.v1_ed25519[0]);
+    assert_key_has_dns_record(&published, &rot3_signatures.v1_rsa[0]);
+    assert_key_has_dns_record(&published, &rot3_signatures.v1_ed25519[0]);
+    assert_zone_file_omits_key(&zone_file, &rot1_signatures.v1_rsa[0]);
+    assert_zone_file_omits_key(&zone_file, &rot1_signatures.v1_ed25519[0]);
+
     // Make sure only the new keys are being used for signing
     assert_ne!(
         rot2_signatures.v1_rsa[0].selector, rot3_signatures.v1_rsa[0].selector,
@@ -186,6 +196,15 @@ pub async fn test(test: &TestServer) {
     assert_key_has_dns_record(&records, &rot4_signatures.v1_ed25519[0]);
     assert_key_has_no_dns_record(&records, &rot2_signatures.v1_rsa[0]);
     assert_key_has_no_dns_record(&records, &rot2_signatures.v1_ed25519[0]);
+
+    // Make sure the DNS management task does not republish the retired keys
+    let (published, zone_file) = test.published_dkim_records(domain_id).await;
+    assert_key_has_no_dns_record(&published, &rot2_signatures.v1_rsa[0]);
+    assert_key_has_no_dns_record(&published, &rot2_signatures.v1_ed25519[0]);
+    assert_key_has_dns_record(&published, &rot4_signatures.v1_rsa[0]);
+    assert_key_has_dns_record(&published, &rot4_signatures.v1_ed25519[0]);
+    assert_zone_file_omits_key(&zone_file, &rot2_signatures.v1_rsa[0]);
+    assert_zone_file_omits_key(&zone_file, &rot2_signatures.v1_ed25519[0]);
 
     // Make sure only the new keys are being used for signing
     assert_ne!(
@@ -309,6 +328,28 @@ impl DkimSignatures {
 }
 
 impl TestServer {
+    async fn published_dkim_records(&self, domain_id: Id) -> (Vec<NamedDnsRecord>, String) {
+        let domain = self
+            .server
+            .registry()
+            .object::<Domain>(domain_id)
+            .await
+            .unwrap()
+            .expect("Domain not found");
+        let records = self
+            .server
+            .build_dns_records(domain_id, &domain, &[DnsRecordType::Dkim])
+            .await
+            .unwrap();
+        let zone_file = self
+            .server
+            .build_bind_dns_records(domain_id, &domain)
+            .await
+            .unwrap();
+
+        (records, zone_file)
+    }
+
     async fn assert_has_signers(&self, domain: &str, selectors: &[&str]) {
         assert_eq!(
             self.server
@@ -343,6 +384,15 @@ fn assert_key_has_dns_record(records: &[NamedDnsRecord], key: &Dkim1Signature) {
     panic!(
         "No DNS record found for DKIM key with selector {}, records: {:#?}",
         key.selector, records
+    );
+}
+
+fn assert_zone_file_omits_key(zone_file: &str, key: &Dkim1Signature) {
+    assert!(
+        !zone_file.contains(&key.selector),
+        "Unexpected zone file entry for DKIM key with selector {}, zone file: {}",
+        key.selector,
+        zone_file
     );
 }
 

@@ -12,6 +12,7 @@ use crate::{
         CalendarEvent, CalendarEventNotification, SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID,
     },
     contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
+    encode_path_segment,
 };
 use calcard::common::timezone::Tz;
 use common::{
@@ -90,7 +91,7 @@ pub(super) async fn build_calcard_resources(
                         resource_from_addressbook(archive.unarchive::<AddressBook>()?, document_id)
                     };
                     let path = DavPath {
-                        path: resource.container_name().unwrap().to_string(),
+                        path: encode_path_segment(resource.container_name().unwrap()).into_owned(),
                         parent_id: None,
                         hierarchy_seq: 1,
                         resource_idx: cache.resources.len(),
@@ -143,7 +144,11 @@ pub(super) async fn build_calcard_resources(
                         })
                     {
                         let path = DavPath {
-                            path: format!("{}/{}", parent.container_name().unwrap(), name.name),
+                            path: format!(
+                                "{}/{}",
+                                encode_path_segment(parent.container_name().unwrap()),
+                                encode_path_segment(&name.name)
+                            ),
                             parent_id: Some(name.parent_id),
                             hierarchy_seq: 0,
                             resource_idx,
@@ -250,7 +255,7 @@ pub(super) fn build_simple_hierarchy(cache: &mut DavResources) {
             DavResourceMetadata::Calendar { name, .. }
             | DavResourceMetadata::AddressBook { name, .. } => {
                 let path = DavPath {
-                    path: name.to_string(),
+                    path: encode_path_segment(name).into_owned(),
                     parent_id: None,
                     hierarchy_seq: 1,
                     resource_idx,
@@ -264,7 +269,11 @@ pub(super) fn build_simple_hierarchy(cache: &mut DavResources) {
                 for name in names {
                     if let Some(parent_name) = name_idx.get(&name.parent_id) {
                         let path = DavPath {
-                            path: format!("{parent_name}/{}", name.name),
+                            path: format!(
+                                "{}/{}",
+                                encode_path_segment(parent_name),
+                                encode_path_segment(&name.name)
+                            ),
                             parent_id: Some(name.parent_id),
                             hierarchy_seq: 0,
                             resource_idx,

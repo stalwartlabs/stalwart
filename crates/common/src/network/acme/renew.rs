@@ -200,6 +200,18 @@ impl Server {
                     parsed_cert.valid_not_after.timestamp(),
                     renew_before,
                 );
+
+                trc::event!(
+                    Acme(trc::AcmeEvent::OrderCompleted),
+                    Domain = domain.name.clone(),
+                    Hostname = new_sans.as_slice(),
+                    Id = id.to_string(),
+                    ValidFrom =
+                        trc::Value::Timestamp(parsed_cert.valid_not_before.timestamp() as u64),
+                    ValidTo = trc::Value::Timestamp(parsed_cert.valid_not_after.timestamp() as u64),
+                    NextRetry = trc::Value::Timestamp(renew_at as u64),
+                );
+
                 tasks.push(Task::AcmeRenewal(TaskDomainManagement {
                     domain_id,
                     status: TaskStatus::at(renew_at),

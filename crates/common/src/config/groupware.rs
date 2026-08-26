@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use registry::schema::structs::{
-    AddressBook, Calendar, CalendarAlarm, CalendarScheduling, DataRetention, FileStorage, Sharing,
-    SystemSettings, WebDav,
+use calcard::vcard::VCardVersion;
+use registry::schema::{
+    enums::VCardVersion as RegistryVCardVersion,
+    structs::{
+        AddressBook, Calendar, CalendarAlarm, CalendarScheduling, DataRetention, FileStorage,
+        Sharing, SystemSettings, WebDav,
+    },
 };
 use std::str::FromStr;
 use store::registry::bootstrap::Bootstrap;
@@ -46,6 +50,7 @@ pub struct GroupwareConfig {
 
     // Addressbook settings
     pub max_vcard_size: usize,
+    pub vcard_version: VCardVersion,
     pub default_addressbook_name: Option<String>,
     pub default_addressbook_display_name: Option<String>,
 
@@ -75,6 +80,7 @@ pub enum CalendarTemplateVariable {
     Color,
     Changed,
     Value,
+    Link,
     LogoCid,
     OldValue,
     Rsvp,
@@ -108,6 +114,10 @@ impl GroupwareConfig {
             max_ical_instances: calendar.max_recurrence_expansions as usize,
             max_ical_attendees_per_instance: calendar.max_attendees as usize,
             max_vcard_size: book.max_v_card_size as usize,
+            vcard_version: match book.v_card_version {
+                RegistryVCardVersion::V3 => VCardVersion::V3_0,
+                RegistryVCardVersion::V4 => VCardVersion::V4_0,
+            },
             max_file_size: file.max_size as usize,
             alarms_enabled: alarm.enable,
             alarms_minimum_interval: alarm.min_trigger_interval.into_inner().as_secs() as i64,
@@ -169,6 +179,7 @@ impl FromStr for CalendarTemplateVariable {
             "attendees_title" => Ok(CalendarTemplateVariable::AttendeesTitle),
             "key" => Ok(CalendarTemplateVariable::Key),
             "value" => Ok(CalendarTemplateVariable::Value),
+            "link" => Ok(CalendarTemplateVariable::Link),
             "logo_cid" => Ok(CalendarTemplateVariable::LogoCid),
             "actions" => Ok(CalendarTemplateVariable::Actions),
             "changed" => Ok(CalendarTemplateVariable::Changed),
@@ -176,6 +187,93 @@ impl FromStr for CalendarTemplateVariable {
             "rsvp" => Ok(CalendarTemplateVariable::Rsvp),
             "color" => Ok(CalendarTemplateVariable::Color),
             _ => Err(format!("Unknown calendar template variable: {}", s)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CalendarTemplateVariable;
+    use utils::template::Template;
+
+    const TEMPLATES: [(&str, &str, &str); 2] = [
+        (
+            "calendar-invite.html",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../resources/html-templates/calendar-invite.html"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../resources/html-templates/calendar-invite.html.min"
+            )),
+        ),
+        (
+            "calendar-alarm.html",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../resources/html-templates/calendar-alarm.html"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../resources/html-templates/calendar-alarm.html.min"
+            )),
+        ),
+    ];
+
+    // Every `{{...}}` token in a template, in order of appearance
+    fn tokens(contents: &str) -> Vec<&str> {
+        let mut tokens = Vec::new();
+        let mut rest = contents;
+
+        while let Some((_, after)) = rest.split_once("{{") {
+            match after.split_once("}}") {
+                Some((token, tail)) => {
+                    tokens.push(token.trim());
+                    rest = tail;
+                }
+                None => break,
+            }
+        }
+
+        tokens
+    }
+
+    #[test]
+    fn shipped_calendar_templates_parse() {
+        for (name, source, minified) in TEMPLATES {
+            Template::<CalendarTemplateVariable>::parse(source)
+                .unwrap_or_else(|err| panic!("{name} failed to parse: {err}"));
+            Template::<CalendarTemplateVariable>::parse(minified)
+                .unwrap_or_else(|err| panic!("{name}.min failed to parse: {err}"));
+        }
+    }
+
+    #[test]
+    fn minified_calendar_templates_are_in_sync() {
+        for (name, source, minified) in TEMPLATES {
+            let source = tokens(source);
+            assert!(source.len() > 10, "{name} yielded no tokens to compare");
+            assert_eq!(
+                source,
+                tokens(minified),
+                "{name}.min is stale, re-run resources/scripts/minify_html.sh"
+            );
+        }
+    }
+
+    #[test]
+    fn calendar_template_tokens_are_single_line() {
+        // A newline inside `{{...}}` makes the parser reject the block
+        for (name, source, minified) in TEMPLATES {
+            for (suffix, contents) in [("", source), (".min", minified)] {
+                for token in tokens(contents) {
+                    assert!(
+                        !token.contains('\n') && !token.contains('\r'),
+                        "{name}{suffix} has a multi-line token: {token:?}"
+                    );
+                }
+            }
         }
     }
 }

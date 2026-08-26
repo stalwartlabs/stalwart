@@ -13,6 +13,7 @@ use crate::{
 };
 use ahash::AHashSet;
 use deadpool_postgres::Pool;
+use tokio_postgres::error::SqlState;
 
 pub mod blob;
 pub mod lookup;
@@ -55,6 +56,18 @@ fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
         source = cause.source();
     }
     message
+}
+
+pub(crate) const DELETE_CHUNK_SIZE: usize = 1000;
+pub(crate) const MIN_DELETE_CHUNK_SIZE: usize = 10;
+
+#[inline(always)]
+pub(crate) fn is_timeout_error(err: &tokio_postgres::Error) -> bool {
+    err.code().is_some_and(|code| {
+        *code == SqlState::QUERY_CANCELED
+            || *code == SqlState::IDLE_IN_TRANSACTION_SESSION_TIMEOUT
+            || *code == SqlState::LOCK_NOT_AVAILABLE
+    })
 }
 
 #[inline(always)]

@@ -1,3 +1,2 @@
 # GitHub usernames allowed to open pull requests directly.
 mdecimus
-mdyring

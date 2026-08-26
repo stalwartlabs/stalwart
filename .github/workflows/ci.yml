@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Free disk space (heavy ARM targets)
-        if: contains(matrix.target, 'arm')
+        if: contains(matrix.target, 'arm') || contains(matrix.target, 'aarch64')
         run: |
           df -h /mnt /
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /usr/local/.ghcup /usr/local/share/powershell /usr/share/swift /opt/hostedtoolcache/CodeQL
@@ -161,7 +161,7 @@ jobs:
           df -h /mnt /
 
       - name: Add swap (heavy ARM targets)
-        if: contains(matrix.target, 'arm')
+        if: contains(matrix.target, 'arm') || contains(matrix.target, 'aarch64')
         run: |
           mnt_avail=$(df --output=avail -k /mnt | tail -1)
           if [ "$mnt_avail" -lt 18874368 ]; then

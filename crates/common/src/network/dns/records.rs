@@ -51,6 +51,9 @@ impl Server {
                         let Some(key) = self.registry().object::<DkimSignature>(id).await? else {
                             continue;
                         };
+                        if !key.is_published() {
+                            continue;
+                        }
                         records.push(generate_dkim_dns_record(&key, domain_name).await?);
                     }
                 }

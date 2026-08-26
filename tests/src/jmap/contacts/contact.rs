@@ -1331,11 +1331,11 @@ TEL;TYPE=PREF,CELL,VOICE;PROP-ID=k1:+1-555-123-4567
 TEL;TYPE=WORK,VOICE;PROP-ID=k2:+1-555-987-6543
 TEL;TYPE=HOME,VOICE;PROP-ID=k3:+1-555-456-7890
 ADR;TYPE=WORK;LABEL="123 Business Ave\nSuite 400\nNew York, NY 10001\nUSA";
- TZ=Etc/GMT+5;GEO="40.7128;-74.0060";PROP-ID=k1;JSCOMPS=";11;3;4;5;6":;;123 
- Business Ave;New York;NY;10001;USA;;;;;123 Business Ave;;;;;;
+ TZ=Etc/GMT+5;GEO="40.7128;-74.0060";PROP-ID=k1;JSCOMPS=";11;3;4;5;6":;;123
+  Business Ave;New York;NY;10001;USA;;;;;123 Business Ave;;;;;;
 ADR;TYPE=HOME,PREF;LABEL="456 Residential St\nApt 7B\nBrooklyn, NY 11201\nU
- SA";PROP-ID=k2;JSCOMPS=";11;3;4;5;6":;;456 Residential St;Brooklyn;NY;11201;
- USA;;;;;456 Residential St;;;;;;
+ SA";PROP-ID=k2;JSCOMPS=";11;3;4;5;6":;;456 Residential St;Brooklyn;NY;1120
+ 1;USA;;;;;456 Residential St;;;;;;
 TITLE;PROP-ID=k1:Senior Research Scientist
 JSPROP;JSPTR=titles/k2/organizationId:"k1"
 ROLE;PROP-ID=k2:Team Lead

@@ -4,21 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::{
-    common::timezone::Tz,
-    icalendar::{ArchivedICalendarParameterName, ArchivedICalendarProperty, ICalendarProperty},
+use calcard::icalendar::{
+    ArchivedICalendarParameterName, ArchivedICalendarProperty, ICalendarProperty,
 };
-use chrono::{DateTime, Locale};
 use common::{
     DEFAULT_LOGO_BASE64, Server,
     auth::{AccountInfo, BuildAccessToken},
     config::groupware::CalendarTemplateVariable,
-    i18n,
     ipc::{CalendarAlert, PushNotification},
     network::{ServerInstance, stream::NullIo},
 };
 use groupware::{
     calendar::{ArchivedCalendarEvent, CalendarEvent},
+    scheduling::{
+        ItipTime, ItipValue,
+        format::{TextFormatter, hyperlink},
+    },
     strip_mailto_scheme,
 };
 use mail_builder::{
@@ -36,7 +37,7 @@ use registry::{
 };
 use smtp::core::{Session, SessionData};
 use smtp_proto::{MailFrom, RcptTo};
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes, now},
@@ -465,6 +466,7 @@ async fn build_template(
     let mut description = None;
     let mut rcpt_to = None;
     let mut location = None;
+    let mut conference = None;
     let mut organizer = None;
     let mut guests = vec![];
 
@@ -498,6 +500,9 @@ async fn build_template(
             }
             ArchivedICalendarProperty::Location => {
                 location = entry.values.first().and_then(|v| v.as_text());
+            }
+            ArchivedICalendarProperty::Conference if conference.is_none() => {
+                conference = entry.values.first().and_then(|v| v.as_text());
             }
             ArchivedICalendarProperty::Organizer | ArchivedICalendarProperty::Attendee => {
                 let email = entry
@@ -560,32 +565,22 @@ async fn build_template(
 
     #[cfg(not(feature = "enterprise"))]
     let template = &server.core.groupware.alarms_template;
-    let locale = i18n::locale_or_default(account_info.locale().as_str());
-    let chrono_locale = Locale::from_str(account_info.locale().as_str()).unwrap_or(Locale::en_US);
-    let event_start = alarm.event_start.timestamp();
-    let event_end = alarm.event_end.timestamp();
-    let event_start_tz = alarm.event_start_tz as u16;
-    let event_end_tz = alarm.event_end_tz as u16;
+    let formatter = TextFormatter::new(account_info.locale().as_str())?;
+    let locale = formatter.locale;
 
-    let start = format!(
-        "{} ({})",
-        DateTime::from_timestamp(event_start, 0)
-            .unwrap_or_default()
-            .format_localized(locale.calendar_date_template, chrono_locale),
-        Tz::from_id(event_start_tz)
-            .unwrap_or(Tz::UTC)
-            .name()
-            .unwrap_or_default()
+    let start = formatter.field_to_string(
+        &ItipValue::Time(ItipTime {
+            start: alarm.event_start.timestamp(),
+            tz_id: alarm.event_start_tz as u16,
+        }),
+        locale.calendar_date_template,
     );
-    let end = format!(
-        "{} ({})",
-        DateTime::from_timestamp(event_end, 0)
-            .unwrap_or_default()
-            .format_localized(locale.calendar_date_template, chrono_locale),
-        Tz::from_id(event_end_tz)
-            .unwrap_or(Tz::UTC)
-            .name()
-            .unwrap_or_default()
+    let end = formatter.field_to_string(
+        &ItipValue::Time(ItipTime {
+            start: alarm.event_end.timestamp(),
+            tz_id: alarm.event_end_tz as u16,
+        }),
+        locale.calendar_date_template,
     );
     let subject = format!(
         "{}: {} @ {}",
@@ -601,6 +596,7 @@ async fn build_template(
             _ => unreachable!(),
         })
         .unwrap_or_else(|| account_info.name().to_string());
+    let logo_cid = format!("cid:{logo_cid}");
     let mut variables = Variables::new();
     variables.insert_single(CalendarTemplateVariable::PageTitle, subject.as_str());
     variables.insert_single(
@@ -620,32 +616,41 @@ async fn build_template(
         CalendarTemplateVariable::AttendeesTitle,
         locale.calendar_attendees,
     );
-    variables.insert_single(
-        CalendarTemplateVariable::EventTitle,
-        summary.unwrap_or_default(),
-    );
-    variables.insert_single(CalendarTemplateVariable::LogoCid, logo_cid);
+    if let Some(summary) = summary.filter(|summary| !summary.is_empty()) {
+        variables.insert_single(CalendarTemplateVariable::EventTitle, summary);
+    }
+    variables.insert_single(CalendarTemplateVariable::LogoCid, logo_cid.as_str());
     if let Some(description) = description {
         variables.insert_single(CalendarTemplateVariable::EventDescription, description);
     }
     variables.insert_block(
         CalendarTemplateVariable::EventDetails,
         [
-            Some([
+            Some(vec![
                 (CalendarTemplateVariable::Key, locale.calendar_start),
                 (CalendarTemplateVariable::Value, start.as_str()),
             ]),
-            Some([
+            Some(vec![
                 (CalendarTemplateVariable::Key, locale.calendar_end),
                 (CalendarTemplateVariable::Value, end.as_str()),
             ]),
             location.map(|location| {
-                [
+                vec![
                     (CalendarTemplateVariable::Key, locale.calendar_location),
                     (CalendarTemplateVariable::Value, location),
                 ]
             }),
-            Some([
+            conference.map(|conference| {
+                let mut detail = vec![
+                    (CalendarTemplateVariable::Key, locale.calendar_conference),
+                    (CalendarTemplateVariable::Value, conference),
+                ];
+                if let Some(link) = hyperlink(conference) {
+                    detail.push((CalendarTemplateVariable::Link, link));
+                }
+                detail
+            }),
+            Some(vec![
                 (CalendarTemplateVariable::Key, locale.calendar_organizer),
                 (CalendarTemplateVariable::Value, organizer.as_str()),
             ]),

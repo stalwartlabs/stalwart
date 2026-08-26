@@ -113,6 +113,14 @@ impl AcmeRequestBuilder {
         let mut order = response.body;
         let mut retry_after = None;
 
+        trc::event!(
+            Acme(AcmeEvent::OrderStart),
+            Url = self.directory.new_order.to_string(),
+            Details = order_url.to_string(),
+            Hostname = domains.as_slice(),
+            Type = self.challenge.as_str(),
+        );
+
         loop {
             match order.status {
                 OrderStatus::Pending => {
@@ -198,6 +206,14 @@ impl AcmeRequestBuilder {
                     } else {
                         "Unknown reason".to_string()
                     };
+
+                    trc::event!(
+                        Acme(AcmeEvent::OrderInvalid),
+                        Url = self.directory.new_order.to_string(),
+                        Details = order_url.to_string(),
+                        Hostname = domains.as_slice(),
+                        Reason = reason.clone(),
+                    );
 
                     return Err(AcmeError::OrderInvalid(reason));
                 }
@@ -306,7 +322,16 @@ impl AcmeRequestBuilder {
             }
             AuthStatus::Valid => return Ok(()),
             _ => {
-                return Err(AcmeError::AuthInvalid(auth.into_error()));
+                trc::event!(
+                    Acme(AcmeEvent::AuthError),
+                    Hostname = auth.identifier.hostname().to_string(),
+                    Type = self.challenge.as_str(),
+                    Url = self.directory.new_order.to_string(),
+                    Details = url.to_string(),
+                    Reason = auth.to_error(),
+                );
+
+                return Err(AcmeError::AuthInvalid(auth.to_error()));
             }
         };
 
@@ -339,10 +364,28 @@ impl AcmeRequestBuilder {
                     return Ok(());
                 }
                 _ => {
-                    return Err(AcmeError::AuthInvalid(response.body.into_error()));
+                    trc::event!(
+                        Acme(AcmeEvent::AuthError),
+                        Hostname = domain.to_string(),
+                        Type = self.challenge.as_str(),
+                        Url = self.directory.new_order.to_string(),
+                        Details = url.to_string(),
+                        Reason = response.body.to_error(),
+                    );
+
+                    return Err(AcmeError::AuthInvalid(response.body.to_error()));
                 }
             }
         }
+
+        trc::event!(
+            Acme(AcmeEvent::AuthTooManyAttempts),
+            Hostname = domain.to_string(),
+            Type = self.challenge.as_str(),
+            Url = self.directory.new_order.to_string(),
+            Details = url.to_string(),
+            Total = 5u64,
+        );
 
         Err(AcmeError::AuthTimeout {
             max_retries: self.max_retries,

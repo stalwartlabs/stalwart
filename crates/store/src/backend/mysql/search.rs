@@ -7,7 +7,10 @@
 use crate::{
     backend::{
         MAX_TOKEN_LENGTH,
-        mysql::{MysqlSearchField, MysqlStore, into_error},
+        mysql::{
+            DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, MysqlSearchField, MysqlStore, into_error,
+            is_timeout_error,
+        },
     },
     search::{
         IndexDocument, KeyValueMatch, SearchFilter, SearchQuery, SearchResults, SearchValue,
@@ -102,16 +105,45 @@ impl MysqlStore {
     }
 
     pub async fn unindex(&self, filter: SearchQuery) -> trc::Result<u64> {
-        let mut query = format!("DELETE FROM {} ", filter.index.mysql_table());
+        let table = filter.index.mysql_table();
+        let mut query = format!("DELETE FROM {table} ");
         let params = build_filter(&mut query, &filter.filters);
 
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        let s = conn.prep(query).await.map_err(into_error)?;
+        let s = conn.prep(&query).await.map_err(into_error)?;
 
-        conn.exec_drop(s, params)
-            .await
-            .map(|_| conn.affected_rows() as u64)
-            .map_err(into_error)
+        match conn.exec_drop(s, params.clone()).await {
+            Ok(_) => return Ok(conn.affected_rows()),
+            Err(err) if is_timeout_error(&err) => (),
+            Err(err) => return Err(into_error(err)),
+        }
+
+        let mut chunk_size = DELETE_CHUNK_SIZE;
+        let mut deleted = 0;
+
+        loop {
+            let s = conn
+                .prep(format!("{query} LIMIT {chunk_size}"))
+                .await
+                .map_err(into_error)?;
+
+            loop {
+                match conn.exec_drop(&s, params.clone()).await {
+                    Ok(_) => {
+                        let affected = conn.affected_rows();
+                        if affected == 0 {
+                            return Ok(deleted);
+                        }
+                        deleted += affected;
+                    }
+                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
+                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                        break;
+                    }
+                    Err(err) => return Err(into_error(err)),
+                }
+            }
+        }
     }
 }
 

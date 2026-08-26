@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{PostgresStore, into_error};
+use super::{PostgresStore, into_error, is_timeout_error};
 use crate::{
     Deserialize, IterateParams, Key, ValueKey, backend::postgres::into_pool_error,
     write::ValueClass,
@@ -85,31 +85,66 @@ impl PostgresStore {
                 }
             })
             .await.map_err(into_error)?;
-        let rows = conn
-            .query_raw(&s, &[&begin, &end])
-            .await
-            .map_err(into_error)?;
+        let mut from = begin;
+        let mut to = end;
+        let mut resume_key: Option<Vec<u8>> = None;
 
-        pin_mut!(rows);
+        loop {
+            let mut last_key = None;
+            let mut timed_out = false;
 
-        if params.values {
-            while let Some(row) = rows.try_next().await.map_err(into_error)? {
-                let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
-                let value = row.try_get::<_, &[u8]>(1).map_err(into_error)?;
+            {
+                let rows = conn
+                    .query_raw(&s, &[&from, &to])
+                    .await
+                    .map_err(into_error)?;
 
-                if !cb(key, value)? {
-                    break;
+                pin_mut!(rows);
+
+                loop {
+                    match rows.try_next().await {
+                        Ok(Some(row)) => {
+                            let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
+                            let value = if params.values {
+                                row.try_get::<_, &[u8]>(1).map_err(into_error)?
+                            } else {
+                                b"".as_slice()
+                            };
+
+                            if resume_key.take().is_some_and(|resumed| resumed == key) {
+                                continue;
+                            }
+
+                            if !cb(key, value)? {
+                                return Ok(());
+                            }
+
+                            last_key = Some(key.to_vec());
+                        }
+                        Ok(None) => break,
+                        Err(err) => {
+                            if params.first || last_key.is_none() || !is_timeout_error(&err) {
+                                return Err(into_error(err));
+                            }
+                            timed_out = true;
+                            break;
+                        }
+                    }
                 }
             }
-        } else {
-            while let Some(row) = rows.try_next().await.map_err(into_error)? {
-                if !cb(row.try_get::<_, &[u8]>(0).map_err(into_error)?, b"")? {
-                    break;
+
+            match last_key {
+                Some(last_key) if timed_out => {
+                    if params.ascending {
+                        from.clone_from(&last_key);
+                    } else {
+                        to.clone_from(&last_key);
+                    }
+                    resume_key = Some(last_key);
                 }
+                _ => return Ok(()),
             }
         }
-
-        Ok(())
     }
 
     pub(crate) async fn iterate_many<T: Key>(
@@ -129,22 +164,47 @@ impl PostgresStore {
         type RangeCallback<'y> =
             &'y mut (dyn for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Send + Sync);
 
-        async fn emit(rows: tokio_postgres::RowStream, cb: RangeCallback<'_>) -> trc::Result<bool> {
+        async fn emit(
+            rows: tokio_postgres::RowStream,
+            resume_key: &mut Option<Vec<u8>>,
+            cb: RangeCallback<'_>,
+        ) -> trc::Result<Emitted> {
             pin_mut!(rows);
-            while let Some(row) = rows.try_next().await.map_err(into_error)? {
-                let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
-                let value = row.try_get::<_, &[u8]>(1).map_err(into_error)?;
-                if !cb(key, value)? {
-                    return Ok(false);
+            let mut last_key = None;
+
+            loop {
+                match rows.try_next().await {
+                    Ok(Some(row)) => {
+                        let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
+                        let value = row.try_get::<_, &[u8]>(1).map_err(into_error)?;
+
+                        if resume_key.take().is_some_and(|resumed| resumed == key) {
+                            continue;
+                        }
+
+                        if !cb(key, value)? {
+                            return Ok(Emitted::Stopped);
+                        }
+
+                        last_key = Some(key.to_vec());
+                    }
+                    Ok(None) => return Ok(Emitted::Done),
+                    Err(err) => {
+                        return match last_key {
+                            Some(last_key) if is_timeout_error(&err) => {
+                                Ok(Emitted::TimedOut(last_key))
+                            }
+                            _ => Err(into_error(err)),
+                        };
+                    }
                 }
             }
-            Ok(true)
         }
 
-        let build_query = |chunk: &[(Vec<u8>, Vec<u8>)]| {
-            let mut query = String::with_capacity(chunk.len() * 28 + 40);
+        let build_query = |count: usize| {
+            let mut query = String::with_capacity(count * 28 + 40);
             let _ = write!(query, "SELECT k, v FROM {table} WHERE ");
-            for i in 0..chunk.len() {
+            for i in 0..count {
                 if i > 0 {
                     query.push_str(" OR ");
                 }
@@ -155,39 +215,87 @@ impl PostgresStore {
         };
 
         if bounds.len() <= MAX_RANGES_PER_STMT {
-            let s = conn
-                .prepare_cached(&build_query(&bounds))
-                .await
-                .map_err(into_error)?;
-            let params = bounds
-                .iter()
-                .flat_map(|(begin, end)| [begin, end])
-                .collect::<Vec<_>>();
-            let rows = conn.query_raw(&s, params).await.map_err(into_error)?;
-            emit(rows, &mut cb).await?;
-        } else {
-            let trx = conn.transaction().await.map_err(into_error)?;
-            trx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", &[])
-                .await
-                .map_err(into_error)?;
-            for chunk in bounds.chunks(MAX_RANGES_PER_STMT) {
-                let s = trx
-                    .prepare_cached(&build_query(chunk))
+            let mut pending = bounds;
+            let mut resume_key = None;
+
+            loop {
+                let s = conn
+                    .prepare_cached(&build_query(pending.len()))
                     .await
                     .map_err(into_error)?;
-                let params = chunk
-                    .iter()
-                    .flat_map(|(begin, end)| [begin, end])
-                    .collect::<Vec<_>>();
-                let rows = trx.query_raw(&s, params).await.map_err(into_error)?;
-                if !emit(rows, &mut cb).await? {
-                    break;
+                let rows = conn
+                    .query_raw(
+                        &s,
+                        pending
+                            .iter()
+                            .flat_map(|(begin, end)| [begin, end])
+                            .collect::<Vec<_>>(),
+                    )
+                    .await
+                    .map_err(into_error)?;
+
+                match emit(rows, &mut resume_key, &mut cb).await? {
+                    Emitted::Done | Emitted::Stopped => return Ok(()),
+                    Emitted::TimedOut(last_key) => {
+                        pending = resume_from(&pending, &last_key);
+                        resume_key = Some(last_key);
+                    }
                 }
             }
-            trx.commit().await.map_err(into_error)?;
-        }
+        } else {
+            let mut chunk_start = 0;
+            let mut pending = None;
+            let mut resume_key = None;
 
-        Ok(())
+            loop {
+                let trx = conn.transaction().await.map_err(into_error)?;
+                trx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", &[])
+                    .await
+                    .map_err(into_error)?;
+                let mut timed_out = false;
+
+                while chunk_start < bounds.len() {
+                    let chunk = pending.take().unwrap_or_else(|| {
+                        bounds[chunk_start..bounds.len().min(chunk_start + MAX_RANGES_PER_STMT)]
+                            .to_vec()
+                    });
+                    let s = trx
+                        .prepare_cached(&build_query(chunk.len()))
+                        .await
+                        .map_err(into_error)?;
+                    let rows = trx
+                        .query_raw(
+                            &s,
+                            chunk
+                                .iter()
+                                .flat_map(|(begin, end)| [begin, end])
+                                .collect::<Vec<_>>(),
+                        )
+                        .await
+                        .map_err(into_error)?;
+
+                    match emit(rows, &mut resume_key, &mut cb).await? {
+                        Emitted::Done => {
+                            resume_key = None;
+                            chunk_start += MAX_RANGES_PER_STMT;
+                        }
+                        Emitted::Stopped => return Ok(()),
+                        Emitted::TimedOut(last_key) => {
+                            pending = Some(resume_from(&chunk, &last_key));
+                            resume_key = Some(last_key);
+                            timed_out = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !timed_out {
+                    return trx.commit().await.map(|_| ()).map_err(into_error);
+                }
+
+                trx.rollback().await.map_err(into_error)?;
+            }
+        }
     }
 
     pub(crate) async fn get_counter(
@@ -209,4 +317,27 @@ impl PostgresStore {
             Err(e) => Err(into_error(e)),
         }
     }
+}
+
+enum Emitted {
+    Done,
+    Stopped,
+    TimedOut(Vec<u8>),
+}
+
+fn resume_from(bounds: &[(Vec<u8>, Vec<u8>)], last_key: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    bounds
+        .iter()
+        .filter(|(_, end)| end.as_slice() >= last_key)
+        .map(|(begin, end)| {
+            (
+                if begin.as_slice() < last_key {
+                    last_key.to_vec()
+                } else {
+                    begin.clone()
+                },
+                end.clone(),
+            )
+        })
+        .collect()
 }

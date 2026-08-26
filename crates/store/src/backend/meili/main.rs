@@ -11,11 +11,15 @@ use crate::{
         CalendarSearchField, ContactSearchField, EmailSearchField, SearchField, SearchableField,
         TracingSearchField,
     },
+    write::now,
 };
 use registry::schema::structs;
 use reqwest::{Error, Response, Url};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
+
+const UNCONFIRMED_TASK_RECHECK_DELAY: u64 = 600;
+pub(crate) const MAX_TOTAL_HITS: u64 = 100_000;
 
 impl MeiliSearchStore {
     pub async fn open(config: structs::MeilisearchStore) -> Result<SearchStore, String> {
@@ -155,7 +159,25 @@ impl MeiliSearchStore {
                 .await?;
         }
 
+        self.update_index_pagination(index_name).await?;
+
         Ok(())
+    }
+
+    async fn update_index_pagination(&self, index_uid: &str) -> trc::Result<bool> {
+        let response = assert_success(
+            self.client
+                .patch(format!(
+                    "{}/indexes/{}/settings/pagination",
+                    self.url, index_uid
+                ))
+                .body(json!({ "maxTotalHits": MAX_TOTAL_HITS }).to_string())
+                .send()
+                .await,
+        )
+        .await?;
+
+        self.wait_for_task(response).await
     }
 
     async fn update_index_settings(
@@ -278,13 +300,18 @@ impl MeiliSearchStore {
             }
         }
 
-        if self.task_fail_on_timeout {
-            Err(trc::StoreEvent::MeilisearchError
-                .reason("Timed out waiting for Meilisearch task")
-                .id(task_uid))
+        let err = trc::StoreEvent::MeilisearchError
+            .reason("Timed out waiting for Meilisearch task")
+            .id(task_uid);
+
+        Err(if self.task_fail_on_timeout {
+            err
         } else {
-            Ok(true)
-        }
+            err.ctx(
+                trc::Key::NextRetry,
+                now().saturating_add(UNCONFIRMED_TASK_RECHECK_DELAY),
+            )
+        })
     }
 }
 

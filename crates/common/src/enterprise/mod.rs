@@ -44,7 +44,7 @@ pub struct Enterprise {
     pub spam_filter_llm: Option<SpamFilterLlmConfig>,
     pub template_calendar_alarm: Option<Template<CalendarTemplateVariable>>,
     pub template_scheduling_email: Option<Template<CalendarTemplateVariable>>,
-    pub template_scheduling_web: Option<Template<CalendarTemplateVariable>>,
+    pub template_scheduling_web: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone)]

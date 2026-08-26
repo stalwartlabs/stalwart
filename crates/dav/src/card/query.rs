@@ -207,10 +207,9 @@ fn find_parameter<'x>(
 pub(crate) fn serialize_vcard_with_props(
     card: &ArchivedVCard,
     props: &[CardDavPropertyName],
-    version: Option<VCardVersion>,
+    version: VCardVersion,
 ) -> String {
     let mut vcard = String::with_capacity(128);
-    let version = version.or_else(|| card.version()).unwrap_or_default();
     if !props.is_empty() {
         let _ = write!(&mut vcard, "BEGIN:VCARD\r\n");
         let is_v4 = matches!(version, VCardVersion::V4_0);

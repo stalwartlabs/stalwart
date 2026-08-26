@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+pub mod discovery;
 pub mod integration;
 pub mod ldap;
 pub mod oidc;
@@ -15,6 +16,7 @@ pub mod synchronization;
 pub async fn directory_tests() {
     ldap::test().await;
     oidc::test().await;
+    discovery::test().await;
     #[cfg(feature = "sqlite")]
     sql::test().await;
     synchronization::test().await;

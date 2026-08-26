@@ -312,6 +312,7 @@ impl Server {
     }
 
     pub async fn rcpt_id_from_email(&self, address: &str) -> trc::Result<Option<EmailCache>> {
+        let address = address.to_canonical_address();
         if let Some((local_part, domain)) = address.split_once('@') {
             if let Some(domain) = self.domain(domain).await? {
                 self.rcpt_id_from_parts(local_part, domain.id).await
@@ -588,6 +589,7 @@ impl Server {
         address: &str,
         resolve: bool,
     ) -> trc::Result<Option<u32>> {
+        let address = address.to_canonical_address();
         if let Some((local_part, domain)) = address.split_once('@') {
             if let Some(domain) = self.domain(domain).await? {
                 let mut local_part = Cow::Borrowed(local_part);

@@ -36,7 +36,19 @@ pub async fn test() {
         ),
         concat!(
             "INSERT INTO accounts (name, secret, description, type) ",
+            "VALUES ('bob@example.org', 'bob secret', '', 'individual')"
+        ),
+        concat!(
+            "INSERT INTO accounts (name, secret, description, type) ",
+            "VALUES ('nobody@example.org', '', '', 'individual')"
+        ),
+        concat!(
+            "INSERT INTO accounts (name, secret, description, type) ",
             "VALUES ('sales@example.org', NULL, 'Sales Team', 'group')"
+        ),
+        concat!(
+            "INSERT INTO accounts (name, secret, description, type) ",
+            "VALUES ('support@example.org', NULL, '', 'group')"
         ),
         concat!(
             "INSERT INTO group_members (name, member_of) VALUES ",
@@ -109,6 +121,51 @@ pub async fn test() {
         })
         .await
         .is_err()
+    );
+
+    // Empty columns are treated as missing values
+    assert_eq!(
+        sql.authenticate(&Credentials::Basic {
+            username: "bob@example.org".to_string(),
+            secret: "bob secret".to_string(),
+            mfa_token: None,
+        })
+        .await
+        .unwrap(),
+        Account {
+            email: "bob@example.org".to_string(),
+            email_aliases: vec![],
+            secret: Some("bob secret".to_string()),
+            groups: Some(vec![]),
+            description: None,
+        }
+    );
+    assert!(
+        sql.authenticate(&Credentials::Basic {
+            username: "nobody@example.org".to_string(),
+            secret: "".to_string(),
+            mfa_token: None,
+        })
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        sql.recipient("nobody@example.org").await.unwrap(),
+        Recipient::Account(Account {
+            email: "nobody@example.org".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: Some(vec![]),
+            description: None,
+        })
+    );
+    assert_eq!(
+        sql.recipient("support@example.org").await.unwrap(),
+        Recipient::Group(Group {
+            email: "support@example.org".to_string(),
+            email_aliases: vec![],
+            description: None
+        })
     );
 
     // Test recipient lookup

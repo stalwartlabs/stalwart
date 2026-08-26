@@ -153,6 +153,14 @@ impl CardUpdateRequestHandler for Server {
                 Err(DavError::Code(StatusCode::PRECONDITION_FAILED))
                     if headers.ret == Return::Representation =>
                 {
+                    let mut vcard = String::with_capacity(128);
+                    let _ = card.inner.card.write_to(
+                        &mut vcard,
+                        headers
+                            .vcard_version
+                            .unwrap_or(self.core.groupware.vcard_version),
+                    );
+
                     return Ok(HttpResponse::new(StatusCode::PRECONDITION_FAILED)
                         .with_content_type("text/vcard; charset=utf-8")
                         .with_etag(card.etag())
@@ -160,7 +168,7 @@ impl CardUpdateRequestHandler for Server {
                             Rfc1123DateTime::new(i64::from(card.inner.modified)).to_string(),
                         )
                         .with_header("Preference-Applied", "return=representation")
-                        .with_binary_body(card.inner.card.to_string()));
+                        .with_binary_body(vcard));
                 }
                 Err(e) => return Err(e),
             }

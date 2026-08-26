@@ -30,6 +30,23 @@ fn into_error(err: impl Display) -> trc::Error {
     trc::StoreEvent::MysqlError.reason(err)
 }
 
+const ER_LOCK_WAIT_TIMEOUT: u16 = 1205;
+const ER_STATEMENT_TIMEOUT: u16 = 1969;
+const ER_QUERY_TIMEOUT: u16 = 3024;
+
+pub(crate) const DELETE_CHUNK_SIZE: usize = 1000;
+pub(crate) const MIN_DELETE_CHUNK_SIZE: usize = 10;
+
+#[inline(always)]
+pub(crate) fn is_timeout_error(err: &mysql_async::Error) -> bool {
+    matches!(err, mysql_async::Error::Server(err)
+        if matches!(
+            err.code,
+            ER_LOCK_WAIT_TIMEOUT | ER_STATEMENT_TIMEOUT | ER_QUERY_TIMEOUT
+        )
+    )
+}
+
 impl SearchIndex {
     pub fn mysql_table(&self) -> &'static str {
         match self {

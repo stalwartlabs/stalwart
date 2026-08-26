@@ -9,8 +9,9 @@ use crate::{
     outbound::DeliveryResult,
     queue::{
         Error, ErrorDetails, FROM_AUTHENTICATED, FROM_UNAUTHENTICATED_DMARC, HostResponse,
-        MessageSource, MessageWrapper, RCPT_SPAM_PAYLOAD, Status, UnexpectedResponse,
+        MessageSource, MessageWrapper, Status, UnexpectedResponse,
         quota::HasQueueQuota,
+        rcpt_spam_percentage,
         spool::{QueueParams, SmtpSpool},
     },
 };
@@ -35,7 +36,7 @@ impl MessageWrapper {
             recipients.push(IngestRecipient {
                 address: rcpt_addr.to_lowercase(),
                 orcpt: rcpt.orcpt.as_ref().map(|orcpt| orcpt.to_string()),
-                is_spam: rcpt.flags & RCPT_SPAM_PAYLOAD != 0,
+                spam_percentage: rcpt_spam_percentage(rcpt.flags),
             });
             pending_recipients.push((rcpt_idx, rcpt_addr));
         }

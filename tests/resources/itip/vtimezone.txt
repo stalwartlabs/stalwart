@@ -1,0 +1,264 @@
+# Events stored without a VTIMEZONE component, as created over JMAP
+
+# The REQUEST carries a generated definition for every referenced TZID
+> put a@example.com vtimezone-generated@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+ORGANIZER:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B:mailto:b@example.com
+DTSTAMP:20260801T190000Z
+DTSTART;TZID=Europe/Berlin:20261110T160000
+DTEND;TZID=Europe/Berlin:20261110T170000
+SUMMARY:Berlin meeting
+UID:vtimezone-generated@example.com
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: Some("B"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1794322800, tz_id: 433 })
+summary.summary: Text("Berlin meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Berlin meeting
+DTEND;TZID=Europe/Berlin:20261110T170000
+DTSTART;TZID=Europe/Berlin:20261110T160000
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=NEEDS-ACTION:mailto:b@ex
+ ample.com
+ORGANIZER:mailto:a@example.com
+UID:vtimezone-generated@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+BEGIN:STANDARD
+DTSTART:20251231T010000
+TZNAME:CET
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0100
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:20260329T020000
+TZNAME:CEST
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20261025T030000
+TZNAME:CET
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+END:STANDARD
+END:VTIMEZONE
+END:VCALENDAR
+
+> send
+
+# The REPLY sent by an attendee carries a definition of its own
+> put b@example.com vtimezone-generated@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+ORGANIZER:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=ACCEPTED:mailto:b@example.com
+DTSTAMP:20260801T190000Z
+DTSTART;TZID=Europe/Berlin:20261110T160000
+DTEND;TZID=Europe/Berlin:20261110T170000
+SUMMARY:Berlin meeting
+UID:vtimezone-generated@example.com
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: b@example.com
+to: a@example.com
+summary: rsvp ACCEPTED
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: Some("B"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1794322800, tz_id: 433 })
+summary.summary: Text("Berlin meeting")
+BEGIN:VCALENDAR
+METHOD:REPLY
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Berlin meeting
+DTEND;TZID=Europe/Berlin:20261110T170000
+DTSTART;TZID=Europe/Berlin:20261110T160000
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=ACCEPTED:mailto:b@exampl
+ e.com
+ORGANIZER:mailto:a@example.com
+UID:vtimezone-generated@example.com
+DTSTAMP:0
+SEQUENCE:1
+REQUEST-STATUS:2.0;Success
+END:VEVENT
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+BEGIN:STANDARD
+DTSTART:20251231T010000
+TZNAME:CET
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0100
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:20260329T020000
+TZNAME:CEST
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20261025T030000
+TZNAME:CET
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+END:STANDARD
+END:VTIMEZONE
+END:VCALENDAR
+
+> send
+
+# The CANCEL carries one too
+> delete a@example.com vtimezone-generated@example.com
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: cancel
+summary.dtstart: Time(ItipTime { start: 1794322800, tz_id: 433 })
+summary.summary: Text("Berlin meeting")
+BEGIN:VCALENDAR
+METHOD:CANCEL
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+STATUS:CANCELLED
+SUMMARY:Berlin meeting
+DTEND;TZID=Europe/Berlin:20261110T170000
+DTSTART;TZID=Europe/Berlin:20261110T160000
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=ACCEPTED;SCHEDULE-STATUS
+ =2.0:mailto:b@example.com
+ORGANIZER:mailto:a@example.com
+UID:vtimezone-generated@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+BEGIN:STANDARD
+DTSTART:20251231T010000
+TZNAME:CET
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0100
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:20260329T020000
+TZNAME:CEST
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20261025T030000
+TZNAME:CET
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+END:STANDARD
+END:VTIMEZONE
+END:VCALENDAR
+
+> send
+
+# A definition already present in the object is neither replaced nor duplicated
+> put a@example.com vtimezone-supplied@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+BEGIN:STANDARD
+DTSTART:19701025T030000
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+TZNAME:CET
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:19700329T020000
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+TZNAME:CEST
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+ORGANIZER:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B:mailto:b@example.com
+DTSTAMP:20260801T190000Z
+DTSTART;TZID=Europe/Berlin:20261110T160000
+DTEND;TZID=Europe/Berlin:20261110T170000
+SUMMARY:Berlin meeting
+UID:vtimezone-supplied@example.com
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: Some("B"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1794322800, tz_id: 433 })
+summary.summary: Text("Berlin meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Berlin meeting
+DTEND;TZID=Europe/Berlin:20261110T170000
+DTSTART;TZID=Europe/Berlin:20261110T160000
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=NEEDS-ACTION:mailto:b@ex
+ ample.com
+ORGANIZER:mailto:a@example.com
+UID:vtimezone-supplied@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+BEGIN:STANDARD
+DTSTART:19701025T030000
+TZNAME:CET
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:19700329T020000
+TZNAME:CEST
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3
+END:DAYLIGHT
+END:VTIMEZONE
+END:VCALENDAR
+
+> send
+

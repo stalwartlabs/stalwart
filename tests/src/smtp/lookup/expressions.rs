@@ -33,6 +33,10 @@ const TESTS: &[(&str, &str)] = &[
         "is_local_domain('foobar.org') + '-' + is_local_domain('unknown.org')  + '-' + is_local_address('john@foobar.org') + '-' + is_local_address('unknown@foobar.org')",
         "1-0-1-0",
     ),
+    (
+        "is_local_domain('FooBar.org') + '-' + is_local_address('John@FooBar.org') + '-' + is_local_address('JOHN@FOOBAR.ORG')",
+        "1-1-1",
+    ),
 ];
 
 #[tokio::test]

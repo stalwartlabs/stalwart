@@ -530,7 +530,7 @@ pub async fn test(test: &mut TestServer) {
                 recipients: vec![IngestRecipient {
                     address: "user@tenantx.org".to_string(),
                     orcpt: None,
-                    is_spam: false
+                    spam_percentage: None
                 }],
                 message_blob: message_blob.clone(),
                 message_size: TEST_MESSAGE.len() as u64,
@@ -567,7 +567,7 @@ pub async fn test(test: &mut TestServer) {
                 recipients: vec![IngestRecipient {
                     address: "user@tenantx.org".to_string(),
                     orcpt: None,
-                    is_spam: false
+                    spam_percentage: None
                 }],
                 message_blob,
                 message_size: TEST_MESSAGE.len() as u64,

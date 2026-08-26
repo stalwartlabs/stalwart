@@ -183,7 +183,7 @@ impl FormHandler for Server {
                         .map(|address| IngestRecipient {
                             address: address.clone(),
                             orcpt: None,
-                            is_spam: false,
+                            spam_percentage: None,
                         })
                         .collect(),
                     message_blob,

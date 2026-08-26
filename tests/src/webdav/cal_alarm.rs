@@ -79,6 +79,26 @@ pub async fn test(test: &TestServer) {
             )),
             "failed for {contents}"
         );
+
+        // The logo is an inline part, so the template must reference it by cid: URI
+        let html = message.html_bodies().next().unwrap().contents().to_vec();
+        let html = String::from_utf8(html).unwrap();
+        assert!(
+            html.contains("src=\"cid:logo."),
+            "alarm logo must be referenced as a cid: URI: {html}"
+        );
+
+        // A conference URI is rendered as a hyperlink
+        assert!(
+            html.contains("href=\"https://meet.example.com/west-side\""),
+            "alarm must link the conference URI: {html}"
+        );
+
+        if let Some(out_dir) = super::template_out_dir() {
+            let path = out_dir.join(format!("alarm_template_{idx}.html"));
+            std::fs::write(&path, &html).expect("Failed to write alarm template to file");
+            println!("Alarm template {idx} -> {}", path.display());
+        }
     }
 
     client.delete_default_containers().await;
@@ -95,6 +115,7 @@ DESCRIPTION:What mirror where?!
 DTSTART:$START
 DTEND;TZID=America/New_York:21250221T180000
 LOCATION:West Side
+CONFERENCE;VALUE=URI;FEATURE=VIDEO:https://meet.example.com/west-side
 BEGIN:VALARM
 TRIGGER:-P2S
 ACTION:EMAIL

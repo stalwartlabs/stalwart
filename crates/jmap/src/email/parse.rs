@@ -18,7 +18,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Map, Value};
 use mail_parser::{
-    HeaderName, MessageParser, PartType, decoders::html::html_to_text,
+    HeaderName, MessageParser, MimeHeaders, PartType, decoders::html::html_to_text,
     parsers::preview::preview_text,
 };
 use std::future::Future;
@@ -247,11 +247,15 @@ impl EmailParse for Server {
                         let mut body_values = Map::with_capacity(message.parts.len());
                         for (part_id, part) in message.parts.iter().enumerate() {
                             let part_id = part_id as u32;
-                            if ((message.html_body.contains(&part_id)
-                                && (fetch_all_body_values || fetch_html_body_values))
-                                || (message.text_body.contains(&part_id)
-                                    && (fetch_all_body_values || fetch_text_body_values)))
-                                && part.is_text()
+                            if part.is_text()
+                                && part
+                                    .content_type()
+                                    .is_none_or(|ct| ct.ctype().eq_ignore_ascii_case("text"))
+                                && (fetch_all_body_values
+                                    || (fetch_html_body_values
+                                        && message.html_body.contains(&part_id))
+                                    || (fetch_text_body_values
+                                        && message.text_body.contains(&part_id)))
                             {
                                 let (is_truncated, value) =
                                     part.body.truncate(max_body_value_bytes);

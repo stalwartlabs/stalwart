@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta name="color-scheme" content="light dark">
+    <title>Respond to invitation</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        :root {
+            color-scheme: light dark;
+            --bg: #f5f5f4;
+            --card: #fff;
+            --border: #e5e5e3;
+            --line: #ececea;
+            --text: #1a1a18;
+            --muted: #6b6b67;
+            --subtle: #f7f7f5;
+            --accent: #1a1a18;
+            --accent-fg: #fff;
+            --info: #185fa5;
+            --success: #0f7a3c;
+            --warning: #a15c07;
+            --danger: #a0192f;
+            --brand: #db2d54;
+            --radius: 10px;
+            --input-bg: #fafaf9;
+        }
+
+        @media(prefers-color-scheme:dark) {
+            :root {
+                --bg: #18181b;
+                --card: #1f1f23;
+                --border: #2e2e33;
+                --line: #2a2a2f;
+                --text: #f4f4f2;
+                --muted: #9b9b95;
+                --subtle: #26262b;
+                --accent: #f4f4f2;
+                --accent-fg: #18181b;
+                --info: #5faee3;
+                --success: #58c98a;
+                --warning: #e0a458;
+                --danger: #f4839a;
+                --input-bg: #2a2a2e;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: safe center;
+            justify-content: center;
+            padding: 1.5rem 1rem;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.5rem 1.5rem 1.75rem;
+            width: 100%;
+            max-width: 34rem;
+        }
+
+        @media (min-width: 40em) {
+            .card {
+                padding: 0.75rem 2.5rem 2rem;
+                max-width: 40rem;
+            }
+        }
+
+        @media (min-width: 64em) {
+            .card {
+                padding: 1rem 3rem 2.25rem;
+                max-width: 46rem;
+            }
+        }
+
+        .logo-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            min-height: 72px;
+            margin: 0.25rem auto 0.75rem;
+        }
+
+        .logo-wrap svg.default-logo {
+            display: block;
+            width: calc(100% + 1rem);
+            height: auto;
+            margin: -0.25rem auto 0.1rem;
+            max-width: 300px;
+        }
+
+        .logo-wrap[data-loading] .default-logo {
+            visibility: hidden;
+        }
+
+        .logo-wrap img.custom-logo {
+            display: block;
+            max-width: 200px;
+            max-height: 88px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+
+        .default-logo .wordmark {
+            fill: var(--text)
+        }
+
+        .default-logo .symbol {
+            fill: var(--brand)
+        }
+
+        .eyebrow {
+            font-size: .6875rem;
+            font-weight: 600;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: .375rem;
+        }
+
+        .eyebrow.cancelled {
+            color: var(--danger)
+        }
+
+        h1 {
+            font-size: 1.3125rem;
+            font-weight: 600;
+            letter-spacing: -.02em;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
+        }
+
+        .byline {
+            font-size: .8125rem;
+            color: var(--muted);
+            margin-top: .375rem;
+            overflow-wrap: anywhere;
+        }
+
+        .meta {
+            display: flex;
+            flex-direction: column;
+            gap: .625rem;
+            background: var(--subtle);
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: .875rem;
+            margin-top: 1.25rem;
+        }
+
+        .meta-row {
+            display: flex;
+            align-items: flex-start;
+            gap: .625rem;
+            font-size: .875rem;
+            line-height: 1.4;
+            min-width: 0;
+        }
+
+        .meta-row>div {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .meta-row svg {
+            flex-shrink: 0;
+            margin-top: 1px;
+            color: var(--muted);
+        }
+
+        .meta-row .tz {
+            color: var(--muted)
+        }
+
+        .meta-row a {
+            color: var(--info);
+            overflow-wrap: anywhere;
+        }
+
+        @media (min-width: 40em) {
+            .meta {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: .75rem 1.25rem;
+                padding: 1rem 1.125rem;
+            }
+        }
+
+        .section {
+            margin-top: 1.375rem
+        }
+
+        .section-title {
+            font-size: .6875rem;
+            font-weight: 600;
+            letter-spacing: .07em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: .5rem;
+        }
+
+        .desc {
+            font-size: .875rem;
+            line-height: 1.55;
+            color: var(--text);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .desc.clamped {
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .linkish {
+            display: inline-block;
+            margin-top: .375rem;
+            font-size: .8125rem;
+            font-weight: 500;
+            color: var(--info);
+            background: none;
+            border: none;
+            padding: 0;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .linkish:hover {
+            text-decoration: underline
+        }
+
+        .people {
+            display: flex;
+            flex-direction: column;
+            gap: .4375rem
+        }
+
+        .person {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            font-size: .8125rem;
+            line-height: 1.3;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: var(--muted);
+            opacity: .45;
+        }
+
+        .dot.accepted {
+            background: var(--success);
+            opacity: 1
+        }
+
+        .dot.declined {
+            background: var(--danger);
+            opacity: 1
+        }
+
+        .dot.tentative {
+            background: var(--warning);
+            opacity: 1
+        }
+
+        .person .who {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .person .tag {
+            font-size: .6875rem;
+            color: var(--muted);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: .0625rem .375rem;
+            flex-shrink: 0;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid var(--line);
+            margin: 1.5rem 0 1.25rem;
+        }
+
+        .reply-as {
+            font-size: .8125rem;
+            color: var(--muted);
+            margin-bottom: .625rem;
+            overflow-wrap: anywhere;
+        }
+
+        .reply-as strong {
+            color: var(--text);
+            font-weight: 600
+        }
+
+        .choices {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: .5rem;
+        }
+
+        .choice {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: .3125rem;
+            padding: .75rem .25rem;
+            font-family: inherit;
+            font-size: .8125rem;
+            font-weight: 500;
+            color: var(--text);
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            cursor: pointer;
+            transition: border-color .15s, background .15s, color .15s;
+        }
+
+        .choice svg {
+            color: var(--muted);
+            transition: color .15s
+        }
+
+        .choice:hover {
+            border-color: color-mix(in srgb, var(--text) 25%, transparent)
+        }
+
+        .choice[aria-checked=true] {
+            background: color-mix(in srgb, var(--info) 9%, transparent);
+            border-color: color-mix(in srgb, var(--info) 55%, transparent);
+            color: var(--info);
+        }
+
+        .choice[aria-checked=true] svg {
+            color: var(--info)
+        }
+
+        .choice[data-value=accepted][aria-checked=true] {
+            background: color-mix(in srgb, var(--success) 9%, transparent);
+            border-color: color-mix(in srgb, var(--success) 55%, transparent);
+            color: var(--success);
+        }
+
+        .choice[data-value=accepted][aria-checked=true] svg {
+            color: var(--success)
+        }
+
+        .choice[data-value=tentative][aria-checked=true] {
+            background: color-mix(in srgb, var(--warning) 10%, transparent);
+            border-color: color-mix(in srgb, var(--warning) 55%, transparent);
+            color: var(--warning);
+        }
+
+        .choice[data-value=tentative][aria-checked=true] svg {
+            color: var(--warning)
+        }
+
+        .choice[data-value=declined][aria-checked=true] {
+            background: color-mix(in srgb, var(--danger) 9%, transparent);
+            border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+            color: var(--danger);
+        }
+
+        .choice[data-value=declined][aria-checked=true] svg {
+            color: var(--danger)
+        }
+
+        .note-wrap {
+            margin-top: .875rem
+        }
+
+        .note-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: .75rem;
+            font-weight: 500;
+            color: var(--muted);
+            letter-spacing: .03em;
+            margin-bottom: .3125rem;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 72px;
+            resize: vertical;
+            padding: .5625rem .75rem;
+            font-size: .875rem;
+            font-family: inherit;
+            line-height: 1.45;
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            outline: none;
+            transition: border-color .15s;
+            -webkit-appearance: none;
+        }
+
+        textarea:focus {
+            border-color: color-mix(in srgb, var(--info) 60%, transparent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 12%, transparent);
+        }
+
+        textarea::placeholder {
+            color: var(--muted);
+            opacity: .7
+        }
+
+        .btn {
+            width: 100%;
+            margin-top: 1rem;
+            padding: .6875rem 0;
+            font-size: .9375rem;
+            font-weight: 500;
+            font-family: inherit;
+            background: var(--accent);
+            color: var(--accent-fg);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            letter-spacing: -.01em;
+            transition: opacity .15s;
+        }
+
+        .btn:hover {
+            opacity: .88
+        }
+
+        .btn:active {
+            opacity: .75;
+            transform: scale(.995)
+        }
+
+        .btn[disabled] {
+            opacity: .5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .alert {
+            display: flex;
+            align-items: flex-start;
+            gap: .625rem;
+            padding: .625rem .75rem;
+            background: color-mix(in srgb, var(--brand) 10%, transparent);
+            border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);
+            border-radius: 8px;
+            font-size: .8125rem;
+            line-height: 1.4;
+            color: var(--danger);
+            margin-top: .875rem;
+        }
+
+        .alert svg {
+            flex-shrink: 0;
+            margin-top: 1px
+        }
+
+        .outcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: .625rem;
+            padding: .25rem 0 0;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: color-mix(in srgb, var(--success) 14%, transparent);
+            color: var(--success);
+        }
+
+        .badge.tentative {
+            background: color-mix(in srgb, var(--warning) 14%, transparent);
+            color: var(--warning)
+        }
+
+        .badge.declined {
+            background: color-mix(in srgb, var(--danger) 14%, transparent);
+            color: var(--danger)
+        }
+
+        .badge.neutral {
+            background: color-mix(in srgb, var(--muted) 18%, transparent);
+            color: var(--muted)
+        }
+
+        .outcome h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: -.01em;
+        }
+
+        .outcome p {
+            font-size: .8125rem;
+            color: var(--muted);
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .skeleton {
+            display: flex;
+            flex-direction: column;
+            gap: .75rem;
+            padding: .5rem 0 1rem;
+        }
+
+        .sk {
+            height: 12px;
+            border-radius: 6px;
+            background: linear-gradient(90deg, var(--subtle) 25%, var(--line) 37%, var(--subtle) 63%);
+            background-size: 400% 100%;
+            animation: shimmer 1.4s ease infinite;
+        }
+
+        .sk.title {
+            height: 22px;
+            width: 70%
+        }
+
+        .sk.short {
+            width: 45%
+        }
+
+        .sk.box {
+            height: 84px;
+            border-radius: 9px
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 100% 50%
+            }
+
+            100% {
+                background-position: 0 50%
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .sk {
+                animation: none
+            }
+        }
+
+        [hidden] {
+            display: none !important
+        }
+
+        .noscript {
+            font-size: .875rem;
+            line-height: 1.55;
+            color: var(--text);
+            text-align: center;
+            padding: .5rem 0 1rem;
+        }
+
+        .noscript+#view-loading {
+            display: none
+        }
+    </style>
+</head>
+
+<body>
+    <main class="card">
+        <div class="logo-wrap" id="logo-wrap" data-loading>
+            <svg class="default-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680.5 252.1" aria-label="Logo">
+                <path class="wordmark"
+                    d="M227.8 143.6c.3 4.2 2.1 7.6 5.1 10.1 3.1 2.5 7.1 3.8 12.1 3.8 4.3 0 7.9-.9 10.5-2.8 2.7-1.9 4-4.5 4-7.8 0-2.4-.7-4.3-2.2-5.7-1.5-1.4-3.4-2.5-6-3.2-2.5-.7-6-1.5-10.6-2.3-4.6-.8-8.6-1.9-11.9-3.2-3.3-1.3-6-3.3-8.1-6.1-2.1-2.7-3.1-6.3-3.1-10.7 0-4.1 1.1-7.7 3.2-10.9s5.1-5.7 9-7.4c3.8-1.8 8.2-2.6 13.2-2.6 5.1 0 9.6 1 13.7 2.9 4 1.9 7.2 4.5 9.5 7.8s3.6 7.1 3.8 11.4h-11.5c-.4-3.7-2-6.6-4.8-8.9-2.8-2.2-6.3-3.4-10.6-3.4-4.1 0-7.5.9-9.9 2.7-2.5 1.8-3.7 4.3-3.7 7.6 0 2.3.7 4.1 2.2 5.5 1.5 1.4 3.4 2.4 5.9 3.1 2.4.7 5.9 1.4 10.5 2.2 4.6.8 8.6 1.9 11.9 3.3 3.3 1.4 6 3.4 8.2 6 2.1 2.6 3.2 6.1 3.2 10.5 0 4.2-1.1 8-3.4 11.3-2.2 3.3-5.4 5.9-9.4 7.8-4 1.9-8.6 2.8-13.7 2.8-5.6 0-10.6-1-14.9-3.1-4.3-2-7.6-4.9-10-8.5-2.4-3.6-3.7-7.8-3.7-12.5l11.5.3zM278.5 102.1l11-2.1v14.6h12.6v9.7h-12.6v27.2c0 2 .4 3.5 1.2 4.3.8.9 2.2 1.3 4.2 1.3h8.4v9.7h-10.6c-5 0-8.6-1.2-10.8-3.5-2.2-2.3-3.4-5.9-3.4-10.7v-50.5zM356.8 114.6v52.2h-9.7l-1.2-7.9c-1.8 2.6-4.2 4.7-7 6.2-2.9 1.6-6.2 2.3-10 2.3-4.8 0-9-1.1-12.7-3.2-3.7-2.1-6.7-5.2-8.8-9.3-2.1-4-3.2-8.8-3.2-14.2 0-5.3 1.1-10 3.2-14s5.1-7.2 8.8-9.4c3.7-2.2 7.9-3.3 12.6-3.3 3.9 0 7.2.7 10.1 2.2 2.9 1.5 5.2 3.5 6.9 6.1l1.3-7.6h9.7zm-15.1 38.7c2.8-3.2 4.2-7.3 4.2-12.4 0-5.2-1.4-9.4-4.2-12.6-2.8-3.3-6.5-4.9-11-4.9-4.6 0-8.2 1.6-11 4.8-2.8 3.2-4.2 7.4-4.2 12.5 0 5.2 1.4 9.4 4.2 12.6 2.8 3.2 6.5 4.8 11 4.8s8.2-1.6 11-4.8zM365.5 97.5l11-2.1v71.3h-11V97.5zM380.3 114.6h11.6l11.9 39.9 11.9-39.9h10.1l11.4 39.9 12.3-39.9h11.2l-17.3 52.2h-11.8l-11-35.5-11.4 35.5-11.9.1-17-52.3zM513.7 114.6v52.2H504l-1.2-7.9c-1.8 2.6-4.2 4.7-7 6.2-2.9 1.6-6.2 2.3-10 2.3-4.8 0-9-1.1-12.7-3.2-3.7-2.1-6.7-5.2-8.8-9.3-2.1-4-3.2-8.8-3.2-14.2 0-5.3 1.1-10 3.2-14s5.1-7.2 8.8-9.4c3.7-2.2 7.9-3.3 12.6-3.3 3.9 0 7.2.7 10.1 2.2 2.9 1.5 5.2 3.5 6.9 6.1l1.3-7.6h9.7zm-15.1 38.7c2.8-3.2 4.2-7.3 4.2-12.4 0-5.2-1.4-9.4-4.2-12.6-2.8-3.3-6.5-4.9-11-4.9-4.6 0-8.2 1.6-11 4.8-2.8 3.2-4.2 7.4-4.2 12.5 0 5.2 1.4 9.4 4.2 12.6 2.8 3.2 6.5 4.8 11 4.8 4.6 0 8.2-1.6 11-4.8zM551.3 114.6v10.3h-4.9c-4.6 0-7.8 1.5-9.9 4.4-2 3-3.1 6.7-3.1 11.3v26.2h-11v-52.2h9.8l1.2 7.8c1.5-2.4 3.4-4.4 5.8-5.8 2.4-1.4 5.6-2.1 9.6-2.1h2.5zM556.3 102.1l11-2.1v14.6h12.6v9.7h-12.6v27.2c0 2 .4 3.5 1.2 4.3.8.9 2.2 1.3 4.2 1.3h8.4v9.7h-10.6c-5 0-8.6-1.2-10.8-3.5s-3.4-5.9-3.4-10.7v-50.5z" />
+                <path class="symbol"
+                    d="M149.1 84.7h-4.8l-44.8 25.9v8.3l44.8 25.9h4.8l44.8-25.9v-8.3l-44.8-25.9zm32.9 30h-35.3V94.4l35.3 20.3zm-35.3 20.4-35.3-20.4 27-15.6v20.2l6.3 3.6h22.9l-20.9 12.2zM99.5 129.9v11l44.8 25.9h4.8l44.8-25.9v-11l-47.2 27.3zM187.3 166.8l6.6-3.8v-11l-25.7 14.8zM99.5 163l6.6 3.8h19.1L99.5 152z" />
+            </svg>
+        </div>
+
+        <noscript>
+            <p class="noscript">This page needs JavaScript to load the invitation. Enable it, or respond from your
+                calendar application instead.</p>
+        </noscript>
+
+        <div id="view-loading" class="skeleton" aria-live="polite">
+            <div class="sk short"></div>
+            <div class="sk title"></div>
+            <div class="sk box"></div>
+        </div>
+
+        <div id="view-error" class="outcome" hidden aria-live="polite">
+            <div class="badge neutral" id="error-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+            </div>
+            <h2 id="error-title" tabindex="-1">Something went wrong</h2>
+            <p id="error-detail"></p>
+        </div>
+
+        <div id="view-event" hidden>
+            <div class="eyebrow" id="kind">Invitation</div>
+            <h1 id="summary"></h1>
+            <div class="byline" id="byline" hidden></div>
+
+            <div class="meta" id="meta">
+                <div class="meta-row" id="row-when" hidden>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                    <div id="when"></div>
+                </div>
+                <div class="meta-row" id="row-repeat" hidden>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="17 1 21 5 17 9" />
+                        <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                        <polyline points="7 23 3 19 7 15" />
+                        <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                    </svg>
+                    <div id="repeat"></div>
+                </div>
+                <div class="meta-row" id="row-where" hidden>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                        <circle cx="12" cy="10" r="3" />
+                    </svg>
+                    <div id="where"></div>
+                </div>
+                <div class="meta-row" id="row-conference" hidden>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7" />
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                    </svg>
+                    <div><a id="conference" href="#" rel="noreferrer noopener" target="_blank"></a></div>
+                </div>
+            </div>
+
+            <div class="section" id="section-desc" hidden>
+                <div class="section-title" id="desc-title">Description</div>
+                <div class="desc clamped" id="desc"></div>
+                <button type="button" class="linkish" id="desc-toggle" aria-expanded="false"
+                    aria-controls="desc" hidden>Show more</button>
+            </div>
+
+            <div class="section" id="section-people" hidden>
+                <div class="section-title" id="people-title">Attendees</div>
+                <div class="people" id="people"></div>
+                <button type="button" class="linkish" id="people-toggle" aria-expanded="false"
+                    aria-controls="people" hidden></button>
+            </div>
+
+            <div id="respond">
+                <hr>
+                <div class="reply-as" id="reply-as"></div>
+                <div class="choices" id="choices" role="radiogroup" aria-labelledby="reply-as">
+                    <button type="button" class="choice" data-value="accepted" role="radio" aria-checked="false"
+                        tabindex="0">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        <span id="label-accepted">Yes</span>
+                    </button>
+                    <button type="button" class="choice" data-value="tentative" role="radio" aria-checked="false"
+                        tabindex="-1">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                            <circle cx="12" cy="12" r="10" />
+                        </svg>
+                        <span id="label-tentative">Maybe</span>
+                    </button>
+                    <button type="button" class="choice" data-value="declined" role="radio" aria-checked="false"
+                        tabindex="-1">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                        <span id="label-declined">No</span>
+                    </button>
+                </div>
+
+                <div class="note-wrap" id="note-wrap" hidden>
+                    <div class="note-label">
+                        <label for="note" id="note-label">Note to the organizer (optional)</label>
+                        <span id="note-count"></span>
+                    </div>
+                    <textarea id="note" maxlength="512" rows="3"
+                        placeholder="Running ten minutes late, start without me."></textarea>
+                </div>
+
+                <div class="alert" id="alert" hidden aria-live="polite">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span id="alert-msg"></span>
+                </div>
+
+                <button type="button" class="btn" id="send" disabled>Send response</button>
+            </div>
+
+            <div id="recorded" hidden aria-live="polite">
+                <hr>
+                <div class="outcome">
+                    <div class="badge" id="recorded-badge">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                    </div>
+                    <h2 id="recorded-title" tabindex="-1">Your response has been recorded</h2>
+                    <p id="recorded-detail"></p>
+                    <button type="button" class="linkish" id="change">Change my response</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var $ = function (id) { return document.getElementById(id); };
+            function setText(el, text) { if (el) el.textContent = text == null ? '' : String(text); }
+            function show(el) { if (el) el.hidden = false; }
+            function hide(el) { if (el) el.hidden = true; }
+
+            var FALLBACK = {
+                invitation: 'Invitation',
+                updatedInvitation: 'Updated invitation',
+                cancelled: 'Cancelled',
+                description: 'Description',
+                attendees: 'Attendees',
+                organizer: 'Organizer',
+                location: 'Location',
+                conference: 'Conference',
+                when: 'When',
+                you: 'you',
+                yes: 'Yes',
+                maybe: 'Maybe',
+                no: 'No',
+                replyAs: 'Reply as $name',
+                note: 'Note to the organizer (optional)',
+                noteHint: 'Add a short message for the organizer.',
+                send: 'Send response',
+                update: 'Update response',
+                change: 'Change my response',
+                recorded: 'Your RSVP has been recorded',
+                notified: 'The organizer has been notified.',
+                accepted: 'Accepted',
+                tentative: 'Tentative',
+                declined: 'Declined',
+                showMore: 'Show more',
+                showLess: 'Show less',
+                failed: 'RSVP failed',
+                invalidLink: 'This RSVP link is not valid.',
+                error: 'Temporary server failure. If the problem persists, contact your administrator.'
+            };
+
+            var PARTSTATS = ['accepted', 'tentative', 'declined'];
+            function isPartStat(value) {
+                return PARTSTATS.indexOf(value) !== -1;
+            }
+
+            var labels = FALLBACK;
+            function t(key, name) {
+                var value = (labels && labels[key]) || FALLBACK[key] || key;
+                if (name != null) value = value.replace('$name', name);
+                return value;
+            }
+
+            var url = new URL(window.location.href);
+            var token = url.searchParams.get('i') || '';
+            var preset = (url.searchParams.get('m') || '').toLowerCase();
+            var apiUrl = (function () {
+                var path = url.pathname.replace(/\/+$/, '');
+                var at = path.lastIndexOf('/calendar/rsvp');
+                return (at >= 0 ? path.slice(0, at) : '') + '/api/calendar/rsvp';
+            })();
+
+            function post(body) {
+                return fetch(apiUrl, {
+                    method: 'POST',
+                    credentials: 'omit',
+                    cache: 'no-store',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                }).then(function (res) {
+                    return res.json().catch(function () {
+                        return { type: 'error', reason: 'serverError' };
+                    });
+                });
+            }
+
+            var data = null;
+            var selected = '';
+            var peopleExpanded = false;
+            var inFlight = false;
+
+            function clearAlert() { hide($('alert')); }
+            function showAlert(msg) { setText($('alert-msg'), msg); show($('alert')); }
+
+            function fail(title, message) {
+                hide($('view-loading'));
+                hide($('view-event'));
+                title = title || t('failed');
+                document.title = title;
+                setText($('error-title'), title);
+                setText($('error-detail'), message || t('error'));
+                show($('view-error'));
+                $('error-title').focus();
+            }
+
+            function renderPeople() {
+                var list = (data.attendees || []);
+                var box = $('people');
+                while (box.firstChild) box.removeChild(box.firstChild);
+                if (!list.length) { hide($('section-people')); return; }
+
+                var limit = peopleExpanded ? list.length : Math.min(list.length, 5);
+                for (var i = 0; i < limit; i++) {
+                    var person = list[i];
+                    var row = document.createElement('div');
+                    row.className = 'person';
+
+                    var dot = document.createElement('span');
+                    dot.className = 'dot ' + String(person.partstat || '').toLowerCase();
+                    row.appendChild(dot);
+
+                    var who = document.createElement('span');
+                    who.className = 'who';
+                    setText(who, person.name || person.email);
+                    row.appendChild(who);
+
+                    if (person.isOrganizer) {
+                        var tagOrg = document.createElement('span');
+                        tagOrg.className = 'tag';
+                        setText(tagOrg, t('organizer'));
+                        row.appendChild(tagOrg);
+                    }
+                    if (data.attendee && person.email &&
+                        person.email.toLowerCase() === String(data.attendee.email || '').toLowerCase()) {
+                        var tagYou = document.createElement('span');
+                        tagYou.className = 'tag';
+                        setText(tagYou, t('you'));
+                        row.appendChild(tagYou);
+                    }
+                    box.appendChild(row);
+                }
+
+                var toggle = $('people-toggle');
+                if (list.length > 5) {
+                    setText(toggle, peopleExpanded ? t('showLess') : t('showMore'));
+                    show(toggle);
+                } else {
+                    hide(toggle);
+                }
+                show($('section-people'));
+            }
+
+            function select(value) {
+                if (inFlight || !isPartStat(value)) return;
+                selected = value;
+                var nodes = $('choices').querySelectorAll('.choice');
+                for (var i = 0; i < nodes.length; i++) {
+                    var checked = nodes[i].getAttribute('data-value') === value;
+                    nodes[i].setAttribute('aria-checked', checked ? 'true' : 'false');
+                    nodes[i].tabIndex = checked ? 0 : -1;
+                }
+                show($('note-wrap'));
+                $('send').disabled = !value;
+                clearAlert();
+            }
+
+            function renderRecorded(partstat) {
+                var badge = $('recorded-badge');
+                badge.className = 'badge' + (partstat === 'accepted' ? '' : ' ' + partstat);
+                setText($('recorded-title'), t('recorded'));
+                setText($('recorded-detail'), t(partstat) + '. ' + t('notified'));
+                setText($('change'), t('change'));
+                hide($('respond'));
+                show($('recorded'));
+                $('recorded-title').focus();
+            }
+
+            function renderEvent() {
+                labels = data.labels || FALLBACK;
+
+                var kind = data.kind || 'invitation';
+                var kindEl = $('kind');
+                setText(kindEl, kind === 'update' ? t('updatedInvitation')
+                    : kind === 'cancel' ? t('cancelled') : t('invitation'));
+                if (kind === 'cancel') kindEl.className = 'eyebrow cancelled';
+
+                setText($('summary'), data.summary || t('invitation'));
+                document.title = data.summary || t('invitation');
+
+                var organizer = findOrganizer(data);
+                if (organizer) {
+                    setText($('byline'), t('organizer') + ': '
+                        + (organizer.name || organizer.email));
+                    show($('byline'));
+                }
+
+                if (data.when) {
+                    setText($('when'), data.when);
+                    show($('row-when'));
+                }
+                if (data.recurrence) { setText($('repeat'), data.recurrence); show($('row-repeat')); }
+                if (data.location) { setText($('where'), data.location); show($('row-where')); }
+                if (data.conference) {
+                    var link = $('conference');
+                    setText(link, data.conference.value);
+                    if (data.conference.url) {
+                        link.href = data.conference.url;
+                    } else {
+                        link.removeAttribute('href');
+                    }
+                    show($('row-conference'));
+                }
+                if (!data.when && !data.recurrence && !data.location && !data.conference) {
+                    hide($('meta'));
+                }
+
+                if (data.description) {
+                    setText($('desc-title'), t('description'));
+                    setText($('desc'), data.description);
+                    show($('section-desc'));
+                }
+
+                setText($('people-title'), t('attendees'));
+                renderPeople();
+
+                setText($('label-accepted'), t('yes'));
+                setText($('label-tentative'), t('maybe'));
+                setText($('label-declined'), t('no'));
+                setText($('note-label'), t('note'));
+                $('note').placeholder = t('noteHint');
+                updateCount();
+
+                var me = data.attendee || {};
+                setText($('reply-as'), t('replyAs', me.name ? me.name + ' (' + me.email + ')' : me.email));
+
+                var current = String(data.partstat || '').toLowerCase();
+                var known = isPartStat(current);
+                setText($('send'), known ? t('update') : t('send'));
+
+                hide($('view-loading'));
+                show($('view-event'));
+
+                if (data.description) {
+                    var desc = $('desc');
+                    if (desc.scrollHeight - desc.clientHeight > 4) {
+                        setText($('desc-toggle'), t('showMore'));
+                        show($('desc-toggle'));
+                    }
+                }
+
+                if (kind === 'cancel') {
+                    hide($('respond'));
+                    return;
+                }
+
+                if (isPartStat(preset)) {
+                    select(preset);
+                } else if (known) {
+                    select(current);
+                }
+            }
+
+            function updateCount() {
+                var used = $('note').value.length;
+                setText($('note-count'), used ? used + ' / 512' : '');
+            }
+
+            function send() {
+                if (inFlight || !isPartStat(selected)) return;
+                var btn = $('send');
+                inFlight = true;
+                btn.disabled = true;
+                clearAlert();
+
+                post({
+                    token: token,
+                    partstat: selected,
+                    comment: $('note').value.trim()
+                }).then(function (resp) {
+                    if (resp && resp.type === 'recorded') {
+                        data.partstat = resp.partstat || selected;
+                        renderRecorded(String(data.partstat).toLowerCase());
+                        return;
+                    }
+                    inFlight = false;
+                    btn.disabled = false;
+                    showAlert((resp && resp.message) || t('error'));
+                }).catch(function () {
+                    inFlight = false;
+                    btn.disabled = false;
+                    showAlert(t('error'));
+                });
+            }
+
+            function loadCustomLogo(domain) {
+                var wrap = $('logo-wrap');
+                function showDefault() { wrap.removeAttribute('data-loading'); }
+                var target = apiUrl.replace(/\/api\/calendar\/rsvp$/, '') + '/logo';
+                if (domain) target += '?domain=' + encodeURIComponent(domain);
+                fetch(target, { method: 'GET', credentials: 'omit' })
+                    .then(function (res) {
+                        if (!res.ok) return null;
+                        var ct = (res.headers.get('content-type') || '').toLowerCase();
+                        if (ct.indexOf('image/') !== 0) return null;
+                        return res.blob();
+                    })
+                    .then(function (blob) {
+                        if (!blob) { showDefault(); return; }
+                        var objectUrl = URL.createObjectURL(blob);
+                        var img = new Image();
+                        img.className = 'custom-logo';
+                        img.alt = 'Logo';
+                        img.onload = function () {
+                            while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
+                            wrap.appendChild(img);
+                            wrap.removeAttribute('data-loading');
+                        };
+                        img.onerror = function () { URL.revokeObjectURL(objectUrl); showDefault(); };
+                        img.src = objectUrl;
+                    })
+                    .catch(function () { showDefault(); });
+            }
+
+            function findOrganizer(resp) {
+                var list = (resp && resp.attendees) || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i].isOrganizer) return list[i];
+                }
+                return null;
+            }
+
+            function organizerDomain(resp) {
+                var organizer = findOrganizer(resp);
+                var email = organizer && organizer.email;
+                var at = email ? String(email).lastIndexOf('@') : -1;
+                return at !== -1 ? String(email).slice(at + 1).toLowerCase() : '';
+            }
+
+            $('choices').addEventListener('click', function (ev) {
+                var btn = ev.target.closest ? ev.target.closest('.choice') : null;
+                if (btn) select(btn.getAttribute('data-value'));
+            });
+            $('choices').addEventListener('keydown', function (ev) {
+                var step = ev.key === 'ArrowRight' || ev.key === 'ArrowDown' ? 1
+                    : ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 0;
+                if (!step) return;
+                ev.preventDefault();
+                var at = PARTSTATS.indexOf(selected);
+                var next = PARTSTATS[(at + step + PARTSTATS.length) % PARTSTATS.length];
+                select(next);
+                var node = $('choices').querySelector('.choice[data-value="' + next + '"]');
+                if (node) node.focus();
+            });
+            $('send').addEventListener('click', send);
+            $('note').addEventListener('input', updateCount);
+            $('desc-toggle').addEventListener('click', function () {
+                var clamped = $('desc').classList.toggle('clamped');
+                setText($('desc-toggle'), clamped ? t('showMore') : t('showLess'));
+                $('desc-toggle').setAttribute('aria-expanded', clamped ? 'false' : 'true');
+            });
+            $('people-toggle').addEventListener('click', function () {
+                peopleExpanded = !peopleExpanded;
+                $('people-toggle').setAttribute('aria-expanded', peopleExpanded ? 'true' : 'false');
+                renderPeople();
+            });
+            $('change').addEventListener('click', function () {
+                inFlight = false;
+                hide($('recorded'));
+                show($('respond'));
+                $('send').disabled = !selected;
+                setText($('send'), t('update'));
+            });
+
+            if (!token) { loadCustomLogo(''); fail(null, FALLBACK.invalidLink); return; }
+
+            post({ token: token }).then(function (resp) {
+                loadCustomLogo(organizerDomain(resp));
+                if (resp && resp.labels) labels = resp.labels;
+                if (!resp || resp.type !== 'invitation') {
+                    fail(resp && resp.title, resp && resp.message);
+                    return;
+                }
+                data = resp;
+                renderEvent();
+            }).catch(function () {
+                loadCustomLogo('');
+                fail();
+            });
+        })();
+    </script>
+</body>
+
+</html>

@@ -20,6 +20,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(180);
 static FOUNDATIONDB: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static POSTGRES: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static MYSQL: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
+static MARIADB: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static REDIS: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static NATS: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static MINIO: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
@@ -146,6 +147,25 @@ pub async fn ensure_mysql() {
         })
         .await;
     wait_for_tcp(3307).await;
+}
+
+pub async fn ensure_mariadb() {
+    MARIADB
+        .get_or_init(|| async {
+            GenericImage::new("mariadb", "11.4")
+                .with_wait_for(WaitFor::message_on_stderr("port: 3306  mariadb.org"))
+                .with_env_var("MARIADB_ROOT_PASSWORD", "password")
+                .with_env_var("MARIADB_DATABASE", "stalwart")
+                .with_mapped_port(3308, 3306.tcp())
+                .with_startup_timeout(READY_TIMEOUT)
+                .with_container_name("stalwart-test-mariadb")
+                .with_reuse(ReuseDirective::Always)
+                .start()
+                .await
+                .expect("Failed to start MariaDB container")
+        })
+        .await;
+    wait_for_tcp(3308).await;
 }
 
 pub async fn ensure_redis() {

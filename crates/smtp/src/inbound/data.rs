@@ -9,15 +9,15 @@ use crate::{
     core::{Session, SessionAddress, State},
     inbound::{dkim::DkimSign, milter::Modification},
     queue::{
-        self, Message, MessageSource, MessageWrapper, QueueEnvelope, RCPT_SPAM_PAYLOAD,
-        quota::HasQueueQuota, spool::QueueParams,
+        self, Message, MessageSource, MessageWrapper, QueueEnvelope, RCPT_SPAM_MASK,
+        quota::HasQueueQuota, rcpt_spam_flag, spool::QueueParams,
     },
     reporting::analysis::AnalyzeReport,
     scripts::ScriptResult,
 };
 use common::{
     config::{
-        mailstore::spamfilter::SpamFilterAction,
+        mailstore::spamfilter::{SpamFilterAction, spam_status},
         smtp::{
             auth::VerifyStrategy,
             queue::{QueueExpiry, QueueName},
@@ -42,7 +42,7 @@ use mail_auth::{
 use mail_builder::headers::{date::Date, message_id::generate_message_id_header};
 use mail_parser::{MessageParser, MimeHeaders, parsers::fields::thread::thread_name};
 use registry::schema::structs::Rate;
-use sieve::{SpamStatus, runtime::Variable};
+use sieve::runtime::Variable;
 use smtp_proto::{
     MAIL_BY_RETURN, RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS,
 };
@@ -530,7 +530,7 @@ impl<T: SessionStream> Session<T> {
 
         // Run SPAM filter
         let mut train_spam = None;
-        let mut spam_status = None;
+        let mut spam_result = None;
         if self.server.core.spam.enabled
             && self
                 .server
@@ -557,19 +557,15 @@ impl<T: SessionStream> Session<T> {
                             thread_name(parsed_message.subject().unwrap_or_default()).to_string(),
                         )
                     });
-                    spam_status = Some(if score.is_spam {
-                        SpamStatus::Spam
-                    } else {
-                        SpamStatus::Ham
-                    });
+                    let scores = &self.server.core.spam.scores;
+                    spam_result = Some((score.score, scores.spam_percentage(score.score)));
 
                     // Add scores for local recipients
-                    for (is_spam, recipient) in
+                    for (user_score, recipient) in
                         score.results.into_iter().zip(self.data.rcpt_to.iter_mut())
                     {
-                        if is_spam {
-                            recipient.flags |= RCPT_SPAM_PAYLOAD;
-                        }
+                        recipient.flags = (recipient.flags & !RCPT_SPAM_MASK)
+                            | rcpt_spam_flag(scores.spam_percentage(user_score));
                     }
                 }
                 SpamFilterAction::Discard => {
@@ -653,8 +649,11 @@ impl<T: SessionStream> Session<T> {
             let mut params = self
                 .build_script_parameters("data")
                 .with_auth_headers(&headers);
-            if let Some(spam_status) = spam_status {
-                params = params.with_spam_status(spam_status);
+            if let Some((score, percentage)) = spam_result {
+                params = params
+                    .with_spam_status(spam_status(Some(percentage)))
+                    .set_variable("spam.score", score as f64)
+                    .set_variable("spam.is_spam", self.server.core.spam.scores.is_spam(score));
             }
             let params = params
                 .set_variable(

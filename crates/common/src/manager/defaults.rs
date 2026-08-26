@@ -69,6 +69,7 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                     #[cfg(feature = "dev_mode")]
                     resource_url: "file:///Users/me/code/webui/.ignore/webui.zip".into(),
                     unpack_directory: None,
+                    oauth_client_id: None,
                     url_prefix: Map::new(vec!["/admin".into(), "/account".into()]),
                 }
                 .into(),

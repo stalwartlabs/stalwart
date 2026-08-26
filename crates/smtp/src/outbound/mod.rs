@@ -308,6 +308,14 @@ impl NextHop<'_> {
     }
 
     #[inline(always)]
+    fn allow_loopback(&self) -> bool {
+        match self {
+            NextHop::MX { .. } => cfg!(feature = "test_mode"),
+            NextHop::Relay(_) => true,
+        }
+    }
+
+    #[inline(always)]
     fn credentials(&self) -> Option<&Credentials> {
         match self {
             NextHop::MX { .. } => None,

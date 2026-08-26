@@ -250,6 +250,7 @@ impl OpenIdDirectory {
                 .as_ref()
                 .and_then(|name_claim| claims.get(name_claim))
                 .and_then(|v| v.as_str())
+                .filter(|name| !name.is_empty())
                 .map(|s| s.to_string()),
         })
     }

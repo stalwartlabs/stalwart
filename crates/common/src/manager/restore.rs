@@ -15,7 +15,10 @@ use std::{
 };
 use store::{
     BlobStore, IterateParams, Shape, Store, Subspace, U32_LEN,
-    write::{AnyClass, AnyKey, BatchBuilder, ValueClass, key::DeserializeBigEndian},
+    write::{
+        AnyClass, AnyKey, BatchBuilder, ValueClass,
+        key::{DeserializeBigEndian, is_node_id_key},
+    },
 };
 use types::{collection::Collection, field::Field};
 use utils::{UnwrapFailure, failed};
@@ -23,26 +26,52 @@ use utils::{UnwrapFailure, failed};
 impl Core {
     pub async fn restore(&self, src: PathBuf) {
         // Backup the core
-        if src.is_dir() {
-            // Iterate directory and spawn a task for each file
-            let mut tasks = Vec::new();
+        let paths = if src.is_dir() {
+            let mut paths = Vec::new();
             for entry in std::fs::read_dir(&src).failed("Failed to read directory") {
                 let entry = entry.failed("Failed to read entry");
                 let path = entry.path();
                 if path.is_file() {
-                    let storage = self.storage.clone();
-                    let blob_store = self.storage.blob.clone();
-                    tasks.push(tokio::spawn(async move {
-                        restore_file(storage.data, blob_store, &path).await;
-                    }));
+                    paths.push(path);
                 }
             }
-
-            for task in tasks {
-                task.await.failed("Failed to wait for task");
-            }
+            paths
         } else {
-            restore_file(self.storage.data.clone(), self.storage.blob.clone(), &src).await;
+            vec![src]
+        };
+
+        let mut conflicts = Vec::new();
+        for path in &paths {
+            let subspace = KeyValueReader::new(path).subspace;
+            if subspace_has_data(&self.storage.data, subspace).await {
+                conflicts.push(path.clone());
+            }
+        }
+
+        if !conflicts.is_empty() {
+            eprintln!(
+                "Cannot import: the target database already contains data in the key ranges being \
+                 imported. This usually means Stalwart was started before the import ran, which \
+                 can create duplicate entries. Import into a fresh, empty database and do not \
+                 start Stalwart before importing. Conflicting dumps:"
+            );
+            for path in conflicts {
+                eprintln!("  {}", path.display());
+            }
+            std::process::exit(1);
+        }
+
+        let mut tasks = Vec::new();
+        for path in paths {
+            let storage = self.storage.clone();
+            let blob_store = self.storage.blob.clone();
+            tasks.push(tokio::spawn(async move {
+                restore_file(storage.data, blob_store, &path).await;
+            }));
+        }
+
+        for task in tasks {
+            task.await.failed("Failed to wait for task");
         }
     }
 }
@@ -62,9 +91,13 @@ async fn subspace_has_data(store: &Store, subspace: Subspace) -> bool {
                 },
             )
             .no_values(),
-            |_, _| {
-                has_data = true;
-                Ok(false)
+            |key, _| {
+                if subspace == Subspace::System && is_node_id_key(key) {
+                    Ok(true)
+                } else {
+                    has_data = true;
+                    Ok(false)
+                }
             },
         )
         .await
@@ -76,18 +109,6 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
     println!("Importing database dump from {}.", path.to_str().unwrap());
 
     let mut reader = KeyValueReader::new(path);
-
-    if subspace_has_data(&store, reader.subspace).await {
-        eprintln!(
-            "Cannot import {}: the target database already contains data in the key range being \
-             imported. This usually means Stalwart was started before the import ran, which can \
-             create duplicate entries. Import into a fresh, empty database and do not start \
-             Stalwart before importing.",
-            path.display()
-        );
-        std::process::exit(1);
-    }
-
     let mut batch = BatchBuilder::new();
 
     match reader.subspace {

@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.16.19"
+version = "0.16.20"
 edition = "2024"
 build = "build.rs"
 

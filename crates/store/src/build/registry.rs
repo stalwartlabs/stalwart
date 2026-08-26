@@ -27,7 +27,7 @@ const STALE_NODE_TIMEOUT: u64 = 60 * 60; // 1 hour
 const DEAD_NODE_TIMEOUT: u64 = 60 * 60 * 24; // 24 hours
 
 impl RegistryStore {
-    pub async fn init(local: PathBuf) -> Result<Self, String> {
+    pub async fn init(local: PathBuf, acquire_node_id: bool) -> Result<Self, String> {
         // Create inner store
         let mut inner = RegistryStoreInner::new(local);
 
@@ -68,20 +68,27 @@ impl RegistryStore {
             }
         };
 
-        Self::from_inner(inner).await
+        Self::from_inner(inner, acquire_node_id).await
     }
 
     pub fn from_inner_bootstrapped(inner: RegistryStoreInner) -> Self {
         Self(inner.into())
     }
 
-    pub async fn from_inner(mut inner: RegistryStoreInner) -> Result<Self, String> {
+    pub async fn from_inner(
+        mut inner: RegistryStoreInner,
+        acquire_node_id: bool,
+    ) -> Result<Self, String> {
         // Create tables (SQL only)
         inner
             .store
             .create_tables()
             .await
             .map_err(|err| format!("Failed to create tables: {err}"))?;
+
+        if !acquire_node_id {
+            return Ok(Self(inner.into()));
+        }
 
         // Obtain node id
         let mut retry_count = 0;
@@ -319,18 +326,21 @@ impl RegistryStore {
         push_shard_id: u32,
         cluster_role: Option<String>,
     ) -> Self {
-        Self::from_inner(RegistryStoreInner {
-            local_path: PathBuf::from(path),
-            store,
-            node_id: 0,
-            env_recovery_mode: false,
-            env_recovery_admin: Some(("admin".to_string(), "popolna_zapora".to_string())),
-            env_cluster_role: cluster_role,
-            env_push_shard_id: push_shard_id,
-            env_hostname: hostname,
-            env_public_url: None,
-            id_generator: utils::snowflake::SnowflakeIdGenerator::new(),
-        })
+        Self::from_inner(
+            RegistryStoreInner {
+                local_path: PathBuf::from(path),
+                store,
+                node_id: 0,
+                env_recovery_mode: false,
+                env_recovery_admin: Some(("admin".to_string(), "popolna_zapora".to_string())),
+                env_cluster_role: cluster_role,
+                env_push_shard_id: push_shard_id,
+                env_hostname: hostname,
+                env_public_url: None,
+                id_generator: utils::snowflake::SnowflakeIdGenerator::new(),
+            },
+            true,
+        )
         .await
         .unwrap()
     }

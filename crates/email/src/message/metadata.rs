@@ -781,6 +781,15 @@ impl ArchivedMessageMetadataPart {
             .and_then(|header| header.as_content_type())
     }
 
+    pub fn is_text_mime_type(&self) -> bool {
+        matches!(
+            self.body,
+            ArchivedMetadataPartType::Text | ArchivedMetadataPartType::Html
+        ) && self
+            .content_type()
+            .is_none_or(|ct| ct.ctype().eq_ignore_ascii_case("text"))
+    }
+
     pub fn content_language(&self) -> &ArchivedMetadataHeaderValue {
         self.header_value(&MetadataHeaderName::ContentLanguage)
             .unwrap_or(&ArchivedMetadataHeaderValue::Empty)

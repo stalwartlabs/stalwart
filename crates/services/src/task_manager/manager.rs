@@ -528,7 +528,7 @@ async fn update_tasks(
                     TaskFailureType::Retry(retry_at) => (attempt_number
                         < max_attempts.unwrap_or(server.core.network.task_manager.max_attempts)
                         && retry_at
-                            < retry_at.saturating_add(
+                            <= (retry_since.timestamp() as u64).saturating_add(
                                 server.core.network.task_manager.total_deadline.as_secs(),
                             ))
                     .then_some(retry_at)
@@ -541,6 +541,9 @@ async fn update_tasks(
                         now(),
                     )
                     .or_else(|| perpetual_retry_time(task.info.typ, attempt_number)),
+                    TaskFailureType::Perpetual => {
+                        perpetual_retry_time(task.info.typ, attempt_number)
+                    }
                     TaskFailureType::Permanent => None,
                 };
 
@@ -668,7 +671,9 @@ impl TaskResult {
             self,
             TaskResult::Update(_)
                 | TaskResult::Failure {
-                    typ: TaskFailureType::Temporary | TaskFailureType::Retry(_),
+                    typ: TaskFailureType::Temporary
+                        | TaskFailureType::Retry(_)
+                        | TaskFailureType::Perpetual,
                     ..
                 }
         )

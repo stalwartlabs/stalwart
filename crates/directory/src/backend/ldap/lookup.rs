@@ -249,18 +249,18 @@ impl LdapMappings {
                     account.email_aliases.extend(values);
                 }
             } else if self.attr_secret.contains(&attr) {
-                account.secret = value.into_iter().next();
+                account.secret = value.into_iter().find(|secret| !secret.is_empty());
             } else if self.attr_secret_changed.contains(&attr) {
                 // Create a disabled AppPassword, used to indicate that the password has been changed
                 // but cannot be used for authentication.
                 if account.secret.is_none() {
-                    account.secret = value.into_iter().next().map(|item| {
+                    account.secret = value.into_iter().find(|item| !item.is_empty()).map(|item| {
                         format!("$app${}$", xxhash_rust::xxh3::xxh3_64(item.as_bytes()))
                     });
                 }
             } else if let Some(idx) = self.attr_description.iter().position(|a| a == &attr) {
                 if (account.description.is_none() || idx == 0)
-                    && let Some(desc) = value.into_iter().next()
+                    && let Some(desc) = value.into_iter().find(|desc| !desc.is_empty())
                 {
                     account.description = Some(desc);
                 }

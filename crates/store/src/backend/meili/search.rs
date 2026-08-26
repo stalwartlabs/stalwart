@@ -5,13 +5,18 @@
  */
 
 use crate::{
-    backend::meili::{MeiliSearchResponse, MeiliSearchStore, main::assert_success},
+    backend::meili::{
+        MeiliDocumentsResponse, MeiliSearchResponse, MeiliSearchStore,
+        main::{MAX_TOTAL_HITS, assert_success},
+    },
     search::*,
     write::SearchIndex,
 };
 use ahash::AHashSet;
 use serde_json::{Map, Value, json};
 use std::{cmp::Ordering, fmt::Write};
+
+const MAX_SEARCH_RESULTS: usize = 10_000;
 
 impl MeiliSearchStore {
     pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
@@ -73,9 +78,12 @@ impl MeiliSearchStore {
     ) -> trc::Result<R> {
         let filter_group = build_query(filters);
 
+        if filter_group.q.is_empty() {
+            return self.fetch_documents(index, &filter_group.filter).await;
+        }
+
         let mut body = Map::new();
-        body.insert("limit".to_string(), Value::from(10_000));
-        body.insert("offset".to_string(), Value::from(0));
+        body.insert("limit".to_string(), Value::from(MAX_SEARCH_RESULTS));
         body.insert(
             "attributesToRetrieve".to_string(),
             Value::Array(vec![Value::String("id".to_string())]),
@@ -106,33 +114,121 @@ impl MeiliSearchStore {
             }
         }
 
-        let resp = assert_success(
-            self.client
-                .post(format!(
-                    "{}/indexes/{}/search",
-                    self.url,
-                    index.index_name()
-                ))
-                .body(Value::Object(body).to_string())
-                .send()
-                .await,
-        )
-        .await?;
+        let url = format!("{}/indexes/{}/search", self.url, index.index_name());
+        let mut results = R::default();
+        let mut offset = 0;
 
-        let text = resp
-            .text()
-            .await
-            .map_err(|err| trc::StoreEvent::MeilisearchError.reason(err))?;
+        loop {
+            body.insert("offset".to_string(), Value::from(offset));
 
-        serde_json::from_str::<MeiliSearchResponse>(&text)
-            .map(|results| {
-                let mut documents = R::default();
-                for hit in results.hits {
-                    documents.insert(hit.id);
-                }
-                documents
-            })
-            .map_err(|err| trc::StoreEvent::MeilisearchError.reason(err).details(text))
+            let resp = assert_success(
+                self.client
+                    .post(&url)
+                    .body(Value::Object(body.clone()).to_string())
+                    .send()
+                    .await,
+            )
+            .await?;
+
+            let text = resp
+                .text()
+                .await
+                .map_err(|err| trc::StoreEvent::MeilisearchError.reason(err))?;
+
+            let hits = serde_json::from_str::<MeiliSearchResponse>(&text)
+                .map_err(|err| {
+                    trc::StoreEvent::MeilisearchError
+                        .reason(err)
+                        .details(text.clone())
+                })?
+                .hits;
+
+            let total = hits.len();
+            for hit in hits {
+                results.insert(hit.id);
+            }
+
+            if total < MAX_SEARCH_RESULTS {
+                break;
+            }
+
+            offset += total;
+
+            if offset >= MAX_TOTAL_HITS as usize {
+                trc::event!(
+                    Store(trc::StoreEvent::MeilisearchError),
+                    Reason = "Search results were truncated",
+                    Collection = index.index_name(),
+                    Total = offset,
+                );
+                break;
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn fetch_documents<R: SearchResults>(
+        &self,
+        index: SearchIndex,
+        filter: &str,
+    ) -> trc::Result<R> {
+        let url = format!(
+            "{}/indexes/{}/documents/fetch",
+            self.url,
+            index.index_name()
+        );
+        let mut results = R::default();
+        let mut offset = 0;
+
+        loop {
+            let mut body = Map::new();
+            body.insert("limit".to_string(), Value::from(MAX_SEARCH_RESULTS));
+            body.insert("offset".to_string(), Value::from(offset));
+            body.insert(
+                "fields".to_string(),
+                Value::Array(vec![Value::String("id".to_string())]),
+            );
+
+            if !filter.is_empty() {
+                body.insert("filter".to_string(), Value::String(filter.to_string()));
+            }
+
+            let resp = assert_success(
+                self.client
+                    .post(&url)
+                    .body(Value::Object(body).to_string())
+                    .send()
+                    .await,
+            )
+            .await?;
+
+            let text = resp
+                .text()
+                .await
+                .map_err(|err| trc::StoreEvent::MeilisearchError.reason(err))?;
+
+            let documents = serde_json::from_str::<MeiliDocumentsResponse>(&text)
+                .map_err(|err| {
+                    trc::StoreEvent::MeilisearchError
+                        .reason(err)
+                        .details(text.clone())
+                })?
+                .results;
+
+            let total = documents.len();
+            for document in documents {
+                results.insert(document.id);
+            }
+
+            if total < MAX_SEARCH_RESULTS {
+                break;
+            }
+
+            offset += total;
+        }
+
+        Ok(results)
     }
 
     pub async fn unindex(&self, filter: SearchQuery) -> trc::Result<u64> {

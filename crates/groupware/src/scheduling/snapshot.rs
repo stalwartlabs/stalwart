@@ -298,6 +298,7 @@ pub fn itip_snapshot<'x, 'y>(
                     | ICalendarProperty::Exdate
                     | ICalendarProperty::Status
                     | ICalendarProperty::Location
+                    | ICalendarProperty::Conference
                     | ICalendarProperty::Summary
                     | ICalendarProperty::Description
                     | ICalendarProperty::Priority
@@ -418,6 +419,7 @@ impl ItipSnapshot<'_> {
                     | ICalendarProperty::Description
                     | ICalendarProperty::Dtstart
                     | ICalendarProperty::Location
+                    | ICalendarProperty::Conference
                     | ICalendarProperty::Rrule
             ) {
                 let value = match &entry.value {

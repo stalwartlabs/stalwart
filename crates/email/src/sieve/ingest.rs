@@ -14,10 +14,13 @@ use crate::{
     },
     sieve::VacationResponse,
 };
-use common::{Server, auth::AccessToken, scripts::plugins::PluginContext};
+use common::{
+    Server, auth::AccessToken, config::mailstore::spamfilter::spam_status,
+    scripts::plugins::PluginContext,
+};
 use mail_builder::headers::date::Date;
 use mail_parser::{HeaderName, MessageParser};
-use sieve::{Envelope, Event, Input, Mailbox, Recipient, Sieve, SpamStatus};
+use sieve::{Envelope, Event, Input, Mailbox, Recipient, Sieve};
 use std::{borrow::Cow, sync::Arc};
 use std::{future::Future, str::FromStr};
 use store::{
@@ -147,11 +150,7 @@ impl SieveScriptIngest for Server {
         if let Some(orcpt) = &envelope_to.orcpt {
             instance.set_envelope(Envelope::Orcpt, orcpt.as_str());
         }
-        instance.set_spam_status(if envelope_to.is_spam {
-            SpamStatus::Spam
-        } else {
-            SpamStatus::Ham
-        });
+        instance.set_spam_status(spam_status(envelope_to.spam_percentage));
 
         let mut input = Input::script(
             active_script.script_name.to_string(),
@@ -563,7 +562,7 @@ impl SieveScriptIngest for Server {
                         source: IngestSource::Smtp {
                             deliver_to: envelope_to.address.as_str(),
                             is_sender_authenticated: envelope_from_authenticated,
-                            is_spam: envelope_to.is_spam,
+                            is_spam: envelope_to.is_spam(),
                         },
                         session_id,
                     })

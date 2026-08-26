@@ -137,10 +137,20 @@ impl Listener {
                                         tokio::spawn(async move {
                                             match ProxiedStream::create_from_tokio(stream, Default::default()).await {
                                                 Ok(stream) =>{
-                                                    let remote_addr = stream.proxy_header()
+                                                    let (remote_addr, local_addr) = stream.proxy_header()
                                                                             .proxied_address()
-                                                                            .map(|addr| addr.source)
-                                                                            .unwrap_or(remote_addr);
+                                                                            .map(|addr| {
+                                                                                let local_addr = match addr.destination.ip() {
+                                                                                    IpAddr::V6(ip) => ip
+                                                                                        .to_ipv4_mapped()
+                                                                                        .map(|ip| SocketAddr::new(IpAddr::V4(ip), addr.destination.port()))
+                                                                                        .unwrap_or(addr.destination),
+                                                                                    _ => addr.destination,
+                                                                                };
+
+                                                                                (addr.source, local_addr)
+                                                                            })
+                                                                            .unwrap_or((remote_addr, local_addr));
                                                     if let Some(session) = instance.build_session(stream, local_addr, remote_addr, &server) {
                                                         // Spawn session
                                                         manager.spawn(session, is_tls, enable_acme, span_start, span_end);

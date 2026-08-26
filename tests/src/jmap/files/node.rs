@@ -686,6 +686,44 @@ pub async fn test(test: &TestServer) {
         .destroyed()
         .for_each(drop);
 
+    // WebDAV compatibility: names created over JMAP are percent-encoded in hrefs
+    let dav_client = account.webdav_client();
+    let response = account
+        .jmap_create(
+            MethodObject::FileNode,
+            [
+                json!({"name": "Ünterlagen 2026", "parentId": null}),
+                json!({"name": "Q1 & Q2 (final)", "parentId": "#i0"}),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let dav_parent_id = response.created(0).id().to_string();
+    response.created(1);
+    let dav_parent_path = "/dav/file/jdoe%40example.com/%C3%9Cnterlagen%202026";
+    let dav_child_path =
+        "/dav/file/jdoe%40example.com/%C3%9Cnterlagen%202026/Q1%20%26%20Q2%20%28final%29";
+    dav_client
+        .propfind(dav_parent_path, ["D:getetag"])
+        .await
+        .with_hrefs([
+            format!("{dav_parent_path}/").as_str(),
+            format!("{dav_child_path}/").as_str(),
+        ]);
+    dav_client
+        .propfind(dav_child_path, ["D:getetag"])
+        .await
+        .with_hrefs([format!("{dav_child_path}/").as_str()]);
+    account
+        .jmap_destroy(
+            MethodObject::FileNode,
+            [&dav_parent_id],
+            [("onDestroyRemoveChildren", true)],
+        )
+        .await
+        .destroyed()
+        .for_each(drop);
+
     // Make sure everything is gone
     test.assert_is_empty().await;
 }

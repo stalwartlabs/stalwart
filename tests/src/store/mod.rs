@@ -10,6 +10,8 @@ pub mod lookup;
 pub mod ops;
 pub mod query;
 pub mod registry;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+pub mod sql_timeout;
 
 use crate::utils::server::TestServerBuilder;
 use std::io::Read;
@@ -25,6 +27,8 @@ pub async fn store_tests() {
     registry::test(&test).await;
     import_export::test(&test).await;
     ops::test(&test).await;
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    sql_timeout::test(&test).await;
 
     if test.is_reset() {
         test.temp_dir.delete();

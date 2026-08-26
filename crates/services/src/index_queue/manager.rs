@@ -333,9 +333,12 @@ async fn update_partition_status(
                     batch.clear(partition.status_class()).commit_point();
                 }
             }
-            PartitionOutcome::Failed(reason) => {
+            PartitionOutcome::Failed(failure) => {
                 let attempts = state.failed.get(&partition).copied().unwrap_or_default();
-                let next_retry = now() + retry_delay(attempts);
+                let (reason, deferred_until) = failure.into_parts();
+                let next_retry = deferred_until
+                    .filter(|retry_at| *retry_at > now())
+                    .unwrap_or_else(|| now() + retry_delay(attempts));
 
                 trc::event!(
                     TaskManager(TaskManagerEvent::TaskRetry),

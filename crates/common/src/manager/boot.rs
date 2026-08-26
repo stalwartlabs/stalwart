@@ -122,9 +122,12 @@ impl BootManager {
         }
 
         // Initialize registry
-        let registry = RegistryStore::init(PathBuf::from(config_path.unwrap()))
-            .await
-            .failed("⚠️ Startup failed");
+        let registry = RegistryStore::init(
+            PathBuf::from(config_path.unwrap()),
+            import_export == StoreOp::None,
+        )
+        .await
+        .failed("⚠️ Startup failed");
         let mut bootstrap = Bootstrap::new(registry).await;
 
         // Add safe defaults if missing

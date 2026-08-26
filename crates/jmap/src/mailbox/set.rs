@@ -425,7 +425,9 @@ impl MailboxSet for Server {
                     changes.parent_id = 0;
                 }
                 (Key::Property(MailboxProperty::IsSubscribed), Value::Bool(subscribe)) => {
-                    let account_id = ctx.access_token.account_id();
+                    let account_id = ctx
+                        .access_token
+                        .personal_id(ctx.account_id, Collection::Mailbox);
                     if subscribe {
                         if !changes.subscribers.contains(&account_id) {
                             changes.subscribers.push(account_id);

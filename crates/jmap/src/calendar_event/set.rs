@@ -633,7 +633,10 @@ impl CalendarEventSet for Server {
                     _calendar
                         .unarchive::<Calendar>()
                         .caused_by(trc::location!())?
-                        .default_alerts(access_token, !show_without_time)
+                        .default_alerts(
+                            access_token.personal_id(account_id, Collection::Calendar),
+                            !show_without_time,
+                        )
                         .map(default_alert_to_ical),
                 );
             }

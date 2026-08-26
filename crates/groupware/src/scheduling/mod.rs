@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::decode_mailto_address;
+use crate::{decode_mailto_address, extract_addr_spec};
 use ahash::{AHashMap, AHashSet};
 use calcard::{
     common::{IanaString, PartialDateTime},
     icalendar::{
-        ICalendarComponent, ICalendarDuration, ICalendarEntry, ICalendarMethod, ICalendarParameter,
-        ICalendarParticipationRole, ICalendarParticipationStatus, ICalendarPeriod,
-        ICalendarProperty, ICalendarRecurrenceRule, ICalendarScheduleForceSendValue,
-        ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
+        ICalendar, ICalendarComponent, ICalendarDuration, ICalendarEntry, ICalendarMethod,
+        ICalendarParameter, ICalendarParticipationRole, ICalendarParticipationStatus,
+        ICalendarPeriod, ICalendarProperty, ICalendarRecurrenceRule,
+        ICalendarScheduleForceSendValue, ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
     },
 };
+use indexmap::IndexSet;
 use registry::schema::structs::TaskCalendarItipContents;
 use std::{fmt::Display, hash::Hash};
 use utils::sanitize_email;
@@ -23,6 +24,7 @@ pub mod attendee;
 pub mod event_cancel;
 pub mod event_create;
 pub mod event_update;
+pub mod format;
 pub mod inbound;
 pub mod itip;
 pub mod organizer;
@@ -41,10 +43,12 @@ pub struct ItipSnapshot<'x> {
     pub comp: &'x ICalendarComponent,
     pub attendees: AHashSet<Attendee<'x>>,
     pub dtstamp: Option<&'x PartialDateTime>,
-    pub entries: AHashSet<ItipEntry<'x>>,
+    pub entries: ItipEntries<'x>,
     pub sequence: Option<i64>,
     pub request_status: Vec<&'x str>,
 }
+
+pub type ItipEntries<'x> = IndexSet<ItipEntry<'x>, ahash::RandomState>;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct ItipEntry<'x> {
@@ -239,7 +243,9 @@ impl Attendee<'_> {
 
 impl Email {
     pub fn new(email: &str, local_addresses: &[String]) -> Option<Self> {
-        let email = sanitize_email(&decode_mailto_address(email.trim()))?;
+        let decoded = decode_mailto_address(email.trim());
+        let email = sanitize_email(decoded.as_ref())
+            .or_else(|| extract_addr_spec(decoded.as_ref()).and_then(sanitize_email))?;
         let is_local = local_addresses.contains(&email);
         Some(Email { email, is_local })
     }
@@ -251,6 +257,21 @@ impl Email {
             None
         }
     }
+}
+
+pub fn ical_size(ical: &ICalendar) -> usize {
+    struct SizeWriter(usize);
+
+    impl std::fmt::Write for SizeWriter {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0 += text.len();
+            Ok(())
+        }
+    }
+
+    let mut writer = SizeWriter(0);
+    let _ = ical.write_to(&mut writer);
+    writer.0
 }
 
 impl PartialEq for Attendee<'_> {

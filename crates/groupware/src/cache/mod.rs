@@ -382,6 +382,15 @@ impl GroupwareCache for Server {
                 document_id,
                 &mut batch,
             )?;
+
+            batch
+                .with_collection(Collection::Principal)
+                .with_document(0)
+                .set(
+                    PrincipalField::DefaultAddressBookId,
+                    document_id.serialize(),
+                );
+
             self.commit_batch(batch).await?;
             Ok(Some(document_id))
         } else {

@@ -122,8 +122,7 @@ impl CardGetRequestHandler for Server {
             &mut vcard,
             headers
                 .vcard_version
-                .or_else(|| card.card.version())
-                .unwrap_or_default(),
+                .unwrap_or(self.core.groupware.vcard_version),
         );
 
         if !is_head {

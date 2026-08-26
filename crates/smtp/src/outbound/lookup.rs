@@ -101,7 +101,6 @@ impl DnsLookup for Server {
         }
     }
 
-    #[allow(unused_mut)]
     async fn resolve_host(
         &self,
         remote_host: &NextHop<'_>,
@@ -147,8 +146,7 @@ impl DnsLookup for Server {
         };
 
         if !remote_ips.is_empty() {
-            #[cfg(not(feature = "test_mode"))]
-            if remote_ips.iter().any(|ip| ip.is_loopback()) {
+            if !remote_host.allow_loopback() && remote_ips.iter().any(|ip| ip.is_loopback()) {
                 remote_ips.retain(|ip| !ip.is_loopback());
                 if remote_ips.is_empty() {
                     return Err(Status::PermanentFailure(Box::new(ErrorDetails {

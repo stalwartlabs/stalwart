@@ -1,0 +1,52 @@
+From: Jane Smith <jane@example.com>
+To: John Doe <jdoe@example.com>
+Subject: Project sync
+Date: Tue, 15 Apr 2025 09:12:33 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: text/plain; charset=utf-8
+
+Please find the invite and the notes attached.
+
+--outer
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp//Scheduler//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:1234-5678-9012
+DTSTAMP:20250415T091233Z
+DTSTART:20250416T140000Z
+DTEND:20250416T150000Z
+SUMMARY:Project sync
+ORGANIZER:mailto:jane@example.com
+ATTENDEE:mailto:jdoe@example.com
+END:VEVENT
+END:VCALENDAR
+
+--outer
+Content-Type: text/plain; charset=utf-8; name="notes.txt"
+Content-Disposition: attachment; filename="notes.txt"
+
+Agenda:
+- Review the milestones
+- Agree on the release date
+
+--outer
+Content-Type: text/html; charset=utf-8; name="report.html"
+Content-Disposition: attachment; filename="report.html"
+
+<html><body><p>Quarterly report.</p></body></html>
+
+--outer
+Content-Type: application/octet-stream; name="blob.bin"
+Content-Disposition: attachment; filename="blob.bin"
+Content-Transfer-Encoding: base64
+
+SGVsbG8gV29ybGQ=
+
+--outer--

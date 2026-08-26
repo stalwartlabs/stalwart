@@ -10,7 +10,8 @@ use crate::index_queue::document::{
 };
 use crate::index_queue::{
     BULK_LINGER, BulkRequest, Deletion, ITEM_OVERSCAN, LOCK_EXPIRY, LOCK_MARGIN,
-    MAX_DELETE_CLAUSES, Partition, PartitionOutcome, PendingItem, QueuedItem, Sink,
+    MAX_DELETE_CLAUSES, Partition, PartitionFailure, PartitionOutcome, PendingItem, QueuedItem,
+    Sink,
 };
 use common::{BuildServer, Inner, Server};
 use email::message::metadata::MessageMetadata;
@@ -176,7 +177,7 @@ async fn process_items(
     items: Vec<QueuedItem>,
     sink: &Sink,
     clear_index: bool,
-) -> Result<(), String> {
+) -> Result<(), PartitionFailure> {
     let mut documents = Vec::new();
     let mut deletions = Vec::new();
     let mut batch = BatchBuilder::new();
@@ -222,7 +223,7 @@ async fn process_items(
                             .caused_by(trc::location!())
                     );
 
-                    return Err(reason);
+                    return Err(reason.into());
                 }
             }
         } else if !matches!(
@@ -241,7 +242,7 @@ async fn process_items(
                         .caused_by(trc::location!())
                 );
 
-                return Err(reason);
+                return Err(reason.into());
             }
 
             batch.commit_point();
@@ -274,7 +275,7 @@ async fn process_items(
                     .caused_by(trc::location!())
             );
 
-            return Err(reason);
+            return Err(reason.into());
         }
     }
 
@@ -292,7 +293,7 @@ impl Sink {
         partition: Partition,
         documents: Vec<IndexDocument>,
         deletions: Vec<Deletion>,
-    ) -> Result<(), String> {
+    ) -> Result<(), PartitionFailure> {
         if documents.is_empty() && deletions.is_empty() {
             return Ok(());
         }
@@ -312,8 +313,10 @@ impl Sink {
                 {
                     Ok(_) => ack_rx
                         .await
-                        .unwrap_or_else(|_| Err("Bulk indexer is no longer available".to_string())),
-                    Err(_) => Err("Bulk indexer is no longer available".to_string()),
+                        .unwrap_or_else(|_| {
+                            Err("Bulk indexer is no longer available".to_string().into())
+                        }),
+                    Err(_) => Err("Bulk indexer is no longer available".to_string().into()),
                 }
             }
         }
@@ -366,7 +369,7 @@ async fn flush_partition(
     partition: Partition,
     documents: Vec<IndexDocument>,
     deletions: Vec<Deletion>,
-) -> Result<(), String> {
+) -> Result<(), PartitionFailure> {
     let Some(store) = server.search_store().internal_fts() else {
         return flush_documents(server, documents, deletions).await;
     };
@@ -390,13 +393,14 @@ async fn flush_partition(
 
     result.map_err(|err| {
         let reason = err.to_string();
+        let failure = PartitionFailure::deferred(reason, &err);
         trc::error!(
             err.details("Failed to update the search index")
                 .ctx(trc::Key::Type, partition.index.name())
                 .ctx(trc::Key::Id, partition.partition)
                 .caused_by(trc::location!())
         );
-        reason
+        failure
     })
 }
 
@@ -404,17 +408,17 @@ async fn flush_documents(
     server: &Server,
     documents: Vec<IndexDocument>,
     deletions: Vec<Deletion>,
-) -> Result<(), String> {
+) -> Result<(), PartitionFailure> {
     if !documents.is_empty()
         && let Err(err) = server.search_store().index(documents).await
     {
-        let reason = err.to_string();
+        let failure = PartitionFailure::deferred(err.to_string(), &err);
         trc::error!(
             err.details("Failed to index documents")
                 .caused_by(trc::location!())
         );
 
-        return Err(reason);
+        return Err(failure);
     }
 
     if !deletions.is_empty() {
@@ -466,14 +470,14 @@ async fn flush_documents(
                 }
 
                 if let Err(err) = server.search_store().unindex(query).await {
-                    let reason = err.to_string();
+                    let failure = PartitionFailure::deferred(err.to_string(), &err);
                     trc::error!(
                         err.details("Failed to delete documents from index")
                             .ctx(trc::Key::Type, index.name())
                             .caused_by(trc::location!())
                     );
 
-                    return Err(reason);
+                    return Err(failure);
                 }
             }
         }
@@ -488,7 +492,7 @@ async fn read_queue(
     batch_size: usize,
     count_deletions: bool,
     from_document: Option<(u32, u32)>,
-) -> Result<(Vec<QueuedItem>, bool), String> {
+) -> Result<(Vec<QueuedItem>, bool), PartitionFailure> {
     let (mut from_class, to_class) =
         SearchIndexClass::queue_range(partition.index, partition.partition);
 
@@ -565,7 +569,7 @@ async fn read_queue(
                     .ctx(trc::Key::Id, partition.partition)
                     .caused_by(trc::location!())
             );
-            reason
+            PartitionFailure::from(reason)
         })?;
 
     Ok((items, is_exhausted))
@@ -605,19 +609,19 @@ fn pending_items(items: &[QueuedItem]) -> impl Iterator<Item = PendingItem> {
         })
 }
 
-async fn clear_queue_index(server: &Server, partition: Partition) -> Result<(), String> {
+async fn clear_queue_index(server: &Server, partition: Partition) -> Result<(), PartitionFailure> {
     let mut batch = BatchBuilder::new();
     batch.clear(partition.index_class());
     write_queue_index(server, batch).await
 }
 
-async fn set_queue_index(server: &Server, partition: Partition) -> Result<(), String> {
+async fn set_queue_index(server: &Server, partition: Partition) -> Result<(), PartitionFailure> {
     let mut batch = BatchBuilder::new();
     batch.set(partition.index_class(), vec![]);
     write_queue_index(server, batch).await
 }
 
-async fn write_queue_index(server: &Server, mut batch: BatchBuilder) -> Result<(), String> {
+async fn write_queue_index(server: &Server, mut batch: BatchBuilder) -> Result<(), PartitionFailure> {
     server
         .store()
         .write(batch.build_all())
@@ -629,7 +633,7 @@ async fn write_queue_index(server: &Server, mut batch: BatchBuilder) -> Result<(
                 err.details("Failed to update the search index queue")
                     .caused_by(trc::location!())
             );
-            reason
+            reason.into()
         })
 }
 

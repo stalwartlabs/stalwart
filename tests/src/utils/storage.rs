@@ -61,8 +61,24 @@ impl RegistryEnvStores for RegistryStore {
     }
 }
 
-pub async fn build_data_store(typ: DataStoreType, path: &str) -> DataStore {
-    match typ {
+pub async fn build_data_store(typ: &str, path: &str) -> DataStore {
+    if typ == "MariaDb" {
+        crate::utils::containers::ensure_mariadb().await;
+        return DataStore::MySql(MySqlStore {
+            host: "localhost".into(),
+            port: 3308,
+            auth_username: "root".to_string().into(),
+            auth_secret: SecretKeyOptional::Value(SecretKeyValue {
+                secret: "password".into(),
+            }),
+            database: "stalwart".into(),
+            use_tls: false,
+            allow_invalid_certs: true,
+            ..Default::default()
+        });
+    }
+
+    match DataStoreType::parse(typ).expect("Invalid store type") {
         DataStoreType::RocksDb => DataStore::RocksDb(RocksDbStore {
             path: format!("{path}/rocks.db"),
             ..Default::default()

@@ -20,9 +20,8 @@ pub fn itip_create(
     } else if !itip.organizer.email.is_local {
         Err(ItipError::NotOrganizer)
     } else {
-        let mut sequences = Vec::new();
-        organizer_request_full(ical, &itip, Some(&mut sequences), true).inspect(|_| {
-            itip_finalize(ical, &sequences);
+        organizer_request_full(ical, &itip, None, true).inspect(|_| {
+            itip_finalize(ical, &[]);
         })
     }
 }

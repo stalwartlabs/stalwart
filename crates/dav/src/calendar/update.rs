@@ -29,7 +29,10 @@ use dav_proto::{
 use groupware::{
     cache::GroupwareCache,
     calendar::{CalendarEvent, CalendarEventData},
-    scheduling::{ItipMessages, event_create::itip_create, event_update::itip_update},
+    scheduling::{
+        ItipMessages, event_create::itip_create, event_update::itip_update,
+        itip::itip_set_unreachable_status,
+    },
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -277,12 +280,21 @@ impl CalendarUpdateRequestHandler for Server {
                             ));
                         }
 
+                        trc::event!(
+                            Calendar(trc::CalendarEvent::ItipMessageError),
+                            AccountId = account_id,
+                            DocumentId = document_id,
+                            Reason = err.to_string(),
+                        );
+
                         // Event changed, but there are no iTIP messages to send
                         if let Some(schedule_tag) = &mut new_event.schedule_tag {
                             *schedule_tag += 1;
                         }
                     }
                 }
+
+                itip_set_unreachable_status(&mut new_event.data.event, account_info.addresses());
             }
             // Validate quota
             let extra_bytes =
@@ -410,8 +422,16 @@ impl CalendarUpdateRequestHandler for Server {
                                 .with_details(err.to_string()),
                             ));
                         }
+
+                        trc::event!(
+                            Calendar(trc::CalendarEvent::ItipMessageError),
+                            AccountId = account_id,
+                            Reason = err.to_string(),
+                        );
                     }
                 }
+
+                itip_set_unreachable_status(&mut event.data.event, account_info.addresses());
             }
 
             // Validate quota

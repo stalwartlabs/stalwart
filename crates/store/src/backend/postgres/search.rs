@@ -5,7 +5,10 @@
  */
 
 use crate::{
-    backend::postgres::{PostgresStore, PsqlSearchField, into_error, into_pool_error},
+    backend::postgres::{
+        DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, PostgresStore, PsqlSearchField, into_error,
+        into_pool_error, is_timeout_error,
+    },
     search::{
         IndexDocument, KeyValueMatch, SearchFilter, SearchQuery, SearchResults, SearchValue,
         TextMatch,
@@ -128,14 +131,44 @@ impl PostgresStore {
 
     pub async fn unindex(&self, filter: SearchQuery) -> trc::Result<u64> {
         debug_assert!(!filter.filters.is_empty());
-        let mut query = format!("DELETE FROM {} ", filter.index.psql_table());
-        let params = self.build_filter(&mut query, &filter.filters);
+        let table = filter.index.psql_table();
+        let mut where_clause = String::new();
+        let params = self.build_filter(&mut where_clause, &filter.filters);
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
-        let s = conn.prepare_cached(&query).await.map_err(into_error)?;
-
-        conn.execute(&s, params.as_slice())
+        let s = conn
+            .prepare_cached(&format!("DELETE FROM {table}{where_clause}"))
             .await
-            .map_err(into_error)
+            .map_err(into_error)?;
+
+        match conn.execute(&s, params.as_slice()).await {
+            Ok(deleted) => return Ok(deleted),
+            Err(err) if is_timeout_error(&err) => (),
+            Err(err) => return Err(into_error(err)),
+        }
+
+        let mut chunk_size = DELETE_CHUNK_SIZE;
+        let mut deleted = 0;
+
+        loop {
+            let s = conn
+                .prepare_cached(&format!(
+                    "DELETE FROM {table} WHERE ctid IN (SELECT ctid FROM {table}{where_clause} LIMIT {chunk_size})"
+                ))
+                .await
+                .map_err(into_error)?;
+
+            loop {
+                match conn.execute(&s, params.as_slice()).await {
+                    Ok(0) => return Ok(deleted),
+                    Ok(affected) => deleted += affected,
+                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
+                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                        break;
+                    }
+                    Err(err) => return Err(into_error(err)),
+                }
+            }
+        }
     }
 
     fn build_filter<'x>(

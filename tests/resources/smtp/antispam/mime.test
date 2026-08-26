@@ -495,3 +495,72 @@ GXiCSBldXgLAAEE9QEAAAQUAAAAUEsBAh4DCgAAAAAAs3pGVwAAAAAAAAAAAA
 AAAAgAGAAAAAAAAAAAAKSBAAAAAHRlc3QuYmluVVQFAAPiCSBldXgLAAEE9QE
 AAAQUAAAAUEsFBgAAAAABAAEATgAAAEIAAAAAAA==
 --boundary--
+<!-- NEXT TEST -->
+expect MIME_GOOD HAS_ATTACHMENT
+
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+	boundary="boundary"
+
+--boundary
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+simple text
+
+--boundary
+Content-Type: audio/x-wave
+Content-Disposition: attachment; filename="voicemail.wav"
+Content-Transfer-Encoding: base64
+
+UklGRqQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YYAAAAAAAQID
+BAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIz
+NDU2Nzg5Ojs8PT4/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj
+JCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==
+--boundary--
+<!-- NEXT TEST -->
+expect MIME_GOOD HAS_ATTACHMENT
+
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+	boundary="boundary"
+
+--boundary
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+simple text
+
+--boundary
+Content-Type: application/x-zip-compressed
+Content-Disposition: attachment; filename="test.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBAoAAAAAALN6RlcAAAAAAAAAAAAAAAAIABwAdGVzdC5iaW5VVAkAA+IJI
+GXiCSBldXgLAAEE9QEAAAQUAAAAUEsBAh4DCgAAAAAAs3pGVwAAAAAAAAAAAA
+AAAAgAGAAAAAAAAAAAAKSBAAAAAHRlc3QuYmluVVQFAAPiCSBldXgLAAEE9QE
+AAAQUAAAAUEsFBgAAAAABAAEATgAAAEIAAAAAAA==
+--boundary--
+<!-- NEXT TEST -->
+expect HAS_ATTACHMENT
+
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+	boundary="boundary"
+
+--boundary
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+simple text
+
+--boundary
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+Content-Disposition: attachment; filename="test.docx"
+Content-Transfer-Encoding: base64
+
+UEsDBAoAAAAAALN6RlcAAAAAAAAAAAAAAAAIABwAdGVzdC5iaW5VVAkAA+IJI
+GXiCSBldXgLAAEE9QEAAAQUAAAAUEsBAh4DCgAAAAAAs3pGVwAAAAAAAAAAAA
+AAAAgAGAAAAAAAAAAAAKSBAAAAAHRlc3QuYmluVVQFAAPiCSBldXgLAAEE9QE
+AAAQUAAAAUEsFBgAAAAABAAEATgAAAEIAAAAAAA==
+--boundary--

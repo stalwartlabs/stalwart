@@ -52,7 +52,7 @@ pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
 
     fn apply_calendar_properties(
         &self,
-        access_token: &AccessToken,
+        personal_id: u32,
         calendar: &mut Calendar,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
@@ -159,11 +159,12 @@ impl CalendarPropPatchRequestHandler for Server {
             let mut new_calendar = archive
                 .deserialize::<Calendar>()
                 .caused_by(trc::location!())?;
+            let personal_id = access_token.personal_id(account_id, Collection::Calendar);
 
             // Remove properties
             if !request.set_first && !request.remove.is_empty() {
                 remove_calendar_properties(
-                    access_token,
+                    personal_id,
                     &mut new_calendar,
                     std::mem::take(&mut request.remove),
                     &mut items,
@@ -172,7 +173,7 @@ impl CalendarPropPatchRequestHandler for Server {
 
             // Set properties
             is_success = self.apply_calendar_properties(
-                access_token,
+                personal_id,
                 &mut new_calendar,
                 true,
                 request.set,
@@ -182,7 +183,7 @@ impl CalendarPropPatchRequestHandler for Server {
             // Remove properties
             if is_success && !request.remove.is_empty() {
                 remove_calendar_properties(
-                    access_token,
+                    personal_id,
                     &mut new_calendar,
                     request.remove,
                     &mut items,
@@ -264,7 +265,7 @@ impl CalendarPropPatchRequestHandler for Server {
 
     fn apply_calendar_properties(
         &self,
-        access_token: &AccessToken,
+        personal_id: u32,
         calendar: &mut Calendar,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
@@ -276,7 +277,7 @@ impl CalendarPropPatchRequestHandler for Server {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
                     if name.len() <= self.core.groupware.live_property_size {
-                        calendar.preferences_mut(access_token).name = name;
+                        calendar.preferences_mut(personal_id).name = name;
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -292,7 +293,7 @@ impl CalendarPropPatchRequestHandler for Server {
                     DavValue::String(name),
                 ) => {
                     if name.len() <= self.core.groupware.live_property_size {
-                        calendar.preferences_mut(access_token).description = Some(name);
+                        calendar.preferences_mut(personal_id).description = Some(name);
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -324,13 +325,13 @@ impl CalendarPropPatchRequestHandler for Server {
                         );
                         has_errors = true;
                     } else {
-                        calendar.preferences_mut(access_token).time_zone = Timezone::Custom(ical);
+                        calendar.preferences_mut(personal_id).time_zone = Timezone::Custom(ical);
                         items.insert_ok(property.property);
                     }
                 }
                 (DavProperty::CalDav(CalDavProperty::TimezoneId), DavValue::String(tz_id)) => {
                     if let Ok(tz) = Tz::from_str(&tz_id) {
-                        calendar.preferences_mut(access_token).time_zone =
+                        calendar.preferences_mut(personal_id).time_zone =
                             Timezone::IANA(tz.as_id());
                         items.insert_ok(property.property);
                     } else {
@@ -532,7 +533,7 @@ fn remove_event_properties(
 }
 
 fn remove_calendar_properties(
-    access_token: &AccessToken,
+    personal_id: u32,
     calendar: &mut Calendar,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
@@ -540,12 +541,12 @@ fn remove_calendar_properties(
     for property in properties {
         match &property {
             DavProperty::CalDav(CalDavProperty::CalendarDescription) => {
-                calendar.preferences_mut(access_token).description = None;
+                calendar.preferences_mut(personal_id).description = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::CalDav(CalDavProperty::CalendarTimezone)
             | DavProperty::CalDav(CalDavProperty::TimezoneId) => {
-                calendar.preferences_mut(access_token).time_zone = Timezone::Default;
+                calendar.preferences_mut(personal_id).time_zone = Timezone::Default;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::DeadProperty(dead) => {

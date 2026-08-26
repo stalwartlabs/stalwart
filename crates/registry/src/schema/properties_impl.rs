@@ -1004,6 +1004,7 @@ impl EnumImpl for Property {
             b"numFeatures" => Property::NumFeatures,
             b"numReplicas" => Property::NumReplicas,
             b"numShards" => Property::NumShards,
+            b"oauthClientId" => Property::OauthClientId,
             b"onSuccessRenewCertificate" => Property::OnSuccessRenewCertificate,
             b"openTelemetry" => Property::OpenTelemetry,
             b"options" => Property::Options,
@@ -1328,6 +1329,7 @@ impl EnumImpl for Property {
             b"userOcid" => Property::UserOcid,
             b"username" => Property::Username,
             b"usernameDomain" => Property::UsernameDomain,
+            b"vCardVersion" => Property::VCardVersion,
             b"validateDomain" => Property::ValidateDomain,
             b"value" => Property::Value,
             b"variableName" => Property::VariableName,
@@ -1944,6 +1946,7 @@ impl EnumImpl for Property {
             Property::NumFeatures => "numFeatures",
             Property::NumReplicas => "numReplicas",
             Property::NumShards => "numShards",
+            Property::OauthClientId => "oauthClientId",
             Property::OnSuccessRenewCertificate => "onSuccessRenewCertificate",
             Property::OpenTelemetry => "openTelemetry",
             Property::Options => "options",
@@ -2268,6 +2271,7 @@ impl EnumImpl for Property {
             Property::UserOcid => "userOcid",
             Property::Username => "username",
             Property::UsernameDomain => "usernameDomain",
+            Property::VCardVersion => "vCardVersion",
             Property::ValidateDomain => "validateDomain",
             Property::Value => "value",
             Property::VariableName => "variableName",
@@ -2694,13 +2698,13 @@ impl EnumImpl for Property {
             928 => Some(Property::InboundReportMaxSize),
             70 => Some(Property::Incidents),
             352 => Some(Property::IncludeSource),
-            930 => Some(Property::Index),
+            932 => Some(Property::Index),
             94 => Some(Property::IndexAsn),
             95 => Some(Property::IndexAsnName),
             664 => Some(Property::IndexBatchSize),
             667 => Some(Property::IndexCalendar),
             668 => Some(Property::IndexCalendarFields),
-            934 => Some(Property::IndexConcurrency),
+            936 => Some(Property::IndexConcurrency),
             670 => Some(Property::IndexContactFields),
             669 => Some(Property::IndexContacts),
             96 => Some(Property::IndexCountry),
@@ -2888,6 +2892,7 @@ impl EnumImpl for Property {
             390 => Some(Property::NumFeatures),
             350 => Some(Property::NumReplicas),
             351 => Some(Property::NumShards),
+            930 => Some(Property::OauthClientId),
             813 => Some(Property::OnSuccessRenewCertificate),
             495 => Some(Property::OpenTelemetry),
             630 => Some(Property::Options),
@@ -2910,7 +2915,7 @@ impl EnumImpl for Property {
             433 => Some(Property::ParseLimitContact),
             434 => Some(Property::ParseLimitEmail),
             432 => Some(Property::ParseLimitEvent),
-            931 => Some(Property::Partition),
+            933 => Some(Property::Partition),
             876 => Some(Property::Password),
             113 => Some(Property::PasswordDefaultExpiry),
             109 => Some(Property::PasswordHashAlgorithm),
@@ -2984,8 +2989,8 @@ impl EnumImpl for Property {
             784 => Some(Property::QueryRecipient),
             514 => Some(Property::QueueId),
             644 => Some(Property::QueueName),
-            933 => Some(Property::QueuedDeletions),
-            932 => Some(Property::QueuedUpdates),
+            935 => Some(Property::QueuedDeletions),
+            934 => Some(Property::QueuedUpdates),
             394 => Some(Property::Quotas),
             532 => Some(Property::Rate),
             410 => Some(Property::RateLimit),
@@ -3212,6 +3217,7 @@ impl EnumImpl for Property {
             901 => Some(Property::UserOcid),
             131 => Some(Property::Username),
             610 => Some(Property::UsernameDomain),
+            931 => Some(Property::VCardVersion),
             413 => Some(Property::ValidateDomain),
             492 => Some(Property::Value),
             675 => Some(Property::VariableName),
@@ -3233,7 +3239,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 935;
+    const COUNT: usize = 937;
 }
 
 impl serde::Serialize for Property {

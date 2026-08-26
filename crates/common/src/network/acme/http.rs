@@ -51,10 +51,16 @@ pub(crate) async fn https(
         response.status(),
         StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
     ) {
-        Err(AcmeError::Backoff {
-            wait: parse_retry_after(&response),
-            max_retries,
-        })
+        let wait = parse_retry_after(&response);
+
+        trc::event!(
+            Acme(trc::AcmeEvent::RenewBackoff),
+            Url = url.to_string(),
+            Code = response.status().as_u16(),
+            Elapsed = wait.unwrap_or_default(),
+        );
+
+        Err(AcmeError::Backoff { wait, max_retries })
     } else {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();

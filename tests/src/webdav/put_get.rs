@@ -565,6 +565,50 @@ END:VCALENDAR
         client.request("DELETE", path, "").await.with_status(expect);
     }
 
+    // Resource names containing characters that are legal in a path segment
+    for (resource_type, container, name) in [
+        (DavResourceName::Cal, "default", "foo+bar(1)&x:y@z.ics"),
+        (DavResourceName::Card, "default", "foo+bar(1)&x:y@z.vcf"),
+        (DavResourceName::Cal, "cal+1(a)", "event.ics"),
+        (DavResourceName::Card, "book+1(a)", "card.vcf"),
+    ] {
+        let container_path = format!(
+            "{}/john%40example.com/{container}",
+            resource_type.base_path()
+        );
+        if container != "default" {
+            client
+                .request("MKCOL", &container_path, "")
+                .await
+                .with_status(StatusCode::CREATED);
+        }
+        let path = format!("{container_path}/{name}");
+        let content = resource_type.generate();
+        client
+            .request("PUT", &path, &content)
+            .await
+            .with_status(StatusCode::CREATED);
+        client
+            .propfind(&path, ["D:getetag"])
+            .await
+            .with_hrefs([path.as_str()]);
+        client
+            .request("GET", &path, "")
+            .await
+            .with_status(StatusCode::OK)
+            .with_body(&content);
+        client
+            .request("DELETE", &path, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+        if container != "default" {
+            client
+                .request("DELETE", &container_path, "")
+                .await
+                .with_status(StatusCode::NO_CONTENT);
+        }
+    }
+
     // Delete files
     for (path, (_, _, etag)) in &files {
         client

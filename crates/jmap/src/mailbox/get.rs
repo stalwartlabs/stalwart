@@ -13,7 +13,7 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::ahash::AHashSet;
-use types::{acl::Acl, keyword::Keyword, special_use::SpecialUse};
+use types::{acl::Acl, collection::Collection, keyword::Keyword, special_use::SpecialUse};
 
 use crate::{api::acl::JmapRights, changes::state::JmapCacheState};
 
@@ -46,6 +46,7 @@ impl MailboxGet for Server {
             MailboxProperty::MyRights,
         ]);
         let account_id = request.account_id.document_id();
+        let personal_id = access_token.personal_id(account_id, Collection::Mailbox);
         let cache = self.get_cached_messages(account_id).await?;
         let shared_ids = if access_token.is_shared(account_id) {
             cache.shared_mailboxes(access_token, Acl::Read).into()
@@ -141,11 +142,9 @@ impl MailboxGet for Server {
                             JmapRights::all_rights::<Mailbox>()
                         }
                     }
-                    MailboxProperty::IsSubscribed => Value::Bool(
-                        cached_mailbox
-                            .subscribers
-                            .contains(&access_token.account_id()),
-                    ),
+                    MailboxProperty::IsSubscribed => {
+                        Value::Bool(cached_mailbox.subscribers.contains(&personal_id))
+                    }
                     MailboxProperty::ShareWith => JmapRights::share_with::<Mailbox>(
                         account_id,
                         access_token,

@@ -16,7 +16,7 @@ use dav_proto::schema::{
     request::DavPropertyValue,
     response::{Condition, List, Prop, PropStat, ResponseDescription, Status},
 };
-use groupware::{DavResourceName, RFC_3986};
+use groupware::{DavResourceName, RFC_3986, is_uri_segment};
 use hyper::{Method, StatusCode};
 use std::borrow::Cow;
 use store::ahash::AHashMap;
@@ -242,18 +242,15 @@ pub(crate) fn fix_percent_encoding(path: &'_ str) -> Cow<'_, str> {
         (None, path)
     };
 
-    for &ch in name.as_bytes() {
-        if !matches!(ch, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'-' | b'.' | b'_' | b'~' | b'%')
-        {
-            let name = percent_encoding::percent_encode(name.as_bytes(), RFC_3986);
+    if is_uri_segment(name) {
+        path.into()
+    } else {
+        let name = percent_encoding::utf8_percent_encode(name, RFC_3986);
 
-            return if let Some(parent) = parent {
-                Cow::Owned(format!("{parent}/{name}"))
-            } else {
-                Cow::Owned(name.to_string())
-            };
+        if let Some(parent) = parent {
+            Cow::Owned(format!("{parent}/{name}"))
+        } else {
+            Cow::Owned(name.to_string())
         }
     }
-
-    path.into()
 }

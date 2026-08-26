@@ -76,72 +76,130 @@ pub fn itip_assign_organizer(ical: &mut ICalendar, organizer_address: &str) -> b
     assigned
 }
 
-pub fn itip_unreachable_recipient<'x>(
-    ical: &'x ICalendar,
+pub(crate) const ITIP_STATUS_INVALID_USER: &str = "3.7";
+
+fn itip_is_server_scheduling(entry: &ICalendarEntry) -> bool {
+    !entry.params.iter().any(|param| {
+        matches!(
+            (&param.name, &param.value),
+            (
+                ICalendarParameterName::ScheduleAgent,
+                ICalendarParameterValue::ScheduleAgent(
+                    ICalendarScheduleAgentValue::Client | ICalendarScheduleAgentValue::None
+                )
+            )
+        )
+    })
+}
+
+fn itip_unreachable_entries(
+    ical: &ICalendar,
     account_emails: &[String],
-) -> Option<&'x str> {
-    let organizer = ical
+) -> Option<Vec<(usize, usize)>> {
+    let (comp_id, entry_id, entry) = ical
         .components
         .iter()
-        .filter(|comp| comp.component_type.is_scheduling_object())
-        .find_map(|comp| {
+        .enumerate()
+        .filter(|(_, comp)| comp.component_type.is_scheduling_object())
+        .find_map(|(comp_id, comp)| {
             comp.entries
                 .iter()
-                .find(|entry| entry.name == ICalendarProperty::Organizer)
-                .and_then(|entry| entry.values.first())
-                .and_then(|value| value.as_text())
-        });
+                .enumerate()
+                .find(|(_, entry)| entry.name == ICalendarProperty::Organizer)
+                .map(|(entry_id, entry)| (comp_id, entry_id, entry))
+        })?;
 
-    if let Some(organizer) = organizer {
-        let Some(email) = Email::new(organizer, account_emails) else {
-            return Some(organizer);
-        };
-        if !email.is_local {
-            return None;
-        }
+    if !itip_is_server_scheduling(entry) {
+        return None;
     }
 
-    for comp in &ical.components {
+    match Email::new(entry.values.first()?.as_text()?, account_emails) {
+        Some(email) if !email.is_local => return None,
+        Some(_) => {}
+        None => return Some(vec![(comp_id, entry_id)]),
+    }
+
+    let mut unreachable = Vec::new();
+
+    for (comp_id, comp) in ical.components.iter().enumerate() {
         if !comp.component_type.is_scheduling_object() {
             continue;
         }
 
-        for entry in &comp.entries {
-            if entry.name != ICalendarProperty::Attendee {
+        for (entry_id, entry) in comp.entries.iter().enumerate() {
+            if entry.name != ICalendarProperty::Attendee || !itip_is_server_scheduling(entry) {
                 continue;
             }
 
-            let mut is_server_scheduling = true;
-            let mut rsvp = true;
-
-            for param in &entry.params {
-                match (&param.name, &param.value) {
+            let rsvp = !entry.params.iter().any(|param| {
+                matches!(
+                    (&param.name, &param.value),
                     (
-                        ICalendarParameterName::ScheduleAgent,
-                        ICalendarParameterValue::ScheduleAgent(agent),
-                    ) => {
-                        is_server_scheduling = agent == &ICalendarScheduleAgentValue::Server;
-                    }
-                    (ICalendarParameterName::Rsvp, ICalendarParameterValue::Bool(value)) => {
-                        rsvp = *value;
-                    }
-                    _ => {}
-                }
-            }
+                        ICalendarParameterName::Rsvp,
+                        ICalendarParameterValue::Bool(false)
+                    )
+                )
+            });
 
-            if !is_server_scheduling || !rsvp {
-                continue;
-            }
-
-            if let Some(value) = entry.values.first().and_then(|value| value.as_text())
-                && Email::new(value, account_emails).is_none()
+            if rsvp
+                && entry
+                    .values
+                    .first()
+                    .and_then(|value| value.as_text())
+                    .is_some_and(|value| Email::new(value, account_emails).is_none())
             {
-                return Some(value);
+                unreachable.push((comp_id, entry_id));
             }
         }
     }
 
-    None
+    Some(unreachable)
+}
+
+pub fn itip_unreachable_recipient<'x>(
+    ical: &'x ICalendar,
+    account_emails: &[String],
+) -> Option<&'x str> {
+    itip_unreachable_entries(ical, account_emails)?
+        .first()
+        .and_then(|(comp_id, entry_id)| {
+            ical.components[*comp_id].entries[*entry_id]
+                .values
+                .first()
+                .and_then(|value| value.as_text())
+        })
+}
+
+pub fn itip_set_unreachable_status(ical: &mut ICalendar, account_emails: &[String]) {
+    let Some(unreachable) = itip_unreachable_entries(ical, account_emails) else {
+        return;
+    };
+
+    for (comp_id, comp) in ical.components.iter_mut().enumerate() {
+        if !comp.component_type.is_scheduling_object() {
+            continue;
+        }
+
+        for (entry_id, entry) in comp.entries.iter_mut().enumerate() {
+            if !matches!(
+                entry.name,
+                ICalendarProperty::Organizer | ICalendarProperty::Attendee
+            ) {
+                continue;
+            }
+
+            entry.params.retain(|param| {
+                param.name != ICalendarParameterName::ScheduleStatus
+                    || param.value.as_text() != Some(ITIP_STATUS_INVALID_USER)
+            });
+
+            if unreachable.contains(&(comp_id, entry_id)) {
+                entry.params.push(ICalendarParameter::schedule_status(
+                    ITIP_STATUS_INVALID_USER.to_string(),
+                ));
+            }
+        }
+    }
 }
 
 pub(crate) enum ItipExportAs<'x> {
@@ -337,6 +395,8 @@ pub(crate) fn itip_add_tz(message: &mut ICalendar, ical: &ICalendar) {
     {
         message.copy_timezones(ical);
     }
+
+    message.add_missing_timezones();
 }
 
 #[inline]

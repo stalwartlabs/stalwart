@@ -254,8 +254,26 @@ pub async fn test(test: &TestServer) {
         .with_status(StatusCode::OK)
         .with_values(["A:comp.[name]:VEVENT", "A:comp.[name]:VTODO"]);
 
+    // Resource names arriving through the URI are echoed back verbatim
+    for name in ["My%20Folder", "file(1)+a:b", "%C3%9Cnterlagen", "Q&A"] {
+        let path = format!("/dav/file/john%40example.com/{name}");
+        let href = format!("{path}/");
+        client
+            .request("MKCOL", &path, "")
+            .await
+            .with_status(StatusCode::CREATED);
+        client
+            .propfind(&path, ["D:getetag"])
+            .await
+            .with_hrefs([href.as_str()]);
+    }
+
     // Delete everything
     for path in [
+        "/dav/file/john%40example.com/My%20Folder",
+        "/dav/file/john%40example.com/file(1)+a:b",
+        "/dav/file/john%40example.com/%C3%9Cnterlagen",
+        "/dav/file/john%40example.com/Q&A",
         "/dav/file/john%40example.com/my-files",
         "/dav/card/john%40example.com/my-cards",
         "/dav/cal/john%40example.com/my-events",

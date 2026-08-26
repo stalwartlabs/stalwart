@@ -42,7 +42,7 @@ pub trait SpamFilterAnalyzeScore: Sync + Send {
 
 #[derive(Debug, Default)]
 pub struct SpamFilterScore {
-    pub results: Vec<bool>,
+    pub results: Vec<f32>,
     pub headers: String,
     pub train_spam: Option<bool>,
     pub score: f32,
@@ -86,10 +86,7 @@ impl SpamFilterAnalyzeScore for Server {
         let mut final_score = ctx.result.score;
         let mut avg_confidence: f32 = 0.0;
         let mut total_results = 0;
-        let mut user_results = vec![
-            ctx.result.score >= self.core.spam.scores.spam_threshold;
-            ctx.input.env_rcpt_rewritten_to.len()
-        ];
+        let mut user_results = vec![ctx.result.score; ctx.input.env_rcpt_rewritten_to.len()];
         if !ctx.result.classifier_confidence.is_empty() {
             for (idx, &confidence) in ctx.result.classifier_confidence.iter().enumerate() {
                 if let Some(confidence) = confidence {
@@ -106,8 +103,7 @@ impl SpamFilterAnalyzeScore for Server {
                         .copied()
                         .unwrap_or_default();
 
-                    user_results[idx] =
-                        ctx.result.score + user_score >= self.core.spam.scores.spam_threshold;
+                    user_results[idx] = ctx.result.score + user_score;
                 }
             }
 

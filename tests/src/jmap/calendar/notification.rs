@@ -133,7 +133,6 @@ pub async fn test(test: &TestServer) {
           "isDraft": false,
           "event": john_event
             .clone()
-            .with_property("sequence", 1)
             .with_property(
                 "updated",
                 notification

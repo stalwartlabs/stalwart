@@ -483,6 +483,22 @@ impl AccessToken {
         self.inner.account_id == account_id
     }
 
+    pub fn personal_id(&self, account_id: u32, collection: Collection) -> u32 {
+        let child_collection = collection.child_collection();
+        if self.is_account_id(account_id)
+            || self.inner.member_of.contains(&account_id)
+            || self.inner.access_to.iter().any(|a| {
+                a.account_id == account_id
+                    && (a.collections.contains(collection)
+                        || child_collection.is_some_and(|child| a.collections.contains(child)))
+            })
+        {
+            self.inner.account_id
+        } else {
+            account_id
+        }
+    }
+
     #[inline(always)]
     pub fn has_permission(&self, permission: Permission) -> bool {
         self.inner

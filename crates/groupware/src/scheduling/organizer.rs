@@ -384,6 +384,7 @@ pub(crate) fn organizer_request_full(
         message.components[comp_id] = comp.clone();
     }
     message.components[0].component_ids.sort_unstable();
+    message.add_missing_timezones();
 
     if !recipients.is_empty() {
         Ok(vec![ItipMessage {

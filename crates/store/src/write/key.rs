@@ -728,6 +728,10 @@ impl ValueClass {
     }
 }
 
+pub fn is_node_id_key(key: &[u8]) -> bool {
+    key.len() == U16_LEN + 1 && key.first().is_some_and(|kind| *kind == SystemKind::NodeId as u8)
+}
+
 impl From<ValueClass> for ValueKey<ValueClass> {
     fn from(class: ValueClass) -> Self {
         ValueKey {

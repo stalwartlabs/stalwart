@@ -12,6 +12,7 @@ use common::{
     KV_OAUTH, Server,
     auth::{
         AuthRequest,
+        authentication::UsernameParts,
         oauth::{
             CLIENT_ID_MAX_LEN, DEVICE_CODE_LEN, SUPPORTED_SCOPES, USER_CODE_ALPHABET,
             USER_CODE_LEN,
@@ -37,7 +38,6 @@ use store::{
     write::ArchiveBytes,
 };
 use trc::AddContext;
-use utils::DomainPart;
 
 #[derive(Debug, serde::Serialize)]
 pub struct ProtectedResourceMetadata {
@@ -143,8 +143,15 @@ impl OAuthApiHandler for Server {
         session: &HttpSessionData,
         account_name: &str,
     ) -> trc::Result<HttpResponse> {
-        let account_name = account_name.trim().to_lowercase();
-        if let Some(domain_name) = account_name.try_domain_part()
+        let username = UsernameParts::new(account_name.trim());
+        let auth_as = username.auth_as();
+        let is_recovery_admin = self
+            .registry()
+            .recovery_admin()
+            .is_some_and(|(user, _)| user.trim().eq_ignore_ascii_case(auth_as.address()));
+
+        if !is_recovery_admin
+            && let Some(domain_name) = auth_as.domain().filter(|domain| !domain.is_empty())
             && let Some(endpoint) = self
                 .get_directory_for_domain(domain_name)
                 .await?

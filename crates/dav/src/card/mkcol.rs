@@ -102,7 +102,7 @@ impl CardMkColRequestHandler for Server {
         if let Some(mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
             if !self.apply_addressbook_properties(
-                access_token,
+                access_token.personal_id(account_id, Collection::AddressBook),
                 &mut book,
                 false,
                 mkcol.props,

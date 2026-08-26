@@ -56,9 +56,11 @@ enum TaskStatus {
 #[derive(Debug, Deserialize)]
 struct MeiliSearchResponse {
     hits: Vec<MeiliHit>,
-    //#[allow(dead_code)]
-    //#[serde(default, rename = "estimatedTotalHits")]
-    //estimated_total_hits: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MeiliDocumentsResponse {
+    results: Vec<MeiliHit>,
 }
 
 #[derive(Debug, Deserialize)]

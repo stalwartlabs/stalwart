@@ -55,6 +55,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
 
     code.push_str("#[derive(Debug, Clone)]\n");
     code.push_str("pub struct Locale {\n");
+    code.push_str("    pub name: &'static str,\n");
 
     for key in locales.keys() {
         code.push_str(&format!("    pub {}: &'static str,\n", key));
@@ -74,6 +75,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
             "pub static {}_LOCALES: Locale = Locale {{\n",
             lang.to_uppercase()
         ));
+        code.push_str(&format!("    name: {lang:?},\n"));
 
         for (key, translations) in locales {
             let value = translations
@@ -86,11 +88,31 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
     }
 
     code.push_str("pub fn locale(name: &str) -> Option<&'static Locale> {\n");
-    code.push_str("    hashify::tiny_map!(name.as_bytes(),\n");
+    code.push_str("    hashify::tiny_map_ignore_case!(name.as_bytes(),\n");
     for lang in &languages {
         code.push_str(&format!(
             "        \"{}\" => &{}_LOCALES,\n",
             lang,
+            lang.to_uppercase()
+        ));
+    }
+    code.push_str("    )\n");
+    code.push_str("}\n\n");
+
+    // Maps a bare language tag onto the regional locale shipped for it
+    let mut by_language: Vec<(&str, &str)> = languages
+        .iter()
+        .map(|lang| (lang.split('_').next().unwrap_or(lang), lang.as_str()))
+        .collect();
+    by_language.sort_unstable();
+    by_language.dedup_by_key(|(language, _)| *language);
+
+    code.push_str("pub fn locale_by_language(language: &str) -> Option<&'static Locale> {\n");
+    code.push_str("    hashify::tiny_map_ignore_case!(language.as_bytes(),\n");
+    for (language, lang) in by_language {
+        code.push_str(&format!(
+            "        \"{}\" => &{}_LOCALES,\n",
+            language,
             lang.to_uppercase()
         ));
     }

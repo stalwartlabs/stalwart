@@ -321,12 +321,12 @@ ADR;TYPE=branch;LABEL="25 Innovation Street\nManchester, M1 5QF\nUnited Kin
 URL;TYPE=WORK:https://www.acme-solutions.example
 URL;TYPE=support:https://support.acme-solutions.example
 CATEGORIES:Technology,B2B,Solutions,Services
-NOTE:Business hours: Mon-Fri 9:00-17:30 GMT. Closed on UK bank holidays. VAT
-  Reg: GB123456789
+NOTE:Business hours: Mon-Fri 9:00-17:30 GMT. Closed on UK bank holidays. VA
+ T Reg: GB123456789
 TZ:Z
 GEO:51.5074;-0.1278
-KEY;TYPE=PGP:https://pgp.example.com/pks/lookup?op=get&search=info@acme-solu
- tions.example
+KEY;TYPE=PGP:https://pgp.example.com/pks/lookup?op=get&search=info@acme-sol
+ utions.example
 UID:urn:uuid:a9e95948-7b1c-46e8-bd85-c729a9e910f2
 REV:20230415T153000Z
 LANG;TYPE=WORK;PREF=1:en

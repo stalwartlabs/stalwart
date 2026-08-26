@@ -154,14 +154,14 @@ SUMMARY:Conference
 DTEND:19970701T2100000Z
 DTSTART:19970701T200000Z
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
-ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=NEEDS-ACTION:mailto:b@exa
- mple.com
-ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=NEEDS-ACTION:mailto:d@exa
- mple.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=NEEDS-ACTION:mailto:b@ex
+ ample.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN=B;PARTSTAT=NEEDS-ACTION:mailto:d@ex
+ ample.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777@example.com
 DTSTAMP:0
-SEQUENCE:1
+SEQUENCE:0
 END:VEVENT
 END:VCALENDAR
 
@@ -374,7 +374,7 @@ MultipleObjectInstances
 
 > reset
 
-# Attendee whose mailto URI percent-encodes a display name is skipped
+# Attendee whose mailto URI percent-encodes a display name is invited at the enclosed addr-spec
 > put a@example.com percent-encoded-attendee@example.com
 BEGIN:VCALENDAR
 PRODID:-//Example/ExampleCalendarClient//EN
@@ -383,7 +383,6 @@ BEGIN:VEVENT
 ORGANIZER:mailto:a@example.com
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
 ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe";EMAIL="John Doe <john.doe@example.net>":mailto:john%20doe%20%3Cjohn.doe@example.net%3E
-ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe":mailto:john.doe@example.net
 DTSTAMP:19970611T190000Z
 DTSTART:19970701T200000Z
 DTEND:19970701T210000Z
@@ -411,15 +410,13 @@ SUMMARY:Conference
 DTEND:19970701T210000Z
 DTSTART:19970701T200000Z
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
-ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe";PARTSTAT=NEEDS-ACTION:mai
- lto:john.doe@example.net
 ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="John Doe";EMAIL="John Doe <john.do
- e@example.net>";PARTSTAT=NEEDS-ACTION:mailto:john%20doe%20%3Cjohn.doe@examp
- le.net%3E
+ e@example.net>";PARTSTAT=NEEDS-ACTION:mailto:john%20doe%20%3Cjohn.doe@exam
+ ple.net%3E
 ORGANIZER:mailto:a@example.com
 UID:percent-encoded-attendee@example.com
 DTSTAMP:0
-SEQUENCE:1
+SEQUENCE:0
 END:VEVENT
 END:VCALENDAR
 
@@ -461,12 +458,55 @@ SUMMARY:Conference
 DTEND:19970701T210000Z
 DTSTART:19970701T200000Z
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
-ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Jane Doe";PARTSTAT=NEEDS-ACTION:mai
- lto:jane%2Edoe@example.net?subject=Conference
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Jane Doe";PARTSTAT=NEEDS-ACTION:ma
+ ilto:jane%2Edoe@example.net?subject=Conference
 ORGANIZER:mailto:a@example.com
 UID:percent-encoded-addrspec@example.com
 DTSTAMP:0
-SEQUENCE:1
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+> reset
+
+# Attendee whose address cannot be parsed is flagged with SCHEDULE-STATUS 3.7
+> put a@example.com unreachable-attendee@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+ORGANIZER:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Jane Doe":mailto:jane.doe@example.net
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Mike Douglass":mailto:not-a-calendar-user
+DTSTAMP:19970611T190000Z
+DTSTART:19970701T200000Z
+DTEND:19970701T210000Z
+SUMMARY:Conference
+UID:unreachable-attendee@example.com
+SEQUENCE:0
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR
+
+> get a@example.com unreachable-attendee@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+STATUS:CONFIRMED
+SUMMARY:Conference
+DTEND:19970701T210000Z
+DTSTART:19970701T200000Z
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=A:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Jane Doe":mailto:jane.doe@example.
+ net
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL;CN="Mike Douglass";SCHEDULE-STATUS=3.7
+ :mailto:not-a-calendar-user
+ORGANIZER:mailto:a@example.com
+UID:unreachable-attendee@example.com
+DTSTAMP:0
+SEQUENCE:0
 END:VEVENT
 END:VCALENDAR
 

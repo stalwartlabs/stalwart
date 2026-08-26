@@ -1,0 +1,271 @@
+{
+  "mailboxIds": {
+    "a": true
+  },
+  "keywords": {
+    "$hasattachment": true,
+    "tag": true
+  },
+  "size": 1198,
+  "receivedAt": "2007-12-18T17:46:40Z",
+  "from": [
+    {
+      "name": "Jane Smith",
+      "email": "jane@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "John Doe",
+      "email": "jdoe@example.com"
+    }
+  ],
+  "subject": "Project sync",
+  "sentAt": "2025-04-15T09:12:33Z",
+  "bodyStructure": {
+    "headers": [
+      {
+        "name": "From",
+        "value": " Jane Smith <jane@example.com>"
+      },
+      {
+        "name": "To",
+        "value": " John Doe <jdoe@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": " Project sync"
+      },
+      {
+        "name": "Date",
+        "value": " Tue, 15 Apr 2025 09:12:33 +0000"
+      },
+      {
+        "name": "MIME-Version",
+        "value": " 1.0"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed; boundary=\"outer\""
+      }
+    ],
+    "type": "multipart/mixed",
+    "subParts": [
+      {
+        "partId": "1",
+        "blobId": "blob_0",
+        "size": 47,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/plain; charset=utf-8"
+          }
+        ],
+        "type": "text/plain",
+        "charset": "utf-8"
+      },
+      {
+        "partId": "2",
+        "blobId": "blob_1",
+        "size": 299,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/calendar; charset=utf-8; method=REQUEST"
+          }
+        ],
+        "type": "text/calendar",
+        "charset": "utf-8"
+      },
+      {
+        "partId": "3",
+        "blobId": "blob_2",
+        "size": 60,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/plain; charset=utf-8; name=\"notes.txt\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": " attachment; filename=\"notes.txt\""
+          }
+        ],
+        "name": "notes.txt",
+        "type": "text/plain",
+        "charset": "utf-8",
+        "disposition": "attachment"
+      },
+      {
+        "partId": "4",
+        "blobId": "blob_3",
+        "size": 51,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/html; charset=utf-8; name=\"report.html\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": " attachment; filename=\"report.html\""
+          }
+        ],
+        "name": "report.html",
+        "type": "text/html",
+        "charset": "utf-8",
+        "disposition": "attachment"
+      },
+      {
+        "partId": "5",
+        "blobId": "blob_4",
+        "size": 11,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " application/octet-stream; name=\"blob.bin\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": " attachment; filename=\"blob.bin\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " base64"
+          }
+        ],
+        "name": "blob.bin",
+        "type": "application/octet-stream",
+        "disposition": "attachment"
+      }
+    ]
+  },
+  "bodyValues": {
+    "1": {
+      "value": "Please find the invite and the notes attached.\n",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "2": {
+      "value": "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Example Corp//Scheduler//EN\nMETHOD:REQUEST\nBEGIN:VEVENT\nUID...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    },
+    "3": {
+      "value": "Agenda:\n- Review the milestones\n- Agree on the release date\n",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "4": {
+      "value": "<html><body><p>Quarterly report.</p></body></html>\n",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "textBody": [
+    {
+      "partId": "1",
+      "blobId": "blob_0",
+      "size": 47,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8"
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "1",
+      "blobId": "blob_0",
+      "size": 47,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8"
+    }
+  ],
+  "attachments": [
+    {
+      "partId": "2",
+      "blobId": "blob_1",
+      "size": 299,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/calendar; charset=utf-8; method=REQUEST"
+        }
+      ],
+      "type": "text/calendar",
+      "charset": "utf-8"
+    },
+    {
+      "partId": "3",
+      "blobId": "blob_2",
+      "size": 60,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8; name=\"notes.txt\""
+        },
+        {
+          "name": "Content-Disposition",
+          "value": " attachment; filename=\"notes.txt\""
+        }
+      ],
+      "name": "notes.txt",
+      "type": "text/plain",
+      "charset": "utf-8",
+      "disposition": "attachment"
+    },
+    {
+      "partId": "4",
+      "blobId": "blob_3",
+      "size": 51,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/html; charset=utf-8; name=\"report.html\""
+        },
+        {
+          "name": "Content-Disposition",
+          "value": " attachment; filename=\"report.html\""
+        }
+      ],
+      "name": "report.html",
+      "type": "text/html",
+      "charset": "utf-8",
+      "disposition": "attachment"
+    },
+    {
+      "partId": "5",
+      "blobId": "blob_4",
+      "size": 11,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " application/octet-stream; name=\"blob.bin\""
+        },
+        {
+          "name": "Content-Disposition",
+          "value": " attachment; filename=\"blob.bin\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
+        }
+      ],
+      "name": "blob.bin",
+      "type": "application/octet-stream",
+      "disposition": "attachment"
+    }
+  ],
+  "hasAttachment": true,
+  "preview": "Please find the invite and the notes attached.\n"
+}

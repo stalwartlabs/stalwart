@@ -8,7 +8,6 @@ use crate::{
     utils::{server::TestServer, webdav::DummyWebDavClient},
     webdav::prop::ALL_DAV_PROPERTIES,
 };
-
 use calcard::{
     common::timezone::Tz,
     icalendar::{
@@ -20,14 +19,69 @@ use dav_proto::schema::property::{CalDavProperty, DavProperty, WebDavProperty};
 use email::cache::MessageCacheFetch;
 use groupware::{
     cache::GroupwareCache,
+    calendar::{CalendarEvent, EVENT_HIDE_ATTENDEES, itip::ItipIngest},
     scheduling::{ItipField, ItipParticipant, ItipSummary, ItipTime, ItipValue},
 };
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
+use serde_json::{Value, json};
 use services::task_manager::tasks::imip::build_itip_template;
 use std::str::FromStr;
-use store::write::now;
-use types::collection::SyncCollection;
+use store::{
+    ValueKey,
+    write::{Archive, ArchiveBytes, BatchBuilder, now},
+};
+use types::collection::{Collection, SyncCollection};
+
+async fn set_hide_attendees(test: &TestServer, account_id: u32, document_id: u32) {
+    let archive = test
+        .server
+        .store()
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+            account_id,
+            Collection::CalendarEvent,
+            document_id,
+        ))
+        .await
+        .unwrap()
+        .expect("Missing event");
+    let previous = archive.to_unarchived::<CalendarEvent>().unwrap();
+    let mut event = previous.deserialize::<CalendarEvent>().unwrap();
+    event.flags |= EVENT_HIDE_ATTENDEES;
+
+    let account_info = test.server.account_info(account_id).await.unwrap();
+    let mut batch = BatchBuilder::new();
+    event
+        .update(
+            account_info.account_tenant_ids(),
+            previous,
+            account_id,
+            document_id,
+            &mut batch,
+        )
+        .unwrap();
+    test.server.commit_batch(batch).await.unwrap();
+}
+
+async fn rsvp_request(client: &DummyWebDavClient, body: &Value) -> Value {
+    let response = client
+        .request_with_headers(
+            "POST",
+            "/api/calendar/rsvp",
+            [("content-type", "application/json")],
+            body.to_string(),
+        )
+        .await
+        .with_status(StatusCode::OK)
+        .body
+        .unwrap();
+
+    serde_json::from_str(&response).expect("Invalid JSON in RSVP response")
+}
+
+fn unfold(ical: &str) -> String {
+    ical.replace("\r\n ", "")
+}
 
 pub async fn test(test: &TestServer) {
     println!("Running calendar scheduling tests...");
@@ -214,7 +268,7 @@ pub async fn test(test: &TestServer) {
     assert_eq!(itips.len(), 1);
     let itip = itips.first().unwrap();
     assert!(
-        itip.contains("SUMMARY:Lunch") && itip.contains("METHOD:REQUEST"),
+        unfold(itip).contains("SUMMARY:Lunch") && unfold(itip).contains("METHOD:REQUEST"),
         "failed for itip: {itip}"
     );
 
@@ -267,17 +321,15 @@ pub async fn test(test: &TestServer) {
     let itips = john_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     assert!(
-        itips[0].contains("METHOD:REPLY")
-            && itips[0].contains("PARTSTAT=ACCEPTED:mailto:jane.smith"),
+        unfold(&itips[0]).contains("METHOD:REPLY")
+            && unfold(&itips[0]).contains("PARTSTAT=ACCEPTED:mailto:jane.smith"),
         "failed for itip: {}",
         itips[0]
     );
     let cals = john_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     assert!(
-        cals[0]
-            .ical
-            .contains("PARTSTAT=ACCEPTED;SCHEDULE-STATUS=2.0:mailto:jane"),
+        unfold(&cals[0].ical).contains("PARTSTAT=ACCEPTED;SCHEDULE-STATUS=2.0:mailto:jane"),
         "failed for cal: {}",
         cals[0].ical
     );
@@ -308,8 +360,8 @@ pub async fn test(test: &TestServer) {
     let itips = john_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     assert!(
-        itips[0].contains("METHOD:REPLY")
-            && itips[0].contains("PARTSTAT=DECLINED:mailto:jane.smith"),
+        unfold(&itips[0]).contains("METHOD:REPLY")
+            && unfold(&itips[0]).contains("PARTSTAT=DECLINED:mailto:jane.smith"),
         "failed for itip: {}",
         itips[0]
     );
@@ -317,7 +369,7 @@ pub async fn test(test: &TestServer) {
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
-        cal.ical.contains("PARTSTAT=DECLINED:mailto:jane"),
+        unfold(&cal.ical).contains("PARTSTAT=DECLINED;SCHEDULE-STATUS=2.0:mailto:jane"),
         "failed for cal: {}",
         cal.ical
     );
@@ -353,24 +405,373 @@ pub async fn test(test: &TestServer) {
         .unwrap_or_else(|| {
             panic!("Failed to find RSVP link in email contents: {contents}");
         });
-    let response = jane_client
-        .request("GET", url, "")
-        .await
-        .with_status(StatusCode::OK)
-        .body
-        .unwrap();
+    let bill_token = reqwest::Url::parse(&format!("https://webdav.example.org{url}"))
+        .expect("Invalid RSVP URL")
+        .query_pairs()
+        .find(|(key, _)| key == "i")
+        .map(|(_, token)| token.into_owned())
+        .expect("Missing RSVP token");
+    let details = rsvp_request(&jane_client, &json!({ "token": bill_token })).await;
+    assert_eq!(details["type"], "invitation", "failed for {details}");
+    assert_eq!(details["summary"], "Lunch", "failed for {details}");
+    let recorded = rsvp_request(
+        &jane_client,
+        &json!({ "token": bill_token, "partstat": "accepted", "comment": "Bringing dessert" }),
+    )
+    .await;
+    assert_eq!(recorded["type"], "recorded", "failed for {recorded}");
+
+    // The attendee's own copy reflects the response
+    let cals = bill_client.fetch_icals().await;
+    assert_eq!(cals.len(), 1);
+    let cal = cals.into_iter().next().unwrap();
     assert!(
-        response.contains("Lunch") && response.contains("RSVP has been recorded"),
-        "failed for response: {response}"
+        unfold(&cal.ical).contains("PARTSTAT=ACCEPTED:mailto:bill"),
+        "failed for cal: {}",
+        cal.ical
+    );
+
+    // The reply lands in the organizer's scheduling inbox, carrying the attendee's comment
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let itips = john_client.fetch_and_remove_itips().await;
+    assert_eq!(itips.len(), 1);
+    assert!(
+        unfold(&itips[0]).contains("METHOD:REPLY")
+            && unfold(&itips[0]).contains("PARTSTAT=ACCEPTED:mailto:bill")
+            && unfold(&itips[0]).contains("COMMENT:Bringing dessert")
+            && unfold(&itips[0]).contains("REQUEST-STATUS:2.0;Success"),
+        "failed for itip: {}",
+        itips[0]
     );
     let cals = john_client.fetch_icals().await;
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
-        cal.ical.contains("PARTSTAT=ACCEPTED:mailto:bill"),
+        unfold(&cal.ical).contains("PARTSTAT=ACCEPTED;SCHEDULE-STATUS=2.0:mailto:bill"),
         "failed for cal: {}",
         cal.ical
     );
+
+    // RSVP on behalf of an attendee that has no local account
+    let test_itip_external = TEST_ITIP_EXTERNAL
+        .replace(
+            "$START",
+            &DateTime::from_timestamp(now() as i64 + 60 * 60)
+                .to_rfc3339()
+                .replace(['-', ':'], ""),
+        )
+        .replace(
+            "$END",
+            &DateTime::from_timestamp(now() as i64 + 5 * 60 * 60)
+                .to_rfc3339()
+                .replace(['-', ':'], ""),
+        );
+    john_client
+        .request_with_headers(
+            "PUT",
+            "/dav/cal/john%40example.com/default/external.ics",
+            [("content-type", "text/calendar; charset=utf-8")],
+            &test_itip_external,
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    let external_document_id = test
+        .server
+        .fetch_dav_resources(
+            john_client.account_id,
+            john_client.account_id,
+            SyncCollection::Calendar,
+        )
+        .await
+        .unwrap()
+        .by_path("default/external.ics")
+        .unwrap()
+        .document_id();
+    let url = test
+        .server
+        .http_rsvp_url(
+            john_client.account_id,
+            "john@example.com",
+            external_document_id,
+            "carol@remote.org",
+        )
+        .await
+        .unwrap()
+        .url(&ICalendarParticipationStatus::Accepted);
+    let rsvp_token = reqwest::Url::parse(&url)
+        .expect("Invalid RSVP URL")
+        .query_pairs()
+        .find(|(key, _)| key == "i")
+        .map(|(_, token)| token.into_owned())
+        .expect("Missing RSVP token");
+
+    // The RSVP page is static and must never record a response by itself
+    let page = john_client
+        .request("GET", "/calendar/rsvp", "")
+        .await
+        .with_status(StatusCode::OK)
+        .body
+        .unwrap();
+    assert!(
+        page.contains("/api/calendar/rsvp"),
+        "failed for page: {page}"
+    );
+
+    // Fetching the invitation details must not change the participation status
+    let details = rsvp_request(&john_client, &json!({ "token": rsvp_token })).await;
+    assert_eq!(details["type"], "invitation", "failed for {details}");
+    assert_eq!(details["summary"], "Brunch", "failed for {details}");
+    assert_eq!(details["partstat"], "NEEDS-ACTION", "failed for {details}");
+    assert_eq!(
+        details["attendee"]["email"], "carol@remote.org",
+        "failed for {details}"
+    );
+
+    // An unknown token is rejected without leaking whether the event exists
+    let invalid = rsvp_request(&john_client, &json!({ "token": "not-a-token" })).await;
+    assert_eq!(invalid["type"], "error", "failed for {invalid}");
+    assert_eq!(invalid["reason"], "invalidLink", "failed for {invalid}");
+
+    // An unparseable participation status is an error, not a silent details response
+    let bad_status = rsvp_request(
+        &john_client,
+        &json!({ "token": rsvp_token, "partstat": "accpeted" }),
+    )
+    .await;
+    assert_eq!(bad_status["type"], "error", "failed for {bad_status}");
+    assert_eq!(
+        bad_status["reason"], "invalidPartStat",
+        "failed for {bad_status}"
+    );
+
+    // Record the response
+    let recorded = rsvp_request(
+        &john_client,
+        &json!({ "token": rsvp_token, "partstat": "accepted", "comment": "See you there" }),
+    )
+    .await;
+    assert_eq!(recorded["type"], "recorded", "failed for {recorded}");
+    assert_eq!(recorded["partstat"], "ACCEPTED", "failed for {recorded}");
+    let external_cal = john_client
+        .fetch_icals()
+        .await
+        .into_iter()
+        .find(|cal| cal.href.ends_with("external.ics"))
+        .expect("Missing external event");
+    assert!(
+        unfold(&external_cal.ical)
+            .contains("PARTSTAT=ACCEPTED;SCHEDULE-STATUS=2.0:mailto:carol@remote.org"),
+        "failed for cal: {}",
+        external_cal.ical
+    );
+
+    // The reply from an external attendee also reaches the organizer's scheduling inbox
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let itips = john_client.fetch_and_remove_itips().await;
+    assert_eq!(itips.len(), 1);
+    assert!(
+        unfold(&itips[0]).contains("METHOD:REPLY")
+            && unfold(&itips[0]).contains("PARTSTAT=ACCEPTED:mailto:carol@remote.org")
+            && unfold(&itips[0]).contains("COMMENT:See you there")
+            && unfold(&itips[0]).contains("REQUEST-STATUS:2.0;Success"),
+        "failed for itip: {}",
+        itips[0]
+    );
+
+    // Re-sending the same response is a no-op that produces no further reply
+    let repeated = rsvp_request(
+        &john_client,
+        &json!({ "token": rsvp_token, "partstat": "accepted" }),
+    )
+    .await;
+    assert_eq!(repeated["type"], "recorded", "failed for {repeated}");
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(
+        john_client.fetch_and_remove_itips().await,
+        Vec::<String>::new()
+    );
+    john_client
+        .request("DELETE", &external_cal.href, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
+    // A recurring event is answered as a whole: the master and every overridden
+    // instance the attendee appears in must all be updated by a single RSVP
+    let ts = now() as i64;
+    let stamp = |offset: i64| {
+        DateTime::from_timestamp(ts + offset)
+            .to_rfc3339()
+            .replace(['-', ':'], "")
+    };
+    let test_itip_recurring = TEST_ITIP_RECURRING
+        .replace("$START", &stamp(60 * 60))
+        .replace("$END", &stamp(2 * 60 * 60))
+        .replace("$SECOND_END", &stamp(7 * 24 * 60 * 60 + 3 * 60 * 60))
+        .replace("$SECOND", &stamp(7 * 24 * 60 * 60 + 60 * 60));
+    john_client
+        .request_with_headers(
+            "PUT",
+            "/dav/cal/john%40example.com/default/recurring.ics",
+            [("content-type", "text/calendar; charset=utf-8")],
+            &test_itip_recurring,
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    let recurring_document_id = test
+        .server
+        .fetch_dav_resources(
+            john_client.account_id,
+            john_client.account_id,
+            SyncCollection::Calendar,
+        )
+        .await
+        .unwrap()
+        .by_path("default/recurring.ics")
+        .unwrap()
+        .document_id();
+    let recurring_url = test
+        .server
+        .http_rsvp_url(
+            john_client.account_id,
+            "john@example.com",
+            recurring_document_id,
+            "carol@remote.org",
+        )
+        .await
+        .unwrap()
+        .url(&ICalendarParticipationStatus::Accepted);
+    let recurring_token = reqwest::Url::parse(&recurring_url)
+        .expect("Invalid RSVP URL")
+        .query_pairs()
+        .find(|(key, _)| key == "i")
+        .map(|(_, token)| token.into_owned())
+        .expect("Missing RSVP token");
+
+    let recorded = rsvp_request(
+        &john_client,
+        &json!({ "token": recurring_token, "partstat": "declined" }),
+    )
+    .await;
+    assert_eq!(recorded["type"], "recorded", "failed for {recorded}");
+
+    let recurring_cal = john_client
+        .fetch_icals()
+        .await
+        .into_iter()
+        .find(|cal| cal.href.ends_with("recurring.ics"))
+        .expect("Missing recurring event");
+    let recurring_ical = unfold(&recurring_cal.ical);
+    assert_eq!(
+        recurring_ical
+            .matches("PARTSTAT=DECLINED;SCHEDULE-STATUS=2.0:mailto:carol@remote.org")
+            .count(),
+        2,
+        "both the master and the override must be updated: {recurring_ical}"
+    );
+
+    // Repeating the same answer is still reported as recorded, but sends no second reply
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    john_client.fetch_and_remove_itips().await;
+    let repeated = rsvp_request(
+        &john_client,
+        &json!({ "token": recurring_token, "partstat": "declined" }),
+    )
+    .await;
+    assert_eq!(repeated["type"], "recorded", "failed for {repeated}");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(
+        john_client.fetch_and_remove_itips().await,
+        Vec::<String>::new(),
+        "a repeated RSVP must not produce another reply"
+    );
+    john_client
+        .request("DELETE", &recurring_cal.href, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
+    // hideAttendees restricts the RSVP response to the organizer and the requester
+    let test_itip_hidden = TEST_ITIP_HIDDEN
+        .replace("$START", &stamp(60 * 60))
+        .replace("$END", &stamp(2 * 60 * 60));
+    john_client
+        .request_with_headers(
+            "PUT",
+            "/dav/cal/john%40example.com/default/hidden.ics",
+            [("content-type", "text/calendar; charset=utf-8")],
+            &test_itip_hidden,
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    let hidden_document_id = test
+        .server
+        .fetch_dav_resources(
+            john_client.account_id,
+            john_client.account_id,
+            SyncCollection::Calendar,
+        )
+        .await
+        .unwrap()
+        .by_path("default/hidden.ics")
+        .unwrap()
+        .document_id();
+    let hidden_url = test
+        .server
+        .http_rsvp_url(
+            john_client.account_id,
+            "john@example.com",
+            hidden_document_id,
+            "carol@remote.org",
+        )
+        .await
+        .unwrap()
+        .url(&ICalendarParticipationStatus::Accepted);
+    let hidden_token = reqwest::Url::parse(&hidden_url)
+        .expect("Invalid RSVP URL")
+        .query_pairs()
+        .find(|(key, _)| key == "i")
+        .map(|(_, token)| token.into_owned())
+        .expect("Missing RSVP token");
+
+    // With the flag clear every participant is listed
+    let details = rsvp_request(&john_client, &json!({ "token": hidden_token })).await;
+    let emails = |details: &Value| {
+        details["attendees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["email"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        emails(&details),
+        vec![
+            "jdoe@example.com".to_string(),
+            "carol@remote.org".to_string(),
+            "dave@remote.org".to_string()
+        ],
+        "failed for {details}"
+    );
+
+    // With it set, the other attendee is withheld
+    set_hide_attendees(test, john_client.account_id, hidden_document_id).await;
+    let details = rsvp_request(&john_client, &json!({ "token": hidden_token })).await;
+    assert_eq!(
+        emails(&details),
+        vec![
+            "jdoe@example.com".to_string(),
+            "carol@remote.org".to_string()
+        ],
+        "dave must not be disclosed when hideAttendees is set: {details}"
+    );
+    john_client
+        .request(
+            "DELETE",
+            "/dav/cal/john%40example.com/default/hidden.ics",
+            "",
+        )
+        .await
+        .with_status(StatusCode::NO_CONTENT);
 
     // Test the schedule outbox
     let test_outbox = TEST_FREEBUSY
@@ -414,12 +815,12 @@ pub async fn test(test: &TestServer) {
             }
             "A:schedule-response.A:response.A:calendar-data" => {
                 assert!(
-                    value.contains("BEGIN:VFREEBUSY"),
+                    unfold(value).contains("BEGIN:VFREEBUSY"),
                     "missing freebusy data in response: {response:?}"
                 );
                 if account == "jdoe@example.com" {
                     assert!(
-                        value.contains("FREEBUSY;FBTYPE=BUSY:"),
+                        unfold(value).contains("FREEBUSY;FBTYPE=BUSY:"),
                         "missing freebusy data in response: {response:?}"
                     );
                     found_data = true;
@@ -457,7 +858,7 @@ pub async fn test(test: &TestServer) {
     test.wait_for_tasks().await;
     let mut itips = bill_client.fetch_and_remove_itips().await;
     itips.sort_unstable_by(|a, _| {
-        if a.contains("Lunch") {
+        if unfold(a).contains("Lunch") {
             std::cmp::Ordering::Less
         } else {
             std::cmp::Ordering::Greater
@@ -465,12 +866,13 @@ pub async fn test(test: &TestServer) {
     });
     assert_eq!(itips.len(), 2);
     assert!(
-        itips[0].contains("METHOD:REQUEST") && itips[0].contains("Lunch"),
+        unfold(&itips[0]).contains("METHOD:REQUEST") && unfold(&itips[0]).contains("Lunch"),
         "failed for itip: {}",
         itips[0]
     );
     assert!(
-        itips[1].contains("METHOD:REQUEST") && itips[1].contains("Breakfast at Tiffany's"),
+        unfold(&itips[1]).contains("METHOD:REQUEST")
+            && unfold(&itips[1]).contains("Breakfast at Tiffany's"),
         "failed for itip: {}",
         itips[1]
     );
@@ -478,8 +880,8 @@ pub async fn test(test: &TestServer) {
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
-        cal.ical.contains("SUMMARY:Breakfast at Tiffany's")
-            && cal.ical.contains("PARTSTAT=ACCEPTED:mailto:bill"),
+        unfold(&cal.ical).contains("SUMMARY:Breakfast at Tiffany's")
+            && unfold(&cal.ical).contains("PARTSTAT=ACCEPTED:mailto:bill"),
         "failed for cal: {}",
         cal.ical
     );
@@ -498,7 +900,8 @@ pub async fn test(test: &TestServer) {
     let itips = bill_client.fetch_and_remove_itips().await;
     assert_eq!(itips.len(), 1);
     assert!(
-        itips[0].contains("METHOD:CANCEL") && itips[0].contains("STATUS:CANCELLED"),
+        unfold(&itips[0]).contains("METHOD:CANCEL")
+            && unfold(&itips[0]).contains("STATUS:CANCELLED"),
         "failed for itip: {}",
         itips[0]
     );
@@ -506,7 +909,7 @@ pub async fn test(test: &TestServer) {
     assert_eq!(cals.len(), 1);
     let cal = cals.into_iter().next().unwrap();
     assert!(
-        cal.ical.contains("STATUS:CANCELLED"),
+        unfold(&cal.ical).contains("STATUS:CANCELLED"),
         "failed for cal: {}",
         cal.ical
     );
@@ -608,6 +1011,7 @@ pub async fn test_build_itip_templates(test: &TestServer) {
     let account = test.account("john@example.com");
     let account_id = account.id().document_id();
     let account_info = test.server.account_info(account_id).await.unwrap();
+    let out_dir = super::template_out_dir().expect("ITIP_TEMPLATES must be set");
 
     for (idx, summary) in [
         ItipSummary::Invite(vec![
@@ -622,6 +1026,10 @@ pub async fn test_build_itip_templates(test: &TestServer) {
             ItipField {
                 name: ICalendarProperty::Location,
                 value: ItipValue::Text("Cafe Corner".to_string()),
+            },
+            ItipField {
+                name: ICalendarProperty::Conference,
+                value: ItipValue::Text("https://meet.example.com/lunch".to_string()),
             },
             ItipField {
                 name: ICalendarProperty::Dtstart,
@@ -752,6 +1160,10 @@ pub async fn test_build_itip_templates(test: &TestServer) {
                     value: ItipValue::Text("Cafe Corner".to_string()),
                 },
                 ItipField {
+                    name: ICalendarProperty::Conference,
+                    value: ItipValue::Text("https://meet.example.com/lunch".to_string()),
+                },
+                ItipField {
                     name: ICalendarProperty::Dtstart,
                     value: ItipValue::Time(ItipTime {
                         start: 1750616068,
@@ -784,6 +1196,10 @@ pub async fn test_build_itip_templates(test: &TestServer) {
                     value: ItipValue::Text("Dinner at the cafe".to_string()),
                 },
                 ItipField {
+                    name: ICalendarProperty::Conference,
+                    value: ItipValue::Text("https://meet.example.com/dinner".to_string()),
+                },
+                ItipField {
                     name: ICalendarProperty::Dtstart,
                     value: ItipValue::Time(ItipTime {
                         start: 1750916068,
@@ -806,11 +1222,16 @@ pub async fn test_build_itip_templates(test: &TestServer) {
             &summary,
             "124",
         )
-        .await;
+        .await
+        .expect("Failed to build iTIP template");
 
-        println!("iTIP template {idx}: {}", html.subject);
-        std::fs::write(format!("itip_template_{idx}.html"), html.body)
-            .expect("Failed to write iTIP template to file");
+        let path = out_dir.join(format!("itip_template_{idx}.html"));
+        std::fs::write(&path, html.body).expect("Failed to write iTIP template to file");
+        println!(
+            "iTIP template {idx}: {} -> {}",
+            html.subject,
+            path.display()
+        );
     }
 }
 
@@ -828,6 +1249,71 @@ SUMMARY:Lunch
 ORGANIZER:mailto:jdoe@example.com
 ATTENDEE;CUTYPE=INDIVIDUAL:mailto:jane.smith@example.com
 ATTENDEE;CUTYPE=INDIVIDUAL:mailto:bill@example.com
+END:VEVENT
+END:VCALENDAR
+"#;
+
+const TEST_ITIP_EXTERNAL: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:AD9263504FD3
+SEQUENCE:0
+DTSTART:$START
+DTEND:$END
+DTSTAMP:20090602T170000Z
+TRANSP:OPAQUE
+SUMMARY:Brunch
+ORGANIZER:mailto:jdoe@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL:mailto:carol@remote.org
+END:VEVENT
+END:VCALENDAR
+"#;
+
+const TEST_ITIP_HIDDEN: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:HID9263504FD3
+SEQUENCE:0
+DTSTART:$START
+DTEND:$END
+DTSTAMP:20090602T170000Z
+TRANSP:OPAQUE
+SUMMARY:All hands
+ORGANIZER:mailto:jdoe@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL:mailto:carol@remote.org
+ATTENDEE;CUTYPE=INDIVIDUAL:mailto:dave@remote.org
+END:VEVENT
+END:VCALENDAR
+"#;
+
+const TEST_ITIP_RECURRING: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:REC9263504FD3
+SEQUENCE:0
+DTSTART:$START
+DTEND:$END
+DTSTAMP:20090602T170000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+TRANSP:OPAQUE
+SUMMARY:Weekly sync
+ORGANIZER:mailto:jdoe@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL:mailto:carol@remote.org
+END:VEVENT
+BEGIN:VEVENT
+UID:REC9263504FD3
+SEQUENCE:0
+RECURRENCE-ID:$SECOND
+DTSTART:$SECOND
+DTEND:$SECOND_END
+DTSTAMP:20090602T170000Z
+TRANSP:OPAQUE
+SUMMARY:Weekly sync (moved)
+ORGANIZER:mailto:jdoe@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL:mailto:carol@remote.org
 END:VEVENT
 END:VCALENDAR
 "#;

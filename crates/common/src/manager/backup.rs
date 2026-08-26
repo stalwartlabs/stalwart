@@ -261,6 +261,7 @@ fn spawn_writer(
             }
         }
 
+        let mut file = file.finish().failed("Failed to finish backup file");
         file.flush().failed("Failed to flush backup file");
     });
 
