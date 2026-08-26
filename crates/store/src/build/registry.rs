@@ -5,13 +5,13 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, RegistryStoreInner, Store, U16_LEN, U32_LEN, U64_LEN, ValueKey,
+    IterateParams, RegistryStore, RegistryStoreInner, Store, U64_LEN, ValueKey,
     backend::ephemeral::EphemeralStore,
     registry::local::RegistryInit,
     write::{
         BatchBuilder, ValueClass,
         assert::AssertValue,
-        key::{DeserializeBigEndian, KeySerializer},
+        key::{DeserializeBigEndian, KeySerializer, node_id_from_key},
         now,
     },
 };
@@ -106,8 +106,7 @@ impl RegistryStore {
                     )
                     .ascending(),
                     |key, value| {
-                        if key.len() == U16_LEN * 3 {
-                            let node_id = key.deserialize_be_u16(U32_LEN)?;
+                        if let Some(node_id) = node_id_from_key(key) {
                             let last_renewal = now.saturating_sub(value.deserialize_be_u64(0)?);
                             let hostname = value
                                 .get(U64_LEN..)
@@ -213,8 +212,7 @@ impl RegistryStore {
                 )
                 .ascending(),
                 |key, value| {
-                    if key.len() == U16_LEN * 3 {
-                        let node_id = key.deserialize_be_u16(U32_LEN)?;
+                    if let Some(node_id) = node_id_from_key(key) {
                         let last_renewal = value.deserialize_be_u64(0)?;
                         let last_renewal_since_now = now.saturating_sub(last_renewal);
                         let hostname = value

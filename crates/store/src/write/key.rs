@@ -728,8 +728,19 @@ impl ValueClass {
     }
 }
 
+pub fn node_id_from_key(key: &[u8]) -> Option<u16> {
+    match key {
+        [kind, node_id @ ..]
+            if *kind == SystemKind::NodeId as u8 && node_id.len() == U16_LEN =>
+        {
+            node_id.try_into().ok().map(u16::from_be_bytes)
+        }
+        _ => None,
+    }
+}
+
 pub fn is_node_id_key(key: &[u8]) -> bool {
-    key.len() == U16_LEN + 1 && key.first().is_some_and(|kind| *kind == SystemKind::NodeId as u8)
+    node_id_from_key(key).is_some()
 }
 
 impl From<ValueClass> for ValueKey<ValueClass> {
@@ -1004,5 +1015,31 @@ impl SearchIndex {
             "tracing" => Some(SearchIndex::Tracing),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Key, write::AnyClass};
+
+    #[test]
+    fn node_id_key_roundtrip() {
+        for node_id in [0u16, 1, 42, u16::MAX] {
+            let key = ValueKey::from(ValueClass::NodeId(node_id)).serialize(0);
+
+            assert_eq!(key.len(), ValueClass::NodeId(node_id).key_len_hint());
+            assert!(is_node_id_key(&key), "{node_id} produced {key:?}");
+            assert_eq!(node_id_from_key(&key), Some(node_id));
+        }
+
+        assert_eq!(
+            node_id_from_key(&ValueKey::from(ValueClass::Any(AnyClass {
+                subspace: Subspace::System,
+                key: vec![SystemKind::SchemaVersion as u8],
+            }))
+            .serialize(0)),
+            None
+        );
     }
 }
