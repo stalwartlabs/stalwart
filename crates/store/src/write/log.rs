@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::U16_LEN;
+use crate::{U16_LEN, U64_LEN};
 use ahash::AHashSet;
 use types::collection::{SyncCollection, VanishedCollection};
 use utils::{codec::leb128::Leb128Vec, map::vec_map::VecMap};
@@ -22,6 +22,12 @@ const _: () = assert!(CHANGE_LISTS == ITEM_DELETES + 1);
 const _: () = assert!(CHANGE_LISTS <= u8::BITS as usize);
 
 const CHANGE_SET_THRESHOLD: usize = 256;
+const CHANGE_SET_SCAN_LIMIT: usize = 32;
+
+const CONTAINER_BYTES_HINT: usize = 2;
+const ITEM_BYTES_HINT: usize = 2;
+const PREFIXED_ITEM_BYTES_HINT: usize = 3;
+const VANISHED_ID_BYTES_HINT: usize = 2;
 
 #[derive(Debug)]
 pub enum ChangeSet<T> {
@@ -87,6 +93,12 @@ impl<T: Copy + Eq + std::hash::Hash + Into<u64>> ChangeSet<T> {
     }
 
     pub fn remove(&mut self, value: &T) -> bool {
+        if let ChangeSet::Small(items) = self
+            && items.len() > CHANGE_SET_SCAN_LIMIT
+        {
+            *self = ChangeSet::Large(items.iter().copied().collect());
+        }
+
         match self {
             ChangeSet::Small(items) => {
                 if let Some(pos) = items.iter().position(|item| item == value) {
@@ -301,16 +313,17 @@ impl Changes {
             }
         }
 
+        let containers = self.container_inserts.len()
+            + self.container_updates.len()
+            + self.container_property_changes.len()
+            + self.container_deletes.len();
+        let items =
+            self.item_inserts.len() + self.item_updates.len() + self.item_deletes.len();
+
         let mut buf = Vec::with_capacity(
-            1 + (self.item_inserts.len()
-                + self.item_updates.len()
-                + self.item_deletes.len()
-                + self.container_inserts.len()
-                + self.container_updates.len()
-                + self.container_property_changes.len()
-                + self.container_deletes.len()
-                + 4)
-                * std::mem::size_of::<usize>(),
+            1 + CHANGE_LISTS
+                + (containers * CONTAINER_BYTES_HINT)
+                + (items * if is_prefixed { PREFIXED_ITEM_BYTES_HINT } else { ITEM_BYTES_HINT }),
         );
         buf.push(presence);
 
@@ -389,16 +402,55 @@ impl VanishedItem {
     }
 }
 
+fn shared_prefix_len(prev: &str, name: &str) -> usize {
+    let prev = prev.as_bytes();
+    let bytes = name.as_bytes();
+    let max_len = prev.len().min(bytes.len());
+    let mut len = 0;
+
+    while len + U64_LEN <= max_len {
+        let a = u64::from_le_bytes(prev[len..len + U64_LEN].try_into().unwrap());
+        let b = u64::from_le_bytes(bytes[len..len + U64_LEN].try_into().unwrap());
+        if a != b {
+            len += (a ^ b).trailing_zeros() as usize / 8;
+            break;
+        }
+        len += U64_LEN;
+    }
+    while len < max_len && prev[len] == bytes[len] {
+        len += 1;
+    }
+    while len > 0 && !name.is_char_boundary(len) {
+        len -= 1;
+    }
+
+    len
+}
+
 impl VanishedItems {
     pub fn serialize(&self, is_named: bool, scratch: &mut Vec<u64>) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.0.len() * 4 + 8);
+        let mut buf = Vec::with_capacity(if is_named {
+            self.0.iter().map(|item| item.serialized_size()).sum()
+        } else {
+            self.0.len() * VANISHED_ID_BYTES_HINT + U64_LEN
+        });
 
         if is_named {
+            let mut prev: Option<&str> = None;
+
             for item in &self.0 {
                 match item {
                     VanishedItem::Name(name) => {
-                        buf.push_leb128(name.len());
-                        buf.extend_from_slice(name.as_bytes());
+                        if let Some(prev) = prev {
+                            let shared = shared_prefix_len(prev, name);
+                            buf.push_leb128(shared);
+                            buf.push_leb128(name.len() - shared);
+                            buf.extend_from_slice(&name.as_bytes()[shared..]);
+                        } else {
+                            buf.push_leb128(name.len());
+                            buf.extend_from_slice(name.as_bytes());
+                        }
+                        prev = Some(name);
                     }
                     VanishedItem::Id(_) => {
                         debug_assert!(false, "id logged for a name-based vanished collection");
@@ -808,6 +860,22 @@ mod tests {
                 "x".repeat(200),
                 "unicode-\u{1F600}-name".to_string(),
             ],
+            vec![
+                "/dav/cal/john.doe/personal/aB3xK9qLm7.ics".to_string(),
+                "/dav/cal/john.doe/personal/aB3xK9qLm8.ics".to_string(),
+                "/dav/cal/john.doe/personal/zZ9yT2wVn4.ics".to_string(),
+                "/dav/cal/john.doe/work/aB3xK9qLm7.ics".to_string(),
+            ],
+            vec![String::new(), String::new(), String::new()],
+            vec![
+                "/dav/cal/jos\u{e9}/caf\u{e9}".to_string(),
+                "/dav/cal/jos\u{e9}/caf\u{e8}".to_string(),
+                "/dav/cal/jos\u{e9}/caf\u{e9}\u{1F600}".to_string(),
+                "/dav/cal/jos\u{e9}/caf\u{e9}\u{1F601}".to_string(),
+            ],
+            (0..300)
+                .map(|i| format!("/dav/file/john.doe/Documents/Projects/{i}/report.pdf"))
+                .collect(),
         ] {
             let items = VanishedItems(
                 names
@@ -850,5 +918,219 @@ mod tests {
         .expect("failed to decode names containing NUL");
 
         assert_eq!(names, decoded, "a NUL byte must not split a path");
+    }
+
+    #[test]
+    fn vanished_names_do_not_share_across_log_entries() {
+        let mut scratch = Vec::new();
+        let entries = [
+            vec![
+                "/dav/cal/john.doe/personal/aB3xK9qLm7.ics".to_string(),
+                "/dav/cal/john.doe/personal/aB3xK9qLm8.ics".to_string(),
+            ],
+            vec!["/x".to_string(), "/y".to_string()],
+            vec!["/dav/card/john.doe/contacts/zZ9.vcf".to_string()],
+        ];
+
+        let mut decoded = Vec::new();
+        for names in &entries {
+            let items = VanishedItems(
+                names
+                    .iter()
+                    .map(|name| VanishedItem::Name(name.clone()))
+                    .collect(),
+            );
+            <String as crate::query::log::DeserializeVanished>::deserialize_vanished(
+                &items.serialize(true, &mut scratch),
+                &mut decoded,
+            )
+            .expect("failed to decode vanished names");
+        }
+
+        assert_eq!(
+            entries.concat(),
+            decoded,
+            "prefixes must not carry over between log entries"
+        );
+    }
+
+    #[test]
+    fn vanished_names_reject_corrupt_prefix() {
+        for bytes in [
+            vec![0x02, b'/', b'a', 0x09, 0x00],
+            vec![0x02, b'/', b'a', 0x02, 0x05],
+            vec![0x05],
+            vec![0x02, b'/'],
+        ] {
+            let mut decoded = Vec::new();
+            assert!(
+                <String as crate::query::log::DeserializeVanished>::deserialize_vanished(
+                    &bytes,
+                    &mut decoded,
+                )
+                .is_none(),
+                "corrupt payload {bytes:?} decoded as {decoded:?}"
+            );
+        }
+    }
+
+    fn accumulate(rows: &[Changes], is_prefixed: bool) -> Vec<Change> {
+        let mut scratch = Vec::new();
+        let mut decoded = crate::query::log::Changes::default();
+        for row in rows {
+            decoded
+                .deserialize(&row.serialize(is_prefixed, &mut scratch), is_prefixed)
+                .expect("failed to decode");
+        }
+        decoded.finalize();
+        decoded.changes
+    }
+
+    fn container_row(slot: usize, id: u32) -> Changes {
+        let mut changes = Changes::default();
+        match slot {
+            CONTAINER_INSERTS => changes.container_inserts.insert(id),
+            CONTAINER_UPDATES => changes.container_updates.insert(id),
+            CONTAINER_PROPERTY_CHANGES => changes.container_property_changes.insert(id),
+            _ => changes.container_deletes.insert(id),
+        };
+        changes
+    }
+
+    fn item_row(slot: usize, id: u64) -> Changes {
+        let mut changes = Changes::default();
+        match slot {
+            ITEM_INSERTS => changes.item_inserts.insert(id),
+            ITEM_UPDATES => changes.item_updates.insert(id),
+            _ => changes.item_deletes.insert(id),
+        };
+        changes
+    }
+
+    #[test]
+    fn changelog_precedence_across_rows() {
+        let id = 7u32;
+
+        let cases: [(usize, usize, Option<Change>); 12] = [
+            (CONTAINER_INSERTS, CONTAINER_UPDATES, Some(Change::InsertContainer(7))),
+            (CONTAINER_INSERTS, CONTAINER_PROPERTY_CHANGES, Some(Change::InsertContainer(7))),
+            (CONTAINER_INSERTS, CONTAINER_DELETES, None),
+            (CONTAINER_UPDATES, CONTAINER_PROPERTY_CHANGES, Some(Change::UpdateContainer(7))),
+            (CONTAINER_UPDATES, CONTAINER_DELETES, Some(Change::DeleteContainer(7))),
+            (CONTAINER_PROPERTY_CHANGES, CONTAINER_UPDATES, Some(Change::UpdateContainer(7))),
+            (CONTAINER_PROPERTY_CHANGES, CONTAINER_DELETES, Some(Change::DeleteContainer(7))),
+            (CONTAINER_DELETES, CONTAINER_UPDATES, Some(Change::DeleteContainer(7))),
+            (CONTAINER_DELETES, CONTAINER_PROPERTY_CHANGES, Some(Change::DeleteContainer(7))),
+            (CONTAINER_INSERTS, CONTAINER_INSERTS, Some(Change::InsertContainer(7))),
+            (CONTAINER_UPDATES, CONTAINER_UPDATES, Some(Change::UpdateContainer(7))),
+            (CONTAINER_DELETES, CONTAINER_DELETES, Some(Change::DeleteContainer(7))),
+        ];
+
+        for (first, second, expected) in cases {
+            let got = accumulate(&[container_row(first, id), container_row(second, id)], false);
+            let want: Vec<Change> = expected.into_iter().collect();
+            assert_eq!(want, got, "container precedence {first} then {second}");
+        }
+
+        let id = (3u64 << 32) | 9;
+
+        let cases: [(usize, usize, Option<Change>); 8] = [
+            (ITEM_INSERTS, ITEM_UPDATES, Some(Change::InsertItem(id))),
+            (ITEM_INSERTS, ITEM_DELETES, None),
+            (ITEM_UPDATES, ITEM_DELETES, Some(Change::DeleteItem(id))),
+            (ITEM_DELETES, ITEM_UPDATES, Some(Change::DeleteItem(id))),
+            (ITEM_UPDATES, ITEM_UPDATES, Some(Change::UpdateItem(id))),
+            (ITEM_DELETES, ITEM_DELETES, Some(Change::DeleteItem(id))),
+            (ITEM_INSERTS, ITEM_INSERTS, Some(Change::InsertItem(id))),
+            (ITEM_UPDATES, ITEM_INSERTS, Some(Change::InsertItem(id))),
+        ];
+
+        for (first, second, expected) in cases {
+            let got = accumulate(&[item_row(first, id), item_row(second, id)], true);
+            let want: Vec<Change> = expected.into_iter().collect();
+            assert_eq!(want, got, "item precedence {first} then {second}");
+        }
+    }
+
+    #[test]
+    fn changelog_delete_survives_later_property_change() {
+        let got = accumulate(
+            &[
+                container_row(CONTAINER_DELETES, 4),
+                container_row(CONTAINER_PROPERTY_CHANGES, 4),
+                container_row(CONTAINER_PROPERTY_CHANGES, 4),
+            ],
+            false,
+        );
+
+        assert_eq!(
+            vec![Change::DeleteContainer(4)],
+            got,
+            "a destroyed container must not be downgraded to a property change"
+        );
+    }
+
+    #[test]
+    fn changelog_never_serializes_to_an_empty_value() {
+        let mut scratch = Vec::new();
+
+        for is_prefixed in [true, false] {
+            assert!(
+                !Changes::default().serialize(is_prefixed, &mut scratch).is_empty(),
+                "an empty changelog row must not collide with the truncation marker"
+            );
+
+            for slot in 0..CHANGE_LISTS {
+                let mut changes = Changes::default();
+                match slot {
+                    CONTAINER_INSERTS => changes.container_inserts.insert(0),
+                    CONTAINER_UPDATES => changes.container_updates.insert(0),
+                    CONTAINER_PROPERTY_CHANGES => changes.container_property_changes.insert(0),
+                    CONTAINER_DELETES => changes.container_deletes.insert(0),
+                    ITEM_INSERTS => changes.item_inserts.insert(0),
+                    ITEM_UPDATES => changes.item_updates.insert(0),
+                    _ => changes.item_deletes.insert(0),
+                };
+                assert!(
+                    !changes.serialize(is_prefixed, &mut scratch).is_empty(),
+                    "a row holding only id 0 must not serialize to an empty value"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn vanished_names_split_multibyte_characters() {
+        let mut scratch = Vec::new();
+
+        for names in [
+            vec!["/dav/cal/u/Caf\u{e9}/x".to_string(), "/dav/cal/u/Caf\u{e8}/y".to_string()],
+            vec!["a\u{e9}x".to_string(), "a\u{eb}y".to_string()],
+            vec!["\u{65e5}\u{672c}".to_string(), "\u{65e5}\u{4e2d}".to_string()],
+            vec!["\u{1F600}a".to_string(), "\u{1F601}b".to_string()],
+            vec!["prefix".to_string(), "prefix\u{e9}".to_string()],
+            vec!["prefix\u{e9}".to_string(), "prefix".to_string()],
+            vec!["\u{e9}".to_string(), "\u{e9}".to_string()],
+            vec!["".to_string(), "\u{e9}".to_string()],
+            vec![
+                "/dav/file/u/\u{4e2d}\u{6587}/a".to_string(),
+                "/dav/file/u/\u{4e2d}\u{56fd}/b".to_string(),
+                "/dav/file/u/\u{4e2d}\u{6587}/c".to_string(),
+            ],
+        ] {
+            let items = VanishedItems(
+                names.iter().map(|n| VanishedItem::Name(n.clone())).collect(),
+            );
+            let bytes = items.serialize(true, &mut scratch);
+
+            let mut decoded = Vec::new();
+            <String as crate::query::log::DeserializeVanished>::deserialize_vanished(
+                &bytes,
+                &mut decoded,
+            )
+            .unwrap_or_else(|| panic!("failed to decode {names:?}"));
+
+            assert_eq!(names, decoded, "multibyte roundtrip failed");
+        }
     }
 }

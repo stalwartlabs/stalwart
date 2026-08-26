@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use trc::AddContext;
-use types::collection::{SyncCollection, VanishedCollection};
-use utils::codec::leb128::Leb128Iterator;
-
 use crate::{
     IterateParams, LogKey, Store, U64_LEN,
     write::{
@@ -20,6 +16,9 @@ use crate::{
     },
 };
 use ahash::AHashMap;
+use trc::AddContext;
+use types::collection::{SyncCollection, VanishedCollection};
+use utils::codec::leb128::{Leb128Iterator, Leb128Reader};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Change {
@@ -42,8 +41,7 @@ pub struct Changes {
     pub is_truncated: bool,
     container_index: AHashMap<u64, usize>,
     item_index: AHashMap<u64, usize>,
-    discarded: Vec<bool>,
-    has_discarded: bool,
+    discarded: Option<Vec<bool>>,
     live: usize,
 }
 
@@ -70,8 +68,7 @@ impl Default for Changes {
             is_truncated: false,
             container_index: AHashMap::new(),
             item_index: AHashMap::new(),
-            discarded: Vec::new(),
-            has_discarded: false,
+            discarded: None,
             live: 0,
         }
     }
@@ -190,7 +187,11 @@ impl Store {
                 if (is_inclusive || change_id != from_change_id)
                     && T::deserialize_vanished(value, &mut vanished).is_none()
                 {
-                    return Err(trc::Error::corrupted_key(key, value.into(), trc::location!()));
+                    return Err(trc::Error::corrupted_key(
+                        key,
+                        value.into(),
+                        trc::location!(),
+                    ));
                 }
                 Ok(true)
             },
@@ -236,7 +237,11 @@ impl Store {
                 if (is_inclusive || change_id != from_change_id)
                     && decode_vanished_uids(value, mailbox_id, &mut uids).is_none()
                 {
-                    return Err(trc::Error::corrupted_key(key, value.into(), trc::location!()));
+                    return Err(trc::Error::corrupted_key(
+                        key,
+                        value.into(),
+                        trc::location!(),
+                    ));
                 }
                 Ok(true)
             },
@@ -304,28 +309,27 @@ impl Changes {
         };
 
         if let Some(pos) = index.get(&id).copied() {
-            let is_insert = matches!(
-                self.changes[pos],
-                Change::InsertContainer(_) | Change::InsertItem(_)
-            );
+            let (is_insert, is_update, is_delete) = match self.changes[pos] {
+                Change::InsertContainer(_) | Change::InsertItem(_) => (true, false, false),
+                Change::UpdateContainer(_) => (false, true, false),
+                Change::DeleteContainer(_) | Change::DeleteItem(_) => (false, false, true),
+                _ => (false, false, false),
+            };
 
             match change {
                 Change::UpdateContainer(_)
                 | Change::UpdateContainerProperty(_)
                 | Change::UpdateItem(_)
-                    if is_insert =>
+                    if is_insert || is_delete =>
                 {
                     return;
                 }
-                Change::UpdateContainerProperty(_)
-                    if matches!(self.changes[pos], Change::UpdateContainer(_)) =>
-                {
+                Change::UpdateContainerProperty(_) if is_update => {
                     return;
                 }
                 Change::DeleteContainer(_) | Change::DeleteItem(_) if is_insert => {
                     index.remove(&id);
-                    self.discarded[pos] = true;
-                    self.has_discarded = true;
+                    self.discard(pos);
                     self.live -= 1;
                     return;
                 }
@@ -338,29 +342,32 @@ impl Changes {
 
         index.insert(id, self.changes.len());
         self.changes.push(change);
-        self.discarded.push(false);
         self.live += 1;
+    }
+
+    fn discard(&mut self, pos: usize) {
+        let discarded = self.discarded.get_or_insert_default();
+        if discarded.len() <= pos {
+            discarded.resize(pos + 1, false);
+        }
+        discarded[pos] = true;
     }
 
     pub(crate) fn push_share_notification(&mut self, change_id: u64) {
         self.changes.push(Change::InsertItem(change_id));
-        self.discarded.push(false);
         self.live += 1;
     }
 
     pub(crate) fn finalize(&mut self) {
-        if self.has_discarded {
+        if let Some(discarded) = self.discarded.take() {
             let mut pos = 0;
-            let discarded = std::mem::take(&mut self.discarded);
             self.changes.retain(|_| {
-                let keep = !discarded[pos];
+                let keep = !discarded.get(pos).copied().unwrap_or(false);
                 pos += 1;
                 keep
             });
-            self.has_discarded = false;
         }
 
-        self.discarded = Vec::new();
         self.container_index = AHashMap::new();
         self.item_index = AHashMap::new();
     }
@@ -499,7 +506,11 @@ impl Change {
     }
 }
 
-pub(crate) fn decode_vanished_uids(bytes: &[u8], mailbox_id: u32, uids: &mut Vec<u32>) -> Option<()> {
+pub(crate) fn decode_vanished_uids(
+    bytes: &[u8],
+    mailbox_id: u32,
+    uids: &mut Vec<u32>,
+) -> Option<()> {
     let mut bytes_it = bytes.iter();
     let mut group = 0u64;
 
@@ -546,15 +557,28 @@ impl DeserializeVanished for (u32, u32) {
 
 impl DeserializeVanished for String {
     fn deserialize_vanished(bytes: &[u8], items: &mut Vec<Self>) -> Option<()> {
+        let first = items.len();
         let mut pos = 0;
 
         while pos < bytes.len() {
-            let mut bytes_it = bytes.get(pos..)?.iter();
-            let len: usize = bytes_it.next_leb128()?;
-            let start = bytes.len() - bytes_it.len();
-            let end = start.checked_add(len)?;
+            let shared = if items.len() != first {
+                let (shared, read) = bytes.get(pos..)?.read_leb128::<usize>()?;
+                pos += read;
+                shared
+            } else {
+                0
+            };
+            let (len, read) = bytes.get(pos..)?.read_leb128::<usize>()?;
+            pos += read;
+            let end = pos.checked_add(len)?;
+            let suffix = std::str::from_utf8(bytes.get(pos..end)?).ok()?;
 
-            items.push(std::str::from_utf8(bytes.get(start..end)?).ok()?.to_string());
+            let mut name = String::with_capacity(shared + len);
+            if shared != 0 {
+                name.push_str(items.last()?.get(..shared)?);
+            }
+            name.push_str(suffix);
+            items.push(name);
             pos = end;
         }
 
