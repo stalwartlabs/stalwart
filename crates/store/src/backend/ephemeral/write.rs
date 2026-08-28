@@ -8,30 +8,55 @@ use super::EphemeralStore;
 use crate::{
     IndexKey, Key, LogKey, Shape, Subspace,
     backend::deserialize_i64_le,
-    write::{AssignedIds, Batch, MergeResult, Operation, ValueClass, ValueOp},
+    write::{AssignedIds, Batch, LogSet, MergeResult, Operation, ValueClass, ValueOp},
 };
+use types::collection::SyncCollection;
 
 impl EphemeralStore {
-    pub(crate) async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub(crate) async fn write(
+        &self,
+        batch: Batch<'_>,
+        result: &mut AssignedIds,
+    ) -> trc::Result<()> {
         let mut account_id = u32::MAX;
         let mut collection = u8::MAX;
+        let mut change_group = SyncCollection::None.change_group();
         let mut document_id = u32::MAX;
-        let mut change_id = 0u64;
-        let mut result = AssignedIds::default();
         let has_changes = !batch.change_accounts.is_empty();
+        let mut log_buf = Vec::new();
+        let mut log_scratch = Vec::new();
 
         let mut state = self.state.write();
 
-        if has_changes {
+        if batch.has_allocations() {
             let map = state.subspaces.entry(Subspace::Counter).or_default();
-            for &account_id in batch.change_accounts {
-                let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
-                let next = match map.get(&key) {
-                    Some(bytes) => deserialize_i64_le(&key, bytes)? + 1,
+            let mut key_buf = Vec::with_capacity(16);
+
+            for account in batch.change_accounts {
+                key_buf.clear();
+                ValueClass::ChangeId(account.group).serialize_into(
+                    &mut key_buf,
+                    account.account_id,
+                    0,
+                    0,
+                    0,
+                );
+                let next = match map.get(&key_buf) {
+                    Some(bytes) => deserialize_i64_le(&key_buf, bytes)? + 1,
                     None => 1,
                 };
-                map.insert(key, next.to_le_bytes().to_vec());
-                result.push_change_id(account_id, next as u64);
+                map.insert(key_buf.clone(), next.to_le_bytes().to_vec());
+                result.push_change_id(account.account_id, account.group, next as u64);
+            }
+
+            for reservation in batch.reservations {
+                reservation.serialize_key_into(&mut key_buf, 0);
+                let next = match map.get(&key_buf) {
+                    Some(bytes) => deserialize_i64_le(&key_buf, bytes)? + reservation.count as i64,
+                    None => reservation.count as i64,
+                };
+                map.insert(key_buf.clone(), next.to_le_bytes().to_vec());
+                result.fill_slots(reservation.first_slot, reservation.count, next as u32);
             }
         }
 
@@ -42,18 +67,22 @@ impl EphemeralStore {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id);
+                        result.set_current_change_id(account_id, change_group);
                     }
                 }
                 Operation::Collection {
                     collection: collection_,
                 } => {
                     collection = u8::from(*collection_);
+                    change_group = collection_.change_group();
+                    if has_changes {
+                        result.set_current_change_id(account_id, change_group);
+                    }
                 }
                 Operation::DocumentId {
                     document_id: document_id_,
                 } => {
-                    document_id = *document_id_;
+                    document_id = document_id_.resolve(result);
                 }
                 Operation::Value { class, op } => {
                     let subspace = class.subspace(collection);
@@ -62,15 +91,12 @@ impl EphemeralStore {
 
                     match op {
                         ValueOp::Set(value) => {
-                            map.insert(key, std::mem::take(value));
-                        }
-                        ValueOp::SetFnc { payload, fnc } => {
-                            (fnc.0)(&result, payload)?;
-                            map.insert(key, payload.clone());
+                            let value = value.resolve(result)?.into_owned();
+                            map.insert(key, value);
                         }
                         ValueOp::MergeFnc(merge_op) => {
                             let merge_result =
-                                (merge_op.0)(&result, map.get(&key).map(|v| v.as_slice()))?;
+                                (merge_op.0)(result, map.get(&key).map(|v| v.as_slice()))?;
 
                             match merge_result {
                                 MergeResult::Update(value) => {
@@ -121,18 +147,33 @@ impl EphemeralStore {
                     }
                 }
                 Operation::Log { collection, set } => {
+                    let log_change_id = result
+                        .change_id(account_id, collection.change_group())
+                        .unwrap_or_default();
                     debug_assert!(
-                        change_id != 0,
+                        log_change_id != 0,
                         "no change id was allocated for this account"
                     );
                     let log_key = LogKey {
                         account_id,
                         collection: u8::from(*collection),
-                        change_id,
+                        change_id: log_change_id,
                     }
                     .serialize(0);
+                    let bytes = match set {
+                        LogSet::Bytes(bytes) => std::mem::take(bytes),
+                        LogSet::Pending(changes) => {
+                            changes.serialize_into(
+                                collection.is_prefixed(),
+                                Some(result),
+                                &mut log_scratch,
+                                &mut log_buf,
+                            );
+                            std::mem::take(&mut log_buf)
+                        }
+                    };
                     let map = state.subspaces.entry(Subspace::Logs).or_default();
-                    map.insert(log_key, std::mem::take(set));
+                    map.insert(log_key, bytes);
                 }
                 Operation::AssertValue {
                     class,
@@ -154,7 +195,7 @@ impl EphemeralStore {
             }
         }
 
-        Ok(result)
+        Ok(())
     }
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {

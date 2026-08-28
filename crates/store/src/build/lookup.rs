@@ -5,7 +5,15 @@
  */
 
 use crate::{LookupStores, registry::bootstrap::Bootstrap};
-use registry::schema::structs::{LookupStore, StoreLookup};
+#[cfg(any(
+    feature = "postgres",
+    feature = "mysql",
+    feature = "sqlite",
+    feature = "enterprise",
+    feature = "redis"
+))]
+use registry::schema::structs::LookupStore;
+use registry::schema::structs::StoreLookup;
 use std::collections::hash_map::Entry;
 
 impl LookupStores {

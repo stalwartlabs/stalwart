@@ -445,13 +445,9 @@ impl CalendarUpdateRequestHandler for Server {
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::CalendarEvent, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
             let schedule_tag = event.schedule_tag;
-            let etag = event
+            event
                 .insert(
                     access_token.account_tenant_ids(),
                     account_id,
@@ -459,14 +455,17 @@ impl CalendarUpdateRequestHandler for Server {
                     next_email_alarm,
                     &mut batch,
                 )
-                .caused_by(trc::location!())?
-                .etag();
+                .caused_by(trc::location!())?;
             if let Some(itip_messages) = itip_messages {
                 itip_messages
                     .queue(&mut batch)
                     .caused_by(trc::location!())?;
             }
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let etag = self
+                .commit_batch(batch)
+                .await
+                .caused_by(trc::location!())?
+                .etag();
 
             Ok(HttpResponse::new(StatusCode::CREATED)
                 .with_etag_opt(etag)

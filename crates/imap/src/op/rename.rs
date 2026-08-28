@@ -168,36 +168,35 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         // Build batch
-        let mut parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);
-        let mut create_ids = Vec::with_capacity(params.path.len());
-        let mut next_document_id = self
-            .server
-            .store()
-            .assign_document_ids(
-                params.account_id,
-                Collection::Mailbox,
-                params.path.len() as u64,
-            )
-            .await
-            .caused_by(trc::location!())?;
+        let parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);
         let mut batch = BatchBuilder::new();
+        let first_slot = batch.reserve_document_ids(
+            params.account_id,
+            Collection::Mailbox,
+            params.path.len() as u32,
+        );
+        let mut parent_slot = None;
 
-        for &path_item in params.path.iter() {
-            let mailbox_id = next_document_id;
-            next_document_id -= 1;
+        for (offset, &path_item) in params.path.iter().enumerate() {
+            let slot = first_slot.offset(offset);
+            let mut new_folder = email::mailbox::Mailbox::new(path_item);
+            if parent_slot.is_none() {
+                new_folder.parent_id = parent_id;
+            }
+            let builder = ObjectIndexBuilder::<(), _>::new().with_changes(new_folder);
 
             batch
                 .with_account_id(params.account_id)
                 .with_collection(Collection::Mailbox)
-                .with_document(mailbox_id)
-                .custom(ObjectIndexBuilder::<(), _>::new().with_changes(
-                    email::mailbox::Mailbox::new(path_item).with_parent_id(parent_id),
-                ))
+                .create_document(slot)
+                .custom(match parent_slot {
+                    Some(parent_slot) => builder.with_pending_id(parent_slot),
+                    None => builder,
+                })
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .commit_point();
 
-            parent_id = mailbox_id + 1;
-            create_ids.push(mailbox_id);
+            parent_slot = Some(slot);
         }
 
         let mut new_mailbox = mailbox
@@ -206,15 +205,17 @@ impl<T: SessionStream> SessionData<T> {
         new_mailbox.name = new_mailbox_name.into();
         new_mailbox.parent_id = parent_id;
         new_mailbox.uid_validity = rand::random::<u32>();
+        let builder = ObjectIndexBuilder::new()
+            .with_current(mailbox)
+            .with_changes(new_mailbox);
         batch
             .with_account_id(params.account_id)
             .with_collection(Collection::Mailbox)
             .with_document(mailbox_id)
-            .custom(
-                ObjectIndexBuilder::new()
-                    .with_current(mailbox)
-                    .with_changes(new_mailbox),
-            )
+            .custom(match parent_slot {
+                Some(parent_slot) => builder.with_pending_id(parent_slot),
+                None => builder,
+            })
             .imap_ctx(&arguments.tag, trc::location!())?;
         self.server
             .commit_batch(batch)

@@ -5,7 +5,10 @@
  */
 
 use crate::{
-    api::acl::{JmapAcl, JmapRights},
+    api::{
+        acl::{JmapAcl, JmapRights},
+        parent_ref::ParentRef,
+    },
     changes::state::JmapCacheState,
 };
 use common::{
@@ -24,7 +27,10 @@ use email::{
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
-    object::mailbox::{self, MailboxProperty, MailboxValue},
+    object::{
+        AnyId,
+        mailbox::{self, MailboxProperty, MailboxValue},
+    },
     references::resolve::ResolveCreatedReference,
     request::MaybeInvalid,
     types::state::State,
@@ -34,12 +40,19 @@ use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     ValueKey,
+    ahash::AHashMap,
     roaring::RoaringBitmap,
-    write::{Archive, ArchiveBytes, BatchBuilder, assert::AssertValue},
+    write::{
+        Archive, ArchiveBytes, BatchBuilder, Slot, assert::AssertValue, log::PENDING_ID_MARKER,
+    },
 };
 use trc::AddContext;
 use types::{
-    acl::Acl, collection::Collection, field::MailboxField, id::Id, special_use::SpecialUse,
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+    field::MailboxField,
+    id::Id,
+    special_use::SpecialUse,
 };
 
 pub struct SetContext<'x> {
@@ -64,11 +77,31 @@ pub trait MailboxSet: Sync + Send {
         changes_: Map<'_, MailboxProperty, MailboxValue>,
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext,
+        resolver: Option<&CreateResolver<'_>>,
     ) -> impl Future<
         Output = trc::Result<
-            Result<ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, SetError<MailboxProperty>>,
+            Result<
+                (ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, ParentRef),
+                SetError<MailboxProperty>,
+            >,
         >,
     > + Send;
+}
+
+pub struct CreateResolver<'x>(&'x AHashMap<String, Slot>);
+
+impl CreateResolver<'_> {
+    fn contains_slot(&self, slot: Slot) -> bool {
+        self.0.values().any(|created| *created == slot)
+    }
+}
+
+impl ResolveCreatedReference<MailboxProperty, MailboxValue> for CreateResolver<'_> {
+    fn get_created_id(&self, id_ref: &str) -> Option<AnyId> {
+        self.0
+            .get(id_ref)
+            .map(|slot| AnyId::Id(Id::new(PENDING_ID_MARKER | slot.index() as u64)))
+    }
 }
 
 impl MailboxSet for Server {
@@ -98,13 +131,14 @@ impl MailboxSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
+        let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
         'create: for (id, object) in request.unwrap_create() {
             let Some(object) = object.into_object() else {
                 continue;
             };
 
             // Validate quota
-            if ctx.mailbox_ids.len()
+            if ctx.mailbox_ids.len() + pending_creates.len() as u64
                 >= self.object_quota(account_info.object_quotas(), StorageQuota::MaxMailboxes)
                     as u64
             {
@@ -118,33 +152,32 @@ impl MailboxSet for Server {
                 continue 'create;
             }
 
-            match self.mailbox_set_item(object, None, &ctx).await? {
-                Ok(builder) => {
+            match self
+                .mailbox_set_item(object, None, &ctx, Some(&CreateResolver(&pending_creates)))
+                .await?
+            {
+                Ok((builder, parent)) => {
                     batch
                         .with_account_id(account_id)
                         .with_collection(Collection::Mailbox);
 
-                    let parent_id = builder.changes().unwrap().parent_id;
-                    if parent_id > 0 {
+                    if let Some(parent_document_id) = parent.document_id() {
                         batch
-                            .with_document(parent_id - 1)
+                            .with_document(parent_document_id)
                             .assert_value(MailboxField::Archive, AssertValue::Some);
                     }
 
-                    let document_id = self
-                        .store()
-                        .assign_document_ids(account_id, Collection::Mailbox, 1)
-                        .await
-                        .caused_by(trc::location!())?;
-
+                    let slot = batch.reserve_document_id(account_id, Collection::Mailbox);
                     batch
-                        .with_document(document_id)
-                        .custom(builder)
+                        .create_document(slot)
+                        .custom(match parent.slot() {
+                            Some(parent_slot) => builder.with_pending_id(parent_slot),
+                            None => builder,
+                        })
                         .caused_by(trc::location!())?
                         .commit_point();
 
-                    ctx.mailbox_ids.insert(document_id);
-                    ctx.response.created(id, document_id);
+                    pending_creates.insert(id, slot);
                 }
                 Err(err) => {
                     ctx.response.not_created.append(id, err);
@@ -154,12 +187,16 @@ impl MailboxSet for Server {
         }
 
         if !batch.is_empty() {
-            change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+            change_id = assigned_ids
+                .last_change_id(account_id, SyncCollection::Email.change_group())
                 .into();
+
+            for (id, slot) in pending_creates {
+                let document_id = assigned_ids.slot(slot);
+                ctx.mailbox_ids.insert(document_id);
+                ctx.response.created(id, document_id);
+            }
         }
 
         // Process updates
@@ -240,10 +277,10 @@ impl MailboxSet for Server {
                 }
 
                 match self
-                    .mailbox_set_item(object, (document_id, mailbox).into(), &ctx)
+                    .mailbox_set_item(object, (document_id, mailbox).into(), &ctx, None)
                     .await?
                 {
-                    Ok(builder) => {
+                    Ok((builder, parent)) => {
                         batch
                             .with_account_id(account_id)
                             .with_collection(Collection::Mailbox);
@@ -263,10 +300,9 @@ impl MailboxSet for Server {
                             merge_subscription(&mut batch, subscriber, subscribe);
                             batch.commit_point();
                         } else {
-                            let parent_id = builder.changes().unwrap().parent_id;
-                            if parent_id > 0 {
+                            if let Some(parent_document_id) = parent.document_id() {
                                 batch
-                                    .with_document(parent_id - 1)
+                                    .with_document(parent_document_id)
                                     .assert_value(MailboxField::Archive, AssertValue::Some);
                             }
 
@@ -292,7 +328,7 @@ impl MailboxSet for Server {
             match self
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(account_id))
+                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email.change_group()))
             {
                 Ok(change_id_) => {
                     change_id = Some(change_id_);
@@ -377,16 +413,25 @@ impl MailboxSet for Server {
         changes_: Map<'_, MailboxProperty, MailboxValue>,
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext<'_>,
-    ) -> trc::Result<Result<ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, SetError<MailboxProperty>>>
-    {
+        resolver: Option<&CreateResolver<'_>>,
+    ) -> trc::Result<
+        Result<
+            (ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, ParentRef),
+            SetError<MailboxProperty>,
+        >,
+    > {
         // Parse properties
         let mut changes = update
             .as_ref()
             .map(|(_, obj)| obj.inner.clone())
             .unwrap_or_else(|| Mailbox::new(String::new()));
+        let mut parent = ParentRef::from_stored(changes.parent_id);
         let mut has_acl_changes = false;
         for (property, mut value) in changes_.into_vec() {
-            if let Err(err) = ctx.response.resolve_self_references(&mut value, 0, false) {
+            if let Err(err) = match resolver {
+                Some(resolver) => resolver.resolve_self_references(&mut value, 0, false),
+                None => ctx.response.resolve_self_references(&mut value, 0, false),
+            } {
                 return Ok(Err(err));
             };
             match (&property, value) {
@@ -411,18 +456,25 @@ impl MailboxSet for Server {
                     Key::Property(MailboxProperty::ParentId),
                     Value::Element(MailboxValue::Id(value)),
                 ) => {
-                    let parent_id = value.document_id();
-                    if ctx.will_destroy.contains(&value) {
-                        return Ok(Err(SetError::will_destroy()
-                            .with_description("Parent ID will be destroyed.")));
-                    } else if !ctx.mailbox_ids.contains(parent_id) {
-                        return Ok(Err(SetError::invalid_properties()
-                            .with_description("Parent ID does not exist.")));
+                    let parent_ref = ParentRef::from_id(value);
+                    if let Some(slot) = parent_ref.slot() {
+                        if resolver.is_none_or(|resolver| !resolver.contains_slot(slot)) {
+                            return Ok(Err(SetError::invalid_properties()
+                                .with_description("Parent ID does not exist.")));
+                        }
+                    } else if let Some(parent_id) = parent_ref.document_id() {
+                        if ctx.will_destroy.contains(&value) {
+                            return Ok(Err(SetError::will_destroy()
+                                .with_description("Parent ID will be destroyed.")));
+                        } else if !ctx.mailbox_ids.contains(parent_id) {
+                            return Ok(Err(SetError::invalid_properties()
+                                .with_description("Parent ID does not exist.")));
+                        }
                     }
-                    changes.parent_id = parent_id + 1;
+                    parent = parent_ref;
                 }
                 (Key::Property(MailboxProperty::ParentId), Value::Null) => {
-                    changes.parent_id = 0;
+                    parent = ParentRef::ROOT;
                 }
                 (Key::Property(MailboxProperty::IsSubscribed), Value::Bool(subscribe)) => {
                     let account_id = ctx
@@ -502,10 +554,14 @@ impl MailboxSet for Server {
             }
         }
 
-        // Validate depth and circular parent-child relationship
-        if update
-            .as_ref()
-            .is_none_or(|(_, m)| m.inner.parent_id != changes.parent_id)
+        changes.parent_id = parent.as_stored();
+
+        // Validate depth and circular parent-child relationship. A parent created within
+        // this request has no ancestors in storage yet, so there is nothing to walk.
+        if !parent.is_pending()
+            && update
+                .as_ref()
+                .is_none_or(|(_, m)| m.inner.parent_id != changes.parent_id)
         {
             let mut mailbox_parent_id = changes.parent_id;
             let current_mailbox_id = update
@@ -609,9 +665,9 @@ impl MailboxSet for Server {
             if update
                 .as_ref()
                 .is_none_or(|(_, m)| m.inner.name != changes.name)
+                && let Some(parent_cache_id) = parent.cache_id()
                 && let Some(existing) = cached_mailboxes.mailboxes.items.iter().find(|m| {
-                    m.name.to_lowercase() == lower_name
-                        && m.parent_id().map_or(0, |id| id + 1) == changes.parent_id
+                    m.name.to_lowercase() == lower_name && m.parent_id() == parent_cache_id
                 })
             {
                 return Ok(Err(SetError::already_exists()
@@ -645,8 +701,11 @@ impl MailboxSet for Server {
         }
 
         // Validate
-        Ok(Ok(ObjectIndexBuilder::new()
-            .with_changes(changes)
-            .with_current_opt(current)))
+        Ok(Ok((
+            ObjectIndexBuilder::new()
+                .with_changes(changes)
+                .with_current_opt(current),
+            parent,
+        )))
     }
 }

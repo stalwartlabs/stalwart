@@ -116,20 +116,19 @@ impl FileMkColRequestHandler for Server {
         }
 
         // Prepare write batch
-        let document_id = self
-            .store()
-            .assign_document_ids(account_id, Collection::FileNode, 1)
-            .await
-            .caused_by(trc::location!())?;
         let mut batch = BatchBuilder::new();
+        let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
-            .with_document(document_id)
+            .create_document(document_id)
             .custom(ObjectIndexBuilder::<(), _>::new().with_changes(node))
             .caused_by(trc::location!())?;
-        let etag = batch.etag();
-        self.commit_batch(batch).await.caused_by(trc::location!())?;
+        let etag = self
+            .commit_batch(batch)
+            .await
+            .caused_by(trc::location!())?
+            .etag();
 
         if let Some(prop_stat) = return_prop_stat {
             Ok(HttpResponse::new(StatusCode::CREATED)

@@ -46,6 +46,17 @@ impl IndexableAndSerializableObject for Mailbox {
     fn is_versioned() -> bool {
         false
     }
+
+    fn set_pending_id(&mut self, document_id: u32) {
+        self.parent_id = document_id + 1;
+    }
+
+    fn size_hint(&self) -> usize {
+        self.name.len()
+            + (self.subscribers.len() * std::mem::size_of::<u32>())
+            + (self.acls.len() * std::mem::size_of::<AclGrant>())
+            + std::mem::size_of::<Mailbox>()
+    }
 }
 
 impl ArchiveCompression for Mailbox {

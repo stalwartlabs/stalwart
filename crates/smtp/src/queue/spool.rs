@@ -421,7 +421,7 @@ impl MessageWrapper {
             },
             vec![],
         );
-        if let Err(err) = server.store().write(batch.build_all()).await {
+        if let Err(err) = server.store().write_batch(batch.build_all()).await {
             trc::error!(
                 err.details("Failed to write to store.")
                     .span_id(session_id)
@@ -584,7 +584,7 @@ impl MessageWrapper {
                 },
             );
 
-        if let Err(err) = server.store().write(batch.build_all()).await {
+        if let Err(err) = server.store().write_batch(batch.build_all()).await {
             trc::error!(
                 err.details("Failed to write to store.")
                     .span_id(session_id)
@@ -771,7 +771,7 @@ impl MessageWrapper {
             );
         }
 
-        if let Err(err) = server.store().write(batch.build_all()).await {
+        if let Err(err) = server.store().write_batch(batch.build_all()).await {
             trc::error!(
                 err.details("Failed to save changes.")
                     .span_id(self.span_id)
@@ -829,7 +829,7 @@ impl MessageWrapper {
             })
             .clear(ValueClass::Queue(QueueClass::Message(self.queue_id)));
 
-        if let Err(err) = server.store().write(batch.build_all()).await {
+        if let Err(err) = server.store().write_batch(batch.build_all()).await {
             trc::error!(
                 err.details("Failed to write to update queue.")
                     .span_id(self.span_id)
@@ -927,7 +927,7 @@ impl MessageWrapper {
             },
         );
 
-        if let Err(err) = server.store().write(batch.build_all()).await {
+        if let Err(err) = server.store().write_batch(batch.build_all()).await {
             trc::error!(
                 err.details("Failed to save changes.")
                     .span_id(self.span_id)
@@ -978,7 +978,7 @@ impl MessageWrapper {
             })
             .clear(ValueClass::Queue(QueueClass::Message(self.queue_id)));
 
-        if let Err(err) = server.store().write(batch.build_all()).await {
+        if let Err(err) = server.store().write_batch(batch.build_all()).await {
             trc::error!(
                 err.details("Failed to write to update queue.")
                     .span_id(self.span_id)

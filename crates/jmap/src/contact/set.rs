@@ -25,7 +25,7 @@ use store::{
     ValueKey,
     ahash::AHashSet,
     roaring::RoaringBitmap,
-    write::{Archive, ArchiveBytes, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder, Slot},
 };
 use trc::AddContext;
 use types::{
@@ -54,7 +54,7 @@ pub trait ContactCardSet: Sync + Send {
         can_add_address_books: &Option<RoaringBitmap>,
         js_contact: JSContact<'_, Id, BlobId>,
         updates: Value<'_, JSContactProperty<Id>, JSContactValue<Id, BlobId>>,
-    ) -> impl Future<Output = trc::Result<Result<u32, SetError<JSContactProperty<Id>>>>>;
+    ) -> impl Future<Output = trc::Result<Result<Slot, SetError<JSContactProperty<Id>>>>>;
 }
 
 impl ContactCardSet for Server {
@@ -97,6 +97,7 @@ impl ContactCardSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
+        let mut created_slots: Vec<(String, Slot)> = Vec::new();
         'create: for (id, object) in request.unwrap_create() {
             match self
                 .create_contact_card(
@@ -112,7 +113,7 @@ impl ContactCardSet for Server {
                 .await?
             {
                 Ok(document_id) => {
-                    response.created(id, document_id);
+                    created_slots.push((id, document_id));
                 }
                 Err(err) => {
                     response.not_created.append(id, err);
@@ -369,13 +370,16 @@ impl ContactCardSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            response.new_state = State::Exact(change_id).into();
+            for (create_id, slot) in created_slots {
+                response.created(create_id, assigned_ids.slot(slot));
+            }
+
+            response.new_state = State::Exact(
+                assigned_ids.last_change_id(account_id, SyncCollection::AddressBook.change_group()),
+            )
+            .into();
         }
 
         Ok(response)
@@ -391,7 +395,7 @@ impl ContactCardSet for Server {
         can_add_address_books: &Option<RoaringBitmap>,
         mut js_contact: JSContact<'_, Id, BlobId>,
         updates: Value<'_, JSContactProperty<Id>, JSContactValue<Id, BlobId>>,
-    ) -> trc::Result<Result<u32, SetError<JSContactProperty<Id>>>> {
+    ) -> trc::Result<Result<Slot, SetError<JSContactProperty<Id>>>> {
         // Process changes
         let mut names = Vec::new();
         if let Err(err) = update_contact_card(None, updates, &mut names, &mut js_contact) {
@@ -448,11 +452,7 @@ impl ContactCardSet for Server {
         }
 
         // Insert record
-        let document_id = self
-            .store()
-            .assign_document_ids(account_id, Collection::ContactCard, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let document_id = batch.reserve_document_id(account_id, Collection::ContactCard);
         ContactCard {
             names,
             size: size as u32,

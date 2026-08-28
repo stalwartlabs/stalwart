@@ -25,7 +25,7 @@ use registry::{
 use store::write::now;
 use store::{
     Deserialize, IterateParams, ValueKey,
-    write::{SearchIndex, SearchIndexClass, TaskQueueClass, ValueClass},
+    write::{PendingId, SearchIndex, SearchIndexClass, TaskId, TaskQueueClass, ValueClass},
 };
 use store::{RegistryStore, registry::write::RegistryWrite};
 
@@ -239,8 +239,12 @@ pub async fn wait_for_tasks(server: &Server, skip_not_due: bool, skip_permanent_
             .data
             .iterate(
                 IterateParams::new(
-                    ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Task { id: 0 })),
-                    ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Task { id: u64::MAX })),
+                    ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Task {
+                        id: TaskId::Assigned(0),
+                    })),
+                    ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Task {
+                        id: TaskId::Assigned(u64::MAX),
+                    })),
                 )
                 .ascending(),
                 |_, value| {
@@ -286,13 +290,13 @@ pub async fn wait_for_index(server: &Server) {
                     ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                         index: SearchIndex::Email,
                         id_prefix: 0,
-                        id_suffix: 0,
+                        id_suffix: PendingId::Assigned(0),
                         created_at: 0,
                     })),
                     ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                         index: SearchIndex::Tracing,
                         id_prefix: u32::MAX,
-                        id_suffix: u32::MAX,
+                        id_suffix: PendingId::Assigned(u32::MAX),
                         created_at: u64::MAX,
                     })),
                 )

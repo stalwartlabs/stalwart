@@ -87,7 +87,7 @@ impl Store {
         let mut commit_points = batch.commit_points();
         for commit_point in commit_points.iter() {
             let batch = batch.build_one(commit_point);
-            self.write(batch).await.caused_by(trc::location!())?;
+            self.write_batch(batch).await.caused_by(trc::location!())?;
         }
 
         Ok(())
@@ -121,7 +121,7 @@ impl Store {
         let mut commit_points = batch.commit_points();
         for commit_point in commit_points.iter() {
             let batch = batch.build_one(commit_point);
-            self.write(batch).await.caused_by(trc::location!())?;
+            self.write_batch(batch).await.caused_by(trc::location!())?;
         }
 
         Ok(())
@@ -155,7 +155,7 @@ impl Store {
         batch
             .clear(SearchIndexClass::QueueIndex { index, partition })
             .clear(SearchIndexClass::QueueStatus { index, partition });
-        self.write(batch.build_all())
+        self.write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())
             .map(|_| ())

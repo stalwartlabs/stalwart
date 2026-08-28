@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use store::{
     ahash::{AHashMap, AHashSet},
     search::IndexDocument,
-    write::{SearchIndex, SearchIndexClass, ValueClass},
+    write::{PendingId, SearchIndex, SearchIndexClass, ValueClass},
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -127,7 +127,7 @@ impl Partition {
         ValueClass::SearchIndex(SearchIndexClass::Queue {
             index: self.index,
             id_prefix: item.id_prefix,
-            id_suffix: item.id_suffix,
+            id_suffix: PendingId::Assigned(item.id_suffix),
             created_at: item.created_at,
         })
     }

@@ -15,10 +15,9 @@ use jmap_tools::{Map, Value};
 use std::{collections::BTreeSet, future::Future};
 use store::{
     SerializeInfallible, ValueKey,
-    ahash::AHashMap,
     rkyv::{option::ArchivedOption, vec::ArchivedVec},
     roaring::RoaringBitmap,
-    write::{Archive, ArchiveBytes, BatchBuilder, assert::AssertValue},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, assert::AssertValue},
     xxhash_rust::xxh3::Xxh3,
 };
 use trc::AddContext;
@@ -184,7 +183,7 @@ impl IdentityGet for Server {
         if stored_hash == Some(addresses_hash) {
             return Ok(identity_ids);
         }
-        let mut identity_id_changes = AHashMap::new();
+        let mut identity_id_changes = Vec::new();
 
         // Determine which addresses are missing and which identities are no longer valid
         let member_of = &account_info.account().id_member_of;
@@ -226,27 +225,23 @@ impl IdentityGet for Server {
             .with_collection(Collection::Identity);
 
         // Create identities for the new addresses
+        let mut created_slots = Vec::new();
         if !missing_addresses.is_empty() {
             let name = account_info.description().unwrap_or(account_info.name());
-            let mut next_document_id = self
-                .store()
-                .assign_document_ids(
-                    account_id,
-                    Collection::Identity,
-                    missing_addresses.len() as u64,
-                )
-                .await
-                .caused_by(trc::location!())?;
-            for email in missing_addresses {
+            let first_slot = batch.reserve_document_ids(
+                account_id,
+                Collection::Identity,
+                missing_addresses.len() as u32,
+            );
+            for (offset, email) in missing_addresses.into_iter().enumerate() {
                 let name = if name.is_empty() {
                     email.to_string()
                 } else {
                     name.to_string()
                 };
-                let document_id = next_document_id;
-                next_document_id -= 1;
+                let slot = first_slot.offset(offset);
                 batch
-                    .with_document(document_id)
+                    .create_document(slot)
                     .custom(ObjectIndexBuilder::<(), _>::new().with_changes(Identity {
                         name,
                         email: email.to_string(),
@@ -254,8 +249,8 @@ impl IdentityGet for Server {
                     }))
                     .caused_by(trc::location!())?
                     .commit_point();
-                identity_id_changes.insert(document_id, true);
-                identity_ids.insert(document_id);
+                identity_id_changes.push((PendingId::Slot(slot), true));
+                created_slots.push(slot);
             }
         }
 
@@ -266,7 +261,7 @@ impl IdentityGet for Server {
                 .clear(Field::ARCHIVE)
                 .log_item_delete(SyncCollection::Identity, None)
                 .commit_point();
-            identity_id_changes.insert(document_id, false);
+            identity_id_changes.push((PendingId::Assigned(document_id), false));
             identity_ids.remove(document_id);
         }
 
@@ -287,7 +282,12 @@ impl IdentityGet for Server {
             );
 
         match self.commit_batch(batch).await {
-            Ok(_) => Ok(identity_ids),
+            Ok(assigned_ids) => {
+                for slot in created_slots {
+                    identity_ids.insert(assigned_ids.slot(slot));
+                }
+                Ok(identity_ids)
+            }
             Err(err) if err.is_assertion_failure() => self
                 .document_id_set(account_id, Collection::Identity, IdentityField::DocumentId)
                 .await

@@ -554,7 +554,7 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                 maintenance_type: TaskSpamFilterMaintenanceType::UpdateRules,
                 status: TaskStatus::now(),
             }));
-            bp.data_store.write(batch.build_all()).await?;
+            bp.data_store.write_batch(batch.build_all()).await?;
         }
     }
 

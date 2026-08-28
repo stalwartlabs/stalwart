@@ -78,7 +78,7 @@ async fn restore_item(server: &Server, task: &TaskRestoreArchivedItem) -> trc::R
                             until: task.archived_until.timestamp() as u64,
                         },
                     });
-                    server.store().write(batch.build_all()).await?;
+                    server.store().write_batch(batch.build_all()).await?;
 
                     Ok(TaskResult::Success(vec![]))
                 }

@@ -12,10 +12,11 @@ use rkyv::{
 };
 use std::{borrow::Cow, fmt::Debug};
 use store::{
-    Serialize, SerializeInfallible, U64_LEN,
+    Serialize, SerializeInfallible, U32_LEN, U64_LEN,
     write::{
-        Archive, ArchiveBytes, ArchiveCompression, Archiver, BatchBuilder, BlobLink, BlobOp,
-        IntoOperations, SearchIndex, ValueClass,
+        Archive, ArchiveBytes, ArchiveCompression, Archiver, AssignedIds, BatchBuilder, BlobLink,
+        BlobOp, IntoOperations, Patch, PatchSource, PendingId, SearchIndex, SerializeWithIds, Slot,
+        ValueClass,
     },
 };
 use types::{
@@ -51,11 +52,11 @@ pub enum IndexValue<'x> {
     },
     LogContainerProperty {
         sync_collection: SyncCollection,
-        ids: Vec<u32>,
+        ids: Vec<PendingId>,
     },
     LogItem {
         sync_collection: SyncCollection,
-        prefix: Option<u32>,
+        prefix: Option<PendingId>,
     },
     Acl {
         value: Cow<'x, [AclGrant]>,
@@ -243,6 +244,14 @@ pub trait IndexableAndSerializableObject:
     >
 {
     fn is_versioned() -> bool;
+
+    fn set_pending_id(&mut self, _document_id: u32) {
+        unreachable!("object carries no pending document id")
+    }
+
+    fn size_hint(&self) -> usize {
+        unreachable!("object carries no pending document id")
+    }
 }
 
 #[derive(Debug)]
@@ -251,6 +260,7 @@ pub struct ObjectIndexBuilder<C, N> {
     tenant_id: Option<u32>,
     current: Option<C>,
     changes: Option<N>,
+    pending_id: Option<Slot>,
 }
 
 impl<C, N> Default for ObjectIndexBuilder<C, N> {
@@ -291,21 +301,61 @@ impl CurrentObject for () {
 }
 
 pub trait SerializableObject: IndexableObject {
-    fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()>;
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()>;
 }
 
-impl<T: IndexableAndSerializableObject> SerializableObject for T {
-    fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()> {
+struct PendingObject<T>
+where
+    T: IndexableAndSerializableObject,
+{
+    archiver: Archiver<T>,
+    slot: Slot,
+}
+
+impl<T: IndexableAndSerializableObject + 'static> SerializeWithIds for PendingObject<T> {
+    fn serialize_with_ids(&mut self, ids: &AssignedIds) -> trc::Result<(Vec<u8>, Option<u32>)> {
+        self.archiver.inner.set_pending_id(ids.slot(self.slot));
+
+        let mut archive = self.archiver.serialize()?;
         if T::is_versioned() {
+            let offset = archive.len() - U64_LEN - 1;
+            archive[offset..offset + U64_LEN]
+                .copy_from_slice(&ids.current_change_id().to_be_bytes());
+        }
+        let hash = Archive::<ArchiveBytes>::extract_hash(&archive);
+
+        Ok((archive, hash))
+    }
+}
+
+impl<T: IndexableAndSerializableObject + 'static> SerializableObject for T {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        if let Some(slot) = pending_id {
+            let size_hint = self.size_hint();
+            let archiver = Archiver::new(self);
+            let archiver = if T::is_versioned() {
+                archiver.with_version()
+            } else {
+                archiver
+            };
+
+            batch.set_archive_hash(None).set_serializable(
+                Field::ARCHIVE,
+                size_hint,
+                Box::new(PendingObject { archiver, slot }),
+            );
+        } else if T::is_versioned() {
             let (offset, archive) = Archiver::new(self).serialize_versioned()?;
-            let offset = offset as usize;
             batch
                 .set_archive_hash(Archive::<ArchiveBytes>::extract_hash(&archive))
-                .set_fnc(Field::ARCHIVE, archive, move |ids, bytes| {
-                    let change_id = ids.current_change_id()?;
-                    bytes[offset..offset + U64_LEN].copy_from_slice(&change_id.to_be_bytes());
-                    Ok(())
-                });
+                .set_patched(
+                    Field::ARCHIVE,
+                    archive,
+                    vec![Patch {
+                        offset: offset as u32,
+                        source: PatchSource::ChangeIdBe,
+                    }],
+                );
         } else {
             let archive = Archiver::new(self).serialize()?;
             batch
@@ -324,6 +374,7 @@ impl<C, N> ObjectIndexBuilder<C, N> {
             changes: None,
             tenant_id: None,
             changed_by: u32::MAX,
+            pending_id: None,
         }
     }
 
@@ -334,6 +385,11 @@ impl<C, N> ObjectIndexBuilder<C, N> {
 
     pub fn with_changes(mut self, changes: N) -> Self {
         self.changes = Some(changes);
+        self
+    }
+
+    pub fn with_pending_id(mut self, slot: Slot) -> Self {
+        self.pending_id = Some(slot);
         self
     }
 
@@ -374,7 +430,7 @@ impl<C: CurrentObject, N: SerializableObject> IntoOperations for ObjectIndexBuil
                 for item in changes.index_values() {
                     build_index(batch, item, self.changed_by, self.tenant_id, true);
                 }
-                changes.serialize_into(batch)?;
+                changes.serialize_into(batch, self.pending_id)?;
             }
             (Some(current), Some(changes)) => {
                 // Update
@@ -397,7 +453,7 @@ impl<C: CurrentObject, N: SerializableObject> IntoOperations for ObjectIndexBuil
                         }
                     }
                 }
-                changes.serialize_into(batch)?;
+                changes.serialize_into(batch, self.pending_id)?;
             }
             (Some(current), None) => {
                 // Deletion
@@ -411,6 +467,16 @@ impl<C: CurrentObject, N: SerializableObject> IntoOperations for ObjectIndexBuil
         }
 
         Ok(())
+    }
+}
+
+fn share_notification_patches(object_id: PendingId) -> Vec<Patch> {
+    match object_id {
+        PendingId::Slot(slot) => vec![Patch {
+            offset: U32_LEN as u32,
+            source: PatchSource::SlotBeU32(slot),
+        }],
+        PendingId::Assigned(_) => Vec::new(),
     }
 }
 
@@ -469,7 +535,8 @@ fn build_index(
         IndexValue::Acl { value } => {
             let object_account_id = batch.last_account_id().unwrap_or_default();
             let object_type = batch.last_collection().unwrap_or(Collection::None);
-            let object_id = batch.last_document_id().unwrap_or_default();
+            let object_id = batch.last_document_id().unwrap_or(PendingId::Assigned(0));
+            let object_id_placeholder = object_id.assigned().unwrap_or_default();
             let notification_id = SnowflakeIdGenerator::global_id().unwrap_or_default();
 
             for item in value.as_ref() {
@@ -480,13 +547,14 @@ fn build_index(
                         item.account_id,
                         ShareNotification {
                             object_account_id,
-                            object_id,
+                            object_id: object_id_placeholder,
                             object_type,
                             changed_by,
                             old_rights: Default::default(),
                             new_rights: item.grants,
                             name: Default::default(),
                         },
+                        share_notification_patches(object_id),
                     );
                 } else {
                     batch.acl_revoke(item.account_id);
@@ -495,13 +563,14 @@ fn build_index(
                         item.account_id,
                         ShareNotification {
                             object_account_id,
-                            object_id,
+                            object_id: object_id_placeholder,
                             object_type,
                             changed_by,
                             old_rights: item.grants,
                             new_rights: Default::default(),
                             name: Default::default(),
                         },
+                        share_notification_patches(object_id),
                     );
                 }
             }
@@ -620,7 +689,8 @@ fn merge_index(
 
             let object_account_id = batch.last_account_id().unwrap_or_default();
             let object_type = batch.last_collection().unwrap_or(Collection::None);
-            let object_id = batch.last_document_id().unwrap_or_default();
+            let object_id = batch.last_document_id().unwrap_or(PendingId::Assigned(0));
+            let object_id_placeholder = object_id.assigned().unwrap_or_default();
             let notification_id = SnowflakeIdGenerator::global_id().unwrap_or_default();
 
             match (has_old_acl, has_new_acl) {
@@ -637,13 +707,14 @@ fn merge_index(
                                 current_item.account_id,
                                 ShareNotification {
                                     object_account_id,
-                                    object_id,
+                                    object_id: object_id_placeholder,
                                     object_type,
                                     changed_by,
                                     old_rights: current_item.grants,
                                     new_rights: Default::default(),
                                     name: Default::default(),
                                 },
+                                share_notification_patches(object_id),
                             );
                         }
                     }
@@ -669,13 +740,14 @@ fn merge_index(
                                 item.account_id,
                                 ShareNotification {
                                     object_account_id,
-                                    object_id,
+                                    object_id: object_id_placeholder,
                                     object_type,
                                     changed_by,
                                     old_rights,
                                     new_rights: item.grants,
                                     name: Default::default(),
                                 },
+                                share_notification_patches(object_id),
                             );
                         }
                     }
@@ -689,13 +761,14 @@ fn merge_index(
                             item.account_id,
                             ShareNotification {
                                 object_account_id,
-                                object_id,
+                                object_id: object_id_placeholder,
                                 object_type,
                                 changed_by,
                                 old_rights: Default::default(),
                                 new_rights: item.grants,
                                 name: Default::default(),
                             },
+                            share_notification_patches(object_id),
                         );
                     }
                 }
@@ -708,13 +781,14 @@ fn merge_index(
                             item.account_id,
                             ShareNotification {
                                 object_account_id,
-                                object_id,
+                                object_id: object_id_placeholder,
                                 object_type,
                                 changed_by,
                                 old_rights: item.grants,
                                 new_rights: Default::default(),
                                 name: Default::default(),
                             },
+                            share_notification_patches(object_id),
                         );
                     }
                 }

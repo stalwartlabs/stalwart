@@ -516,7 +516,7 @@ async fn restore_account_id(server: &Server, id: u32) -> trc::Result<()> {
         );
         let last_id = server
             .store()
-            .write(id_batch.build_all())
+            .write_batch(id_batch.build_all())
             .await
             .and_then(|v| v.last_counter_id())?;
 

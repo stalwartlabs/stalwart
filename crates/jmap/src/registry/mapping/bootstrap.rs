@@ -473,7 +473,7 @@ pub(crate) async fn bootstrap_set(
             }));
         }
         if !batch.is_empty() {
-            match registry.store().write(batch.build_all()).await {
+            match registry.store().write_batch(batch.build_all()).await {
                 Ok(_) => {}
                 Err(err) => {
                     trc::error!(err.caused_by(trc::location!()));

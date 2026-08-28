@@ -23,7 +23,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use store::write::{BatchBuilder, now};
+use store::write::{BatchBuilder, PendingId, now};
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes},
@@ -523,11 +523,7 @@ async fn copy_event(
             name: new_name.to_string(),
             parent_id: to_calendar_id,
         }];
-        let to_document_id = server
-            .store()
-            .assign_document_ids(to_account_id, Collection::CalendarEvent, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let to_document_id = batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
         new_event
             .insert(
                 changed_by,
@@ -701,11 +697,7 @@ async fn move_event(
             )
             .caused_by(trc::location!())?;
 
-        let to_document_id = server
-            .store()
-            .assign_document_ids(to_account_id, Collection::CalendarEvent, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let to_document_id = batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
         new_event
             .insert(
                 access_token.account_tenant_ids(),
@@ -911,14 +903,11 @@ async fn copy_container(
                 .caused_by(trc::location!())?;
         }
 
-        to_document_id
+        PendingId::Assigned(to_document_id)
     } else {
-        server
-            .store()
-            .assign_document_ids(to_account_id, Collection::Calendar, 1)
-            .await
-            .caused_by(trc::location!())?
+        PendingId::Slot(batch.reserve_document_id(to_account_id, Collection::Calendar))
     };
+    let parent_id = to_document_id;
     calendar
         .insert(
             access_token.account_tenant_ids(),
@@ -946,7 +935,10 @@ async fn copy_container(
             let mut new_name = None;
 
             for name in event.inner.names.iter() {
-                if name.parent_id == to_document_id {
+                if parent_id
+                    .assigned()
+                    .is_some_and(|parent| name.parent_id == parent)
+                {
                     continue;
                 } else if name.parent_id == from_document_id {
                     new_name = Some(name.name.to_string());
@@ -955,7 +947,7 @@ async fn copy_container(
             let new_name = if let Some(new_name) = new_name {
                 DavName {
                     name: new_name,
-                    parent_id: to_document_id,
+                    parent_id: parent_id.assigned().unwrap_or_default(),
                 }
             } else {
                 continue;
@@ -975,15 +967,24 @@ async fn copy_container(
                 }
 
                 new_event.names.push(new_name);
-                new_event
-                    .update(
+                match parent_id {
+                    PendingId::Assigned(_) => new_event.update(
                         access_token.account_tenant_ids(),
                         event,
                         from_account_id,
                         from_child_document_id,
                         &mut batch,
-                    )
-                    .caused_by(trc::location!())?;
+                    ),
+                    PendingId::Slot(parent_id) => new_event.update_pending_parent(
+                        access_token.account_tenant_ids(),
+                        event,
+                        from_account_id,
+                        from_child_document_id,
+                        parent_id,
+                        &mut batch,
+                    ),
+                }
+                .caused_by(trc::location!())?;
             } else {
                 let next_email_alarm = event.inner.data.next_alarm(now() as i64, Tz::Floating);
                 if remove_source {
@@ -999,22 +1000,28 @@ async fn copy_container(
                         )
                         .caused_by(trc::location!())?;
                 }
-                let to_document_id = server
-                    .store()
-                    .assign_document_ids(to_account_id, Collection::CalendarEvent, 1)
-                    .await
-                    .caused_by(trc::location!())?;
+                let to_document_id =
+                    batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
                 new_event.names = vec![new_name];
                 required_space += new_event.size as u64;
-                new_event
-                    .insert(
+                match parent_id {
+                    PendingId::Assigned(_) => new_event.insert(
                         access_token.account_tenant_ids(),
                         to_account_id,
                         to_document_id,
                         next_email_alarm,
                         &mut batch,
-                    )
-                    .caused_by(trc::location!())?;
+                    ),
+                    PendingId::Slot(parent_id) => new_event.insert_pending_parent(
+                        access_token.account_tenant_ids(),
+                        to_account_id,
+                        to_document_id,
+                        parent_id,
+                        next_email_alarm,
+                        &mut batch,
+                    ),
+                }
+                .caused_by(trc::location!())?;
             }
         }
     }

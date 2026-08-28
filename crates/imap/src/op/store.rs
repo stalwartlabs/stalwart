@@ -32,7 +32,7 @@ use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use store::{
     query::log::{Change, Query},
-    write::BatchBuilder,
+    write::{BatchBuilder, PendingId},
 };
 use trc::AddContext;
 use types::{
@@ -399,7 +399,10 @@ impl<T: SessionStream> SessionData<T> {
         // Log mailbox changes
         if !changed_mailboxes.is_empty() {
             for parent_id in changed_mailboxes {
-                batch.log_container_property_change(SyncCollection::Email, parent_id);
+                batch.log_container_property_change(
+                    SyncCollection::Email,
+                    PendingId::Assigned(parent_id),
+                );
             }
         }
 
@@ -409,7 +412,9 @@ impl<T: SessionStream> SessionData<T> {
                 .server
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(mailbox.id.account_id))
+                .map(|ids| {
+                    ids.last_change_id(mailbox.id.account_id, SyncCollection::Email.change_group())
+                })
                 .caused_by(trc::location!())
             {
                 Ok(change_id) => {

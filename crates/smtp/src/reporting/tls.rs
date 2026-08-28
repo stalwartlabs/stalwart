@@ -89,7 +89,7 @@ impl TlsReporting for Server {
         self.core
             .storage
             .data
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
 
@@ -339,7 +339,7 @@ impl TlsReporting for Server {
                     },
                 );
 
-                match self.core.storage.data.write(batch.build_all()).await {
+                match self.core.storage.data.write_batch(batch.build_all()).await {
                     Ok(_) => return,
                     Err(err) if err.is_assertion_failure() && rety_count < 3 => {
                         rety_count += 1;
@@ -414,7 +414,7 @@ impl TlsReporting for Server {
                 report_bytes,
             );
 
-            match self.core.storage.data.write(batch.build_all()).await {
+            match self.core.storage.data.write_batch(batch.build_all()).await {
                 Ok(_) => {
                     break;
                 }

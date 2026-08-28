@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::api::parent_ref::ParentRef;
 use crate::{
     api::acl::JmapAcl,
     blob::download::BlobDownload,
@@ -34,12 +35,13 @@ use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
-    write::{Archive, ArchiveBytes, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, Slot, now},
 };
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    id::Id,
 };
 use utils::map::vec_map::VecMap;
 
@@ -127,9 +129,10 @@ impl FileNodeCopy for Server {
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
 
         let mut batch = BatchBuilder::new();
-        let mut pending_names: AHashMap<(u32, String), Option<u32>> = AHashMap::new();
+        let mut pending_names: AHashMap<(ParentRef, String), Option<u32>> = AHashMap::new();
         let mut implicit_destroys: AHashSet<u32> = AHashSet::new();
-        let mut created_folders = AHashMap::new();
+        let mut created_folders: AHashMap<u64, Vec<types::acl::AclGrant>> = AHashMap::new();
+        let mut created_slots: Vec<(Id, Slot, Option<String>)> = Vec::new();
         let mut destroy_ids = Vec::new();
 
         'create: for (id, create) in request.create.into_valid() {
@@ -171,6 +174,7 @@ impl FileNodeCopy for Server {
             // ACLs are account-scoped; do not carry the source account's grants over.
             file_node.acls.clear();
 
+            let parent;
             let has_acl_changes =
                 match update_file_node(None, create, &mut file_node, true, &NoResolver) {
                     Ok(result) => {
@@ -216,6 +220,8 @@ impl FileNodeCopy for Server {
                             continue 'create;
                         }
 
+                        parent = result.parent;
+                        file_node.parent_id = parent.as_stored();
                         result.has_acl_changes
                     }
                     Err(err) => {
@@ -225,7 +231,7 @@ impl FileNodeCopy for Server {
                 };
 
             if let Err(err) =
-                validate_file_node_hierarchy(None, &file_node, is_shared, &cache, &created_folders)
+                validate_file_node_hierarchy(None, parent, is_shared, &cache, &created_folders)
             {
                 response.not_created.append(id, err);
                 continue 'create;
@@ -237,6 +243,7 @@ impl FileNodeCopy for Server {
 
             let renamed = match find_sibling_collision(
                 None,
+                parent,
                 &file_node,
                 &cache,
                 &pending_names,
@@ -274,7 +281,7 @@ impl FileNodeCopy for Server {
                             file_node.name = pick_unique_rename(
                                 &file_node.name,
                                 None,
-                                file_node.parent_id,
+                                parent,
                                 &cache,
                                 &pending_names,
                                 case_insensitive,
@@ -302,7 +309,7 @@ impl FileNodeCopy for Server {
                         file_node.name = pick_unique_rename(
                             &file_node.name,
                             None,
-                            file_node.parent_id,
+                            parent,
                             &cache,
                             &pending_names,
                             case_insensitive,
@@ -310,7 +317,8 @@ impl FileNodeCopy for Server {
                         true
                     }
                     OnExists::Reject | OnExists::Replace | OnExists::Newest => {
-                        let key = crate::file::set::pending_key(&file_node, case_insensitive);
+                        let key =
+                            crate::file::set::pending_key(parent, &file_node, case_insensitive);
                         let mut err = SetError::already_exists();
                         if let Some(Some(doc_id)) = pending_names.get(&key) {
                             err = err.with_existing_id(types::id::Id::from(*doc_id));
@@ -322,12 +330,10 @@ impl FileNodeCopy for Server {
             };
 
             // Permission and ACL inheritance for the destination parent
-            if file_node.parent_id > 0 {
-                let parent_id = file_node.parent_id - 1;
-
+            if let (Some(parent_key), Some(parent_id)) = (parent.key(), parent.document_id()) {
                 // The user must be allowed to add children to the destination parent
                 if let Some(allowed) = &can_add_to
-                    && !created_folders.contains_key(&parent_id)
+                    && !created_folders.contains_key(&parent_key)
                     && !allowed.contains(parent_id)
                 {
                     response.not_created.append(
@@ -339,7 +345,7 @@ impl FileNodeCopy for Server {
                     continue 'create;
                 }
 
-                let parent_acls = created_folders.get(&parent_id).cloned().or_else(|| {
+                let parent_acls = created_folders.get(&parent_key).cloned().or_else(|| {
                     cache
                         .container_resource_by_id(parent_id)
                         .and_then(|r| r.acls())
@@ -379,41 +385,32 @@ impl FileNodeCopy for Server {
                     .caused_by(trc::location!())?;
             }
 
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::FileNode, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
             if file_node.file.is_none() {
-                created_folders.insert(document_id, file_node.acls.clone());
+                created_folders.insert(
+                    ParentRef::pending(document_id).key().unwrap(),
+                    file_node.acls.clone(),
+                );
             }
             pending_names.insert(
-                crate::file::set::pending_key(&file_node, case_insensitive),
+                crate::file::set::pending_key(parent, &file_node, case_insensitive),
                 None,
             );
             let final_name = file_node.name.clone();
             let set_created = file_node.created == 0;
             let set_modified = file_node.modified == 0;
             file_node
-                .insert(
+                .insert_with_parent(
                     access_token.account_tenant_ids(),
                     account_id,
                     document_id,
+                    parent.slot(),
                     set_created,
                     set_modified,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
-            response.created(id, document_id);
-            if renamed
-                && let Some(value) = response.created.get_mut(&id)
-                && let jmap_tools::Value::Object(map) = value
-            {
-                map.insert_unchecked(
-                    jmap_tools::Key::Property(FileNodeProperty::Name),
-                    jmap_tools::Value::Str(std::borrow::Cow::Owned(final_name)),
-                );
-            }
+            created_slots.push((id, document_id, renamed.then_some(final_name)));
 
             if on_success_delete {
                 destroy_ids.push(MaybeInvalid::Value(id));
@@ -440,12 +437,24 @@ impl FileNodeCopy for Server {
         }
 
         if !batch.is_empty() {
-            let change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
-            response.new_state = State::Exact(change_id);
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+            for (create_id, slot, renamed) in created_slots {
+                response.created(create_id, assigned_ids.slot(slot));
+                if let Some(final_name) = renamed
+                    && let Some(value) = response.created.get_mut(&create_id)
+                    && let jmap_tools::Value::Object(map) = value
+                {
+                    map.insert_unchecked(
+                        jmap_tools::Key::Property(FileNodeProperty::Name),
+                        jmap_tools::Value::Str(std::borrow::Cow::Owned(final_name)),
+                    );
+                }
+            }
+
+            response.new_state = State::Exact(
+                assigned_ids.last_change_id(account_id, SyncCollection::FileNode.change_group()),
+            );
         }
 
         if on_success_delete && !destroy_ids.is_empty() {

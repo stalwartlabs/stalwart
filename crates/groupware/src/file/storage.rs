@@ -9,7 +9,7 @@ use crate::DestroyArchive;
 use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, Slot, now},
 };
 use trc::AddContext;
 use types::collection::{Collection, VanishedCollection};
@@ -19,7 +19,7 @@ impl FileNode {
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
         set_created: bool,
         set_modified: bool,
         batch: &mut BatchBuilder,
@@ -37,12 +37,49 @@ impl FileNode {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
-            .with_document(document_id)
+            .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
                     .with_changed_by(changed_by),
             )
+            .map(|b| b.commit_point())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_with_parent(
+        self,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: Slot,
+        parent_id: Option<Slot>,
+        set_created: bool,
+        set_modified: bool,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
+        let mut node = self;
+        let now = now() as i64;
+        if set_created {
+            node.created = now;
+        }
+        if set_modified {
+            node.modified = now;
+        }
+
+        // Prepare write batch
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::FileNode)
+            .create_document(document_id)
+            .custom({
+                let builder = ObjectIndexBuilder::<(), _>::new()
+                    .with_changes(node)
+                    .with_changed_by(changed_by);
+                match parent_id {
+                    Some(parent_id) => builder.with_pending_id(parent_id),
+                    None => builder,
+                }
+            })
             .map(|b| b.commit_point())
     }
 
@@ -69,6 +106,36 @@ impl FileNode {
                     .with_changes(new_node)
                     .with_changed_by(changed_by),
             )
+            .map(|b| b.commit_point())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_with_parent<'x>(
+        self,
+        changed_by: AccountTenantIds,
+        node: Archive<&ArchivedFileNode>,
+        account_id: u32,
+        document_id: u32,
+        parent_id: Option<Slot>,
+        set_modified: bool,
+        batch: &'x mut BatchBuilder,
+    ) -> trc::Result<&'x mut BatchBuilder> {
+        let mut new_node = self;
+        if set_modified {
+            new_node.modified = now() as i64;
+        }
+        let builder = ObjectIndexBuilder::new()
+            .with_current(node)
+            .with_changes(new_node)
+            .with_changed_by(changed_by);
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::FileNode)
+            .with_document(document_id)
+            .custom(match parent_id {
+                Some(parent_id) => builder.with_pending_id(parent_id),
+                None => builder,
+            })
             .map(|b| b.commit_point())
     }
 }

@@ -165,7 +165,7 @@ pub async fn store_console(store: Store) {
                             subspace,
                             key: key.collect(),
                         }));
-                        if let Err(err) = store.write(batch.build_all()).await {
+                        if let Err(err) = store.write_batch(batch.build_all()).await {
                             println!("Failed to delete key: {}", err);
                         }
                     }
@@ -223,7 +223,7 @@ pub async fn store_console(store: Store) {
                         }),
                         value,
                     );
-                    if let Err(err) = store.write(batch.build_all()).await {
+                    if let Err(err) = store.write_batch(batch.build_all()).await {
                         println!("Failed to insert key: {}", err);
                     }
                 }

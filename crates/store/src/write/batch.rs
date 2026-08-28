@@ -12,11 +12,12 @@ use crate::{
     Deserialize, Serialize, SerializeInfallible, U32_LEN,
     search::GLOBAL_BUCKET_SHIFT,
     write::{
-        AssignedIds, DOCUMENT_ID_SET, LogCollection, MergeOperation, MergeResult, SearchIndex,
-        SearchIndexClass, SetOperation, TaskQueueClass,
+        AssignedIds, ChangeGroup, CommitPointOffsets, DOCUMENT_ID_SET, LogCollection, LogSet,
+        MergeOperation, MergeResult, Patch, PendingId, PendingTask, Reservation, ReservationClass,
+        SearchIndex, SearchIndexClass, SerializeOperation, SerializeWithIds, SetValue, Slot,
+        TaskId, TaskQueueClass,
     },
 };
-use ahash::AHashMap;
 use registry::{
     schema::structs::Task,
     types::{EnumImpl, ObjectImpl},
@@ -25,6 +26,7 @@ use roaring::RoaringBitmap;
 use types::{
     collection::{Collection, SyncCollection, VanishedCollection},
     field::FieldType,
+    id::Id,
 };
 use utils::{map::vec_map::VecMap, snowflake::SnowflakeIdGenerator};
 
@@ -38,6 +40,8 @@ impl BatchBuilder {
             changes: Default::default(),
             changed_collections: Default::default(),
             change_accounts: Vec::new(),
+            reservations: Vec::new(),
+            next_slot: 0,
             batch_size: 0,
             batch_ops: 0,
             has_assertions: false,
@@ -70,10 +74,77 @@ impl BatchBuilder {
     }
 
     pub fn with_document(&mut self, document_id: u32) -> &mut Self {
+        self.with_pending_document(PendingId::Assigned(document_id))
+    }
+
+    pub fn create_document(&mut self, slot: Slot) -> &mut Self {
+        self.with_pending_document(PendingId::Slot(slot))
+    }
+
+    pub fn with_pending_document(&mut self, document_id: PendingId) -> &mut Self {
         self.ops.push(Operation::DocumentId { document_id });
         self.current_document_id = Some(document_id);
         self.has_assertions = false;
         self
+    }
+
+    pub fn reserve_document_id(&mut self, account_id: u32, collection: Collection) -> Slot {
+        self.reserve(ReservationClass::DocumentId {
+            account_id,
+            collection,
+        })
+    }
+
+    pub fn reserve_document_ids(
+        &mut self,
+        account_id: u32,
+        collection: Collection,
+        count: u32,
+    ) -> Slot {
+        self.reserve_many(
+            ReservationClass::DocumentId {
+                account_id,
+                collection,
+            },
+            count,
+        )
+    }
+
+    pub fn reserve_uid(&mut self, account_id: u32, mailbox_id: u32) -> Slot {
+        self.reserve(ReservationClass::Uid {
+            account_id,
+            mailbox_id,
+        })
+    }
+
+    fn reserve(&mut self, class: ReservationClass) -> Slot {
+        let next_slot = self.next_slot;
+        let reservations_start = self.reservations_start();
+        if self.reservations.len() > reservations_start
+            && let Some(last) = self.reservations.last_mut()
+            && last.class == class
+            && last.first_slot.index() + last.count as usize == next_slot as usize
+        {
+            last.count += 1;
+            self.next_slot += 1;
+            return Slot::new(next_slot);
+        }
+
+        self.reserve_many(class, 1)
+    }
+
+    fn reserve_many(&mut self, class: ReservationClass, count: u32) -> Slot {
+        let first_slot = Slot::new(self.next_slot);
+        self.next_slot = self
+            .next_slot
+            .checked_add(count)
+            .expect("too many reserved ids");
+        self.reservations.push(Reservation {
+            class,
+            first_slot,
+            count,
+        });
+        first_slot
     }
 
     pub fn assert_value(
@@ -133,11 +204,11 @@ impl BatchBuilder {
     pub fn merge_document_ids(
         &mut self,
         field: impl FieldType,
-        changes: AHashMap<u32, bool>,
+        changes: Vec<(PendingId, bool)>,
     ) -> &mut Self {
         self.with_document(DOCUMENT_ID_SET).merge_fnc(
             ValueClass::Property(field.into()),
-            move |_, bytes| {
+            move |ids, bytes| {
                 let mut document_ids = match bytes {
                     Some(bytes) => RoaringBitmap::deserialize(bytes)?,
                     None => RoaringBitmap::new(),
@@ -145,10 +216,11 @@ impl BatchBuilder {
                 let mut has_changes = false;
 
                 for (document_id, do_insert) in &changes {
+                    let document_id = document_id.resolve(ids);
                     if *do_insert {
-                        has_changes |= document_ids.insert(*document_id);
+                        has_changes |= document_ids.insert(document_id);
                     } else {
-                        has_changes |= document_ids.remove(*document_id);
+                        has_changes |= document_ids.remove(document_id);
                     }
                 }
 
@@ -186,8 +258,38 @@ impl BatchBuilder {
     }
 
     pub fn set(&mut self, class: impl Into<ValueClass>, value: impl Into<Vec<u8>>) -> &mut Self {
+        self.set_patched(class, value, Vec::new())
+    }
+
+    pub fn set_patched(
+        &mut self,
+        class: impl Into<ValueClass>,
+        value: impl Into<Vec<u8>>,
+        patches: Vec<Patch>,
+    ) -> &mut Self {
         let class = class.into();
-        let value = value.into();
+        let payload = value.into();
+        debug_assert!(
+            patches
+                .iter()
+                .all(|patch| (patch.offset as usize) < payload.len()),
+            "patch offset is outside the payload"
+        );
+        self.batch_size += class.key_len_hint() + payload.len();
+        self.ops.push(Operation::Value {
+            class,
+            op: ValueOp::Set(if patches.is_empty() {
+                SetValue::Fixed(payload)
+            } else {
+                SetValue::Patched(payload, patches.into_boxed_slice())
+            }),
+        });
+        self.batch_ops += 1;
+        self
+    }
+
+    pub fn set_value(&mut self, class: impl Into<ValueClass>, value: SetValue) -> &mut Self {
+        let class = class.into();
         self.batch_size += class.key_len_hint() + value.len();
         self.ops.push(Operation::Value {
             class,
@@ -197,20 +299,17 @@ impl BatchBuilder {
         self
     }
 
-    pub fn set_fnc(
+    pub fn set_serializable(
         &mut self,
         class: impl Into<ValueClass>,
-        payload: Vec<u8>,
-        fnc: impl Fn(&AssignedIds, &mut [u8]) -> trc::Result<()> + Send + Sync + 'static,
+        size_hint: usize,
+        object: Box<dyn SerializeWithIds>,
     ) -> &mut Self {
         let class = class.into();
-        self.batch_size += class.key_len_hint() + payload.len();
+        self.batch_size += class.key_len_hint() + size_hint;
         self.ops.push(Operation::Value {
             class,
-            op: ValueOp::SetFnc {
-                payload,
-                fnc: SetOperation(Box::new(fnc)),
-            },
+            op: ValueOp::Set(SetValue::Serializable(SerializeOperation(object))),
         });
         self.batch_ops += 1;
         self
@@ -251,7 +350,7 @@ impl BatchBuilder {
         self.batch_size += (U32_LEN * 3) + op.len();
         self.ops.push(Operation::Value {
             class: ValueClass::Acl(grant_account_id),
-            op: ValueOp::Set(op),
+            op: ValueOp::Set(SetValue::Fixed(op)),
         });
         self.batch_ops += 1;
         self
@@ -270,7 +369,7 @@ impl BatchBuilder {
     pub fn log_item_insert(
         &mut self,
         collection: SyncCollection,
-        prefix: Option<u32>,
+        prefix: Option<PendingId>,
     ) -> &mut Self {
         if let (Some(account_id), Some(document_id)) =
             (self.current_account_id, self.current_document_id)
@@ -287,7 +386,7 @@ impl BatchBuilder {
     pub fn log_item_update(
         &mut self,
         collection: SyncCollection,
-        prefix: Option<u32>,
+        prefix: Option<PendingId>,
     ) -> &mut Self {
         if let (Some(account_id), Some(document_id)) =
             (self.current_account_id, self.current_document_id)
@@ -304,7 +403,7 @@ impl BatchBuilder {
     pub fn log_item_delete(
         &mut self,
         collection: SyncCollection,
-        prefix: Option<u32>,
+        prefix: Option<PendingId>,
     ) -> &mut Self {
         if let (Some(account_id), Some(document_id)) =
             (self.current_account_id, self.current_document_id)
@@ -354,7 +453,7 @@ impl BatchBuilder {
     pub fn log_container_property_change(
         &mut self,
         collection: SyncCollection,
-        document_id: u32,
+        document_id: PendingId,
     ) -> &mut Self {
         if let Some(account_id) = self.current_account_id {
             self.changes
@@ -384,29 +483,34 @@ impl BatchBuilder {
         notification_id: u64,
         notify_account_id: u32,
         value: impl SerializeInfallible,
+        patches: Vec<Patch>,
     ) -> &mut Self {
         self.changed_collections
             .get_mut_or_insert(notify_account_id)
             .share_notification_id = Some(notification_id);
-        self.set(
+        self.set_patched(
             ValueClass::ShareNotification {
                 notification_id,
                 notify_account_id,
             },
             value.serialize(),
+            patches,
         )
     }
 
     fn serialize_changes(&mut self) {
+        let reservations_start = self.reservations_start();
+        self.reservations[reservations_start..].sort_unstable_by_key(|reservation| {
+            (reservation.class.sort_key(), reservation.first_slot)
+        });
+        let change_accounts_start = self.change_accounts_start();
+
         if !self.changes.is_empty() {
             for (account_id, changelog) in std::mem::take(&mut self.changes) {
                 if changelog.changes.is_empty() && changelog.vanished.is_empty() {
                     continue;
                 }
                 self.with_account_id(account_id);
-                if !self.change_accounts.contains(&account_id) {
-                    self.change_accounts.push(account_id);
-                }
 
                 // Serialize changes
                 let mut scratch = Vec::new();
@@ -418,21 +522,52 @@ impl BatchBuilder {
                     if changes.has_item_changes() {
                         cc.changed_items.insert(collection);
                     }
+                    self.register_change_group(account_id, collection.change_group());
 
+                    let set = if changes.has_pending() {
+                        LogSet::Pending(Box::new(changes))
+                    } else {
+                        LogSet::Bytes(changes.serialize(collection.is_prefixed(), &mut scratch))
+                    };
                     self.ops.push(Operation::Log {
                         collection: LogCollection::Sync(collection),
-                        set: changes.serialize(collection.is_prefixed(), &mut scratch),
+                        set,
                     });
                 }
 
                 // Serialize vanished items
                 for (collection, vanished) in changelog.vanished.into_iter() {
+                    self.register_change_group(account_id, collection.change_group());
                     self.ops.push(Operation::Log {
                         collection: LogCollection::Vanished(collection),
-                        set: vanished.serialize(collection.is_named(), &mut scratch),
+                        set: LogSet::Bytes(vanished.serialize(collection.is_named(), &mut scratch)),
                     });
                 }
             }
+
+            self.change_accounts[change_accounts_start..]
+                .sort_unstable_by_key(|entry| (entry.account_id, entry.group));
+        }
+    }
+
+    #[inline(always)]
+    fn change_accounts_start(&self) -> usize {
+        self.commit_points
+            .last()
+            .map_or(0, |commit_point| commit_point.change_accounts)
+    }
+
+    #[inline(always)]
+    fn reservations_start(&self) -> usize {
+        self.commit_points
+            .last()
+            .map_or(0, |commit_point| commit_point.reservations)
+    }
+
+    fn register_change_group(&mut self, account_id: u32, group: u8) {
+        let entry = ChangeGroup { account_id, group };
+        if !self.change_accounts[self.change_accounts_start()..].contains(&entry) {
+            self.change_accounts.push(entry);
         }
     }
 
@@ -447,7 +582,11 @@ impl BatchBuilder {
 
     pub fn add_commit_point(&mut self) -> &mut Self {
         self.serialize_changes();
-        self.commit_points.push(self.ops.len());
+        self.commit_points.push(CommitPointOffsets {
+            ops: self.ops.len(),
+            reservations: self.reservations.len(),
+            change_accounts: self.change_accounts.len(),
+        });
         self.batch_ops = 0;
         self.batch_size = 0;
         self.last_index_partition = None;
@@ -501,7 +640,7 @@ impl BatchBuilder {
         self.current_collection
     }
 
-    pub fn last_document_id(&self) -> Option<u32> {
+    pub fn last_document_id(&self) -> Option<PendingId> {
         self.current_document_id
     }
 
@@ -513,14 +652,21 @@ impl BatchBuilder {
         self.serialize_changes();
         CommitPointIterator {
             commit_points: std::mem::take(&mut self.commit_points),
-            commit_point_last: self.ops.len(),
-            offset_start: 0,
+            commit_point_last: CommitPointOffsets {
+                ops: self.ops.len(),
+                reservations: self.reservations.len(),
+                change_accounts: self.change_accounts.len(),
+            },
+            offset_start: CommitPointOffsets::default(),
         }
     }
 
     pub fn build_one(&mut self, commit_point: CommitPoint) -> Batch<'_> {
         Batch {
-            change_accounts: &self.change_accounts,
+            change_accounts: &self.change_accounts
+                [commit_point.change_account_start..commit_point.change_account_end],
+            reservations: &self.reservations
+                [commit_point.reservation_start..commit_point.reservation_end],
             ops: &mut self.ops[commit_point.offset_start..commit_point.offset_end],
         }
     }
@@ -529,6 +675,7 @@ impl BatchBuilder {
         self.serialize_changes();
         Batch {
             change_accounts: &self.change_accounts,
+            reservations: self.reservations.as_slice(),
             ops: self.ops.as_mut_slice(),
         }
     }
@@ -565,38 +712,76 @@ impl BatchBuilder {
     }
 
     pub fn schedule_task(&mut self, task: Task) -> &mut Self {
+        self.schedule_task_with_id(SnowflakeIdGenerator::global_id().unwrap_or_default(), task)
+    }
+
+    pub fn schedule_task_with_id(&mut self, id: u64, task: Task) -> &mut Self {
+        self.push_task(TaskId::Assigned(id), task, None)
+    }
+
+    pub fn schedule_document_task(&mut self, task: Task) -> &mut Self {
+        let document_id = self
+            .current_document_id
+            .expect("no document is set for a document task");
+
+        self.push_task(TaskId::Document, task, Some(document_id))
+    }
+
+    pub fn schedule_task_with_document(&mut self, task: Task) -> &mut Self {
+        let document_id = self
+            .current_document_id
+            .expect("no document is set for a document task");
+        let id = TaskId::Assigned(SnowflakeIdGenerator::global_id().unwrap_or_default());
+
+        self.push_task(id, task, Some(document_id))
+    }
+
+    fn push_task(
+        &mut self,
+        id: TaskId,
+        mut task: Task,
+        document_id: Option<PendingId>,
+    ) -> &mut Self {
         let due = task.due_timestamp();
         let class = task.object_type().to_id();
-        let task = task.to_pickled_vec();
-        let id = SnowflakeIdGenerator::global_id().unwrap_or_default();
         self.has_tasks = true;
 
-        self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
+        let value = match document_id {
+            Some(PendingId::Slot(slot)) => {
+                self.batch_size += task.size_hint();
+                SetValue::Serializable(SerializeOperation(Box::new(PendingTask { task, slot })))
+            }
+            Some(PendingId::Assigned(document_id)) => {
+                task.set_document_id(Id::from(document_id));
+                SetValue::Fixed(task.to_pickled_vec())
+            }
+            None => SetValue::Fixed(task.to_pickled_vec()),
+        };
+
+        self.set_value(ValueClass::TaskQueue(TaskQueueClass::Task { id }), value)
             .set(
                 ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
                 class.serialize(),
             )
     }
 
-    pub fn schedule_task_with_id(&mut self, id: u64, task: Task) -> &mut Self {
-        let due = task.due_timestamp();
-        let class = task.object_type().to_id();
-        let task = task.to_pickled_vec();
-        self.has_tasks = true;
-
-        self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), task)
-            .set(
-                ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
-                class.serialize(),
-            )
+    pub fn clear_document_task(&mut self, due: u64) -> &mut Self {
+        self.clear(ValueClass::TaskQueue(TaskQueueClass::Task {
+            id: TaskId::Document,
+        }))
+        .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
+            id: TaskId::Document,
+            due,
+        }))
     }
 
     pub fn queue_document_index(
         &mut self,
         index: SearchIndex,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
     ) -> &mut Self {
+        let document_id = self.assert_indexable(document_id.into());
         self.queue_index_task(index, account_id).set(
             ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index,
@@ -612,8 +797,9 @@ impl BatchBuilder {
         &mut self,
         index: SearchIndex,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
     ) -> &mut Self {
+        let document_id = self.assert_indexable(document_id.into());
         self.queue_index_task(index, account_id).set(
             ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index,
@@ -631,12 +817,20 @@ impl BatchBuilder {
                 ValueClass::SearchIndex(SearchIndexClass::Queue {
                     index: SearchIndex::Tracing,
                     id_prefix: (id >> 32) as u32,
-                    id_suffix: id as u32,
+                    id_suffix: PendingId::Assigned(id as u32),
                     created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0)
                         .unwrap_or_default(),
                 }),
                 vec![1u8],
             )
+    }
+
+    fn assert_indexable(&self, document_id: PendingId) -> PendingId {
+        debug_assert!(
+            !document_id.is_pending() || self.current_document_id == Some(document_id),
+            "a pending search index id must be the current document"
+        );
+        document_id
     }
 
     fn queue_index_task(&mut self, index: SearchIndex, partition: u32) -> &mut Self {
@@ -654,14 +848,18 @@ impl BatchBuilder {
 }
 
 pub struct CommitPointIterator {
-    commit_points: Vec<usize>,
-    commit_point_last: usize,
-    offset_start: usize,
+    commit_points: Vec<CommitPointOffsets>,
+    commit_point_last: CommitPointOffsets,
+    offset_start: CommitPointOffsets,
 }
 
 pub struct CommitPoint {
     pub offset_start: usize,
     pub offset_end: usize,
+    pub reservation_start: usize,
+    pub reservation_end: usize,
+    pub change_account_start: usize,
+    pub change_account_end: usize,
 }
 
 impl CommitPointIterator {
@@ -670,12 +868,16 @@ impl CommitPointIterator {
             .iter()
             .copied()
             .chain([self.commit_point_last])
-            .map(|offset_end| {
+            .map(|end| {
                 let point = CommitPoint {
-                    offset_start: self.offset_start,
-                    offset_end,
+                    offset_start: self.offset_start.ops,
+                    offset_end: end.ops,
+                    reservation_start: self.offset_start.reservations,
+                    reservation_end: end.reservations,
+                    change_account_start: self.offset_start.change_accounts,
+                    change_account_end: end.change_accounts,
                 };
-                self.offset_start = offset_end;
+                self.offset_start = end;
                 point
             })
     }

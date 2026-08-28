@@ -26,9 +26,11 @@ impl Server {
 
         for commit_point in commit_points.iter() {
             let batch = builder.build_one(commit_point);
-            assigned_ids
-                .ids
-                .extend(self.store().write(batch).await?.ids);
+            self.store().write(batch, &mut assigned_ids).await?;
+        }
+
+        if let Some(hash) = builder.last_archive_hash() {
+            assigned_ids.push_archive_hash(hash);
         }
 
         let queues = builder.queue_notify();
@@ -37,24 +39,43 @@ impl Server {
         }
 
         if let Some(changes) = builder.changes() {
+            let mut group_types =
+                [Bitmap::<DataType>::default(); SyncCollection::MAX_CHANGE_GROUP as usize + 1];
+
             for (account_id, changed_collections) in changes {
-                let mut state_change = StateChange::new(account_id);
-                for changed_collection in changed_collections.changed_containers {
-                    if let Some(data_type) = DataType::try_from_sync(changed_collection, true) {
-                        state_change.set_change(data_type);
+                group_types.fill(Bitmap::default());
+
+                for (changed_collection, is_container) in changed_collections
+                    .changed_containers
+                    .into_iter()
+                    .map(|collection| (collection, true))
+                    .chain(
+                        changed_collections
+                            .changed_items
+                            .into_iter()
+                            .map(|collection| (collection, false)),
+                    )
+                {
+                    if let Some(data_type) =
+                        DataType::try_from_sync(changed_collection, is_container)
+                    {
+                        group_types[changed_collection.change_group() as usize].insert(data_type);
                     }
                 }
-                for changed_collection in changed_collections.changed_items {
-                    if let Some(data_type) = DataType::try_from_sync(changed_collection, false) {
-                        state_change.set_change(data_type);
+
+                for (group, types) in group_types.iter().enumerate() {
+                    if !types.is_empty() {
+                        self.broadcast_push_notification(PushNotification::StateChange(
+                            StateChange {
+                                account_id,
+                                change_id: assigned_ids.last_change_id(account_id, group as u8),
+                                types: *types,
+                            },
+                        ))
+                        .await;
                     }
                 }
-                if state_change.has_changes() {
-                    self.broadcast_push_notification(PushNotification::StateChange(
-                        state_change.with_change_id(assigned_ids.last_change_id(account_id)?),
-                    ))
-                    .await;
-                }
+
                 if let Some(change_id) = changed_collections.share_notification_id {
                     self.broadcast_push_notification(PushNotification::StateChange(StateChange {
                         account_id,
@@ -170,7 +191,7 @@ impl Server {
                         Vec::new(),
                     );
                     self.store()
-                        .write(batch.build_all())
+                        .write_batch(batch.build_all())
                         .await
                         .caused_by(trc::location!())?;
                 }

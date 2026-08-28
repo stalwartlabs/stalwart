@@ -6,14 +6,14 @@
 
 use crate::{
     mailbox::{JUNK_ID, TRASH_ID},
-    message::messagedata::MessageData,
+    message::messagedata::{MessageData, PendingMessageData},
 };
 use common::storage::index::{
     CurrentObject, IndexItem, IndexValue, IndexableObject, SerializableObject,
 };
 use store::{
     Serialize, U64_LEN,
-    write::{BatchBuilder, assert::AssertValue, now},
+    write::{BatchBuilder, Patch, PatchSource, PendingId, Slot, assert::AssertValue, now},
 };
 use types::{
     blob_hash::BlobHash,
@@ -43,24 +43,35 @@ impl CurrentObject for MessageData {
 }
 
 impl SerializableObject for MessageData {
-    fn serialize_into(self, batch: &mut BatchBuilder) -> trc::Result<()> {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        debug_assert!(pending_id.is_none(), "message data carries no pending id");
         let payload = self.serialize()?;
-        let offset = payload.len() - U64_LEN;
-        batch.set_fnc(Field::ARCHIVE, payload, move |ids, bytes| {
-            bytes[offset..].copy_from_slice(&ids.current_change_id()?.to_be_bytes());
-            Ok(())
-        });
+        let offset = (payload.len() - U64_LEN) as u32;
+        batch.set_patched(
+            Field::ARCHIVE,
+            payload,
+            vec![Patch {
+                offset,
+                source: PatchSource::ChangeIdBe,
+            }],
+        );
         Ok(())
     }
 }
 
 impl IndexableObject for MessageData {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
+        self.index_values_in_thread(PendingId::Assigned(self.thread_id))
+    }
+}
+
+impl MessageData {
+    fn index_values_in_thread(&self, thread_id: PendingId) -> impl Iterator<Item = IndexValue<'_>> {
         let mut mailboxes = Vec::with_capacity(self.mailboxes.len());
         let mut is_in_trash = false;
 
         for mailbox in &self.mailboxes {
-            mailboxes.push(mailbox.mailbox_id);
+            mailboxes.push(PendingId::Assigned(mailbox.mailbox_id));
             is_in_trash |= mailbox.mailbox_id == TRASH_ID || mailbox.mailbox_id == JUNK_ID;
         }
 
@@ -76,11 +87,11 @@ impl IndexableObject for MessageData {
             IndexValue::Quota { used: self.size },
             IndexValue::LogItem {
                 sync_collection: SyncCollection::Email,
-                prefix: self.thread_id.into(),
+                prefix: Some(thread_id),
             },
             IndexValue::LogContainerProperty {
                 sync_collection: SyncCollection::Thread,
-                ids: vec![self.thread_id],
+                ids: vec![thread_id],
             },
             IndexValue::LogContainerProperty {
                 sync_collection: SyncCollection::Email,
@@ -88,6 +99,44 @@ impl IndexableObject for MessageData {
             },
         ]
         .into_iter()
+    }
+}
+
+impl PendingMessageData {
+    pub fn new(data: MessageData) -> Self {
+        PendingMessageData {
+            data,
+            uid_slot: None,
+            thread_slot: None,
+            change_id: None,
+        }
+    }
+
+    pub fn thread_id(&self) -> PendingId {
+        match self.thread_slot {
+            Some(thread_slot) => PendingId::Slot(thread_slot),
+            None => PendingId::Assigned(self.data.thread_id),
+        }
+    }
+}
+
+impl IndexableObject for PendingMessageData {
+    fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
+        self.data.index_values_in_thread(self.thread_id())
+    }
+}
+
+impl SerializableObject for PendingMessageData {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        debug_assert!(pending_id.is_none(), "message data carries no pending id");
+        debug_assert_eq!(
+            self.uid_slot.is_some(),
+            self.data.pending_uids() > 0,
+            "unassigned uids and reserved uid slots disagree"
+        );
+        let size_hint = self.data.size_hint();
+        batch.set_serializable(Field::ARCHIVE, size_hint, Box::new(self));
+        Ok(())
     }
 }
 
@@ -100,6 +149,6 @@ pub(super) trait IndexMessage {
         extra_headers: Vec<u8>,
         extra_headers_parsed: Vec<mail_parser::Header<'x>>,
         blob_hash: BlobHash,
-        data: MessageData,
+        data: PendingMessageData,
     ) -> trc::Result<&mut Self>;
 }

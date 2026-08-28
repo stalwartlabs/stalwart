@@ -253,7 +253,7 @@ pub(crate) async fn index_queue_status_set(
     if has_changes {
         set.server
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
         set.server

@@ -5,8 +5,7 @@
  */
 
 use crate::message::{
-    index::{IndexMessage, MAX_MESSAGE_PARTS, PREVIEW_LENGTH},
-    messagedata::MessageData,
+    index::{IndexMessage, MAX_MESSAGE_PARTS, PREVIEW_LENGTH, PendingMessageData},
     metadata::{
         ArchivedMessageMetadata, ArchivedMessageMetadataPart, ArchivedMetadataHeaderName,
         MessageMetadata, MessageMetadataPart, build_metadata_contents,
@@ -135,7 +134,7 @@ impl IndexMessage for BatchBuilder {
         extra_headers: Vec<u8>,
         mut extra_headers_parsed: Vec<mail_parser::Header<'x>>,
         blob_hash: BlobHash,
-        mut data: MessageData,
+        mut data: PendingMessageData,
     ) -> trc::Result<&mut Self> {
         let mut has_attachments = false;
         let mut preview = None;
@@ -250,9 +249,9 @@ impl IndexMessage for BatchBuilder {
             blob_body_offset,
         };
         if has_attachments {
-            data.keywords |= 1 << HASATTACHMENT;
+            data.data.keywords |= 1 << HASATTACHMENT;
         } else {
-            data.keywords |= 1 << HASNOATTACHMENT;
+            data.data.keywords |= 1 << HASNOATTACHMENT;
         }
 
         self.set(

@@ -57,7 +57,7 @@ pub async fn blob_tests() {
     // Reserve blob
     let until = now() + 1;
     store
-        .write(
+        .write_batch(
             BatchBuilder::new()
                 .with_account_id(0)
                 .set(
@@ -83,7 +83,7 @@ pub async fn blob_tests() {
 
     // Commit blob
     store
-        .write(
+        .write_batch(
             BatchBuilder::new()
                 .set(BlobOp::Commit { hash: hash.clone() }, Vec::new())
                 .build_all(),
@@ -217,7 +217,7 @@ pub async fn blob_tests() {
         };
         batch.set(BlobOp::Commit { hash: hash.clone() }, vec![]);
 
-        store.write(batch.build_all()).await.unwrap();
+        store.write_batch(batch.build_all()).await.unwrap();
         blob_store
             .put_blob(hash.as_ref(), blob.as_slice(), CompressionAlgo::Lz4)
             .await
@@ -310,7 +310,7 @@ pub async fn blob_tests() {
 
     // Unlink blob
     store
-        .write(
+        .write_batch(
             BatchBuilder::new()
                 .with_account_id(0)
                 .with_collection(Collection::Email)

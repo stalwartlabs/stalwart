@@ -146,7 +146,7 @@ impl Store {
         let mut batch = BatchBuilder::new();
         for (account_id, op) in state.delete_keys {
             if batch.is_large_batch() {
-                self.write(batch.build_all())
+                self.write_batch(batch.build_all())
                     .await
                     .caused_by(trc::location!())?;
                 batch = BatchBuilder::new();
@@ -163,7 +163,7 @@ impl Store {
         }
         for (account_id, object_id) in state.delete_registry {
             if batch.is_large_batch() {
-                self.write(batch.build_all())
+                self.write_batch(batch.build_all())
                     .await
                     .caused_by(trc::location!())?;
                 batch = BatchBuilder::new();
@@ -185,7 +185,7 @@ impl Store {
                 }));
         }
         if !batch.is_empty() {
-            self.write(batch.build_all())
+            self.write_batch(batch.build_all())
                 .await
                 .caused_by(trc::location!())?;
         }

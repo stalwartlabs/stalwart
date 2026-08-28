@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{U16_LEN, U64_LEN};
-use ahash::AHashSet;
+use crate::{
+    U16_LEN, U64_LEN,
+    write::{AssignedIds, PendingId},
+};
+use ahash::{AHashSet, RandomState};
+use indexmap::IndexSet;
 use types::collection::{SyncCollection, VanishedCollection};
 use utils::{codec::leb128::Leb128Vec, map::vec_map::VecMap};
 
@@ -33,6 +37,60 @@ const VANISHED_ID_BYTES_HINT: usize = 2;
 pub enum ChangeSet<T> {
     Small(Vec<T>),
     Large(AHashSet<T>),
+}
+
+impl<T: std::hash::Hash + Eq> PartialEq for ChangeSet<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.len_inner() == other.len_inner() && self.iter().all(|item| other.contains_inner(item))
+    }
+}
+
+impl<T: std::hash::Hash + Eq> Eq for ChangeSet<T> {}
+
+impl<T: std::hash::Hash + Eq> std::hash::Hash for ChangeSet<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let mut fold = 0u64;
+        for item in self.iter() {
+            let mut hasher = ahash::AHasher::default();
+            item.hash(&mut hasher);
+            fold ^= std::hash::Hasher::finish(&hasher);
+        }
+        state.write_u64(fold);
+        state.write_usize(self.len_inner());
+    }
+}
+
+impl<T> ChangeSet<T> {
+    #[inline(always)]
+    fn len_inner(&self) -> usize {
+        match self {
+            ChangeSet::Small(items) => items.len(),
+            ChangeSet::Large(items) => items.len(),
+        }
+    }
+}
+
+impl<T: std::hash::Hash + Eq> ChangeSet<T> {
+    #[inline(always)]
+    fn contains_inner(&self, value: &T) -> bool {
+        match self {
+            ChangeSet::Small(items) => items.contains(value),
+            ChangeSet::Large(items) => items.contains(value),
+        }
+    }
+}
+
+pub const PENDING_ID_MARKER: u64 = (u32::MAX as u64) << 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PendingChange {
+    pub prefix: Option<PendingId>,
+    pub id: PendingId,
+}
+
+#[inline(always)]
+pub const fn is_pending_id(id: u64) -> bool {
+    id & PENDING_ID_MARKER == PENDING_ID_MARKER
 }
 
 impl<T> Default for ChangeSet<T> {
@@ -133,12 +191,16 @@ impl<T: Copy + Eq + std::hash::Hash + Into<u64>> ChangeSet<T> {
         }
     }
 
-    fn collect_sorted(&self, out: &mut Vec<u64>) {
+    fn collect_unsorted(&self, out: &mut Vec<u64>) {
         out.clear();
         match self {
             ChangeSet::Small(items) => out.extend(items.iter().map(|item| (*item).into())),
             ChangeSet::Large(items) => out.extend(items.iter().map(|item| (*item).into())),
         }
+    }
+
+    fn collect_sorted(&self, out: &mut Vec<u64>) {
+        self.collect_unsorted(out);
         out.sort_unstable();
     }
 }
@@ -168,36 +230,97 @@ pub enum VanishedItem {
 #[derive(Default, Debug)]
 pub(crate) struct VanishedItems(Vec<VanishedItem>);
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct Changes {
     pub item_inserts: ChangeSet<u64>,
     pub item_updates: ChangeSet<u64>,
     pub item_deletes: ChangeSet<u64>,
 
-    pub container_inserts: ChangeSet<u32>,
-    pub container_updates: ChangeSet<u32>,
-    pub container_deletes: ChangeSet<u32>,
-    pub container_property_changes: ChangeSet<u32>,
+    pub container_inserts: ChangeSet<u64>,
+    pub container_updates: ChangeSet<u64>,
+    pub container_deletes: ChangeSet<u64>,
+    pub container_property_changes: ChangeSet<u64>,
+
+    pending: IndexSet<PendingChange, RandomState>,
+}
+
+impl std::hash::Hash for Changes {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.item_inserts.hash(state);
+        self.item_updates.hash(state);
+        self.item_deletes.hash(state);
+        self.container_inserts.hash(state);
+        self.container_updates.hash(state);
+        self.container_deletes.hash(state);
+        self.container_property_changes.hash(state);
+        state.write_usize(self.pending.len());
+    }
+}
+
+impl Changes {
+    fn build_id(&mut self, prefix: Option<PendingId>, document_id: PendingId) -> u64 {
+        match (prefix, document_id) {
+            (None, PendingId::Assigned(document_id)) => document_id as u64,
+            (Some(PendingId::Assigned(prefix)), PendingId::Assigned(document_id)) => {
+                debug_assert_ne!(prefix, u32::MAX, "prefix collides with the pending marker");
+                ((prefix as u64) << 32) | document_id as u64
+            }
+            _ => {
+                let change = PendingChange {
+                    prefix,
+                    id: document_id,
+                };
+                PENDING_ID_MARKER | self.pending.insert_full(change).0 as u64
+            }
+        }
+    }
+
+    fn resolve_id(&self, id: u64, ids: &AssignedIds) -> u64 {
+        if !is_pending_id(id) {
+            return id;
+        }
+
+        let Some(change) = self
+            .pending
+            .get_index((id & u32::MAX as u64) as usize)
+            .copied()
+        else {
+            debug_assert!(false, "pending change is out of range");
+            return id;
+        };
+        let document_id = change.id.resolve(ids) as u64;
+
+        match change.prefix {
+            Some(prefix) => ((prefix.resolve(ids) as u64) << 32) | document_id,
+            None => document_id,
+        }
+    }
+
+    #[inline(always)]
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
 }
 
 impl ChangeLogBuilder {
-    pub fn log_container_insert(&mut self, collection: SyncCollection, document_id: u32) {
+    pub fn log_container_insert(&mut self, collection: SyncCollection, document_id: PendingId) {
         let changes = self.changes.get_mut_or_insert(collection);
-        if changes.container_deletes.remove(&document_id) {
-            changes.container_updates.insert(document_id);
+        let id = changes.build_id(None, document_id);
+        if changes.container_deletes.remove(&id) {
+            changes.container_updates.insert(id);
         } else {
-            changes.container_inserts.insert(document_id);
+            changes.container_inserts.insert(id);
         }
     }
 
     pub fn log_item_insert(
         &mut self,
         collection: SyncCollection,
-        prefix: Option<u32>,
-        document_id: u32,
+        prefix: Option<PendingId>,
+        document_id: PendingId,
     ) {
-        let id = build_id(prefix, document_id);
         let changes = self.changes.get_mut_or_insert(collection);
+        let id = changes.build_id(prefix, document_id);
         if changes.item_deletes.remove(&id) {
             changes.item_updates.insert(id);
         } else {
@@ -205,35 +328,36 @@ impl ChangeLogBuilder {
         }
     }
 
-    pub fn log_container_update(&mut self, collection: SyncCollection, document_id: u32) {
-        self.changes
-            .get_mut_or_insert(collection)
-            .container_updates
-            .insert(document_id);
+    pub fn log_container_update(&mut self, collection: SyncCollection, document_id: PendingId) {
+        let changes = self.changes.get_mut_or_insert(collection);
+        let id = changes.build_id(None, document_id);
+        changes.container_updates.insert(id);
     }
 
-    pub fn log_container_property_update(&mut self, collection: SyncCollection, document_id: u32) {
-        self.changes
-            .get_mut_or_insert(collection)
-            .container_property_changes
-            .insert(document_id);
+    pub fn log_container_property_update(
+        &mut self,
+        collection: SyncCollection,
+        document_id: PendingId,
+    ) {
+        let changes = self.changes.get_mut_or_insert(collection);
+        let id = changes.build_id(None, document_id);
+        changes.container_property_changes.insert(id);
     }
 
     pub fn log_item_update(
         &mut self,
         collection: SyncCollection,
-        prefix: Option<u32>,
-        document_id: u32,
+        prefix: Option<PendingId>,
+        document_id: PendingId,
     ) {
-        self.changes
-            .get_mut_or_insert(collection)
-            .item_updates
-            .insert(build_id(prefix, document_id));
+        let changes = self.changes.get_mut_or_insert(collection);
+        let id = changes.build_id(prefix, document_id);
+        changes.item_updates.insert(id);
     }
 
-    pub fn log_container_delete(&mut self, collection: SyncCollection, document_id: u32) {
+    pub fn log_container_delete(&mut self, collection: SyncCollection, document_id: PendingId) {
         let changes = self.changes.get_mut_or_insert(collection);
-        let id = document_id;
+        let id = changes.build_id(None, document_id);
         changes.container_updates.remove(&id);
         changes.container_property_changes.remove(&id);
         changes.container_deletes.insert(id);
@@ -242,11 +366,11 @@ impl ChangeLogBuilder {
     pub fn log_item_delete(
         &mut self,
         collection: SyncCollection,
-        prefix: Option<u32>,
-        document_id: u32,
+        prefix: Option<PendingId>,
+        document_id: PendingId,
     ) {
         let changes = self.changes.get_mut_or_insert(collection);
-        let id = build_id(prefix, document_id);
+        let id = changes.build_id(prefix, document_id);
         changes.item_updates.remove(&id);
         changes.item_deletes.insert(id);
     }
@@ -260,15 +384,6 @@ impl ChangeLogBuilder {
             .get_mut_or_insert(collection)
             .0
             .push(item.into());
-    }
-}
-
-#[inline(always)]
-fn build_id(prefix: Option<u32>, document_id: u32) -> u64 {
-    if let Some(prefix) = prefix {
-        ((prefix as u64) << 32) | document_id as u64
-    } else {
-        document_id as u64
     }
 }
 
@@ -289,6 +404,19 @@ impl Changes {
 
 impl Changes {
     pub fn serialize(&self, is_prefixed: bool, scratch: &mut Vec<u64>) -> Vec<u8> {
+        debug_assert!(!self.has_pending());
+        let mut buf = Vec::new();
+        self.serialize_into(is_prefixed, None, scratch, &mut buf);
+        buf
+    }
+
+    pub fn serialize_into(
+        &self,
+        is_prefixed: bool,
+        ids: Option<&AssignedIds>,
+        scratch: &mut Vec<u64>,
+        buf: &mut Vec<u8>,
+    ) {
         let container_lists = [
             (CONTAINER_INSERTS, &self.container_inserts),
             (CONTAINER_UPDATES, &self.container_updates),
@@ -317,13 +445,18 @@ impl Changes {
             + self.container_updates.len()
             + self.container_property_changes.len()
             + self.container_deletes.len();
-        let items =
-            self.item_inserts.len() + self.item_updates.len() + self.item_deletes.len();
+        let items = self.item_inserts.len() + self.item_updates.len() + self.item_deletes.len();
 
-        let mut buf = Vec::with_capacity(
+        buf.clear();
+        buf.reserve(
             1 + CHANGE_LISTS
                 + (containers * CONTAINER_BYTES_HINT)
-                + (items * if is_prefixed { PREFIXED_ITEM_BYTES_HINT } else { ITEM_BYTES_HINT }),
+                + (items
+                    * if is_prefixed {
+                        PREFIXED_ITEM_BYTES_HINT
+                    } else {
+                        ITEM_BYTES_HINT
+                    }),
         );
         buf.push(presence);
 
@@ -342,7 +475,7 @@ impl Changes {
             if presence & (1 << slot) == 0 {
                 continue;
             }
-            list.collect_sorted(scratch);
+            self.collect(list, scratch, ids);
 
             let mut prev = 0u64;
             for id in scratch.iter() {
@@ -355,7 +488,7 @@ impl Changes {
             if presence & (1 << slot) == 0 {
                 continue;
             }
-            list.collect_sorted(scratch);
+            self.collect(list, scratch, ids);
 
             if is_prefixed {
                 let mut prev_prefix = 0i64;
@@ -376,8 +509,20 @@ impl Changes {
                 }
             }
         }
+    }
 
-        buf
+    fn collect(&self, list: &ChangeSet<u64>, scratch: &mut Vec<u64>, ids: Option<&AssignedIds>) {
+        if !self.has_pending() {
+            list.collect_sorted(scratch);
+            return;
+        }
+
+        let ids = ids.expect("pending changes require assigned ids");
+        list.collect_unsorted(scratch);
+        for id in scratch.iter_mut() {
+            *id = self.resolve_id(*id, ids);
+        }
+        scratch.sort_unstable();
     }
 }
 
@@ -528,12 +673,12 @@ mod tests {
         let mut expected = Vec::new();
         for id in &changes.container_inserts {
             if !changes.container_deletes.contains(id) {
-                expected.push(Change::InsertContainer(*id as u64));
+                expected.push(Change::InsertContainer(*id));
             }
         }
         for id in &changes.container_updates {
             if !changes.container_inserts.contains(id) && !changes.container_deletes.contains(id) {
-                expected.push(Change::UpdateContainer(*id as u64));
+                expected.push(Change::UpdateContainer(*id));
             }
         }
         for id in &changes.container_property_changes {
@@ -541,12 +686,12 @@ mod tests {
                 && !changes.container_updates.contains(id)
                 && !changes.container_deletes.contains(id)
             {
-                expected.push(Change::UpdateContainerProperty(*id as u64));
+                expected.push(Change::UpdateContainerProperty(*id));
             }
         }
         for id in &changes.container_deletes {
             if !changes.container_inserts.contains(id) {
-                expected.push(Change::DeleteContainer(*id as u64));
+                expected.push(Change::DeleteContainer(*id));
             }
         }
         for id in &changes.item_inserts {
@@ -669,18 +814,16 @@ mod tests {
 
                 match lcg.next() % 4 {
                     0 => {
-                        changes.container_inserts.insert((lcg.next() % 1000) as u32);
+                        changes.container_inserts.insert(lcg.next() % 1000);
                     }
                     1 => {
-                        changes.container_updates.insert((lcg.next() % 1000) as u32);
+                        changes.container_updates.insert(lcg.next() % 1000);
                     }
                     2 => {
-                        changes
-                            .container_property_changes
-                            .insert((lcg.next() % 1000) as u32);
+                        changes.container_property_changes.insert(lcg.next() % 1000);
                     }
                     _ => {
-                        changes.container_deletes.insert((lcg.next() % 1000) as u32);
+                        changes.container_deletes.insert(lcg.next() % 1000);
                     }
                 }
             }
@@ -747,14 +890,14 @@ mod tests {
                     document_id - (idx % 977)
                 };
                 changes.item_inserts.insert((thread_id << 32) | document_id);
-                changes.container_property_changes.insert((idx % 50) as u32);
+                changes.container_property_changes.insert(idx % 50);
             }
             roundtrip(&changes, true);
 
             let mut changes = Changes::default();
             for idx in 0..n as u64 {
                 changes.item_deletes.insert((idx << 32) | (n as u64 - idx));
-                changes.container_deletes.insert(idx as u32);
+                changes.container_deletes.insert(idx);
             }
             roundtrip(&changes, true);
         }
@@ -768,9 +911,7 @@ mod tests {
             let mut changes = Changes::default();
             for _ in 0..(lcg.next() % 30) {
                 changes.item_inserts.insert(lcg.next() % 100_000);
-                changes
-                    .container_deletes
-                    .insert((lcg.next() % 5_000) as u32);
+                changes.container_deletes.insert(lcg.next() % 5_000);
             }
             roundtrip(&changes, false);
         }
@@ -811,7 +952,10 @@ mod tests {
                 .map(|(_, u)| *u)
                 .collect();
             expected.sort_unstable();
-            assert_eq!(expected, uids, "skip-decode disagreed for mailbox {mailbox_id}");
+            assert_eq!(
+                expected, uids,
+                "skip-decode disagreed for mailbox {mailbox_id}"
+            );
         }
     }
 
@@ -986,7 +1130,7 @@ mod tests {
         decoded.changes
     }
 
-    fn container_row(slot: usize, id: u32) -> Changes {
+    fn container_row(slot: usize, id: u64) -> Changes {
         let mut changes = Changes::default();
         match slot {
             CONTAINER_INSERTS => changes.container_inserts.insert(id),
@@ -1009,25 +1153,72 @@ mod tests {
 
     #[test]
     fn changelog_precedence_across_rows() {
-        let id = 7u32;
+        let id = 7u64;
 
         let cases: [(usize, usize, Option<Change>); 12] = [
-            (CONTAINER_INSERTS, CONTAINER_UPDATES, Some(Change::InsertContainer(7))),
-            (CONTAINER_INSERTS, CONTAINER_PROPERTY_CHANGES, Some(Change::InsertContainer(7))),
+            (
+                CONTAINER_INSERTS,
+                CONTAINER_UPDATES,
+                Some(Change::InsertContainer(7)),
+            ),
+            (
+                CONTAINER_INSERTS,
+                CONTAINER_PROPERTY_CHANGES,
+                Some(Change::InsertContainer(7)),
+            ),
             (CONTAINER_INSERTS, CONTAINER_DELETES, None),
-            (CONTAINER_UPDATES, CONTAINER_PROPERTY_CHANGES, Some(Change::UpdateContainer(7))),
-            (CONTAINER_UPDATES, CONTAINER_DELETES, Some(Change::DeleteContainer(7))),
-            (CONTAINER_PROPERTY_CHANGES, CONTAINER_UPDATES, Some(Change::UpdateContainer(7))),
-            (CONTAINER_PROPERTY_CHANGES, CONTAINER_DELETES, Some(Change::DeleteContainer(7))),
-            (CONTAINER_DELETES, CONTAINER_UPDATES, Some(Change::DeleteContainer(7))),
-            (CONTAINER_DELETES, CONTAINER_PROPERTY_CHANGES, Some(Change::DeleteContainer(7))),
-            (CONTAINER_INSERTS, CONTAINER_INSERTS, Some(Change::InsertContainer(7))),
-            (CONTAINER_UPDATES, CONTAINER_UPDATES, Some(Change::UpdateContainer(7))),
-            (CONTAINER_DELETES, CONTAINER_DELETES, Some(Change::DeleteContainer(7))),
+            (
+                CONTAINER_UPDATES,
+                CONTAINER_PROPERTY_CHANGES,
+                Some(Change::UpdateContainer(7)),
+            ),
+            (
+                CONTAINER_UPDATES,
+                CONTAINER_DELETES,
+                Some(Change::DeleteContainer(7)),
+            ),
+            (
+                CONTAINER_PROPERTY_CHANGES,
+                CONTAINER_UPDATES,
+                Some(Change::UpdateContainer(7)),
+            ),
+            (
+                CONTAINER_PROPERTY_CHANGES,
+                CONTAINER_DELETES,
+                Some(Change::DeleteContainer(7)),
+            ),
+            (
+                CONTAINER_DELETES,
+                CONTAINER_UPDATES,
+                Some(Change::DeleteContainer(7)),
+            ),
+            (
+                CONTAINER_DELETES,
+                CONTAINER_PROPERTY_CHANGES,
+                Some(Change::DeleteContainer(7)),
+            ),
+            (
+                CONTAINER_INSERTS,
+                CONTAINER_INSERTS,
+                Some(Change::InsertContainer(7)),
+            ),
+            (
+                CONTAINER_UPDATES,
+                CONTAINER_UPDATES,
+                Some(Change::UpdateContainer(7)),
+            ),
+            (
+                CONTAINER_DELETES,
+                CONTAINER_DELETES,
+                Some(Change::DeleteContainer(7)),
+            ),
         ];
 
         for (first, second, expected) in cases {
-            let got = accumulate(&[container_row(first, id), container_row(second, id)], false);
+            let got = accumulate(
+                &[container_row(first, id), container_row(second, id)],
+                false,
+            );
             let want: Vec<Change> = expected.into_iter().collect();
             assert_eq!(want, got, "container precedence {first} then {second}");
         }
@@ -1076,7 +1267,9 @@ mod tests {
 
         for is_prefixed in [true, false] {
             assert!(
-                !Changes::default().serialize(is_prefixed, &mut scratch).is_empty(),
+                !Changes::default()
+                    .serialize(is_prefixed, &mut scratch)
+                    .is_empty(),
                 "an empty changelog row must not collide with the truncation marker"
             );
 
@@ -1104,9 +1297,15 @@ mod tests {
         let mut scratch = Vec::new();
 
         for names in [
-            vec!["/dav/cal/u/Caf\u{e9}/x".to_string(), "/dav/cal/u/Caf\u{e8}/y".to_string()],
+            vec![
+                "/dav/cal/u/Caf\u{e9}/x".to_string(),
+                "/dav/cal/u/Caf\u{e8}/y".to_string(),
+            ],
             vec!["a\u{e9}x".to_string(), "a\u{eb}y".to_string()],
-            vec!["\u{65e5}\u{672c}".to_string(), "\u{65e5}\u{4e2d}".to_string()],
+            vec![
+                "\u{65e5}\u{672c}".to_string(),
+                "\u{65e5}\u{4e2d}".to_string(),
+            ],
             vec!["\u{1F600}a".to_string(), "\u{1F601}b".to_string()],
             vec!["prefix".to_string(), "prefix\u{e9}".to_string()],
             vec!["prefix\u{e9}".to_string(), "prefix".to_string()],
@@ -1119,7 +1318,10 @@ mod tests {
             ],
         ] {
             let items = VanishedItems(
-                names.iter().map(|n| VanishedItem::Name(n.clone())).collect(),
+                names
+                    .iter()
+                    .map(|n| VanishedItem::Name(n.clone()))
+                    .collect(),
             );
             let bytes = items.serialize(true, &mut scratch);
 

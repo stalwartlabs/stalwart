@@ -184,6 +184,7 @@ impl SearchField {
         }
     }
 
+    #[cfg(feature = "postgres")]
     pub(crate) fn is_json(&self) -> bool {
         matches!(self, SearchField::Email(EmailSearchField::Headers))
     }

@@ -175,7 +175,7 @@ impl RegistryStore {
                     );
             }
 
-            match inner.store.write(batch.build_all()).await {
+            match inner.store.write_batch(batch.build_all()).await {
                 Ok(_) => break,
                 Err(err) => {
                     if err.is_assertion_failure() && retry_count < 5 {
@@ -252,7 +252,7 @@ impl RegistryStore {
         );
         self.0
             .store
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())
             .map(|_| ())

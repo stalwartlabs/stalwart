@@ -23,7 +23,7 @@ use std::borrow::Cow;
 use std::future::Future;
 use store::{
     SerializeInfallible, ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId},
 };
 use trc::AddContext;
 use types::{
@@ -249,17 +249,16 @@ impl VacationResponseSet for Server {
                 .with_changed_by(access_token.account_tenant_ids());
 
             // Update id
-            let document_id = if let Some(document_id) = document_id {
-                batch.with_document(document_id);
-                document_id
-            } else {
-                let document_id = self
-                    .store()
-                    .assign_document_ids(account_id, Collection::SieveScript, 1)
-                    .await
-                    .caused_by(trc::location!())?;
-                batch.with_document(document_id);
-                document_id
+            let document_id = match document_id {
+                Some(document_id) => {
+                    batch.with_document(document_id);
+                    PendingId::Assigned(document_id)
+                }
+                None => {
+                    let slot = batch.reserve_document_id(account_id, Collection::SieveScript);
+                    batch.create_document(slot);
+                    PendingId::Slot(slot)
+                }
             };
 
             // Create sieve script only if there are changes
@@ -278,13 +277,29 @@ impl VacationResponseSet for Server {
             batch.custom(obj).caused_by(trc::location!())?;
 
             // Deactivate other sieve scripts
-            let was_active = active_script_id == Some(document_id);
+            let was_active = document_id
+                .assigned()
+                .is_some_and(|document_id| active_script_id == Some(document_id));
             if is_active {
                 if !was_active {
                     batch
                         .with_collection(Collection::Principal)
-                        .with_document(0)
-                        .set(PrincipalField::ActiveScriptId, document_id.serialize());
+                        .with_document(0);
+                    match document_id {
+                        PendingId::Assigned(document_id) => {
+                            batch.set(PrincipalField::ActiveScriptId, document_id.serialize());
+                        }
+                        PendingId::Slot(slot) => {
+                            batch.set_patched(
+                                PrincipalField::ActiveScriptId,
+                                0u32.serialize(),
+                                vec![Patch {
+                                    offset: 0,
+                                    source: PatchSource::SlotBeU32(slot),
+                                }],
+                            );
+                        }
+                    }
                 }
             } else if was_active {
                 batch
@@ -298,7 +313,12 @@ impl VacationResponseSet for Server {
                 response.new_state = Some(State::Exact(
                     self.commit_batch(batch)
                         .await
-                        .and_then(|ids| ids.last_change_id(account_id))
+                        .map(|ids| {
+                            ids.last_change_id(
+                                account_id,
+                                SyncCollection::SieveScript.change_group(),
+                            )
+                        })
                         .caused_by(trc::location!())?,
                 ));
             }

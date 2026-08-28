@@ -83,7 +83,7 @@ impl BlobCopy for Server {
                     vec![],
                 );
                 self.store()
-                    .write(batch.build_all())
+                    .write_batch(batch.build_all())
                     .await
                     .caused_by(trc::location!())?;
 

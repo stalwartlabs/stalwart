@@ -9,8 +9,7 @@ use futures::FutureExt;
 use registry::schema::structs::DataStore;
 use std::{panic::AssertUnwindSafe, time::Duration};
 use store::{
-    IterateParams, Key, Rows, Store, Subspace, U32_LEN, Value, ValueKey,
-    write::ValueClass,
+    IterateParams, Key, Rows, Store, Subspace, U32_LEN, Value, ValueKey, write::ValueClass,
 };
 use types::collection::Collection;
 

@@ -87,7 +87,7 @@ pub async fn test(test: &TestServer) {
             .core
             .storage
             .data
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .unwrap();
 

@@ -472,12 +472,9 @@ async fn copy_container(
     };
     copy_files.sort_unstable_by_key(|a| a.1);
     let now = now() as i64;
-    let mut next_document_id = server
-        .store()
-        .assign_document_ids(to_account_id, Collection::FileNode, copy_files.len() as u64)
-        .await
-        .caused_by(trc::location!())?;
-    for (document_id, _) in copy_files.into_iter() {
+    let first_slot =
+        batch.reserve_document_ids(to_account_id, Collection::FileNode, copy_files.len() as u32);
+    for (slot_offset, (document_id, _)) in copy_files.into_iter().enumerate() {
         let node_ = server
             .store()
             .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
@@ -504,27 +501,27 @@ async fn copy_container(
         if let Some(new_name) = destination.new_name.take() {
             node.name = new_name;
         }
-        node.parent_id = if let Some(&prev_document_id) = id_map.get(&node.parent_id) {
-            prev_document_id
-        } else {
-            parent_id
-        };
+        let pending_parent = id_map.get(&node.parent_id).copied();
+        if pending_parent.is_none() {
+            node.parent_id = parent_id;
+        }
 
         // Prepare write batch
-        let new_document_id = next_document_id;
-        next_document_id -= 1;
+        let new_slot = first_slot.offset(slot_offset);
+        let builder = ObjectIndexBuilder::<(), _>::new()
+            .with_changes(node)
+            .with_changed_by(access_token.account_tenant_ids());
         batch
             .with_account_id(to_account_id)
             .with_collection(Collection::FileNode)
-            .with_document(new_document_id)
-            .custom(
-                ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(node)
-                    .with_changed_by(access_token.account_tenant_ids()),
-            )
+            .create_document(new_slot)
+            .custom(match pending_parent {
+                Some(pending_parent) => builder.with_pending_id(pending_parent),
+                None => builder,
+            })
             .caused_by(trc::location!())?
             .commit_point();
-        id_map.insert(document_id + 1, new_document_id + 1);
+        id_map.insert(document_id + 1, new_slot);
     }
 
     // Delete nodes
@@ -758,11 +755,7 @@ async fn move_item(
             .etag()
     } else {
         // Destination is in a different account: insert a new node, then delete the old one
-        let to_document_id = server
-            .store()
-            .assign_document_ids(to_account_id, Collection::FileNode, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let to_document_id = batch.reserve_document_id(to_account_id, Collection::FileNode);
         let etag = new_node
             .insert(
                 access_token.account_tenant_ids(),
@@ -822,11 +815,7 @@ async fn copy_item(
         node.name = new_name;
     }
     let mut batch = BatchBuilder::new();
-    let to_document_id = server
-        .store()
-        .assign_document_ids(to_account_id, Collection::FileNode, 1)
-        .await
-        .caused_by(trc::location!())?;
+    let to_document_id = batch.reserve_document_id(to_account_id, Collection::FileNode);
     let etag = node
         .insert(
             access_token.account_tenant_ids(),

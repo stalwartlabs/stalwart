@@ -72,6 +72,14 @@ impl IndexableAndSerializableObject for FileNode {
     fn is_versioned() -> bool {
         true
     }
+
+    fn set_pending_id(&mut self, document_id: u32) {
+        self.parent_id = document_id + 1;
+    }
+
+    fn size_hint(&self) -> usize {
+        self.size()
+    }
 }
 
 impl FileNode {

@@ -40,7 +40,11 @@ use store::{
     write::{Archive, ArchiveBytes, BatchBuilder, now},
 };
 use trc::AddContext;
-use types::{collection::Collection, field::EmailField, id::Id};
+use types::{
+    collection::{Collection, SyncCollection},
+    field::EmailField,
+    id::Id,
+};
 use utils::{map::vec_map::VecMap, sanitize_email};
 
 pub trait EmailSubmissionSet: Sync + Send {
@@ -76,6 +80,7 @@ impl EmailSubmissionSet for Server {
         // Process creates
         let mut success_email_ids = HashMap::new();
         let mut batch = BatchBuilder::new();
+        let mut pending_creates = Vec::new();
         for (id, object) in request.unwrap_create() {
             match self
                 .send_message(account_id, &response, instance, object)
@@ -96,39 +101,16 @@ impl EmailSubmissionSet for Server {
                     };
 
                     // Insert record
-                    let document_id = self
-                        .store()
-                        .assign_document_ids(account_id, Collection::EmailSubmission, 1)
-                        .await
-                        .caused_by(trc::location!())?;
+                    let slot = batch.reserve_document_id(account_id, Collection::EmailSubmission);
                     batch
                         .with_account_id(account_id)
                         .with_collection(Collection::EmailSubmission)
-                        .with_document(document_id)
+                        .create_document(slot)
                         .custom(ObjectIndexBuilder::<(), _>::new().with_changes(submission))
                         .caused_by(trc::location!())?
                         .commit_point();
 
-                    response.created.insert(
-                        id,
-                        Value::Object(
-                            Map::with_capacity(3)
-                                .with_key_value(
-                                    EmailSubmissionProperty::Id,
-                                    Value::Element(Id::from(document_id).into()),
-                                )
-                                .with_key_value(
-                                    EmailSubmissionProperty::SendAt,
-                                    Value::Element(EmailSubmissionValue::Date(
-                                        UTCDate::from_timestamp(send_at as i64),
-                                    )),
-                                )
-                                .with_key_value(
-                                    EmailSubmissionProperty::UndoStatus,
-                                    Value::Element(EmailSubmissionValue::UndoStatus(undo_status)),
-                                ),
-                        ),
-                    );
+                    pending_creates.push((id, slot, send_at, undo_status));
                 }
                 Err(err) => {
                     response.not_created.append(id, err);
@@ -295,12 +277,35 @@ impl EmailSubmissionSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
-            response.new_state = State::Exact(change_id).into();
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+            response.new_state = State::Exact(
+                assigned_ids
+                    .last_change_id(account_id, SyncCollection::EmailSubmission.change_group()),
+            )
+            .into();
+
+            for (id, slot, send_at, undo_status) in pending_creates {
+                response.created.insert(
+                    id,
+                    Value::Object(
+                        Map::with_capacity(3)
+                            .with_key_value(
+                                EmailSubmissionProperty::Id,
+                                Value::Element(Id::from(assigned_ids.slot(slot)).into()),
+                            )
+                            .with_key_value(
+                                EmailSubmissionProperty::SendAt,
+                                Value::Element(EmailSubmissionValue::Date(
+                                    UTCDate::from_timestamp(send_at as i64),
+                                )),
+                            )
+                            .with_key_value(
+                                EmailSubmissionProperty::UndoStatus,
+                                Value::Element(EmailSubmissionValue::UndoStatus(undo_status)),
+                            ),
+                    ),
+                );
+            }
         }
 
         // On success

@@ -87,7 +87,7 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         }
 
         if !batch.is_empty() {
-            server.store().write(batch.build_all()).await?;
+            server.store().write_batch(batch.build_all()).await?;
         }
     }
 
@@ -131,7 +131,7 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         }
     }
     if !batch.is_empty() {
-        server.store().write(batch.build_all()).await?;
+        server.store().write_batch(batch.build_all()).await?;
     }
 
     // Remove search index
@@ -227,7 +227,7 @@ pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Res
         if batch.is_large_batch() {
             server
                 .store()
-                .write(batch.build_all())
+                .write_batch(batch.build_all())
                 .await
                 .caused_by(trc::location!())?;
             batch = BatchBuilder::new();
@@ -245,7 +245,7 @@ pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Res
     if !batch.is_empty() {
         server
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
     }

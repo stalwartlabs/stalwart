@@ -11,7 +11,7 @@ use super::{
 use crate::message::{
     index::extractors::VisitTextArchived,
     ingest::ThreadInfo,
-    messagedata::MessageData,
+    messagedata::{MessageData, PendingMessageData},
     metadata::{ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue},
     sortkeys::MessageSortKeys,
 };
@@ -172,19 +172,6 @@ impl EmailCopy for Server {
         };
         let blob_hash = BlobHash::from(&metadata.blob_hash);
 
-        // Assign IMAP UIDs
-        let mut mailbox_ids: TinyVec<[MessageUid; 2]> = TinyVec::with_capacity(mailboxes.len());
-        email.imap_uids = Vec::with_capacity(mailboxes.len());
-        let mut ids = self
-            .assign_email_ids(to_account_id, mailboxes.iter().copied(), true)
-            .await
-            .caused_by(trc::location!())?;
-        let document_id = ids.next().unwrap();
-        for (uid, mailbox_id) in ids.zip(mailboxes.iter().copied()) {
-            mailbox_ids.push(MessageUid::new(mailbox_id, uid));
-            email.imap_uids.push(uid);
-        }
-
         let mut keywords_flags = 0;
         let mut keywords_extra = Vec::new();
         for keyword in keywords {
@@ -198,45 +185,66 @@ impl EmailCopy for Server {
         let mut batch = BatchBuilder::new();
         batch.with_account_id(to_account_id);
 
+        // Reserve a document id and one IMAP UID per target mailbox
+        let document_slot = batch.reserve_document_id(to_account_id, Collection::Email);
+        let mut mailbox_ids: TinyVec<[MessageUid; 2]> = TinyVec::with_capacity(mailboxes.len());
+        let mut uid_slot = None;
+        for mailbox_id in mailboxes.iter().copied() {
+            let slot = batch.reserve_uid(to_account_id, mailbox_id);
+            uid_slot.get_or_insert(slot);
+            mailbox_ids.push(MessageUid::new_unassigned(mailbox_id));
+        }
+
         // Determine thread id
         let tenant_id = to_account.tenant_id();
-        let thread_id = if let Some(thread_id) = thread_result.thread_id {
-            thread_id
-        } else {
+        let thread_slot = if thread_result.thread_id.is_none() {
             batch
                 .with_collection(Collection::Thread)
-                .with_document(document_id)
+                .create_document(document_slot)
                 .log_container_insert(SyncCollection::Thread);
-            document_id
+            Some(document_slot)
+        } else {
+            None
         };
+
+        let data = PendingMessageData {
+            data: MessageData {
+                mailboxes: mailbox_ids,
+                keywords: keywords_flags,
+                thread_id: thread_result.thread_id.unwrap_or_default(),
+                size,
+                keywords_extra,
+                received_at,
+                sent_at: sent_at
+                    .map(|sent_at| (sent_at - received_at as i64) as i32)
+                    .unwrap_or_default(),
+                change_id: 0,
+            },
+            uid_slot,
+            thread_slot,
+            change_id: None,
+        };
+        let (thread_info, thread_info_patches) =
+            ThreadInfo::serialize(data.thread_id(), &message_ids);
+
         batch
             .with_collection(Collection::Email)
-            .with_document(document_id)
+            .create_document(document_slot)
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_tenant_id(tenant_id)
-                    .with_changes(MessageData {
-                        mailboxes: mailbox_ids,
-                        keywords: keywords_flags,
-                        thread_id,
-                        size,
-                        keywords_extra,
-                        received_at,
-                        sent_at: sent_at
-                            .map(|sent_at| (sent_at - received_at as i64) as i32)
-                            .unwrap_or_default(),
-                        change_id: 0,
-                    }),
+                    .with_changes(data),
             )
             .caused_by(trc::location!())?
-            .set(
+            .set_patched(
                 ValueClass::IndexProperty(IndexPropertyClass::Hash {
                     property: EmailField::Threading.into(),
                     hash: thread_result.thread_hash,
                 }),
-                ThreadInfo::serialize(thread_id, &message_ids),
+                thread_info,
+                thread_info_patches,
             )
-            .queue_document_index(SearchIndex::Email, to_account_id, document_id);
+            .queue_document_index(SearchIndex::Email, to_account_id, document_slot);
 
         // Merge threads if necessary
         if !thread_result.merge_ids.is_empty() {
@@ -262,20 +270,26 @@ impl EmailCopy for Server {
 
         // Insert and obtain ids
         let queues = batch.queue_notify();
-        let change_id = self
+        let assigned_ids = self
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
-            .caused_by(trc::location!())?
-            .last_change_id(to_account_id)?;
+            .caused_by(trc::location!())?;
+        let document_id = assigned_ids.slot(document_slot);
 
         // Request indexing
         self.notify_queues(queues).await;
 
         // Update response
         email.document_id = document_id;
-        email.thread_id = thread_id;
-        email.change_id = change_id;
+        email.thread_id = thread_result.thread_id.unwrap_or(document_id);
+        email.change_id =
+            assigned_ids.last_change_id(to_account_id, SyncCollection::Email.change_group());
+        email.imap_uids = uid_slot
+            .into_iter()
+            .flat_map(|uid_slot| (0..mailboxes.len()).map(move |offset| uid_slot.offset(offset)))
+            .map(|uid_slot| assigned_ids.slot(uid_slot))
+            .collect();
         email.blob_id = BlobId::new(
             blob_hash,
             BlobClass::Linked {

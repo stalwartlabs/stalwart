@@ -57,6 +57,7 @@ gethostname = "1.1.0"
 radsort = "0.1.1"
 indexmap = "2.7.1"
 nohash-hasher = "0.2.0"
+tinyvec = { version = "1.12.0", features = ["alloc"] }
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }

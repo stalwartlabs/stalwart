@@ -20,7 +20,7 @@ use std::str::FromStr;
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::BatchBuilder,
+    write::{BatchBuilder, PendingId},
 };
 use types::{
     collection::{Collection, SyncCollection},
@@ -122,10 +122,11 @@ pub async fn test(test: &TestServer) {
             LogAction::Update(id) => {
                 let id = *id_map.get(id).unwrap();
                 let mut batch = BatchBuilder::new();
-                batch
-                    .with_document(id.document_id())
-                    .log_item_update(SyncCollection::Email, id.prefix_id().into());
-                server.store().write(batch.build_all()).await.unwrap();
+                batch.with_document(id.document_id()).log_item_update(
+                    SyncCollection::Email,
+                    Some(PendingId::Assigned(id.prefix_id())),
+                );
+                server.store().write_batch(batch.build_all()).await.unwrap();
                 updated_ids.insert(id);
             }
             LogAction::Delete(id) => {
@@ -156,7 +157,7 @@ pub async fn test(test: &TestServer) {
                     .core
                     .storage
                     .data
-                    .write(
+                    .write_batch(
                         BatchBuilder::new()
                             .with_account_id(account.id().document_id())
                             .with_collection(Collection::Email)

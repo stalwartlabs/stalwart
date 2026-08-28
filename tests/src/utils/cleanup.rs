@@ -168,7 +168,7 @@ pub async fn store_blob_expire_all(store: &Store) {
         )
         .await
         .unwrap();
-    store.write(batch.build_all()).await.unwrap();
+    store.write_batch(batch.build_all()).await.unwrap();
 }
 
 pub async fn store_lookup_expire_all(store: &Store) {
@@ -200,12 +200,12 @@ pub async fn store_lookup_expire_all(store: &Store) {
                 op: ValueOp::Clear,
             });
             if batch.is_large_batch() {
-                store.write(batch.build_all()).await.unwrap();
+                store.write_batch(batch.build_all()).await.unwrap();
                 batch = BatchBuilder::new();
             }
         }
         if !batch.is_empty() {
-            store.write(batch.build_all()).await.unwrap();
+            store.write_batch(batch.build_all()).await.unwrap();
         }
     }
 
@@ -221,12 +221,12 @@ pub async fn store_lookup_expire_all(store: &Store) {
                 op: ValueOp::Clear,
             });
             if batch.is_large_batch() {
-                store.write(batch.build_all()).await.unwrap();
+                store.write_batch(batch.build_all()).await.unwrap();
                 batch = BatchBuilder::new();
             }
         }
         if !batch.is_empty() {
-            store.write(batch.build_all()).await.unwrap();
+            store.write_batch(batch.build_all()).await.unwrap();
         }
     }
 }
@@ -385,7 +385,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
         .unwrap();
 
     if !delete_batch.is_empty() {
-        store.write(delete_batch.build_all()).await.unwrap();
+        store.write_batch(delete_batch.build_all()).await.unwrap();
     }
 
     if failed {

@@ -118,6 +118,17 @@ impl IndexableAndSerializableObject for ContactCard {
     fn is_versioned() -> bool {
         true
     }
+
+    fn set_pending_id(&mut self, document_id: u32) {
+        self.names
+            .last_mut()
+            .expect("a pending address book id requires a name")
+            .parent_id = document_id;
+    }
+
+    fn size_hint(&self) -> usize {
+        self.size()
+    }
 }
 
 impl AddressBook {

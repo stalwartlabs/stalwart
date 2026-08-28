@@ -25,7 +25,7 @@ use rand::{RngExt, distr::Alphanumeric};
 use store::{
     SerializeInfallible, ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId, Slot, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -63,7 +63,8 @@ impl AddressBookSet for Server {
             .with_state(cache.assert_state(true, &request.if_in_state)?);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
-        let mut set_default = None;
+        let mut set_default: Option<PendingId> = None;
+        let mut created_slots: Vec<(String, Slot)> = Vec::new();
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -112,11 +113,7 @@ impl AddressBookSet for Server {
             }
 
             // Insert record
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::AddressBook, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let document_id = batch.reserve_document_id(account_id, Collection::AddressBook);
             address_book
                 .insert(
                     access_token.account_tenant_ids(),
@@ -130,10 +127,10 @@ impl AddressBookSet for Server {
                 &request.arguments.on_success_set_is_default
                 && id_ref == &id
             {
-                set_default = Some(document_id);
+                set_default = Some(PendingId::Slot(document_id));
             }
 
-            response.created(id, document_id);
+            created_slots.push((id, document_id));
         }
 
         // Process updates
@@ -374,21 +371,28 @@ impl AddressBookSet for Server {
 
         // Set default address book
         if let Some(MaybeIdReference::Id(id)) = &request.arguments.on_success_set_is_default {
-            set_default = Some(id.document_id());
+            set_default = Some(PendingId::Assigned(id.document_id()));
         }
         if let Some(default_address_book_id) = set_default {
             if response.not_created.is_empty()
                 && response.not_updated.is_empty()
                 && response.not_destroyed.is_empty()
             {
+                let (payload, patches) = match default_address_book_id {
+                    PendingId::Assigned(document_id) => (document_id.serialize(), Vec::new()),
+                    PendingId::Slot(slot) => (
+                        0u32.serialize(),
+                        vec![Patch {
+                            offset: 0,
+                            source: PatchSource::SlotBeU32(slot),
+                        }],
+                    ),
+                };
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Principal)
                     .with_document(0)
-                    .set(
-                        PrincipalField::DefaultAddressBookId,
-                        default_address_book_id.serialize(),
-                    );
+                    .set_patched(PrincipalField::DefaultAddressBookId, payload, patches);
             }
         } else if reset_default_address_book {
             batch
@@ -399,14 +403,18 @@ impl AddressBookSet for Server {
         }
 
         // Write changes
-        if !batch.is_empty()
-            && let Ok(change_id) = self
-                .commit_batch(batch)
-                .await
-                .caused_by(trc::location!())?
-                .last_change_id(account_id)
-        {
-            response.new_state = State::Exact(change_id).into();
+        if !batch.is_empty() {
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+            for (create_id, slot) in created_slots {
+                response.created(create_id, assigned_ids.slot(slot));
+            }
+
+            if let Some(change_id) =
+                assigned_ids.change_id(account_id, SyncCollection::AddressBook.change_group())
+            {
+                response.new_state = State::Exact(change_id).into();
+            }
         }
 
         Ok(response)

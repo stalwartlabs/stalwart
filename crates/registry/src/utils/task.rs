@@ -11,6 +11,7 @@ use crate::{
     },
     types::{EnumImpl, index::IndexValue},
 };
+use types::id::Id;
 
 impl Task {
     pub fn set_status(&mut self, status: TaskStatus) {
@@ -86,6 +87,26 @@ impl Task {
             Task::DkimManagement(_) => Permission::TaskDkimManagement,
             Task::DnsManagement(_) => Permission::TaskDnsManagement,
             Task::TenantMaintenance(_) => Permission::TaskTenantMaintenance,
+        }
+    }
+
+    pub fn set_document_id(&mut self, document_id: Id) {
+        match self {
+            Task::CalendarAlarmEmail(task) => task.document_id = document_id,
+            Task::CalendarAlarmNotification(task) => task.document_id = document_id,
+            Task::CalendarItipMessage(task) => task.document_id = document_id,
+            _ => unreachable!("task type does not carry a document id"),
+        }
+    }
+
+    pub fn size_hint(&self) -> usize {
+        match self {
+            Task::CalendarItipMessage(task) => task
+                .messages
+                .iter()
+                .map(|message| message.i_calendar_data.len() + message.summary.len())
+                .sum(),
+            _ => 64,
         }
     }
 }

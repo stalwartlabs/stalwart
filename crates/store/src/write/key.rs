@@ -11,7 +11,9 @@ use crate::{
     IndexKey, IndexKeyPrefix, Key, LogKey, Subspace, U16_LEN, U32_LEN, U64_LEN, U128_LEN, ValueKey,
     WITH_SUBSPACE,
     search::{GLOBAL_BUCKET_SHIFT, SearchField},
-    write::{BlobLink, IndexPropertyClass, RegistryClass, SearchIndex, SearchIndexClass},
+    write::{
+        BlobLink, IndexPropertyClass, PendingId, RegistryClass, SearchIndex, SearchIndexClass,
+    },
 };
 use registry::schema::prelude::ObjectType;
 use std::{borrow::BorrowMut, convert::TryInto};
@@ -340,8 +342,12 @@ impl ValueClass {
                 .write(collection)
                 .write(document_id),
             ValueClass::TaskQueue(task) => match task {
-                TaskQueueClass::Task { id } => serializer.write(0u64).write(*id),
-                TaskQueueClass::Due { id, due } => serializer.write(*due).write(*id),
+                TaskQueueClass::Task { id } => serializer
+                    .write(0u64)
+                    .write(id.resolve(account_id, document_id)),
+                TaskQueueClass::Due { id, due } => serializer
+                    .write(*due)
+                    .write(id.resolve(account_id, document_id)),
             },
             ValueClass::Blob(op) => match op {
                 BlobOp::Commit { hash } => serializer.write::<&[u8]>(hash.as_ref()),
@@ -415,7 +421,9 @@ impl ValueClass {
                 TelemetryClass::Metric(metric_id) => serializer.write(*metric_id),
             },
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
-            ValueClass::ChangeId => serializer.write(account_id),
+            ValueClass::ChangeId(group) => {
+                serializer.write(account_id).write(u8::MAX).write(*group)
+            }
             ValueClass::Quota => serializer.write(account_id).write(u8::MAX),
             ValueClass::TenantQuota(tenant_id) => serializer
                 .write(GlobalCounterKind::TenantQuota as u8)
@@ -478,7 +486,7 @@ impl ValueClass {
                 } => serializer
                     .write(index.to_u8())
                     .write(*id_prefix)
-                    .write(*id_suffix)
+                    .write(id_suffix.assigned().unwrap_or(document_id))
                     .write(*created_at),
                 SearchIndexClass::QueueIndex { index, partition } => serializer
                     .write(SearchIndexClass::QUEUE_CONTROL)
@@ -612,7 +620,7 @@ impl ValueClass {
                 TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN,
             },
             ValueClass::DocumentId | ValueClass::Quota | ValueClass::TenantQuota(_) => U32_LEN + 1,
-            ValueClass::ChangeId => U32_LEN,
+            ValueClass::ChangeId(_) => U32_LEN + 2,
             ValueClass::ShareNotification { .. } => U32_LEN + U64_LEN + 1,
             ValueClass::NodeId(_) => U16_LEN + 1,
             ValueClass::SearchIndex(v) => match v {
@@ -690,7 +698,9 @@ impl ValueClass {
                 TelemetryClass::Span { .. } => Subspace::TelemetrySpan,
                 TelemetryClass::Metric { .. } => Subspace::TelemetryMetric,
             },
-            ValueClass::DocumentId | ValueClass::ChangeId | ValueClass::Quota => Subspace::Counter,
+            ValueClass::DocumentId | ValueClass::ChangeId(_) | ValueClass::Quota => {
+                Subspace::Counter
+            }
             ValueClass::TenantQuota(_) => Subspace::GlobalCounter,
             ValueClass::ShareNotification { .. } => Subspace::Logs,
             ValueClass::SearchIndex(search) => match search {
@@ -730,9 +740,7 @@ impl ValueClass {
 
 pub fn node_id_from_key(key: &[u8]) -> Option<u16> {
     match key {
-        [kind, node_id @ ..]
-            if *kind == SystemKind::NodeId as u8 && node_id.len() == U16_LEN =>
-        {
+        [kind, node_id @ ..] if *kind == SystemKind::NodeId as u8 && node_id.len() == U16_LEN => {
             node_id.try_into().ok().map(u16::from_be_bytes)
         }
         _ => None,
@@ -934,13 +942,13 @@ impl SearchIndexClass {
             SearchIndexClass::Queue {
                 index,
                 id_prefix: from_prefix,
-                id_suffix: 0,
+                id_suffix: PendingId::Assigned(0),
                 created_at: 0,
             },
             SearchIndexClass::Queue {
                 index,
                 id_prefix: to_prefix,
-                id_suffix: u32::MAX,
+                id_suffix: PendingId::Assigned(u32::MAX),
                 created_at: u64::MAX,
             },
         )
@@ -1034,11 +1042,13 @@ mod tests {
         }
 
         assert_eq!(
-            node_id_from_key(&ValueKey::from(ValueClass::Any(AnyClass {
-                subspace: Subspace::System,
-                key: vec![SystemKind::SchemaVersion as u8],
-            }))
-            .serialize(0)),
+            node_id_from_key(
+                &ValueKey::from(ValueClass::Any(AnyClass {
+                    subspace: Subspace::System,
+                    key: vec![SystemKind::SchemaVersion as u8],
+                }))
+                .serialize(0)
+            ),
             None
         );
     }

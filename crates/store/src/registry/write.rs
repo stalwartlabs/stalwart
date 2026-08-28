@@ -302,7 +302,7 @@ impl RegistryStore {
             item_id = self
                 .0
                 .store
-                .write(id_batch.build_all())
+                .write_batch(id_batch.build_all())
                 .await
                 .and_then(|v| v.last_counter_id())? as u64;
         }
@@ -339,7 +339,7 @@ impl RegistryStore {
             );
 
         self.store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .map(|_| RegistryWriteResult::Success(Id::new(item_id)))
     }
@@ -407,7 +407,7 @@ impl RegistryStore {
 
         self.0
             .store
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .map(|_| RegistryWriteResult::Success(Id::from(item_id)))
             .caused_by(trc::location!())

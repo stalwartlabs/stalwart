@@ -5,10 +5,12 @@
  */
 
 use self::assert::AssertValue;
-use crate::{Subspace, backend::MAX_TOKEN_LENGTH};
+use crate::{Subspace, U32_LEN, U64_LEN, backend::MAX_TOKEN_LENGTH};
 use log::ChangeLogBuilder;
 use nlp::tokenizers::word::WordTokenizer;
-use std::{collections::HashSet, hash::Hash, time::SystemTime};
+use registry::{schema::structs::Task, types::ObjectImpl};
+use std::{borrow::Cow, collections::HashSet, hash::Hash, time::SystemTime};
+use tinyvec::TinyVec;
 use types::{
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection, VanishedCollection},
@@ -16,6 +18,7 @@ use types::{
         CalendarEventField, CalendarNotificationField, ContactField, EmailField,
         EmailSubmissionField, Field, MailboxField, PrincipalField, SieveField,
     },
+    id::Id,
 };
 use utils::{
     cheeky_hash::CheekyHash,
@@ -71,22 +74,51 @@ where
     pub compression: Compression,
 }
 
-#[derive(Debug, Default)]
-pub struct AssignedIds {
-    pub ids: Vec<AssignedId>,
-    current_change_id: Option<u64>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Slot(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PendingId {
+    Assigned(u32),
+    Slot(Slot),
 }
 
-#[derive(Debug)]
-pub enum AssignedId {
-    Counter(i64),
-    ChangeId(ChangeId),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChangeGroup {
+    pub account_id: u32,
+    pub group: u8,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChangeId {
+    pub account_id: u32,
+    pub group: u8,
+    pub change_id: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct AssignedIds {
+    slots: TinyVec<[u32; 8]>,
+    change_ids: TinyVec<[ChangeId; 2]>,
+    counters: TinyVec<[i64; 1]>,
+    archive_hashes: TinyVec<[u32; 1]>,
+    current_change_id: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CommitPointOffsets {
+    pub ops: usize,
+    pub reservations: usize,
+    pub change_accounts: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ChangeId {
-    pub account_id: u32,
-    pub change_id: u64,
+pub struct AssignedIdsMark {
+    slots: usize,
+    change_ids: usize,
+    counters: usize,
+    archive_hashes: usize,
 }
 
 #[cfg(any(
@@ -139,8 +171,28 @@ mod commit_limits {
 
 #[derive(Debug)]
 pub struct Batch<'x> {
-    pub(crate) change_accounts: &'x [u32],
+    pub(crate) change_accounts: &'x [ChangeGroup],
+    pub(crate) reservations: &'x [Reservation],
     pub(crate) ops: &'x mut [Operation],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Reservation {
+    pub class: ReservationClass,
+    pub first_slot: Slot,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReservationClass {
+    DocumentId {
+        account_id: u32,
+        collection: Collection,
+    },
+    Uid {
+        account_id: u32,
+        mailbox_id: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -153,14 +205,16 @@ pub struct QueueNotify {
 pub struct BatchBuilder {
     current_account_id: Option<u32>,
     current_collection: Option<Collection>,
-    current_document_id: Option<u32>,
+    current_document_id: Option<PendingId>,
     changes: VecMap<u32, ChangeLogBuilder>,
     changed_collections: VecMap<u32, ChangedCollection>,
-    change_accounts: Vec<u32>,
+    change_accounts: Vec<ChangeGroup>,
+    reservations: Vec<Reservation>,
+    next_slot: u32,
     has_assertions: bool,
     batch_size: usize,
     batch_ops: usize,
-    commit_points: Vec<usize>,
+    commit_points: Vec<CommitPointOffsets>,
     last_archive_hash: Option<u32>,
     last_index_partition: Option<(SearchIndex, u32)>,
     has_index_tasks: bool,
@@ -184,7 +238,7 @@ pub enum Operation {
         collection: Collection,
     },
     DocumentId {
-        document_id: u32,
+        document_id: PendingId,
     },
     AssertValue {
         class: ValueClass,
@@ -201,14 +255,79 @@ pub enum Operation {
     },
     Log {
         collection: LogCollection,
-        set: Vec<u8>,
+        set: LogSet,
     },
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum LogSet {
+    Bytes(Vec<u8>),
+    Pending(Box<log::Changes>),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum LogCollection {
     Sync(SyncCollection),
     Vanished(VanishedCollection),
+}
+
+impl LogCollection {
+    #[inline(always)]
+    pub fn change_group(&self) -> u8 {
+        match self {
+            LogCollection::Sync(collection) => collection.change_group(),
+            LogCollection::Vanished(collection) => collection.change_group(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_prefixed(&self) -> bool {
+        match self {
+            LogCollection::Sync(collection) => collection.is_prefixed(),
+            LogCollection::Vanished(_) => false,
+        }
+    }
+}
+
+impl Batch<'_> {
+    #[inline(always)]
+    pub fn has_allocations(&self) -> bool {
+        !self.change_accounts.is_empty() || !self.reservations.is_empty()
+    }
+}
+
+impl ReservationClass {
+    #[inline(always)]
+    pub fn sort_key(&self) -> (u8, u32, u32) {
+        match *self {
+            ReservationClass::DocumentId {
+                account_id,
+                collection,
+            } => (0, account_id, u8::from(collection) as u32),
+            ReservationClass::Uid {
+                account_id,
+                mailbox_id,
+            } => (1, account_id, mailbox_id),
+        }
+    }
+}
+
+impl Reservation {
+    pub fn serialize_key_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        buf.clear();
+        match self.class {
+            ReservationClass::DocumentId {
+                account_id,
+                collection,
+            } => {
+                ValueClass::DocumentId.serialize_into(buf, account_id, collection.into(), 0, flags)
+            }
+            ReservationClass::Uid {
+                account_id,
+                mailbox_id,
+            } => ValueClass::MailboxUid.serialize_into(buf, account_id, 0, mailbox_id, flags),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -231,7 +350,7 @@ pub enum ValueClass {
         notify_account_id: u32,
     },
     DocumentId,
-    ChangeId,
+    ChangeId(u8),
     Quota,
     TenantQuota(u32),
     NodeId(u16),
@@ -274,7 +393,7 @@ pub enum SearchIndexClass {
     Queue {
         index: SearchIndex,
         id_prefix: u32,
-        id_suffix: u32,
+        id_suffix: PendingId,
         created_at: u64,
     },
     QueueIndex {
@@ -289,8 +408,14 @@ pub enum SearchIndexClass {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum TaskQueueClass {
-    Task { id: u64 },
-    Due { id: u64, due: u64 },
+    Task { id: TaskId },
+    Due { id: TaskId, due: u64 },
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+pub enum TaskId {
+    Assigned(u64),
+    Document,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
@@ -370,11 +495,7 @@ pub struct QueueEvent {
 
 #[derive(Debug, PartialEq, Eq, Hash, Default)]
 pub enum ValueOp {
-    Set(Vec<u8>),
-    SetFnc {
-        payload: Vec<u8>,
-        fnc: SetOperation,
-    },
+    Set(SetValue),
     MergeFnc(MergeOperation),
     AtomicAdd(i64),
     AddAndGet(i64),
@@ -382,21 +503,73 @@ pub enum ValueOp {
     Clear,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Patch {
+    pub offset: u32,
+    pub source: PatchSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PatchSource {
+    SlotBeU32(Slot),
+    ChangeIdBe,
+}
+
+pub const MAX_CONCURRENT_ALLOCATIONS: usize = 16;
+
 pub enum MergeResult {
     Update(Vec<u8>),
     Skip,
     Delete,
 }
 
-pub type SetFnc = Box<dyn Fn(&AssignedIds, &mut [u8]) -> trc::Result<()> + Send + Sync>;
 pub type MergeFnc =
     Box<dyn Fn(&AssignedIds, Option<&[u8]>) -> trc::Result<MergeResult> + Send + Sync>;
 
-#[repr(transparent)]
-pub struct MergeOperation(pub(crate) MergeFnc);
+pub trait SerializeWithIds: Send + Sync {
+    fn serialize_with_ids(&mut self, ids: &AssignedIds) -> trc::Result<(Vec<u8>, Option<u32>)>;
+}
 
 #[repr(transparent)]
-pub struct SetOperation(pub(crate) SetFnc);
+pub struct SerializeOperation(pub(crate) Box<dyn SerializeWithIds>);
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum SetValue {
+    Fixed(Vec<u8>),
+    Patched(Vec<u8>, Box<[Patch]>),
+    Serializable(SerializeOperation),
+}
+
+impl SetValue {
+    pub fn resolve(&mut self, ids: &mut AssignedIds) -> trc::Result<Cow<'_, [u8]>> {
+        match self {
+            SetValue::Fixed(payload) => Ok(Cow::Borrowed(payload)),
+            SetValue::Patched(payload, patches) => {
+                Patch::apply(patches, payload, ids);
+                Ok(Cow::Borrowed(payload))
+            }
+            SetValue::Serializable(object) => {
+                let (payload, hash) = (object.0).serialize_with_ids(ids)?;
+                ids.set_archive_hash(hash);
+                Ok(Cow::Owned(payload))
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            SetValue::Fixed(payload) | SetValue::Patched(payload, _) => payload.len(),
+            SetValue::Serializable(..) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[repr(transparent)]
+pub struct MergeOperation(pub(crate) MergeFnc);
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum BlobOp {
@@ -453,64 +626,207 @@ impl AsRef<ValueClass> for ValueClass {
     }
 }
 
+impl Slot {
+    #[inline(always)]
+    pub fn new(index: u32) -> Self {
+        Slot(index)
+    }
+
+    #[inline(always)]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline(always)]
+    pub fn offset(self, offset: usize) -> Slot {
+        Slot(
+            self.0
+                .checked_add(u32::try_from(offset).expect("slot offset is out of range"))
+                .expect("slot offset is out of range"),
+        )
+    }
+}
+
+impl PendingId {
+    #[inline(always)]
+    pub fn resolve(self, ids: &AssignedIds) -> u32 {
+        match self {
+            PendingId::Assigned(document_id) => document_id,
+            PendingId::Slot(slot) => ids.slot(slot),
+        }
+    }
+
+    #[inline(always)]
+    pub fn assigned(self) -> Option<u32> {
+        match self {
+            PendingId::Assigned(document_id) => Some(document_id),
+            PendingId::Slot(_) => None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_pending(self) -> bool {
+        matches!(self, PendingId::Slot(_))
+    }
+}
+
+impl From<u32> for PendingId {
+    #[inline(always)]
+    fn from(document_id: u32) -> Self {
+        PendingId::Assigned(document_id)
+    }
+}
+
+impl TaskId {
+    #[inline(always)]
+    pub fn resolve(self, account_id: u32, document_id: u32) -> u64 {
+        match self {
+            TaskId::Assigned(id) => id,
+            TaskId::Document => Id::from_parts(account_id, document_id).id(),
+        }
+    }
+}
+
+impl From<u64> for TaskId {
+    #[inline(always)]
+    fn from(id: u64) -> Self {
+        TaskId::Assigned(id)
+    }
+}
+
+impl From<Slot> for PendingId {
+    #[inline(always)]
+    fn from(slot: Slot) -> Self {
+        PendingId::Slot(slot)
+    }
+}
+
 impl AssignedIds {
+    #[inline(always)]
+    pub fn mark(&self) -> AssignedIdsMark {
+        AssignedIdsMark {
+            slots: self.slots.len(),
+            change_ids: self.change_ids.len(),
+            counters: self.counters.len(),
+            archive_hashes: self.archive_hashes.len(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn rollback(&mut self, mark: AssignedIdsMark) {
+        self.slots.truncate(mark.slots);
+        self.change_ids.truncate(mark.change_ids);
+        self.counters.truncate(mark.counters);
+        self.archive_hashes.truncate(mark.archive_hashes);
+        self.current_change_id = 0;
+    }
+
+    pub fn push_archive_hash(&mut self, hash: u32) {
+        self.archive_hashes.push(hash);
+    }
+
+    pub fn set_archive_hash(&mut self, hash: Option<u32>) {
+        if let Some(hash) = hash {
+            self.archive_hashes.push(hash);
+        }
+    }
+
+    #[inline(always)]
+    pub fn last_archive_hash(&self) -> Option<u32> {
+        self.archive_hashes.last().copied()
+    }
+
     pub fn push_counter_id(&mut self, id: i64) {
-        self.ids.push(AssignedId::Counter(id));
+        self.counters.push(id);
     }
 
-    pub fn push_change_id(&mut self, account_id: u32, change_id: u64) {
-        self.ids.push(AssignedId::ChangeId(ChangeId {
+    pub fn push_change_id(&mut self, account_id: u32, group: u8, change_id: u64) {
+        self.change_ids.push(ChangeId {
             account_id,
+            group,
             change_id,
-        }));
+        });
     }
 
-    pub fn change_id(&self, account_id: u32) -> Option<u64> {
-        self.ids
+    pub fn fill_slots(&mut self, first_slot: Slot, count: u32, last_id: u32) {
+        debug_assert!(last_id >= count, "{last_id} < {count}");
+        debug_assert_ne!(last_id, u32::MAX, "document id space is exhausted");
+
+        let first = first_slot.index();
+        if self.slots.len() < first + count as usize {
+            self.slots.resize(first + count as usize, u32::MAX);
+        }
+        let base = last_id - count + 1;
+        for offset in 0..count {
+            self.slots[first + offset as usize] = base + offset;
+        }
+    }
+
+    #[inline(always)]
+    pub fn slot(&self, slot: Slot) -> u32 {
+        let document_id = self.slots[slot.index()];
+        debug_assert_ne!(document_id, u32::MAX, "slot {slot:?} was never assigned");
+        document_id
+    }
+
+    pub fn change_id(&self, account_id: u32, group: u8) -> Option<u64> {
+        self.change_ids
             .iter()
-            .filter_map(|id| match id {
-                AssignedId::ChangeId(change_id) if change_id.account_id == account_id => {
-                    Some(change_id.change_id)
-                }
-                _ => None,
-            })
+            .filter(|id| id.account_id == account_id && id.group == group)
+            .map(|id| id.change_id)
             .next_back()
     }
 
-    pub fn last_change_id(&self, account_id: u32) -> trc::Result<u64> {
-        self.change_id(account_id).ok_or_else(|| {
-            trc::StoreEvent::UnexpectedError
-                .caused_by(trc::location!())
-                .ctx(trc::Key::Reason, "No change ids were created")
-        })
+    pub fn last_change_id(&self, account_id: u32, group: u8) -> u64 {
+        let change_id = self.change_id(account_id, group);
+        debug_assert!(
+            change_id.is_some(),
+            "no change id was created for account {account_id} group {group}"
+        );
+        change_id.unwrap_or_default()
     }
 
-    pub fn current_change_id(&self) -> trc::Result<u64> {
-        self.current_change_id.ok_or_else(|| {
-            trc::StoreEvent::UnexpectedError
-                .caused_by(trc::location!())
-                .ctx(trc::Key::Reason, "No current change id is set")
-        })
+    #[inline(always)]
+    pub fn current_change_id(&self) -> u64 {
+        debug_assert_ne!(self.current_change_id, 0, "no current change id is set");
+        self.current_change_id
     }
 
-    pub(crate) fn set_current_change_id(&mut self, account_id: u32) -> u64 {
-        self.current_change_id = self.change_id(account_id);
-        self.current_change_id.unwrap_or_default()
+    #[inline(always)]
+    pub fn try_current_change_id(&self) -> Option<u64> {
+        Some(self.current_change_id).filter(|change_id| *change_id != 0)
+    }
+
+    #[inline(always)]
+    pub(crate) fn set_current_change_id(&mut self, account_id: u32, group: u8) -> u64 {
+        self.current_change_id = self.change_id(account_id, group).unwrap_or_default();
+        self.current_change_id
     }
 
     pub fn last_counter_id(&self) -> trc::Result<i64> {
-        self.ids
-            .iter()
-            .filter_map(|id| match id {
-                AssignedId::Counter(counter_id) => Some(*counter_id),
-                _ => None,
-            })
-            .next_back()
-            .ok_or_else(|| {
-                trc::StoreEvent::UnexpectedError
-                    .caused_by(trc::location!())
-                    .ctx(trc::Key::Reason, "No counter ids were created")
-            })
+        self.counters.last().copied().ok_or_else(|| {
+            trc::StoreEvent::UnexpectedError
+                .caused_by(trc::location!())
+                .ctx(trc::Key::Reason, "No counter ids were created")
+        })
+    }
+}
+
+impl Patch {
+    pub fn apply(patches: &[Patch], payload: &mut [u8], ids: &AssignedIds) {
+        for patch in patches {
+            let offset = patch.offset as usize;
+            match patch.source {
+                PatchSource::SlotBeU32(slot) => {
+                    payload[offset..offset + U32_LEN]
+                        .copy_from_slice(&ids.slot(slot).to_be_bytes());
+                }
+                PatchSource::ChangeIdBe => {
+                    payload[offset..offset + U64_LEN]
+                        .copy_from_slice(&ids.current_change_id().to_be_bytes());
+                }
+            }
+        }
     }
 }
 
@@ -612,21 +928,50 @@ impl MergeOperation {
     }
 }
 
-impl SetOperation {
+pub struct PendingTask {
+    pub task: Task,
+    pub slot: Slot,
+}
+
+impl SerializeWithIds for PendingTask {
+    fn serialize_with_ids(&mut self, ids: &AssignedIds) -> trc::Result<(Vec<u8>, Option<u32>)> {
+        self.task.set_document_id(Id::from(ids.slot(self.slot)));
+
+        Ok((self.task.to_pickled_vec(), None))
+    }
+}
+
+impl SerializeOperation {
     fn id(&self) -> usize {
         &*self.0 as *const _ as *const u8 as usize
+    }
+}
+
+impl std::fmt::Debug for SerializeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SerializeOperation")
+            .field(&self.id())
+            .finish()
+    }
+}
+
+impl PartialEq for SerializeOperation {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Eq for SerializeOperation {}
+
+impl Hash for SerializeOperation {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
     }
 }
 
 impl std::fmt::Debug for MergeOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("MergeOperation").field(&self.id()).finish()
-    }
-}
-
-impl std::fmt::Debug for SetOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SetOperation").field(&self.id()).finish()
     }
 }
 
@@ -638,21 +983,7 @@ impl PartialEq for MergeOperation {
 
 impl Eq for MergeOperation {}
 
-impl PartialEq for SetOperation {
-    fn eq(&self, other: &Self) -> bool {
-        self.id() == other.id()
-    }
-}
-
-impl Eq for SetOperation {}
-
 impl Hash for MergeOperation {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id().hash(state);
-    }
-}
-
-impl Hash for SetOperation {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id().hash(state);
     }

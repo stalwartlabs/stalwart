@@ -168,16 +168,11 @@ impl<T: SessionStream> Session<T> {
 
             // Write record
             let mut batch = BatchBuilder::new();
-            let document_id = self
-                .server
-                .store()
-                .assign_document_ids(account_id, Collection::SieveScript, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let slot = batch.reserve_document_id(account_id, Collection::SieveScript);
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::SieveScript)
-                .with_document(document_id)
+                .create_document(slot)
                 .custom(
                     ObjectIndexBuilder::<(), _>::new()
                         .with_changes(
@@ -191,7 +186,8 @@ impl<T: SessionStream> Session<T> {
                 .caused_by(trc::location!())?
                 .clear(blob_hold);
 
-            self.server
+            let assigned_ids = self
+                .server
                 .commit_batch(batch)
                 .await
                 .caused_by(trc::location!())?;
@@ -200,7 +196,7 @@ impl<T: SessionStream> Session<T> {
                 ManageSieve(trc::ManageSieveEvent::CreateScript),
                 SpanId = self.session_id,
                 Id = name,
-                DocumentId = document_id,
+                DocumentId = assigned_ids.slot(slot),
                 Elapsed = op_start.elapsed()
             );
         }

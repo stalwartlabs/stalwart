@@ -8145,6 +8145,7 @@ dependencies = [
  "rustls-pki-types",
  "serde",
  "serde_json",
+ "tinyvec",
  "tokio",
  "tokio-postgres",
  "tokio-rustls",

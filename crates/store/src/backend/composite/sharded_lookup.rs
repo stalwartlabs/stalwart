@@ -98,6 +98,7 @@ impl ShardedInMemory {
         .await
     }
 
+    #[allow(unused_variables)]
     pub async fn renew_lock(&self, key: &[u8], expires: u64) -> trc::Result<()> {
         Box::pin(async move {
             match self.get_store(key) {

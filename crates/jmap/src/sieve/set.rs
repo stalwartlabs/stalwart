@@ -30,15 +30,24 @@ use std::future::Future;
 use store::{
     SerializeInfallible, ValueKey,
     rand::{RngExt, rng},
-    write::{Archive, ArchiveBytes, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId, Slot},
 };
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId, BlobSection},
+    blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
     field::{PrincipalField, SieveField},
     id::Id,
 };
+
+struct PendingSieveScript {
+    id: String,
+    slot: Slot,
+    blob_hash: BlobHash,
+    blob_size: usize,
+    is_active: bool,
+}
 
 pub struct SetContext<'x> {
     account_id: u32,
@@ -102,7 +111,12 @@ impl SieveScriptSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        let mut activations = Vec::new();
+        let mut activations: Vec<(PendingId, bool)> = Vec::new();
+        let mut activate_script = match &request.arguments.on_success_activate_script {
+            Some(MaybeIdReference::Id(id)) => Some(PendingId::Assigned(id.document_id())),
+            _ => None,
+        };
+        let mut pending_creates: Vec<PendingSieveScript> = Vec::new();
         for (id, object) in request.unwrap_create() {
             if sieve_ids.len()
                 < self.object_quota(account.object_quotas(), StorageQuota::MaxSieveScripts) as u64
@@ -126,15 +140,11 @@ impl SieveScriptSet for Server {
                         let blob_hash = sieve.blob_hash.clone();
 
                         // Write record
-                        let document_id = self
-                            .store()
-                            .assign_document_ids(account_id, Collection::SieveScript, 1)
-                            .await
-                            .caused_by(trc::location!())?;
+                        let slot = batch.reserve_document_id(account_id, Collection::SieveScript);
                         batch
                             .with_account_id(account_id)
                             .with_collection(Collection::SieveScript)
-                            .with_document(document_id)
+                            .create_document(slot)
                             .custom(
                                 result
                                     .builder
@@ -146,40 +156,27 @@ impl SieveScriptSet for Server {
 
                         // Set isActive if needed
                         if let Some(set_item) = result.set_item {
-                            activations.push((document_id, set_item));
+                            activations.push((PendingId::Slot(slot), set_item));
                         }
 
-                        let mut result = Map::with_capacity(1)
-                            .with_key_value(SieveProperty::Id, SieveValue::Id(document_id.into()))
-                            .with_key_value(
-                                SieveProperty::BlobId,
-                                SieveValue::BlobId(BlobId {
-                                    hash: blob_hash,
-                                    class: BlobClass::Linked {
-                                        account_id,
-                                        collection: Collection::SieveScript.into(),
-                                        document_id,
-                                    },
-                                    section: BlobSection {
-                                        size: blob_size,
-                                        ..Default::default()
-                                    }
-                                    .into(),
-                                }),
-                            );
-
                         // Update active script if needed
-                        if let Some(MaybeIdReference::Reference(id_ref)) =
+                        let is_active = if let Some(MaybeIdReference::Reference(id_ref)) =
                             &request.arguments.on_success_activate_script
                             && id_ref == &id
                         {
-                            request.arguments.on_success_activate_script =
-                                Some(MaybeIdReference::Id(Id::from(document_id)));
-                            result.insert_unchecked(SieveProperty::IsActive, true);
-                        }
+                            activate_script = Some(PendingId::Slot(slot));
+                            true
+                        } else {
+                            false
+                        };
 
-                        // Add result with updated blobId
-                        ctx.response.created.insert(id, result.into());
+                        pending_creates.push(PendingSieveScript {
+                            id,
+                            slot,
+                            blob_hash,
+                            blob_size,
+                            is_active,
+                        });
                     }
                     Err(err) => {
                         ctx.response.not_created.append(id, err);
@@ -274,7 +271,7 @@ impl SieveScriptSet for Server {
 
                         // Set isActive if needed
                         if let Some(set_item) = result.set_item {
-                            activations.push((document_id, set_item));
+                            activations.push((PendingId::Assigned(document_id), set_item));
                         }
 
                         // Write record
@@ -357,11 +354,12 @@ impl SieveScriptSet for Server {
             .unwrap_or(false);
         if activations.len() == 1 {
             let (document_id, set_item) = activations[0];
-            let is_active = active_script_id.is_some_and(|active_id| active_id == document_id);
+            let is_active = document_id
+                .assigned()
+                .is_some_and(|document_id| active_script_id == Some(document_id));
             if set_item {
                 if request.arguments.on_success_activate_script.is_none() && !is_active {
-                    request.arguments.on_success_activate_script =
-                        Some(MaybeIdReference::Id(document_id.into()));
+                    activate_script = Some(document_id);
                 }
             } else if !on_success_deactivate_script && is_active {
                 on_success_deactivate_script = true;
@@ -372,33 +370,68 @@ impl SieveScriptSet for Server {
         if ctx.response.not_created.is_empty()
             && ctx.response.not_updated.is_empty()
             && ctx.response.not_destroyed.is_empty()
-            && (request.arguments.on_success_activate_script.is_some()
-                || on_success_deactivate_script)
+            && (activate_script.is_some() || on_success_deactivate_script)
         {
-            if let Some(MaybeIdReference::Id(id)) = request.arguments.on_success_activate_script {
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::Principal)
-                    .with_document(0)
-                    .set(PrincipalField::ActiveScriptId, id.document_id().serialize());
-            } else if on_success_deactivate_script {
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::Principal)
-                    .with_document(0)
-                    .clear(PrincipalField::ActiveScriptId);
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .with_document(0);
+
+            match activate_script {
+                Some(PendingId::Assigned(document_id)) => {
+                    batch.set(PrincipalField::ActiveScriptId, document_id.serialize());
+                }
+                Some(PendingId::Slot(slot)) => {
+                    batch.set_patched(
+                        PrincipalField::ActiveScriptId,
+                        0u32.serialize(),
+                        vec![Patch {
+                            offset: 0,
+                            source: PatchSource::SlotBeU32(slot),
+                        }],
+                    );
+                }
+                None => {
+                    batch.clear(PrincipalField::ActiveScriptId);
+                }
             }
         }
 
         // Write changes
-        if !batch.is_empty()
-            && let Ok(change_id) = self
-                .commit_batch(batch)
-                .await
-                .caused_by(trc::location!())?
-                .last_change_id(account_id)
-        {
-            ctx.response.new_state = State::Exact(change_id).into();
+        if !batch.is_empty() {
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+            if let Some(change_id) =
+                assigned_ids.change_id(account_id, SyncCollection::SieveScript.change_group())
+            {
+                ctx.response.new_state = State::Exact(change_id).into();
+            }
+
+            for create in pending_creates {
+                let document_id = assigned_ids.slot(create.slot);
+                let mut result = Map::with_capacity(1)
+                    .with_key_value(SieveProperty::Id, SieveValue::Id(document_id.into()))
+                    .with_key_value(
+                        SieveProperty::BlobId,
+                        SieveValue::BlobId(BlobId {
+                            hash: create.blob_hash,
+                            class: BlobClass::Linked {
+                                account_id,
+                                collection: Collection::SieveScript.into(),
+                                document_id,
+                            },
+                            section: BlobSection {
+                                size: create.blob_size,
+                                ..Default::default()
+                            }
+                            .into(),
+                        }),
+                    );
+                if create.is_active {
+                    result.insert_unchecked(SieveProperty::IsActive, true);
+                }
+                ctx.response.created.insert(create.id, result.into());
+            }
         }
 
         Ok(ctx.response)

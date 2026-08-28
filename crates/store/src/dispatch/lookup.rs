@@ -12,7 +12,7 @@ use trc::AddContext;
 use crate::{
     Deserialize, InMemoryStore, IterateParams, QueryResult, Store, U64_LEN, Value, ValueKey,
     write::{
-        BatchBuilder, Operation, ValueClass, ValueOp,
+        BatchBuilder, Operation, SetValue, ValueClass, ValueOp,
         key::{DeserializeBigEndian, KeySerializer},
         now,
     },
@@ -36,14 +36,14 @@ impl InMemoryStore {
                 let mut batch = BatchBuilder::new();
                 batch.any_op(Operation::Value {
                     class: ValueClass::InMemory(InMemoryClass::Key(kv.key)),
-                    op: ValueOp::Set(
+                    op: ValueOp::Set(SetValue::Fixed(
                         KeySerializer::new(kv.value.len() + U64_LEN)
                             .write(kv.expires.map_or(u64::MAX, |expires| now() + expires))
                             .write(kv.value.as_slice())
                             .finalize(),
-                    ),
+                    )),
                 });
-                store.write(batch.build_all()).await.map(|_| ())
+                store.write_batch(batch.build_all()).await.map(|_| ())
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_set(&kv.key, &kv.value, kv.expires).await,
@@ -68,12 +68,12 @@ impl InMemoryStore {
                 if let Some(expires) = kv.expires {
                     batch.any_op(Operation::Value {
                         class: ValueClass::InMemory(InMemoryClass::Key(kv.key.clone())),
-                        op: ValueOp::Set(
+                        op: ValueOp::Set(SetValue::Fixed(
                             KeySerializer::new(U64_LEN * 2)
                                 .write(0u64)
                                 .write(now() + expires)
                                 .finalize(),
-                        ),
+                        )),
                     });
                 }
 
@@ -84,7 +84,7 @@ impl InMemoryStore {
                     });
 
                     store
-                        .write(batch.build_all())
+                        .write_batch(batch.build_all())
                         .await
                         .and_then(|r| r.last_counter_id())
                 } else {
@@ -93,7 +93,7 @@ impl InMemoryStore {
                         op: ValueOp::AtomicAdd(kv.value),
                     });
 
-                    store.write(batch.build_all()).await.map(|_| 0)
+                    store.write_batch(batch.build_all()).await.map(|_| 0)
                 }
             }
             #[cfg(feature = "redis")]
@@ -119,7 +119,7 @@ impl InMemoryStore {
                     class: ValueClass::InMemory(InMemoryClass::Key(key.into().into_bytes())),
                     op: ValueOp::Clear,
                 });
-                store.write(batch.build_all()).await.map(|_| ())
+                store.write_batch(batch.build_all()).await.map(|_| ())
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_delete(key.into().as_bytes()).await,
@@ -144,7 +144,7 @@ impl InMemoryStore {
                     class: ValueClass::InMemory(InMemoryClass::Counter(key.into().into_bytes())),
                     op: ValueOp::Clear,
                 });
-                store.write(batch.build_all()).await.map(|_| ())
+                store.write_batch(batch.build_all()).await.map(|_| ())
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_delete(key.into().as_bytes()).await,
@@ -345,7 +345,7 @@ impl InMemoryStore {
                     }
                 });
 
-                match store.write(batch.build_all()).await {
+                match store.write_batch(batch.build_all()).await {
                     Ok(_) => Ok(true),
                     Err(err) if err.is_assertion_failure() => Ok(false),
                     Err(err) => Err(err
@@ -388,7 +388,7 @@ impl InMemoryStore {
                 );
 
                 store
-                    .write(batch.build_all())
+                    .write_batch(batch.build_all())
                     .await
                     .map(|_| ())
                     .map_err(|err| {
@@ -462,7 +462,7 @@ impl InMemoryStore {
                         });
                         if batch.is_large_batch() {
                             store
-                                .write(batch.build_all())
+                                .write_batch(batch.build_all())
                                 .await
                                 .caused_by(trc::location!())?;
                             batch = BatchBuilder::new();
@@ -470,7 +470,7 @@ impl InMemoryStore {
                     }
                     if !batch.is_empty() {
                         store
-                            .write(batch.build_all())
+                            .write_batch(batch.build_all())
                             .await
                             .caused_by(trc::location!())?;
                     }
@@ -489,7 +489,7 @@ impl InMemoryStore {
                         });
                         if batch.is_large_batch() {
                             store
-                                .write(batch.build_all())
+                                .write_batch(batch.build_all())
                                 .await
                                 .caused_by(trc::location!())?;
                             batch = BatchBuilder::new();
@@ -497,7 +497,7 @@ impl InMemoryStore {
                     }
                     if !batch.is_empty() {
                         store
-                            .write(batch.build_all())
+                            .write_batch(batch.build_all())
                             .await
                             .caused_by(trc::location!())?;
                     }

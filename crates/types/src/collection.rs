@@ -79,6 +79,19 @@ impl VanishedCollection {
             | VanishedCollection::FileNode => true,
         }
     }
+
+    pub const fn sync_collection(&self) -> SyncCollection {
+        match self {
+            VanishedCollection::Email => SyncCollection::Email,
+            VanishedCollection::Calendar => SyncCollection::Calendar,
+            VanishedCollection::AddressBook => SyncCollection::AddressBook,
+            VanishedCollection::FileNode => SyncCollection::FileNode,
+        }
+    }
+
+    pub const fn change_group(&self) -> u8 {
+        self.sync_collection().change_group()
+    }
 }
 
 impl Collection {
@@ -102,6 +115,10 @@ impl Collection {
             Collection::CalendarEventNotification => Some(Collection::CalendarEventNotification),
             _ => None,
         }
+    }
+
+    pub fn change_group(&self) -> u8 {
+        SyncCollection::from(*self).change_group()
     }
 
     pub fn child_collection(&self) -> Option<Collection> {
@@ -163,6 +180,15 @@ impl SyncCollection {
     pub fn is_prefixed(&self) -> bool {
         matches!(self, SyncCollection::Email)
     }
+
+    pub const fn change_group(&self) -> u8 {
+        match self {
+            SyncCollection::Thread => SyncCollection::Email as u8,
+            other => *other as u8,
+        }
+    }
+
+    pub const MAX_CHANGE_GROUP: u8 = SyncCollection::None as u8;
 }
 
 impl From<Collection> for SyncCollection {

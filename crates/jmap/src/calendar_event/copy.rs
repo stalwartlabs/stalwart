@@ -29,12 +29,13 @@ use jmap_proto::{
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    write::{Archive, ArchiveBytes, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder, Slot},
 };
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    id::Id,
 };
 use utils::map::vec_map::VecMap;
 
@@ -105,6 +106,7 @@ impl JmapCalendarEventCopy for Server {
         };
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
+        let mut created_slots: Vec<(Id, Slot)> = Vec::new();
 
         // Obtain account info
         let account_info = self
@@ -178,7 +180,7 @@ impl JmapCalendarEventCopy for Server {
                 .await?
             {
                 Ok(document_id) => {
-                    response.created(id, document_id);
+                    created_slots.push((id, document_id));
 
                     // Add to destroy list
                     if on_success_delete {
@@ -194,13 +196,15 @@ impl JmapCalendarEventCopy for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            response.new_state = State::Exact(change_id);
+            for (create_id, slot) in created_slots {
+                response.created(create_id, assigned_ids.slot(slot));
+            }
+
+            response.new_state = State::Exact(
+                assigned_ids.last_change_id(account_id, SyncCollection::Calendar.change_group()),
+            );
         }
 
         // Destroy ids

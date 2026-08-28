@@ -280,15 +280,11 @@ impl FileUpdateRequestHandler for Server {
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::FileNode, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::FileNode)
-                .with_document(document_id)
+                .create_document(document_id)
                 .clear(blob_hold)
                 .custom(
                     ObjectIndexBuilder::<(), _>::new()
@@ -296,8 +292,11 @@ impl FileUpdateRequestHandler for Server {
                         .with_changed_by(access_token.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?;
-            let etag = batch.etag();
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let etag = self
+                .commit_batch(batch)
+                .await
+                .caused_by(trc::location!())?
+                .etag();
 
             Ok(HttpResponse::new(StatusCode::CREATED).with_etag_opt(etag))
         }

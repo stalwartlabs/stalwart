@@ -22,7 +22,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use store::write::BatchBuilder;
+use store::write::{BatchBuilder, PendingId};
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes},
@@ -503,11 +503,7 @@ async fn copy_card(
             name: new_name.to_string(),
             parent_id: to_addressbook_id,
         }];
-        let to_document_id = server
-            .store()
-            .assign_document_ids(to_account_id, Collection::ContactCard, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let to_document_id = batch.reserve_document_id(to_account_id, Collection::ContactCard);
         new_card
             .insert(
                 access_token.account_tenant_ids(),
@@ -661,11 +657,7 @@ async fn move_card(
             )
             .caused_by(trc::location!())?;
 
-        let to_document_id = server
-            .store()
-            .assign_document_ids(to_account_id, Collection::ContactCard, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let to_document_id = batch.reserve_document_id(to_account_id, Collection::ContactCard);
         new_card
             .insert(
                 access_token.account_tenant_ids(),
@@ -861,14 +853,11 @@ async fn copy_container(
                 .caused_by(trc::location!())?;
         }
 
-        to_document_id
+        PendingId::Assigned(to_document_id)
     } else {
-        server
-            .store()
-            .assign_document_ids(to_account_id, Collection::AddressBook, 1)
-            .await
-            .caused_by(trc::location!())?
+        PendingId::Slot(batch.reserve_document_id(to_account_id, Collection::AddressBook))
     };
+    let parent_id = to_document_id;
     book.insert(
         access_token.account_tenant_ids(),
         to_account_id,
@@ -895,7 +884,10 @@ async fn copy_container(
             let mut new_name = None;
 
             for name in card.inner.names.iter() {
-                if name.parent_id == to_document_id {
+                if parent_id
+                    .assigned()
+                    .is_some_and(|parent| name.parent_id == parent)
+                {
                     continue;
                 } else if name.parent_id == from_document_id {
                     new_name = Some(name.name.to_string());
@@ -904,7 +896,7 @@ async fn copy_container(
             let new_name = if let Some(new_name) = new_name {
                 DavName {
                     name: new_name,
-                    parent_id: to_document_id,
+                    parent_id: parent_id.assigned().unwrap_or_default(),
                 }
             } else {
                 continue;
@@ -924,15 +916,24 @@ async fn copy_container(
                 }
 
                 new_card.names.push(new_name);
-                new_card
-                    .update(
+                match parent_id {
+                    PendingId::Assigned(_) => new_card.update(
                         access_token.account_tenant_ids(),
                         card,
                         from_account_id,
                         from_child_document_id,
                         &mut batch,
-                    )
-                    .caused_by(trc::location!())?;
+                    ),
+                    PendingId::Slot(parent_id) => new_card.update_pending_parent(
+                        access_token.account_tenant_ids(),
+                        card,
+                        from_account_id,
+                        from_child_document_id,
+                        parent_id,
+                        &mut batch,
+                    ),
+                }
+                .caused_by(trc::location!())?;
             } else {
                 if remove_source {
                     DestroyArchive(card)
@@ -947,21 +948,26 @@ async fn copy_container(
                         .caused_by(trc::location!())?;
                 }
 
-                let to_document_id = server
-                    .store()
-                    .assign_document_ids(to_account_id, Collection::ContactCard, 1)
-                    .await
-                    .caused_by(trc::location!())?;
+                let to_document_id =
+                    batch.reserve_document_id(to_account_id, Collection::ContactCard);
                 new_card.names = vec![new_name];
                 required_space += new_card.size as u64;
-                new_card
-                    .insert(
+                match parent_id {
+                    PendingId::Assigned(_) => new_card.insert(
                         access_token.account_tenant_ids(),
                         to_account_id,
                         to_document_id,
                         &mut batch,
-                    )
-                    .caused_by(trc::location!())?;
+                    ),
+                    PendingId::Slot(parent_id) => new_card.insert_pending_parent(
+                        access_token.account_tenant_ids(),
+                        to_account_id,
+                        to_document_id,
+                        parent_id,
+                        &mut batch,
+                    ),
+                }
+                .caused_by(trc::location!())?;
             }
         }
     }

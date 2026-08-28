@@ -6,12 +6,11 @@
 
 use crate::{
     Deserialize, IterateParams, Key, QueryResult, Store, Subspace, U32_LEN, Value, ValueKey,
-    write::{AnyKey, AssignedIds, Batch, BatchBuilder, ValueClass, key::KeySerializer},
+    write::{AnyKey, AssignedIds, Batch, ValueClass, key::KeySerializer},
 };
 use compact_str::ToCompactString;
 use std::time::Instant;
 use trc::{AddContext, StoreEvent};
-use types::collection::Collection;
 
 impl Store {
     pub async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
@@ -203,27 +202,33 @@ impl Store {
         result.caused_by(trc::location!())
     }
 
-    pub async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub async fn write_batch(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
+        let mut assigned_ids = AssignedIds::default();
+        self.write(batch, &mut assigned_ids).await?;
+        Ok(assigned_ids)
+    }
+
+    pub async fn write(&self, batch: Batch<'_>, assigned_ids: &mut AssignedIds) -> trc::Result<()> {
         let start_time = Instant::now();
         let ops = batch.ops.len();
 
         let result = match self {
             #[cfg(feature = "sqlite")]
-            Self::SQLite(store) => store.write(batch).await,
+            Self::SQLite(store) => store.write(batch, assigned_ids).await,
             #[cfg(feature = "foundation")]
-            Self::FoundationDb(store) => store.write(batch).await,
+            Self::FoundationDb(store) => store.write(batch, assigned_ids).await,
             #[cfg(feature = "postgres")]
-            Self::PostgreSQL(store) => store.write(batch).await,
+            Self::PostgreSQL(store) => store.write(batch, assigned_ids).await,
             #[cfg(feature = "mysql")]
-            Self::MySQL(store) => store.write(batch).await,
+            Self::MySQL(store) => store.write(batch, assigned_ids).await,
             #[cfg(feature = "rocks")]
-            Self::RocksDb(store) => store.write(batch).await,
-            Self::Ephemeral(store) => store.write(batch).await,
+            Self::RocksDb(store) => store.write(batch, assigned_ids).await,
+            Self::Ephemeral(store) => store.write(batch, assigned_ids).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
-            Self::SQLReadReplica(store) => store.write(batch).await,
+            Self::SQLReadReplica(store) => store.write(batch, assigned_ids).await,
             // SPDX-SnippetEnd
             Self::None => Err(trc::StoreEvent::NotConfigured.into()),
         };
@@ -235,26 +240,6 @@ impl Store {
         );
 
         result
-    }
-
-    pub async fn assign_document_ids(
-        &self,
-        account_id: u32,
-        collection: Collection,
-        num_ids: u64,
-    ) -> trc::Result<u32> {
-        // Increment UID next
-        let mut batch = BatchBuilder::new();
-        batch
-            .with_account_id(account_id)
-            .with_collection(collection)
-            .add_and_get(ValueClass::DocumentId, num_ids as i64);
-        self.write(batch.build_all()).await.and_then(|v| {
-            v.last_counter_id().map(|id| {
-                debug_assert!(id >= num_ids as i64, "{} < {}", id, num_ids);
-                id as u32
-            })
-        })
     }
 
     pub async fn purge_store(&self) -> trc::Result<()> {

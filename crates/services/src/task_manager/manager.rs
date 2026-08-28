@@ -42,7 +42,7 @@ use store::rand::seq::SliceRandom;
 use store::write::key::DeserializeBigEndian;
 use store::{
     IterateParams, ValueKey,
-    write::{BatchBuilder, TaskQueueClass, ValueClass, assert::AssertValue, now},
+    write::{BatchBuilder, TaskId, TaskQueueClass, ValueClass, assert::AssertValue, now},
 };
 use store::{SerializeInfallible, U64_LEN, rand};
 use tokio::sync::{mpsc, watch};
@@ -124,7 +124,9 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
                 match server
                     .store()
                     .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                        TaskQueueClass::Task { id: job_id },
+                        TaskQueueClass::Task {
+                            id: TaskId::Assigned(job_id),
+                        },
                     )))
                     .await
                 {
@@ -278,7 +280,7 @@ impl TaskQueueManager for Server {
             collection: 0,
             document_id: 0,
             class: ValueClass::TaskQueue(TaskQueueClass::Due {
-                id: 0,
+                id: TaskId::Assigned(0),
                 due: scan_floor.max(1),
             }),
         };
@@ -287,7 +289,7 @@ impl TaskQueueManager for Server {
             collection: u8::MAX,
             document_id: u32::MAX,
             class: ValueClass::TaskQueue(TaskQueueClass::Due {
-                id: u64::MAX,
+                id: TaskId::Assigned(u64::MAX),
                 due: now_timestamp + QUEUE_REFRESH_INTERVAL,
             }),
         };
@@ -497,7 +499,8 @@ async fn update_tasks(
     let mut batch = BatchBuilder::new();
 
     for (task, result) in tasks.iter_mut().zip(results) {
-        let id = task.info.id;
+        let task_id = task.info.id;
+        let id = TaskId::Assigned(task_id);
         batch.clear(ValueClass::TaskQueue(TaskQueueClass::Due {
             id,
             due: task.info.due,
@@ -550,7 +553,7 @@ async fn update_tasks(
                 let due = if let Some(retry_at) = retry_at {
                     trc::event!(
                         TaskManager(TaskManagerEvent::TaskRetry),
-                        Id = id,
+                        Id = task_id,
                         Details = task.task.name(),
                         Reason = message.to_string(),
                         NextRetry = trc::Value::Timestamp(retry_at),
@@ -567,7 +570,7 @@ async fn update_tasks(
                 } else {
                     trc::event!(
                         TaskManager(TaskManagerEvent::TaskFailed),
-                        Id = id,
+                        Id = task_id,
                         Details = task.task.name(),
                         Reason = message.to_string(),
                     );
@@ -597,7 +600,7 @@ async fn update_tasks(
         }
     }
 
-    let is_committed = match server.store().write(batch.build_all()).await {
+    let is_committed = match server.store().write_batch(batch.build_all()).await {
         Ok(_) => true,
         Err(err) => {
             if err.matches(trc::EventType::Store(trc::StoreEvent::AssertValueFailed)) {

@@ -579,7 +579,7 @@ pub async fn test(test: &TestServer) {
             SieveField::Archive,
             Archiver::new(script).serialize().unwrap(),
         );
-    server.store().write(batch.build_all()).await.unwrap();
+    server.store().write_batch(batch.build_all()).await.unwrap();
 
     lmtp.ingest(
         "bill@remote.org",

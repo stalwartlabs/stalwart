@@ -201,7 +201,7 @@ impl MailboxDestroy for Server {
             match self
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(account_id))
+                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email.change_group()))
             {
                 Ok(change_id) => Ok(Ok(Some(change_id))),
                 Err(err) if err.is_assertion_failure() => {

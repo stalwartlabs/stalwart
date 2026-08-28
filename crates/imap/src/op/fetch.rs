@@ -681,7 +681,7 @@ impl<T: SessionStream> SessionData<T> {
                 .server
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(account_id))
+                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email.change_group()))
                 .imap_ctx(&arguments.tag, trc::location!())
             {
                 Ok(change_id) => {

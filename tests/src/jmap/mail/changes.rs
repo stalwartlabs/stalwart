@@ -7,7 +7,10 @@
 use crate::utils::server::TestServer;
 use jmap_proto::types::state::State;
 use std::str::FromStr;
-use store::{ahash::AHashSet, write::BatchBuilder};
+use store::{
+    ahash::AHashSet,
+    write::{BatchBuilder, PendingId},
+};
 use types::{
     collection::{Collection, SyncCollection},
     id::Id,
@@ -156,7 +159,10 @@ pub async fn test(test: &TestServer) {
                         .log_item_delete(SyncCollection::Email, None);
                 }
                 LogAction::UpdateChild(id) => {
-                    batch.log_container_property_change(SyncCollection::Email, id as u32);
+                    batch.log_container_property_change(
+                        SyncCollection::Email,
+                        PendingId::Assigned(id as u32),
+                    );
                 }
                 LogAction::Move(old_id, new_id) => {
                     batch
@@ -172,7 +178,7 @@ pub async fn test(test: &TestServer) {
             .core
             .storage
             .data
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .unwrap();
 

@@ -27,7 +27,7 @@ use store::{
     SerializeInfallible, ValueKey,
     ahash::AHashMap,
     query::log::{Change, Query},
-    write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, ValueClass},
 };
 use trc::{AddContext, StoreEvent};
 use types::{
@@ -354,10 +354,7 @@ impl GroupwareCache for Server {
             let mut batch = BatchBuilder::new();
             let account_id = account_info_owner.account_id();
             let account_name = account_info_owner.name();
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::AddressBook, 1)
-                .await?;
+            let document_id = batch.reserve_document_id(account_id, Collection::AddressBook);
             AddressBook {
                 name: name.clone(),
                 preferences: vec![AddressBookPreferences {
@@ -386,13 +383,17 @@ impl GroupwareCache for Server {
             batch
                 .with_collection(Collection::Principal)
                 .with_document(0)
-                .set(
+                .set_patched(
                     PrincipalField::DefaultAddressBookId,
-                    document_id.serialize(),
+                    0u32.serialize(),
+                    vec![Patch {
+                        offset: 0,
+                        source: PatchSource::SlotBeU32(document_id),
+                    }],
                 );
 
-            self.commit_batch(batch).await?;
-            Ok(Some(document_id))
+            let ids = self.commit_batch(batch).await?;
+            Ok(Some(ids.slot(document_id)))
         } else {
             Ok(None)
         }
@@ -407,10 +408,7 @@ impl GroupwareCache for Server {
             let mut batch = BatchBuilder::new();
             let account_id = account_info_owner.account_id();
             let account_name = account_info_owner.name();
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::Calendar, 1)
-                .await?;
+            let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
             Calendar {
                 name: name.clone(),
                 preferences: vec![CalendarPreferences {
@@ -440,10 +438,17 @@ impl GroupwareCache for Server {
             batch
                 .with_collection(Collection::Principal)
                 .with_document(0)
-                .set(PrincipalField::DefaultCalendarId, document_id.serialize());
+                .set_patched(
+                    PrincipalField::DefaultCalendarId,
+                    0u32.serialize(),
+                    vec![Patch {
+                        offset: 0,
+                        source: PatchSource::SlotBeU32(document_id),
+                    }],
+                );
 
-            self.commit_batch(batch).await?;
-            Ok(Some(document_id))
+            let ids = self.commit_batch(batch).await?;
+            Ok(Some(ids.slot(document_id)))
         } else {
             Ok(None)
         }

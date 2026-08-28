@@ -19,6 +19,7 @@ use registry::schema::structs::{
     Task, TaskCalendarItipContents, TaskCalendarItipMessage, TaskStatus,
 };
 use store::write::BatchBuilder;
+use types::id::Id;
 
 pub(crate) fn itip_build_envelope(method: ICalendarMethod) -> ICalendarComponent {
     ICalendarComponent {
@@ -445,9 +446,9 @@ impl ItipMessages {
     }
 
     pub fn queue(self, batch: &mut BatchBuilder) -> trc::Result<()> {
-        batch.schedule_task(Task::CalendarItipMessage(TaskCalendarItipMessage {
+        batch.schedule_task_with_document(Task::CalendarItipMessage(TaskCalendarItipMessage {
             account_id: batch.last_account_id().unwrap().into(),
-            document_id: batch.last_document_id().unwrap().into(),
+            document_id: Id::default(),
             messages: self.messages.into(),
             status: TaskStatus::now(),
         }));

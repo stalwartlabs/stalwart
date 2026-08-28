@@ -9,7 +9,7 @@ use crate::DestroyArchive;
 use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, Slot, now},
 };
 use trc::AddContext;
 use types::collection::{Collection, VanishedCollection};
@@ -46,7 +46,7 @@ impl ContactCard {
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         // Build card
@@ -59,11 +59,63 @@ impl ContactCard {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::ContactCard)
-            .with_document(document_id)
+            .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(card)
                     .with_changed_by(changed_by),
+            )
+            .map(|b| b.commit_point())
+    }
+
+    pub fn insert_pending_parent(
+        self,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: Slot,
+        parent_id: Slot,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
+        let mut card = self;
+        let now = now() as i64;
+        card.modified = now;
+        card.created = now;
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::ContactCard)
+            .create_document(document_id)
+            .custom(
+                ObjectIndexBuilder::<(), _>::new()
+                    .with_changes(card)
+                    .with_changed_by(changed_by)
+                    .with_pending_id(parent_id),
+            )
+            .map(|b| b.commit_point())
+    }
+
+    pub fn update_pending_parent<'x>(
+        self,
+        changed_by: AccountTenantIds,
+        card: Archive<&ArchivedContactCard>,
+        account_id: u32,
+        document_id: u32,
+        parent_id: Slot,
+        batch: &'x mut BatchBuilder,
+    ) -> trc::Result<&'x mut BatchBuilder> {
+        let mut new_card = self;
+        new_card.modified = now() as i64;
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::ContactCard)
+            .with_document(document_id)
+            .custom(
+                ObjectIndexBuilder::new()
+                    .with_current(card)
+                    .with_changes(new_card)
+                    .with_changed_by(changed_by)
+                    .with_pending_id(parent_id),
             )
             .map(|b| b.commit_point())
     }
@@ -74,7 +126,7 @@ impl AddressBook {
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         // Build address book
@@ -87,7 +139,7 @@ impl AddressBook {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::AddressBook)
-            .with_document(document_id)
+            .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(book)

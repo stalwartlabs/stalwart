@@ -19,7 +19,7 @@ use store::{
     SerializeInfallible, U64_LEN,
     registry::ObjectIdVersioned,
     write::{
-        BatchBuilder, RegistryClass, TaskQueueClass, ValueClass, assert::AssertValue,
+        BatchBuilder, RegistryClass, TaskId, TaskQueueClass, ValueClass, assert::AssertValue,
         key::KeySerializer,
     },
 };
@@ -53,12 +53,12 @@ pub trait InternalReportIndex: ObjectImpl {
             batch
                 .assert_value(key.clone(), AssertValue::Hash(revision))
                 .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
-                    id: item_id,
+                    id: TaskId::Assigned(item_id),
                     due: current_deliver_at.timestamp() as u64,
                 }))
                 .set(
                     ValueClass::TaskQueue(TaskQueueClass::Due {
-                        id: item_id,
+                        id: TaskId::Assigned(item_id),
                         due: at.timestamp() as u64,
                     }),
                     object_id.serialize(),
@@ -91,9 +91,11 @@ pub trait InternalReportIndex: ObjectImpl {
                     item_id,
                 }))
                 .clear(pk)
-                .clear(ValueClass::TaskQueue(TaskQueueClass::Task { id: item_id }))
+                .clear(ValueClass::TaskQueue(TaskQueueClass::Task {
+                    id: TaskId::Assigned(item_id),
+                }))
                 .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
-                    id: item_id,
+                    id: TaskId::Assigned(item_id),
                     due: self.deliver_at().timestamp() as u64,
                 }));
         }

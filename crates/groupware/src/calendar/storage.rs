@@ -29,8 +29,8 @@ use store::{
     IndexKey, IterateParams, SerializeInfallible, U32_LEN, ValueKey,
     roaring::RoaringBitmap,
     write::{
-        Archive, ArchiveBytes, BatchBuilder, Operation, TaskQueueClass, ValueClass, ValueOp,
-        key::DeserializeBigEndian, now,
+        Archive, ArchiveBytes, BatchBuilder, Operation, PendingId, SetValue, Slot, TaskId,
+        TaskQueueClass, ValueClass, ValueOp, key::DeserializeBigEndian, now,
     },
 };
 use trc::AddContext;
@@ -159,7 +159,7 @@ impl CalendarEvent {
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
         next_alarm: Option<CalendarAlarm>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
@@ -173,7 +173,7 @@ impl CalendarEvent {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
-            .with_document(document_id)
+            .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
@@ -187,6 +187,66 @@ impl CalendarEvent {
                 batch.commit_point()
             })
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_pending_parent(
+        self,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: Slot,
+        parent_id: Slot,
+        next_alarm: Option<CalendarAlarm>,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
+        let mut event = self;
+        let now = now() as i64;
+        event.modified = now;
+        event.created = now;
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::CalendarEvent)
+            .create_document(document_id)
+            .custom(
+                ObjectIndexBuilder::<(), _>::new()
+                    .with_changes(event)
+                    .with_changed_by(changed_by)
+                    .with_pending_id(parent_id),
+            )
+            .map(|batch| {
+                if let Some(next_alarm) = next_alarm {
+                    next_alarm.write_task(batch);
+                }
+
+                batch.commit_point()
+            })
+    }
+
+    pub fn update_pending_parent<'x>(
+        self,
+        changed_by: AccountTenantIds,
+        event: Archive<&ArchivedCalendarEvent>,
+        account_id: u32,
+        document_id: u32,
+        parent_id: Slot,
+        batch: &'x mut BatchBuilder,
+    ) -> trc::Result<&'x mut BatchBuilder> {
+        let mut new_event = self;
+        new_event.modified = now() as i64;
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::CalendarEvent)
+            .with_document(document_id)
+            .custom(
+                ObjectIndexBuilder::new()
+                    .with_current(event)
+                    .with_changes(new_event)
+                    .with_changed_by(changed_by)
+                    .with_pending_id(parent_id),
+            )
+            .map(|b| b.commit_point())
+    }
 }
 
 impl Calendar {
@@ -194,7 +254,7 @@ impl Calendar {
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         // Build address calendar
@@ -215,7 +275,7 @@ impl Calendar {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Calendar)
-            .with_document(document_id)
+            .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(calendar)
@@ -256,7 +316,7 @@ impl CalendarEventNotification {
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
-        document_id: u32,
+        document_id: impl Into<PendingId>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         // Build event
@@ -269,11 +329,38 @@ impl CalendarEventNotification {
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEventNotification)
-            .with_document(document_id)
+            .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
                     .with_changed_by(changed_by),
+            )
+            .map(|batch| batch.commit_point())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_pending_event(
+        self,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: Slot,
+        event_id: Slot,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<&mut BatchBuilder> {
+        let mut event = self;
+        let now = now() as i64;
+        event.modified = now;
+        event.created = now;
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::CalendarEventNotification)
+            .with_pending_document(document_id.into())
+            .custom(
+                ObjectIndexBuilder::<(), _>::new()
+                    .with_changes(event)
+                    .with_changed_by(changed_by)
+                    .with_pending_id(event_id),
             )
             .map(|batch| batch.commit_point())
     }
@@ -487,8 +574,8 @@ impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
 }
 
 impl CalendarAlarm {
-    pub fn build_write_ops(&self, account_id: u32, document_id: u32) -> [Operation; 2] {
-        let task = match &self.typ {
+    pub fn task(&self, account_id: u32) -> Task {
+        match &self.typ {
             CalendarAlarmType::Email {
                 event_start,
                 event_start_tz,
@@ -496,7 +583,7 @@ impl CalendarAlarm {
                 event_end_tz,
             } => Task::CalendarAlarmEmail(TaskCalendarAlarmEmail {
                 account_id: account_id.into(),
-                document_id: document_id.into(),
+                document_id: Id::default(),
                 alarm_id: self.alarm_id.into(),
                 event_id: self.event_id.into(),
                 event_end: UTCDateTime::from_timestamp(*event_end),
@@ -508,49 +595,42 @@ impl CalendarAlarm {
             CalendarAlarmType::Display { recurrence_id } => {
                 Task::CalendarAlarmNotification(TaskCalendarAlarmNotification {
                     account_id: account_id.into(),
-                    document_id: document_id.into(),
+                    document_id: Id::default(),
                     alarm_id: self.alarm_id.into(),
                     event_id: self.event_id.into(),
                     recurrence_id: *recurrence_id,
                     status: TaskStatus::at(self.alarm_time),
                 })
             }
-        };
-        let id = Id::from_parts(account_id, document_id).id();
+        }
+    }
+
+    pub fn build_write_ops(&self, account_id: u32, document_id: u32) -> [Operation; 2] {
+        let mut task = self.task(account_id);
+        task.set_document_id(Id::from(document_id));
+        let id = TaskId::Assigned(Id::from_parts(account_id, document_id).id());
         [
             Operation::Value {
                 class: ValueClass::TaskQueue(TaskQueueClass::Due {
                     id,
                     due: self.alarm_time as u64,
                 }),
-                op: ValueOp::Set(task.object_type().to_id().serialize()),
+                op: ValueOp::Set(SetValue::Fixed(task.object_type().to_id().serialize())),
             },
             Operation::Value {
                 class: ValueClass::TaskQueue(TaskQueueClass::Task { id }),
-                op: ValueOp::Set(task.to_pickled_vec()),
+                op: ValueOp::Set(SetValue::Fixed(task.to_pickled_vec())),
             },
         ]
     }
 
     pub fn write_task(&self, batch: &mut BatchBuilder) {
         let account_id = batch.last_account_id().unwrap();
-        let document_id = batch.last_document_id().unwrap();
-
-        for op in self.build_write_ops(account_id, document_id) {
-            batch.any_op(op);
-        }
+        batch.schedule_document_task(self.task(account_id));
     }
 
     pub fn delete_task(&self, batch: &mut BatchBuilder) {
-        let account_id = batch.last_account_id().unwrap();
-        let document_id = batch.last_document_id().unwrap();
-        let id = Id::from_parts(account_id, document_id).id();
-        batch
-            .clear(ValueClass::TaskQueue(TaskQueueClass::Task { id }))
-            .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
-                id,
-                due: self.alarm_time as u64,
-            }));
+        batch.clear_document_task(self.alarm_time as u64);
     }
 }
 

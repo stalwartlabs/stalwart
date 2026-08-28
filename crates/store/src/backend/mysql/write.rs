@@ -8,31 +8,37 @@ use super::{DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, MysqlStore, into_error, is
 use crate::{
     IndexKey, Key, LogKey, Shape, Subspace,
     write::{
-        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
+        AssignedIds, Batch, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
         ValueClass, ValueOp, commit_backoff,
     },
 };
 use ahash::AHashMap;
 use mysql_async::{Conn, Error, IsolationLevel, TxOpts, params, prelude::Queryable};
 use std::time::Instant;
+use types::collection::SyncCollection;
 
 #[derive(Debug)]
 enum CommitError {
     Mysql(mysql_async::Error),
     Internal(trc::Error),
-    //Retry,
 }
 
 impl MysqlStore {
-    pub(crate) async fn write(&self, mut batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub(crate) async fn write(
+        &self,
+        mut batch: Batch<'_>,
+        assigned_ids: &mut AssignedIds,
+    ) -> trc::Result<()> {
         let start = Instant::now();
         let mut retry_count = 0;
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
+        let mark = assigned_ids.mark();
 
         loop {
-            let err = match self.write_trx(&mut conn, &mut batch).await {
-                Ok(result) => {
-                    return Ok(result);
+            assigned_ids.rollback(mark);
+            let err = match self.write_trx(&mut conn, &mut batch, assigned_ids).await {
+                Ok(()) => {
+                    return Ok(());
                 }
                 Err(err) => err,
             };
@@ -44,13 +50,6 @@ impl MysqlStore {
                     if [1062, 1213].contains(&err.code)
                         && retry_count < MAX_COMMIT_ATTEMPTS
                         && start.elapsed() < MAX_COMMIT_TIME => {}
-                /*CommitError::Retry => {
-                    if retry_count > MAX_COMMIT_ATTEMPTS || start.elapsed() > MAX_COMMIT_TIME {
-                        return Err(trc::StoreEvent::AssertValueFailed
-                            .into_err()
-                            .caused_by(trc::location!()));
-                    }
-                }*/
                 CommitError::Mysql(err) => {
                     return Err(into_error(err));
                 }
@@ -68,37 +67,62 @@ impl MysqlStore {
         &self,
         conn: &mut Conn,
         batch: &mut Batch<'_>,
-    ) -> Result<AssignedIds, CommitError> {
+        result: &mut AssignedIds,
+    ) -> Result<(), CommitError> {
         let has_changes = !batch.change_accounts.is_empty();
         let mut account_id = u32::MAX;
         let mut collection = u8::MAX;
+        let mut change_group = SyncCollection::None.change_group();
         let mut document_id = u32::MAX;
-        let mut change_id = 0u64;
         let mut asserted_values = AHashMap::new();
         let mut tx_opts = TxOpts::default();
         tx_opts
             .with_consistent_snapshot(false)
             .with_isolation_level(IsolationLevel::ReadCommitted);
         let mut trx = conn.start_transaction(tx_opts).await?;
-        let mut result = AssignedIds::default();
+        let mut log_buf = Vec::new();
+        let mut log_scratch = Vec::new();
 
-        if has_changes {
-            for &account_id in batch.change_accounts {
-                let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
-                let s = trx
-                    .prep(concat!(
-                        "INSERT INTO n (k, v) VALUES (:k, LAST_INSERT_ID(1)) ",
-                        "ON DUPLICATE KEY UPDATE v = LAST_INSERT_ID(v + 1)"
-                    ))
+        if batch.has_allocations() {
+            let incr = trx
+                .prep(concat!(
+                    "INSERT INTO n (k, v) VALUES (:k, LAST_INSERT_ID(:v)) ",
+                    "ON DUPLICATE KEY UPDATE v = LAST_INSERT_ID(v + :v)"
+                ))
+                .await?;
+            let last_id = trx.prep("SELECT LAST_INSERT_ID()").await?;
+            let mut key_buf = Vec::with_capacity(16);
+
+            for account in batch.change_accounts {
+                key_buf.clear();
+                ValueClass::ChangeId(account.group).serialize_into(
+                    &mut key_buf,
+                    account.account_id,
+                    0,
+                    0,
+                    0,
+                );
+                trx.exec_drop(&incr, params! {"k" => &key_buf, "v" => 1i64})
                     .await?;
-                trx.exec_drop(&s, params! {"k" => key}).await?;
-                let s = trx.prep("SELECT LAST_INSERT_ID()").await?;
-                let change_id = trx.exec_first::<i64, _, _>(&s, ()).await?.ok_or_else(|| {
-                    mysql_async::Error::Io(mysql_async::IoError::Io(std::io::Error::other(
-                        "LAST_INSERT_ID() did not return a value",
-                    )))
-                })?;
-                result.push_change_id(account_id, change_id as u64);
+                let change_id = trx
+                    .exec_first::<i64, _, _>(&last_id, ())
+                    .await?
+                    .ok_or_else(missing_last_insert_id)?;
+                result.push_change_id(account.account_id, account.group, change_id as u64);
+            }
+
+            for reservation in batch.reservations {
+                reservation.serialize_key_into(&mut key_buf, 0);
+                trx.exec_drop(
+                    &incr,
+                    params! {"k" => &key_buf, "v" => reservation.count as i64},
+                )
+                .await?;
+                let counter = trx
+                    .exec_first::<i64, _, _>(&last_id, ())
+                    .await?
+                    .ok_or_else(missing_last_insert_id)?;
+                result.fill_slots(reservation.first_slot, reservation.count, counter as u32);
             }
         }
 
@@ -110,18 +134,22 @@ impl MysqlStore {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id);
+                        result.set_current_change_id(account_id, change_group);
                     }
                 }
                 Operation::Collection {
                     collection: collection_,
                 } => {
                     collection = u8::from(*collection_);
+                    change_group = collection_.change_group();
+                    if has_changes {
+                        result.set_current_change_id(account_id, change_group);
+                    }
                 }
                 Operation::DocumentId {
                     document_id: document_id_,
                 } => {
-                    document_id = *document_id_;
+                    document_id = document_id_.resolve(result);
                 }
                 Operation::Value { class, op } => {
                     key_buf.clear();
@@ -131,7 +159,9 @@ impl MysqlStore {
                     let table = subspace.name();
 
                     match op {
-                        ValueOp::Set(value) => {
+                        ValueOp::Set(set_value) => {
+                            let value = set_value.resolve(result)?;
+                            let value = &*value;
                             if !matches!(subspace.shape(), Shape::Presence) {
                                 let exists = asserted_values.get(key);
                                 let s = if let Some(exists) = exists {
@@ -156,10 +186,7 @@ impl MysqlStore {
                             .await?
                                 };
 
-                                match trx
-                                    .exec_drop(&s, params! {"k" => key, "v" => &*value})
-                                    .await
-                                {
+                                match trx.exec_drop(&s, params! {"k" => key, "v" => value}).await {
                                     Ok(_) => {
                                         if trx.affected_rows() == 0 {
                                             trx.rollback().await?;
@@ -181,47 +208,6 @@ impl MysqlStore {
                                 trx.exec_drop(&s, (key,)).await?;
                             }
                         }
-                        ValueOp::SetFnc { payload, fnc } => {
-                            (fnc.0)(&result, payload)?;
-                            let exists = asserted_values.get(key);
-                            let s = if let Some(exists) = exists {
-                                if *exists {
-                                    trx.prep(format!("UPDATE {} SET v = :v WHERE k = :k", table))
-                                        .await?
-                                } else {
-                                    trx.prep(format!(
-                                        "INSERT INTO {} (k, v) VALUES (:k, :v)",
-                                        table
-                                    ))
-                                    .await?
-                                }
-                            } else {
-                                trx
-                            .prep(
-                                format!("INSERT INTO {} (k, v) VALUES (:k, :v) ON DUPLICATE KEY UPDATE v = VALUES(v)", table),
-                            )
-                            .await?
-                            };
-
-                            match trx
-                                .exec_drop(&s, params! {"k" => key, "v" => &*payload})
-                                .await
-                            {
-                                Ok(_) => {
-                                    if trx.affected_rows() == 0 {
-                                        trx.rollback().await?;
-                                        return Err(trc::StoreEvent::AssertValueFailed
-                                            .into_err()
-                                            .caused_by(trc::location!())
-                                            .into());
-                                    }
-                                }
-                                Err(err) => {
-                                    trx.rollback().await?;
-                                    return Err(err.into());
-                                }
-                            }
-                        }
                         ValueOp::MergeFnc(merge_op) => {
                             let s = trx
                                 .prep(format!("SELECT v FROM {} WHERE k = ? FOR UPDATE", table))
@@ -230,12 +216,12 @@ impl MysqlStore {
                                 .exec_first::<Vec<u8>, _, _>(&s, (&key,))
                                 .await?
                                 .map(|bytes| {
-                                    (merge_op.0)(&result, Some(bytes.as_ref()))
+                                    (merge_op.0)(result, Some(bytes.as_ref()))
                                         .map(|v| (true, v))
                                         .map_err(CommitError::from)
                                 })
                                 .unwrap_or_else(|| {
-                                    (merge_op.0)(&result, None)
+                                    (merge_op.0)(result, None)
                                         .map(|v| (false, v))
                                         .map_err(CommitError::from)
                                 })?;
@@ -345,24 +331,39 @@ impl MysqlStore {
                     trx.exec_drop(&s, (key,)).await?;
                 }
                 Operation::Log { collection, set } => {
+                    let log_change_id = result
+                        .change_id(account_id, collection.change_group())
+                        .unwrap_or_default();
                     debug_assert!(
-                        change_id != 0,
+                        log_change_id != 0,
                         "no change id was allocated for this account"
                     );
                     key_buf.clear();
                     LogKey {
                         account_id,
                         collection: u8::from(*collection),
-                        change_id,
+                        change_id: log_change_id,
                     }
                     .serialize_into(&mut key_buf, 0);
                     let key = &key_buf;
+                    let value = match set {
+                        LogSet::Bytes(bytes) => &*bytes,
+                        LogSet::Pending(changes) => {
+                            changes.serialize_into(
+                                collection.is_prefixed(),
+                                Some(result),
+                                &mut log_scratch,
+                                &mut log_buf,
+                            );
+                            &log_buf
+                        }
+                    };
 
                     let s = trx
                         .prep("INSERT INTO l (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)")
                         .await?;
 
-                    trx.exec_drop(&s, (key, &*set)).await?;
+                    trx.exec_drop(&s, (key, value)).await?;
                 }
                 Operation::AssertValue {
                     class,
@@ -391,7 +392,7 @@ impl MysqlStore {
             }
         }
 
-        trx.commit().await.map(|_| result).map_err(Into::into)
+        trx.commit().await.map_err(Into::into)
     }
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
@@ -531,6 +532,12 @@ async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
             }
         }
     }
+}
+
+fn missing_last_insert_id() -> mysql_async::Error {
+    mysql_async::Error::Io(mysql_async::IoError::Io(std::io::Error::other(
+        "LAST_INSERT_ID() did not return a value",
+    )))
 }
 
 impl From<trc::Error> for CommitError {

@@ -138,6 +138,17 @@ impl IndexableAndSerializableObject for CalendarEvent {
     fn is_versioned() -> bool {
         true
     }
+
+    fn set_pending_id(&mut self, document_id: u32) {
+        self.names
+            .last_mut()
+            .expect("a pending calendar id requires a name")
+            .parent_id = document_id;
+    }
+
+    fn size_hint(&self) -> usize {
+        self.size()
+    }
 }
 
 impl IndexableObject for CalendarEventNotification {
@@ -181,6 +192,14 @@ impl IndexableObject for &ArchivedCalendarEventNotification {
 impl IndexableAndSerializableObject for CalendarEventNotification {
     fn is_versioned() -> bool {
         false
+    }
+
+    fn set_pending_id(&mut self, document_id: u32) {
+        self.event_id = Some(document_id);
+    }
+
+    fn size_hint(&self) -> usize {
+        self.size()
     }
 }
 

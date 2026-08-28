@@ -5,7 +5,10 @@
  */
 
 use crate::{
-    api::acl::{JmapAcl, JmapRights},
+    api::{
+        acl::{JmapAcl, JmapRights},
+        parent_ref::ParentRef,
+    },
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
 };
@@ -23,11 +26,11 @@ use jmap_proto::{
     request::MaybeInvalid,
     types::state::State,
 };
-use jmap_tools::{JsonPointerItem, Key, Value};
+use jmap_tools::{JsonPointerItem, Key, Map, Value};
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{Archive, ArchiveBytes, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, Slot, log::PENDING_ID_MARKER, now},
 };
 use trc::AddContext;
 use types::{
@@ -81,74 +84,84 @@ impl FileNodeSet for Server {
             .arguments
             .compare_case_insensitively
             .unwrap_or(false);
-        let mut pending_names: AHashMap<(u32, String), Option<u32>> = AHashMap::new();
+        let mut pending_names: AHashMap<(ParentRef, String), Option<u32>> = AHashMap::new();
         let mut implicit_destroys: AHashSet<u32> = AHashSet::new();
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        let mut created_folders = AHashMap::new();
+        let mut created_folders: AHashMap<u64, Vec<AclGrant>> = AHashMap::new();
+        let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
+        let mut created_slots: Vec<(String, Slot, Option<String>)> = Vec::new();
         'create: for (id, object) in request.unwrap_create() {
             let mut file_node = FileNode::default();
+            let parent;
 
             // Process changes
-            let has_acl_changes =
-                match update_file_node(None, object, &mut file_node, true, &response) {
-                    Ok(result) => {
-                        if let Some(blob_id) = result.blob_id {
-                            let file_details = file_node.file.get_or_insert_default();
-                            if !self.has_access_blob(&blob_id, access_token).await? {
-                                response.not_created.append(
-                                    id,
-                                    SetError::forbidden().with_description(format!(
-                                        "You do not have access to blobId {blob_id}."
-                                    )),
-                                );
-                                continue;
-                            } else if let Some(blob_contents) = self
-                                .blob_store()
-                                .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
-                                .await?
-                            {
-                                file_details.size = blob_contents.len() as u32;
-                            } else {
-                                response.not_created.append(
-                                    id,
-                                    SetError::invalid_properties()
-                                        .with_property(FileNodeProperty::BlobId)
-                                        .with_description("Blob could not be found."),
-                                );
-                                continue 'create;
-                            }
-
-                            file_details.blob_hash = blob_id.hash;
-                        }
-
-                        // Validate blob hash
-                        if file_node
-                            .file
-                            .as_ref()
-                            .is_some_and(|f| f.blob_hash.is_empty())
+            let has_acl_changes = match update_file_node(
+                None,
+                object,
+                &mut file_node,
+                true,
+                &CreateResolver(&pending_creates),
+            ) {
+                Ok(result) => {
+                    if let Some(blob_id) = result.blob_id {
+                        let file_details = file_node.file.get_or_insert_default();
+                        if !self.has_access_blob(&blob_id, access_token).await? {
+                            response.not_created.append(
+                                id,
+                                SetError::forbidden().with_description(format!(
+                                    "You do not have access to blobId {blob_id}."
+                                )),
+                            );
+                            continue;
+                        } else if let Some(blob_contents) = self
+                            .blob_store()
+                            .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
+                            .await?
                         {
+                            file_details.size = blob_contents.len() as u32;
+                        } else {
                             response.not_created.append(
                                 id,
                                 SetError::invalid_properties()
                                     .with_property(FileNodeProperty::BlobId)
-                                    .with_description("Missing blob id."),
+                                    .with_description("Blob could not be found."),
                             );
                             continue 'create;
                         }
 
-                        result.has_acl_changes
+                        file_details.blob_hash = blob_id.hash;
                     }
-                    Err(err) => {
-                        response.not_created.append(id, err);
+
+                    // Validate blob hash
+                    if file_node
+                        .file
+                        .as_ref()
+                        .is_some_and(|f| f.blob_hash.is_empty())
+                    {
+                        response.not_created.append(
+                            id,
+                            SetError::invalid_properties()
+                                .with_property(FileNodeProperty::BlobId)
+                                .with_description("Missing blob id."),
+                        );
                         continue 'create;
                     }
-                };
+
+                    parent = result.parent;
+                    file_node.parent_id = parent.as_stored();
+                    result.has_acl_changes
+                }
+                Err(err) => {
+                    response.not_created.append(id, err);
+                    continue 'create;
+                }
+            };
 
             // Validate hierarchy
             if let Err(err) =
-                validate_file_node_hierarchy(None, &file_node, is_shared, &cache, &created_folders)
+                validate_file_node_hierarchy(None, parent, is_shared, &cache, &created_folders)
             {
                 response.not_created.append(id, err);
                 continue 'create;
@@ -160,6 +173,7 @@ impl FileNodeSet for Server {
 
             let renamed = match find_sibling_collision(
                 None,
+                parent,
                 &file_node,
                 &cache,
                 &pending_names,
@@ -195,7 +209,7 @@ impl FileNodeSet for Server {
                             file_node.name = pick_unique_rename(
                                 &file_node.name,
                                 None,
-                                file_node.parent_id,
+                                parent,
                                 &cache,
                                 &pending_names,
                                 case_insensitive,
@@ -220,7 +234,7 @@ impl FileNodeSet for Server {
                 }
                 Collision::Pending => match on_exists {
                     OnExists::Reject | OnExists::Replace | OnExists::Newest => {
-                        let key = pending_key(&file_node, case_insensitive);
+                        let key = pending_key(parent, &file_node, case_insensitive);
                         let mut err = SetError::already_exists();
                         if let Some(Some(doc_id)) = pending_names.get(&key) {
                             err = err.with_existing_id(Id::from(*doc_id));
@@ -232,7 +246,7 @@ impl FileNodeSet for Server {
                         file_node.name = pick_unique_rename(
                             &file_node.name,
                             None,
-                            file_node.parent_id,
+                            parent,
                             &cache,
                             &pending_names,
                             case_insensitive,
@@ -243,11 +257,11 @@ impl FileNodeSet for Server {
             };
 
             // Inherit ACLs from parent
-            if file_node.parent_id > 0 {
-                let parent_id = file_node.parent_id - 1;
-                let parent_acls = created_folders.get(&parent_id).cloned().or_else(|| {
-                    cache
-                        .container_resource_by_id(parent_id)
+            if let Some(parent_key) = parent.key() {
+                let parent_acls = created_folders.get(&parent_key).cloned().or_else(|| {
+                    parent
+                        .document_id()
+                        .and_then(|parent_id| cache.container_resource_by_id(parent_id))
                         .and_then(|r| r.acls())
                         .map(|a| a.to_vec())
                 });
@@ -281,36 +295,30 @@ impl FileNodeSet for Server {
             }
 
             // Insert record
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::FileNode, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
             if file_node.file.is_none() {
-                created_folders.insert(document_id, file_node.acls.clone());
+                created_folders.insert(
+                    ParentRef::pending(document_id).key().unwrap(),
+                    file_node.acls.clone(),
+                );
             }
             let final_name = file_node.name.clone();
-            pending_names.insert(pending_key(&file_node, case_insensitive), None);
+            pending_names.insert(pending_key(parent, &file_node, case_insensitive), None);
             let set_created = file_node.created == 0;
             let set_modified = file_node.modified == 0;
+            pending_creates.insert(id.clone(), document_id);
             file_node
-                .insert(
+                .insert_with_parent(
                     access_token.account_tenant_ids(),
                     account_id,
                     document_id,
+                    parent.slot(),
                     set_created,
                     set_modified,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
-            let create_id = id.clone();
-            response.created(id, document_id);
-            if renamed && let Some(Value::Object(map)) = response.created.get_mut(&create_id) {
-                map.insert_unchecked(
-                    Key::Property(FileNodeProperty::Name),
-                    Value::Str(std::borrow::Cow::Owned(final_name)),
-                );
-            }
+            created_slots.push((id, document_id, renamed.then_some(final_name)));
         }
 
         // Process updates
@@ -350,53 +358,61 @@ impl FileNodeSet for Server {
             let mut new_file_node = file_node
                 .deserialize::<FileNode>()
                 .caused_by(trc::location!())?;
+            let parent;
 
             // Apply changes
-            let (has_acl_changes, modified_set) =
-                match update_file_node(Some(id), object, &mut new_file_node, false, &response) {
-                    Ok(result) => {
-                        let modified_set = result.modified_set;
-                        if let Some(blob_id) = result.blob_id {
-                            let file_details = new_file_node.file.get_or_insert_default();
-                            if !self.has_access_blob(&blob_id, access_token).await? {
-                                response.not_updated.append(
-                                    id,
-                                    SetError::forbidden().with_description(format!(
-                                        "You do not have access to blobId {blob_id}."
-                                    )),
-                                );
-                                continue;
-                            } else if let Some(blob_contents) = self
-                                .blob_store()
-                                .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
-                                .await?
-                            {
-                                file_details.size = blob_contents.len() as u32;
-                            } else {
-                                response.not_updated.append(
-                                    id,
-                                    SetError::invalid_properties()
-                                        .with_property(FileNodeProperty::BlobId)
-                                        .with_description("Blob could not be found."),
-                                );
-                                continue 'update;
-                            }
-
-                            file_details.blob_hash = blob_id.hash;
+            let (has_acl_changes, modified_set) = match update_file_node(
+                Some(id),
+                object,
+                &mut new_file_node,
+                false,
+                &CreateResolver(&pending_creates),
+            ) {
+                Ok(result) => {
+                    let modified_set = result.modified_set;
+                    if let Some(blob_id) = result.blob_id {
+                        let file_details = new_file_node.file.get_or_insert_default();
+                        if !self.has_access_blob(&blob_id, access_token).await? {
+                            response.not_updated.append(
+                                id,
+                                SetError::forbidden().with_description(format!(
+                                    "You do not have access to blobId {blob_id}."
+                                )),
+                            );
+                            continue;
+                        } else if let Some(blob_contents) = self
+                            .blob_store()
+                            .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
+                            .await?
+                        {
+                            file_details.size = blob_contents.len() as u32;
+                        } else {
+                            response.not_updated.append(
+                                id,
+                                SetError::invalid_properties()
+                                    .with_property(FileNodeProperty::BlobId)
+                                    .with_description("Blob could not be found."),
+                            );
+                            continue 'update;
                         }
 
-                        (result.has_acl_changes, modified_set)
+                        file_details.blob_hash = blob_id.hash;
                     }
-                    Err(err) => {
-                        response.not_updated.append(id, err);
-                        continue 'update;
-                    }
-                };
+
+                    parent = result.parent;
+                    new_file_node.parent_id = parent.as_stored();
+                    (result.has_acl_changes, modified_set)
+                }
+                Err(err) => {
+                    response.not_updated.append(id, err);
+                    continue 'update;
+                }
+            };
 
             // Validate hierarchy
             if let Err(err) = validate_file_node_hierarchy(
                 Some(document_id),
-                &new_file_node,
+                parent,
                 is_shared,
                 &cache,
                 &created_folders,
@@ -407,6 +423,7 @@ impl FileNodeSet for Server {
 
             let renamed = match find_sibling_collision(
                 Some(document_id),
+                parent,
                 &new_file_node,
                 &cache,
                 &pending_names,
@@ -442,7 +459,7 @@ impl FileNodeSet for Server {
                             new_file_node.name = pick_unique_rename(
                                 &new_file_node.name,
                                 Some(document_id),
-                                new_file_node.parent_id,
+                                parent,
                                 &cache,
                                 &pending_names,
                                 case_insensitive,
@@ -467,7 +484,7 @@ impl FileNodeSet for Server {
                 }
                 Collision::Pending => match on_exists {
                     OnExists::Reject | OnExists::Replace | OnExists::Newest => {
-                        let key = pending_key(&new_file_node, case_insensitive);
+                        let key = pending_key(parent, &new_file_node, case_insensitive);
                         let mut err = SetError::already_exists();
                         if let Some(Some(doc_id)) = pending_names.get(&key) {
                             err = err.with_existing_id(Id::from(*doc_id));
@@ -479,7 +496,7 @@ impl FileNodeSet for Server {
                         new_file_node.name = pick_unique_rename(
                             &new_file_node.name,
                             Some(document_id),
-                            new_file_node.parent_id,
+                            parent,
                             &cache,
                             &pending_names,
                             case_insensitive,
@@ -524,16 +541,17 @@ impl FileNodeSet for Server {
 
             let final_name = new_file_node.name.clone();
             pending_names.insert(
-                pending_key(&new_file_node, case_insensitive),
+                pending_key(parent, &new_file_node, case_insensitive),
                 Some(document_id),
             );
             // Update record. Bump modified to now() unless the client supplied a value.
             new_file_node
-                .update(
+                .update_with_parent(
                     access_token.account_tenant_ids(),
                     file_node,
                     account_id,
                     document_id,
+                    parent.slot(),
                     !modified_set,
                     &mut batch,
                 )
@@ -633,13 +651,26 @@ impl FileNodeSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            response.new_state = State::Exact(change_id).into();
+            for (create_id, slot, renamed) in created_slots {
+                let mut map = Map::from(vec![(
+                    Key::Property(FileNodeProperty::Id),
+                    Value::Element(Id::from(assigned_ids.slot(slot)).into()),
+                )]);
+                if let Some(final_name) = renamed {
+                    map.insert_unchecked(
+                        Key::Property(FileNodeProperty::Name),
+                        Value::Str(std::borrow::Cow::Owned(final_name)),
+                    );
+                }
+                response.created.insert(create_id, Value::Object(map));
+            }
+
+            response.new_state = State::Exact(
+                assigned_ids.last_change_id(account_id, SyncCollection::FileNode.change_group()),
+            )
+            .into();
         }
 
         Ok(response)
@@ -650,6 +681,17 @@ pub(super) struct UpdateResult {
     pub(super) has_acl_changes: bool,
     pub(super) blob_id: Option<BlobId>,
     pub(super) modified_set: bool,
+    pub(super) parent: ParentRef,
+}
+
+pub(super) struct CreateResolver<'x>(pub(super) &'x AHashMap<String, Slot>);
+
+impl ResolveCreatedReference<FileNodeProperty, FileNodeValue> for CreateResolver<'_> {
+    fn get_created_id(&self, id_ref: &str) -> Option<AnyId> {
+        self.0
+            .get(id_ref)
+            .map(|slot| AnyId::Id(Id::new(PENDING_ID_MARKER | slot.index() as u64)))
+    }
 }
 
 pub(super) struct NoResolver;
@@ -668,6 +710,7 @@ pub(super) fn update_file_node<R: ResolveCreatedReference<FileNodeProperty, File
     resolver: &R,
 ) -> Result<UpdateResult, SetError<FileNodeProperty>> {
     let mut has_acl_changes = false;
+    let mut parent = ParentRef::from_stored(file_node.parent_id);
     let mut blob_id = None;
     let mut pending_size: Option<u32> = None;
     let mut pending_type: Option<Option<String>> = None;
@@ -704,10 +747,10 @@ pub(super) fn update_file_node<R: ResolveCreatedReference<FileNodeProperty, File
                 file_node.name = value.into_owned();
             }
             (FileNodeProperty::ParentId, Value::Element(FileNodeValue::Id(value))) => {
-                file_node.parent_id = value.document_id() + 1;
+                parent = ParentRef::from_id(value);
             }
             (FileNodeProperty::ParentId, Value::Null) => {
-                file_node.parent_id = 0;
+                parent = ParentRef::ROOT;
             }
             (FileNodeProperty::BlobId, Value::Element(FileNodeValue::BlobId(value))) => {
                 if file_node
@@ -852,52 +895,55 @@ pub(super) fn update_file_node<R: ResolveCreatedReference<FileNodeProperty, File
         has_acl_changes,
         blob_id,
         modified_set,
+        parent,
     })
 }
 
 pub(super) fn validate_file_node_hierarchy(
     document_id: Option<u32>,
-    node: &FileNode,
+    parent: ParentRef,
     is_shared: bool,
     cache: &DavResources,
-    created_folders: &AHashMap<u32, Vec<AclGrant>>,
+    created_folders: &AHashMap<u64, Vec<AclGrant>>,
 ) -> Result<(), SetError<FileNodeProperty>> {
-    if node.parent_id == 0 {
+    let Some(parent_key) = parent.key() else {
         if is_shared && document_id.is_none() {
             return Err(SetError::invalid_properties()
                 .with_property(FileNodeProperty::ParentId)
                 .with_description("Cannot create top-level folder in a shared account."));
         }
-    } else {
-        let parent_id = node.parent_id - 1;
 
-        if let Some(document_id) = document_id {
-            if document_id == parent_id {
-                return Err(SetError::invalid_properties()
-                    .with_property(FileNodeProperty::ParentId)
-                    .with_description("A file node cannot be its own parent."));
-            }
+        return Ok(());
+    };
 
-            // Validate circular references
-            if let Some(file) = cache.container_resource_path_by_id(document_id)
-                && cache
-                    .subtree(file.path())
-                    .any(|r| r.document_id() == parent_id)
-            {
-                return Err(SetError::invalid_properties()
-                    .with_property(FileNodeProperty::ParentId)
-                    .with_description("Circular reference in parent ids."));
-            }
+    if let (Some(document_id), Some(parent_id)) = (document_id, parent.document_id()) {
+        if document_id == parent_id {
+            return Err(SetError::invalid_properties()
+                .with_property(FileNodeProperty::ParentId)
+                .with_description("A file node cannot be its own parent."));
         }
 
-        // Make sure the parent is a container
-        if !created_folders.contains_key(&parent_id)
-            && cache.container_resource_by_id(parent_id).is_none()
+        // Validate circular references
+        if let Some(file) = cache.container_resource_path_by_id(document_id)
+            && cache
+                .subtree(file.path())
+                .any(|r| r.document_id() == parent_id)
         {
             return Err(SetError::invalid_properties()
                 .with_property(FileNodeProperty::ParentId)
-                .with_description("Parent ID does not exist or is not a folder."));
+                .with_description("Circular reference in parent ids."));
         }
+    }
+
+    // Make sure the parent is a container
+    if !created_folders.contains_key(&parent_key)
+        && parent
+            .document_id()
+            .is_none_or(|parent_id| cache.container_resource_by_id(parent_id).is_none())
+    {
+        return Err(SetError::invalid_properties()
+            .with_property(FileNodeProperty::ParentId)
+            .with_description("Parent ID does not exist or is not a folder."));
     }
 
     Ok(())
@@ -938,9 +984,13 @@ pub(super) fn names_equal(a: &str, b: &str, case_insensitive: bool) -> bool {
     }
 }
 
-pub(super) fn pending_key(node: &FileNode, case_insensitive: bool) -> (u32, String) {
+pub(super) fn pending_key(
+    parent: ParentRef,
+    node: &FileNode,
+    case_insensitive: bool,
+) -> (ParentRef, String) {
     (
-        node.parent_id,
+        parent,
         if case_insensitive {
             node.name.to_lowercase()
         } else {
@@ -951,28 +1001,26 @@ pub(super) fn pending_key(node: &FileNode, case_insensitive: bool) -> (u32, Stri
 
 pub(super) fn find_sibling_collision(
     document_id: Option<u32>,
+    parent: ParentRef,
     node: &FileNode,
     cache: &DavResources,
-    pending: &AHashMap<(u32, String), Option<u32>>,
+    pending: &AHashMap<(ParentRef, String), Option<u32>>,
     case_insensitive: bool,
 ) -> Collision {
-    let node_parent_id = if node.parent_id == 0 {
-        None
-    } else {
-        Some(node.parent_id - 1)
-    };
-    for resource in &cache.resources {
-        if let DavResourceMetadata::File {
-            name, parent_id, ..
-        } = &resource.data
-            && document_id.is_none_or(|id| id != resource.document_id)
-            && node_parent_id == *parent_id
-            && names_equal(&node.name, name, case_insensitive)
-        {
-            return Collision::Existing(resource.document_id);
+    if let Some(node_parent_id) = parent.cache_id() {
+        for resource in &cache.resources {
+            if let DavResourceMetadata::File {
+                name, parent_id, ..
+            } = &resource.data
+                && document_id.is_none_or(|id| id != resource.document_id)
+                && node_parent_id == *parent_id
+                && names_equal(&node.name, name, case_insensitive)
+            {
+                return Collision::Existing(resource.document_id);
+            }
         }
     }
-    if pending.contains_key(&pending_key(node, case_insensitive)) {
+    if pending.contains_key(&pending_key(parent, node, case_insensitive)) {
         return Collision::Pending;
     }
     Collision::None
@@ -981,9 +1029,9 @@ pub(super) fn find_sibling_collision(
 pub(super) fn pick_unique_rename(
     base: &str,
     document_id: Option<u32>,
-    parent_id: u32,
+    parent: ParentRef,
     cache: &DavResources,
-    pending: &AHashMap<(u32, String), Option<u32>>,
+    pending: &AHashMap<(ParentRef, String), Option<u32>>,
     case_insensitive: bool,
 ) -> String {
     let (stem, ext) = match base.rfind('.') {
@@ -997,26 +1045,22 @@ pub(super) fn pick_unique_rename(
             s.to_string()
         }
     };
-    let node_parent_id = if parent_id == 0 {
-        None
-    } else {
-        Some(parent_id - 1)
-    };
-
     // Collect all sibling names once, instead of rescanning per probe.
     let mut taken: AHashSet<String> = AHashSet::new();
-    for resource in &cache.resources {
-        if let DavResourceMetadata::File {
-            name, parent_id, ..
-        } = &resource.data
-            && document_id.is_none_or(|id| id != resource.document_id)
-            && node_parent_id == *parent_id
-        {
-            taken.insert(fold(name));
+    if let Some(node_parent_id) = parent.cache_id() {
+        for resource in &cache.resources {
+            if let DavResourceMetadata::File {
+                name, parent_id, ..
+            } = &resource.data
+                && document_id.is_none_or(|id| id != resource.document_id)
+                && node_parent_id == *parent_id
+            {
+                taken.insert(fold(name));
+            }
         }
     }
     for ((pending_parent, pending_name), _) in pending {
-        if *pending_parent == parent_id {
+        if *pending_parent == parent {
             taken.insert(fold(pending_name));
         }
     }

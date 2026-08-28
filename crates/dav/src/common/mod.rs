@@ -29,7 +29,7 @@ use groupware::{
 };
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
-use store::write::{Archive, ArchiveBytes, BatchBuilder};
+use store::write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder};
 use types::{
     TimeRange, acl::ArchivedAclGrant, collection::Collection, dead_property::ArchivedDeadProperty,
 };
@@ -110,6 +110,12 @@ impl<T> ETag for Archive<T> {
 }
 
 impl ExtractETag for BatchBuilder {
+    fn etag(&self) -> Option<String> {
+        self.last_archive_hash().map(|hash| format!("\"{}\"", hash))
+    }
+}
+
+impl ExtractETag for AssignedIds {
     fn etag(&self) -> Option<String> {
         self.last_archive_hash().map(|hash| format!("\"{}\"", hash))
     }

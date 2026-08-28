@@ -215,12 +215,12 @@ impl SQLReadReplica {
         .await
     }
 
-    pub async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub async fn write(&self, batch: Batch<'_>, assigned_ids: &mut AssignedIds) -> trc::Result<()> {
         match &self.primary {
             #[cfg(feature = "postgres")]
-            Store::PostgreSQL(store) => store.write(batch).await,
+            Store::PostgreSQL(store) => store.write(batch, assigned_ids).await,
             #[cfg(feature = "mysql")]
-            Store::MySQL(store) => store.write(batch).await,
+            Store::MySQL(store) => store.write(batch, assigned_ids).await,
             _ => panic!("Invalid store type"),
         }
     }

@@ -282,20 +282,9 @@ impl ItipIngest for Server {
                 ..Default::default()
             };
 
-            // Obtain document ids
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::CalendarEvent, 1)
-                .await
-                .caused_by(trc::location!())?;
-            let itip_document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::CalendarEventNotification, 1)
-                .await
-                .caused_by(trc::location!())?;
             let itip_message = CalendarEventNotification {
                 event: itip,
-                event_id: Some(document_id),
+                event_id: None,
                 changed_by,
                 size: itip_message.len() as u32,
                 ..Default::default()
@@ -303,6 +292,9 @@ impl ItipIngest for Server {
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
+            let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
+            let itip_document_id =
+                batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
             event
                 .insert(
                     account_info.account_tenant_ids(),
@@ -313,10 +305,11 @@ impl ItipIngest for Server {
                 )
                 .caused_by(trc::location!())?;
             itip_message
-                .insert(
+                .insert_pending_event(
                     account_info.account_tenant_ids(),
                     account_id,
                     itip_document_id,
+                    document_id,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
@@ -789,11 +782,6 @@ async fn commit_itip_merge(
     }
 
     // Build event for schedule inbox
-    let itip_document_id = server
-        .store()
-        .assign_document_ids(account_id, Collection::CalendarEventNotification, 1)
-        .await
-        .caused_by(trc::location!())?;
     let itip_message = CalendarEventNotification {
         event: itip,
         changed_by,
@@ -805,6 +793,8 @@ async fn commit_itip_merge(
 
     // Prepare write batch
     let mut batch = BatchBuilder::new();
+    let itip_document_id =
+        batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
     event
         .update(
             account_info.account_tenant_ids(),

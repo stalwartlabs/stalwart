@@ -20,7 +20,7 @@ use email::{
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
-        messagedata::{KeywordDiff, merge_keywords},
+        messagedata::{KeywordDiff, PendingMessageData, merge_keywords},
     },
 };
 use http_proto::HttpSessionData;
@@ -44,7 +44,11 @@ use mail_builder::{
 use mail_parser::MessageParser;
 use std::future::Future;
 use std::{borrow::Cow, collections::HashMap};
-use store::{ahash::AHashMap, roaring::RoaringBitmap, write::BatchBuilder};
+use store::{
+    ahash::AHashMap,
+    roaring::RoaringBitmap,
+    write::{BatchBuilder, PendingId},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -941,6 +945,7 @@ impl EmailSet for Server {
             }
 
             // Process mailboxes
+            let mut uid_slot = None;
             if has_mailbox_changes {
                 // Make sure the message is at least in one mailbox
                 if new_data.mailboxes.is_empty() {
@@ -1022,26 +1027,14 @@ impl EmailSet for Server {
                     }
                 }
 
-                // Obtain IMAP UIDs for added mailboxes
-                let ids = self
-                    .assign_email_ids(
-                        account_id,
-                        new_data
-                            .mailboxes
-                            .iter()
-                            .filter(|m| m.uid == 0)
-                            .map(|m| m.mailbox_id),
-                        false,
-                    )
-                    .await
-                    .caused_by(trc::location!())?;
-                for (uid_mailbox, uid) in new_data
+                // Reserve IMAP UIDs for added mailboxes
+                for mailbox_id in new_data
                     .mailboxes
-                    .iter_mut()
+                    .iter()
                     .filter(|m| m.uid == 0)
-                    .zip(ids)
+                    .map(|m| m.mailbox_id)
                 {
-                    uid_mailbox.uid = uid;
+                    uid_slot.get_or_insert(batch.reserve_uid(account_id, mailbox_id));
                 }
             }
 
@@ -1052,11 +1045,14 @@ impl EmailSet for Server {
                 .with_document(document_id);
             if has_mailbox_changes {
                 batch
-                    .custom(
-                        ObjectIndexBuilder::new()
-                            .with_current(data)
-                            .with_changes(new_data),
-                    )
+                    .custom(ObjectIndexBuilder::new().with_current(data).with_changes(
+                        PendingMessageData {
+                            data: new_data,
+                            uid_slot,
+                            thread_slot: None,
+                            change_id: None,
+                        },
+                    ))
                     .caused_by(trc::location!())?;
             } else {
                 merge_keywords(
@@ -1089,7 +1085,10 @@ impl EmailSet for Server {
         if !batch.is_empty() {
             // Log mailbox changes
             for (parent_id, deleted_uids) in changed_mailboxes {
-                batch.log_container_property_change(SyncCollection::Email, parent_id);
+                batch.log_container_property_change(
+                    SyncCollection::Email,
+                    PendingId::Assigned(parent_id),
+                );
                 for deleted_uid in deleted_uids {
                     batch.log_vanished_item(VanishedCollection::Email, (parent_id, deleted_uid));
                 }
@@ -1098,7 +1097,7 @@ impl EmailSet for Server {
             match self
                 .commit_batch(batch)
                 .await
-                .and_then(|ids| ids.last_change_id(account_id))
+                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email.change_group()))
             {
                 Ok(change_id) => {
                     last_change_id = change_id.into();
@@ -1170,7 +1169,9 @@ impl EmailSet for Server {
                     last_change_id = self
                         .commit_batch(batch)
                         .await
-                        .and_then(|ids| ids.last_change_id(account_id))
+                        .map(|ids| {
+                            ids.last_change_id(account_id, SyncCollection::Email.change_group())
+                        })
                         .caused_by(trc::location!())?
                         .into();
                 }

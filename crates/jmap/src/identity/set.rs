@@ -19,8 +19,7 @@ use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
     ValueKey,
-    ahash::AHashMap,
-    write::{Archive, ArchiveBytes, BatchBuilder},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
 };
 use trc::AddContext;
 use types::{
@@ -46,7 +45,7 @@ impl IdentitySet for Server {
         let identity_ids = self
             .document_id_set(account_id, Collection::Identity, IdentityField::DocumentId)
             .await?;
-        let mut identity_id_changes = AHashMap::new();
+        let mut identity_id_changes = Vec::new();
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let account_info = self
@@ -56,6 +55,7 @@ impl IdentitySet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
+        let mut pending_creates = Vec::new();
         'create: for (id, object) in request.unwrap_create() {
             let mut identity = Identity::default();
 
@@ -116,20 +116,16 @@ impl IdentitySet for Server {
             }
 
             // Insert record
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::Identity, 1)
-                .await
-                .caused_by(trc::location!())?;
+            let slot = batch.reserve_document_id(account_id, Collection::Identity);
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Identity)
-                .with_document(document_id)
+                .create_document(slot)
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(identity))
                 .caused_by(trc::location!())?
                 .commit_point();
-            identity_id_changes.insert(document_id, true);
-            response.created(id, document_id);
+            identity_id_changes.push((PendingId::Slot(slot), true));
+            pending_creates.push((id, slot));
         }
 
         // Process updates
@@ -215,7 +211,7 @@ impl IdentitySet for Server {
                     .clear(Field::ARCHIVE)
                     .log_item_delete(SyncCollection::Identity, None)
                     .commit_point();
-                identity_id_changes.insert(document_id, false);
+                identity_id_changes.push((PendingId::Assigned(document_id), false));
                 response.destroyed.push(id);
             } else {
                 response.not_destroyed.append(id, SetError::not_found());
@@ -231,13 +227,16 @@ impl IdentitySet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let change_id = self
-                .commit_batch(batch)
-                .await
-                .and_then(|ids| ids.last_change_id(account_id))
-                .caused_by(trc::location!())?;
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            response.new_state = State::Exact(change_id).into();
+            response.new_state = State::Exact(
+                assigned_ids.last_change_id(account_id, SyncCollection::Identity.change_group()),
+            )
+            .into();
+
+            for (id, slot) in pending_creates {
+                response.created(id, assigned_ids.slot(slot));
+            }
         }
 
         Ok(response)

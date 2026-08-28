@@ -124,11 +124,7 @@ impl CalendarMkColRequestHandler for Server {
 
         // Prepare write batch
         let mut batch = BatchBuilder::new();
-        let document_id = self
-            .store()
-            .assign_document_ids(account_id, Collection::Calendar, 1)
-            .await
-            .caused_by(trc::location!())?;
+        let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
         calendar
             .insert(
                 access_token.account_tenant_ids(),
@@ -137,8 +133,11 @@ impl CalendarMkColRequestHandler for Server {
                 &mut batch,
             )
             .caused_by(trc::location!())?;
-        let etag = batch.etag();
-        self.commit_batch(batch).await.caused_by(trc::location!())?;
+        let etag = self
+            .commit_batch(batch)
+            .await
+            .caused_by(trc::location!())?
+            .etag();
 
         if let Some(prop_stat) = return_prop_stat {
             Ok(HttpResponse::new(StatusCode::CREATED)

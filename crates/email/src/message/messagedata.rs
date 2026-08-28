@@ -9,7 +9,10 @@ use compact_str::CompactString;
 use store::{
     Deserialize, IterateParams, Serialize, U32_LEN, U64_LEN, ValueKey,
     dispatch::DocumentSet,
-    write::{BatchBuilder, MergeResult, ValueClass, key::DeserializeBigEndian},
+    write::{
+        AssignedIds, BatchBuilder, MergeResult, PendingId, SerializeWithIds, Slot, ValueClass,
+        key::DeserializeBigEndian,
+    },
 };
 use tinyvec::TinyVec;
 use trc::AddContext;
@@ -330,7 +333,7 @@ impl KeywordDiff {
 }
 
 pub fn merge_keywords(batch: &mut BatchBuilder, thread_id: u32, diff: KeywordDiff) {
-    batch.log_item_update(SyncCollection::Email, Some(thread_id));
+    batch.log_item_update(SyncCollection::Email, Some(PendingId::Assigned(thread_id)));
     batch.merge_fnc(Field::ARCHIVE, move |ids, bytes| {
         let Some(bytes) = bytes else {
             return Ok(MergeResult::Skip);
@@ -341,30 +344,60 @@ pub fn merge_keywords(batch: &mut BatchBuilder, thread_id: u32, diff: KeywordDif
             return Ok(MergeResult::Skip);
         }
 
-        data.serialize_with_change_id(ids.current_change_id()?)
+        data.serialize_with_change_id(ids.current_change_id())
             .map(MergeResult::Update)
     });
 }
 
 impl MessageData {
     pub fn serialize_with_change_id(&self, change_id: u64) -> trc::Result<Vec<u8>> {
-        let mut out = Vec::with_capacity(
-            std::mem::size_of::<MessageData>()
-                + (std::mem::size_of::<MessageUid>() * self.mailboxes.len().saturating_sub(2))
-                + (self
-                    .keywords_extra
-                    .iter()
-                    .map(|k| k.len() + 1)
-                    .sum::<usize>()),
-        );
+        Ok(self.serialize_resolved(change_id, None, None, None))
+    }
+
+    pub fn size_hint(&self) -> usize {
+        std::mem::size_of::<MessageData>()
+            + (std::mem::size_of::<MessageUid>() * self.mailboxes.len().saturating_sub(2))
+            + (self
+                .keywords_extra
+                .iter()
+                .map(|k| k.len() + 1)
+                .sum::<usize>())
+    }
+
+    pub fn pending_uids(&self) -> usize {
+        self.mailboxes.iter().filter(|mb| mb.uid == 0).count()
+    }
+
+    fn serialize_resolved(
+        &self,
+        change_id: u64,
+        ids: Option<&AssignedIds>,
+        uid_slot: Option<Slot>,
+        thread_slot: Option<Slot>,
+    ) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.size_hint());
+        let mut next_uid_slot = 0;
 
         self.mailboxes.len().to_leb128_bytes(&mut out);
         for mb in self.mailboxes.iter() {
             mb.mailbox_id.to_leb128_bytes(&mut out);
-            mb.uid.to_leb128_bytes(&mut out);
+            let uid = match (ids, uid_slot) {
+                (Some(ids), Some(uid_slot)) if mb.uid == 0 => {
+                    let uid = ids.slot(uid_slot.offset(next_uid_slot));
+                    next_uid_slot += 1;
+                    uid
+                }
+                _ => mb.uid,
+            };
+            uid.to_leb128_bytes(&mut out);
         }
 
-        self.thread_id.to_leb128_bytes(&mut out);
+        match (ids, thread_slot) {
+            (Some(ids), Some(thread_slot)) => ids.slot(thread_slot),
+            _ => self.thread_id,
+        }
+        .to_leb128_bytes(&mut out);
+
         self.size.to_leb128_bytes(&mut out);
         self.received_at.to_leb128_bytes(&mut out);
         (((self.sent_at << 1) ^ (self.sent_at >> 31)) as u32).to_leb128_bytes(&mut out);
@@ -378,7 +411,36 @@ impl MessageData {
 
         out.extend_from_slice(&change_id.to_be_bytes());
 
-        Ok(out)
+        out
+    }
+}
+
+pub struct PendingMessageData {
+    pub data: MessageData,
+    pub uid_slot: Option<Slot>,
+    pub thread_slot: Option<Slot>,
+    pub change_id: Option<u64>,
+}
+
+impl SerializeWithIds for PendingMessageData {
+    fn serialize_with_ids(&mut self, ids: &AssignedIds) -> trc::Result<(Vec<u8>, Option<u32>)> {
+        let change_id = match self.change_id {
+            Some(change_id) => change_id,
+            None => ids.try_current_change_id().ok_or_else(|| {
+                trc::StoreEvent::UnexpectedError
+                    .caused_by(trc::location!())
+                    .ctx(
+                        trc::Key::Reason,
+                        "No change id was allocated for this message",
+                    )
+            })?,
+        };
+
+        Ok((
+            self.data
+                .serialize_resolved(change_id, Some(ids), self.uid_slot, self.thread_slot),
+            None,
+        ))
     }
 }
 

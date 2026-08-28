@@ -272,21 +272,19 @@ impl CardUpdateRequestHandler for Server {
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
-            let document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::ContactCard, 1)
+            let document_id = batch.reserve_document_id(account_id, Collection::ContactCard);
+            card.insert(
+                access_token.account_tenant_ids(),
+                account_id,
+                document_id,
+                &mut batch,
+            )
+            .caused_by(trc::location!())?;
+            let etag = self
+                .commit_batch(batch)
                 .await
-                .caused_by(trc::location!())?;
-            let etag = card
-                .insert(
-                    access_token.account_tenant_ids(),
-                    account_id,
-                    document_id,
-                    &mut batch,
-                )
                 .caused_by(trc::location!())?
                 .etag();
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
 
             Ok(HttpResponse::new(StatusCode::CREATED).with_etag_opt(etag))
         } else {

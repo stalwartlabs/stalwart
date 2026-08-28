@@ -331,7 +331,7 @@ impl AnalyzeReport for Server {
                         }
                     }
 
-                    if let Err(err) = core.core.storage.data.write(batch.build_all()).await {
+                    if let Err(err) = core.core.storage.data.write_batch(batch.build_all()).await {
                         trc::error!(
                             err.span_id(session_id)
                                 .caused_by(trc::location!())

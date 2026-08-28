@@ -68,15 +68,13 @@ impl MailboxFnc for Server {
                 .custom(ObjectIndexBuilder::<(), _>::new().with_changes(object))
                 .caused_by(trc::location!())?;
         }
-        self.store()
-            .assign_document_ids(account_id, Collection::Mailbox, (ARCHIVE_ID + 1) as u64)
-            .await
-            .caused_by(trc::location!())?;
+
+        batch.reserve_document_ids(account_id, Collection::Mailbox, last_document_id + 1);
 
         self.core
             .storage
             .data
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
 
@@ -137,28 +135,38 @@ impl MailboxFnc for Server {
                 return Ok(None);
             }
 
-            let mut next_document_id = self
-                .store()
-                .assign_document_ids(account_id, Collection::Mailbox, create_paths.len() as u64)
-                .await
-                .caused_by(trc::location!())?;
             let mut batch = BatchBuilder::new();
-            for name in create_paths {
-                let document_id = next_document_id;
-                next_document_id -= 1;
+            let first_slot = batch.reserve_document_ids(
+                account_id,
+                Collection::Mailbox,
+                create_paths.len() as u32,
+            );
+            let last_slot = first_slot.offset(create_paths.len() - 1);
+            let mut parent_slot = None;
+
+            for (offset, name) in create_paths.into_iter().enumerate() {
+                let slot = first_slot.offset(offset);
+                let mut mailbox = Mailbox::new(name);
+                if parent_slot.is_none() {
+                    mailbox.parent_id = next_parent_id;
+                }
+                let builder = ObjectIndexBuilder::<(), _>::new().with_changes(mailbox);
+
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Mailbox)
-                    .with_document(document_id)
-                    .custom(
-                        ObjectIndexBuilder::<(), _>::new()
-                            .with_changes(Mailbox::new(name).with_parent_id(next_parent_id)),
-                    )
+                    .create_document(slot)
+                    .custom(match parent_slot {
+                        Some(parent_slot) => builder.with_pending_id(parent_slot),
+                        None => builder,
+                    })
                     .caused_by(trc::location!())?;
-                next_parent_id = document_id + 1;
+                parent_slot = Some(slot);
             }
 
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+            return Ok(Some(assigned_ids.slot(last_slot)));
         }
 
         Ok(Some(next_parent_id - 1))

@@ -36,7 +36,9 @@ use std::str::FromStr;
 use store::{
     IterateParams, SerializeInfallible, U64_LEN, ValueKey,
     registry::RegistryFilterOp,
-    write::{BatchBuilder, RegistryClass, TaskQueueClass, ValueClass, key::DeserializeBigEndian},
+    write::{
+        BatchBuilder, RegistryClass, TaskId, TaskQueueClass, ValueClass, key::DeserializeBigEndian,
+    },
 };
 use trc::AddContext;
 use types::id::Id;
@@ -150,7 +152,9 @@ pub(crate) async fn task_set(
             .server
             .store()
             .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                TaskQueueClass::Task { id: task_id },
+                TaskQueueClass::Task {
+                    id: TaskId::Assigned(task_id),
+                },
             )))
             .await?
         else {
@@ -207,12 +211,12 @@ pub(crate) async fn task_set(
             if timestamp != old_timestamp {
                 batch
                     .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
-                        id: task_id,
+                        id: TaskId::Assigned(task_id),
                         due: old_timestamp,
                     }))
                     .set(
                         ValueClass::TaskQueue(TaskQueueClass::Due {
-                            id: task_id,
+                            id: TaskId::Assigned(task_id),
                             due: timestamp,
                         }),
                         task.object_type().to_id().serialize(),
@@ -221,7 +225,9 @@ pub(crate) async fn task_set(
 
             batch
                 .set(
-                    ValueClass::TaskQueue(TaskQueueClass::Task { id: task_id }),
+                    ValueClass::TaskQueue(TaskQueueClass::Task {
+                        id: TaskId::Assigned(task_id),
+                    }),
                     task.to_pickled_vec(),
                 )
                 .commit_point();
@@ -237,7 +243,9 @@ pub(crate) async fn task_set(
             .server
             .store()
             .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                TaskQueueClass::Task { id: task_id },
+                TaskQueueClass::Task {
+                    id: TaskId::Assigned(task_id),
+                },
             )))
             .await?
         else {
@@ -326,9 +334,11 @@ pub(crate) async fn task_set(
         }
 
         batch
-            .clear(ValueClass::TaskQueue(TaskQueueClass::Task { id: task_id }))
+            .clear(ValueClass::TaskQueue(TaskQueueClass::Task {
+                id: TaskId::Assigned(task_id),
+            }))
             .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
-                id: task_id,
+                id: TaskId::Assigned(task_id),
                 due,
             }))
             .commit_point();
@@ -340,7 +350,7 @@ pub(crate) async fn task_set(
     if has_changes {
         set.server
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
     }
@@ -371,7 +381,9 @@ pub(crate) async fn task_get(
             .server
             .store()
             .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                TaskQueueClass::Task { id: id.id() },
+                TaskQueueClass::Task {
+                    id: TaskId::Assigned(id.id()),
+                },
             )))
             .await?
         {
@@ -469,7 +481,9 @@ pub(crate) async fn task_query(
             .server
             .store()
             .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
-                TaskQueueClass::Task { id: anchor_id },
+                TaskQueueClass::Task {
+                    id: TaskId::Assigned(anchor_id),
+                },
             )))
             .await
             .caused_by(trc::location!())?
@@ -496,11 +510,11 @@ pub(crate) async fn task_query(
 
     let mut total = 0;
     let from_key = ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Due {
-        id: from_id,
+        id: TaskId::Assigned(from_id),
         due: due_from,
     }));
     let to_key = ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Due {
-        id: to_id,
+        id: TaskId::Assigned(to_id),
         due: due_to,
     }));
 
@@ -555,9 +569,12 @@ pub(crate) async fn task_query(
 
 async fn task_ids(server: &Server, max_results: usize) -> trc::Result<Vec<Id>> {
     let mut tasks = Vec::with_capacity(8);
-    let from_key = ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Due { id: 0, due: 1 }));
+    let from_key = ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Due {
+        id: TaskId::Assigned(0),
+        due: 1,
+    }));
     let to_key = ValueKey::from(ValueClass::TaskQueue(TaskQueueClass::Due {
-        id: u64::MAX,
+        id: TaskId::Assigned(u64::MAX),
         due: u64::MAX,
     }));
 

@@ -917,7 +917,7 @@ async fn delete_samples(
             if batch.is_large_batch() {
                 server
                     .store()
-                    .write(batch.build_all())
+                    .write_batch(batch.build_all())
                     .await
                     .caused_by(trc::location!())?;
                 batch = BatchBuilder::new();
@@ -928,7 +928,7 @@ async fn delete_samples(
     if !batch.is_empty() {
         server
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
     }

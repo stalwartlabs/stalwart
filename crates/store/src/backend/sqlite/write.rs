@@ -7,43 +7,57 @@
 use super::{SqliteStore, into_error};
 use crate::{
     IndexKey, Key, LogKey, Shape, Subspace,
-    write::{AssignedIds, Batch, MergeResult, Operation, ValueClass, ValueOp},
+    write::{AssignedIds, Batch, LogSet, MergeResult, Operation, ValueClass, ValueOp},
 };
-use rusqlite::{OptionalExtension, TransactionBehavior, params};
+use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use trc::AddContext;
+use types::collection::SyncCollection;
 
 impl SqliteStore {
-    pub(crate) async fn write(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub(crate) async fn write(
+        &self,
+        batch: Batch<'_>,
+        assigned_ids: &mut AssignedIds,
+    ) -> trc::Result<()> {
         let manager = self.conn_pool.clone();
+        let mark = assigned_ids.mark();
         self.spawn_worker(move || {
             let mut conn = manager.get().map_err(into_error)?;
 
             let mut account_id = u32::MAX;
             let mut collection = u8::MAX;
+            let mut change_group = SyncCollection::None.change_group();
             let mut document_id = u32::MAX;
-            let mut change_id = 0u64;
             let trx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(into_error)
                 .caused_by(trc::location!())?;
-            let mut result = AssignedIds::default();
+            let result = &mut *assigned_ids;
+            result.rollback(mark);
             let has_changes = !batch.change_accounts.is_empty();
+            let mut log_buf = Vec::new();
+            let mut log_scratch = Vec::new();
 
-            if has_changes {
-                for &account_id in batch.change_accounts {
-                    let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
-                    let change_id = trx
-                        .prepare_cached(concat!(
-                            "INSERT INTO n (k, v) VALUES (?, ?) ",
-                            "ON CONFLICT(k) DO UPDATE SET v = v + ",
-                            "excluded.v RETURNING v"
-                        ))
-                        .map_err(into_error)
-                        .caused_by(trc::location!())?
-                        .query_row(params![&key, &1i64], |row| row.get::<_, i64>(0))
-                        .map_err(into_error)
-                        .caused_by(trc::location!())?;
-                    result.push_change_id(account_id, change_id as u64);
+            if batch.has_allocations() {
+                let mut key_buf = Vec::with_capacity(16);
+
+                for account in batch.change_accounts {
+                    key_buf.clear();
+                    ValueClass::ChangeId(account.group).serialize_into(
+                        &mut key_buf,
+                        account.account_id,
+                        0,
+                        0,
+                        0,
+                    );
+                    let change_id = incr_counter(&trx, &key_buf, 1)?;
+                    result.push_change_id(account.account_id, account.group, change_id as u64);
+                }
+
+                for reservation in batch.reservations {
+                    reservation.serialize_key_into(&mut key_buf, 0);
+                    let last_id = incr_counter(&trx, &key_buf, reservation.count as i64)?;
+                    result.fill_slots(reservation.first_slot, reservation.count, last_id as u32);
                 }
             }
 
@@ -55,18 +69,22 @@ impl SqliteStore {
                     } => {
                         account_id = *account_id_;
                         if has_changes {
-                            change_id = result.set_current_change_id(account_id);
+                            result.set_current_change_id(account_id, change_group);
                         }
                     }
                     Operation::Collection {
                         collection: collection_,
                     } => {
                         collection = u8::from(*collection_);
+                        change_group = collection_.change_group();
+                        if has_changes {
+                            result.set_current_change_id(account_id, change_group);
+                        }
                     }
                     Operation::DocumentId {
                         document_id: document_id_,
                     } => {
-                        document_id = *document_id_;
+                        document_id = document_id_.resolve(result);
                     }
                     Operation::Value { class, op } => {
                         key_buf.clear();
@@ -76,7 +94,9 @@ impl SqliteStore {
                         let table = subspace.name();
 
                         match op {
-                            ValueOp::Set(value) => {
+                            ValueOp::Set(set_value) => {
+                                let value = set_value.resolve(result)?;
+                                let value = &*value;
                                 if !matches!(subspace.shape(), Shape::Presence) {
                                     trx.prepare_cached(&format!(
                                         "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
@@ -84,7 +104,7 @@ impl SqliteStore {
                                     ))
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?
-                                    .execute([key.as_slice(), value.as_slice()])
+                                    .execute([key.as_slice(), value])
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?;
                                 } else {
@@ -99,30 +119,21 @@ impl SqliteStore {
                                     .caused_by(trc::location!())?;
                                 }
                             }
-                            ValueOp::SetFnc { payload, fnc } => {
-                                (fnc.0)(&result, payload)?;
-                                trx.prepare_cached(&format!(
-                                    "INSERT OR REPLACE INTO {} (k, v) VALUES (?, ?)",
-                                    table
-                                ))
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?
-                                .execute([key, &*payload])
-                                .map_err(into_error)
-                                .caused_by(trc::location!())?;
-                            }
                             ValueOp::MergeFnc(merge_op) => {
                                 let merge_result = trx
                                     .prepare_cached(&format!("SELECT v FROM {} WHERE k = ?", table))
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?
                                     .query_row([&key], |row| {
-                                        Ok((merge_op.0)(&result, Some(row.get_ref(0)?.as_bytes()?)))
+                                        Ok((merge_op.0)(
+                                            &*result,
+                                            Some(row.get_ref(0)?.as_bytes()?),
+                                        ))
                                     })
                                     .optional()
                                     .map_err(into_error)
                                     .caused_by(trc::location!())?
-                                    .unwrap_or_else(|| (merge_op.0)(&result, None))?;
+                                    .unwrap_or_else(|| (merge_op.0)(&*result, None))?;
 
                                 match merge_result {
                                     MergeResult::Update(value) => {
@@ -231,23 +242,38 @@ impl SqliteStore {
                         }
                     }
                     Operation::Log { collection, set } => {
+                        let log_change_id = result
+                            .change_id(account_id, collection.change_group())
+                            .unwrap_or_default();
                         debug_assert!(
-                            change_id != 0,
+                            log_change_id != 0,
                             "no change id was allocated for this account"
                         );
                         key_buf.clear();
                         LogKey {
                             account_id,
                             collection: u8::from(*collection),
-                            change_id,
+                            change_id: log_change_id,
                         }
                         .serialize_into(&mut key_buf, 0);
                         let key = &key_buf;
+                        let value = match set {
+                            LogSet::Bytes(bytes) => &*bytes,
+                            LogSet::Pending(changes) => {
+                                changes.serialize_into(
+                                    collection.is_prefixed(),
+                                    Some(result),
+                                    &mut log_scratch,
+                                    &mut log_buf,
+                                );
+                                &log_buf
+                            }
+                        };
 
                         trx.prepare_cached("INSERT OR REPLACE INTO l (k, v) VALUES (?, ?)")
                             .map_err(into_error)
                             .caused_by(trc::location!())?
-                            .execute([key.as_slice(), set.as_slice()])
+                            .execute([key.as_slice(), value.as_slice()])
                             .map_err(into_error)
                             .caused_by(trc::location!())?;
                     }
@@ -283,7 +309,7 @@ impl SqliteStore {
                 }
             }
 
-            trx.commit().map(|_| result).map_err(into_error)
+            trx.commit().map_err(into_error)
         })
         .await
     }
@@ -329,4 +355,17 @@ impl SqliteStore {
         })
         .await
     }
+}
+
+fn incr_counter(trx: &Transaction<'_>, key: &[u8], by: i64) -> trc::Result<i64> {
+    trx.prepare_cached(concat!(
+        "INSERT INTO n (k, v) VALUES (?, ?) ",
+        "ON CONFLICT(k) DO UPDATE SET v = v + ",
+        "excluded.v RETURNING v"
+    ))
+    .map_err(into_error)
+    .caused_by(trc::location!())?
+    .query_row(params![&key, &by], |row| row.get::<_, i64>(0))
+    .map_err(into_error)
+    .caused_by(trc::location!())
 }

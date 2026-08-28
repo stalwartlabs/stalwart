@@ -9,7 +9,7 @@ use crate::{
     Deserialize, IndexKey, Key, LogKey, Shape, Subspace,
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
+        AssignedIds, Batch, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
         ValueClass, ValueOp, commit_backoff,
     },
 };
@@ -18,27 +18,35 @@ use rocksdb::{
     OptimisticTransactionOptions, WriteOptions,
 };
 use std::{sync::Arc, time::Instant};
+use types::collection::SyncCollection;
 
 impl RocksDbStore {
-    pub(crate) async fn write(&self, mut batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub(crate) async fn write(
+        &self,
+        mut batch: Batch<'_>,
+        assigned_ids: &mut AssignedIds,
+    ) -> trc::Result<()> {
         let db = self.db.clone();
         let mut retry_count = 0;
         let start = Instant::now();
+        let mark = assigned_ids.mark();
 
         loop {
             let attempt = self
                 .spawn_worker(|| {
+                    assigned_ids.rollback(mark);
                     let mut txn = RocksDBTransaction {
                         db: &db,
                         cf_indexes: db.cf_handle(CF_INDEXES).unwrap(),
                         cf_logs: db.cf_handle(CF_LOGS).unwrap(),
                         txn_opts: OptimisticTransactionOptions::default(),
                         batch: &mut batch,
+                        result: assigned_ids,
                     };
                     txn.txn_opts.set_snapshot(true);
 
                     match txn.commit() {
-                        Ok(result) => Ok(Ok(result)),
+                        Ok(()) => Ok(Ok(())),
                         Err(CommitError::Internal(err)) => Err(err),
                         Err(CommitError::RocksDB(err)) => Ok(Err(err)),
                     }
@@ -46,7 +54,7 @@ impl RocksDbStore {
                 .await?;
 
             match attempt {
-                Ok(result) => return Ok(result),
+                Ok(()) => return Ok(()),
                 Err(err) => match err.kind() {
                     ErrorKind::Busy | ErrorKind::MergeInProgress | ErrorKind::TryAgain
                         if retry_count < MAX_COMMIT_ATTEMPTS
@@ -123,6 +131,7 @@ struct RocksDBTransaction<'x, 'y> {
     cf_logs: Arc<BoundColumnFamily<'x>>,
     txn_opts: OptimisticTransactionOptions,
     batch: &'x mut Batch<'y>,
+    result: &'x mut AssignedIds,
 }
 
 enum CommitError {
@@ -130,37 +139,55 @@ enum CommitError {
     RocksDB(rocksdb::Error),
 }
 
+fn read_counter(
+    txn: &rocksdb::Transaction<'_, OptimisticTransactionDB>,
+    cf: &Arc<BoundColumnFamily<'_>>,
+    key: &[u8],
+) -> Result<i64, CommitError> {
+    match txn.get_pinned_for_update_cf(cf, key, true)? {
+        Some(bytes) => deserialize_i64_le(key, &bytes).map_err(CommitError::from),
+        None => Ok(0),
+    }
+}
+
 impl RocksDBTransaction<'_, '_> {
-    fn commit(&mut self) -> Result<AssignedIds, CommitError> {
+    fn commit(&mut self) -> Result<(), CommitError> {
         let mut account_id = u32::MAX;
         let mut collection = u8::MAX;
+        let mut change_group = SyncCollection::None.change_group();
         let mut document_id = u32::MAX;
-        let mut change_id = 0u64;
-        let mut result = AssignedIds::default();
+        let result = &mut *self.result;
         let has_changes = !self.batch.change_accounts.is_empty();
+        let mut log_buf = Vec::new();
+        let mut log_scratch = Vec::new();
 
         let txn = self
             .db
             .transaction_opt(&WriteOptions::default(), &self.txn_opts);
 
-        if has_changes {
+        if self.batch.has_allocations() {
             let cf = self.db.subspace_handle(Subspace::Counter);
-            for &account_id in self.batch.change_accounts {
-                let key = ValueClass::ChangeId.serialize(account_id, 0, 0, 0);
-                let change_id = txn
-                    .get_pinned_for_update_cf(&cf, &key, true)
-                    .map_err(CommitError::from)
-                    .and_then(|bytes| {
-                        if let Some(bytes) = bytes {
-                            deserialize_i64_le(&key, &bytes)
-                                .map(|v| v + 1)
-                                .map_err(CommitError::from)
-                        } else {
-                            Ok(1)
-                        }
-                    })?;
-                txn.put_cf(&cf, &key, &change_id.to_le_bytes()[..])?;
-                result.push_change_id(account_id, change_id as u64);
+            let mut key_buf = Vec::with_capacity(16);
+
+            for account in self.batch.change_accounts {
+                key_buf.clear();
+                ValueClass::ChangeId(account.group).serialize_into(
+                    &mut key_buf,
+                    account.account_id,
+                    0,
+                    0,
+                    0,
+                );
+                let change_id = read_counter(&txn, &cf, &key_buf)? + 1;
+                txn.put_cf(&cf, &key_buf, &change_id.to_le_bytes()[..])?;
+                result.push_change_id(account.account_id, account.group, change_id as u64);
+            }
+
+            for reservation in self.batch.reservations {
+                reservation.serialize_key_into(&mut key_buf, 0);
+                let last_id = read_counter(&txn, &cf, &key_buf)? + reservation.count as i64;
+                txn.put_cf(&cf, &key_buf, &last_id.to_le_bytes()[..])?;
+                result.fill_slots(reservation.first_slot, reservation.count, last_id as u32);
             }
         }
 
@@ -172,18 +199,22 @@ impl RocksDBTransaction<'_, '_> {
                 } => {
                     account_id = *account_id_;
                     if has_changes {
-                        change_id = result.set_current_change_id(account_id);
+                        result.set_current_change_id(account_id, change_group);
                     }
                 }
                 Operation::Collection {
                     collection: collection_,
                 } => {
                     collection = u8::from(*collection_);
+                    change_group = collection_.change_group();
+                    if has_changes {
+                        result.set_current_change_id(account_id, change_group);
+                    }
                 }
                 Operation::DocumentId {
                     document_id: document_id_,
                 } => {
-                    document_id = *document_id_;
+                    document_id = document_id_.resolve(result);
                 }
                 Operation::Value { class, op } => {
                     key_buf.clear();
@@ -193,16 +224,12 @@ impl RocksDBTransaction<'_, '_> {
 
                     match op {
                         ValueOp::Set(value) => {
-                            txn.put_cf(&cf, key, value)?;
-                        }
-                        ValueOp::SetFnc { payload, fnc } => {
-                            (fnc.0)(&result, payload)?;
-
-                            txn.put_cf(&cf, key, &*payload)?;
+                            let value = value.resolve(result)?;
+                            txn.put_cf(&cf, key, &*value)?;
                         }
                         ValueOp::MergeFnc(merge_op) => {
                             let merge_result = (merge_op.0)(
-                                &result,
+                                result,
                                 txn.get_pinned_for_update_cf(&cf, key, true)?.as_deref(),
                             )?;
 
@@ -259,19 +286,35 @@ impl RocksDBTransaction<'_, '_> {
                     }
                 }
                 Operation::Log { collection, set } => {
+                    let log_change_id = result
+                        .change_id(account_id, collection.change_group())
+                        .unwrap_or_default();
                     debug_assert!(
-                        change_id != 0,
+                        log_change_id != 0,
                         "no change id was allocated for this account"
                     );
                     key_buf.clear();
                     LogKey {
                         account_id,
                         collection: u8::from(*collection),
-                        change_id,
+                        change_id: log_change_id,
                     }
                     .serialize_into(&mut key_buf, 0);
 
-                    txn.put_cf(&self.cf_logs, &key_buf, set)?;
+                    match set {
+                        LogSet::Bytes(bytes) => {
+                            txn.put_cf(&self.cf_logs, &key_buf, &*bytes)?;
+                        }
+                        LogSet::Pending(changes) => {
+                            changes.serialize_into(
+                                collection.is_prefixed(),
+                                Some(result),
+                                &mut log_scratch,
+                                &mut log_buf,
+                            );
+                            txn.put_cf(&self.cf_logs, &key_buf, &log_buf)?;
+                        }
+                    }
                 }
                 Operation::AssertValue {
                     class,
@@ -296,7 +339,7 @@ impl RocksDBTransaction<'_, '_> {
             }
         }
 
-        txn.commit().map(|_| result).map_err(Into::into)
+        txn.commit().map_err(Into::into)
     }
 }
 

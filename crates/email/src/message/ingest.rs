@@ -11,7 +11,7 @@ use crate::{
     message::{
         crypto::EncryptionFlags,
         index::{IndexMessage, extractors::VisitText},
-        messagedata::MessageData,
+        messagedata::{MessageData, PendingMessageData},
         metadata::MessageMetadata,
     },
 };
@@ -37,8 +37,8 @@ use store::{
     IterateParams, SerializeInfallible, U32_LEN, U128_LEN, ValueKey,
     ahash::AHashMap,
     write::{
-        AssignedId, AssignedIds, BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, SearchIndex,
-        ValueClass, key::DeserializeBigEndian, now,
+        BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, Patch, PatchSource, PendingId,
+        SearchIndex, ValueClass, key::DeserializeBigEndian, now,
     },
 };
 use store::{
@@ -51,7 +51,7 @@ use types::{
     blob::{BlobClass, BlobId},
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
-    field::{ContactField, EmailField, MailboxField},
+    field::{ContactField, EmailField},
     id::Id,
     keyword::Keyword,
     special_use::SpecialUse,
@@ -107,12 +107,6 @@ pub trait EmailIngest: Sync + Send {
         thread_name: &str,
         message_ids: &[u128],
     ) -> impl Future<Output = trc::Result<ThreadResult>> + Send;
-    fn assign_email_ids(
-        &self,
-        account_id: u32,
-        mailbox_ids: impl IntoIterator<Item = u32> + Sync + Send,
-        generate_email_id: bool,
-    ) -> impl Future<Output = trc::Result<impl Iterator<Item = u32> + 'static>> + Send;
     fn add_account_spam_sample(
         &self,
         batch: &mut BatchBuilder,
@@ -579,37 +573,35 @@ impl EmailIngest for Server {
                 .caused_by(trc::location!())?
         };
 
-        // Assign IMAP UIDs
-        let mut mailbox_ids: TinyVec<[MessageUid; 2]> =
-            TinyVec::with_capacity(params.mailbox_ids.len());
-        let mut imap_uids = Vec::with_capacity(params.mailbox_ids.len());
-        let mut ids = self
-            .assign_email_ids(account_id, params.mailbox_ids.iter().copied(), true)
-            .await
-            .caused_by(trc::location!())?;
-        let document_id = ids.next().unwrap();
-        for (uid, mailbox_id) in ids.zip(params.mailbox_ids.iter().copied()) {
-            mailbox_ids.push(MessageUid::new(mailbox_id, uid));
-            imap_uids.push(uid);
-        }
-
         // Build write batch
         let mut batch = BatchBuilder::new();
-        let mailbox_ids_event = mailbox_ids
+        let mailbox_ids_event = params
+            .mailbox_ids
             .iter()
-            .map(|m| trc::Value::from(m.mailbox_id))
+            .map(|mailbox_id| trc::Value::from(*mailbox_id))
             .collect::<Vec<_>>();
         batch.with_account_id(account_id);
 
+        // Reserve a document id and one IMAP UID per target mailbox
+        let document_slot = batch.reserve_document_id(account_id, Collection::Email);
+        let mut mailbox_ids: TinyVec<[MessageUid; 2]> =
+            TinyVec::with_capacity(params.mailbox_ids.len());
+        let mut uid_slot = None;
+        for mailbox_id in params.mailbox_ids.iter().copied() {
+            let slot = batch.reserve_uid(account_id, mailbox_id);
+            uid_slot.get_or_insert(slot);
+            mailbox_ids.push(MessageUid::new_unassigned(mailbox_id));
+        }
+
         // Determine thread id
-        let thread_id = if let Some(thread_id) = thread_result.thread_id {
-            thread_id
-        } else {
+        let thread_slot = if thread_result.thread_id.is_none() {
             batch
                 .with_collection(Collection::Thread)
-                .with_document(document_id)
+                .create_document(document_slot)
                 .log_container_insert(SyncCollection::Thread);
-            document_id
+            Some(document_slot)
+        } else {
+            None
         };
 
         let mut keywords = 0;
@@ -621,18 +613,24 @@ impl EmailIngest for Server {
                 Err(name) => keywords_extra.push(name),
             }
         }
-        let data = MessageData {
-            mailboxes: mailbox_ids,
-            keywords,
-            keywords_extra,
-            thread_id,
-            size: (message.raw_message.len() + extra_headers.len()) as u32,
-            received_at,
-            sent_at: sent_at
-                .map(|sent_at| (sent_at - received_at as i64) as i32)
-                .unwrap_or_default(),
-            change_id: 0,
+        let data = PendingMessageData {
+            data: MessageData {
+                mailboxes: mailbox_ids,
+                keywords,
+                keywords_extra,
+                thread_id: thread_result.thread_id.unwrap_or_default(),
+                size: (message.raw_message.len() + extra_headers.len()) as u32,
+                received_at,
+                sent_at: sent_at
+                    .map(|sent_at| (sent_at - received_at as i64) as i32)
+                    .unwrap_or_default(),
+                change_id: 0,
+            },
+            uid_slot,
+            thread_slot,
+            change_id: None,
         };
+        let thread_ref = data.thread_id();
 
         // Request spam training
         if let Some(learn_spam) = train_spam {
@@ -653,9 +651,10 @@ impl EmailIngest for Server {
             );
         }
 
+        let (thread_info, thread_info_patches) = ThreadInfo::serialize(thread_ref, &message_ids);
         batch
             .with_collection(Collection::Email)
-            .with_document(document_id)
+            .create_document(document_slot)
             .index_message(
                 tenant_id,
                 message,
@@ -665,14 +664,15 @@ impl EmailIngest for Server {
                 data,
             )
             .caused_by(trc::location!())?
-            .set(
+            .set_patched(
                 ValueClass::IndexProperty(IndexPropertyClass::Hash {
                     property: EmailField::Threading.into(),
                     hash: thread_result.thread_hash,
                 }),
-                ThreadInfo::serialize(thread_id, &message_ids),
+                thread_info,
+                thread_info_patches,
             )
-            .queue_document_index(SearchIndex::Email, account_id, document_id);
+            .queue_document_index(SearchIndex::Email, account_id, document_slot);
 
         if let Some(blob_hold) = blob_hold {
             batch.clear(blob_hold);
@@ -702,12 +702,22 @@ impl EmailIngest for Server {
 
         // Insert and obtain ids
         let queues = batch.queue_notify();
-        let change_id = self
+        let assigned_ids = self
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
-            .caused_by(trc::location!())?
-            .last_change_id(account_id)?;
+            .caused_by(trc::location!())?;
+        let change_id =
+            assigned_ids.last_change_id(account_id, SyncCollection::Email.change_group());
+        let document_id = assigned_ids.slot(document_slot);
+        let thread_id = thread_result.thread_id.unwrap_or(document_id);
+        let imap_uids = uid_slot
+            .into_iter()
+            .flat_map(|uid_slot| {
+                (0..params.mailbox_ids.len()).map(move |offset| uid_slot.offset(offset))
+            })
+            .map(|uid_slot| assigned_ids.slot(uid_slot))
+            .collect::<Vec<_>>();
 
         // Request indexing
         self.notify_queues(queues).await;
@@ -854,50 +864,6 @@ impl EmailIngest for Server {
         }
     }
 
-    async fn assign_email_ids(
-        &self,
-        account_id: u32,
-        mailbox_ids: impl IntoIterator<Item = u32> + Sync + Send,
-        generate_email_id: bool,
-    ) -> trc::Result<impl Iterator<Item = u32> + 'static> {
-        // Increment UID next
-        let mut batch = BatchBuilder::new();
-        batch.with_account_id(account_id);
-
-        let mut expected_ids = 0;
-        if generate_email_id {
-            batch
-                .with_collection(Collection::Email)
-                .add_and_get(ValueClass::DocumentId, 1);
-            expected_ids += 1;
-        }
-
-        batch.with_collection(Collection::Mailbox);
-
-        for mailbox_id in mailbox_ids {
-            batch
-                .with_document(mailbox_id)
-                .add_and_get(MailboxField::UidCounter, 1);
-            expected_ids += 1;
-        }
-
-        let ids = if expected_ids > 0 {
-            self.core.storage.data.write(batch.build_all()).await?
-        } else {
-            AssignedIds::default()
-        };
-        if ids.ids.len() == expected_ids {
-            Ok(ids.ids.into_iter().map(|id| match id {
-                AssignedId::Counter(id) => id as u32,
-                AssignedId::ChangeId(_) => unreachable!(),
-            }))
-        } else {
-            Err(trc::StoreEvent::UnexpectedError
-                .caused_by(trc::location!())
-                .ctx(trc::Key::Reason, "No all document ids were generated"))
-        }
-    }
-
     async fn add_account_spam_sample(
         &self,
         batch: &mut BatchBuilder,
@@ -1030,13 +996,22 @@ impl IngestSource<'_> {
 pub struct ThreadInfo;
 
 impl ThreadInfo {
-    pub fn serialize(thread_id: u32, ref_ids: &[u128]) -> Vec<u8> {
+    pub fn serialize(thread_id: PendingId, ref_ids: &[u128]) -> (Vec<u8>, Vec<Patch>) {
         let mut buf = Vec::with_capacity(U32_LEN + 1 + ref_ids.len() * U128_LEN);
-        buf.extend_from_slice(&thread_id.to_be_bytes());
+        buf.extend_from_slice(&thread_id.assigned().unwrap_or_default().to_be_bytes());
         for ref_id in ref_ids {
             buf.extend_from_slice(ref_id.to_be_bytes().as_slice());
         }
-        buf
+
+        let patches = match thread_id {
+            PendingId::Slot(slot) => vec![Patch {
+                offset: 0,
+                source: PatchSource::SlotBeU32(slot),
+            }],
+            PendingId::Assigned(_) => Vec::new(),
+        };
+
+        (buf, patches)
     }
 }
 

@@ -23,7 +23,7 @@ use store::{
     IterateParams, U32_LEN, ValueKey,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
-        Archive, ArchiveBytes, BatchBuilder, SearchIndex, SearchIndexClass, ValueClass,
+        Archive, ArchiveBytes, BatchBuilder, PendingId, SearchIndex, SearchIndexClass, ValueClass,
         key::DeserializeBigEndian,
     },
 };
@@ -268,7 +268,11 @@ async fn process_items(
 
     let mut commit_points = batch.commit_points();
     for commit_point in commit_points.iter() {
-        if let Err(err) = server.store().write(batch.build_one(commit_point)).await {
+        if let Err(err) = server
+            .store()
+            .write_batch(batch.build_one(commit_point))
+            .await
+        {
             let reason = err.to_string();
             trc::error!(
                 err.details("Failed to delete processed search index queue items")
@@ -311,11 +315,9 @@ impl Sink {
                     })
                     .await
                 {
-                    Ok(_) => ack_rx
-                        .await
-                        .unwrap_or_else(|_| {
-                            Err("Bulk indexer is no longer available".to_string().into())
-                        }),
+                    Ok(_) => ack_rx.await.unwrap_or_else(|_| {
+                        Err("Bulk indexer is no longer available".to_string().into())
+                    }),
                     Err(_) => Err("Bulk indexer is no longer available".to_string().into()),
                 }
             }
@@ -506,7 +508,7 @@ async fn read_queue(
         } = &mut from_class
     {
         *from_prefix = id_prefix;
-        *from_suffix = id_suffix;
+        *from_suffix = PendingId::Assigned(id_suffix);
         *created_at = u64::MAX;
     }
 
@@ -621,10 +623,13 @@ async fn set_queue_index(server: &Server, partition: Partition) -> Result<(), Pa
     write_queue_index(server, batch).await
 }
 
-async fn write_queue_index(server: &Server, mut batch: BatchBuilder) -> Result<(), PartitionFailure> {
+async fn write_queue_index(
+    server: &Server,
+    mut batch: BatchBuilder,
+) -> Result<(), PartitionFailure> {
     server
         .store()
-        .write(batch.build_all())
+        .write_batch(batch.build_all())
         .await
         .map(|_| ())
         .map_err(|err| {

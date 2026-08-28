@@ -19,8 +19,7 @@ use email::{
     cache::MessageCacheFetch,
     message::{
         delete::EmailDeletion,
-        ingest::EmailIngest,
-        messagedata::{EmailMessageData, MessageData},
+        messagedata::{EmailMessageData, MessageData, PendingMessageData},
     },
     sieve::SieveScript,
 };
@@ -42,7 +41,7 @@ use registry::{
 use smtp::reporting::index::ExternalReportIndex;
 use std::time::Instant;
 use store::{
-    Serialize, ValueKey,
+    ValueKey,
     rand::{self},
     registry::{RegistryFilter, RegistryQuery},
     roaring::RoaringBitmap,
@@ -198,14 +197,14 @@ async fn store_maintenance(
                         }
 
                         if batch.is_large_batch() {
-                            server.store().write(batch.build_all()).await?;
+                            server.store().write_batch(batch.build_all()).await?;
                             batch = BatchBuilder::new();
                         }
                     }
                 }
             }
             if !batch.is_empty() {
-                server.store().write(batch.build_all()).await?;
+                server.store().write_batch(batch.build_all()).await?;
             }
 
             let started = Instant::now();
@@ -496,7 +495,7 @@ async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> 
         .add(ValueClass::Quota, quota);
     server
         .store()
-        .write(batch.build_all())
+        .write_batch(batch.build_all())
         .await
         .caused_by(trc::location!())
         .map(|_| ())
@@ -527,7 +526,7 @@ async fn recalculate_tenant_quota(server: &Server, tenant_id: u32) -> trc::Resul
         .add(ValueClass::TenantQuota(tenant_id), quota);
     server
         .store()
-        .write(batch.build_all())
+        .write_batch(batch.build_all())
         .await
         .caused_by(trc::location!())
         .map(|_| ())
@@ -577,7 +576,7 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
             .clear(MailboxField::UidCounter);
         server
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
         mailbox_count += 1;
@@ -594,22 +593,18 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
             continue;
         };
         let mut new_data = data.clone();
-
-        let ids = server
-            .assign_email_ids(
-                account_id,
-                new_data.mailboxes.iter().map(|m| m.mailbox_id),
-                false,
-            )
-            .await
-            .caused_by(trc::location!())?;
-
-        for (uid_mailbox, uid) in new_data.mailboxes.iter_mut().zip(ids) {
-            uid_mailbox.uid = uid;
+        for uid_mailbox in new_data.mailboxes.iter_mut() {
+            uid_mailbox.uid = 0;
         }
 
         // Prepare write batch
         let mut batch = BatchBuilder::new();
+        let mut uid_slot = None;
+        for mailbox_id in new_data.mailboxes.iter().map(|m| m.mailbox_id) {
+            uid_slot.get_or_insert(batch.reserve_uid(account_id, mailbox_id));
+        }
+        let size_hint = new_data.size_hint();
+
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email)
@@ -618,13 +613,19 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
                 ValueClass::Property(EmailField::Archive.into()),
                 data.change_id,
             )
-            .set(
+            .set_serializable(
                 EmailField::Archive,
-                new_data.serialize().caused_by(trc::location!())?,
+                size_hint,
+                Box::new(PendingMessageData {
+                    data: new_data,
+                    uid_slot,
+                    thread_slot: None,
+                    change_id: Some(data.change_id),
+                }),
             );
         server
             .store()
-            .write(batch.build_all())
+            .write_batch(batch.build_all())
             .await
             .caused_by(trc::location!())?;
         email_count += 1;
