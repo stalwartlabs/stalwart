@@ -130,7 +130,8 @@ pub struct AssignedIdsMark {
     feature = "rocks",
     feature = "postgres",
     feature = "mysql",
-    feature = "foundation"
+    feature = "foundation",
+    feature = "sqlite"
 ))]
 pub(crate) use commit_limits::{MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME};
 
@@ -138,7 +139,8 @@ pub(crate) use commit_limits::{MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME};
     feature = "rocks",
     feature = "postgres",
     feature = "mysql",
-    feature = "foundation"
+    feature = "foundation",
+    feature = "sqlite"
 ))]
 pub(crate) use commit_limits::commit_backoff;
 
@@ -146,7 +148,8 @@ pub(crate) use commit_limits::commit_backoff;
     feature = "rocks",
     feature = "postgres",
     feature = "mysql",
-    feature = "foundation"
+    feature = "foundation",
+    feature = "sqlite"
 ))]
 mod commit_limits {
     use rand::RngExt;

@@ -9,6 +9,7 @@ use std::ops::Range;
 use rusqlite::OptionalExtension;
 
 use super::{SqliteStore, into_error};
+use crate::Subspace;
 
 impl SqliteStore {
     pub(crate) async fn get_blob(
@@ -17,12 +18,13 @@ impl SqliteStore {
         range: Range<usize>,
     ) -> trc::Result<Option<Vec<u8>>> {
         let manager = self.conn_pool.clone();
+        let sql = self.sql.clone();
+        let key = key.to_vec();
+
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let mut result = conn
-                .prepare_cached("SELECT v FROM t WHERE k = ?")
-                .map_err(into_error)?;
-            result
+            conn.prepare_cached(&sql.get(Subspace::Blobs).get_value)
+                .map_err(into_error)?
                 .query_row([&key], |row| {
                     Ok({
                         let bytes = row.get_ref(0)?.as_bytes()?;
@@ -42,13 +44,16 @@ impl SqliteStore {
         .await
     }
 
-    pub(crate) async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
+    pub(crate) async fn put_blob(&self, key: &[u8], data: Vec<u8>) -> trc::Result<()> {
         let manager = self.conn_pool.clone();
+        let sql = self.sql.clone();
+        let key = key.to_vec();
+
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            conn.prepare_cached("INSERT OR REPLACE INTO t (k, v) VALUES (?, ?)")
+            conn.prepare_cached(&sql.get(Subspace::Blobs).upsert_value)
                 .map_err(into_error)?
-                .execute([key, data])
+                .execute([key.as_slice(), data.as_slice()])
                 .map_err(into_error)
                 .map(|_| ())
         })
@@ -57,13 +62,16 @@ impl SqliteStore {
 
     pub(crate) async fn delete_blob(&self, key: &[u8]) -> trc::Result<bool> {
         let manager = self.conn_pool.clone();
+        let sql = self.sql.clone();
+        let key = key.to_vec();
+
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            conn.prepare_cached("DELETE FROM t WHERE k = ?")
+            conn.prepare_cached(&sql.get(Subspace::Blobs).delete_key)
                 .map_err(into_error)?
                 .execute([key])
                 .map_err(into_error)
-                .map(|_| true)
+                .map(|rows| rows > 0)
         })
         .await
     }

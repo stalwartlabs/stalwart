@@ -17,7 +17,7 @@ impl SqliteStore {
         params_: &[Value<'_>],
     ) -> trc::Result<T> {
         let manager = self.conn_pool.clone();
-        self.spawn_worker(move || {
+        self.block_worker(move || {
             let conn = manager.get().map_err(into_error)?;
             let mut s = conn.prepare_cached(query).map_err(into_error)?;
             let params = params_

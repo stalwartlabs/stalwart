@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{CF_INDEXES, CF_LOGS, CfHandle, RocksDbStore, into_error};
+use super::{CfCache, CfHandle, RocksDbStore, into_error};
 use crate::{
     Deserialize, Key, Shape, Subspace,
     backend::deserialize_i64_le,
@@ -32,12 +32,10 @@ impl RocksDbStore {
 
         loop {
             let attempt = self
-                .spawn_worker(|| {
+                .block_worker(|| {
                     assigned_ids.rollback(mark);
                     let mut txn = RocksDBTransaction {
                         db: &db,
-                        cf_indexes: db.cf_handle(CF_INDEXES).unwrap(),
-                        cf_logs: db.cf_handle(CF_LOGS).unwrap(),
                         txn_opts: OptimisticTransactionOptions::default(),
                         batch: &mut batch,
                         result: assigned_ids,
@@ -70,13 +68,13 @@ impl RocksDbStore {
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
         let db = self.db.clone();
+        let subspace = from.subspace();
+        let from = from.serialize(0);
+        let to = to.serialize(0);
+
         self.spawn_worker(move || {
-            db.delete_range_cf(
-                &db.subspace_handle(from.subspace()),
-                from.serialize(0),
-                to.serialize(0),
-            )
-            .map_err(into_error)
+            db.delete_range_cf(&db.subspace_handle(subspace), from.as_slice(), to.as_slice())
+                .map_err(into_error)
         })
         .await
     }
@@ -126,8 +124,6 @@ impl RocksDbStore {
 
 struct RocksDBTransaction<'x, 'y> {
     db: &'x OptimisticTransactionDB,
-    cf_indexes: Arc<BoundColumnFamily<'x>>,
-    cf_logs: Arc<BoundColumnFamily<'x>>,
     txn_opts: OptimisticTransactionOptions,
     batch: &'x mut Batch<'y>,
     result: &'x mut AssignedIds,
@@ -155,13 +151,14 @@ impl RocksDBTransaction<'_, '_> {
         let result = &mut *self.result;
         let mut log_buf = Vec::new();
         let mut log_scratch = Vec::new();
+        let mut cfs = CfCache::new(self.db);
 
         let txn = self
             .db
             .transaction_opt(&WriteOptions::default(), &self.txn_opts);
 
         if self.batch.has_allocations() {
-            let cf = self.db.subspace_handle(Subspace::Counter);
+            let cf = cfs.get(Subspace::Counter).clone();
             let mut key_buf = Vec::with_capacity(16);
 
             for allocation in self.batch.allocations() {
@@ -180,35 +177,35 @@ impl RocksDBTransaction<'_, '_> {
                 Advance::Value { class, op } => {
                     cursor.value_key(class, &mut key_buf, 0);
                     let key = &key_buf;
-                    let cf = self.db.subspace_handle(cursor.subspace(class));
+                    let cf = cfs.get(cursor.subspace(class));
 
                     match op {
                         ValueOp::Set(value) => {
                             let value = value.resolve(result)?;
-                            txn.put_cf(&cf, key, &*value)?;
+                            txn.put_cf(cf, key, &*value)?;
                         }
                         ValueOp::MergeFnc(merge_op) => {
                             let merge_result = (merge_op.0)(
                                 result,
-                                txn.get_pinned_for_update_cf(&cf, key, true)?.as_deref(),
+                                txn.get_pinned_for_update_cf(cf, key, true)?.as_deref(),
                             )?;
 
                             match merge_result {
                                 MergeResult::Update(value) => {
-                                    txn.put_cf(&cf, key, value)?;
+                                    txn.put_cf(cf, key, value)?;
                                 }
                                 MergeResult::Delete => {
-                                    txn.delete_cf(&cf, key)?;
+                                    txn.delete_cf(cf, key)?;
                                 }
                                 MergeResult::Skip => (),
                             }
                         }
                         ValueOp::AtomicAdd(by) => {
-                            txn.merge_cf(&cf, key, &by.to_le_bytes()[..])?;
+                            txn.merge_cf(cf, key, &by.to_le_bytes()[..])?;
                         }
                         ValueOp::AddAndGet(by) => {
                             let num = txn
-                                .get_pinned_for_update_cf(&cf, key, true)
+                                .get_pinned_for_update_cf(cf, key, true)
                                 .map_err(CommitError::from)
                                 .and_then(|bytes| {
                                     if let Some(bytes) = bytes {
@@ -219,30 +216,32 @@ impl RocksDBTransaction<'_, '_> {
                                         Ok(*by)
                                     }
                                 })?;
-                            txn.put_cf(&cf, key, &num.to_le_bytes()[..])?;
+                            txn.put_cf(cf, key, &num.to_le_bytes()[..])?;
                             result.push_counter_id(num);
                         }
                         ValueOp::Clear => {
-                            txn.delete_cf(&cf, key)?;
+                            txn.delete_cf(cf, key)?;
                         }
                     }
                 }
                 Advance::Index { field, key, set } => {
                     cursor.index_key(field, key, &mut key_buf, 0);
                     let key = &key_buf;
+                    let cf = cfs.get(Subspace::Indexes);
 
                     if set {
-                        txn.put_cf(&self.cf_indexes, key, [])?;
+                        txn.put_cf(cf, key, [])?;
                     } else {
-                        txn.delete_cf(&self.cf_indexes, key)?;
+                        txn.delete_cf(cf, key)?;
                     }
                 }
                 Advance::Log { collection, set } => {
                     cursor.log_key(collection, result, &mut key_buf, 0);
+                    let cf = cfs.get(Subspace::Logs);
 
                     match set {
                         LogSet::Bytes(bytes) => {
-                            txn.put_cf(&self.cf_logs, &key_buf, &*bytes)?;
+                            txn.put_cf(cf, &key_buf, &*bytes)?;
                         }
                         LogSet::Pending(changes) => {
                             changes.serialize_into(
@@ -251,7 +250,7 @@ impl RocksDBTransaction<'_, '_> {
                                 &mut log_scratch,
                                 &mut log_buf,
                             );
-                            txn.put_cf(&self.cf_logs, &key_buf, &log_buf)?;
+                            txn.put_cf(cf, &key_buf, &log_buf)?;
                         }
                     }
                 }
@@ -260,10 +259,10 @@ impl RocksDBTransaction<'_, '_> {
                     assert_value,
                 } => {
                     cursor.value_key(class, &mut key_buf, 0);
-                    let cf = self.db.subspace_handle(cursor.subspace(class));
+                    let cf = cfs.get(cursor.subspace(class));
 
                     let matches = txn
-                        .get_pinned_for_update_cf(&cf, &key_buf, true)?
+                        .get_pinned_for_update_cf(cf, &key_buf, true)?
                         .map(|value| assert_value.matches(&value))
                         .unwrap_or_else(|| assert_value.is_none());
 

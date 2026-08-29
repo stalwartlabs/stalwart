@@ -37,6 +37,43 @@ pub mod composite;
 pub const MAX_TOKEN_LENGTH: usize = (u8::MAX >> 1) as usize;
 pub const MAX_TOKEN_MASK: usize = MAX_TOKEN_LENGTH - 1;
 
+#[cfg(any(feature = "rocks", feature = "sqlite"))]
+pub(crate) mod worker {
+    use rayon::ThreadPool;
+    use tokio::{
+        runtime::{Handle, RuntimeFlavor},
+        sync::oneshot,
+    };
+
+    pub(crate) async fn spawn<U, V>(pool: &ThreadPool, f: U) -> trc::Result<V>
+    where
+        U: FnOnce() -> trc::Result<V> + Send + 'static,
+        V: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+
+        pool.spawn(move || {
+            tx.send(f()).ok();
+        });
+
+        match rx.await {
+            Ok(result) => result,
+            Err(err) => Err(trc::EventType::Server(trc::ServerEvent::ThreadError).reason(err)),
+        }
+    }
+
+    pub(crate) fn block<U, V>(mut f: U) -> trc::Result<V>
+    where
+        U: FnMut() -> trc::Result<V> + Send,
+        V: Send,
+    {
+        match Handle::try_current().map(|handle| handle.runtime_flavor()) {
+            Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(&mut f),
+            _ => f(),
+        }
+    }
+}
+
 #[allow(dead_code)]
 fn deserialize_i64_le(key: &[u8], bytes: &[u8]) -> trc::Result<i64> {
     Ok(i64::from_le_bytes(bytes[..].try_into().map_err(|_| {

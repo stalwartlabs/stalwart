@@ -18,7 +18,7 @@ azure_core = { version = "0.21.0", optional = true }
 azure_storage = { version = "0.21.0", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"], optional = true }
 azure_storage_blobs = { version = "0.21.0", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"]}
-tokio = { version = "1.53", features = ["sync", "fs", "io-util", "time"] }
+tokio = { version = "1.53", features = ["sync", "fs", "io-util", "time", "rt", "rt-multi-thread"] }
 r2d2 = { version = "0.8.10", optional = true }
 futures = { version = "0.3", optional = true }
 rand = "0.10.2"

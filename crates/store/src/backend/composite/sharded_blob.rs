@@ -112,21 +112,21 @@ impl ShardedBlob {
         .await
     }
 
-    pub async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
+    pub async fn put_blob(&self, key: &[u8], data: Vec<u8>) -> trc::Result<()> {
         async move {
             match self.get_store(key) {
                 BlobStore::Store(store) => match store {
                     #[cfg(feature = "sqlite")]
                     Store::SQLite(store) => store.put_blob(key, data).await,
                     #[cfg(feature = "foundation")]
-                    Store::FoundationDb(store) => store.put_blob(key, data).await,
+                    Store::FoundationDb(store) => store.put_blob(key, &data).await,
                     #[cfg(feature = "postgres")]
-                    Store::PostgreSQL(store) => store.put_blob(key, data).await,
+                    Store::PostgreSQL(store) => store.put_blob(key, &data).await,
                     #[cfg(feature = "mysql")]
-                    Store::MySQL(store) => store.put_blob(key, data).await,
+                    Store::MySQL(store) => store.put_blob(key, &data).await,
                     #[cfg(feature = "rocks")]
                     Store::RocksDb(store) => store.put_blob(key, data).await,
-                    Store::Ephemeral(store) => store.put_blob(key, data).await,
+                    Store::Ephemeral(store) => store.put_blob(key, &data).await,
                     // SPDX-SnippetBegin
                     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                     // SPDX-License-Identifier: LicenseRef-SEL
@@ -135,14 +135,14 @@ impl ShardedBlob {
                         any(feature = "postgres", feature = "mysql")
                     ))]
                     // SPDX-SnippetEnd
-                    Store::SQLReadReplica(store) => store.put_blob(key, data).await,
+                    Store::SQLReadReplica(store) => store.put_blob(key, &data).await,
                     Store::None => Err(trc::StoreEvent::NotConfigured.into()),
                 },
-                BlobStore::Fs(store) => store.put_blob(key, data).await,
+                BlobStore::Fs(store) => store.put_blob(key, &data).await,
                 #[cfg(feature = "s3")]
-                BlobStore::S3(store) => store.put_blob(key, data).await,
+                BlobStore::S3(store) => store.put_blob(key, &data).await,
                 #[cfg(feature = "azure")]
-                BlobStore::Azure(store) => store.put_blob(key, data).await,
+                BlobStore::Azure(store) => store.put_blob(key, &data).await,
                 BlobStore::Sharded(_) => unimplemented!(),
             }
         }

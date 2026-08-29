@@ -15,8 +15,10 @@ impl RocksDbStore {
         range: Range<usize>,
     ) -> trc::Result<Option<Vec<u8>>> {
         let db = self.db.clone();
+        let key = key.to_vec();
+
         self.spawn_worker(move || {
-            db.get_pinned_cf(&db.cf_handle(CF_BLOBS).unwrap(), key)
+            db.get_pinned_cf(&db.cf_handle(CF_BLOBS).unwrap(), &key)
                 .map(|obj| {
                     obj.map(|bytes| {
                         if range.start == 0 && range.end == usize::MAX {
@@ -34,10 +36,12 @@ impl RocksDbStore {
         .await
     }
 
-    pub(crate) async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
+    pub(crate) async fn put_blob(&self, key: &[u8], data: Vec<u8>) -> trc::Result<()> {
         let db = self.db.clone();
+        let key = key.to_vec();
+
         self.spawn_worker(move || {
-            db.put_cf(&db.cf_handle(CF_BLOBS).unwrap(), key, data)
+            db.put_cf(&db.cf_handle(CF_BLOBS).unwrap(), &key, &data)
                 .map_err(into_error)
         })
         .await
@@ -45,8 +49,10 @@ impl RocksDbStore {
 
     pub(crate) async fn delete_blob(&self, key: &[u8]) -> trc::Result<bool> {
         let db = self.db.clone();
+        let key = key.to_vec();
+
         self.spawn_worker(move || {
-            db.delete_cf(&db.cf_handle(CF_BLOBS).unwrap(), key)
+            db.delete_cf(&db.cf_handle(CF_BLOBS).unwrap(), &key)
                 .map_err(into_error)
                 .map(|_| true)
         })

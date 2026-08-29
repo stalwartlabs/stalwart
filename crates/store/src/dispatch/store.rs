@@ -108,6 +108,7 @@ impl Store {
         debug_assert!(ranges.iter().all(|params| {
             params.ascending
                 && !params.first
+                && params.values == ranges[0].values
                 && params.begin.subspace() == ranges[0].begin.subspace()
                 && params.end.subspace() == ranges[0].begin.subspace()
         }));

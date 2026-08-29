@@ -5,14 +5,13 @@
  */
 
 use super::RocksDbStore;
-use crate::*;
+use crate::{backend::worker, *};
 use ::registry::schema::structs;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType, MergeOperands,
     OptimisticTransactionDB, Options,
 };
 use std::path::PathBuf;
-use tokio::sync::oneshot;
 
 const MIN_WRITE_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 const MAX_WRITE_BUFFER_SIZE: usize = 64 * 1024 * 1024;
@@ -25,6 +24,8 @@ const CHURN_DELETION_TRIGGER: usize = 1024;
 const CHURN_DELETION_RATIO: f64 = 0.5;
 const BYTES_PER_SYNC: u64 = 1024 * 1024;
 const COLD_MIN_BLOB_SIZE: u64 = 16 * 1024;
+const LOGS_PERIODIC_COMPACTION: u64 = 24 * 60 * 60;
+const COUNTER_LEN: usize = std::mem::size_of::<i64>();
 
 #[derive(Clone, Copy)]
 enum CfProfile {
@@ -112,9 +113,18 @@ impl RocksDbStore {
             } {
                 cf_opts.set_enable_blob_files(true);
                 cf_opts.set_min_blob_size(min_blob_size);
+                cf_opts.set_blob_cache(&cache);
                 cf_opts.set_enable_blob_gc(true);
                 cf_opts.set_blob_gc_age_cutoff(1.0);
                 cf_opts.set_blob_gc_force_threshold(0.5);
+
+                if matches!(profile, CfProfile::Cold) {
+                    cf_opts.set_blob_compression_type(DBCompressionType::Lz4);
+                }
+            }
+
+            if matches!(subspace, Subspace::Logs) {
+                cf_opts.set_periodic_compaction_seconds(LOGS_PERIODIC_COMPACTION);
             }
 
             cfs.push(ColumnFamilyDescriptor::new(subspace.name(), cf_opts));
@@ -148,23 +158,20 @@ impl RocksDbStore {
         })))
     }
 
-    pub async fn spawn_worker<U, V>(&self, mut f: U) -> trc::Result<V>
+    pub(crate) async fn spawn_worker<U, V>(&self, f: U) -> trc::Result<V>
+    where
+        U: FnOnce() -> trc::Result<V> + Send + 'static,
+        V: Send + 'static,
+    {
+        worker::spawn(&self.worker_pool, f).await
+    }
+
+    pub(crate) async fn block_worker<U, V>(&self, f: U) -> trc::Result<V>
     where
         U: FnMut() -> trc::Result<V> + Send,
-        V: Sync + Send + 'static,
+        V: Send,
     {
-        let (tx, rx) = oneshot::channel();
-
-        self.worker_pool.scope(|s| {
-            s.spawn(|_| {
-                tx.send(f()).ok();
-            });
-        });
-
-        match rx.await {
-            Ok(result) => result,
-            Err(err) => Err(trc::EventType::Server(trc::ServerEvent::ThreadError).reason(err)),
-        }
+        worker::block(f)
     }
 }
 
@@ -173,19 +180,24 @@ pub fn numeric_value_merge(
     value: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    let mut value = if let Some(value) = value {
-        i64::from_le_bytes(value.try_into().ok()?)
-    } else {
-        0
-    };
+    let mut result = value.and_then(counter_operand).unwrap_or(0);
 
     for op in operands.iter() {
-        value += i64::from_le_bytes(op.try_into().ok()?);
+        if let Some(operand) = counter_operand(op) {
+            result = result.saturating_add(operand);
+        }
     }
 
-    let mut bytes = Vec::with_capacity(std::mem::size_of::<i64>());
-    bytes.extend_from_slice(&value.to_le_bytes());
+    let mut bytes = Vec::with_capacity(COUNTER_LEN);
+    bytes.extend_from_slice(&result.to_le_bytes());
     Some(bytes)
+}
+
+#[inline(always)]
+fn counter_operand(bytes: &[u8]) -> Option<i64> {
+    <[u8; COUNTER_LEN]>::try_from(bytes)
+        .ok()
+        .map(i64::from_le_bytes)
 }
 
 fn cf_options(profile: CfProfile, cache: &Cache, write_buffer_size: usize) -> Options {
@@ -197,18 +209,22 @@ fn cf_options(profile: CfProfile, cache: &Cache, write_buffer_size: usize) -> Op
     let mut opts = Options::default();
     opts.set_write_buffer_size(write_buffer_size);
     opts.set_max_write_buffer_number(4);
+    block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
 
     match profile {
         CfProfile::PointLookup => {
-            block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
             opts.set_compression_type(DBCompressionType::Lz4);
         }
         CfProfile::Scan => {
             block_opts.set_block_size(SCAN_BLOCK_SIZE);
             opts.set_compression_type(DBCompressionType::Lz4);
+            opts.add_compact_on_deletion_collector_factory(
+                CHURN_DELETION_WINDOW,
+                CHURN_DELETION_TRIGGER,
+                CHURN_DELETION_RATIO,
+            );
         }
         CfProfile::Churn => {
-            block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
             opts.set_compression_type(DBCompressionType::Lz4);
             opts.set_target_file_size_base(CHURN_TARGET_FILE_SIZE);
             opts.add_compact_on_deletion_collector_factory(
@@ -228,16 +244,13 @@ fn cf_options(profile: CfProfile, cache: &Cache, write_buffer_size: usize) -> Op
             );
         }
         CfProfile::Counter => {
-            block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
             opts.set_compression_type(DBCompressionType::None);
             opts.set_merge_operator_associative("merge", numeric_value_merge);
         }
         CfProfile::Blob => {
-            block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
             opts.set_compression_type(DBCompressionType::None);
         }
         CfProfile::Cold => {
-            block_opts.set_bloom_filter(BLOOM_BITS_PER_KEY, false);
             opts.set_compression_type(DBCompressionType::Lz4);
         }
     }

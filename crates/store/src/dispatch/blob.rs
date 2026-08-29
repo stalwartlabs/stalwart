@@ -144,10 +144,11 @@ impl BlobStore {
         };
 
         let start_time = Instant::now();
+        let size = data.len();
         let result = match &self {
             BlobStore::Store(store) => match store {
                 #[cfg(feature = "sqlite")]
-                Store::SQLite(store) => store.put_blob(key, &data).await,
+                Store::SQLite(store) => store.put_blob(key, data).await,
                 #[cfg(feature = "foundation")]
                 Store::FoundationDb(store) => store.put_blob(key, &data).await,
                 #[cfg(feature = "postgres")]
@@ -155,7 +156,7 @@ impl BlobStore {
                 #[cfg(feature = "mysql")]
                 Store::MySQL(store) => store.put_blob(key, &data).await,
                 #[cfg(feature = "rocks")]
-                Store::RocksDb(store) => store.put_blob(key, &data).await,
+                Store::RocksDb(store) => store.put_blob(key, data).await,
                 Store::Ephemeral(store) => store.put_blob(key, &data).await,
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -174,7 +175,7 @@ impl BlobStore {
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
-            BlobStore::Sharded(store) => store.put_blob(key, &data).await,
+            BlobStore::Sharded(store) => store.put_blob(key, data).await,
             // SPDX-SnippetEnd
         }
         .caused_by(trc::location!());
@@ -183,7 +184,7 @@ impl BlobStore {
             Store(StoreEvent::BlobWrite),
             Key = key,
             Elapsed = start_time.elapsed(),
-            Size = data.len(),
+            Size = size,
         );
 
         result

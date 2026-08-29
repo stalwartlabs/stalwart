@@ -14,38 +14,37 @@ impl SqliteStore {
         U: Deserialize + 'static,
     {
         let manager = self.conn_pool.clone();
+        let sql = self.sql.clone();
+        let subspace = key.subspace();
+        let key = key.serialize(0);
+
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let mut result = conn
-                .prepare_cached(&format!(
-                    "SELECT v FROM {} WHERE k = ?",
-                    key.subspace().name()
-                ))
-                .map_err(into_error)?;
-            let key = key.serialize(0);
-            result
-                .query_row([&key], |row| {
-                    U::deserialize_with_key(&key, row.get_ref(0)?.as_bytes()?)
-                        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(err.into()))
-                })
+            let bytes = conn
+                .prepare_cached(&sql.get(subspace).get_value)
+                .map_err(into_error)?
+                .query_row([&key], |row| Ok(row.get_ref(0)?.as_bytes()?.to_vec()))
                 .optional()
-                .map_err(into_error)
+                .map_err(into_error)?;
+
+            match bytes {
+                Some(bytes) => U::deserialize_with_key(&key, &bytes).map(Some),
+                None => Ok(None),
+            }
         })
         .await
     }
 
     pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
         let manager = self.conn_pool.clone();
+        let sql = self.sql.clone();
+        let subspace = key.subspace();
+        let key = key.serialize(0);
+
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let mut result = conn
-                .prepare_cached(&format!(
-                    "SELECT 1 FROM {} WHERE k = ?",
-                    key.subspace().name()
-                ))
-                .map_err(into_error)?;
-            let key = key.serialize(0);
-            result
+            conn.prepare_cached(&sql.get(subspace).key_exists)
+                .map_err(into_error)?
                 .query_row([&key], |_| Ok(()))
                 .optional()
                 .map(|opt| opt.is_some())
@@ -60,35 +59,17 @@ impl SqliteStore {
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         let manager = self.conn_pool.clone();
-        self.spawn_worker(move || {
+        let sql = self
+            .sql
+            .get(params.begin.subspace())
+            .iterate(params.first, params.ascending, params.values);
+
+        self.block_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let table = params.begin.subspace().name();
             let begin = params.begin.serialize(0);
             let end = params.end.serialize(0);
-            let keys = if params.values { "k, v" } else { "k" };
 
-            let mut query = conn
-                .prepare_cached(&match (params.first, params.ascending) {
-                    (true, true) => {
-                        format!(
-                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC LIMIT 1"
-                    )
-                    }
-                    (true, false) => {
-                        format!(
-                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k DESC LIMIT 1"
-                    )
-                    }
-                    (false, true) => {
-                        format!("SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC")
-                    }
-                    (false, false) => {
-                        format!(
-                            "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k DESC"
-                        )
-                    }
-                })
-                .map_err(into_error)?;
+            let mut query = conn.prepare_cached(sql).map_err(into_error)?;
             let mut rows = query.query([&begin, &end]).map_err(into_error)?;
 
             if params.values {
@@ -133,30 +114,35 @@ impl SqliteStore {
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         let manager = self.conn_pool.clone();
-        self.spawn_worker(move || {
+        let values = ranges[0].values;
+        let sql = self
+            .sql
+            .get(ranges[0].begin.subspace())
+            .iterate(false, true, values);
+
+        self.block_worker(move || {
             let conn = manager.get().map_err(into_error)?;
-            let table = ranges[0].begin.subspace().name();
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT k, v FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC"
-                ))
-                .map_err(into_error)?;
+            let mut stmt = conn.prepare_cached(sql).map_err(into_error)?;
 
             'outer: for params in &ranges {
                 let begin = params.begin.serialize(0);
                 let end = params.end.serialize(0);
                 let mut rows = stmt.query([&begin, &end]).map_err(into_error)?;
+
                 while let Some(row) = rows.next().map_err(into_error)? {
                     let key = row
                         .get_ref(0)
                         .map_err(into_error)?
                         .as_bytes()
                         .map_err(into_error)?;
-                    let value = row
-                        .get_ref(1)
-                        .map_err(into_error)?
-                        .as_bytes()
-                        .map_err(into_error)?;
+                    let value = if values {
+                        row.get_ref(1)
+                            .map_err(into_error)?
+                            .as_bytes()
+                            .map_err(into_error)?
+                    } else {
+                        b""
+                    };
 
                     if !cb(key, value)? {
                         break 'outer;
@@ -174,13 +160,15 @@ impl SqliteStore {
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,
     ) -> trc::Result<i64> {
         let key = key.into();
-        let table = key.subspace().name();
-        let key = key.serialize(0);
         let manager = self.conn_pool.clone();
+        let sql = self.sql.clone();
+        let subspace = key.subspace();
+        let key = key.serialize(0);
+
         self.spawn_worker(move || {
             let conn = manager.get().map_err(into_error)?;
             match conn
-                .prepare_cached(&format!("SELECT v FROM {table} WHERE k = ?"))
+                .prepare_cached(&sql.get(subspace).get_value)
                 .map_err(into_error)?
                 .query_row([&key], |row| row.get::<_, i64>(0))
             {

@@ -16,9 +16,11 @@ impl RocksDbStore {
         U: Deserialize + 'static,
     {
         let db = self.db.clone();
+        let subspace = key.subspace();
+        let key = key.serialize(0);
+
         self.spawn_worker(move || {
-            let cf = db.subspace_handle(key.subspace());
-            let key = key.serialize(0);
+            let cf = db.subspace_handle(subspace);
             db.get_pinned_cf(&cf, &key)
                 .map_err(into_error)
                 .and_then(|value| {
@@ -34,9 +36,11 @@ impl RocksDbStore {
 
     pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
         let db = self.db.clone();
+        let subspace = key.subspace();
+        let key = key.serialize(0);
+
         self.spawn_worker(move || {
-            let cf = db.subspace_handle(key.subspace());
-            let key = key.serialize(0);
+            let cf = db.subspace_handle(subspace);
             db.get_pinned_cf(&cf, &key)
                 .map_err(into_error)
                 .map(|value| value.is_some())
@@ -51,7 +55,7 @@ impl RocksDbStore {
     ) -> trc::Result<()> {
         let db = self.db.clone();
 
-        self.spawn_worker(move || {
+        self.block_worker(move || {
             let cf = db.subspace_handle(params.begin.subspace());
             let begin = params.begin.serialize(0);
             let end = params.end.serialize(0);
@@ -63,6 +67,7 @@ impl RocksDbStore {
             let mut read_opts = ReadOptions::default();
             read_opts.set_iterate_lower_bound(begin.as_slice());
             read_opts.set_iterate_upper_bound(upper_bound);
+            read_opts.set_auto_readahead_size(true);
 
             let mut it = db.raw_iterator_cf_opt(&cf, read_opts);
             if params.ascending {
@@ -104,7 +109,7 @@ impl RocksDbStore {
     ) -> trc::Result<()> {
         let db = self.db.clone();
 
-        self.spawn_worker(move || {
+        self.block_worker(move || {
             let cf = db.subspace_handle(ranges[0].begin.subspace());
 
             for params in &ranges {
@@ -118,6 +123,7 @@ impl RocksDbStore {
                 let mut read_opts = ReadOptions::default();
                 read_opts.set_iterate_lower_bound(begin.as_slice());
                 read_opts.set_iterate_upper_bound(upper_bound);
+                read_opts.set_auto_readahead_size(true);
 
                 let mut it = db.raw_iterator_cf_opt(&cf, read_opts);
                 it.seek(&begin);
@@ -153,9 +159,11 @@ impl RocksDbStore {
     ) -> trc::Result<i64> {
         let key = key.into();
         let db = self.db.clone();
+        let subspace = key.subspace();
+        let key = key.serialize(0);
+
         self.spawn_worker(move || {
-            let cf = self.db.subspace_handle(key.subspace());
-            let key = key.serialize(0);
+            let cf = db.subspace_handle(subspace);
 
             db.get_pinned_cf(&cf, &key)
                 .map_err(into_error)

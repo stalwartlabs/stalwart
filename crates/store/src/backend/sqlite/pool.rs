@@ -16,7 +16,6 @@ enum Source {
 
 type InitFn = dyn Fn(&mut Connection) -> Result<(), rusqlite::Error> + Send + Sync + 'static;
 
-/// An `r2d2::ManageConnection` for `rusqlite::Connection`s.
 pub struct SqliteConnectionManager {
     source: Source,
     flags: OpenFlags,
@@ -34,9 +33,6 @@ impl fmt::Debug for SqliteConnectionManager {
 }
 
 impl SqliteConnectionManager {
-    /// Creates a new `SqliteConnectionManager` from file.
-    ///
-    /// See `rusqlite::Connection::open`
     pub fn file<P: AsRef<Path>>(path: P) -> Self {
         Self {
             source: Source::File(path.as_ref().to_path_buf()),
@@ -45,7 +41,6 @@ impl SqliteConnectionManager {
         }
     }
 
-    /// Creates a new `SqliteConnectionManager` from memory.
     pub fn memory() -> Self {
         Self {
             source: Source::Memory,
@@ -54,28 +49,10 @@ impl SqliteConnectionManager {
         }
     }
 
-    /// Converts `SqliteConnectionManager` into one that sets OpenFlags upon
-    /// connection creation.
-    ///
-    /// See `rustqlite::OpenFlags` for a list of available flags.
     pub fn with_flags(self, flags: OpenFlags) -> Self {
         Self { flags, ..self }
     }
 
-    /// Converts `SqliteConnectionManager` into one that calls an initialization
-    /// function upon connection creation. Could be used to set PRAGMAs, for
-    /// example.
-    ///
-    /// ### Example
-    ///
-    /// Make a `SqliteConnectionManager` that sets the `foreign_keys` pragma to
-    /// true for every connection.
-    ///
-    /// ```rust,no_run
-    /// # use r2d2_sqlite::{SqliteConnectionManager};
-    /// let manager = SqliteConnectionManager::file("app.db")
-    ///     .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
-    /// ```
     pub fn with_init<F>(self, init: F) -> Self
     where
         F: Fn(&mut Connection) -> Result<(), rusqlite::Error> + Send + Sync + 'static,
@@ -83,11 +60,6 @@ impl SqliteConnectionManager {
         let init: Option<Box<InitFn>> = Some(Box::new(init));
         Self { init, ..self }
     }
-}
-
-fn sleeper(_: i32) -> bool {
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    true
 }
 
 impl r2d2::ManageConnection for SqliteConnectionManager {
@@ -99,12 +71,9 @@ impl r2d2::ManageConnection for SqliteConnectionManager {
             Source::File(ref path) => Connection::open_with_flags(path, self.flags),
             Source::Memory => Connection::open_in_memory_with_flags(self.flags),
         }
-        .and_then(|mut c| {
-            c.busy_handler(Some(sleeper))?;
-            match self.init {
-                None => Ok(c),
-                Some(ref init) => init(&mut c).map(|_| c),
-            }
+        .and_then(|mut c| match self.init {
+            None => Ok(c),
+            Some(ref init) => init(&mut c).map(|_| c),
         })
     }
 
@@ -112,7 +81,7 @@ impl r2d2::ManageConnection for SqliteConnectionManager {
         conn.execute_batch("")
     }
 
-    fn has_broken(&self, _: &mut Connection) -> bool {
-        false
+    fn has_broken(&self, conn: &mut Connection) -> bool {
+        !conn.is_autocommit()
     }
 }
