@@ -11,9 +11,9 @@ use super::{
 use crate::{
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME,
-        MAX_CONCURRENT_ALLOCATIONS, MergeResult, Operation, ValueClass, ValueOp, commit_backoff,
-        key::KeySerializer,
+        Advance, Allocation, AssignedIds, Batch, BatchCursor, LogSet, MAX_COMMIT_ATTEMPTS,
+        MAX_COMMIT_TIME, MAX_CONCURRENT_ALLOCATIONS, MergeResult, ValueClass, ValueOp,
+        commit_backoff, key::KeySerializer,
     },
     *,
 };
@@ -24,7 +24,6 @@ use foundationdb::{
 use futures::TryStreamExt;
 use std::{borrow::Cow, cmp::Ordering, ops::Range, time::Instant};
 use trc::AddContext;
-use types::collection::SyncCollection;
 
 struct CounterKeys {
     buf: Vec<u8>,
@@ -41,17 +40,13 @@ impl FdbStore {
     ) -> trc::Result<()> {
         let start = Instant::now();
         let mut retry_count = 0;
-        let has_changes = !batch.change_accounts.is_empty();
         let mark = result.mark();
         let counter_keys = counter_keys(&batch);
         let mut log_buf = Vec::new();
         let mut log_scratch = Vec::new();
 
         loop {
-            let mut account_id = u32::MAX;
-            let mut collection = u8::MAX;
-            let mut change_group = SyncCollection::None.change_group();
-            let mut document_id = u32::MAX;
+            let mut cursor = BatchCursor::new(&batch);
             result.rollback(mark);
 
             let trx = self.db.create_trx().map_err(into_error)?;
@@ -62,38 +57,10 @@ impl FdbStore {
 
             let mut key_buf = Vec::with_capacity(64);
             for op in batch.ops.iter_mut() {
-                match op {
-                    Operation::AccountId {
-                        account_id: account_id_,
-                    } => {
-                        account_id = *account_id_;
-                        if has_changes {
-                            result.set_current_change_id(account_id, change_group);
-                        }
-                    }
-                    Operation::Collection {
-                        collection: collection_,
-                    } => {
-                        collection = u8::from(*collection_);
-                        change_group = collection_.change_group();
-                        if has_changes {
-                            result.set_current_change_id(account_id, change_group);
-                        }
-                    }
-                    Operation::DocumentId {
-                        document_id: document_id_,
-                    } => {
-                        document_id = document_id_.resolve(result);
-                    }
-                    Operation::Value { class, op } => {
-                        key_buf.clear();
-                        class.serialize_into(
-                            &mut key_buf,
-                            account_id,
-                            collection,
-                            document_id,
-                            WITH_SUBSPACE,
-                        );
+                match cursor.advance(op, result) {
+                    Advance::Cursor => {}
+                    Advance::Value { class, op } => {
+                        cursor.value_key(class, &mut key_buf, WITH_SUBSPACE);
 
                         match op {
                             ValueOp::Set(set_value) => {
@@ -183,38 +150,17 @@ impl FdbStore {
                             }
                         }
                     }
-                    Operation::Index { field, key, set } => {
-                        key_buf.clear();
-                        IndexKey {
-                            account_id,
-                            collection,
-                            document_id,
-                            field: *field,
-                            key: &*key,
-                        }
-                        .serialize_into(&mut key_buf, WITH_SUBSPACE);
+                    Advance::Index { field, key, set } => {
+                        cursor.index_key(field, key, &mut key_buf, WITH_SUBSPACE);
 
-                        if *set {
+                        if set {
                             trx.set(&key_buf, &[]);
                         } else {
                             trx.clear(&key_buf);
                         }
                     }
-                    Operation::Log { collection, set } => {
-                        let log_change_id = result
-                            .change_id(account_id, collection.change_group())
-                            .unwrap_or_default();
-                        debug_assert!(
-                            log_change_id != 0,
-                            "no change id was allocated for this account"
-                        );
-                        key_buf.clear();
-                        LogKey {
-                            account_id,
-                            collection: u8::from(*collection),
-                            change_id: log_change_id,
-                        }
-                        .serialize_into(&mut key_buf, WITH_SUBSPACE);
+                    Advance::Log { collection, set } => {
+                        cursor.log_key(collection, result, &mut key_buf, WITH_SUBSPACE);
 
                         match set {
                             LogSet::Bytes(bytes) => {
@@ -231,18 +177,11 @@ impl FdbStore {
                             }
                         }
                     }
-                    Operation::AssertValue {
+                    Advance::Assert {
                         class,
                         assert_value,
                     } => {
-                        key_buf.clear();
-                        class.serialize_into(
-                            &mut key_buf,
-                            account_id,
-                            collection,
-                            document_id,
-                            WITH_SUBSPACE,
-                        );
+                        cursor.value_key(class, &mut key_buf, WITH_SUBSPACE);
 
                         let matches = match read_chunked_value(&key_buf, &trx, false).await {
                             Ok(ChunkedValue::Single(bytes)) => assert_value.matches(bytes.as_ref()),
@@ -284,11 +223,11 @@ impl FdbStore {
                 Ok(true)
             }
             Err(err) => {
-                if will_retry {
-                    err.on_error().await.map_err(into_error)?;
+                let err = FdbError::from(err);
+                if will_retry && err.is_retryable_not_committed() {
                     Ok(false)
                 } else {
-                    Err(into_error(FdbError::from(err)))
+                    Err(into_error(err))
                 }
             }
         }
@@ -470,21 +409,16 @@ fn counter_keys(batch: &Batch<'_>) -> CounterKeys {
     };
     let mut key = Vec::with_capacity(16);
 
-    for account in batch.change_accounts {
-        debug_assert!(account.account_id != u32::MAX);
+    for counter in batch.change_accounts {
+        debug_assert!(counter.account_id != u32::MAX);
         let start = keys.buf.len();
-        ValueClass::ChangeId(account.group).serialize_into(
-            &mut keys.buf,
-            account.account_id,
-            0,
-            0,
-            WITH_SUBSPACE,
-        );
+        Allocation::ChangeId(*counter).serialize_key_into(&mut keys.buf, WITH_SUBSPACE);
         keys.ranges.push(start..keys.buf.len());
     }
 
     for reservation in batch.reservations {
-        reservation.serialize_key_into(&mut key, WITH_SUBSPACE);
+        key.clear();
+        Allocation::Reserved(*reservation).serialize_key_into(&mut key, WITH_SUBSPACE);
 
         let key_index = match keys.ranges[num_accounts..]
             .iter()
@@ -537,7 +471,7 @@ async fn allocate_counters(
                 let account = &batch.change_accounts[index];
                 let change_id = current + 1;
                 trx.set(key, &change_id.to_le_bytes()[..]);
-                result.push_change_id(account.account_id, account.group, change_id as u64);
+                result.push_change_id(*account, change_id as u64);
             } else {
                 let key_offset = index - num_accounts;
                 let last_id = current + keys.reservation_total[key_offset];

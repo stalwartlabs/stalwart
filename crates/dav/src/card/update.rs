@@ -208,6 +208,7 @@ impl CardUpdateRequestHandler for Server {
                     card,
                     account_id,
                     document_id,
+                    None,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?
@@ -277,6 +278,7 @@ impl CardUpdateRequestHandler for Server {
                 access_token.account_tenant_ids(),
                 account_id,
                 document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;

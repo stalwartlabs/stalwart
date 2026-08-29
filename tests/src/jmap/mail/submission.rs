@@ -77,7 +77,7 @@ pub async fn test(test: &TestServer) {
     );
 
     // Test automatic identity creation
-    for (identity_id, email) in [(2u64, "jdoe@example.com"), (1u64, "john.doe@example.com")] {
+    for (identity_id, email) in [(1u64, "jdoe@example.com"), (2u64, "john.doe@example.com")] {
         let identity = client
             .identity_get(&Id::from(identity_id).to_string(), None)
             .await

@@ -12,7 +12,7 @@ use crate::{
     WITH_SUBSPACE,
     search::{GLOBAL_BUCKET_SHIFT, SearchField},
     write::{
-        BlobLink, IndexPropertyClass, PendingId, RegistryClass, SearchIndex, SearchIndexClass,
+        BlobLink, IndexPropertyClass, QueueDocumentId, RegistryClass, SearchIndex, SearchIndexClass,
     },
 };
 use registry::schema::prelude::ObjectType;
@@ -421,9 +421,10 @@ impl ValueClass {
                 TelemetryClass::Metric(metric_id) => serializer.write(*metric_id),
             },
             ValueClass::DocumentId => serializer.write(account_id).write(collection),
-            ValueClass::ChangeId(group) => {
-                serializer.write(account_id).write(u8::MAX).write(*group)
-            }
+            ValueClass::ChangeId(group) => serializer
+                .write(account_id)
+                .write(u8::MAX)
+                .write(group.to_u8()),
             ValueClass::Quota => serializer.write(account_id).write(u8::MAX),
             ValueClass::TenantQuota(tenant_id) => serializer
                 .write(GlobalCounterKind::TenantQuota as u8)
@@ -486,7 +487,7 @@ impl ValueClass {
                 } => serializer
                     .write(index.to_u8())
                     .write(*id_prefix)
-                    .write(id_suffix.assigned().unwrap_or(document_id))
+                    .write(id_suffix.resolve(document_id))
                     .write(*created_at),
                 SearchIndexClass::QueueIndex { index, partition } => serializer
                     .write(SearchIndexClass::QUEUE_CONTROL)
@@ -942,13 +943,13 @@ impl SearchIndexClass {
             SearchIndexClass::Queue {
                 index,
                 id_prefix: from_prefix,
-                id_suffix: PendingId::Assigned(0),
+                id_suffix: QueueDocumentId::Assigned(0),
                 created_at: 0,
             },
             SearchIndexClass::Queue {
                 index,
                 id_prefix: to_prefix,
-                id_suffix: PendingId::Assigned(u32::MAX),
+                id_suffix: QueueDocumentId::Assigned(u32::MAX),
                 created_at: u64::MAX,
             },
         )

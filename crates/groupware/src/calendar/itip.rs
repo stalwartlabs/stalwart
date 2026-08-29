@@ -300,16 +300,17 @@ impl ItipIngest for Server {
                     account_info.account_tenant_ids(),
                     account_id,
                     document_id,
+                    None,
                     next_email_alarm,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
             itip_message
-                .insert_pending_event(
+                .insert(
                     account_info.account_tenant_ids(),
                     account_id,
                     itip_document_id,
-                    document_id,
+                    Some(document_id),
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
@@ -601,6 +602,7 @@ async fn http_rsvp_sync_attendee_copy(
                 event,
                 target.account_id,
                 target.document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -801,6 +803,7 @@ async fn commit_itip_merge(
             event_,
             account_id,
             document_id,
+            None,
             &mut batch,
         )
         .caused_by(trc::location!())?;
@@ -817,6 +820,7 @@ async fn commit_itip_merge(
             account_info.account_tenant_ids(),
             account_id,
             itip_document_id,
+            None,
             &mut batch,
         )
         .caused_by(trc::location!())?;

@@ -57,18 +57,13 @@ pub async fn blob_tests() {
     // Reserve blob
     let until = now() + 1;
     store
-        .write_batch(
-            BatchBuilder::new()
-                .with_account_id(0)
-                .set(
-                    BlobOp::Link {
-                        to: BlobLink::Temporary { until },
-                        hash: hash.clone(),
-                    },
-                    1024u32.serialize(),
-                )
-                .build_all(),
-        )
+        .write_batch(BatchBuilder::new().with_account_id(0).set(
+            BlobOp::Link {
+                to: BlobLink::Temporary { until },
+                hash: hash.clone(),
+            },
+            1024u32.serialize(),
+        ))
         .await
         .unwrap();
 
@@ -83,11 +78,7 @@ pub async fn blob_tests() {
 
     // Commit blob
     store
-        .write_batch(
-            BatchBuilder::new()
-                .set(BlobOp::Commit { hash: hash.clone() }, Vec::new())
-                .build_all(),
-        )
+        .write_batch(BatchBuilder::new().set(BlobOp::Commit { hash: hash.clone() }, Vec::new()))
         .await
         .unwrap();
 
@@ -217,7 +208,7 @@ pub async fn blob_tests() {
         };
         batch.set(BlobOp::Commit { hash: hash.clone() }, vec![]);
 
-        store.write_batch(batch.build_all()).await.unwrap();
+        store.write_batch(&mut batch).await.unwrap();
         blob_store
             .put_blob(hash.as_ref(), blob.as_slice(), CompressionAlgo::Lz4)
             .await
@@ -318,8 +309,7 @@ pub async fn blob_tests() {
                 .clear(BlobOp::Link {
                     hash: BlobHash::generate(b"789".as_slice()),
                     to: BlobLink::Document,
-                })
-                .build_all(),
+                }),
         )
         .await
         .unwrap();

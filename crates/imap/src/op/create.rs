@@ -104,7 +104,7 @@ impl<T: SessionStream> SessionData<T> {
         // Build batch
         let parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);
         let mut batch = BatchBuilder::new();
-        let first_slot = batch.reserve_document_ids(
+        let slots = batch.reserve_document_ids(
             params.account_id,
             Collection::Mailbox,
             params.path.len() as u32,
@@ -122,16 +122,13 @@ impl<T: SessionStream> SessionData<T> {
             {
                 mailbox.role = mailbox_role;
             }
-            let slot = first_slot.offset(pos);
+            let slot = slots.get(pos);
             let builder = ObjectIndexBuilder::<(), _>::new().with_changes(mailbox);
             batch
                 .with_account_id(params.account_id)
                 .with_collection(Collection::Mailbox)
                 .create_document(slot)
-                .custom(match parent_slot {
-                    Some(parent_slot) => builder.with_pending_id(parent_slot),
-                    None => builder,
-                })
+                .custom(builder.with_pending_id_opt(parent_slot))
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .commit_point();
             parent_slot = Some(slot);
@@ -142,9 +139,7 @@ impl<T: SessionStream> SessionData<T> {
             .commit_batch(batch)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        let create_ids = (0..params.path.len())
-            .map(|offset| assigned_ids.slot(first_slot.offset(offset)))
-            .collect::<Vec<_>>();
+        let create_ids = assigned_ids.slots(slots).collect::<Vec<_>>();
         let last_mailbox_id = create_ids.last().copied().unwrap_or_default();
 
         trc::event!(

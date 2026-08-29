@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::api::pending_creates::PendingCreates;
 use crate::changes::state::JmapCacheState;
 use crate::contact::assert_is_unique_uid;
 use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
@@ -97,7 +98,7 @@ impl ContactCardSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        let mut created_slots: Vec<(String, Slot)> = Vec::new();
+        let mut created_slots = PendingCreates::new();
         'create: for (id, object) in request.unwrap_create() {
             match self
                 .create_contact_card(
@@ -113,7 +114,7 @@ impl ContactCardSet for Server {
                 .await?
             {
                 Ok(document_id) => {
-                    created_slots.push((id, document_id));
+                    created_slots.push(id, document_id);
                 }
                 Err(err) => {
                     response.not_created.append(id, err);
@@ -298,6 +299,7 @@ impl ContactCardSet for Server {
                     contact_card,
                     account_id,
                     document_id,
+                    None,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
@@ -372,14 +374,11 @@ impl ContactCardSet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            for (create_id, slot) in created_slots {
-                response.created(create_id, assigned_ids.slot(slot));
-            }
+            created_slots.resolve(&mut response, &assigned_ids);
 
-            response.new_state = State::Exact(
-                assigned_ids.last_change_id(account_id, SyncCollection::AddressBook.change_group()),
-            )
-            .into();
+            response.new_state =
+                State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::AddressBook))
+                    .into();
         }
 
         Ok(response)
@@ -463,6 +462,7 @@ impl ContactCardSet for Server {
             access_token.account_tenant_ids(),
             account_id,
             document_id,
+            None,
             batch,
         )
         .caused_by(trc::location!())

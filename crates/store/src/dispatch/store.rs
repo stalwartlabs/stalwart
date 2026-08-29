@@ -6,7 +6,7 @@
 
 use crate::{
     Deserialize, IterateParams, Key, QueryResult, Store, Subspace, U32_LEN, Value, ValueKey,
-    write::{AnyKey, AssignedIds, Batch, ValueClass, key::KeySerializer},
+    write::{AnyKey, AssignedIds, Batch, BatchBuilder, ValueClass, key::KeySerializer},
 };
 use compact_str::ToCompactString;
 use std::time::Instant;
@@ -202,13 +202,23 @@ impl Store {
         result.caused_by(trc::location!())
     }
 
-    pub async fn write_batch(&self, batch: Batch<'_>) -> trc::Result<AssignedIds> {
+    pub async fn write_batch(&self, builder: &mut BatchBuilder) -> trc::Result<AssignedIds> {
         let mut assigned_ids = AssignedIds::default();
-        self.write(batch, &mut assigned_ids).await?;
+        let mut commit_points = builder.commit_points();
+
+        for commit_point in commit_points.iter() {
+            let batch = builder.build_one(commit_point);
+            self.write(batch, &mut assigned_ids).await?;
+        }
+
         Ok(assigned_ids)
     }
 
-    pub async fn write(&self, batch: Batch<'_>, assigned_ids: &mut AssignedIds) -> trc::Result<()> {
+    pub(crate) async fn write(
+        &self,
+        batch: Batch<'_>,
+        assigned_ids: &mut AssignedIds,
+    ) -> trc::Result<()> {
         let start_time = Instant::now();
         let ops = batch.ops.len();
 

@@ -21,6 +21,7 @@ impl ContactCard {
         card: Archive<&ArchivedContactCard>,
         account_id: u32,
         document_id: u32,
+        parent_id: Option<Slot>,
         batch: &'x mut BatchBuilder,
     ) -> trc::Result<&'x mut BatchBuilder> {
         let mut new_card = self;
@@ -37,7 +38,8 @@ impl ContactCard {
                 ObjectIndexBuilder::new()
                     .with_current(card)
                     .with_changes(new_card)
-                    .with_changed_by(changed_by),
+                    .with_changed_by(changed_by)
+                    .with_pending_id_opt(parent_id),
             )
             .map(|b| b.commit_point())
     }
@@ -47,6 +49,7 @@ impl ContactCard {
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: impl Into<PendingId>,
+        parent_id: Option<Slot>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         // Build card
@@ -63,59 +66,8 @@ impl ContactCard {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(card)
-                    .with_changed_by(changed_by),
-            )
-            .map(|b| b.commit_point())
-    }
-
-    pub fn insert_pending_parent(
-        self,
-        changed_by: AccountTenantIds,
-        account_id: u32,
-        document_id: Slot,
-        parent_id: Slot,
-        batch: &mut BatchBuilder,
-    ) -> trc::Result<&mut BatchBuilder> {
-        let mut card = self;
-        let now = now() as i64;
-        card.modified = now;
-        card.created = now;
-
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::ContactCard)
-            .create_document(document_id)
-            .custom(
-                ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(card)
                     .with_changed_by(changed_by)
-                    .with_pending_id(parent_id),
-            )
-            .map(|b| b.commit_point())
-    }
-
-    pub fn update_pending_parent<'x>(
-        self,
-        changed_by: AccountTenantIds,
-        card: Archive<&ArchivedContactCard>,
-        account_id: u32,
-        document_id: u32,
-        parent_id: Slot,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
-        let mut new_card = self;
-        new_card.modified = now() as i64;
-
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::ContactCard)
-            .with_document(document_id)
-            .custom(
-                ObjectIndexBuilder::new()
-                    .with_current(card)
-                    .with_changes(new_card)
-                    .with_changed_by(changed_by)
-                    .with_pending_id(parent_id),
+                    .with_pending_id_opt(parent_id),
             )
             .map(|b| b.commit_point())
     }

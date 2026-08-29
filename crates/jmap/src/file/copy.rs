@@ -131,7 +131,7 @@ impl FileNodeCopy for Server {
         let mut batch = BatchBuilder::new();
         let mut pending_names: AHashMap<(ParentRef, String), Option<u32>> = AHashMap::new();
         let mut implicit_destroys: AHashSet<u32> = AHashSet::new();
-        let mut created_folders: AHashMap<u64, Vec<types::acl::AclGrant>> = AHashMap::new();
+        let mut created_folders: AHashMap<ParentRef, Vec<types::acl::AclGrant>> = AHashMap::new();
         let mut created_slots: Vec<(Id, Slot, Option<String>)> = Vec::new();
         let mut destroy_ids = Vec::new();
 
@@ -330,10 +330,10 @@ impl FileNodeCopy for Server {
             };
 
             // Permission and ACL inheritance for the destination parent
-            if let (Some(parent_key), Some(parent_id)) = (parent.key(), parent.document_id()) {
+            if let Some(parent_id) = parent.document_id() {
                 // The user must be allowed to add children to the destination parent
                 if let Some(allowed) = &can_add_to
-                    && !created_folders.contains_key(&parent_key)
+                    && !created_folders.contains_key(&parent)
                     && !allowed.contains(parent_id)
                 {
                     response.not_created.append(
@@ -345,7 +345,7 @@ impl FileNodeCopy for Server {
                     continue 'create;
                 }
 
-                let parent_acls = created_folders.get(&parent_key).cloned().or_else(|| {
+                let parent_acls = created_folders.get(&parent).cloned().or_else(|| {
                     cache
                         .container_resource_by_id(parent_id)
                         .and_then(|r| r.acls())
@@ -387,10 +387,7 @@ impl FileNodeCopy for Server {
 
             let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
             if file_node.file.is_none() {
-                created_folders.insert(
-                    ParentRef::pending(document_id).key().unwrap(),
-                    file_node.acls.clone(),
-                );
+                created_folders.insert(ParentRef::pending(document_id), file_node.acls.clone());
             }
             pending_names.insert(
                 crate::file::set::pending_key(parent, &file_node, case_insensitive),
@@ -452,9 +449,8 @@ impl FileNodeCopy for Server {
                 }
             }
 
-            response.new_state = State::Exact(
-                assigned_ids.last_change_id(account_id, SyncCollection::FileNode.change_group()),
-            );
+            response.new_state =
+                State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::FileNode));
         }
 
         if on_success_delete && !destroy_ids.is_empty() {

@@ -302,9 +302,9 @@ impl RegistryStore {
             item_id = self
                 .0
                 .store
-                .write_batch(id_batch.build_all())
-                .await
-                .and_then(|v| v.last_counter_id())? as u64;
+                .write_batch(&mut id_batch)
+                .await?
+                .last_counter_id() as u64;
         }
 
         // It's pickle time!
@@ -339,7 +339,7 @@ impl RegistryStore {
             );
 
         self.store()
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .map(|_| RegistryWriteResult::Success(Id::new(item_id)))
     }
@@ -407,7 +407,7 @@ impl RegistryStore {
 
         self.0
             .store
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .map(|_| RegistryWriteResult::Success(Id::from(item_id)))
             .caused_by(trc::location!())

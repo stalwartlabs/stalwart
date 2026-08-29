@@ -6,16 +6,15 @@
 
 use super::{DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, MysqlStore, into_error, is_timeout_error};
 use crate::{
-    IndexKey, Key, LogKey, Shape, Subspace,
+    Key, Shape, Subspace,
     write::{
-        AssignedIds, Batch, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        ValueClass, ValueOp, commit_backoff,
+        Advance, AssignedIds, Batch, BatchCursor, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME,
+        MergeResult, ValueOp, commit_backoff,
     },
 };
 use ahash::AHashMap;
 use mysql_async::{Conn, Error, IsolationLevel, TxOpts, params, prelude::Queryable};
 use std::time::Instant;
-use types::collection::SyncCollection;
 
 #[derive(Debug)]
 enum CommitError {
@@ -69,11 +68,7 @@ impl MysqlStore {
         batch: &mut Batch<'_>,
         result: &mut AssignedIds,
     ) -> Result<(), CommitError> {
-        let has_changes = !batch.change_accounts.is_empty();
-        let mut account_id = u32::MAX;
-        let mut collection = u8::MAX;
-        let mut change_group = SyncCollection::None.change_group();
-        let mut document_id = u32::MAX;
+        let mut cursor = BatchCursor::new(batch);
         let mut asserted_values = AHashMap::new();
         let mut tx_opts = TxOpts::default();
         tx_opts
@@ -93,69 +88,30 @@ impl MysqlStore {
             let last_id = trx.prep("SELECT LAST_INSERT_ID()").await?;
             let mut key_buf = Vec::with_capacity(16);
 
-            for account in batch.change_accounts {
+            for allocation in batch.allocations() {
                 key_buf.clear();
-                ValueClass::ChangeId(account.group).serialize_into(
-                    &mut key_buf,
-                    account.account_id,
-                    0,
-                    0,
-                    0,
-                );
-                trx.exec_drop(&incr, params! {"k" => &key_buf, "v" => 1i64})
-                    .await?;
-                let change_id = trx
-                    .exec_first::<i64, _, _>(&last_id, ())
-                    .await?
-                    .ok_or_else(missing_last_insert_id)?;
-                result.push_change_id(account.account_id, account.group, change_id as u64);
-            }
-
-            for reservation in batch.reservations {
-                reservation.serialize_key_into(&mut key_buf, 0);
+                allocation.serialize_key_into(&mut key_buf, 0);
                 trx.exec_drop(
                     &incr,
-                    params! {"k" => &key_buf, "v" => reservation.count as i64},
+                    params! {"k" => &key_buf, "v" => allocation.increment_by()},
                 )
                 .await?;
                 let counter = trx
                     .exec_first::<i64, _, _>(&last_id, ())
                     .await?
                     .ok_or_else(missing_last_insert_id)?;
-                result.fill_slots(reservation.first_slot, reservation.count, counter as u32);
+                result.apply(allocation, counter);
             }
         }
 
         let mut key_buf = Vec::with_capacity(64);
         for op in batch.ops.iter_mut() {
-            match op {
-                Operation::AccountId {
-                    account_id: account_id_,
-                } => {
-                    account_id = *account_id_;
-                    if has_changes {
-                        result.set_current_change_id(account_id, change_group);
-                    }
-                }
-                Operation::Collection {
-                    collection: collection_,
-                } => {
-                    collection = u8::from(*collection_);
-                    change_group = collection_.change_group();
-                    if has_changes {
-                        result.set_current_change_id(account_id, change_group);
-                    }
-                }
-                Operation::DocumentId {
-                    document_id: document_id_,
-                } => {
-                    document_id = document_id_.resolve(result);
-                }
-                Operation::Value { class, op } => {
-                    key_buf.clear();
-                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+            match cursor.advance(op, result) {
+                Advance::Cursor => {}
+                Advance::Value { class, op } => {
+                    cursor.value_key(class, &mut key_buf, 0);
                     let key = &key_buf;
-                    let subspace = class.subspace(collection);
+                    let subspace = cursor.subspace(class);
                     let table = subspace.name();
 
                     match op {
@@ -311,40 +267,19 @@ impl MysqlStore {
                         }
                     }
                 }
-                Operation::Index { field, key, set } => {
-                    key_buf.clear();
-                    IndexKey {
-                        account_id,
-                        collection,
-                        document_id,
-                        field: *field,
-                        key: &*key,
-                    }
-                    .serialize_into(&mut key_buf, 0);
+                Advance::Index { field, key, set } => {
+                    cursor.index_key(field, key, &mut key_buf, 0);
                     let key = &key_buf;
 
-                    let s = if *set {
+                    let s = if set {
                         trx.prep("INSERT IGNORE INTO i (k) VALUES (?)").await?
                     } else {
                         trx.prep("DELETE FROM i WHERE k = ?").await?
                     };
                     trx.exec_drop(&s, (key,)).await?;
                 }
-                Operation::Log { collection, set } => {
-                    let log_change_id = result
-                        .change_id(account_id, collection.change_group())
-                        .unwrap_or_default();
-                    debug_assert!(
-                        log_change_id != 0,
-                        "no change id was allocated for this account"
-                    );
-                    key_buf.clear();
-                    LogKey {
-                        account_id,
-                        collection: u8::from(*collection),
-                        change_id: log_change_id,
-                    }
-                    .serialize_into(&mut key_buf, 0);
+                Advance::Log { collection, set } => {
+                    cursor.log_key(collection, result, &mut key_buf, 0);
                     let key = &key_buf;
                     let value = match set {
                         LogSet::Bytes(bytes) => &*bytes,
@@ -365,12 +300,12 @@ impl MysqlStore {
 
                     trx.exec_drop(&s, (key, value)).await?;
                 }
-                Operation::AssertValue {
+                Advance::Assert {
                     class,
                     assert_value,
                 } => {
-                    let key = class.serialize(account_id, collection, document_id, 0);
-                    let table = class.subspace(collection).name();
+                    let key = cursor.value_key_owned(class, 0);
+                    let table = cursor.subspace(class).name();
 
                     let s = trx
                         .prep(format!("SELECT v FROM {} WHERE k = ? FOR UPDATE", table))

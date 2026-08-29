@@ -71,15 +71,12 @@ impl FileNode {
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
             .create_document(document_id)
-            .custom({
-                let builder = ObjectIndexBuilder::<(), _>::new()
+            .custom(
+                ObjectIndexBuilder::<(), _>::new()
                     .with_changes(node)
-                    .with_changed_by(changed_by);
-                match parent_id {
-                    Some(parent_id) => builder.with_pending_id(parent_id),
-                    None => builder,
-                }
-            })
+                    .with_changed_by(changed_by)
+                    .with_pending_id_opt(parent_id),
+            )
             .map(|b| b.commit_point())
     }
 
@@ -132,10 +129,7 @@ impl FileNode {
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
             .with_document(document_id)
-            .custom(match parent_id {
-                Some(parent_id) => builder.with_pending_id(parent_id),
-                None => builder,
-            })
+            .custom(builder.with_pending_id_opt(parent_id))
             .map(|b| b.commit_point())
     }
 }

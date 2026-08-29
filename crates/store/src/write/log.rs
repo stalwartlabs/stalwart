@@ -39,47 +39,6 @@ pub enum ChangeSet<T> {
     Large(AHashSet<T>),
 }
 
-impl<T: std::hash::Hash + Eq> PartialEq for ChangeSet<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.len_inner() == other.len_inner() && self.iter().all(|item| other.contains_inner(item))
-    }
-}
-
-impl<T: std::hash::Hash + Eq> Eq for ChangeSet<T> {}
-
-impl<T: std::hash::Hash + Eq> std::hash::Hash for ChangeSet<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let mut fold = 0u64;
-        for item in self.iter() {
-            let mut hasher = ahash::AHasher::default();
-            item.hash(&mut hasher);
-            fold ^= std::hash::Hasher::finish(&hasher);
-        }
-        state.write_u64(fold);
-        state.write_usize(self.len_inner());
-    }
-}
-
-impl<T> ChangeSet<T> {
-    #[inline(always)]
-    fn len_inner(&self) -> usize {
-        match self {
-            ChangeSet::Small(items) => items.len(),
-            ChangeSet::Large(items) => items.len(),
-        }
-    }
-}
-
-impl<T: std::hash::Hash + Eq> ChangeSet<T> {
-    #[inline(always)]
-    fn contains_inner(&self, value: &T) -> bool {
-        match self {
-            ChangeSet::Small(items) => items.contains(value),
-            ChangeSet::Large(items) => items.contains(value),
-        }
-    }
-}
-
 pub const PENDING_ID_MARKER: u64 = (u32::MAX as u64) << 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -230,7 +189,7 @@ pub enum VanishedItem {
 #[derive(Default, Debug)]
 pub(crate) struct VanishedItems(Vec<VanishedItem>);
 
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Default, Debug)]
 pub struct Changes {
     pub item_inserts: ChangeSet<u64>,
     pub item_updates: ChangeSet<u64>,
@@ -242,19 +201,6 @@ pub struct Changes {
     pub container_property_changes: ChangeSet<u64>,
 
     pending: IndexSet<PendingChange, RandomState>,
-}
-
-impl std::hash::Hash for Changes {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.item_inserts.hash(state);
-        self.item_updates.hash(state);
-        self.item_deletes.hash(state);
-        self.container_inserts.hash(state);
-        self.container_updates.hash(state);
-        self.container_deletes.hash(state);
-        self.container_property_changes.hash(state);
-        state.write_usize(self.pending.len());
-    }
 }
 
 impl Changes {
@@ -1334,5 +1280,306 @@ mod tests {
 
             assert_eq!(names, decoded, "multibyte roundtrip failed");
         }
+    }
+
+    fn assigned(ids: &[u32]) -> AssignedIds {
+        let mut assigned = AssignedIds::default();
+        for (index, id) in ids.iter().enumerate() {
+            assert!(*id > 0, "slot ids must be non-zero");
+            assigned.fill_slots(crate::write::Slot::new(index as u32), 1, *id);
+        }
+        assigned
+    }
+
+    fn slot(index: u32) -> PendingId {
+        PendingId::Slot(crate::write::Slot::new(index))
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct Entry {
+        list: usize,
+        prefix: Option<PendingId>,
+        id: PendingId,
+    }
+
+    fn push_entry(changes: &mut Changes, entry: Entry) {
+        let id = changes.build_id(entry.prefix, entry.id);
+        match entry.list {
+            CONTAINER_INSERTS => changes.container_inserts.insert(id),
+            CONTAINER_UPDATES => changes.container_updates.insert(id),
+            CONTAINER_PROPERTY_CHANGES => changes.container_property_changes.insert(id),
+            CONTAINER_DELETES => changes.container_deletes.insert(id),
+            ITEM_INSERTS => changes.item_inserts.insert(id),
+            ITEM_UPDATES => changes.item_updates.insert(id),
+            _ => changes.item_deletes.insert(id),
+        };
+    }
+
+    fn resolve_entry(entry: Entry, ids: &AssignedIds) -> Entry {
+        Entry {
+            list: entry.list,
+            prefix: entry
+                .prefix
+                .map(|prefix| PendingId::Assigned(prefix.resolve(ids))),
+            id: PendingId::Assigned(entry.id.resolve(ids)),
+        }
+    }
+
+    fn assert_pending_matches_concrete(entries: &[Entry], ids: &AssignedIds, is_prefixed: bool) {
+        let mut pending = Changes::default();
+        let mut concrete = Changes::default();
+        for entry in entries {
+            push_entry(&mut pending, *entry);
+            push_entry(&mut concrete, resolve_entry(*entry, ids));
+        }
+        assert!(
+            !concrete.has_pending(),
+            "the reference row must not hold pending ids"
+        );
+
+        let mut scratch = Vec::new();
+        let mut got = Vec::new();
+        pending.serialize_into(is_prefixed, Some(ids), &mut scratch, &mut got);
+        let want = concrete.serialize(is_prefixed, &mut scratch);
+
+        assert_eq!(
+            want, got,
+            "pending row serialized differently, prefixed={is_prefixed}, entries={entries:?}"
+        );
+    }
+
+    #[test]
+    fn pending_changelog_matches_concrete_changelog() {
+        let ids = assigned(&[1000, 1001, 1002, 1500, 2000]);
+
+        for is_prefixed in [true, false] {
+            for list in 0..CHANGE_LISTS {
+                let is_item = list >= ITEM_INSERTS;
+
+                assert_pending_matches_concrete(
+                    &[Entry {
+                        list,
+                        prefix: None,
+                        id: slot(0),
+                    }],
+                    &ids,
+                    is_prefixed,
+                );
+
+                if is_item {
+                    for prefix in [
+                        Some(slot(3)),
+                        Some(PendingId::Assigned(9)),
+                        Some(slot(4)),
+                        None,
+                    ] {
+                        assert_pending_matches_concrete(
+                            &[
+                                Entry {
+                                    list,
+                                    prefix,
+                                    id: slot(0),
+                                },
+                                Entry {
+                                    list,
+                                    prefix,
+                                    id: PendingId::Assigned(7),
+                                },
+                                Entry {
+                                    list,
+                                    prefix,
+                                    id: slot(2),
+                                },
+                                Entry {
+                                    list,
+                                    prefix,
+                                    id: slot(1),
+                                },
+                            ],
+                            &ids,
+                            is_prefixed,
+                        );
+                    }
+                }
+            }
+
+            // A pending id in one list must not disturb the encoding of a wholly concrete list
+            assert_pending_matches_concrete(
+                &[
+                    Entry {
+                        list: ITEM_INSERTS,
+                        prefix: Some(slot(3)),
+                        id: slot(0),
+                    },
+                    Entry {
+                        list: ITEM_UPDATES,
+                        prefix: Some(PendingId::Assigned(4)),
+                        id: PendingId::Assigned(90),
+                    },
+                    Entry {
+                        list: ITEM_UPDATES,
+                        prefix: Some(PendingId::Assigned(4)),
+                        id: PendingId::Assigned(3),
+                    },
+                    Entry {
+                        list: CONTAINER_UPDATES,
+                        prefix: None,
+                        id: PendingId::Assigned(11),
+                    },
+                    Entry {
+                        list: CONTAINER_DELETES,
+                        prefix: None,
+                        id: PendingId::Assigned(2),
+                    },
+                ],
+                &ids,
+                is_prefixed,
+            );
+        }
+    }
+
+    #[test]
+    fn pending_changelog_interns_repeated_ids() {
+        let ids = assigned(&[1000, 1001]);
+        let mut changes = Changes::default();
+
+        for _ in 0..3 {
+            let id = changes.build_id(Some(slot(1)), slot(0));
+            changes.item_inserts.insert(id);
+        }
+
+        assert_eq!(
+            changes.item_inserts.len(),
+            1,
+            "the same pending change must intern to the same marker"
+        );
+
+        assert_pending_matches_concrete(
+            &[
+                Entry {
+                    list: ITEM_INSERTS,
+                    prefix: Some(slot(1)),
+                    id: slot(0),
+                },
+                Entry {
+                    list: ITEM_INSERTS,
+                    prefix: Some(slot(1)),
+                    id: slot(0),
+                },
+            ],
+            &ids,
+            true,
+        );
+    }
+
+    #[test]
+    fn pending_changelog_matches_concrete_changelog_random() {
+        let mut lcg = Lcg(0x51075);
+        let slot_ids: Vec<u32> = (0..24).map(|n| 100_000 + n * 37).collect();
+        let ids = assigned(&slot_ids);
+
+        for _ in 0..400 {
+            for is_prefixed in [true, false] {
+                let mut entries = Vec::new();
+                for _ in 0..(lcg.next() % 24) {
+                    let list = (lcg.next() % CHANGE_LISTS as u64) as usize;
+                    let pick = |lcg: &mut Lcg| {
+                        if lcg.next().is_multiple_of(2) {
+                            slot((lcg.next() % slot_ids.len() as u64) as u32)
+                        } else {
+                            PendingId::Assigned((lcg.next() % 500) as u32 + 1)
+                        }
+                    };
+                    let id = pick(&mut lcg);
+                    let prefix = if list >= ITEM_INSERTS && !lcg.next().is_multiple_of(4) {
+                        Some(pick(&mut lcg))
+                    } else {
+                        None
+                    };
+                    entries.push(Entry { list, prefix, id });
+                }
+
+                assert_pending_matches_concrete(&entries, &ids, is_prefixed);
+            }
+        }
+    }
+
+    #[test]
+    fn pending_changelog_roundtrips_through_the_reader() {
+        let ids = assigned(&[7, 8, 9]);
+        let mut changes = Changes::default();
+
+        for (prefix, id) in [
+            (Some(slot(0)), slot(1)),
+            (Some(PendingId::Assigned(3)), slot(2)),
+            (Some(slot(0)), PendingId::Assigned(4)),
+        ] {
+            let id = changes.build_id(prefix, id);
+            changes.item_inserts.insert(id);
+        }
+        let id = changes.build_id(None, slot(0));
+        changes.container_inserts.insert(id);
+
+        let mut scratch = Vec::new();
+        let mut bytes = Vec::new();
+        changes.serialize_into(true, Some(&ids), &mut scratch, &mut bytes);
+
+        let mut decoded = crate::query::log::Changes::default();
+        decoded.deserialize(&bytes, true).expect("failed to decode");
+        decoded.finalize();
+
+        let mut got = decoded.changes.clone();
+        got.sort_by_key(|c| format!("{c:?}"));
+        let mut want = vec![
+            Change::InsertItem((7u64 << 32) | 8),
+            Change::InsertItem((3u64 << 32) | 9),
+            Change::InsertItem((7u64 << 32) | 4),
+            Change::InsertContainer(7),
+        ];
+        want.sort_by_key(|c| format!("{c:?}"));
+
+        assert_eq!(want, got, "pending ids did not survive a roundtrip");
+    }
+
+    #[test]
+    fn changelog_builder_pending_matches_concrete() {
+        let ids = assigned(&[500, 501, 502]);
+
+        let mut pending = ChangeLogBuilder::default();
+        let mut concrete = ChangeLogBuilder::default();
+
+        for (builder, mailbox, first, second) in [
+            (&mut pending, slot(0), slot(1), PendingId::Assigned(20)),
+            (
+                &mut concrete,
+                PendingId::Assigned(500),
+                PendingId::Assigned(501),
+                PendingId::Assigned(20),
+            ),
+        ] {
+            builder.log_container_insert(SyncCollection::Email, mailbox);
+            builder.log_item_insert(SyncCollection::Email, Some(mailbox), first);
+            builder.log_item_insert(SyncCollection::Email, Some(mailbox), second);
+            // A delete of an id inserted in the same row is promoted to an update
+            builder.log_item_delete(SyncCollection::Email, Some(mailbox), second);
+            builder.log_item_insert(SyncCollection::Email, Some(mailbox), second);
+            // A container delete cancels an earlier property change
+            builder.log_container_property_update(SyncCollection::Email, mailbox);
+            builder.log_container_update(SyncCollection::Email, PendingId::Assigned(3));
+            builder.log_container_delete(SyncCollection::Email, PendingId::Assigned(3));
+        }
+
+        let pending = pending.changes.remove(&SyncCollection::Email).unwrap();
+        let concrete = concrete.changes.remove(&SyncCollection::Email).unwrap();
+
+        assert!(pending.has_pending());
+        assert!(!concrete.has_pending());
+
+        let mut scratch = Vec::new();
+        let mut got = Vec::new();
+        pending.serialize_into(true, Some(&ids), &mut scratch, &mut got);
+        let want = concrete.serialize(true, &mut scratch);
+
+        assert_eq!(want, got, "changelog builder diverged on pending ids");
     }
 }

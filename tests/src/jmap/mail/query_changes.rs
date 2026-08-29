@@ -126,7 +126,7 @@ pub async fn test(test: &TestServer) {
                     SyncCollection::Email,
                     Some(PendingId::Assigned(id.prefix_id())),
                 );
-                server.store().write_batch(batch.build_all()).await.unwrap();
+                server.store().write_batch(&mut batch).await.unwrap();
                 updated_ids.insert(id);
             }
             LogAction::Delete(id) => {
@@ -167,8 +167,7 @@ pub async fn test(test: &TestServer) {
                                     .with_current(old_message)
                                     .with_changes(new_message),
                             )
-                            .unwrap()
-                            .build_all(),
+                            .unwrap(),
                     )
                     .await
                     .unwrap();

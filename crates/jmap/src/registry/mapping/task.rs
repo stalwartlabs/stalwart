@@ -349,8 +349,7 @@ pub(crate) async fn task_set(
     let has_changes = !batch.is_empty();
     if has_changes {
         set.server
-            .store()
-            .write_batch(batch.build_all())
+            .commit_batch(batch)
             .await
             .caused_by(trc::location!())?;
     }

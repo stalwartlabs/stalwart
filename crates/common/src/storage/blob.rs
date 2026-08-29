@@ -95,7 +95,7 @@ impl Server {
         self.core
             .storage
             .data
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
 
@@ -121,7 +121,7 @@ impl Server {
             self.core
                 .storage
                 .data
-                .write_batch(batch.build_all())
+                .write_batch(&mut batch)
                 .await
                 .caused_by(trc::location!())?;
         }
@@ -158,7 +158,7 @@ impl Server {
         self.core
             .storage
             .data
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
 
@@ -184,7 +184,7 @@ impl Server {
             self.core
                 .storage
                 .data
-                .write_batch(batch.build_all())
+                .write_batch(&mut batch)
                 .await
                 .caused_by(trc::location!())?;
         }

@@ -472,7 +472,7 @@ async fn copy_container(
     };
     copy_files.sort_unstable_by_key(|a| a.1);
     let now = now() as i64;
-    let first_slot =
+    let new_slots =
         batch.reserve_document_ids(to_account_id, Collection::FileNode, copy_files.len() as u32);
     for (slot_offset, (document_id, _)) in copy_files.into_iter().enumerate() {
         let node_ = server
@@ -507,7 +507,7 @@ async fn copy_container(
         }
 
         // Prepare write batch
-        let new_slot = first_slot.offset(slot_offset);
+        let new_slot = new_slots.get(slot_offset);
         let builder = ObjectIndexBuilder::<(), _>::new()
             .with_changes(node)
             .with_changed_by(access_token.account_tenant_ids());
@@ -515,10 +515,7 @@ async fn copy_container(
             .with_account_id(to_account_id)
             .with_collection(Collection::FileNode)
             .create_document(new_slot)
-            .custom(match pending_parent {
-                Some(pending_parent) => builder.with_pending_id(pending_parent),
-                None => builder,
-            })
+            .custom(builder.with_pending_id_opt(pending_parent))
             .caused_by(trc::location!())?
             .commit_point();
         id_map.insert(document_id + 1, new_slot);

@@ -202,9 +202,8 @@ impl JmapCalendarEventCopy for Server {
                 response.created(create_id, assigned_ids.slot(slot));
             }
 
-            response.new_state = State::Exact(
-                assigned_ids.last_change_id(account_id, SyncCollection::Calendar.change_group()),
-            );
+            response.new_state =
+                State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::Calendar));
         }
 
         // Destroy ids

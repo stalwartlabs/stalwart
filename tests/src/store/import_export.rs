@@ -54,7 +54,7 @@ pub async fn test(test: &TestServer) {
             .unwrap();
         batch.set(ValueClass::Blob(BlobOp::Commit { hash }), vec![]);
     }
-    db.write_batch(batch.build_all()).await.unwrap();
+    db.write_batch(&mut batch).await.unwrap();
 
     // Create account data
     println!("Creating account data...");
@@ -122,7 +122,7 @@ pub async fn test(test: &TestServer) {
             }
         }
 
-        db.write_batch(batch.build_all()).await.unwrap();
+        db.write_batch(&mut batch).await.unwrap();
     }
 
     // Create queue, config and lookup data
@@ -167,7 +167,7 @@ pub async fn test(test: &TestServer) {
             );
         }
     }
-    db.write_batch(batch.build_all()).await.unwrap();
+    db.write_batch(&mut batch).await.unwrap();
 
     // Create directory data
     println!("Creating directory data...");
@@ -181,7 +181,7 @@ pub async fn test(test: &TestServer) {
             .with_document(account_id)
             .add(ValueClass::Quota, account_id as i64 * 1000);
     }
-    db.write_batch(batch.build_all()).await.unwrap();
+    db.write_batch(&mut batch).await.unwrap();
 
     // Obtain store hash
     println!("Calculating store hash...");
@@ -211,11 +211,11 @@ pub async fn test(test: &TestServer) {
             .write("localhost")
             .finalize(),
     );
-    db.write_batch(batch.build_all()).await.unwrap();
+    db.write_batch(&mut batch).await.unwrap();
     test.server.core.restore(temp_dir.path.clone()).await;
     let mut batch = BatchBuilder::new();
     batch.clear(ValueClass::NodeId(0));
-    db.write_batch(batch.build_all()).await.unwrap();
+    db.write_batch(&mut batch).await.unwrap();
 
     // Verify hash
     print!("Verifying store hash...");

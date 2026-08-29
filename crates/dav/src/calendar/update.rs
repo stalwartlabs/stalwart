@@ -313,6 +313,7 @@ impl CalendarUpdateRequestHandler for Server {
                     event,
                     account_id,
                     document_id,
+                    None,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?
@@ -452,6 +453,7 @@ impl CalendarUpdateRequestHandler for Server {
                     access_token.account_tenant_ids(),
                     account_id,
                     document_id,
+                    None,
                     next_email_alarm,
                     &mut batch,
                 )

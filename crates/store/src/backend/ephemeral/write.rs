@@ -6,11 +6,10 @@
 
 use super::EphemeralStore;
 use crate::{
-    IndexKey, Key, LogKey, Shape, Subspace,
+    Key, Shape, Subspace,
     backend::deserialize_i64_le,
-    write::{AssignedIds, Batch, LogSet, MergeResult, Operation, ValueClass, ValueOp},
+    write::{Advance, AssignedIds, Batch, BatchCursor, LogSet, MergeResult, ValueOp},
 };
-use types::collection::SyncCollection;
 
 impl EphemeralStore {
     pub(crate) async fn write(
@@ -18,11 +17,7 @@ impl EphemeralStore {
         batch: Batch<'_>,
         result: &mut AssignedIds,
     ) -> trc::Result<()> {
-        let mut account_id = u32::MAX;
-        let mut collection = u8::MAX;
-        let mut change_group = SyncCollection::None.change_group();
-        let mut document_id = u32::MAX;
-        let has_changes = !batch.change_accounts.is_empty();
+        let mut cursor = BatchCursor::new(&batch);
         let mut log_buf = Vec::new();
         let mut log_scratch = Vec::new();
 
@@ -32,61 +27,25 @@ impl EphemeralStore {
             let map = state.subspaces.entry(Subspace::Counter).or_default();
             let mut key_buf = Vec::with_capacity(16);
 
-            for account in batch.change_accounts {
+            for allocation in batch.allocations() {
                 key_buf.clear();
-                ValueClass::ChangeId(account.group).serialize_into(
-                    &mut key_buf,
-                    account.account_id,
-                    0,
-                    0,
-                    0,
-                );
-                let next = match map.get(&key_buf) {
-                    Some(bytes) => deserialize_i64_le(&key_buf, bytes)? + 1,
-                    None => 1,
-                };
-                map.insert(key_buf.clone(), next.to_le_bytes().to_vec());
-                result.push_change_id(account.account_id, account.group, next as u64);
-            }
-
-            for reservation in batch.reservations {
-                reservation.serialize_key_into(&mut key_buf, 0);
-                let next = match map.get(&key_buf) {
-                    Some(bytes) => deserialize_i64_le(&key_buf, bytes)? + reservation.count as i64,
-                    None => reservation.count as i64,
-                };
-                map.insert(key_buf.clone(), next.to_le_bytes().to_vec());
-                result.fill_slots(reservation.first_slot, reservation.count, next as u32);
+                allocation.serialize_key_into(&mut key_buf, 0);
+                let last_id = match map.get(&key_buf) {
+                    Some(bytes) => deserialize_i64_le(&key_buf, bytes)?,
+                    None => 0,
+                } + allocation.increment_by();
+                map.insert(key_buf.clone(), last_id.to_le_bytes().to_vec());
+                result.apply(allocation, last_id);
             }
         }
 
+        let mut key_buf = Vec::with_capacity(64);
         for op in batch.ops.iter_mut() {
-            match op {
-                Operation::AccountId {
-                    account_id: account_id_,
-                } => {
-                    account_id = *account_id_;
-                    if has_changes {
-                        result.set_current_change_id(account_id, change_group);
-                    }
-                }
-                Operation::Collection {
-                    collection: collection_,
-                } => {
-                    collection = u8::from(*collection_);
-                    change_group = collection_.change_group();
-                    if has_changes {
-                        result.set_current_change_id(account_id, change_group);
-                    }
-                }
-                Operation::DocumentId {
-                    document_id: document_id_,
-                } => {
-                    document_id = document_id_.resolve(result);
-                }
-                Operation::Value { class, op } => {
-                    let subspace = class.subspace(collection);
-                    let key = class.serialize(account_id, collection, document_id, 0);
+            match cursor.advance(op, result) {
+                Advance::Cursor => {}
+                Advance::Value { class, op } => {
+                    let subspace = cursor.subspace(class);
+                    let key = cursor.value_key_owned(class, 0);
                     let map = state.subspaces.entry(subspace).or_default();
 
                     match op {
@@ -130,36 +89,19 @@ impl EphemeralStore {
                         }
                     }
                 }
-                Operation::Index { field, key, set } => {
-                    let index_key = IndexKey {
-                        account_id,
-                        collection,
-                        document_id,
-                        field: *field,
-                        key: key.as_slice(),
-                    }
-                    .serialize(0);
+                Advance::Index { field, key, set } => {
+                    cursor.index_key(field, key, &mut key_buf, 0);
+                    let index_key = key_buf.clone();
                     let map = state.subspaces.entry(Subspace::Indexes).or_default();
-                    if *set {
+                    if set {
                         map.insert(index_key, Vec::new());
                     } else {
                         map.remove(&index_key);
                     }
                 }
-                Operation::Log { collection, set } => {
-                    let log_change_id = result
-                        .change_id(account_id, collection.change_group())
-                        .unwrap_or_default();
-                    debug_assert!(
-                        log_change_id != 0,
-                        "no change id was allocated for this account"
-                    );
-                    let log_key = LogKey {
-                        account_id,
-                        collection: u8::from(*collection),
-                        change_id: log_change_id,
-                    }
-                    .serialize(0);
+                Advance::Log { collection, set } => {
+                    cursor.log_key(collection, result, &mut key_buf, 0);
+                    let log_key = key_buf.clone();
                     let bytes = match set {
                         LogSet::Bytes(bytes) => std::mem::take(bytes),
                         LogSet::Pending(changes) => {
@@ -175,12 +117,12 @@ impl EphemeralStore {
                     let map = state.subspaces.entry(Subspace::Logs).or_default();
                     map.insert(log_key, bytes);
                 }
-                Operation::AssertValue {
+                Advance::Assert {
                     class,
                     assert_value,
                 } => {
-                    let subspace = class.subspace(collection);
-                    let key = class.serialize(account_id, collection, document_id, 0);
+                    let subspace = cursor.subspace(class);
+                    let key = cursor.value_key_owned(class, 0);
                     let matches = state
                         .subspaces
                         .get(&subspace)

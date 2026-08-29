@@ -180,9 +180,8 @@ impl JmapContactCardCopy for Server {
                 response.created(create_id, assigned_ids.slot(slot));
             }
 
-            response.new_state = State::Exact(
-                assigned_ids.last_change_id(account_id, SyncCollection::AddressBook.change_group()),
-            );
+            response.new_state =
+                State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::AddressBook));
         }
 
         // Destroy ids

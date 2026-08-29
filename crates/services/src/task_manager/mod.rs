@@ -60,7 +60,7 @@ pub(crate) struct TaskDone {
     is_committed: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum TaskResult {
     Success(Vec<Task>),
     Update([Operation; 2]),

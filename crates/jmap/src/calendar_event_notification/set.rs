@@ -110,10 +110,7 @@ impl CalendarEventNotificationSet for Server {
                 .commit_batch(batch)
                 .await
                 .map(|ids| {
-                    ids.last_change_id(
-                        account_id,
-                        SyncCollection::CalendarEventNotification.change_group(),
-                    )
+                    ids.last_change_id(account_id, SyncCollection::CalendarEventNotification)
                 })
                 .caused_by(trc::location!())?;
 

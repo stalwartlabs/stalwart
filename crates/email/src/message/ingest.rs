@@ -38,7 +38,7 @@ use store::{
     ahash::AHashMap,
     write::{
         BatchBuilder, BlobLink, BlobOp, IndexPropertyClass, Patch, PatchSource, PendingId,
-        SearchIndex, ValueClass, key::DeserializeBigEndian, now,
+        QueueDocumentId, SearchIndex, SizedSetValue, ValueClass, key::DeserializeBigEndian, now,
     },
 };
 use store::{
@@ -584,14 +584,13 @@ impl EmailIngest for Server {
 
         // Reserve a document id and one IMAP UID per target mailbox
         let document_slot = batch.reserve_document_id(account_id, Collection::Email);
-        let mut mailbox_ids: TinyVec<[MessageUid; 2]> =
-            TinyVec::with_capacity(params.mailbox_ids.len());
-        let mut uid_slot = None;
-        for mailbox_id in params.mailbox_ids.iter().copied() {
-            let slot = batch.reserve_uid(account_id, mailbox_id);
-            uid_slot.get_or_insert(slot);
-            mailbox_ids.push(MessageUid::new_unassigned(mailbox_id));
-        }
+        let uid_slots = batch.reserve_uids(account_id, params.mailbox_ids.iter().copied());
+        let mailbox_ids: TinyVec<[MessageUid; 2]> = params
+            .mailbox_ids
+            .iter()
+            .copied()
+            .map(MessageUid::new_unassigned)
+            .collect();
 
         // Determine thread id
         let thread_slot = if thread_result.thread_id.is_none() {
@@ -626,7 +625,7 @@ impl EmailIngest for Server {
                     .unwrap_or_default(),
                 change_id: 0,
             },
-            uid_slot,
+            uid_slots,
             thread_slot,
             change_id: None,
         };
@@ -651,7 +650,10 @@ impl EmailIngest for Server {
             );
         }
 
-        let (thread_info, thread_info_patches) = ThreadInfo::serialize(thread_ref, &message_ids);
+        let thread_info = ThreadInfo {
+            thread_id: thread_ref,
+            ref_ids: &message_ids,
+        };
         batch
             .with_collection(Collection::Email)
             .create_document(document_slot)
@@ -664,15 +666,14 @@ impl EmailIngest for Server {
                 data,
             )
             .caused_by(trc::location!())?
-            .set_patched(
+            .set(
                 ValueClass::IndexProperty(IndexPropertyClass::Hash {
                     property: EmailField::Threading.into(),
                     hash: thread_result.thread_hash,
                 }),
                 thread_info,
-                thread_info_patches,
             )
-            .queue_document_index(SearchIndex::Email, account_id, document_slot);
+            .queue_document_index(SearchIndex::Email, account_id, QueueDocumentId::Current);
 
         if let Some(blob_hold) = blob_hold {
             batch.clear(blob_hold);
@@ -704,20 +705,13 @@ impl EmailIngest for Server {
         let queues = batch.queue_notify();
         let assigned_ids = self
             .store()
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
-        let change_id =
-            assigned_ids.last_change_id(account_id, SyncCollection::Email.change_group());
+        let change_id = assigned_ids.last_change_id(account_id, SyncCollection::Email);
         let document_id = assigned_ids.slot(document_slot);
         let thread_id = thread_result.thread_id.unwrap_or(document_id);
-        let imap_uids = uid_slot
-            .into_iter()
-            .flat_map(|uid_slot| {
-                (0..params.mailbox_ids.len()).map(move |offset| uid_slot.offset(offset))
-            })
-            .map(|uid_slot| assigned_ids.slot(uid_slot))
-            .collect::<Vec<_>>();
+        let imap_uids = assigned_ids.slots(uid_slots).collect::<Vec<_>>();
 
         // Request indexing
         self.notify_queues(queues).await;
@@ -993,25 +987,30 @@ impl IngestSource<'_> {
     }
 }
 
-pub struct ThreadInfo;
+pub struct ThreadInfo<'x> {
+    pub thread_id: PendingId,
+    pub ref_ids: &'x [u128],
+}
 
-impl ThreadInfo {
-    pub fn serialize(thread_id: PendingId, ref_ids: &[u128]) -> (Vec<u8>, Vec<Patch>) {
-        let mut buf = Vec::with_capacity(U32_LEN + 1 + ref_ids.len() * U128_LEN);
-        buf.extend_from_slice(&thread_id.assigned().unwrap_or_default().to_be_bytes());
-        for ref_id in ref_ids {
+impl From<ThreadInfo<'_>> for SizedSetValue {
+    fn from(info: ThreadInfo<'_>) -> Self {
+        let mut buf = Vec::with_capacity(U32_LEN + 1 + info.ref_ids.len() * U128_LEN);
+        buf.extend_from_slice(&info.thread_id.assigned().unwrap_or_default().to_be_bytes());
+        for ref_id in info.ref_ids {
             buf.extend_from_slice(ref_id.to_be_bytes().as_slice());
         }
 
-        let patches = match thread_id {
-            PendingId::Slot(slot) => vec![Patch {
-                offset: 0,
-                source: PatchSource::SlotBeU32(slot),
-            }],
-            PendingId::Assigned(_) => Vec::new(),
-        };
-
-        (buf, patches)
+        match info.thread_id {
+            PendingId::Slot(slot) => (
+                buf,
+                vec![Patch {
+                    offset: 0,
+                    source: PatchSource::SlotBeU32(slot),
+                }],
+            )
+                .into(),
+            PendingId::Assigned(_) => buf.into(),
+        }
     }
 }
 

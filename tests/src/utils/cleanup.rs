@@ -168,7 +168,7 @@ pub async fn store_blob_expire_all(store: &Store) {
         )
         .await
         .unwrap();
-    store.write_batch(batch.build_all()).await.unwrap();
+    store.write_batch(&mut batch).await.unwrap();
 }
 
 pub async fn store_lookup_expire_all(store: &Store) {
@@ -200,12 +200,12 @@ pub async fn store_lookup_expire_all(store: &Store) {
                 op: ValueOp::Clear,
             });
             if batch.is_large_batch() {
-                store.write_batch(batch.build_all()).await.unwrap();
+                store.write_batch(&mut batch).await.unwrap();
                 batch = BatchBuilder::new();
             }
         }
         if !batch.is_empty() {
-            store.write_batch(batch.build_all()).await.unwrap();
+            store.write_batch(&mut batch).await.unwrap();
         }
     }
 
@@ -221,12 +221,12 @@ pub async fn store_lookup_expire_all(store: &Store) {
                 op: ValueOp::Clear,
             });
             if batch.is_large_batch() {
-                store.write_batch(batch.build_all()).await.unwrap();
+                store.write_batch(&mut batch).await.unwrap();
                 batch = BatchBuilder::new();
             }
         }
         if !batch.is_empty() {
-            store.write_batch(batch.build_all()).await.unwrap();
+            store.write_batch(&mut batch).await.unwrap();
         }
     }
 }
@@ -273,8 +273,12 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                 IterateParams::new(from_key, to_key).set_values(with_values),
                 |key, value| {
                     match subspace {
-                        Subspace::Counter if key.len() == U32_LEN + 1 || key.len() == U32_LEN => {
-                            // Document id and change id counters
+                        Subspace::Counter
+                            if key.len() == U32_LEN
+                                || key.len() == U32_LEN + 1
+                                || key.len() == U32_LEN + 2 =>
+                        {
+                            // Document id, quota and per-group change id counters
                             delete_batch.clear(ValueClass::Any(AnyClass {
                                 subspace,
                                 key: key.to_vec(),
@@ -385,7 +389,7 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
         .unwrap();
 
     if !delete_batch.is_empty() {
-        store.write_batch(delete_batch.build_all()).await.unwrap();
+        store.write_batch(&mut delete_batch).await.unwrap();
     }
 
     if failed {

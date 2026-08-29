@@ -7,7 +7,7 @@
 use crate::{
     api::{
         acl::{JmapAcl, JmapRights},
-        parent_ref::ParentRef,
+        parent_ref::{CreateResolver, ParentRef},
     },
     changes::state::JmapCacheState,
 };
@@ -42,9 +42,7 @@ use store::{
     ValueKey,
     ahash::AHashMap,
     roaring::RoaringBitmap,
-    write::{
-        Archive, ArchiveBytes, BatchBuilder, Slot, assert::AssertValue, log::PENDING_ID_MARKER,
-    },
+    write::{Archive, ArchiveBytes, BatchBuilder, Slot, assert::AssertValue},
 };
 use trc::AddContext;
 use types::{
@@ -88,19 +86,9 @@ pub trait MailboxSet: Sync + Send {
     > + Send;
 }
 
-pub struct CreateResolver<'x>(&'x AHashMap<String, Slot>);
-
-impl CreateResolver<'_> {
-    fn contains_slot(&self, slot: Slot) -> bool {
-        self.0.values().any(|created| *created == slot)
-    }
-}
-
 impl ResolveCreatedReference<MailboxProperty, MailboxValue> for CreateResolver<'_> {
     fn get_created_id(&self, id_ref: &str) -> Option<AnyId> {
-        self.0
-            .get(id_ref)
-            .map(|slot| AnyId::Id(Id::new(PENDING_ID_MARKER | slot.index() as u64)))
+        self.created_id(id_ref)
     }
 }
 
@@ -153,7 +141,12 @@ impl MailboxSet for Server {
             }
 
             match self
-                .mailbox_set_item(object, None, &ctx, Some(&CreateResolver(&pending_creates)))
+                .mailbox_set_item(
+                    object,
+                    None,
+                    &ctx,
+                    Some(&CreateResolver::new(&pending_creates)),
+                )
                 .await?
             {
                 Ok((builder, parent)) => {
@@ -170,10 +163,7 @@ impl MailboxSet for Server {
                     let slot = batch.reserve_document_id(account_id, Collection::Mailbox);
                     batch
                         .create_document(slot)
-                        .custom(match parent.slot() {
-                            Some(parent_slot) => builder.with_pending_id(parent_slot),
-                            None => builder,
-                        })
+                        .custom(builder.with_pending_id_opt(parent.slot()))
                         .caused_by(trc::location!())?
                         .commit_point();
 
@@ -189,7 +179,7 @@ impl MailboxSet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
             change_id = assigned_ids
-                .last_change_id(account_id, SyncCollection::Email.change_group())
+                .last_change_id(account_id, SyncCollection::Email)
                 .into();
 
             for (id, slot) in pending_creates {
@@ -328,7 +318,7 @@ impl MailboxSet for Server {
             match self
                 .commit_batch(batch)
                 .await
-                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email.change_group()))
+                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email))
             {
                 Ok(change_id_) => {
                     change_id = Some(change_id_);
@@ -456,13 +446,11 @@ impl MailboxSet for Server {
                     Key::Property(MailboxProperty::ParentId),
                     Value::Element(MailboxValue::Id(value)),
                 ) => {
-                    let parent_ref = ParentRef::from_id(value);
-                    if let Some(slot) = parent_ref.slot() {
-                        if resolver.is_none_or(|resolver| !resolver.contains_slot(slot)) {
-                            return Ok(Err(SetError::invalid_properties()
-                                .with_description("Parent ID does not exist.")));
-                        }
-                    } else if let Some(parent_id) = parent_ref.document_id() {
+                    let Some(parent_ref) = ParentRef::from_client_id(value, resolver) else {
+                        return Ok(Err(SetError::invalid_properties()
+                            .with_description("Parent ID does not exist.")));
+                    };
+                    if let Some(parent_id) = parent_ref.document_id() {
                         if ctx.will_destroy.contains(&value) {
                             return Ok(Err(SetError::will_destroy()
                                 .with_description("Parent ID will be destroyed.")));

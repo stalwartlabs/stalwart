@@ -228,7 +228,7 @@ impl IdentityGet for Server {
         let mut created_slots = Vec::new();
         if !missing_addresses.is_empty() {
             let name = account_info.description().unwrap_or(account_info.name());
-            let first_slot = batch.reserve_document_ids(
+            let slots = batch.reserve_document_ids(
                 account_id,
                 Collection::Identity,
                 missing_addresses.len() as u32,
@@ -239,7 +239,7 @@ impl IdentityGet for Server {
                 } else {
                     name.to_string()
                 };
-                let slot = first_slot.offset(offset);
+                let slot = slots.get(offset);
                 batch
                     .create_document(slot)
                     .custom(ObjectIndexBuilder::<(), _>::new().with_changes(Identity {

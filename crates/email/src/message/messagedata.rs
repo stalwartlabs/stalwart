@@ -10,8 +10,8 @@ use store::{
     Deserialize, IterateParams, Serialize, U32_LEN, U64_LEN, ValueKey,
     dispatch::DocumentSet,
     write::{
-        AssignedIds, BatchBuilder, MergeResult, PendingId, SerializeWithIds, Slot, ValueClass,
-        key::DeserializeBigEndian,
+        AssignedIds, BatchBuilder, MergeResult, PendingId, SerializeWithIds, SetValue,
+        SizedSetValue, Slot, SlotRange, ValueClass, key::DeserializeBigEndian,
     },
 };
 use tinyvec::TinyVec;
@@ -351,7 +351,7 @@ pub fn merge_keywords(batch: &mut BatchBuilder, thread_id: u32, diff: KeywordDif
 
 impl MessageData {
     pub fn serialize_with_change_id(&self, change_id: u64) -> trc::Result<Vec<u8>> {
-        Ok(self.serialize_resolved(change_id, None, None, None))
+        Ok(self.serialize_resolved(change_id, None, SlotRange::default(), None))
     }
 
     pub fn size_hint(&self) -> usize {
@@ -372,7 +372,7 @@ impl MessageData {
         &self,
         change_id: u64,
         ids: Option<&AssignedIds>,
-        uid_slot: Option<Slot>,
+        uid_slots: SlotRange,
         thread_slot: Option<Slot>,
     ) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.size_hint());
@@ -381,9 +381,9 @@ impl MessageData {
         self.mailboxes.len().to_leb128_bytes(&mut out);
         for mb in self.mailboxes.iter() {
             mb.mailbox_id.to_leb128_bytes(&mut out);
-            let uid = match (ids, uid_slot) {
-                (Some(ids), Some(uid_slot)) if mb.uid == 0 => {
-                    let uid = ids.slot(uid_slot.offset(next_uid_slot));
+            let uid = match ids {
+                Some(ids) if mb.uid == 0 && next_uid_slot < uid_slots.len() => {
+                    let uid = ids.slot(uid_slots.get(next_uid_slot));
                     next_uid_slot += 1;
                     uid
                 }
@@ -417,7 +417,7 @@ impl MessageData {
 
 pub struct PendingMessageData {
     pub data: MessageData,
-    pub uid_slot: Option<Slot>,
+    pub uid_slots: SlotRange,
     pub thread_slot: Option<Slot>,
     pub change_id: Option<u64>,
 }
@@ -438,9 +438,19 @@ impl SerializeWithIds for PendingMessageData {
 
         Ok((
             self.data
-                .serialize_resolved(change_id, Some(ids), self.uid_slot, self.thread_slot),
+                .serialize_resolved(change_id, Some(ids), self.uid_slots, self.thread_slot),
             None,
         ))
+    }
+
+    fn size_hint(&self) -> usize {
+        self.data.size_hint()
+    }
+}
+
+impl From<PendingMessageData> for SizedSetValue {
+    fn from(data: PendingMessageData) -> Self {
+        SetValue::serializable(data)
     }
 }
 

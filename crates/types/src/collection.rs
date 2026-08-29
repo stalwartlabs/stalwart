@@ -12,6 +12,43 @@ use std::{
 };
 use utils::map::bitmap::BitmapItem;
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[repr(transparent)]
+pub struct ChangeGroup(u8);
+
+impl ChangeGroup {
+    #[inline(always)]
+    pub const fn from_u8(group: u8) -> Self {
+        ChangeGroup(group)
+    }
+
+    #[inline(always)]
+    pub const fn to_u8(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<SyncCollection> for ChangeGroup {
+    #[inline(always)]
+    fn from(collection: SyncCollection) -> Self {
+        collection.change_group()
+    }
+}
+
+impl From<Collection> for ChangeGroup {
+    #[inline(always)]
+    fn from(collection: Collection) -> Self {
+        collection.change_group()
+    }
+}
+
+impl From<VanishedCollection> for ChangeGroup {
+    #[inline(always)]
+    fn from(collection: VanishedCollection) -> Self {
+        collection.change_group()
+    }
+}
+
 #[derive(
     rkyv::Archive,
     rkyv::Deserialize,
@@ -89,7 +126,7 @@ impl VanishedCollection {
         }
     }
 
-    pub const fn change_group(&self) -> u8 {
+    pub const fn change_group(&self) -> ChangeGroup {
         self.sync_collection().change_group()
     }
 }
@@ -117,7 +154,7 @@ impl Collection {
         }
     }
 
-    pub fn change_group(&self) -> u8 {
+    pub fn change_group(&self) -> ChangeGroup {
         SyncCollection::from(*self).change_group()
     }
 
@@ -181,10 +218,10 @@ impl SyncCollection {
         matches!(self, SyncCollection::Email)
     }
 
-    pub const fn change_group(&self) -> u8 {
+    pub const fn change_group(&self) -> ChangeGroup {
         match self {
-            SyncCollection::Thread => SyncCollection::Email as u8,
-            other => *other as u8,
+            SyncCollection::Thread => ChangeGroup(SyncCollection::Email as u8),
+            other => ChangeGroup(*other as u8),
         }
     }
 

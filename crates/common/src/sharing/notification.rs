@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use store::{Deserialize, SerializeInfallible, U32_LEN, U64_LEN, write::key::KeySerializer};
+use store::{
+    Deserialize, SerializeInfallible, U32_LEN, U64_LEN,
+    write::{Patch, PatchSource, PendingId, SizedSetValue, key::KeySerializer},
+};
 use types::{acl::Acl, collection::Collection};
 use utils::map::bitmap::Bitmap;
 
@@ -41,6 +44,25 @@ impl Deserialize for ShareNotification {
 }
 
 impl ShareNotification {
+    const OBJECT_ID_OFFSET: usize = U32_LEN;
+
+    pub fn into_value(mut self, object_id: PendingId) -> SizedSetValue {
+        self.object_id = object_id.assigned().unwrap_or_default();
+        let payload = self.serialize();
+
+        match object_id {
+            PendingId::Assigned(_) => payload.into(),
+            PendingId::Slot(slot) => (
+                payload,
+                vec![Patch {
+                    offset: Self::OBJECT_ID_OFFSET as u32,
+                    source: PatchSource::SlotBeU32(slot),
+                }],
+            )
+                .into(),
+        }
+    }
+
     fn deserialize_from_slice(bytes: &[u8]) -> Option<Self> {
         Some(Self {
             object_account_id: bytes
@@ -48,7 +70,7 @@ impl ShareNotification {
                 .and_then(|b| b.try_into().ok())
                 .map(u32::from_be_bytes)?,
             object_id: bytes
-                .get(U32_LEN..U32_LEN * 2)
+                .get(Self::OBJECT_ID_OFFSET..Self::OBJECT_ID_OFFSET + U32_LEN)
                 .and_then(|b| b.try_into().ok())
                 .map(u32::from_be_bytes)?,
             object_type: bytes.get(U32_LEN * 2).copied().map(Collection::from)?,

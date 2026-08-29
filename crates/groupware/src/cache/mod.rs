@@ -24,10 +24,10 @@ use common::{
 use file::{build_file_resources, build_nested_hierarchy, resource_from_file};
 use std::{sync::Arc, time::Instant};
 use store::{
-    SerializeInfallible, ValueKey,
+    ValueKey,
     ahash::AHashMap,
     query::log::{Change, Query},
-    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
 };
 use trc::{AddContext, StoreEvent};
 use types::{
@@ -383,13 +383,9 @@ impl GroupwareCache for Server {
             batch
                 .with_collection(Collection::Principal)
                 .with_document(0)
-                .set_patched(
+                .set(
                     PrincipalField::DefaultAddressBookId,
-                    0u32.serialize(),
-                    vec![Patch {
-                        offset: 0,
-                        source: PatchSource::SlotBeU32(document_id),
-                    }],
+                    PendingId::Slot(document_id),
                 );
 
             let ids = self.commit_batch(batch).await?;
@@ -438,13 +434,9 @@ impl GroupwareCache for Server {
             batch
                 .with_collection(Collection::Principal)
                 .with_document(0)
-                .set_patched(
+                .set(
                     PrincipalField::DefaultCalendarId,
-                    0u32.serialize(),
-                    vec![Patch {
-                        offset: 0,
-                        source: PatchSource::SlotBeU32(document_id),
-                    }],
+                    PendingId::Slot(document_id),
                 );
 
             let ids = self.commit_batch(batch).await?;

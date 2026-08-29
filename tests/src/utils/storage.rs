@@ -25,7 +25,7 @@ use registry::{
 use store::write::now;
 use store::{
     Deserialize, IterateParams, ValueKey,
-    write::{PendingId, SearchIndex, SearchIndexClass, TaskId, TaskQueueClass, ValueClass},
+    write::{QueueDocumentId, SearchIndex, SearchIndexClass, TaskId, TaskQueueClass, ValueClass},
 };
 use store::{RegistryStore, registry::write::RegistryWrite};
 
@@ -290,13 +290,13 @@ pub async fn wait_for_index(server: &Server) {
                     ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                         index: SearchIndex::Email,
                         id_prefix: 0,
-                        id_suffix: PendingId::Assigned(0),
+                        id_suffix: QueueDocumentId::Assigned(0),
                         created_at: 0,
                     })),
                     ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                         index: SearchIndex::Tracing,
                         id_prefix: u32::MAX,
-                        id_suffix: PendingId::Assigned(u32::MAX),
+                        id_suffix: QueueDocumentId::Assigned(u32::MAX),
                         created_at: u64::MAX,
                     })),
                 )

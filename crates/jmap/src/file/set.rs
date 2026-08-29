@@ -7,7 +7,7 @@
 use crate::{
     api::{
         acl::{JmapAcl, JmapRights},
-        parent_ref::ParentRef,
+        parent_ref::{CreateResolver, ParentRef},
     },
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
@@ -30,7 +30,7 @@ use jmap_tools::{JsonPointerItem, Key, Map, Value};
 use store::{
     ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{Archive, ArchiveBytes, BatchBuilder, Slot, log::PENDING_ID_MARKER, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, Slot, now},
 };
 use trc::AddContext;
 use types::{
@@ -89,7 +89,7 @@ impl FileNodeSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        let mut created_folders: AHashMap<u64, Vec<AclGrant>> = AHashMap::new();
+        let mut created_folders: AHashMap<ParentRef, Vec<AclGrant>> = AHashMap::new();
         let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
         let mut created_slots: Vec<(String, Slot, Option<String>)> = Vec::new();
         'create: for (id, object) in request.unwrap_create() {
@@ -102,7 +102,7 @@ impl FileNodeSet for Server {
                 object,
                 &mut file_node,
                 true,
-                &CreateResolver(&pending_creates),
+                &CreateResolver::new(&pending_creates),
             ) {
                 Ok(result) => {
                     if let Some(blob_id) = result.blob_id {
@@ -257,8 +257,8 @@ impl FileNodeSet for Server {
             };
 
             // Inherit ACLs from parent
-            if let Some(parent_key) = parent.key() {
-                let parent_acls = created_folders.get(&parent_key).cloned().or_else(|| {
+            if !parent.is_root() {
+                let parent_acls = created_folders.get(&parent).cloned().or_else(|| {
                     parent
                         .document_id()
                         .and_then(|parent_id| cache.container_resource_by_id(parent_id))
@@ -297,10 +297,7 @@ impl FileNodeSet for Server {
             // Insert record
             let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
             if file_node.file.is_none() {
-                created_folders.insert(
-                    ParentRef::pending(document_id).key().unwrap(),
-                    file_node.acls.clone(),
-                );
+                created_folders.insert(ParentRef::pending(document_id), file_node.acls.clone());
             }
             let final_name = file_node.name.clone();
             pending_names.insert(pending_key(parent, &file_node, case_insensitive), None);
@@ -366,7 +363,7 @@ impl FileNodeSet for Server {
                 object,
                 &mut new_file_node,
                 false,
-                &CreateResolver(&pending_creates),
+                &CreateResolver::new(&pending_creates),
             ) {
                 Ok(result) => {
                     let modified_set = result.modified_set;
@@ -667,10 +664,9 @@ impl FileNodeSet for Server {
                 response.created.insert(create_id, Value::Object(map));
             }
 
-            response.new_state = State::Exact(
-                assigned_ids.last_change_id(account_id, SyncCollection::FileNode.change_group()),
-            )
-            .into();
+            response.new_state =
+                State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::FileNode))
+                    .into();
         }
 
         Ok(response)
@@ -684,13 +680,9 @@ pub(super) struct UpdateResult {
     pub(super) parent: ParentRef,
 }
 
-pub(super) struct CreateResolver<'x>(pub(super) &'x AHashMap<String, Slot>);
-
 impl ResolveCreatedReference<FileNodeProperty, FileNodeValue> for CreateResolver<'_> {
     fn get_created_id(&self, id_ref: &str) -> Option<AnyId> {
-        self.0
-            .get(id_ref)
-            .map(|slot| AnyId::Id(Id::new(PENDING_ID_MARKER | slot.index() as u64)))
+        self.created_id(id_ref)
     }
 }
 
@@ -904,9 +896,9 @@ pub(super) fn validate_file_node_hierarchy(
     parent: ParentRef,
     is_shared: bool,
     cache: &DavResources,
-    created_folders: &AHashMap<u64, Vec<AclGrant>>,
+    created_folders: &AHashMap<ParentRef, Vec<AclGrant>>,
 ) -> Result<(), SetError<FileNodeProperty>> {
-    let Some(parent_key) = parent.key() else {
+    if parent.is_root() {
         if is_shared && document_id.is_none() {
             return Err(SetError::invalid_properties()
                 .with_property(FileNodeProperty::ParentId)
@@ -936,7 +928,7 @@ pub(super) fn validate_file_node_hierarchy(
     }
 
     // Make sure the parent is a container
-    if !created_folders.contains_key(&parent_key)
+    if !created_folders.contains_key(&parent)
         && parent
             .document_id()
             .is_none_or(|parent_id| cache.container_resource_by_id(parent_id).is_none())

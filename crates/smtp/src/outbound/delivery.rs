@@ -110,7 +110,7 @@ impl QueuedMessage {
                         },
                     )));
 
-                    if let Err(err) = server.store().write_batch(batch.build_all()).await {
+                    if let Err(err) = server.store().write_batch(&mut batch).await {
                         trc::error!(
                             err.details("Failed to delete queue event.")
                                 .caused_by(trc::location!())

@@ -118,7 +118,7 @@ impl Store {
         let mut last_collection = Collection::None;
         for (revoke_account_id, acl_item) in delete_keys.into_iter() {
             if batch.is_large_batch() {
-                self.write_batch(batch.build_all())
+                self.write_batch(&mut batch)
                     .await
                     .caused_by(trc::location!())?;
                 batch = BatchBuilder::new();
@@ -134,7 +134,7 @@ impl Store {
                 .acl_revoke(revoke_account_id);
         }
         if !batch.is_empty() {
-            self.write_batch(batch.build_all())
+            self.write_batch(&mut batch)
                 .await
                 .caused_by(trc::location!())?;
         }

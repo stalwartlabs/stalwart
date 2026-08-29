@@ -43,7 +43,7 @@ impl InMemoryStore {
                             .finalize(),
                     )),
                 });
-                store.write_batch(batch.build_all()).await.map(|_| ())
+                store.write_batch(&mut batch).await.map(|_| ())
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_set(&kv.key, &kv.value, kv.expires).await,
@@ -84,16 +84,16 @@ impl InMemoryStore {
                     });
 
                     store
-                        .write_batch(batch.build_all())
+                        .write_batch(&mut batch)
                         .await
-                        .and_then(|r| r.last_counter_id())
+                        .map(|r| r.last_counter_id())
                 } else {
                     batch.any_op(Operation::Value {
                         class: ValueClass::InMemory(InMemoryClass::Counter(kv.key)),
                         op: ValueOp::AtomicAdd(kv.value),
                     });
 
-                    store.write_batch(batch.build_all()).await.map(|_| 0)
+                    store.write_batch(&mut batch).await.map(|_| 0)
                 }
             }
             #[cfg(feature = "redis")]
@@ -119,7 +119,7 @@ impl InMemoryStore {
                     class: ValueClass::InMemory(InMemoryClass::Key(key.into().into_bytes())),
                     op: ValueOp::Clear,
                 });
-                store.write_batch(batch.build_all()).await.map(|_| ())
+                store.write_batch(&mut batch).await.map(|_| ())
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_delete(key.into().as_bytes()).await,
@@ -144,7 +144,7 @@ impl InMemoryStore {
                     class: ValueClass::InMemory(InMemoryClass::Counter(key.into().into_bytes())),
                     op: ValueOp::Clear,
                 });
-                store.write_batch(batch.build_all()).await.map(|_| ())
+                store.write_batch(&mut batch).await.map(|_| ())
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_delete(key.into().as_bytes()).await,
@@ -345,7 +345,7 @@ impl InMemoryStore {
                     }
                 });
 
-                match store.write_batch(batch.build_all()).await {
+                match store.write_batch(&mut batch).await {
                     Ok(_) => Ok(true),
                     Err(err) if err.is_assertion_failure() => Ok(false),
                     Err(err) => Err(err
@@ -388,7 +388,7 @@ impl InMemoryStore {
                 );
 
                 store
-                    .write_batch(batch.build_all())
+                    .write_batch(&mut batch)
                     .await
                     .map(|_| ())
                     .map_err(|err| {
@@ -462,7 +462,7 @@ impl InMemoryStore {
                         });
                         if batch.is_large_batch() {
                             store
-                                .write_batch(batch.build_all())
+                                .write_batch(&mut batch)
                                 .await
                                 .caused_by(trc::location!())?;
                             batch = BatchBuilder::new();
@@ -470,7 +470,7 @@ impl InMemoryStore {
                     }
                     if !batch.is_empty() {
                         store
-                            .write_batch(batch.build_all())
+                            .write_batch(&mut batch)
                             .await
                             .caused_by(trc::location!())?;
                     }
@@ -489,7 +489,7 @@ impl InMemoryStore {
                         });
                         if batch.is_large_batch() {
                             store
-                                .write_batch(batch.build_all())
+                                .write_batch(&mut batch)
                                 .await
                                 .caused_by(trc::location!())?;
                             batch = BatchBuilder::new();
@@ -497,7 +497,7 @@ impl InMemoryStore {
                     }
                     if !batch.is_empty() {
                         store
-                            .write_batch(batch.build_all())
+                            .write_batch(&mut batch)
                             .await
                             .caused_by(trc::location!())?;
                     }

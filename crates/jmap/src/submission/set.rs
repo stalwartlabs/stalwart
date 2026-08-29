@@ -279,8 +279,7 @@ impl EmailSubmissionSet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
             response.new_state = State::Exact(
-                assigned_ids
-                    .last_change_id(account_id, SyncCollection::EmailSubmission.change_group()),
+                assigned_ids.last_change_id(account_id, SyncCollection::EmailSubmission),
             )
             .into();
 

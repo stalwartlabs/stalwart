@@ -237,6 +237,7 @@ impl CalendarPropPatchRequestHandler for Server {
                         event,
                         account_id,
                         document_id,
+                        None,
                         &mut batch,
                     )
                     .caused_by(trc::location!())?

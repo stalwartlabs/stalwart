@@ -516,9 +516,9 @@ async fn restore_account_id(server: &Server, id: u32) -> trc::Result<()> {
         );
         let last_id = server
             .store()
-            .write_batch(id_batch.build_all())
-            .await
-            .and_then(|v| v.last_counter_id())?;
+            .write_batch(&mut id_batch)
+            .await?
+            .last_counter_id();
 
         if last_id < id as i64 {
             return Err(trc::StoreEvent::UnexpectedError

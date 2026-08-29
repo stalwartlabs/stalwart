@@ -511,6 +511,7 @@ async fn copy_event(
                 event,
                 from_account_id,
                 from_document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -529,6 +530,7 @@ async fn copy_event(
                 changed_by,
                 to_account_id,
                 to_document_id,
+                None,
                 next_email_alarm,
                 &mut batch,
             )
@@ -671,6 +673,7 @@ async fn move_event(
                 event.clone(),
                 from_account_id,
                 from_document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -703,6 +706,7 @@ async fn move_event(
                 access_token.account_tenant_ids(),
                 to_account_id,
                 to_document_id,
+                None,
                 next_email_alarm,
                 &mut batch,
             )
@@ -794,6 +798,7 @@ async fn rename_event(
             event,
             account_id,
             document_id,
+            None,
             &mut batch,
         )
         .caused_by(trc::location!())?;
@@ -967,24 +972,16 @@ async fn copy_container(
                 }
 
                 new_event.names.push(new_name);
-                match parent_id {
-                    PendingId::Assigned(_) => new_event.update(
+                new_event
+                    .update(
                         access_token.account_tenant_ids(),
                         event,
                         from_account_id,
                         from_child_document_id,
+                        parent_id.slot(),
                         &mut batch,
-                    ),
-                    PendingId::Slot(parent_id) => new_event.update_pending_parent(
-                        access_token.account_tenant_ids(),
-                        event,
-                        from_account_id,
-                        from_child_document_id,
-                        parent_id,
-                        &mut batch,
-                    ),
-                }
-                .caused_by(trc::location!())?;
+                    )
+                    .caused_by(trc::location!())?;
             } else {
                 let next_email_alarm = event.inner.data.next_alarm(now() as i64, Tz::Floating);
                 if remove_source {
@@ -1004,24 +1001,16 @@ async fn copy_container(
                     batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
                 new_event.names = vec![new_name];
                 required_space += new_event.size as u64;
-                match parent_id {
-                    PendingId::Assigned(_) => new_event.insert(
+                new_event
+                    .insert(
                         access_token.account_tenant_ids(),
                         to_account_id,
                         to_document_id,
+                        parent_id.slot(),
                         next_email_alarm,
                         &mut batch,
-                    ),
-                    PendingId::Slot(parent_id) => new_event.insert_pending_parent(
-                        access_token.account_tenant_ids(),
-                        to_account_id,
-                        to_document_id,
-                        parent_id,
-                        next_email_alarm,
-                        &mut batch,
-                    ),
-                }
-                .caused_by(trc::location!())?;
+                    )
+                    .caused_by(trc::location!())?;
             }
         }
     }

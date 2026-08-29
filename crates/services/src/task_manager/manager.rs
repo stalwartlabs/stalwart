@@ -600,7 +600,7 @@ async fn update_tasks(
         }
     }
 
-    let is_committed = match server.store().write_batch(batch.build_all()).await {
+    let is_committed = match server.store().write_batch(&mut batch).await {
         Ok(_) => true,
         Err(err) => {
             if err.matches(trc::EventType::Store(trc::StoreEvent::AssertValueFailed)) {

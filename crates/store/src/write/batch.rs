@@ -12,9 +12,9 @@ use crate::{
     Deserialize, Serialize, SerializeInfallible, U32_LEN,
     search::GLOBAL_BUCKET_SHIFT,
     write::{
-        AssignedIds, ChangeGroup, CommitPointOffsets, DOCUMENT_ID_SET, LogCollection, LogSet,
-        MergeOperation, MergeResult, Patch, PendingId, PendingTask, Reservation, ReservationClass,
-        SearchIndex, SearchIndexClass, SerializeOperation, SerializeWithIds, SetValue, Slot,
+        AssignedIds, ChangeCounter, CommitPointOffsets, DOCUMENT_ID_SET, LogCollection, LogSet,
+        MergeOperation, MergeResult, PendingId, PendingTask, QueueDocumentId, Reservation,
+        ReservationClass, SearchIndex, SearchIndexClass, SetValue, SizedSetValue, Slot, SlotRange,
         TaskId, TaskQueueClass,
     },
 };
@@ -24,7 +24,7 @@ use registry::{
 };
 use roaring::RoaringBitmap;
 use types::{
-    collection::{Collection, SyncCollection, VanishedCollection},
+    collection::{ChangeGroup, Collection, SyncCollection, VanishedCollection},
     field::FieldType,
     id::Id,
 };
@@ -100,12 +100,15 @@ impl BatchBuilder {
         account_id: u32,
         collection: Collection,
         count: u32,
-    ) -> Slot {
-        self.reserve_many(
-            ReservationClass::DocumentId {
-                account_id,
-                collection,
-            },
+    ) -> SlotRange {
+        SlotRange::new(
+            self.reserve_many(
+                ReservationClass::DocumentId {
+                    account_id,
+                    collection,
+                },
+                count,
+            ),
             count,
         )
     }
@@ -115,6 +118,24 @@ impl BatchBuilder {
             account_id,
             mailbox_id,
         })
+    }
+
+    pub fn reserve_uids(
+        &mut self,
+        account_id: u32,
+        mailbox_ids: impl IntoIterator<Item = u32>,
+    ) -> SlotRange {
+        let first_slot = Slot::new(self.next_slot);
+        let mut count = 0;
+        for mailbox_id in mailbox_ids {
+            self.reserve(ReservationClass::Uid {
+                account_id,
+                mailbox_id,
+            });
+            count += 1;
+        }
+
+        SlotRange::new(first_slot, count)
     }
 
     fn reserve(&mut self, class: ReservationClass) -> Slot {
@@ -257,59 +278,17 @@ impl BatchBuilder {
         self
     }
 
-    pub fn set(&mut self, class: impl Into<ValueClass>, value: impl Into<Vec<u8>>) -> &mut Self {
-        self.set_patched(class, value, Vec::new())
-    }
-
-    pub fn set_patched(
+    pub fn set(
         &mut self,
         class: impl Into<ValueClass>,
-        value: impl Into<Vec<u8>>,
-        patches: Vec<Patch>,
+        value: impl Into<SizedSetValue>,
     ) -> &mut Self {
         let class = class.into();
-        let payload = value.into();
-        debug_assert!(
-            patches
-                .iter()
-                .all(|patch| (patch.offset as usize) < payload.len()),
-            "patch offset is outside the payload"
-        );
-        self.batch_size += class.key_len_hint() + payload.len();
-        self.ops.push(Operation::Value {
-            class,
-            op: ValueOp::Set(if patches.is_empty() {
-                SetValue::Fixed(payload)
-            } else {
-                SetValue::Patched(payload, patches.into_boxed_slice())
-            }),
-        });
-        self.batch_ops += 1;
-        self
-    }
-
-    pub fn set_value(&mut self, class: impl Into<ValueClass>, value: SetValue) -> &mut Self {
-        let class = class.into();
-        self.batch_size += class.key_len_hint() + value.len();
-        self.ops.push(Operation::Value {
-            class,
-            op: ValueOp::Set(value),
-        });
-        self.batch_ops += 1;
-        self
-    }
-
-    pub fn set_serializable(
-        &mut self,
-        class: impl Into<ValueClass>,
-        size_hint: usize,
-        object: Box<dyn SerializeWithIds>,
-    ) -> &mut Self {
-        let class = class.into();
+        let SizedSetValue { value, size_hint } = value.into();
         self.batch_size += class.key_len_hint() + size_hint;
         self.ops.push(Operation::Value {
             class,
-            op: ValueOp::Set(SetValue::Serializable(SerializeOperation(object))),
+            op: ValueOp::Set(value),
         });
         self.batch_ops += 1;
         self
@@ -482,29 +461,32 @@ impl BatchBuilder {
         &mut self,
         notification_id: u64,
         notify_account_id: u32,
-        value: impl SerializeInfallible,
-        patches: Vec<Patch>,
+        value: impl Into<SizedSetValue>,
     ) -> &mut Self {
         self.changed_collections
             .get_mut_or_insert(notify_account_id)
             .share_notification_id = Some(notification_id);
-        self.set_patched(
+        self.set(
             ValueClass::ShareNotification {
                 notification_id,
                 notify_account_id,
             },
-            value.serialize(),
-            patches,
+            value,
         )
     }
 
-    fn serialize_changes(&mut self) {
+    fn sort_allocations_for_lock_order(&mut self) {
         let reservations_start = self.reservations_start();
         self.reservations[reservations_start..].sort_unstable_by_key(|reservation| {
             (reservation.class.sort_key(), reservation.first_slot)
         });
-        let change_accounts_start = self.change_accounts_start();
 
+        let change_accounts_start = self.change_accounts_start();
+        self.change_accounts[change_accounts_start..]
+            .sort_unstable_by_key(|entry| (entry.account_id, entry.group));
+    }
+
+    fn serialize_changes(&mut self) {
         if !self.changes.is_empty() {
             for (account_id, changelog) in std::mem::take(&mut self.changes) {
                 if changelog.changes.is_empty() && changelog.vanished.is_empty() {
@@ -544,9 +526,6 @@ impl BatchBuilder {
                     });
                 }
             }
-
-            self.change_accounts[change_accounts_start..]
-                .sort_unstable_by_key(|entry| (entry.account_id, entry.group));
         }
     }
 
@@ -564,8 +543,8 @@ impl BatchBuilder {
             .map_or(0, |commit_point| commit_point.reservations)
     }
 
-    fn register_change_group(&mut self, account_id: u32, group: u8) {
-        let entry = ChangeGroup { account_id, group };
+    fn register_change_group(&mut self, account_id: u32, group: ChangeGroup) {
+        let entry = ChangeCounter { account_id, group };
         if !self.change_accounts[self.change_accounts_start()..].contains(&entry) {
             self.change_accounts.push(entry);
         }
@@ -582,6 +561,7 @@ impl BatchBuilder {
 
     pub fn add_commit_point(&mut self) -> &mut Self {
         self.serialize_changes();
+        self.sort_allocations_for_lock_order();
         self.commit_points.push(CommitPointOffsets {
             ops: self.ops.len(),
             reservations: self.reservations.len(),
@@ -650,6 +630,7 @@ impl BatchBuilder {
 
     pub fn commit_points(&mut self) -> CommitPointIterator {
         self.serialize_changes();
+        self.sort_allocations_for_lock_order();
         CommitPointIterator {
             commit_points: std::mem::take(&mut self.commit_points),
             commit_point_last: CommitPointOffsets {
@@ -668,15 +649,6 @@ impl BatchBuilder {
             reservations: &self.reservations
                 [commit_point.reservation_start..commit_point.reservation_end],
             ops: &mut self.ops[commit_point.offset_start..commit_point.offset_end],
-        }
-    }
-
-    pub fn build_all(&mut self) -> Batch<'_> {
-        self.serialize_changes();
-        Batch {
-            change_accounts: &self.change_accounts,
-            reservations: self.reservations.as_slice(),
-            ops: self.ops.as_mut_slice(),
         }
     }
 
@@ -747,18 +719,15 @@ impl BatchBuilder {
         self.has_tasks = true;
 
         let value = match document_id {
-            Some(PendingId::Slot(slot)) => {
-                self.batch_size += task.size_hint();
-                SetValue::Serializable(SerializeOperation(Box::new(PendingTask { task, slot })))
-            }
+            Some(PendingId::Slot(slot)) => SetValue::serializable(PendingTask { task, slot }),
             Some(PendingId::Assigned(document_id)) => {
                 task.set_document_id(Id::from(document_id));
-                SetValue::Fixed(task.to_pickled_vec())
+                SetValue::fixed(task.to_pickled_vec())
             }
-            None => SetValue::Fixed(task.to_pickled_vec()),
+            None => SetValue::fixed(task.to_pickled_vec()),
         };
 
-        self.set_value(ValueClass::TaskQueue(TaskQueueClass::Task { id }), value)
+        self.set(ValueClass::TaskQueue(TaskQueueClass::Task { id }), value)
             .set(
                 ValueClass::TaskQueue(TaskQueueClass::Due { id, due }),
                 class.serialize(),
@@ -779,9 +748,9 @@ impl BatchBuilder {
         &mut self,
         index: SearchIndex,
         account_id: u32,
-        document_id: impl Into<PendingId>,
+        document_id: impl Into<QueueDocumentId>,
     ) -> &mut Self {
-        let document_id = self.assert_indexable(document_id.into());
+        let document_id = document_id.into();
         self.queue_index_task(index, account_id).set(
             ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index,
@@ -797,9 +766,9 @@ impl BatchBuilder {
         &mut self,
         index: SearchIndex,
         account_id: u32,
-        document_id: impl Into<PendingId>,
+        document_id: impl Into<QueueDocumentId>,
     ) -> &mut Self {
-        let document_id = self.assert_indexable(document_id.into());
+        let document_id = document_id.into();
         self.queue_index_task(index, account_id).set(
             ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index,
@@ -817,20 +786,12 @@ impl BatchBuilder {
                 ValueClass::SearchIndex(SearchIndexClass::Queue {
                     index: SearchIndex::Tracing,
                     id_prefix: (id >> 32) as u32,
-                    id_suffix: PendingId::Assigned(id as u32),
+                    id_suffix: QueueDocumentId::Assigned(id as u32),
                     created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0)
                         .unwrap_or_default(),
                 }),
                 vec![1u8],
             )
-    }
-
-    fn assert_indexable(&self, document_id: PendingId) -> PendingId {
-        debug_assert!(
-            !document_id.is_pending() || self.current_document_id == Some(document_id),
-            "a pending search index id must be the current document"
-        );
-        document_id
     }
 
     fn queue_index_task(&mut self, index: SearchIndex, partition: u32) -> &mut Self {

@@ -252,7 +252,7 @@ impl WebApplicationManager {
                 );
             server
                 .store()
-                .write_batch(batch.build_all())
+                .write_batch(&mut batch)
                 .await
                 .caused_by(trc::location!())?;
 

@@ -134,6 +134,7 @@ impl CalendarEvent {
         event: Archive<&ArchivedCalendarEvent>,
         account_id: u32,
         document_id: u32,
+        parent_id: Option<Slot>,
         batch: &'x mut BatchBuilder,
     ) -> trc::Result<&'x mut BatchBuilder> {
         let mut new_event = self;
@@ -150,7 +151,8 @@ impl CalendarEvent {
                 ObjectIndexBuilder::new()
                     .with_current(event)
                     .with_changes(new_event)
-                    .with_changed_by(changed_by),
+                    .with_changed_by(changed_by)
+                    .with_pending_id_opt(parent_id),
             )
             .map(|b| b.commit_point())
     }
@@ -160,6 +162,7 @@ impl CalendarEvent {
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: impl Into<PendingId>,
+        parent_id: Option<Slot>,
         next_alarm: Option<CalendarAlarm>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
@@ -177,7 +180,8 @@ impl CalendarEvent {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
-                    .with_changed_by(changed_by),
+                    .with_changed_by(changed_by)
+                    .with_pending_id_opt(parent_id),
             )
             .map(|batch| {
                 if let Some(next_alarm) = next_alarm {
@@ -186,66 +190,6 @@ impl CalendarEvent {
 
                 batch.commit_point()
             })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn insert_pending_parent(
-        self,
-        changed_by: AccountTenantIds,
-        account_id: u32,
-        document_id: Slot,
-        parent_id: Slot,
-        next_alarm: Option<CalendarAlarm>,
-        batch: &mut BatchBuilder,
-    ) -> trc::Result<&mut BatchBuilder> {
-        let mut event = self;
-        let now = now() as i64;
-        event.modified = now;
-        event.created = now;
-
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::CalendarEvent)
-            .create_document(document_id)
-            .custom(
-                ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(event)
-                    .with_changed_by(changed_by)
-                    .with_pending_id(parent_id),
-            )
-            .map(|batch| {
-                if let Some(next_alarm) = next_alarm {
-                    next_alarm.write_task(batch);
-                }
-
-                batch.commit_point()
-            })
-    }
-
-    pub fn update_pending_parent<'x>(
-        self,
-        changed_by: AccountTenantIds,
-        event: Archive<&ArchivedCalendarEvent>,
-        account_id: u32,
-        document_id: u32,
-        parent_id: Slot,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
-        let mut new_event = self;
-        new_event.modified = now() as i64;
-
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::CalendarEvent)
-            .with_document(document_id)
-            .custom(
-                ObjectIndexBuilder::new()
-                    .with_current(event)
-                    .with_changes(new_event)
-                    .with_changed_by(changed_by)
-                    .with_pending_id(parent_id),
-            )
-            .map(|b| b.commit_point())
     }
 }
 
@@ -317,6 +261,7 @@ impl CalendarEventNotification {
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: impl Into<PendingId>,
+        event_id: Option<Slot>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         // Build event
@@ -333,34 +278,8 @@ impl CalendarEventNotification {
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
                     .with_changes(event)
-                    .with_changed_by(changed_by),
-            )
-            .map(|batch| batch.commit_point())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn insert_pending_event(
-        self,
-        changed_by: AccountTenantIds,
-        account_id: u32,
-        document_id: Slot,
-        event_id: Slot,
-        batch: &mut BatchBuilder,
-    ) -> trc::Result<&mut BatchBuilder> {
-        let mut event = self;
-        let now = now() as i64;
-        event.modified = now;
-        event.created = now;
-
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::CalendarEventNotification)
-            .with_pending_document(document_id.into())
-            .custom(
-                ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(event)
                     .with_changed_by(changed_by)
-                    .with_pending_id(event_id),
+                    .with_pending_id_opt(event_id),
             )
             .map(|batch| batch.commit_point())
     }

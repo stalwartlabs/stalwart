@@ -492,6 +492,7 @@ async fn copy_card(
                 card,
                 from_account_id,
                 from_document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -509,6 +510,7 @@ async fn copy_card(
                 access_token.account_tenant_ids(),
                 to_account_id,
                 to_document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -633,6 +635,7 @@ async fn move_card(
                 card.clone(),
                 from_account_id,
                 from_document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -663,6 +666,7 @@ async fn move_card(
                 access_token.account_tenant_ids(),
                 to_account_id,
                 to_document_id,
+                None,
                 &mut batch,
             )
             .caused_by(trc::location!())?;
@@ -752,6 +756,7 @@ async fn rename_card(
             card,
             account_id,
             document_id,
+            None,
             &mut batch,
         )
         .caused_by(trc::location!())?;
@@ -916,24 +921,16 @@ async fn copy_container(
                 }
 
                 new_card.names.push(new_name);
-                match parent_id {
-                    PendingId::Assigned(_) => new_card.update(
+                new_card
+                    .update(
                         access_token.account_tenant_ids(),
                         card,
                         from_account_id,
                         from_child_document_id,
+                        parent_id.slot(),
                         &mut batch,
-                    ),
-                    PendingId::Slot(parent_id) => new_card.update_pending_parent(
-                        access_token.account_tenant_ids(),
-                        card,
-                        from_account_id,
-                        from_child_document_id,
-                        parent_id,
-                        &mut batch,
-                    ),
-                }
-                .caused_by(trc::location!())?;
+                    )
+                    .caused_by(trc::location!())?;
             } else {
                 if remove_source {
                     DestroyArchive(card)
@@ -952,22 +949,15 @@ async fn copy_container(
                     batch.reserve_document_id(to_account_id, Collection::ContactCard);
                 new_card.names = vec![new_name];
                 required_space += new_card.size as u64;
-                match parent_id {
-                    PendingId::Assigned(_) => new_card.insert(
+                new_card
+                    .insert(
                         access_token.account_tenant_ids(),
                         to_account_id,
                         to_document_id,
+                        parent_id.slot(),
                         &mut batch,
-                    ),
-                    PendingId::Slot(parent_id) => new_card.insert_pending_parent(
-                        access_token.account_tenant_ids(),
-                        to_account_id,
-                        to_document_id,
-                        parent_id,
-                        &mut batch,
-                    ),
-                }
-                .caused_by(trc::location!())?;
+                    )
+                    .caused_by(trc::location!())?;
             }
         }
     }

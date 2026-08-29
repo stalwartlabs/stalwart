@@ -6,11 +6,11 @@
 
 use super::{CF_INDEXES, CF_LOGS, CfHandle, RocksDbStore, into_error};
 use crate::{
-    Deserialize, IndexKey, Key, LogKey, Shape, Subspace,
+    Deserialize, Key, Shape, Subspace,
     backend::deserialize_i64_le,
     write::{
-        AssignedIds, Batch, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
-        ValueClass, ValueOp, commit_backoff,
+        Advance, AssignedIds, Batch, BatchCursor, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME,
+        MergeResult, ValueOp, commit_backoff,
     },
 };
 use rocksdb::{
@@ -18,7 +18,6 @@ use rocksdb::{
     OptimisticTransactionOptions, WriteOptions,
 };
 use std::{sync::Arc, time::Instant};
-use types::collection::SyncCollection;
 
 impl RocksDbStore {
     pub(crate) async fn write(
@@ -152,12 +151,8 @@ fn read_counter(
 
 impl RocksDBTransaction<'_, '_> {
     fn commit(&mut self) -> Result<(), CommitError> {
-        let mut account_id = u32::MAX;
-        let mut collection = u8::MAX;
-        let mut change_group = SyncCollection::None.change_group();
-        let mut document_id = u32::MAX;
+        let mut cursor = BatchCursor::new(self.batch);
         let result = &mut *self.result;
-        let has_changes = !self.batch.change_accounts.is_empty();
         let mut log_buf = Vec::new();
         let mut log_scratch = Vec::new();
 
@@ -169,58 +164,23 @@ impl RocksDBTransaction<'_, '_> {
             let cf = self.db.subspace_handle(Subspace::Counter);
             let mut key_buf = Vec::with_capacity(16);
 
-            for account in self.batch.change_accounts {
+            for allocation in self.batch.allocations() {
                 key_buf.clear();
-                ValueClass::ChangeId(account.group).serialize_into(
-                    &mut key_buf,
-                    account.account_id,
-                    0,
-                    0,
-                    0,
-                );
-                let change_id = read_counter(&txn, &cf, &key_buf)? + 1;
-                txn.put_cf(&cf, &key_buf, &change_id.to_le_bytes()[..])?;
-                result.push_change_id(account.account_id, account.group, change_id as u64);
-            }
-
-            for reservation in self.batch.reservations {
-                reservation.serialize_key_into(&mut key_buf, 0);
-                let last_id = read_counter(&txn, &cf, &key_buf)? + reservation.count as i64;
+                allocation.serialize_key_into(&mut key_buf, 0);
+                let last_id = read_counter(&txn, &cf, &key_buf)? + allocation.increment_by();
                 txn.put_cf(&cf, &key_buf, &last_id.to_le_bytes()[..])?;
-                result.fill_slots(reservation.first_slot, reservation.count, last_id as u32);
+                result.apply(allocation, last_id);
             }
         }
 
         let mut key_buf = Vec::with_capacity(64);
         for op in self.batch.ops.iter_mut() {
-            match op {
-                Operation::AccountId {
-                    account_id: account_id_,
-                } => {
-                    account_id = *account_id_;
-                    if has_changes {
-                        result.set_current_change_id(account_id, change_group);
-                    }
-                }
-                Operation::Collection {
-                    collection: collection_,
-                } => {
-                    collection = u8::from(*collection_);
-                    change_group = collection_.change_group();
-                    if has_changes {
-                        result.set_current_change_id(account_id, change_group);
-                    }
-                }
-                Operation::DocumentId {
-                    document_id: document_id_,
-                } => {
-                    document_id = document_id_.resolve(result);
-                }
-                Operation::Value { class, op } => {
-                    key_buf.clear();
-                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+            match cursor.advance(op, result) {
+                Advance::Cursor => {}
+                Advance::Value { class, op } => {
+                    cursor.value_key(class, &mut key_buf, 0);
                     let key = &key_buf;
-                    let cf = self.db.subspace_handle(class.subspace(collection));
+                    let cf = self.db.subspace_handle(cursor.subspace(class));
 
                     match op {
                         ValueOp::Set(value) => {
@@ -267,39 +227,18 @@ impl RocksDBTransaction<'_, '_> {
                         }
                     }
                 }
-                Operation::Index { field, key, set } => {
-                    key_buf.clear();
-                    IndexKey {
-                        account_id,
-                        collection,
-                        document_id,
-                        field: *field,
-                        key: &*key,
-                    }
-                    .serialize_into(&mut key_buf, 0);
+                Advance::Index { field, key, set } => {
+                    cursor.index_key(field, key, &mut key_buf, 0);
                     let key = &key_buf;
 
-                    if *set {
+                    if set {
                         txn.put_cf(&self.cf_indexes, key, [])?;
                     } else {
                         txn.delete_cf(&self.cf_indexes, key)?;
                     }
                 }
-                Operation::Log { collection, set } => {
-                    let log_change_id = result
-                        .change_id(account_id, collection.change_group())
-                        .unwrap_or_default();
-                    debug_assert!(
-                        log_change_id != 0,
-                        "no change id was allocated for this account"
-                    );
-                    key_buf.clear();
-                    LogKey {
-                        account_id,
-                        collection: u8::from(*collection),
-                        change_id: log_change_id,
-                    }
-                    .serialize_into(&mut key_buf, 0);
+                Advance::Log { collection, set } => {
+                    cursor.log_key(collection, result, &mut key_buf, 0);
 
                     match set {
                         LogSet::Bytes(bytes) => {
@@ -316,13 +255,12 @@ impl RocksDBTransaction<'_, '_> {
                         }
                     }
                 }
-                Operation::AssertValue {
+                Advance::Assert {
                     class,
                     assert_value,
                 } => {
-                    key_buf.clear();
-                    class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
-                    let cf = self.db.subspace_handle(class.subspace(collection));
+                    cursor.value_key(class, &mut key_buf, 0);
+                    let cf = self.db.subspace_handle(cursor.subspace(class));
 
                     let matches = txn
                         .get_pinned_for_update_cf(&cf, &key_buf, true)?

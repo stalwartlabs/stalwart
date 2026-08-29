@@ -23,8 +23,8 @@ use store::{
     IterateParams, U32_LEN, ValueKey,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
-        Archive, ArchiveBytes, BatchBuilder, PendingId, SearchIndex, SearchIndexClass, ValueClass,
-        key::DeserializeBigEndian,
+        Archive, ArchiveBytes, BatchBuilder, QueueDocumentId, SearchIndex, SearchIndexClass,
+        ValueClass, key::DeserializeBigEndian,
     },
 };
 use tokio::sync::{mpsc, oneshot};
@@ -266,21 +266,14 @@ async fn process_items(
         batch.clear(partition.index_class());
     }
 
-    let mut commit_points = batch.commit_points();
-    for commit_point in commit_points.iter() {
-        if let Err(err) = server
-            .store()
-            .write_batch(batch.build_one(commit_point))
-            .await
-        {
-            let reason = err.to_string();
-            trc::error!(
-                err.details("Failed to delete processed search index queue items")
-                    .caused_by(trc::location!())
-            );
+    if let Err(err) = server.store().write_batch(&mut batch).await {
+        let reason = err.to_string();
+        trc::error!(
+            err.details("Failed to delete processed search index queue items")
+                .caused_by(trc::location!())
+        );
 
-            return Err(reason.into());
-        }
+        return Err(reason.into());
     }
 
     Ok(())
@@ -508,7 +501,7 @@ async fn read_queue(
         } = &mut from_class
     {
         *from_prefix = id_prefix;
-        *from_suffix = PendingId::Assigned(id_suffix);
+        *from_suffix = QueueDocumentId::Assigned(id_suffix);
         *created_at = u64::MAX;
     }
 
@@ -629,7 +622,7 @@ async fn write_queue_index(
 ) -> Result<(), PartitionFailure> {
     server
         .store()
-        .write_batch(batch.build_all())
+        .write_batch(&mut batch)
         .await
         .map(|_| ())
         .map_err(|err| {

@@ -71,7 +71,7 @@ pub async fn insert_test_data(server: &Server) {
             ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
             report_bytes,
         );
-        server.store().write(batch.build_all()).await.unwrap();
+        server.store().write_batch(&mut batch).await.unwrap();
     }
 
     for report in sample_dmarc_internal_reports() {
@@ -85,28 +85,28 @@ pub async fn insert_test_data(server: &Server) {
             ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
             report_bytes,
         );
-        server.store().write(batch.build_all()).await.unwrap();
+        server.store().write_batch(&mut batch).await.unwrap();
     }
 
     for report in sample_tls_external_reports() {
         let mut batch = BatchBuilder::new();
         let item_id = server.inner.data.queue_id_gen.generate();
         report.write_ops(&mut batch, item_id, true);
-        server.store().write(batch.build_all()).await.unwrap();
+        server.store().write_batch(&mut batch).await.unwrap();
     }
 
     for report in sample_dmarc_external_reports() {
         let mut batch = BatchBuilder::new();
         let item_id = server.inner.data.queue_id_gen.generate();
         report.write_ops(&mut batch, item_id, true);
-        server.store().write(batch.build_all()).await.unwrap();
+        server.store().write_batch(&mut batch).await.unwrap();
     }
 
     for report in sample_arf_external_reports() {
         let mut batch = BatchBuilder::new();
         let item_id = server.inner.data.queue_id_gen.generate();
         report.write_ops(&mut batch, item_id, true);
-        server.store().write(batch.build_all()).await.unwrap();
+        server.store().write_batch(&mut batch).await.unwrap();
     }
 }
 

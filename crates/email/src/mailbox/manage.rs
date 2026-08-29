@@ -74,7 +74,7 @@ impl MailboxFnc for Server {
         self.core
             .storage
             .data
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
 
@@ -136,16 +136,16 @@ impl MailboxFnc for Server {
             }
 
             let mut batch = BatchBuilder::new();
-            let first_slot = batch.reserve_document_ids(
+            let slots = batch.reserve_document_ids(
                 account_id,
                 Collection::Mailbox,
                 create_paths.len() as u32,
             );
-            let last_slot = first_slot.offset(create_paths.len() - 1);
+            let last_slot = slots.last();
             let mut parent_slot = None;
 
             for (offset, name) in create_paths.into_iter().enumerate() {
-                let slot = first_slot.offset(offset);
+                let slot = slots.get(offset);
                 let mut mailbox = Mailbox::new(name);
                 if parent_slot.is_none() {
                     mailbox.parent_id = next_parent_id;
@@ -156,10 +156,7 @@ impl MailboxFnc for Server {
                     .with_account_id(account_id)
                     .with_collection(Collection::Mailbox)
                     .create_document(slot)
-                    .custom(match parent_slot {
-                        Some(parent_slot) => builder.with_pending_id(parent_slot),
-                        None => builder,
-                    })
+                    .custom(builder.with_pending_id_opt(parent_slot))
                     .caused_by(trc::location!())?;
                 parent_slot = Some(slot);
             }

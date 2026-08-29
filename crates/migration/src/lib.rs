@@ -82,7 +82,7 @@ async fn write_schema_version(server: &Server) -> trc::Result<()> {
 
     server
         .store()
-        .write_batch(batch.build_all())
+        .write_batch(&mut batch)
         .await
         .caused_by(trc::location!())?;
 

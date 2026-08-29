@@ -311,17 +311,15 @@ impl<T: SessionStream> SessionData<T> {
                     }
 
                     // Reserve IMAP UIDs
-                    let mut uid_slot = None;
-                    for mailbox_id in new_data
-                        .mailboxes
-                        .iter()
-                        .filter(|m| m.uid == 0)
-                        .map(|m| m.mailbox_id)
-                    {
-                        let slot = batch.reserve_uid(account_id, mailbox_id);
-                        uid_slot.get_or_insert(slot);
-                        pending_copied_ids.push((imap_id.uid, slot));
-                    }
+                    let uid_slots = batch.reserve_uids(
+                        account_id,
+                        new_data
+                            .mailboxes
+                            .iter()
+                            .filter(|m| m.uid == 0)
+                            .map(|m| m.mailbox_id),
+                    );
+                    pending_copied_ids.extend(uid_slots.iter().map(|slot| (imap_id.uid, slot)));
 
                     // Prepare write batch
                     batch
@@ -331,7 +329,7 @@ impl<T: SessionStream> SessionData<T> {
                         .custom(ObjectIndexBuilder::new().with_current(data).with_changes(
                             PendingMessageData {
                                 data: new_data,
-                                uid_slot,
+                                uid_slots,
                                 thread_slot: None,
                                 change_id: None,
                             },
@@ -466,18 +464,15 @@ impl<T: SessionStream> SessionData<T> {
                                 new_data.add_mailbox(MessageUid::new_unassigned(dest_mailbox_id));
 
                                 let mut batch = BatchBuilder::new();
-                                let mut uid_slot = None;
-                                let mut assigned_slot = None;
-                                for mailbox_id in new_data
-                                    .mailboxes
-                                    .iter()
-                                    .filter(|m| m.uid == 0)
-                                    .map(|m| m.mailbox_id)
-                                {
-                                    let slot = batch.reserve_uid(dest_account_id, mailbox_id);
-                                    uid_slot.get_or_insert(slot);
-                                    assigned_slot = Some(slot);
-                                }
+                                let uid_slots = batch.reserve_uids(
+                                    dest_account_id,
+                                    new_data
+                                        .mailboxes
+                                        .iter()
+                                        .filter(|m| m.uid == 0)
+                                        .map(|m| m.mailbox_id),
+                                );
+                                let assigned_slot = uid_slots.iter().last();
 
                                 batch
                                     .with_account_id(dest_account_id)
@@ -487,7 +482,7 @@ impl<T: SessionStream> SessionData<T> {
                                         ObjectIndexBuilder::new().with_current(data).with_changes(
                                             PendingMessageData {
                                                 data: new_data,
-                                                uid_slot,
+                                                uid_slots,
                                                 thread_slot: None,
                                                 change_id: None,
                                             },
@@ -502,10 +497,7 @@ impl<T: SessionStream> SessionData<T> {
                                     .imap_ctx(&arguments.tag, trc::location!())?;
 
                                 dest_change_id = assigned_ids
-                                    .last_change_id(
-                                        dest_account_id,
-                                        SyncCollection::Email.change_group(),
-                                    )
+                                    .last_change_id(dest_account_id, SyncCollection::Email)
                                     .into();
 
                                 copied_ids.push((

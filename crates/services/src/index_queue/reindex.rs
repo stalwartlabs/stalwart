@@ -11,7 +11,7 @@ use groupware::cache::GroupwareCache;
 use store::{
     IterateParams, U32_LEN, ValueKey,
     write::{
-        BatchBuilder, PendingId, SearchIndex, SearchIndexClass, TelemetryClass, ValueClass,
+        BatchBuilder, QueueDocumentId, SearchIndex, SearchIndexClass, TelemetryClass, ValueClass,
         key::DeserializeBigEndian,
     },
 };
@@ -150,7 +150,9 @@ async fn clear_queued_updates(
                         .clear(SearchIndexClass::Queue {
                             index,
                             id_prefix: key.deserialize_be_u32(1)?,
-                            id_suffix: PendingId::Assigned(key.deserialize_be_u32(1 + U32_LEN)?),
+                            id_suffix: QueueDocumentId::Assigned(
+                                key.deserialize_be_u32(1 + U32_LEN)?,
+                            ),
                             created_at: key.deserialize_be_u64(1 + (U32_LEN * 2))?,
                         })
                         .commit_point();
@@ -162,14 +164,11 @@ async fn clear_queued_updates(
         .await
         .caused_by(trc::location!())?;
 
-    let mut commit_points = batch.commit_points();
-    for commit_point in commit_points.iter() {
-        server
-            .store()
-            .write_batch(batch.build_one(commit_point))
-            .await
-            .caused_by(trc::location!())?;
-    }
+    server
+        .store()
+        .write_batch(&mut batch)
+        .await
+        .caused_by(trc::location!())?;
 
     Ok(())
 }
@@ -181,13 +180,13 @@ async fn clear_tracing_queue(server: &Server) -> trc::Result<()> {
             ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index: SearchIndex::Tracing,
                 id_prefix: 0,
-                id_suffix: PendingId::Assigned(0),
+                id_suffix: QueueDocumentId::Assigned(0),
                 created_at: 0,
             })),
             ValueKey::from(ValueClass::SearchIndex(SearchIndexClass::Queue {
                 index: SearchIndex::Tracing,
                 id_prefix: u32::MAX,
-                id_suffix: PendingId::Assigned(u32::MAX),
+                id_suffix: QueueDocumentId::Assigned(u32::MAX),
                 created_at: u64::MAX,
             })),
         )

@@ -512,7 +512,7 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
 
             if let Some(mut batch) = batch
                 && !batch.is_empty()
-                && let Err(err) = server.store().write_batch(batch.build_all()).await
+                && let Err(err) = server.store().write_batch(&mut batch).await
             {
                 trc::error!(err.details("Failed to write scheduled tasks"));
             }

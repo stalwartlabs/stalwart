@@ -6,12 +6,11 @@
 
 use super::{SqliteStore, into_error};
 use crate::{
-    IndexKey, Key, LogKey, Shape, Subspace,
-    write::{AssignedIds, Batch, LogSet, MergeResult, Operation, ValueClass, ValueOp},
+    Key, Shape, Subspace,
+    write::{Advance, AssignedIds, Batch, BatchCursor, LogSet, MergeResult, ValueOp},
 };
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use trc::AddContext;
-use types::collection::SyncCollection;
 
 impl SqliteStore {
     pub(crate) async fn write(
@@ -24,73 +23,35 @@ impl SqliteStore {
         self.spawn_worker(move || {
             let mut conn = manager.get().map_err(into_error)?;
 
-            let mut account_id = u32::MAX;
-            let mut collection = u8::MAX;
-            let mut change_group = SyncCollection::None.change_group();
-            let mut document_id = u32::MAX;
+            let mut cursor = BatchCursor::new(&batch);
             let trx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(into_error)
                 .caused_by(trc::location!())?;
             let result = &mut *assigned_ids;
             result.rollback(mark);
-            let has_changes = !batch.change_accounts.is_empty();
             let mut log_buf = Vec::new();
             let mut log_scratch = Vec::new();
 
             if batch.has_allocations() {
                 let mut key_buf = Vec::with_capacity(16);
 
-                for account in batch.change_accounts {
+                for allocation in batch.allocations() {
                     key_buf.clear();
-                    ValueClass::ChangeId(account.group).serialize_into(
-                        &mut key_buf,
-                        account.account_id,
-                        0,
-                        0,
-                        0,
-                    );
-                    let change_id = incr_counter(&trx, &key_buf, 1)?;
-                    result.push_change_id(account.account_id, account.group, change_id as u64);
-                }
-
-                for reservation in batch.reservations {
-                    reservation.serialize_key_into(&mut key_buf, 0);
-                    let last_id = incr_counter(&trx, &key_buf, reservation.count as i64)?;
-                    result.fill_slots(reservation.first_slot, reservation.count, last_id as u32);
+                    allocation.serialize_key_into(&mut key_buf, 0);
+                    let last_id = incr_counter(&trx, &key_buf, allocation.increment_by())?;
+                    result.apply(allocation, last_id);
                 }
             }
 
             let mut key_buf = Vec::with_capacity(64);
             for op in batch.ops.iter_mut() {
-                match op {
-                    Operation::AccountId {
-                        account_id: account_id_,
-                    } => {
-                        account_id = *account_id_;
-                        if has_changes {
-                            result.set_current_change_id(account_id, change_group);
-                        }
-                    }
-                    Operation::Collection {
-                        collection: collection_,
-                    } => {
-                        collection = u8::from(*collection_);
-                        change_group = collection_.change_group();
-                        if has_changes {
-                            result.set_current_change_id(account_id, change_group);
-                        }
-                    }
-                    Operation::DocumentId {
-                        document_id: document_id_,
-                    } => {
-                        document_id = document_id_.resolve(result);
-                    }
-                    Operation::Value { class, op } => {
-                        key_buf.clear();
-                        class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                match cursor.advance(op, result) {
+                    Advance::Cursor => {}
+                    Advance::Value { class, op } => {
+                        cursor.value_key(class, &mut key_buf, 0);
                         let key = &key_buf;
-                        let subspace = class.subspace(collection);
+                        let subspace = cursor.subspace(class);
                         let table = subspace.name();
 
                         match op {
@@ -213,19 +174,11 @@ impl SqliteStore {
                             }
                         }
                     }
-                    Operation::Index { field, key, set } => {
-                        key_buf.clear();
-                        IndexKey {
-                            account_id,
-                            collection,
-                            document_id,
-                            field: *field,
-                            key: &*key,
-                        }
-                        .serialize_into(&mut key_buf, 0);
+                    Advance::Index { field, key, set } => {
+                        cursor.index_key(field, key, &mut key_buf, 0);
                         let key = &key_buf;
 
-                        if *set {
+                        if set {
                             trx.prepare_cached("INSERT OR IGNORE INTO i (k) VALUES (?)")
                                 .map_err(into_error)
                                 .caused_by(trc::location!())?
@@ -241,21 +194,8 @@ impl SqliteStore {
                                 .caused_by(trc::location!())?;
                         }
                     }
-                    Operation::Log { collection, set } => {
-                        let log_change_id = result
-                            .change_id(account_id, collection.change_group())
-                            .unwrap_or_default();
-                        debug_assert!(
-                            log_change_id != 0,
-                            "no change id was allocated for this account"
-                        );
-                        key_buf.clear();
-                        LogKey {
-                            account_id,
-                            collection: u8::from(*collection),
-                            change_id: log_change_id,
-                        }
-                        .serialize_into(&mut key_buf, 0);
+                    Advance::Log { collection, set } => {
+                        cursor.log_key(collection, result, &mut key_buf, 0);
                         let key = &key_buf;
                         let value = match set {
                             LogSet::Bytes(bytes) => &*bytes,
@@ -277,14 +217,13 @@ impl SqliteStore {
                             .map_err(into_error)
                             .caused_by(trc::location!())?;
                     }
-                    Operation::AssertValue {
+                    Advance::Assert {
                         class,
                         assert_value,
                     } => {
-                        key_buf.clear();
-                        class.serialize_into(&mut key_buf, account_id, collection, document_id, 0);
+                        cursor.value_key(class, &mut key_buf, 0);
                         let key = &key_buf;
-                        let table = class.subspace(collection).name();
+                        let table = cursor.subspace(class).name();
 
                         let matches = trx
                             .prepare_cached(&format!("SELECT v FROM {} WHERE k = ?", table))

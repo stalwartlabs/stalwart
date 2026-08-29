@@ -375,17 +375,10 @@ async fn update_partition_status(
         return;
     }
 
-    let mut commit_points = batch.commit_points();
-    for commit_point in commit_points.iter() {
-        if let Err(err) = server
-            .store()
-            .write_batch(batch.build_one(commit_point))
-            .await
-        {
-            trc::error!(
-                err.caused_by(trc::location!())
-                    .details("Failed to update the search index queue status.")
-            );
-        }
+    if let Err(err) = server.store().write_batch(&mut batch).await {
+        trc::error!(
+            err.caused_by(trc::location!())
+                .details("Failed to update the search index queue status.")
+        );
     }
 }

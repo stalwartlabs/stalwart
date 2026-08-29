@@ -22,6 +22,7 @@ pub mod acl;
 pub mod auth;
 pub mod event_source;
 pub mod parent_ref;
+pub mod pending_creates;
 pub mod query;
 pub mod request;
 pub mod session;

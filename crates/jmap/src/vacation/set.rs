@@ -22,8 +22,8 @@ use mail_parser::decoders::html::html_to_text;
 use std::borrow::Cow;
 use std::future::Future;
 use store::{
-    SerializeInfallible, ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId},
+    ValueKey,
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
 };
 use trc::AddContext;
 use types::{
@@ -285,21 +285,7 @@ impl VacationResponseSet for Server {
                     batch
                         .with_collection(Collection::Principal)
                         .with_document(0);
-                    match document_id {
-                        PendingId::Assigned(document_id) => {
-                            batch.set(PrincipalField::ActiveScriptId, document_id.serialize());
-                        }
-                        PendingId::Slot(slot) => {
-                            batch.set_patched(
-                                PrincipalField::ActiveScriptId,
-                                0u32.serialize(),
-                                vec![Patch {
-                                    offset: 0,
-                                    source: PatchSource::SlotBeU32(slot),
-                                }],
-                            );
-                        }
-                    }
+                    batch.set(PrincipalField::ActiveScriptId, document_id);
                 }
             } else if was_active {
                 batch
@@ -313,12 +299,7 @@ impl VacationResponseSet for Server {
                 response.new_state = Some(State::Exact(
                     self.commit_batch(batch)
                         .await
-                        .map(|ids| {
-                            ids.last_change_id(
-                                account_id,
-                                SyncCollection::SieveScript.change_group(),
-                            )
-                        })
+                        .map(|ids| ids.last_change_id(account_id, SyncCollection::SieveScript))
                         .caused_by(trc::location!())?,
                 ));
             }

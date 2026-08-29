@@ -225,8 +225,7 @@ pub(crate) async fn spam_sample_set(
 
     if !batch.is_empty() {
         set.server
-            .store()
-            .write_batch(batch.build_all())
+            .commit_batch(batch)
             .await
             .caused_by(trc::location!())?;
     }

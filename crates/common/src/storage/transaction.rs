@@ -14,20 +14,14 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    collection::SyncCollection,
+    collection::{ChangeGroup, SyncCollection},
     type_state::{DataType, StateChange},
 };
 use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
 
 impl Server {
     pub async fn commit_batch(&self, mut builder: BatchBuilder) -> trc::Result<AssignedIds> {
-        let mut assigned_ids = AssignedIds::default();
-        let mut commit_points = builder.commit_points();
-
-        for commit_point in commit_points.iter() {
-            let batch = builder.build_one(commit_point);
-            self.store().write(batch, &mut assigned_ids).await?;
-        }
+        let mut assigned_ids = self.store().write_batch(&mut builder).await?;
 
         if let Some(hash) = builder.last_archive_hash() {
             assigned_ids.push_archive_hash(hash);
@@ -59,7 +53,8 @@ impl Server {
                     if let Some(data_type) =
                         DataType::try_from_sync(changed_collection, is_container)
                     {
-                        group_types[changed_collection.change_group() as usize].insert(data_type);
+                        group_types[changed_collection.change_group().to_u8() as usize]
+                            .insert(data_type);
                     }
                 }
 
@@ -68,7 +63,8 @@ impl Server {
                         self.broadcast_push_notification(PushNotification::StateChange(
                             StateChange {
                                 account_id,
-                                change_id: assigned_ids.last_change_id(account_id, group as u8),
+                                change_id: assigned_ids
+                                    .last_change_id(account_id, ChangeGroup::from_u8(group as u8)),
                                 types: *types,
                             },
                         ))
@@ -191,7 +187,7 @@ impl Server {
                         Vec::new(),
                     );
                     self.store()
-                        .write_batch(batch.build_all())
+                        .write_batch(&mut batch)
                         .await
                         .caused_by(trc::location!())?;
                 }

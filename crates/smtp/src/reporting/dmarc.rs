@@ -364,7 +364,7 @@ impl DmarcReporting for Server {
                 .finalize(),
         });
         self.store()
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
 
@@ -585,7 +585,7 @@ impl DmarcReporting for Server {
                     },
                 );
 
-                match self.core.storage.data.write_batch(batch.build_all()).await {
+                match self.core.storage.data.write_batch(&mut batch).await {
                     Ok(_) => return,
                     Err(err) if err.is_assertion_failure() && rety_count < 3 => {
                         rety_count += 1;
@@ -702,7 +702,7 @@ impl DmarcReporting for Server {
                 report_bytes,
             );
 
-            match self.core.storage.data.write_batch(batch.build_all()).await {
+            match self.core.storage.data.write_batch(&mut batch).await {
                 Ok(_) => {
                     break;
                 }

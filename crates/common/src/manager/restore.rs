@@ -135,7 +135,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                 );
                 if batch.is_large_batch() {
                     store
-                        .write_batch(batch.build_all())
+                        .write_batch(&mut batch)
                         .await
                         .failed("Failed to write batch");
                     batch = BatchBuilder::new();
@@ -167,7 +167,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
 
                 if batch.is_large_batch() {
                     store
-                        .write_batch(batch.build_all())
+                        .write_batch(&mut batch)
                         .await
                         .failed("Failed to write batch");
                     batch = BatchBuilder::new();
@@ -185,7 +185,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
                 );
                 if batch.is_large_batch() {
                     store
-                        .write_batch(batch.build_all())
+                        .write_batch(&mut batch)
                         .await
                         .failed("Failed to write batch");
                     batch = BatchBuilder::new();
@@ -196,7 +196,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
 
     if !batch.is_empty() {
         store
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .failed("Failed to write batch");
     }

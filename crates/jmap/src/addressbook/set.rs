@@ -5,6 +5,7 @@
  */
 
 use crate::api::acl::{JmapAcl, JmapRights};
+use crate::api::pending_creates::PendingCreates;
 use crate::changes::state::JmapCacheState;
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{
@@ -23,9 +24,9 @@ use jmap_proto::{
 use jmap_tools::{JsonPointerItem, Key, Value};
 use rand::{RngExt, distr::Alphanumeric};
 use store::{
-    SerializeInfallible, ValueKey,
+    ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId, Slot, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -64,7 +65,7 @@ impl AddressBookSet for Server {
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
         let mut set_default: Option<PendingId> = None;
-        let mut created_slots: Vec<(String, Slot)> = Vec::new();
+        let mut created_slots = PendingCreates::new();
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -130,7 +131,7 @@ impl AddressBookSet for Server {
                 set_default = Some(PendingId::Slot(document_id));
             }
 
-            created_slots.push((id, document_id));
+            created_slots.push(id, document_id);
         }
 
         // Process updates
@@ -361,6 +362,7 @@ impl AddressBookSet for Server {
                                 card,
                                 account_id,
                                 document_id,
+                                None,
                                 &mut batch,
                             )?;
                         }
@@ -378,21 +380,14 @@ impl AddressBookSet for Server {
                 && response.not_updated.is_empty()
                 && response.not_destroyed.is_empty()
             {
-                let (payload, patches) = match default_address_book_id {
-                    PendingId::Assigned(document_id) => (document_id.serialize(), Vec::new()),
-                    PendingId::Slot(slot) => (
-                        0u32.serialize(),
-                        vec![Patch {
-                            offset: 0,
-                            source: PatchSource::SlotBeU32(slot),
-                        }],
-                    ),
-                };
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Principal)
                     .with_document(0)
-                    .set_patched(PrincipalField::DefaultAddressBookId, payload, patches);
+                    .set(
+                        PrincipalField::DefaultAddressBookId,
+                        default_address_book_id,
+                    );
             }
         } else if reset_default_address_book {
             batch
@@ -406,12 +401,9 @@ impl AddressBookSet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            for (create_id, slot) in created_slots {
-                response.created(create_id, assigned_ids.slot(slot));
-            }
+            created_slots.resolve(&mut response, &assigned_ids);
 
-            if let Some(change_id) =
-                assigned_ids.change_id(account_id, SyncCollection::AddressBook.change_group())
+            if let Some(change_id) = assigned_ids.change_id(account_id, SyncCollection::AddressBook)
             {
                 response.new_state = State::Exact(change_id).into();
             }

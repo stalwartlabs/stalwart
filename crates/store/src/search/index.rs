@@ -84,11 +84,9 @@ impl Store {
         }
 
         let mut batch = account_indexer.build_batch(index, account_id);
-        let mut commit_points = batch.commit_points();
-        for commit_point in commit_points.iter() {
-            let batch = batch.build_one(commit_point);
-            self.write_batch(batch).await.caused_by(trc::location!())?;
-        }
+        self.write_batch(&mut batch)
+            .await
+            .caused_by(trc::location!())?;
 
         Ok(())
     }
@@ -118,11 +116,9 @@ impl Store {
         }
 
         let mut batch = global_indexer.build_batch(SearchIndex::Tracing);
-        let mut commit_points = batch.commit_points();
-        for commit_point in commit_points.iter() {
-            let batch = batch.build_one(commit_point);
-            self.write_batch(batch).await.caused_by(trc::location!())?;
-        }
+        self.write_batch(&mut batch)
+            .await
+            .caused_by(trc::location!())?;
 
         Ok(())
     }
@@ -155,7 +151,7 @@ impl Store {
         batch
             .clear(SearchIndexClass::QueueIndex { index, partition })
             .clear(SearchIndexClass::QueueStatus { index, partition });
-        self.write_batch(batch.build_all())
+        self.write_batch(&mut batch)
             .await
             .caused_by(trc::location!())
             .map(|_| ())

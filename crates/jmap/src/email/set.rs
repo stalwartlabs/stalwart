@@ -47,7 +47,7 @@ use std::{borrow::Cow, collections::HashMap};
 use store::{
     ahash::AHashMap,
     roaring::RoaringBitmap,
-    write::{BatchBuilder, PendingId},
+    write::{BatchBuilder, PendingId, SlotRange},
 };
 use trc::AddContext;
 use types::{
@@ -945,7 +945,7 @@ impl EmailSet for Server {
             }
 
             // Process mailboxes
-            let mut uid_slot = None;
+            let mut uid_slots = SlotRange::default();
             if has_mailbox_changes {
                 // Make sure the message is at least in one mailbox
                 if new_data.mailboxes.is_empty() {
@@ -1028,14 +1028,14 @@ impl EmailSet for Server {
                 }
 
                 // Reserve IMAP UIDs for added mailboxes
-                for mailbox_id in new_data
-                    .mailboxes
-                    .iter()
-                    .filter(|m| m.uid == 0)
-                    .map(|m| m.mailbox_id)
-                {
-                    uid_slot.get_or_insert(batch.reserve_uid(account_id, mailbox_id));
-                }
+                uid_slots = batch.reserve_uids(
+                    account_id,
+                    new_data
+                        .mailboxes
+                        .iter()
+                        .filter(|m| m.uid == 0)
+                        .map(|m| m.mailbox_id),
+                );
             }
 
             // Write changes
@@ -1048,7 +1048,7 @@ impl EmailSet for Server {
                     .custom(ObjectIndexBuilder::new().with_current(data).with_changes(
                         PendingMessageData {
                             data: new_data,
-                            uid_slot,
+                            uid_slots,
                             thread_slot: None,
                             change_id: None,
                         },
@@ -1097,7 +1097,7 @@ impl EmailSet for Server {
             match self
                 .commit_batch(batch)
                 .await
-                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email.change_group()))
+                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email))
             {
                 Ok(change_id) => {
                     last_change_id = change_id.into();
@@ -1169,9 +1169,7 @@ impl EmailSet for Server {
                     last_change_id = self
                         .commit_batch(batch)
                         .await
-                        .map(|ids| {
-                            ids.last_change_id(account_id, SyncCollection::Email.change_group())
-                        })
+                        .map(|ids| ids.last_change_id(account_id, SyncCollection::Email))
                         .caused_by(trc::location!())?
                         .into();
                 }

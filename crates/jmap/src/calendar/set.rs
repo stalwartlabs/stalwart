@@ -5,6 +5,7 @@
  */
 
 use crate::api::acl::{JmapAcl, JmapRights};
+use crate::api::pending_creates::PendingCreates;
 use crate::changes::state::JmapCacheState;
 use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
@@ -28,9 +29,9 @@ use jmap_proto::{
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
 use rand::{RngExt, distr::Alphanumeric};
 use store::{
-    SerializeInfallible, ValueKey,
+    ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId, Slot, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -69,7 +70,7 @@ impl CalendarSet for Server {
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
         let mut set_default: Option<PendingId> = None;
-        let mut created_slots: Vec<(String, Slot)> = Vec::new();
+        let mut created_slots = PendingCreates::new();
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -134,7 +135,7 @@ impl CalendarSet for Server {
                 set_default = Some(PendingId::Slot(document_id));
             }
 
-            created_slots.push((id, document_id));
+            created_slots.push(id, document_id);
         }
 
         // Process updates
@@ -363,6 +364,7 @@ impl CalendarSet for Server {
                                 event,
                                 account_id,
                                 document_id,
+                                None,
                                 &mut batch,
                             )?;
                         }
@@ -380,21 +382,11 @@ impl CalendarSet for Server {
                 && response.not_updated.is_empty()
                 && response.not_destroyed.is_empty()
             {
-                let (payload, patches) = match default_calendar_id {
-                    PendingId::Assigned(document_id) => (document_id.serialize(), Vec::new()),
-                    PendingId::Slot(slot) => (
-                        0u32.serialize(),
-                        vec![Patch {
-                            offset: 0,
-                            source: PatchSource::SlotBeU32(slot),
-                        }],
-                    ),
-                };
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::Principal)
                     .with_document(0)
-                    .set_patched(PrincipalField::DefaultCalendarId, payload, patches);
+                    .set(PrincipalField::DefaultCalendarId, default_calendar_id);
             }
         } else if reset_default_calendar {
             batch
@@ -408,13 +400,9 @@ impl CalendarSet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            for (create_id, slot) in created_slots {
-                response.created(create_id, assigned_ids.slot(slot));
-            }
+            created_slots.resolve(&mut response, &assigned_ids);
 
-            if let Some(change_id) =
-                assigned_ids.change_id(account_id, SyncCollection::Calendar.change_group())
-            {
+            if let Some(change_id) = assigned_ids.change_id(account_id, SyncCollection::Calendar) {
                 response.new_state = State::Exact(change_id).into();
             }
         }

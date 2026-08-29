@@ -57,6 +57,7 @@ async fn set_hide_attendees(test: &TestServer, account_id: u32, document_id: u32
             previous,
             account_id,
             document_id,
+            None,
             &mut batch,
         )
         .unwrap();

@@ -208,7 +208,7 @@ impl FormHandler for Server {
             let mut batch = BatchBuilder::new();
             batch.clear(blob_hold);
             self.store()
-                .write_batch(batch.build_all())
+                .write_batch(&mut batch)
                 .await
                 .caused_by(trc::location!())?;
 

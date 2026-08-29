@@ -28,9 +28,9 @@ use registry::schema::enums::StorageQuota;
 use sieve::compiler::ErrorType;
 use std::future::Future;
 use store::{
-    SerializeInfallible, ValueKey,
+    ValueKey,
     rand::{RngExt, rng},
-    write::{Archive, ArchiveBytes, BatchBuilder, Patch, PatchSource, PendingId, Slot},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, Slot},
 };
 use trc::AddContext;
 use types::{
@@ -378,18 +378,8 @@ impl SieveScriptSet for Server {
                 .with_document(0);
 
             match activate_script {
-                Some(PendingId::Assigned(document_id)) => {
-                    batch.set(PrincipalField::ActiveScriptId, document_id.serialize());
-                }
-                Some(PendingId::Slot(slot)) => {
-                    batch.set_patched(
-                        PrincipalField::ActiveScriptId,
-                        0u32.serialize(),
-                        vec![Patch {
-                            offset: 0,
-                            source: PatchSource::SlotBeU32(slot),
-                        }],
-                    );
+                Some(document_id) => {
+                    batch.set(PrincipalField::ActiveScriptId, document_id);
                 }
                 None => {
                     batch.clear(PrincipalField::ActiveScriptId);
@@ -401,8 +391,7 @@ impl SieveScriptSet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            if let Some(change_id) =
-                assigned_ids.change_id(account_id, SyncCollection::SieveScript.change_group())
+            if let Some(change_id) = assigned_ids.change_id(account_id, SyncCollection::SieveScript)
             {
                 ctx.response.new_state = State::Exact(change_id).into();
             }

@@ -197,14 +197,14 @@ async fn store_maintenance(
                         }
 
                         if batch.is_large_batch() {
-                            server.store().write_batch(batch.build_all()).await?;
+                            server.store().write_batch(&mut batch).await?;
                             batch = BatchBuilder::new();
                         }
                     }
                 }
             }
             if !batch.is_empty() {
-                server.store().write_batch(batch.build_all()).await?;
+                server.store().write_batch(&mut batch).await?;
             }
 
             let started = Instant::now();
@@ -495,7 +495,7 @@ async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> 
         .add(ValueClass::Quota, quota);
     server
         .store()
-        .write_batch(batch.build_all())
+        .write_batch(&mut batch)
         .await
         .caused_by(trc::location!())
         .map(|_| ())
@@ -526,7 +526,7 @@ async fn recalculate_tenant_quota(server: &Server, tenant_id: u32) -> trc::Resul
         .add(ValueClass::TenantQuota(tenant_id), quota);
     server
         .store()
-        .write_batch(batch.build_all())
+        .write_batch(&mut batch)
         .await
         .caused_by(trc::location!())
         .map(|_| ())
@@ -576,7 +576,7 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
             .clear(MailboxField::UidCounter);
         server
             .store()
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
         mailbox_count += 1;
@@ -599,12 +599,8 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
 
         // Prepare write batch
         let mut batch = BatchBuilder::new();
-        let mut uid_slot = None;
-        for mailbox_id in new_data.mailboxes.iter().map(|m| m.mailbox_id) {
-            uid_slot.get_or_insert(batch.reserve_uid(account_id, mailbox_id));
-        }
-        let size_hint = new_data.size_hint();
-
+        let uid_slots =
+            batch.reserve_uids(account_id, new_data.mailboxes.iter().map(|m| m.mailbox_id));
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email)
@@ -613,19 +609,18 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
                 ValueClass::Property(EmailField::Archive.into()),
                 data.change_id,
             )
-            .set_serializable(
+            .set(
                 EmailField::Archive,
-                size_hint,
-                Box::new(PendingMessageData {
+                PendingMessageData {
                     data: new_data,
-                    uid_slot,
+                    uid_slots,
                     thread_slot: None,
                     change_id: Some(data.change_id),
-                }),
+                },
             );
         server
             .store()
-            .write_batch(batch.build_all())
+            .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
         email_count += 1;

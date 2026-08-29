@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::api::pending_creates::PendingCreates;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
@@ -55,7 +56,7 @@ impl IdentitySet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        let mut pending_creates = Vec::new();
+        let mut pending_creates = PendingCreates::new();
         'create: for (id, object) in request.unwrap_create() {
             let mut identity = Identity::default();
 
@@ -125,7 +126,7 @@ impl IdentitySet for Server {
                 .caused_by(trc::location!())?
                 .commit_point();
             identity_id_changes.push((PendingId::Slot(slot), true));
-            pending_creates.push((id, slot));
+            pending_creates.push(id, slot);
         }
 
         // Process updates
@@ -229,14 +230,11 @@ impl IdentitySet for Server {
         if !batch.is_empty() {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            response.new_state = State::Exact(
-                assigned_ids.last_change_id(account_id, SyncCollection::Identity.change_group()),
-            )
-            .into();
+            response.new_state =
+                State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::Identity))
+                    .into();
 
-            for (id, slot) in pending_creates {
-                response.created(id, assigned_ids.slot(slot));
-            }
+            pending_creates.resolve(&mut response, &assigned_ids);
         }
 
         Ok(response)

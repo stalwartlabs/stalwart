@@ -170,7 +170,7 @@ impl<T: SessionStream> SessionData<T> {
         // Build batch
         let parent_id = params.parent_mailbox_id.map(|id| id + 1).unwrap_or(0);
         let mut batch = BatchBuilder::new();
-        let first_slot = batch.reserve_document_ids(
+        let slots = batch.reserve_document_ids(
             params.account_id,
             Collection::Mailbox,
             params.path.len() as u32,
@@ -178,7 +178,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut parent_slot = None;
 
         for (offset, &path_item) in params.path.iter().enumerate() {
-            let slot = first_slot.offset(offset);
+            let slot = slots.get(offset);
             let mut new_folder = email::mailbox::Mailbox::new(path_item);
             if parent_slot.is_none() {
                 new_folder.parent_id = parent_id;
@@ -189,10 +189,7 @@ impl<T: SessionStream> SessionData<T> {
                 .with_account_id(params.account_id)
                 .with_collection(Collection::Mailbox)
                 .create_document(slot)
-                .custom(match parent_slot {
-                    Some(parent_slot) => builder.with_pending_id(parent_slot),
-                    None => builder,
-                })
+                .custom(builder.with_pending_id_opt(parent_slot))
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .commit_point();
 
@@ -212,10 +209,7 @@ impl<T: SessionStream> SessionData<T> {
             .with_account_id(params.account_id)
             .with_collection(Collection::Mailbox)
             .with_document(mailbox_id)
-            .custom(match parent_slot {
-                Some(parent_slot) => builder.with_pending_id(parent_slot),
-                None => builder,
-            })
+            .custom(builder.with_pending_id_opt(parent_slot))
             .imap_ctx(&arguments.tag, trc::location!())?;
         self.server
             .commit_batch(batch)

@@ -234,6 +234,7 @@ impl CardPropPatchRequestHandler for Server {
                         card,
                         account_id,
                         document_id,
+                        None,
                         &mut batch,
                     )
                     .caused_by(trc::location!())?

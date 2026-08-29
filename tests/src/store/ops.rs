@@ -83,7 +83,7 @@ async fn test_iterate_many(db: &store::Store) {
         }),
         b"small".to_vec(),
     );
-    db.write_batch(batch.build_all()).await.unwrap();
+    db.write_batch(&mut batch).await.unwrap();
 
     // Multi-range scan with an empty range in between, per-range order preserved
     let ranges = [1010u16, 1015, 1020, 1030, 1050]
@@ -221,6 +221,540 @@ async fn test_iterate_many(db: &store::Store) {
     .unwrap();
 }
 
+const ID_ACCOUNT_BASE: u32 = 0x0400_0000;
+const ID_APPEND_ACCOUNT: u32 = ID_ACCOUNT_BASE + 1;
+const ID_WIDE_ACCOUNT: u32 = ID_ACCOUNT_BASE + 2;
+const ID_DUP_ACCOUNT: u32 = ID_ACCOUNT_BASE + 3;
+const ID_GROUP_ACCOUNT: u32 = ID_ACCOUNT_BASE + 4;
+const ID_LOG_ACCOUNT: u32 = ID_ACCOUNT_BASE + 5;
+
+fn document_id_counter(account_id: u32, collection: Collection) -> ValueKey<ValueClass> {
+    ValueKey {
+        account_id,
+        collection: u8::from(collection),
+        document_id: 0,
+        class: ValueClass::DocumentId,
+    }
+}
+
+fn uid_counter(account_id: u32, mailbox_id: u32) -> ValueKey<ValueClass> {
+    ValueKey {
+        account_id,
+        collection: 0,
+        document_id: mailbox_id,
+        class: ValueClass::MailboxUid,
+    }
+}
+
+fn change_id_counter(account_id: u32, collection: SyncCollection) -> ValueKey<ValueClass> {
+    ValueKey {
+        account_id,
+        collection: 0,
+        document_id: 0,
+        class: ValueClass::ChangeId(collection.change_group()),
+    }
+}
+
+fn versioned_archive(value: &str) -> (u32, Vec<u8>) {
+    let (offset, bytes) = Archiver::with_compression(
+        value.as_bytes().to_vec(),
+        Compression::Zstd(Some(Dictionary::Common)),
+    )
+    .serialize_versioned()
+    .unwrap();
+    (offset as u32, bytes)
+}
+
+async fn test_id_assignment(db: &store::Store) {
+    use store::write::PendingId;
+
+    println!("Running single-transaction id assignment tests...");
+
+    // 1000 concurrent batches, each reserving one document id, must agree on 1..=1000.
+    // Every one of them contends for the same counter, so the run is full of retries: if a
+    // retried attempt kept the ids of the attempt it replaced the counter would overshoot.
+    const CONCURRENT_CREATES: u32 = 1000;
+    let mut handles = Vec::new();
+    for _ in 0..CONCURRENT_CREATES {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            let mut batch = BatchBuilder::new();
+            let slot = batch.reserve_document_id(ID_ACCOUNT_BASE, Collection::Email);
+            batch
+                .with_account_id(ID_ACCOUNT_BASE)
+                .with_collection(Collection::Email)
+                .create_document(slot)
+                .set(ValueClass::Property(1), b"created".to_vec());
+            db.write_batch(&mut batch).await.unwrap().slot(slot)
+        }));
+    }
+
+    let mut created = HashSet::new();
+    for handle in handles {
+        let document_id = handle.await.unwrap();
+        assert!(
+            created.insert(document_id),
+            "document id {document_id} was assigned twice"
+        );
+    }
+    assert_eq!(created.len(), CONCURRENT_CREATES as usize);
+    assert_eq!(
+        created.iter().copied().min().unwrap(),
+        1,
+        "document ids must start at 1"
+    );
+    assert_eq!(
+        created.iter().copied().max().unwrap(),
+        CONCURRENT_CREATES,
+        "document ids are not contiguous, an attempt burned an id"
+    );
+    assert_eq!(
+        db.get_counter(document_id_counter(ID_ACCOUNT_BASE, Collection::Email))
+            .await
+            .unwrap(),
+        CONCURRENT_CREATES as i64,
+        "a retried attempt kept its ids, the counter overshot"
+    );
+
+    // A batch that fails its assertion must advance no counter at all
+    const ASSERT_MAILBOX: u32 = 3;
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(ID_ACCOUNT_BASE)
+        .with_collection(Collection::Email)
+        .with_document(0)
+        .set(ValueClass::Property(2), b"present".to_vec())
+        .log_container_insert(SyncCollection::Email);
+    db.write_batch(&mut batch).await.unwrap();
+
+    let documents_before = db
+        .get_counter(document_id_counter(ID_ACCOUNT_BASE, Collection::Email))
+        .await
+        .unwrap();
+    let uids_before = db
+        .get_counter(uid_counter(ID_ACCOUNT_BASE, ASSERT_MAILBOX))
+        .await
+        .unwrap();
+    let changes_before = db
+        .get_counter(change_id_counter(ID_ACCOUNT_BASE, SyncCollection::Email))
+        .await
+        .unwrap();
+
+    let mut batch = BatchBuilder::new();
+    let doc_slot = batch.reserve_document_id(ID_ACCOUNT_BASE, Collection::Email);
+    let uid_slot = batch.reserve_uid(ID_ACCOUNT_BASE, ASSERT_MAILBOX);
+    batch
+        .with_account_id(ID_ACCOUNT_BASE)
+        .with_collection(Collection::Email)
+        .create_document(doc_slot)
+        .set(
+            ValueClass::Property(3),
+            (
+                vec![0u8; 4],
+                vec![Patch {
+                    offset: 0,
+                    source: PatchSource::SlotBeU32(uid_slot),
+                }],
+            ),
+        )
+        .log_item_insert(
+            SyncCollection::Email,
+            Some(PendingId::Assigned(ASSERT_MAILBOX)),
+        )
+        .with_document(0)
+        .assert_value(ValueClass::Property(2), ());
+    let err = db.write_batch(&mut batch).await.unwrap_err();
+    assert!(
+        err.is_assertion_failure(),
+        "expected an assertion failure, got {err:?}"
+    );
+
+    assert_eq!(
+        db.get_counter(document_id_counter(ID_ACCOUNT_BASE, Collection::Email))
+            .await
+            .unwrap(),
+        documents_before,
+        "a failed assertion advanced the document id counter"
+    );
+    assert_eq!(
+        db.get_counter(uid_counter(ID_ACCOUNT_BASE, ASSERT_MAILBOX))
+            .await
+            .unwrap(),
+        uids_before,
+        "a failed assertion advanced the uid counter"
+    );
+    assert_eq!(
+        db.get_counter(change_id_counter(ID_ACCOUNT_BASE, SyncCollection::Email))
+            .await
+            .unwrap(),
+        changes_before,
+        "a failed assertion advanced the change id counter"
+    );
+    assert_eq!(
+        db.get_value::<store::write::serialize::RawValue>(ValueKey {
+            account_id: ID_ACCOUNT_BASE,
+            collection: u8::from(Collection::Email),
+            document_id: documents_before as u32 + 1,
+            class: ValueClass::Property(3),
+        })
+        .await
+        .unwrap()
+        .map(|v| v.0),
+        None,
+        "a failed assertion still wrote the document"
+    );
+
+    // The id the failed batch would have taken must go to the next writer
+    let mut batch = BatchBuilder::new();
+    let slot = batch.reserve_document_id(ID_ACCOUNT_BASE, Collection::Email);
+    batch
+        .with_account_id(ID_ACCOUNT_BASE)
+        .with_collection(Collection::Email)
+        .create_document(slot)
+        .set(ValueClass::Property(1), b"after".to_vec());
+    assert_eq!(
+        db.write_batch(&mut batch).await.unwrap().slot(slot),
+        documents_before as u32 + 1,
+        "the failed batch burned an id"
+    );
+
+    // Concurrent appends to one mailbox: uid order must not invert against change id order
+    // (RFC 9051 section 2.3.1.1)
+    const APPEND_MAILBOX: u32 = 9;
+    const CONCURRENT_APPENDS: u32 = 250;
+    let mut handles = Vec::new();
+    for _ in 0..CONCURRENT_APPENDS {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            let mut batch = BatchBuilder::new();
+            let uid_slot = batch.reserve_uid(ID_APPEND_ACCOUNT, APPEND_MAILBOX);
+            let doc_slot = batch.reserve_document_id(ID_APPEND_ACCOUNT, Collection::Email);
+            batch
+                .with_account_id(ID_APPEND_ACCOUNT)
+                .with_collection(Collection::Email)
+                .create_document(doc_slot)
+                .set(
+                    ValueClass::Property(1),
+                    (
+                        vec![0u8; 4],
+                        vec![Patch {
+                            offset: 0,
+                            source: PatchSource::SlotBeU32(uid_slot),
+                        }],
+                    ),
+                )
+                .log_item_insert(
+                    SyncCollection::Email,
+                    Some(PendingId::Assigned(APPEND_MAILBOX)),
+                );
+            let ids = db.write_batch(&mut batch).await.unwrap();
+            (
+                ids.last_change_id(ID_APPEND_ACCOUNT, SyncCollection::Email.change_group()),
+                ids.slot(uid_slot),
+                ids.slot(doc_slot),
+            )
+        }));
+    }
+
+    let mut appended = Vec::new();
+    for handle in handles {
+        appended.push(handle.await.unwrap());
+    }
+    appended.sort_unstable();
+
+    let mut prev_change_id = 0u64;
+    let mut prev_uid = 0u32;
+    for (change_id, uid, _) in &appended {
+        assert!(
+            *change_id > prev_change_id,
+            "change id {change_id} was handed out twice"
+        );
+        assert_eq!(
+            *uid,
+            prev_uid + 1,
+            "uid {uid} is out of order at change id {change_id}"
+        );
+        prev_change_id = *change_id;
+        prev_uid = *uid;
+    }
+    assert_eq!(appended.len(), CONCURRENT_APPENDS as usize);
+    assert_eq!(
+        db.get_counter(uid_counter(ID_APPEND_ACCOUNT, APPEND_MAILBOX))
+            .await
+            .unwrap(),
+        CONCURRENT_APPENDS as i64,
+        "a retried append burned a uid"
+    );
+
+    // The stamped uid must match the one handed back to the caller
+    for (_, uid, document_id) in &appended {
+        let stored = db
+            .get_value::<store::write::serialize::RawValue>(ValueKey {
+                account_id: ID_APPEND_ACCOUNT,
+                collection: u8::from(Collection::Email),
+                document_id: *document_id,
+                class: ValueClass::Property(1),
+            })
+            .await
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_eq!(
+            u32::from_be_bytes(stored.try_into().unwrap()),
+            *uid,
+            "document {document_id} was stamped with a different uid"
+        );
+    }
+
+    // A reservation set larger than MAX_CONCURRENT_ALLOCATIONS, to exercise chunked allocation
+    const WIDE_MAILBOXES: u32 = 40;
+    let wide_collections = [
+        Collection::Email,
+        Collection::Mailbox,
+        Collection::Calendar,
+        Collection::ContactCard,
+    ];
+    for round in 1..=3u32 {
+        let mut batch = BatchBuilder::new();
+        let mut slots = Vec::new();
+        for mailbox_id in 0..WIDE_MAILBOXES {
+            slots.push(batch.reserve_uid(ID_WIDE_ACCOUNT, mailbox_id));
+        }
+        for collection in wide_collections {
+            slots.push(batch.reserve_document_id(ID_WIDE_ACCOUNT, collection));
+        }
+        assert!(slots.len() > store::write::MAX_CONCURRENT_ALLOCATIONS);
+
+        batch
+            .with_account_id(ID_WIDE_ACCOUNT)
+            .with_collection(Collection::Email)
+            .with_document(0)
+            .set(ValueClass::Property(1), b"wide".to_vec());
+        let ids = db.write_batch(&mut batch).await.unwrap();
+
+        for (index, slot) in slots.iter().enumerate() {
+            assert_eq!(
+                ids.slot(*slot),
+                round,
+                "slot {index} of {} got the wrong id in round {round}",
+                slots.len()
+            );
+        }
+    }
+
+    // Two reservations of the same class in one batch must own separate ranges.
+    // This is the JMAP Email/set shape: message 1 into mailboxes A and B, then message 2 into A.
+    const DUP_A: u32 = 11;
+    const DUP_B: u32 = 12;
+    let mut batch = BatchBuilder::new();
+    let a1 = batch.reserve_uid(ID_DUP_ACCOUNT, DUP_A);
+    let b1 = batch.reserve_uid(ID_DUP_ACCOUNT, DUP_B);
+    let a2 = batch.reserve_uid(ID_DUP_ACCOUNT, DUP_A);
+    let b2 = batch.reserve_uid(ID_DUP_ACCOUNT, DUP_B);
+    let a3 = batch.reserve_uid(ID_DUP_ACCOUNT, DUP_A);
+    let email1 = batch.reserve_document_id(ID_DUP_ACCOUNT, Collection::Email);
+    let mailbox1 = batch.reserve_document_id(ID_DUP_ACCOUNT, Collection::Mailbox);
+    let email2 = batch.reserve_document_id(ID_DUP_ACCOUNT, Collection::Email);
+    batch
+        .with_account_id(ID_DUP_ACCOUNT)
+        .with_collection(Collection::Email)
+        .with_document(0)
+        .set(ValueClass::Property(1), b"dup".to_vec());
+    let ids = db.write_batch(&mut batch).await.unwrap();
+
+    assert_eq!(
+        [ids.slot(a1), ids.slot(a2), ids.slot(a3)],
+        [1, 2, 3],
+        "repeated uid reservations for one mailbox were handed the same range"
+    );
+    assert_eq!(
+        [ids.slot(b1), ids.slot(b2)],
+        [1, 2],
+        "repeated uid reservations for one mailbox were handed the same range"
+    );
+    assert_eq!(
+        [ids.slot(email1), ids.slot(email2)],
+        [1, 2],
+        "repeated document id reservations were handed the same range"
+    );
+    assert_eq!(ids.slot(mailbox1), 1);
+    assert_eq!(
+        db.get_counter(uid_counter(ID_DUP_ACCOUNT, DUP_A))
+            .await
+            .unwrap(),
+        3,
+        "the uid counter fell behind the ids it handed out"
+    );
+    assert_eq!(
+        db.get_counter(uid_counter(ID_DUP_ACCOUNT, DUP_B))
+            .await
+            .unwrap(),
+        2,
+        "the uid counter fell behind the ids it handed out"
+    );
+    assert_eq!(
+        db.get_counter(document_id_counter(ID_DUP_ACCOUNT, Collection::Email))
+            .await
+            .unwrap(),
+        2
+    );
+
+    // Contiguous reservations of the same class coalesce, and must still be numbered in order
+    let mut batch = BatchBuilder::new();
+    let run = (0..5)
+        .map(|_| batch.reserve_uid(ID_DUP_ACCOUNT, DUP_A))
+        .collect::<Vec<_>>();
+    batch
+        .with_account_id(ID_DUP_ACCOUNT)
+        .with_collection(Collection::Email)
+        .with_document(0)
+        .set(ValueClass::Property(1), b"run".to_vec());
+    let ids = db.write_batch(&mut batch).await.unwrap();
+    assert_eq!(
+        run.iter().map(|slot| ids.slot(*slot)).collect::<Vec<_>>(),
+        vec![4, 5, 6, 7, 8],
+        "a coalesced reservation was numbered out of order"
+    );
+
+    // A batch touching two change groups stamps each archive with its own group's change id
+    for _ in 0..3 {
+        let mut batch = BatchBuilder::new();
+        batch
+            .with_account_id(ID_GROUP_ACCOUNT)
+            .with_collection(Collection::Email)
+            .with_document(0)
+            .log_container_insert(SyncCollection::Email);
+        db.write_batch(&mut batch).await.unwrap();
+    }
+
+    let (email_offset, email_archive) = versioned_archive("email");
+    let (calendar_offset, calendar_archive) = versioned_archive("calendar");
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(ID_GROUP_ACCOUNT)
+        .with_collection(Collection::Email)
+        .with_document(1)
+        .set(
+            ValueClass::Property(6),
+            (
+                email_archive,
+                vec![Patch {
+                    offset: email_offset,
+                    source: PatchSource::ChangeIdBe,
+                }],
+            ),
+        )
+        .log_container_insert(SyncCollection::Email)
+        .with_collection(Collection::Calendar)
+        .with_document(1)
+        .set(
+            ValueClass::Property(6),
+            (
+                calendar_archive,
+                vec![Patch {
+                    offset: calendar_offset,
+                    source: PatchSource::ChangeIdBe,
+                }],
+            ),
+        )
+        .log_container_insert(SyncCollection::Calendar);
+    let ids = db.write_batch(&mut batch).await.unwrap();
+
+    let email_change_id =
+        ids.last_change_id(ID_GROUP_ACCOUNT, SyncCollection::Email.change_group());
+    let calendar_change_id =
+        ids.last_change_id(ID_GROUP_ACCOUNT, SyncCollection::Calendar.change_group());
+    assert_eq!(email_change_id, 4, "the email change group did not advance");
+    assert_eq!(
+        calendar_change_id, 1,
+        "the calendar change group shared the email counter"
+    );
+
+    for (collection, want) in [
+        (Collection::Email, email_change_id),
+        (Collection::Calendar, calendar_change_id),
+    ] {
+        let stored = db
+            .get_value::<Archive<ArchiveBytes>>(ValueKey {
+                account_id: ID_GROUP_ACCOUNT,
+                collection: u8::from(collection),
+                document_id: 1,
+                class: ValueClass::Property(6),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.version.change_id(),
+            Some(want),
+            "{collection:?} was stamped with another change group's id"
+        );
+        stored.unarchive_untrusted::<Vec<u8>>().unwrap();
+    }
+
+    // A changelog row holding pending ids must resolve to the ids the batch was assigned
+    let mut batch = BatchBuilder::new();
+    let mailbox_slot = batch.reserve_document_id(ID_LOG_ACCOUNT, Collection::Mailbox);
+    let email_slot = batch.reserve_document_id(ID_LOG_ACCOUNT, Collection::Email);
+    batch
+        .with_account_id(ID_LOG_ACCOUNT)
+        .with_collection(Collection::Mailbox)
+        .create_document(mailbox_slot)
+        .set(ValueClass::Property(1), b"mailbox".to_vec())
+        .log_container_insert(SyncCollection::Email)
+        .with_collection(Collection::Email)
+        .create_document(email_slot)
+        .set(ValueClass::Property(1), b"email".to_vec())
+        .log_item_insert(SyncCollection::Email, Some(PendingId::Slot(mailbox_slot)));
+    let ids = db.write_batch(&mut batch).await.unwrap();
+    let mailbox_id = ids.slot(mailbox_slot) as u64;
+    let email_id = ids.slot(email_slot) as u64;
+
+    let logged = db
+        .changes(
+            ID_LOG_ACCOUNT,
+            store::write::LogCollection::Sync(SyncCollection::Email),
+            store::query::log::Query::All,
+        )
+        .await
+        .unwrap();
+    let mut got = logged.changes.clone();
+    got.sort_by_key(|change| format!("{change:?}"));
+    let mut want = vec![
+        store::query::log::Change::InsertContainer(mailbox_id),
+        store::query::log::Change::InsertItem((mailbox_id << 32) | email_id),
+    ];
+    want.sort_by_key(|change| format!("{change:?}"));
+    assert_eq!(
+        want, got,
+        "the changelog kept the pending marker instead of the assigned ids"
+    );
+
+    // Cleanup
+    for subspace in [
+        store::Subspace::Counter,
+        store::Subspace::Property,
+        store::Subspace::Logs,
+    ] {
+        db.delete_range(
+            store::write::AnyKey {
+                subspace,
+                key: ID_ACCOUNT_BASE.to_be_bytes().to_vec(),
+            },
+            store::write::AnyKey {
+                subspace,
+                key: [
+                    (ID_ACCOUNT_BASE + 0xFF).to_be_bytes().as_slice(),
+                    &[u8::MAX; 12],
+                ]
+                .concat(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
 #[cfg(feature = "foundationdb")]
 fn value_gen(chunks: impl IntoIterator<Item = (u8, usize)>) -> Vec<u8> {
     let mut value = Vec::new();
@@ -234,6 +768,7 @@ pub async fn test(test: &TestServer) {
     let db = test.server.store().clone();
 
     test_iterate_many(&db).await;
+    test_id_assignment(&db).await;
 
     #[cfg(feature = "foundationdb")]
     if matches!(db, store::Store::FoundationDb(_)) {
@@ -271,7 +806,7 @@ pub async fn test(test: &TestServer) {
                 value.clone(),
             );
         }
-        db.write_batch(batch.build_all()).await.unwrap();
+        db.write_batch(&mut batch).await.unwrap();
 
         // Iterate over all keys
         let mut results = Vec::new();
@@ -343,8 +878,7 @@ pub async fn test(test: &TestServer) {
                             item_id: 0,
                         }),
                         n.to_be_bytes().to_vec(),
-                    )
-                    .build_all(),
+                    ),
             )
             .await
             .unwrap();
@@ -372,8 +906,7 @@ pub async fn test(test: &TestServer) {
                 .clear(ValueClass::Registry(RegistryClass::Item {
                     object_id: 100,
                     item_id: 0,
-                }))
-                .build_all(),
+                })),
         )
         .await
         .unwrap();
@@ -391,8 +924,7 @@ pub async fn test(test: &TestServer) {
                             .with_account_id(0)
                             .with_collection(Collection::Email)
                             .with_document(5000)
-                            .add_and_get(ValueClass::Quota, 1)
-                            .build_all(),
+                            .add_and_get(ValueClass::Quota, 1),
                     )
                     .await
                     .unwrap();
@@ -447,8 +979,7 @@ pub async fn test(test: &TestServer) {
                 .with_account_id(0)
                 .with_collection(Collection::Email)
                 .with_document(5000)
-                .clear(ValueClass::Quota)
-                .build_all(),
+                .clear(ValueClass::Quota),
         )
         .await
         .unwrap();
@@ -470,8 +1001,7 @@ pub async fn test(test: &TestServer) {
                 .with_account_id(CHUNKED_ACCOUNT)
                 .with_collection(Collection::Email)
                 .with_document(1)
-                .set(ValueClass::Property(chunked_field), marker.clone())
-                .build_all(),
+                .set(ValueClass::Property(chunked_field), marker.clone()),
         )
         .await
         .unwrap();
@@ -492,8 +1022,7 @@ pub async fn test(test: &TestServer) {
                     .with_account_id(CHUNKED_ACCOUNT)
                     .with_collection(Collection::Email)
                     .with_document(0)
-                    .set(ValueClass::Property(chunked_field), value.clone())
-                    .build_all(),
+                    .set(ValueClass::Property(chunked_field), value.clone()),
             )
             .await
             .unwrap();
@@ -540,24 +1069,19 @@ pub async fn test(test: &TestServer) {
                     .with_account_id(document_id)
                     .with_collection(Collection::Email)
                     .with_document(document_id)
-                    .set(ValueClass::Property(ORPHAN_FIELD), marker.clone())
-                    .build_all(),
+                    .set(ValueClass::Property(ORPHAN_FIELD), marker.clone()),
             )
             .await
             .unwrap();
         }
 
-        db.write_batch(
-            BatchBuilder::new()
-                .set(
-                    ValueClass::Any(store::write::AnyClass {
-                        subspace: store::Subspace::Property,
-                        key: vec![0u8],
-                    }),
-                    vec![1u8],
-                )
-                .build_all(),
-        )
+        db.write_batch(BatchBuilder::new().set(
+            ValueClass::Any(store::write::AnyClass {
+                subspace: store::Subspace::Property,
+                key: vec![0u8],
+            }),
+            vec![1u8],
+        ))
         .await
         .unwrap();
 
@@ -590,20 +1114,17 @@ pub async fn test(test: &TestServer) {
                     .with_account_id(document_id)
                     .with_collection(Collection::Email)
                     .with_document(document_id)
-                    .clear(ValueClass::Property(ORPHAN_FIELD))
-                    .build_all(),
+                    .clear(ValueClass::Property(ORPHAN_FIELD)),
             )
             .await
             .unwrap();
         }
 
         db.write_batch(
-            BatchBuilder::new()
-                .clear(ValueClass::Any(store::write::AnyClass {
-                    subspace: store::Subspace::Property,
-                    key: vec![0u8],
-                }))
-                .build_all(),
+            BatchBuilder::new().clear(ValueClass::Any(store::write::AnyClass {
+                subspace: store::Subspace::Property,
+                key: vec![0u8],
+            })),
         )
         .await
         .unwrap();
@@ -624,8 +1145,7 @@ pub async fn test(test: &TestServer) {
         db.write_batch(
             BatchBuilder::new()
                 .set(in_memory_key(b""), value_gen([(b'p', 64)]))
-                .set(in_memory_key(b"x"), marker.clone())
-                .build_all(),
+                .set(in_memory_key(b"x"), marker.clone()),
         )
         .await
         .unwrap();
@@ -637,7 +1157,7 @@ pub async fn test(test: &TestServer) {
             } else {
                 batch.clear(in_memory_key(b""));
             }
-            db.write_batch(batch.build_all()).await.unwrap();
+            db.write_batch(&mut batch).await.unwrap();
 
             assert_eq!(
                 db.get_value::<store::write::serialize::RawValue>(ValueKey::from(in_memory_key(
@@ -651,7 +1171,7 @@ pub async fn test(test: &TestServer) {
             );
         }
 
-        db.write_batch(BatchBuilder::new().clear(in_memory_key(b"x")).build_all())
+        db.write_batch(BatchBuilder::new().clear(in_memory_key(b"x")))
             .await
             .unwrap();
 
@@ -673,7 +1193,7 @@ pub async fn test(test: &TestServer) {
                 );
 
                 if n % 10000 == 0 {
-                    db.write_batch(batch.build_all()).await.unwrap();
+                    db.write_batch(&mut batch).await.unwrap();
                     batch = BatchBuilder::new();
                     batch
                         .with_account_id(0)
@@ -681,7 +1201,7 @@ pub async fn test(test: &TestServer) {
                         .with_document(0);
                 }
             }
-            db.write_batch(batch.build_all()).await.unwrap();
+            db.write_batch(&mut batch).await.unwrap();
 
             println!("Created 900.000 keys...");
 
@@ -783,7 +1303,7 @@ pub async fn test(test: &TestServer) {
                 }));
 
                 if n % 10000 == 0 {
-                    db.write_batch(batch.build_all()).await.unwrap();
+                    db.write_batch(&mut batch).await.unwrap();
                     batch = BatchBuilder::new();
                     batch
                         .with_account_id(0)
@@ -791,7 +1311,7 @@ pub async fn test(test: &TestServer) {
                         .with_document(0);
                 }
             }
-            db.write_batch(batch.build_all()).await.unwrap();
+            db.write_batch(&mut batch).await.unwrap();
         }
     }
 
@@ -820,7 +1340,7 @@ pub async fn test(test: &TestServer) {
                             }
                         });
 
-                    match db.write_batch(builder.build_all()).await {
+                    match db.write_batch(&mut builder).await {
                         Ok(_) => {
                             break;
                         }
@@ -868,11 +1388,10 @@ pub async fn test(test: &TestServer) {
                     .with_collection(Collection::Email)
                     .with_document(0)
                     .add_and_get(ValueClass::Quota, 1);
-                db.write_batch(builder.build_all())
+                db.write_batch(&mut builder)
                     .await
                     .unwrap()
                     .last_counter_id()
-                    .unwrap()
             })
         });
     }
@@ -924,16 +1443,18 @@ pub async fn test(test: &TestServer) {
                     .with_account_id(0)
                     .with_collection(Collection::Email)
                     .with_document(document_id)
-                    .set_patched(
+                    .set(
                         ValueClass::Property(5),
-                        archived_value,
-                        vec![Patch {
-                            offset: offset as u32,
-                            source: PatchSource::ChangeIdBe,
-                        }],
+                        (
+                            archived_value,
+                            vec![Patch {
+                                offset: offset as u32,
+                                source: PatchSource::ChangeIdBe,
+                            }],
+                        ),
                     )
                     .log_container_insert(SyncCollection::Email);
-                db.write_batch(builder.build_all())
+                db.write_batch(&mut builder)
                     .await
                     .unwrap()
                     .last_change_id(0, SyncCollection::Email.change_group())
@@ -999,8 +1520,7 @@ pub async fn test(test: &TestServer) {
                 .with_document(0)
                 .set(ValueClass::Property(CHUNK_FIELD), value.as_slice())
                 .set(ValueClass::Property(0), "check1".as_bytes())
-                .set(ValueClass::Property(2), "check2".as_bytes())
-                .build_all(),
+                .set(ValueClass::Property(2), "check2".as_bytes()),
         )
         .await
         .unwrap();
@@ -1026,8 +1546,7 @@ pub async fn test(test: &TestServer) {
                 .with_account_id(0)
                 .with_collection(Collection::Email)
                 .with_document(0)
-                .clear(ValueClass::Property(CHUNK_FIELD))
-                .build_all(),
+                .clear(ValueClass::Property(CHUNK_FIELD)),
         )
         .await
         .unwrap();
@@ -1082,7 +1601,7 @@ pub async fn test(test: &TestServer) {
                 .clear(ValueClass::Property(5));
         }
 
-        db.write_batch(batch.build_all()).await.unwrap();
+        db.write_batch(&mut batch).await.unwrap();
 
         // Make sure everything is deleted
         store_assert_is_empty(&db, db.clone().into(), false).await;

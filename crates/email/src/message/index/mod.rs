@@ -13,7 +13,9 @@ use common::storage::index::{
 };
 use store::{
     Serialize, U64_LEN,
-    write::{BatchBuilder, Patch, PatchSource, PendingId, Slot, assert::AssertValue, now},
+    write::{
+        BatchBuilder, Patch, PatchSource, PendingId, Slot, SlotRange, assert::AssertValue, now,
+    },
 };
 use types::{
     blob_hash::BlobHash,
@@ -47,13 +49,15 @@ impl SerializableObject for MessageData {
         debug_assert!(pending_id.is_none(), "message data carries no pending id");
         let payload = self.serialize()?;
         let offset = (payload.len() - U64_LEN) as u32;
-        batch.set_patched(
+        batch.set(
             Field::ARCHIVE,
-            payload,
-            vec![Patch {
-                offset,
-                source: PatchSource::ChangeIdBe,
-            }],
+            (
+                payload,
+                vec![Patch {
+                    offset,
+                    source: PatchSource::ChangeIdBe,
+                }],
+            ),
         );
         Ok(())
     }
@@ -106,7 +110,7 @@ impl PendingMessageData {
     pub fn new(data: MessageData) -> Self {
         PendingMessageData {
             data,
-            uid_slot: None,
+            uid_slots: SlotRange::default(),
             thread_slot: None,
             change_id: None,
         }
@@ -130,12 +134,11 @@ impl SerializableObject for PendingMessageData {
     fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
         debug_assert!(pending_id.is_none(), "message data carries no pending id");
         debug_assert_eq!(
-            self.uid_slot.is_some(),
-            self.data.pending_uids() > 0,
+            self.uid_slots.len(),
+            self.data.pending_uids(),
             "unassigned uids and reserved uid slots disagree"
         );
-        let size_hint = self.data.size_hint();
-        batch.set_serializable(Field::ARCHIVE, size_hint, Box::new(self));
+        batch.set(Field::ARCHIVE, self);
         Ok(())
     }
 }

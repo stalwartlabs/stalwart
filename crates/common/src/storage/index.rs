@@ -12,11 +12,11 @@ use rkyv::{
 };
 use std::{borrow::Cow, fmt::Debug};
 use store::{
-    Serialize, SerializeInfallible, U32_LEN, U64_LEN,
+    Serialize, SerializeInfallible, U64_LEN,
     write::{
         Archive, ArchiveBytes, ArchiveCompression, Archiver, AssignedIds, BatchBuilder, BlobLink,
-        BlobOp, IntoOperations, Patch, PatchSource, PendingId, SearchIndex, SerializeWithIds, Slot,
-        ValueClass,
+        BlobOp, IntoOperations, Patch, PatchSource, PendingId, QueueDocumentId, SearchIndex,
+        SerializeWithIds, SetValue, SizedSetValue, Slot, ValueClass,
     },
 };
 use types::{
@@ -310,6 +310,7 @@ where
 {
     archiver: Archiver<T>,
     slot: Slot,
+    size_hint: usize,
 }
 
 impl<T: IndexableAndSerializableObject + 'static> SerializeWithIds for PendingObject<T> {
@@ -326,6 +327,16 @@ impl<T: IndexableAndSerializableObject + 'static> SerializeWithIds for PendingOb
 
         Ok((archive, hash))
     }
+
+    fn size_hint(&self) -> usize {
+        self.size_hint
+    }
+}
+
+impl<T: IndexableAndSerializableObject + 'static> From<PendingObject<T>> for SizedSetValue {
+    fn from(object: PendingObject<T>) -> Self {
+        SetValue::serializable(object)
+    }
 }
 
 impl<T: IndexableAndSerializableObject + 'static> SerializableObject for T {
@@ -339,22 +350,27 @@ impl<T: IndexableAndSerializableObject + 'static> SerializableObject for T {
                 archiver
             };
 
-            batch.set_archive_hash(None).set_serializable(
+            batch.set_archive_hash(None).set(
                 Field::ARCHIVE,
-                size_hint,
-                Box::new(PendingObject { archiver, slot }),
+                PendingObject {
+                    archiver,
+                    slot,
+                    size_hint,
+                },
             );
         } else if T::is_versioned() {
             let (offset, archive) = Archiver::new(self).serialize_versioned()?;
             batch
                 .set_archive_hash(Archive::<ArchiveBytes>::extract_hash(&archive))
-                .set_patched(
+                .set(
                     Field::ARCHIVE,
-                    archive,
-                    vec![Patch {
-                        offset: offset as u32,
-                        source: PatchSource::ChangeIdBe,
-                    }],
+                    (
+                        archive,
+                        vec![Patch {
+                            offset: offset as u32,
+                            source: PatchSource::ChangeIdBe,
+                        }],
+                    ),
                 );
         } else {
             let archive = Archiver::new(self).serialize()?;
@@ -390,6 +406,11 @@ impl<C, N> ObjectIndexBuilder<C, N> {
 
     pub fn with_pending_id(mut self, slot: Slot) -> Self {
         self.pending_id = Some(slot);
+        self
+    }
+
+    pub fn with_pending_id_opt(mut self, slot: Option<Slot>) -> Self {
+        self.pending_id = slot;
         self
     }
 
@@ -470,16 +491,6 @@ impl<C: CurrentObject, N: SerializableObject> IntoOperations for ObjectIndexBuil
     }
 }
 
-fn share_notification_patches(object_id: PendingId) -> Vec<Patch> {
-    match object_id {
-        PendingId::Slot(slot) => vec![Patch {
-            offset: U32_LEN as u32,
-            source: PatchSource::SlotBeU32(slot),
-        }],
-        PendingId::Assigned(_) => Vec::new(),
-    }
-}
-
 fn build_index(
     batch: &mut BatchBuilder,
     item: IndexValue<'_>,
@@ -499,12 +510,11 @@ fn build_index(
         }
         IndexValue::SearchIndex { index, .. } => {
             let account_id = batch.last_account_id().unwrap();
-            let document_id = batch.last_document_id().unwrap();
 
             if set {
-                batch.queue_document_index(index, account_id, document_id);
+                batch.queue_document_index(index, account_id, QueueDocumentId::Current);
             } else {
-                batch.queue_document_unindex(index, account_id, document_id);
+                batch.queue_document_unindex(index, account_id, QueueDocumentId::Current);
             }
         }
         IndexValue::Property { field, value } => {
@@ -536,7 +546,6 @@ fn build_index(
             let object_account_id = batch.last_account_id().unwrap_or_default();
             let object_type = batch.last_collection().unwrap_or(Collection::None);
             let object_id = batch.last_document_id().unwrap_or(PendingId::Assigned(0));
-            let object_id_placeholder = object_id.assigned().unwrap_or_default();
             let notification_id = SnowflakeIdGenerator::global_id().unwrap_or_default();
 
             for item in value.as_ref() {
@@ -547,14 +556,13 @@ fn build_index(
                         item.account_id,
                         ShareNotification {
                             object_account_id,
-                            object_id: object_id_placeholder,
                             object_type,
                             changed_by,
                             old_rights: Default::default(),
                             new_rights: item.grants,
-                            name: Default::default(),
-                        },
-                        share_notification_patches(object_id),
+                            ..Default::default()
+                        }
+                        .into_value(object_id),
                     );
                 } else {
                     batch.acl_revoke(item.account_id);
@@ -563,14 +571,13 @@ fn build_index(
                         item.account_id,
                         ShareNotification {
                             object_account_id,
-                            object_id: object_id_placeholder,
                             object_type,
                             changed_by,
                             old_rights: item.grants,
                             new_rights: Default::default(),
-                            name: Default::default(),
-                        },
-                        share_notification_patches(object_id),
+                            ..Default::default()
+                        }
+                        .into_value(object_id),
                     );
                 }
             }
@@ -641,7 +648,7 @@ fn merge_index(
             batch.queue_document_index(
                 index,
                 batch.last_account_id().unwrap(),
-                batch.last_document_id().unwrap(),
+                QueueDocumentId::Current,
             );
         }
         (
@@ -690,7 +697,6 @@ fn merge_index(
             let object_account_id = batch.last_account_id().unwrap_or_default();
             let object_type = batch.last_collection().unwrap_or(Collection::None);
             let object_id = batch.last_document_id().unwrap_or(PendingId::Assigned(0));
-            let object_id_placeholder = object_id.assigned().unwrap_or_default();
             let notification_id = SnowflakeIdGenerator::global_id().unwrap_or_default();
 
             match (has_old_acl, has_new_acl) {
@@ -707,14 +713,13 @@ fn merge_index(
                                 current_item.account_id,
                                 ShareNotification {
                                     object_account_id,
-                                    object_id: object_id_placeholder,
                                     object_type,
                                     changed_by,
                                     old_rights: current_item.grants,
                                     new_rights: Default::default(),
-                                    name: Default::default(),
-                                },
-                                share_notification_patches(object_id),
+                                    ..Default::default()
+                                }
+                                .into_value(object_id),
                             );
                         }
                     }
@@ -740,14 +745,13 @@ fn merge_index(
                                 item.account_id,
                                 ShareNotification {
                                     object_account_id,
-                                    object_id: object_id_placeholder,
                                     object_type,
                                     changed_by,
                                     old_rights,
                                     new_rights: item.grants,
-                                    name: Default::default(),
-                                },
-                                share_notification_patches(object_id),
+                                    ..Default::default()
+                                }
+                                .into_value(object_id),
                             );
                         }
                     }
@@ -761,14 +765,13 @@ fn merge_index(
                             item.account_id,
                             ShareNotification {
                                 object_account_id,
-                                object_id: object_id_placeholder,
                                 object_type,
                                 changed_by,
                                 old_rights: Default::default(),
                                 new_rights: item.grants,
-                                name: Default::default(),
-                            },
-                            share_notification_patches(object_id),
+                                ..Default::default()
+                            }
+                            .into_value(object_id),
                         );
                     }
                 }
@@ -781,14 +784,13 @@ fn merge_index(
                             item.account_id,
                             ShareNotification {
                                 object_account_id,
-                                object_id: object_id_placeholder,
                                 object_type,
                                 changed_by,
                                 old_rights: item.grants,
                                 new_rights: Default::default(),
-                                name: Default::default(),
-                            },
-                            share_notification_patches(object_id),
+                                ..Default::default()
+                            }
+                            .into_value(object_id),
                         );
                     }
                 }
