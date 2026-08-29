@@ -241,13 +241,25 @@ impl Command<Vec<u8>, Vec<u8>> {
             }
             Command::Quit => Ok(Command::Quit),
             Command::Stat => Ok(Command::Stat),
-            Command::List { msg } => Ok(Command::List { msg }),
-            Command::Retr { msg } if num_args == 1 => Ok(Command::Retr { msg }),
-            Command::Dele { msg } if num_args == 1 => Ok(Command::Dele { msg }),
+            Command::List { msg } => msg
+                .map(validate_msg_num)
+                .transpose()
+                .map(|msg| Command::List { msg }),
+            Command::Retr { msg } if num_args == 1 => {
+                validate_msg_num(msg).map(|msg| Command::Retr { msg })
+            }
+            Command::Dele { msg } if num_args == 1 => {
+                validate_msg_num(msg).map(|msg| Command::Dele { msg })
+            }
             Command::Noop => Ok(Command::Noop),
             Command::Rset => Ok(Command::Rset),
-            Command::Top { msg, n } if num_args == 2 => Ok(Command::Top { msg, n }),
-            Command::Uidl { msg } => Ok(Command::Uidl { msg }),
+            Command::Top { msg, n } if num_args == 2 => {
+                validate_msg_num(msg).map(|msg| Command::Top { msg, n })
+            }
+            Command::Uidl { msg } => msg
+                .map(validate_msg_num)
+                .transpose()
+                .map(|msg| Command::Uidl { msg }),
             Command::Capa => Ok(Command::Capa),
             Command::Stls => Ok(Command::Stls),
             Command::Utf8 => Ok(Command::Utf8),
@@ -268,6 +280,17 @@ impl Command<Vec<u8>, Vec<u8>> {
 #[inline(always)]
 fn into_string(bytes: Vec<u8>) -> Result<String, Error> {
     String::from_utf8(bytes).map_err(|_| Error::Parse("Invalid UTF-8".into()))
+}
+
+#[inline(always)]
+fn validate_msg_num(num: u32) -> Result<u32, Error> {
+    if num > 0 {
+        Ok(num)
+    } else {
+        Err(Error::Parse(
+            "Message number must be greater than zero".into(),
+        ))
+    }
 }
 
 #[inline(always)]
@@ -428,15 +451,21 @@ mod tests {
             "apop a b c",
             "quit 1",
             "stat 1",
+            "list 0",
             "list 1 2",
             "retr",
+            "retr 0",
             "retr 1 2",
             "dele",
+            "dele 0",
             "dele 1 2",
             "noop 1",
             "rset 1",
             "top",
+            "top 0 0",
+            "top 0 1 2",
             "top 1 2 3",
+            "uidl 0",
             "uidl 1 2 3",
             "capa 1",
             "stls 1",
