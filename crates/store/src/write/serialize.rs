@@ -352,6 +352,31 @@ impl Archive<ArchiveBytes> {
             None
         }
     }
+
+    fn hash_offset(bytes: &[u8]) -> Option<usize> {
+        let marker = *bytes.last()?;
+        if marker & VERSIONED != 0 {
+            bytes.len().checked_sub(U32_LEN + U64_LEN + 1)
+        } else if marker & HASHED != 0 {
+            bytes.len().checked_sub(U32_LEN + 1)
+        } else {
+            None
+        }
+    }
+
+    pub fn restamp_hash(bytes: &mut [u8]) {
+        debug_assert!(
+            bytes
+                .last()
+                .is_none_or(|marker| marker & (ZSTD_COMPRESSED | LZ4_COMPRESSED) == 0),
+            "a compressed archive cannot be rehashed"
+        );
+
+        if let Some(offset) = Self::hash_offset(bytes) {
+            let hash = (xxhash_rust::xxh3::xxh3_64(&bytes[..offset]) as u32).to_be_bytes();
+            bytes[offset..offset + U32_LEN].copy_from_slice(&hash);
+        }
+    }
 }
 
 impl<T> Archiver<T>
@@ -414,6 +439,25 @@ where
         self.with_version()
             .serialize()
             .map(|bytes| ((bytes.len() - U64_LEN - 1) as u64, bytes))
+    }
+
+    pub fn serialize_patchable(self) -> trc::Result<(u32, Vec<u8>)> {
+        let flags = self.flags;
+
+        Self {
+            inner: self.inner,
+            flags,
+            compression: Compression::None,
+        }
+        .serialize()
+        .map(|bytes| {
+            let payload_len = bytes.len()
+                - 1
+                - ((flags & HASHED != 0) as usize) * U32_LEN
+                - ((flags & VERSIONED != 0) as usize) * U64_LEN;
+
+            (payload_len as u32, bytes)
+        })
     }
 }
 

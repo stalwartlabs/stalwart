@@ -12,7 +12,7 @@ use rkyv::{
 };
 use std::{borrow::Cow, fmt::Debug};
 use store::{
-    Serialize, SerializeInfallible, U64_LEN,
+    Serialize, SerializeInfallible, U32_LEN, U64_LEN,
     write::{
         Archive, ArchiveBytes, ArchiveCompression, Archiver, AssignedIds, BatchBuilder, BlobLink,
         BlobOp, IntoOperations, Patch, PatchSource, PendingId, QueueDocumentId, SearchIndex,
@@ -243,6 +243,8 @@ pub trait IndexableAndSerializableObject:
         >,
     >
 {
+    const PENDING_ID_FIELD: Option<ArchivedIdField> = None;
+
     fn is_versioned() -> bool;
 
     fn set_pending_id(&mut self, _document_id: u32) {
@@ -251,6 +253,35 @@ pub trait IndexableAndSerializableObject:
 
     fn size_hint(&self) -> usize {
         unreachable!("object carries no pending document id")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ArchivedIdField {
+    offset: usize,
+    base: u32,
+}
+
+impl ArchivedIdField {
+    pub const fn new(offset: usize) -> Self {
+        Self { offset, base: 0 }
+    }
+
+    pub const fn one_based(self) -> Self {
+        Self {
+            offset: self.offset,
+            base: 1,
+        }
+    }
+
+    pub fn patch(&self, root_offset: usize, slot: Slot) -> Patch {
+        Patch {
+            offset: (root_offset + self.offset) as u32,
+            source: PatchSource::SlotArchivedU32 {
+                slot,
+                base: self.base,
+            },
+        }
     }
 }
 
@@ -342,22 +373,52 @@ impl<T: IndexableAndSerializableObject + 'static> From<PendingObject<T>> for Siz
 impl<T: IndexableAndSerializableObject + 'static> SerializableObject for T {
     fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
         if let Some(slot) = pending_id {
-            let size_hint = self.size_hint();
-            let archiver = Archiver::new(self);
-            let archiver = if T::is_versioned() {
-                archiver.with_version()
-            } else {
-                archiver
-            };
+            if let Some(field) = T::PENDING_ID_FIELD {
+                const {
+                    assert!(std::mem::align_of::<T::Archived>() == 1);
+                };
+                debug_assert!(
+                    field.offset + U32_LEN <= std::mem::size_of::<T::Archived>(),
+                    "pending id field is outside the archived root"
+                );
 
-            batch.set_archive_hash(None).set(
-                Field::ARCHIVE,
-                PendingObject {
-                    archiver,
-                    slot,
-                    size_hint,
-                },
-            );
+                let archiver = Archiver::new(self);
+                let (payload_len, archive) = if T::is_versioned() {
+                    archiver.with_version().serialize_patchable()?
+                } else {
+                    archiver.serialize_patchable()?
+                };
+                let root_offset = payload_len as usize - std::mem::size_of::<T::Archived>();
+                let mut patches = vec![field.patch(root_offset, slot)];
+
+                if T::is_versioned() {
+                    patches.push(Patch {
+                        offset: (archive.len() - U64_LEN - 1) as u32,
+                        source: PatchSource::ChangeIdBe,
+                    });
+                }
+
+                batch
+                    .set_archive_hash(None)
+                    .set(Field::ARCHIVE, (archive, patches));
+            } else {
+                let size_hint = self.size_hint();
+                let archiver = Archiver::new(self);
+                let archiver = if T::is_versioned() {
+                    archiver.with_version()
+                } else {
+                    archiver
+                };
+
+                batch.set_archive_hash(None).set(
+                    Field::ARCHIVE,
+                    PendingObject {
+                        archiver,
+                        slot,
+                        size_hint,
+                    },
+                );
+            }
         } else if T::is_versioned() {
             let (offset, archive) = Archiver::new(self).serialize_versioned()?;
             batch

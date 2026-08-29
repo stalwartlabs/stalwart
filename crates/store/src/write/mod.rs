@@ -722,6 +722,7 @@ pub struct Patch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PatchSource {
     SlotBeU32(Slot),
+    SlotArchivedU32 { slot: Slot, base: u32 },
     ChangeIdBe,
 }
 
@@ -1217,6 +1218,11 @@ impl Patch {
                     payload[offset..offset + U32_LEN]
                         .copy_from_slice(&ids.slot(slot).to_be_bytes());
                 }
+                PatchSource::SlotArchivedU32 { slot, base } => {
+                    payload[offset..offset + U32_LEN]
+                        .copy_from_slice(&(ids.slot(slot) + base).to_le_bytes());
+                    Archive::<ArchiveBytes>::restamp_hash(payload);
+                }
                 PatchSource::ChangeIdBe => {
                     payload[offset..offset + U64_LEN]
                         .copy_from_slice(&ids.current_change_id().to_be_bytes());
@@ -1579,6 +1585,117 @@ mod tests {
         assert_eq!(&payload[0..8], &0x0102_0304_0506_0708u64.to_be_bytes());
         assert_eq!(&payload[8..12], &0x0000_0203u32.to_be_bytes());
         assert_eq!(&payload[12..16], &0x0000_0202u32.to_be_bytes());
+    }
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+    struct PatchTarget {
+        name: String,
+        id: u32,
+        trailing: Vec<u32>,
+    }
+
+    impl ArchiveCompression for PatchTarget {
+        const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+    }
+
+    fn patch_target(id: u32) -> PatchTarget {
+        PatchTarget {
+            name: "a mailbox name long enough to clear the dictionary watermark".to_string(),
+            id,
+            trailing: (0..16).collect(),
+        }
+    }
+
+    #[test]
+    fn an_archived_slot_patch_rewrites_the_field_and_the_hash() {
+        let mut ids = AssignedIds::default();
+        ids.fill_slots(Slot::new(0), 1, 41);
+        ids.push_change_id(counter(1, 0), 7);
+        ids.set_current_change_id(1, group(0));
+
+        for versioned in [false, true] {
+            let archiver = Archiver::new(patch_target(0));
+            let (payload_len, mut archive) = if versioned {
+                archiver.with_version().serialize_patchable()
+            } else {
+                archiver.serialize_patchable()
+            }
+            .expect("serialize");
+
+            let offset = payload_len as usize - std::mem::size_of::<ArchivedPatchTarget>()
+                + std::mem::offset_of!(ArchivedPatchTarget, id);
+            let mut patches = vec![Patch {
+                offset: offset as u32,
+                source: PatchSource::SlotArchivedU32 {
+                    slot: Slot::new(0),
+                    base: 1,
+                },
+            }];
+            if versioned {
+                patches.push(Patch {
+                    offset: (archive.len() - U64_LEN - 1) as u32,
+                    source: PatchSource::ChangeIdBe,
+                });
+            }
+
+            Patch::apply(&patches, &mut archive, &ids);
+
+            let stored = <Archive<ArchiveBytes> as crate::Deserialize>::deserialize(&archive)
+                .expect("the patched archive failed its integrity check");
+            assert_eq!(
+                stored.version.change_id(),
+                versioned.then_some(7),
+                "change id was not stamped"
+            );
+            assert_eq!(
+                stored.deserialize::<PatchTarget>().expect("unarchive"),
+                patch_target(42),
+                "the patched field did not round trip"
+            );
+        }
+    }
+
+    #[test]
+    fn patching_the_same_archive_twice_is_idempotent() {
+        let mut ids = AssignedIds::default();
+        ids.fill_slots(Slot::new(0), 1, 41);
+
+        let (payload_len, mut archive) = Archiver::new(patch_target(0))
+            .serialize_patchable()
+            .expect("serialize");
+        let patches = [Patch {
+            offset: (payload_len as usize - std::mem::size_of::<ArchivedPatchTarget>()
+                + std::mem::offset_of!(ArchivedPatchTarget, id)) as u32,
+            source: PatchSource::SlotArchivedU32 {
+                slot: Slot::new(0),
+                base: 1,
+            },
+        }];
+
+        Patch::apply(&patches, &mut archive, &ids);
+        let once = archive.clone();
+        Patch::apply(&patches, &mut archive, &ids);
+
+        assert_eq!(once, archive, "a retried patch changed the payload");
+    }
+
+    #[test]
+    fn a_patchable_archive_is_never_compressed() {
+        let (payload_len, archive) = Archiver::new(patch_target(0))
+            .serialize_patchable()
+            .expect("serialize");
+        let compressed =
+            crate::Serialize::serialize(&Archiver::new(patch_target(0))).expect("serialize");
+
+        assert!(
+            compressed.len() < archive.len(),
+            "the sample must be large enough to compress, otherwise this proves nothing"
+        );
+        assert_eq!(
+            payload_len as usize,
+            archive.len() - U32_LEN - 1,
+            "an unversioned patchable archive carries a hash and a marker"
+        );
     }
 
     #[test]
