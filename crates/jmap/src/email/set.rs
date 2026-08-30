@@ -739,6 +739,19 @@ impl EmailSet for Server {
                 continue 'create;
             }
 
+            match builder
+                .headers
+                .iter()
+                .position(|(name, _)| name.eq_ignore_ascii_case("Message-ID"))
+            {
+                Some(pos) => {
+                    builder.headers[pos].0 = Cow::Borrowed("Message-ID");
+                }
+                None => {
+                    builder = builder.message_id(self.core.network.message_id());
+                }
+            }
+
             // In test, sort headers to avoid randomness
             #[cfg(feature = "test_mode")]
             {

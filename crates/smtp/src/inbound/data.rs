@@ -12,7 +12,7 @@ use crate::{
         self, Message, MessageSource, MessageWrapper, QueueEnvelope, RCPT_SPAM_MASK,
         quota::HasQueueQuota, rcpt_spam_flag, spool::QueueParams,
     },
-    reporting::analysis::AnalyzeReport,
+    reporting::analysis::{AnalyzeReport, ReportData},
     scripts::ScriptResult,
 };
 use common::{
@@ -452,8 +452,14 @@ impl<T: SessionStream> Session<T> {
         };
 
         // Analyze reports
-        if is_report {
+        if is_report && ReportData::is_present(&parsed_message) {
             if !rc.analysis.forward {
+                self.data
+                    .rcpt_to
+                    .retain(|rcpt| !rc.analysis.is_report_address(rcpt.report_address()));
+            }
+
+            if self.data.rcpt_to.is_empty() {
                 self.server.analyze_report(
                     mail_parser::Message {
                         html_body: parsed_message.html_body,

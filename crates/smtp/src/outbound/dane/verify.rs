@@ -91,7 +91,7 @@ impl TlsaVerify for Tlsa {
                 Hostname = hostname.to_string(),
             );
 
-            Err(Status::PermanentFailure(Box::new(ErrorDetails {
+            Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                 entity: hostname.into(),
                 details: Error::DaneError("No matching certificates found in TLSA records".into()),
             })))

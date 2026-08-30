@@ -670,14 +670,22 @@ impl QueuedMessage {
 
                 // Obtain source and remote IPs
                 let time = Instant::now();
-                let remote_ips = match server.resolve_host(remote_host, &envelope).await {
-                    Ok(remote_ips) => {
+                let validate_addresses = server.core.smtp.resolvers.dnssec_available
+                    && tls_strategy.try_dane()
+                    && is_smtp
+                    && remote_host.dnssec_status() == DnssecStatus::Secure;
+                let (remote_ips, addresses_dnssec_status) = match server
+                    .resolve_host(remote_host, &envelope, validate_addresses)
+                    .await
+                {
+                    Ok(resolved) => {
                         trc::event!(
                             Delivery(DeliveryEvent::IpLookup),
                             SpanId = message.span_id,
                             Domain = domain.to_string(),
                             Hostname = envelope.mx.to_string(),
-                            Details = remote_ips
+                            Details = resolved
+                                .ips
                                 .iter()
                                 .map(|ip| trc::Value::from(*ip))
                                 .collect::<Vec<_>>(),
@@ -685,7 +693,7 @@ impl QueuedMessage {
                             Elapsed = time.elapsed(),
                         );
 
-                        remote_ips
+                        (resolved.ips, resolved.dnssec_status)
                     }
                     Err(status) => {
                         trc::event!(
@@ -703,11 +711,22 @@ impl QueuedMessage {
                 };
 
                 // Lookup DANE policy
+                let mut dane_requires_encryption = false;
                 let dane_policy = if tls_strategy.try_dane() && is_smtp {
                     let time = Instant::now();
                     let strict = tls_strategy.is_dane_required();
 
-                    match remote_host.dnssec_status() {
+                    let (dnssec_status, dnssec_entity) = match remote_host.dnssec_status() {
+                        DnssecStatus::Secure => match addresses_dnssec_status {
+                            status @ (DnssecStatus::Insecure | DnssecStatus::Bogus) => {
+                                (status, "A/AAAA")
+                            }
+                            _ => (DnssecStatus::Secure, "MX"),
+                        },
+                        status => (status, "MX"),
+                    };
+
+                    match dnssec_status {
                         DnssecStatus::Secure => {
                             match server
                                 .tlsa_lookup(format!("_25._tcp.{}.", envelope.mx))
@@ -760,7 +779,7 @@ impl QueuedMessage {
 
                                         if strict {
                                             last_status =
-                                                Status::PermanentFailure(Box::new(ErrorDetails {
+                                                Status::TemporaryFailure(Box::new(ErrorDetails {
                                                     entity: envelope.mx.into(),
                                                     details: Error::DaneError(
                                                         "No valid TLSA records were found".into(),
@@ -768,6 +787,8 @@ impl QueuedMessage {
                                                 }));
                                             continue 'next_host;
                                         }
+
+                                        dane_requires_encryption = true;
                                         None
                                     }
                                 }
@@ -845,7 +866,7 @@ impl QueuedMessage {
                                         }
 
                                         last_status =
-                                            Status::PermanentFailure(Box::new(ErrorDetails {
+                                            Status::TemporaryFailure(Box::new(ErrorDetails {
                                                 entity: envelope.mx.into(),
                                                 details: Error::DaneError(
                                                     "No TLSA DNSSEC records found".into(),
@@ -896,7 +917,7 @@ impl QueuedMessage {
                                             }
 
                                             last_status =
-                                                Status::PermanentFailure(Box::new(ErrorDetails {
+                                                Status::TemporaryFailure(Box::new(ErrorDetails {
                                                     entity: envelope.mx.into(),
                                                     details: Error::DaneError(
                                                         "No TLSA records found".into(),
@@ -929,12 +950,12 @@ impl QueuedMessage {
                                 SpanId = message.span_id,
                                 Domain = domain.to_string(),
                                 Hostname = envelope.mx.to_string(),
-                                Details = "MX",
+                                Details = dnssec_entity,
                                 Strict = strict,
                                 Elapsed = time.elapsed(),
                             );
 
-                            // Report bogus MX record
+                            // Report bogus DNS record
                             if let Some(tls_report) = &tls_report {
                                 server
                                     .schedule_report(TlsEvent {
@@ -942,9 +963,9 @@ impl QueuedMessage {
                                         domain: domain.to_string(),
                                         failure: FailureDetails::new(ResultType::DnssecInvalid)
                                             .with_receiving_mx_hostname(envelope.mx)
-                                            .with_failure_reason_code(
-                                                "Bogus MX records were found.",
-                                            )
+                                            .with_failure_reason_code(format!(
+                                                "Bogus {dnssec_entity} records were found."
+                                            ))
                                             .into(),
                                         tls_record: tls_report.record.clone(),
                                         interval: tls_report.interval,
@@ -955,7 +976,9 @@ impl QueuedMessage {
 
                             last_status = Status::TemporaryFailure(Box::new(ErrorDetails {
                                 entity: envelope.mx.into(),
-                                details: Error::DaneError("Bogus MX records were found".into()),
+                                details: Error::DaneError(
+                                    format!("Bogus {dnssec_entity} records were found").into(),
+                                ),
                             }));
                             continue 'next_host;
                         }
@@ -989,7 +1012,7 @@ impl QueuedMessage {
                                         .await;
                                 }
 
-                                last_status = Status::PermanentFailure(Box::new(ErrorDetails {
+                                last_status = Status::TemporaryFailure(Box::new(ErrorDetails {
                                     entity: envelope.mx.into(),
                                     details: Error::DaneError(
                                         "No TLSA DNSSEC records found".into(),
@@ -1116,8 +1139,10 @@ impl QueuedMessage {
                     let is_strict_tls = tls_strategy.is_tls_required()
                         || (message.message.flags & MAIL_REQUIRETLS) != 0
                         || is_mta_sts_enforced
-                        || dane_policy.is_some();
+                        || dane_policy.is_some()
+                        || dane_requires_encryption;
                     let tls_connector = if dane_policy.is_some()
+                        || dane_requires_encryption
                         || remote_host.allow_invalid_certs()
                         || (tls_strategy.allow_invalid_certs && !is_mta_sts_enforced)
                     {

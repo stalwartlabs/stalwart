@@ -6,7 +6,6 @@
 
 use crate::{
     smtp::{
-        inbound::TestQueueEvent,
         queue::{build_rcpt, new_message},
         session::TestSession,
     },
@@ -179,7 +178,7 @@ async fn throttle_outbound() {
         .await
         .try_deliver(local.server.clone());
     tokio::time::sleep(Duration::from_millis(100)).await;
-    local.read_event().await.assert_refresh();
+    local.expect_refresh().await;
     let due = local.last_queued_due().await - now();
     assert!(due > 0, "Due: {}", due);
 
@@ -229,7 +228,7 @@ async fn throttle_outbound() {
         .await
         .try_deliver(local.server.clone());
     tokio::time::sleep(Duration::from_millis(100)).await;
-    local.read_event().await.assert_refresh();
+    local.expect_refresh().await;
     let due = local.last_queued_due().await - now();
     assert!(due > 0, "Due: {}", due);
 
@@ -300,7 +299,7 @@ async fn throttle_outbound() {
         .try_deliver(local.server.clone());
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    local.read_event().await.assert_refresh();
+    local.expect_refresh().await;
     let due = local.last_queued_due().await - now();
     assert!(due > 0, "Due: {}", due);
 }

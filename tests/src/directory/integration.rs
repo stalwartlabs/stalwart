@@ -9,8 +9,10 @@ use crate::{
     utils::{server::TestServerBuilder, smtp::SmtpConnection},
 };
 use ahash::AHashMap;
+use common::auth::{AuthRequest, RECOVERY_ADMIN_ID};
 use email::cache::MessageCacheFetch;
 use registry::schema::structs::{Account, AccountSettings, Directory};
+use std::net::IpAddr;
 use types::id::Id;
 
 pub async fn test() {
@@ -188,6 +190,37 @@ pub async fn test() {
             1
         );
     }
+
+    // Test recovery admin impersonation of an account that has not logged in before
+    assert!(
+        test.server
+            .account_id_from_email("multi.mail@example.org", false)
+            .await
+            .unwrap()
+            .is_none(),
+        "Account multi.mail@example.org exists before impersonation"
+    );
+    let access_token = test
+        .server
+        .authenticate(&AuthRequest::from_plain(
+            "multi.mail@example.org%admin",
+            admin.secret(),
+            0,
+            IpAddr::from([127, 0, 0, 1]),
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("Failed to impersonate multi.mail@example.org: {err:?}"));
+    assert_ne!(access_token.account_id(), RECOVERY_ADMIN_ID);
+    assert_eq!(
+        test.server
+            .registry()
+            .object::<Account>(access_token.account_id().into())
+            .await
+            .unwrap()
+            .and_then(|account| account.into_user())
+            .map(|account| account.name),
+        Some("multi.mail".to_string())
+    );
 }
 
 const TEST_EMAIL: &str = r#"From: bill@remote.org

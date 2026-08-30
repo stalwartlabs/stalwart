@@ -558,7 +558,7 @@ pub async fn test(test: &TestServer) {
             "baseEventId": &event_3_id
           },
           {
-            "recurrenceId": "2006-01-04T14:00:00",
+            "recurrenceId": "2006-01-04T12:00:00",
             "title": "Event two overridden",
             "start": "2006-01-04T14:00:00",
             "timeZone": "US/Eastern",
@@ -576,7 +576,7 @@ pub async fn test(test: &TestServer) {
             "baseEventId": &event_2_id
           },
           {
-            "recurrenceId": "2006-01-06T14:00:00",
+            "recurrenceId": "2006-01-06T12:00:00",
             "duration": "PT1H",
             "title": "Event two overridden twice",
             "timeZone": "US/Eastern",
@@ -1041,7 +1041,7 @@ fn test_jscalendar_participants(uid: &str, organizer: Option<&str>) -> Value {
     event
 }
 
-fn assert_eq_ignoring_updated(got: &Value, expected: Value) {
+pub fn assert_eq_ignoring_updated(got: &Value, expected: Value) {
     strip_updated(got.clone()).assert_is_equal(strip_updated(expected));
 }
 

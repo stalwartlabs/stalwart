@@ -28,6 +28,14 @@ impl<T: SessionStream> Session<T> {
             return;
         };
 
+        if self
+            .server
+            .is_local_report_domain(signature.domain(), self.data.session_id)
+            .await
+        {
+            return;
+        }
+
         // Throttle recipient
         if !self.throttle_rcpt(rcpt, rate, "dkim").await {
             trc::event!(

@@ -61,7 +61,7 @@ impl Scripting {
             .register_functions(&mut fnc_map_untrusted);
 
         // Parse untrusted runtime
-        let untrusted_runtime = Runtime::new()
+        let mut untrusted_runtime = Runtime::new()
             .with_functions(&mut fnc_map_untrusted)
             .with_max_nested_includes(untrusted.max_nested_includes as usize)
             .with_cpu_limit(untrusted.max_cpu_cycles as usize)
@@ -96,6 +96,11 @@ impl Scripting {
         // Allocate compiler and runtime
         let trusted = bp.setting_infallible::<SieveSystemInterpreter>().await;
         let system = bp.setting_infallible::<SystemSettings>().await;
+        let local_hostname = if !system.default_hostname.is_empty() {
+            system.default_hostname.clone()
+        } else {
+            bp.registry.local_hostname().to_string()
+        };
         let trusted_compiler = Compiler::new()
             .with_max_string_size(52428800)
             .with_max_variable_name_size(100)
@@ -133,7 +138,8 @@ impl Scripting {
             .with_max_nested_includes(trusted.max_nested_includes as usize)
             .with_max_received_headers(trusted.max_received_headers as usize)
             .with_default_duplicate_expiry(trusted.duplicate_expiry.into_inner().as_secs());
-        trusted_runtime.set_local_hostname(system.default_hostname.clone());
+        trusted_runtime.set_local_hostname(local_hostname.clone());
+        untrusted_runtime.set_local_hostname(local_hostname);
 
         // Parse trusted scripts
         let mut trusted_scripts: AHashMap<String, Arc<Sieve>> = AHashMap::new();

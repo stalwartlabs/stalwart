@@ -457,10 +457,10 @@ async fn delivery_diagnose(
         let remote_ips = match host.fqdn_hostname() {
             HostOrIp::Host(hostname) => {
                 match server
-                    .ip_lookup(&hostname, IpLookupStrategy::Ipv4thenIpv6, usize::MAX)
+                    .ip_lookup(&hostname, IpLookupStrategy::Ipv4thenIpv6, usize::MAX, false)
                     .await
                 {
-                    Ok(remote_ips) if !remote_ips.is_empty() => remote_ips,
+                    Ok((remote_ips, _)) if !remote_ips.is_empty() => remote_ips,
                     Ok(_) => {
                         tx.send(DeliveryStage::IpLookupError {
                             reason: "No IP addresses found for host".to_string(),

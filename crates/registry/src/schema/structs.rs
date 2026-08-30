@@ -2724,6 +2724,8 @@ pub struct Domain {
     pub allow_relaying: bool,
     #[serde(rename = "reportAddressUri")]
     pub report_address_uri: Option<String>,
+    #[serde(rename = "allowScimProvisioning")]
+    pub allow_scim_provisioning: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2953,6 +2955,8 @@ pub struct GroupAccount {
     pub locale: Locale,
     #[serde(rename = "timeZone")]
     pub time_zone: Option<TimeZone>,
+    #[serde(rename = "externalId")]
+    pub external_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6217,6 +6221,8 @@ pub struct UserAccount {
     pub quotas: VecMap<StorageQuota, u64>,
     #[serde(rename = "aliases")]
     pub aliases: List<EmailAlias>,
+    #[serde(rename = "externalId")]
+    pub external_id: Option<String>,
     #[serde(rename = "description")]
     pub description: Option<String>,
     #[serde(rename = "locale")]

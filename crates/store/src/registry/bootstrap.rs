@@ -61,6 +61,11 @@ impl Bootstrap {
         }
     }
 
+    pub fn with_data_store(mut self, data_store: Store) -> Self {
+        self.data_store = data_store;
+        self
+    }
+
     pub async fn setting<T: ObjectImpl + From<Object>>(&mut self) -> trc::Result<T> {
         let object_id = T::OBJECT.singleton();
 

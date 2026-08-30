@@ -93,6 +93,7 @@ impl Server {
                                     )),
                                 )
                                 .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
+                                .message_id(self.core.network.message_id())
                                 .subject(subject)
                                 .text_body(body.build())
                                 .write_to_vec()

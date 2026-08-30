@@ -59,7 +59,7 @@ use smtp::{
     },
     reporting::scheduler::SpawnReport,
 };
-use std::{path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::VecDeque, path::PathBuf, str::FromStr, sync::Arc};
 use store::{
     RegistryStore, Store, ValueKey,
     registry::{RegistryQuery, bootstrap::Bootstrap, write::RegistryWrite},
@@ -74,6 +74,7 @@ pub struct TestServer {
     pub accounts: AHashMap<&'static str, Account>,
     pub temp_dir: TempDir,
     pub queue_rx: mpsc::Receiver<QueueEvent>,
+    pub queue_events: VecDeque<QueueEvent>,
     pub report_rx: mpsc::Receiver<ReportingEvent>,
     shutdown_tx: watch::Sender<bool>,
     reset: bool,
@@ -461,6 +462,7 @@ impl TestServerBuilder {
             temp_dir: self.temp_dir,
             accounts: AHashMap::from_iter([("admin", admin)]),
             queue_rx,
+            queue_events: VecDeque::new(),
             report_rx,
             shutdown_tx,
             reset: self.reset,

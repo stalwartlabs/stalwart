@@ -72,13 +72,7 @@ impl AddressBookGet for Server {
             })
             .await
             .caused_by(trc::location!())?
-            .or_else(|| {
-                if address_book_ids.len() == 1 {
-                    address_book_ids.iter().next()
-                } else {
-                    None
-                }
-            });
+            .or_else(|| cache.document_ids(true).min());
 
         let ids = if let Some(ids) = ids {
             ids

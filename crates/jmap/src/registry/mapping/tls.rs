@@ -28,7 +28,13 @@ pub(crate) async fn validate_acme_provider(
     provider: &mut AcmeProvider,
     unpatched_properties: VecMap<Property, JmapValue<'_>>,
 ) -> ValidationResult {
-    let response = match validate_tenant_quota(set, TenantStorageQuota::MaxAcmeProviders).await? {
+    let response = match validate_tenant_quota(
+        set.server,
+        set.access_token,
+        TenantStorageQuota::MaxAcmeProviders,
+    )
+    .await?
+    {
         Ok(response) => response,
         Err(err) => {
             return Ok(Err(err));

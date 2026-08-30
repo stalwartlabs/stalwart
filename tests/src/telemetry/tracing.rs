@@ -22,10 +22,10 @@ pub async fn test(test: &TestServer) {
     let account = test
         .create_user_account(
             "admin@example.org",
-            "admin@example.org",
+            "jdoe@example.org",
             "this is a very strong password",
             &[],
-            "admin@example.org",
+            "jdoe@example.org",
         )
         .await;
 

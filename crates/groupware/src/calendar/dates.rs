@@ -14,8 +14,9 @@ use calcard::{
     icalendar::{ICalendar, ICalendarComponentType, dates::TimeOrDelta},
 };
 use compact_str::ToCompactString;
+use indexmap::IndexMap;
 use store::{
-    ahash::AHashMap,
+    ahash::{AHashMap, RandomState},
     write::{key::KeySerializer, now},
 };
 
@@ -32,7 +33,8 @@ impl CalendarEventData {
         let now = now() as i64;
 
         let expanded = ical.expand_dates(default_tz, max_expansions);
-        let mut groups: AHashMap<(u16, u16, u16, i32), Vec<i64>> = AHashMap::with_capacity(16);
+        let mut groups: IndexMap<(u16, u16, u16, i32), Vec<i64>, RandomState> =
+            IndexMap::with_capacity_and_hasher(16, RandomState::default());
         let mut alarms = AHashMap::with_capacity(16);
 
         for event in expanded.events {

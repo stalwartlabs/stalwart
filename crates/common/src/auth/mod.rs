@@ -70,6 +70,12 @@ pub struct DomainCache {
 pub const DOMAIN_FLAG_RELAY: u8 = 1;
 pub const DOMAIN_FLAG_SUB_ADDRESSING: u8 = 1 << 1;
 
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+pub const DOMAIN_FLAG_SCIM_PROVISIONING: u8 = 1 << 2;
+// SPDX-SnippetEnd
+
 #[derive(Debug, Clone, Default)]
 pub struct AccountCache {
     pub name: Box<str>,
@@ -317,8 +323,23 @@ impl<'x> EmailAddressRef<'x> {
     }
 }
 
+impl AccountCache {
+    pub fn domain_id(&self) -> Option<u32> {
+        self.addresses.first().map(|address| address.domain_id)
+    }
+}
+
 impl DomainCache {
     pub fn name(&self) -> &str {
         self.names.first().map(|s| s.as_ref()).unwrap_or_default()
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[inline]
+    pub fn allows_scim_provisioning(&self) -> bool {
+        (self.flags & DOMAIN_FLAG_SCIM_PROVISIONING) != 0
+    }
+    // SPDX-SnippetEnd
 }

@@ -30,7 +30,9 @@ pub(crate) async fn validate_domain(
     tasks: &mut Vec<Task>,
 ) -> ValidationResult {
     let response = if old_domain.is_none() {
-        match validate_tenant_quota(set, TenantStorageQuota::MaxDomains).await? {
+        match validate_tenant_quota(set.server, set.access_token, TenantStorageQuota::MaxDomains)
+            .await?
+        {
             Ok(response) => response,
             Err(err) => {
                 return Ok(Err(err));
@@ -180,7 +182,13 @@ pub(crate) async fn validate_dns_server(
     old_dns: Option<&DnsServer>,
 ) -> ValidationResult {
     let response = if old_dns.is_none() {
-        match validate_tenant_quota(set, TenantStorageQuota::MaxDnsServers).await? {
+        match validate_tenant_quota(
+            set.server,
+            set.access_token,
+            TenantStorageQuota::MaxDnsServers,
+        )
+        .await?
+        {
             Ok(response) => response,
             Err(err) => {
                 return Ok(Err(err));

@@ -18,6 +18,20 @@ pub trait DnsCache {
     fn txt_add(&self, name: impl ToFqdn, value: impl Into<Txt>, valid_until: std::time::Instant);
     fn ipv4_add(&self, name: impl ToFqdn, value: Vec<Ipv4Addr>, valid_until: std::time::Instant);
     fn ipv6_add(&self, name: impl ToFqdn, value: Vec<Ipv6Addr>, valid_until: std::time::Instant);
+    fn ipv4_add_dnssec(
+        &self,
+        name: impl ToFqdn,
+        value: Vec<Ipv4Addr>,
+        dnssec_status: DnssecStatus,
+        valid_until: std::time::Instant,
+    );
+    fn ipv6_add_dnssec(
+        &self,
+        name: impl ToFqdn,
+        value: Vec<Ipv6Addr>,
+        dnssec_status: DnssecStatus,
+        valid_until: std::time::Instant,
+    );
     fn dnsbl_add(&self, name: &str, value: Vec<Ipv4Addr>, valid_until: std::time::Instant);
     fn ptr_add(&self, name: IpAddr, value: Vec<String>, valid_until: std::time::Instant);
     fn mx_add(
@@ -39,11 +53,21 @@ impl DnsCache for Server {
     }
 
     fn ipv4_add(&self, name: impl ToFqdn, value: Vec<Ipv4Addr>, valid_until: std::time::Instant) {
+        self.ipv4_add_dnssec(name, value, DnssecStatus::Secure, valid_until);
+    }
+
+    fn ipv4_add_dnssec(
+        &self,
+        name: impl ToFqdn,
+        value: Vec<Ipv4Addr>,
+        dnssec_status: DnssecStatus,
+        valid_until: std::time::Instant,
+    ) {
         self.inner.cache.dns_ipv4.insert_with_expiry(
             name.to_fqdn(),
             RecordSet {
                 rrset: Arc::from(value),
-                dnssec_status: DnssecStatus::Indeterminate,
+                dnssec_status,
             },
             valid_until,
         );
@@ -65,11 +89,21 @@ impl DnsCache for Server {
     }
 
     fn ipv6_add(&self, name: impl ToFqdn, value: Vec<Ipv6Addr>, valid_until: std::time::Instant) {
+        self.ipv6_add_dnssec(name, value, DnssecStatus::Secure, valid_until);
+    }
+
+    fn ipv6_add_dnssec(
+        &self,
+        name: impl ToFqdn,
+        value: Vec<Ipv6Addr>,
+        dnssec_status: DnssecStatus,
+        valid_until: std::time::Instant,
+    ) {
         self.inner.cache.dns_ipv6.insert_with_expiry(
             name.to_fqdn(),
             RecordSet {
                 rrset: Arc::from(value),
-                dnssec_status: DnssecStatus::Indeterminate,
+                dnssec_status,
             },
             valid_until,
         );

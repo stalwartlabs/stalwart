@@ -13,7 +13,7 @@ use crate::{
     },
     scheduling::{
         InstanceId, ItipError, ItipMessage, ItipSnapshots,
-        format::{TextFormatter, hyperlink},
+        format::{DateStyle, TextFormatter, hyperlink},
         ical_size,
         inbound::{
             MergeAction, MergeResult, itip_import_message, itip_merge_changes, itip_method,
@@ -951,6 +951,8 @@ fn build_rsvp_invitation(
             .map_or(ICalendarParticipationStatus::NeedsAction.as_str(), |v| {
                 v.as_str()
             }),
+        language: locale.name,
+        dir: locale.direction,
         labels: RsvpLabels::new(locale),
         attendee: RsvpParticipant {
             name: participant.name.map(|name| name.to_string()),
@@ -962,7 +964,7 @@ fn build_rsvp_invitation(
     };
 
     for field in instance.build_summary(None, &[]) {
-        let value = formatter.field_to_string(&field.value, locale.calendar_date_template_long);
+        let value = formatter.field_to_string(&field.value, DateStyle::Long);
         if value.is_empty() {
             continue;
         }
@@ -1047,6 +1049,8 @@ pub enum RsvpResponse {
         reason: RsvpError,
         title: &'static str,
         message: &'static str,
+        language: &'static str,
+        dir: &'static str,
     },
 }
 
@@ -1080,6 +1084,8 @@ pub struct RsvpInvitation {
     pub attendee: RsvpParticipant,
     pub attendees: Vec<RsvpParticipant>,
     pub partstat: &'static str,
+    pub language: &'static str,
+    pub dir: &'static str,
     pub labels: RsvpLabels,
 }
 
@@ -1185,6 +1191,8 @@ impl RsvpResponse {
                 RsvpError::NotParticipant => locale.calendar_not_participant,
                 RsvpError::ServerError => locale.calendar_rsvp_error,
             },
+            language: locale.name,
+            dir: locale.direction,
         }
     }
 

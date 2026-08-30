@@ -17,7 +17,13 @@ pub(crate) async fn validate_dkim_signature(
     old_key: Option<&DkimSignature>,
 ) -> ValidationResult {
     let response = if old_key.is_none() {
-        match validate_tenant_quota(set, TenantStorageQuota::MaxDkimKeys).await? {
+        match validate_tenant_quota(
+            set.server,
+            set.access_token,
+            TenantStorageQuota::MaxDkimKeys,
+        )
+        .await?
+        {
             Ok(response) => response,
             Err(err) => {
                 return Ok(Err(err));

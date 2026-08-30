@@ -12,6 +12,7 @@ email = { path = "../email" }
 smtp = { path = "../smtp" }
 jmap = { path = "../jmap" }
 dav = { path = "../dav" }
+scim = { path = "../scim" }
 groupware = { path = "../groupware" }
 spam-filter = { path = "../spam-filter" }
 http_proto = { path = "../http-proto" }
@@ -52,7 +53,7 @@ flate2 = "1.1"
 [features]
 test_mode = []
 dev_mode = []
-enterprise = []
+enterprise = ["scim/enterprise"]
 
 [lints]
 workspace = true

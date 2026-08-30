@@ -6,7 +6,7 @@
 
 use crate::{
     smtp::{
-        inbound::{TestMessage, TestQueueEvent},
+        inbound::TestMessage,
         session::{TestSession, VerifyResponse},
     },
     utils::server::TestServerBuilder,
@@ -344,8 +344,8 @@ async fn sieve_scripts() {
             "250",
         )
         .await;
-    test.read_event().await.assert_refresh();
-    test.read_event().await.assert_refresh();
+    test.expect_refresh().await;
+    test.expect_refresh().await;
     let messages = test.read_queued_messages().await;
     assert_eq!(messages.len(), 2);
     let mut messages = messages.into_iter();
@@ -391,8 +391,8 @@ async fn sieve_scripts() {
             "250",
         )
         .await;
-    test.read_event().await.assert_refresh();
-    test.read_event().await.assert_refresh();
+    test.expect_refresh().await;
+    test.expect_refresh().await;
     let messages = test.read_queued_messages().await;
     assert_eq!(messages.len(), 2);
     let mut messages = messages.into_iter();

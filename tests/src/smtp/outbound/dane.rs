@@ -146,15 +146,8 @@ async fn dane_verify() {
         .expect_message_then_deliver()
         .await
         .try_deliver(local.server.clone());
-    local
-        .expect_message()
-        .await
-        .read_lines(&local)
-        .await
-        .assert_contains("<bill@foobar.org> (DANE failed to authenticate")
-        .assert_contains("No TLSA reco=")
-        .assert_contains("rds found");
-    local.read_event().await.assert_done();
+    let retry = local.expect_message().await;
+    assert!(retry.message.recipients[0].retry.due > now());
     local.assert_no_events();
 
     // Expect TLS failure report
@@ -197,15 +190,8 @@ async fn dane_verify() {
         .expect_message_then_deliver()
         .await
         .try_deliver(local.server.clone());
-    local
-        .expect_message()
-        .await
-        .read_lines(&local)
-        .await
-        .assert_contains("<bill@foobar.org> (DANE failed to authenticate")
-        .assert_contains("No matching ")
-        .assert_contains("certificates found");
-    local.read_event().await.assert_done();
+    let retry = local.expect_message().await;
+    assert!(retry.message.recipients[0].retry.due > now());
     local.assert_no_events();
 
     // Expect TLS failure report
@@ -275,13 +261,8 @@ async fn dane_verify() {
         .expect_message_then_deliver()
         .await
         .try_deliver(local.server.clone());
-    local
-        .expect_message()
-        .await
-        .read_lines(&local)
-        .await
-        .assert_contains("<bill@foobar.org> (DANE failed to authenticate");
-    local.read_event().await.assert_done();
+    let retry = local.expect_message().await;
+    assert!(retry.message.recipients[0].retry.due > now());
     local.assert_no_events();
     let report = local.read_report().await.unwrap_tls();
     assert_eq!(report.policy, PolicyType::Tlsa(None));
@@ -294,7 +275,7 @@ async fn dane_verify() {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn dane_downgrade_on_tlsa_servfail() {
+async fn dane_tlsa_lookup_error_defers() {
     let mut local = TestServerBuilder::new("smtp_dane_downgrade_local")
         .await
         .with_http_listener(19020)
@@ -358,9 +339,10 @@ async fn dane_downgrade_on_tlsa_servfail() {
         DnssecStatus::Secure,
         Instant::now() + Duration::from_secs(10),
     );
-    local.server.ipv4_add(
+    local.server.ipv4_add_dnssec(
         "mx._dns_error.foobar.org",
         vec!["127.0.0.1".parse().unwrap()],
+        DnssecStatus::Secure,
         Instant::now() + Duration::from_secs(10),
     );
 
@@ -378,6 +360,218 @@ async fn dane_downgrade_on_tlsa_servfail() {
 
     let retry = local.expect_message().await;
     assert!(retry.message.recipients[0].retry.due > now());
+    remote.assert_no_events();
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn dane_skipped_when_mx_host_zone_is_insecure() {
+    let mut local = TestServerBuilder::new("smtp_dane_insecure_host_local")
+        .await
+        .with_http_listener(19053)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+    let mut remote = TestServerBuilder::new("smtp_dane_insecure_host_remote")
+        .await
+        .with_dummy_tls_cert(["*.foobar.org"])
+        .await
+        .with_http_listener(19054)
+        .await
+        .with_smtp_listener(9925)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+
+    let local_admin = local.account("admin");
+    local_admin.mta_allow_relaying().await;
+    local_admin.mta_no_auth().await;
+    let (tls_strategy_id, mut tls_strategy) = local_admin
+        .registry_get_all::<MtaTlsStrategy>()
+        .await
+        .into_iter()
+        .find(|(_, s)| s.name == "default")
+        .unwrap();
+    tls_strategy.dane = MtaRequiredOrOptional::Optional;
+    tls_strategy.start_tls = MtaRequiredOrOptional::Require;
+    tls_strategy.allow_invalid_certs = true;
+    let mut tls_strategy = serde_json::to_value(tls_strategy).unwrap();
+    tls_strategy
+        .as_object_mut()
+        .unwrap()
+        .retain(|k, _| k != "name");
+    local_admin
+        .registry_update_object(ObjectType::MtaTlsStrategy, tls_strategy_id, tls_strategy)
+        .await;
+    local_admin.reload_settings().await;
+    local.reload_core();
+    local.expect_reload_settings().await;
+
+    let remote_admin = remote.account("admin");
+    remote_admin.mta_no_auth().await;
+    remote_admin.mta_allow_relaying().await;
+    remote_admin.mta_add_all_headers().await;
+    remote_admin.mta_allow_non_fqdn().await;
+    remote_admin.reload_settings().await;
+    remote.reload_core();
+    remote.expect_reload_settings().await;
+
+    local.server.mx_add(
+        "foobar.org",
+        vec![MX {
+            exchanges: vec!["mx._dns_error.foobar.org".into()].into_boxed_slice(),
+            preference: 10,
+        }],
+        DnssecStatus::Secure,
+        Instant::now() + Duration::from_secs(10),
+    );
+    local.server.ipv4_add_dnssec(
+        "mx._dns_error.foobar.org",
+        vec!["127.0.0.1".parse().unwrap()],
+        DnssecStatus::Insecure,
+        Instant::now() + Duration::from_secs(10),
+    );
+
+    let mut session = local.new_mta_session();
+    session.data.remote_ip_str = "10.0.0.1".into();
+    session.eval_session_params().await;
+    session.ehlo("mx.test.org").await;
+    session
+        .send_message("john@test.org", &["bill@foobar.org"], "test:no_dkim", "250")
+        .await;
+    local
+        .expect_message_then_deliver()
+        .await
+        .try_deliver(local.server.clone());
+    local.read_event().await.assert_done();
+    local.assert_no_events();
+
+    remote
+        .expect_message()
+        .await
+        .read_lines(&remote)
+        .await
+        .assert_contains("using TLSv1.3 with cipher");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn dane_required_fails_when_mx_host_zone_is_insecure() {
+    let mut local = TestServerBuilder::new("smtp_dane_insecure_required_local")
+        .await
+        .with_http_listener(19055)
+        .await
+        .disable_services()
+        .capture_queue()
+        .capture_reporting()
+        .build()
+        .await;
+    let mut remote = TestServerBuilder::new("smtp_dane_insecure_required_remote")
+        .await
+        .with_dummy_tls_cert(["*.foobar.org"])
+        .await
+        .with_http_listener(19056)
+        .await
+        .with_smtp_listener(9925)
+        .await
+        .disable_services()
+        .capture_queue()
+        .build()
+        .await;
+
+    let local_admin = local.account("admin");
+    local_admin.mta_allow_relaying().await;
+    local_admin.mta_no_auth().await;
+    let (tls_strategy_id, mut tls_strategy) = local_admin
+        .registry_get_all::<MtaTlsStrategy>()
+        .await
+        .into_iter()
+        .find(|(_, s)| s.name == "default")
+        .unwrap();
+    tls_strategy.dane = MtaRequiredOrOptional::Require;
+    tls_strategy.allow_invalid_certs = true;
+    let mut tls_strategy = serde_json::to_value(tls_strategy).unwrap();
+    tls_strategy
+        .as_object_mut()
+        .unwrap()
+        .retain(|k, _| k != "name");
+    local_admin
+        .registry_update_object(ObjectType::MtaTlsStrategy, tls_strategy_id, tls_strategy)
+        .await;
+    local_admin
+        .registry_create_object(TlsReportSettings {
+            send_frequency: Expression {
+                else_: "weekly".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+    local_admin.reload_settings().await;
+    local.reload_core();
+    local.expect_reload_settings().await;
+
+    let remote_admin = remote.account("admin");
+    remote_admin.mta_no_auth().await;
+    remote_admin.mta_allow_relaying().await;
+    remote_admin.mta_add_all_headers().await;
+    remote_admin.mta_allow_non_fqdn().await;
+    remote_admin.reload_settings().await;
+    remote.reload_core();
+    remote.expect_reload_settings().await;
+
+    local.server.mx_add(
+        "foobar.org",
+        vec![MX {
+            exchanges: vec!["mx._dns_error.foobar.org".into()].into_boxed_slice(),
+            preference: 10,
+        }],
+        DnssecStatus::Secure,
+        Instant::now() + Duration::from_secs(10),
+    );
+    local.server.ipv4_add_dnssec(
+        "mx._dns_error.foobar.org",
+        vec!["127.0.0.1".parse().unwrap()],
+        DnssecStatus::Insecure,
+        Instant::now() + Duration::from_secs(10),
+    );
+    local.server.txt_add(
+        "_smtp._tls.foobar.org",
+        TlsRpt::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
+        Instant::now() + Duration::from_secs(10),
+    );
+
+    let mut session = local.new_mta_session();
+    session.data.remote_ip_str = "10.0.0.1".into();
+    session.eval_session_params().await;
+    session.ehlo("mx.test.org").await;
+    session
+        .send_message("john@test.org", &["bill@foobar.org"], "test:no_dkim", "250")
+        .await;
+    local
+        .expect_message_then_deliver()
+        .await
+        .try_deliver(local.server.clone());
+
+    let retry = local.expect_message().await;
+    assert!(retry.message.recipients[0].retry.due > now());
+    local.assert_no_events();
+
+    let report = local.read_report().await.unwrap_tls();
+    assert_eq!(report.domain, "foobar.org");
+    assert_eq!(report.policy, PolicyType::Tlsa(None));
+    assert_eq!(
+        report.failure.as_ref().unwrap().result_type,
+        ResultType::DaneRequired
+    );
+    assert_eq!(
+        report.failure.as_ref().unwrap().failure_reason_code,
+        Some("MX host is not in a DNSSEC signed zone.".to_string())
+    );
     remote.assert_no_events();
 }
 
@@ -619,7 +813,7 @@ async fn dane_test() {
         certs.remove(0);
         assert_eq!(
             tlsa.verify(0, &host, &[host.as_str()], Some(&certs)),
-            Err(Status::PermanentFailure(Box::new(ErrorDetails {
+            Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                 entity: host.into(),
                 details: Error::DaneError("No matching certificates found in TLSA records".into())
             })))

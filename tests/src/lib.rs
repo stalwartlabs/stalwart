@@ -24,6 +24,8 @@ pub mod imap;
 #[cfg(test)]
 pub mod jmap;
 #[cfg(test)]
+pub mod scim;
+#[cfg(test)]
 pub mod smtp;
 #[cfg(test)]
 pub mod store;

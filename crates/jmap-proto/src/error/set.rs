@@ -182,6 +182,18 @@ impl<T: Property> SetError<T> {
         self
     }
 
+    pub fn error_type(&self) -> &SetErrorType {
+        &self.0.type_
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        self.0.description.as_deref()
+    }
+
+    pub fn validation_errors(&self) -> &[ValidationError] {
+        &self.0.validation_errors
+    }
+
     pub fn with_property(mut self, property: impl Into<InvalidProperty<T>>) -> Self {
         self.0.properties = vec![property.into()].into();
         self

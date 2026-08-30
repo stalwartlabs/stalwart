@@ -10,7 +10,7 @@ use deadpool::{
     managed::{Manager, Pool},
 };
 use redis::{
-    Client, IntoConnectionInfo, ProtocolVersion,
+    Client, ConnectionAddr, IntoConnectionInfo, ProtocolVersion, TlsMode,
     cluster::{ClusterClient, ClusterClientBuilder},
     cluster_read_routing::RandomReplicaStrategy,
     sentinel::{SentinelClient, SentinelClientBuilder, SentinelServerType},
@@ -113,10 +113,25 @@ impl RedisStore {
         config: structs::RedisSentinelStore,
     ) -> Result<InMemoryStore, String> {
         let mut sentinels = Vec::with_capacity(config.urls.len());
+        let mut tls_mode = None;
         for url in config.urls {
             let info = url
                 .into_connection_info()
                 .map_err(|err| format!("Invalid Redis Sentinel URL: {err}"))?;
+            let url_tls_mode = match info.addr() {
+                ConnectionAddr::TcpTls { insecure: true, .. } => Some(TlsMode::Insecure),
+                ConnectionAddr::TcpTls {
+                    insecure: false, ..
+                } => Some(TlsMode::Secure),
+                _ => None,
+            };
+            if sentinels.is_empty() {
+                tls_mode = url_tls_mode;
+            } else if tls_mode != url_tls_mode {
+                return Err(
+                    "All Redis Sentinel URLs must use the same scheme and TLS settings".to_string(),
+                );
+            }
             sentinels.push(info.addr().clone());
         }
 
@@ -143,6 +158,9 @@ impl RedisStore {
         }
         if matches!(config.protocol_version, RedisProtocol::Resp3) {
             builder = builder.set_client_to_redis_protocol(ProtocolVersion::RESP3);
+        }
+        if let Some(tls_mode) = tls_mode {
+            builder = builder.set_client_to_redis_tls_mode(tls_mode);
         }
 
         let client = builder

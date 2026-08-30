@@ -32,7 +32,13 @@ impl SqlDirectory {
                 if data_store.is_sql() {
                     data_store.clone()
                 } else {
-                    return Err("The configured data store is not compatible with the SQL directory backend.".to_string());
+                    return Err(concat!(
+                        "This directory is set to store accounts in the main data store, ",
+                        "but the configured data store is not an SQL database. ",
+                        "Either select an SQL data store or configure a separate SQL ",
+                        "database for this directory."
+                    )
+                    .to_string());
                 }
             }
             _ => {

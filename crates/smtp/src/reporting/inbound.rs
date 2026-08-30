@@ -6,7 +6,7 @@
 
 use crate::core::Session;
 use ahash::AHashMap;
-use common::{USER_AGENT, config::smtp::report::AddressMatch};
+use common::USER_AGENT;
 use mail_auth::report::{
     ActionDisposition, AuthFailureType, DeliveryResult, DmarcResult, Feedback, FeedbackType,
     Report, tlsrpt::TlsReport,
@@ -36,28 +36,12 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
     }
 
     pub fn is_report(&self) -> bool {
-        for addr_match in &self.server.core.smtp.report.analysis.addresses {
-            for addr in &self.data.rcpt_to {
-                let rcpt_addr = addr
-                    .dsn_info
-                    .as_ref()
-                    .and_then(|v| v.strip_prefix("rfc822;"))
-                    .unwrap_or(&addr.address_lcase);
+        let analysis = &self.server.core.smtp.report.analysis;
 
-                match addr_match {
-                    AddressMatch::StartsWith(prefix) if rcpt_addr.starts_with(prefix) => {
-                        return true;
-                    }
-                    AddressMatch::EndsWith(suffix) if rcpt_addr.ends_with(suffix) => {
-                        return true;
-                    }
-                    AddressMatch::Equals(value) if rcpt_addr.eq(value) => return true,
-                    _ => (),
-                }
-            }
-        }
-
-        false
+        self.data
+            .rcpt_to
+            .iter()
+            .any(|addr| analysis.is_report_address(addr.report_address()))
     }
 }
 

@@ -19,6 +19,7 @@ pub struct CalendarEventExpansion {
     pub expansion_id: u32,
     pub start: i64,
     pub end: i64,
+    pub start_naive: i64,
 }
 
 impl ArchivedCalendarEventData {
@@ -69,6 +70,7 @@ impl ArchivedCalendarEventData {
                             expansion_id,
                             start,
                             end,
+                            start_naive: start_date_naive,
                         });
                     } else if start > limit.end {
                         continue 'outer;
@@ -90,6 +92,7 @@ impl ArchivedCalendarEventData {
                         expansion_id: base_expansion_id,
                         start,
                         end,
+                        start_naive: start_date_naive,
                     });
                 }
 
@@ -152,6 +155,7 @@ impl CalendarEventData {
                                     expansion_id,
                                     start,
                                     end,
+                                    start_naive: start_date_naive,
                                 });
                             }
 
@@ -181,6 +185,7 @@ impl CalendarEventData {
                             expansion_id: base_expansion_id,
                             start,
                             end,
+                            start_naive: start_date_naive,
                         });
                     }
 
@@ -202,6 +207,7 @@ impl CalendarEventData {
                         expansion_id,
                         start: i64::MAX,
                         end: i64::MAX,
+                        start_naive: i64::MAX,
                     }),
             );
         }
@@ -241,6 +247,7 @@ impl CalendarEventData {
             expansion_id: u32::MAX,
             start,
             end,
+            start_naive: start_date_naive,
         })
     }
 }
@@ -252,6 +259,7 @@ impl Default for CalendarEventExpansion {
             expansion_id: u32::MAX,
             start: i64::MAX,
             end: i64::MAX,
+            start_naive: i64::MAX,
         }
     }
 }
@@ -262,7 +270,7 @@ impl CalendarEventExpansion {
     }
 }
 
-pub(crate) fn resolve_local(tz: Tz, naive_secs: i64) -> Option<i64> {
+pub fn resolve_local(tz: Tz, naive_secs: i64) -> Option<i64> {
     tz.from_local_datetime(&DateTime::from_timestamp(naive_secs, 0)?.naive_local())
         .earliest()
         .map(|dt| dt.timestamp())

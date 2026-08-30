@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    smtp::{inbound::TestQueueEvent, session::TestSession},
+    smtp::session::TestSession,
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use mail_auth::{DnssecStatus, MX};
@@ -123,7 +123,7 @@ async fn ip_lookup_strategy() {
                 "Message: {:?}",
                 message
             );
-            local.read_event().await.assert_refresh();
+            local.expect_refresh().await;
         }
     }
 }

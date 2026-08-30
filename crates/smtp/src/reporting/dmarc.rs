@@ -57,6 +57,14 @@ impl<T: SessionStream> Session<T> {
         let dmarc_record = dmarc_output.dmarc_record_cloned().unwrap();
         let config = &self.server.core.smtp.report.dmarc;
 
+        if self
+            .server
+            .is_local_report_domain(dmarc_output.domain(), self.data.session_id)
+            .await
+        {
+            return;
+        }
+
         // Send failure report. RFC 9991 Section 2: report generators MUST NOT
         // honor "ruf" for policy records published with "psd=y".
         if !matches!(dmarc_record.psd, dmarc::Psd::Yes)

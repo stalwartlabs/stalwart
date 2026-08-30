@@ -26,12 +26,13 @@ use hyper::StatusCode;
 use store::write::{BatchBuilder, PendingId, now};
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes},
+    write::{Archive, ArchiveBytes, ValueClass},
 };
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
+    field::PrincipalField,
 };
 
 pub(crate) trait CalendarCopyMoveRequestHandler: Sync + Send {
@@ -856,6 +857,25 @@ async fn copy_container(
                 &mut batch,
             )
             .caused_by(trc::location!())?;
+
+        // Reset default calendar id
+        let default_calendar_id = server
+            .store()
+            .get_value::<u32>(ValueKey {
+                account_id: from_account_id,
+                collection: Collection::Principal.into(),
+                document_id: 0,
+                class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+            })
+            .await
+            .caused_by(trc::location!())?;
+        if default_calendar_id.is_some_and(|id| id == from_document_id) {
+            batch
+                .with_account_id(from_account_id)
+                .with_collection(Collection::Principal)
+                .with_document(0)
+                .clear(PrincipalField::DefaultCalendarId);
+        }
     }
 
     let preference = calendar.preferences.into_iter().next().unwrap();

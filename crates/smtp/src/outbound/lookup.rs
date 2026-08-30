@@ -5,16 +5,22 @@
  */
 
 use super::NextHop;
+use super::dane::dnssec::{TlsaLookup, least_secure};
 use crate::queue::{Error, ErrorDetails, HostResponse, Status};
 use common::{
     Server,
     config::smtp::queue::{ConnectionStrategy, HostOrIp, IpAndHost, MxConfig},
     expr::functions::ResolveVariable,
 };
-use mail_auth::{IpLookupStrategy, MX, RecordSet};
+use mail_auth::{DnssecStatus, IpLookupStrategy, MX, RecordSet};
 use rand::{RngExt, seq::SliceRandom};
 use registry::schema::enums::ExpressionVariable;
 use std::{future::Future, net::IpAddr, sync::Arc};
+
+pub struct ResolvedHost {
+    pub ips: Vec<IpAddr>,
+    pub dnssec_status: DnssecStatus,
+}
 
 pub trait DnsLookup: Sync + Send {
     fn ip_lookup(
@@ -22,13 +28,15 @@ pub trait DnsLookup: Sync + Send {
         key: &str,
         strategy: IpLookupStrategy,
         max_results: usize,
-    ) -> impl Future<Output = mail_auth::Result<Vec<IpAddr>>> + Send;
+        dnssec: bool,
+    ) -> impl Future<Output = mail_auth::Result<(Vec<IpAddr>, DnssecStatus)>> + Send;
 
     fn resolve_host(
         &self,
         remote_host: &NextHop<'_>,
         envelope: &impl ResolveVariable,
-    ) -> impl Future<Output = Result<Vec<IpAddr>, Status<HostResponse<Box<str>>, ErrorDetails>>> + Send;
+        dnssec: bool,
+    ) -> impl Future<Output = Result<ResolvedHost, Status<HostResponse<Box<str>>, ErrorDetails>>> + Send;
 }
 
 impl DnsLookup for Server {
@@ -37,23 +45,35 @@ impl DnsLookup for Server {
         key: &str,
         strategy: IpLookupStrategy,
         max_results: usize,
-    ) -> mail_auth::Result<Vec<IpAddr>> {
+        dnssec: bool,
+    ) -> mail_auth::Result<(Vec<IpAddr>, DnssecStatus)> {
         let (has_ipv4, has_ipv6, v4_first) = match strategy {
             IpLookupStrategy::Ipv4Only => (true, false, false),
             IpLookupStrategy::Ipv6Only => (false, true, false),
             IpLookupStrategy::Ipv4thenIpv6 => (true, true, true),
             IpLookupStrategy::Ipv6thenIpv4 => (true, true, false),
         };
+        let mut dnssec_status: Option<DnssecStatus> = None;
+
         let ipv4_addrs = if has_ipv4 {
-            match self
-                .core
-                .smtp
-                .resolvers
-                .dns
-                .ipv4_lookup(key, Some(&self.inner.cache.dns_ipv4))
-                .await
-            {
-                Ok(addrs) => addrs.rrset,
+            let result = if dnssec {
+                self.ipv4_lookup_dnssec(key).await
+            } else {
+                self.core
+                    .smtp
+                    .resolvers
+                    .dns
+                    .ipv4_lookup(key, Some(&self.inner.cache.dns_ipv4))
+                    .await
+            };
+
+            match result {
+                Ok(addrs) => {
+                    if !addrs.rrset.is_empty() {
+                        dnssec_status = Some(addrs.dnssec_status);
+                    }
+                    addrs.rrset
+                }
                 Err(_) if has_ipv6 => Arc::new([]),
                 Err(err) => return Err(err),
             }
@@ -61,57 +81,72 @@ impl DnsLookup for Server {
             Arc::new([])
         };
 
-        if has_ipv6 {
-            let ipv6_addrs = match self
-                .core
-                .smtp
-                .resolvers
-                .dns
-                .ipv6_lookup(key, Some(&self.inner.cache.dns_ipv6))
-                .await
-            {
-                Ok(addrs) => addrs.rrset,
+        let ipv6_addrs = if has_ipv6 {
+            let result = if dnssec {
+                self.ipv6_lookup_dnssec(key).await
+            } else {
+                self.core
+                    .smtp
+                    .resolvers
+                    .dns
+                    .ipv6_lookup(key, Some(&self.inner.cache.dns_ipv6))
+                    .await
+            };
+
+            match result {
+                Ok(addrs) => {
+                    if !addrs.rrset.is_empty() {
+                        dnssec_status = Some(match dnssec_status {
+                            Some(status) => least_secure(status, addrs.dnssec_status),
+                            None => addrs.dnssec_status,
+                        });
+                    }
+                    addrs.rrset
+                }
                 Err(_) if !ipv4_addrs.is_empty() => Arc::new([]),
                 Err(err) => return Err(err),
-            };
-            if v4_first {
-                Ok(ipv4_addrs
-                    .iter()
-                    .copied()
-                    .map(IpAddr::from)
-                    .chain(ipv6_addrs.iter().copied().map(IpAddr::from))
-                    .take(max_results)
-                    .collect())
-            } else {
-                Ok(ipv6_addrs
-                    .iter()
-                    .copied()
-                    .map(IpAddr::from)
-                    .chain(ipv4_addrs.iter().copied().map(IpAddr::from))
-                    .take(max_results)
-                    .collect())
             }
         } else {
-            Ok(ipv4_addrs
+            Arc::new([])
+        };
+
+        let remote_ips = if v4_first {
+            ipv4_addrs
                 .iter()
-                .take(max_results)
                 .copied()
                 .map(IpAddr::from)
-                .collect())
-        }
+                .chain(ipv6_addrs.iter().copied().map(IpAddr::from))
+                .take(max_results)
+                .collect()
+        } else {
+            ipv6_addrs
+                .iter()
+                .copied()
+                .map(IpAddr::from)
+                .chain(ipv4_addrs.iter().copied().map(IpAddr::from))
+                .take(max_results)
+                .collect()
+        };
+
+        Ok((
+            remote_ips,
+            dnssec_status.unwrap_or(DnssecStatus::Indeterminate),
+        ))
     }
 
     async fn resolve_host(
         &self,
         remote_host: &NextHop<'_>,
         envelope: &impl ResolveVariable,
-    ) -> Result<Vec<IpAddr>, Status<HostResponse<Box<str>>, ErrorDetails>> {
-        let mut remote_ips = match remote_host.fqdn_hostname() {
+        dnssec: bool,
+    ) -> Result<ResolvedHost, Status<HostResponse<Box<str>>, ErrorDetails>> {
+        let (mut remote_ips, dnssec_status) = match remote_host.fqdn_hostname() {
             HostOrIp::Host(hostname) => self
                 .ip_lookup(
                     hostname.as_ref(),
                     remote_host.ip_lookup_strategy(),
                     remote_host.max_multi_homed(),
+                    dnssec,
                 )
                 .await
                 .map_err(|err| {
@@ -142,7 +177,7 @@ impl DnsLookup for Server {
                         }))
                     }
                 })?,
-            HostOrIp::Ip(ip) => vec![ip],
+            HostOrIp::Ip(ip) => (vec![ip], DnssecStatus::Indeterminate),
         };
 
         if !remote_ips.is_empty() {
@@ -156,7 +191,10 @@ impl DnsLookup for Server {
                 }
             }
 
-            Ok(remote_ips)
+            Ok(ResolvedHost {
+                ips: remote_ips,
+                dnssec_status,
+            })
         } else {
             Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                 entity: remote_host.hostname().into(),

@@ -20,6 +20,9 @@ use serde_json::json;
 use store::write::now;
 use types::id::Id;
 
+const TASK_WAIT_ATTEMPTS: usize = 100;
+const TASK_WAIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
 const TASK_SUCCESS: u64 = 0;
 const TASK_TEMP_FAIL: u64 = 1;
 const TASK_PERM_FAIL: u64 = 2;
@@ -33,20 +36,16 @@ pub async fn test(test: &mut TestServer) {
 
     // Create a successful task for immediate execution
     admin.schedule_test_task(TASK_SUCCESS, 0).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     admin.assert_no_tasks().await;
 
     // Create a successful task for future execution
     admin.schedule_test_task(TASK_SUCCESS, 1).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     admin.assert_has_tasks(1).await;
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     admin.assert_no_tasks().await;
 
     // Create a permanent failure task for immediate execution
     admin.schedule_test_task(TASK_PERM_FAIL, 0).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let task = admin.assert_has_tasks(1).await.into_iter().next().unwrap();
+    let task = admin.assert_has_failed_task().await;
     assert_eq!(
         task.task.status().unwrap_failed().failure_reason,
         "Simulated permanent failure"
@@ -86,15 +85,14 @@ pub async fn test(test: &mut TestServer) {
 
     // Create a temporary failure task for immediate execution
     admin.schedule_test_task(TASK_TEMP_FAIL, 0).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let task = admin.assert_has_tasks(1).await.into_iter().next().unwrap();
+    let task = admin.assert_has_retried_task().await;
     let task_status = task.task.status().unwrap_retry();
     assert_eq!(task_status.failure_reason, "Simulated temporary failure");
     assert_eq!(task_status.attempt_number, 1);
 
     // Wait until the max attempts is reached
     test.wait_for_tasks_skip_failures().await;
-    let task = admin.assert_has_tasks(1).await.into_iter().next().unwrap();
+    let task = admin.assert_has_failed_task().await;
     let task_status = task.task.status().unwrap_failed();
     assert_eq!(task_status.failure_reason, "Simulated temporary failure");
     assert_eq!(task_status.failed_attempt_number, 3);
@@ -120,15 +118,14 @@ pub async fn test(test: &mut TestServer) {
 
     // Create a temporary failure task for immediate execution
     admin.schedule_test_task(TASK_TEMP_FAIL, 0).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let task = admin.assert_has_tasks(1).await.into_iter().next().unwrap();
+    let task = admin.assert_has_retried_task().await;
     let task_status = task.task.status().unwrap_retry();
     assert_eq!(task_status.failure_reason, "Simulated temporary failure");
     assert_eq!(task_status.attempt_number, 1);
 
     // Wait until 2 seconds deadline is reached
     test.wait_for_tasks_skip_failures().await;
-    let task = admin.assert_has_tasks(1).await.into_iter().next().unwrap();
+    let task = admin.assert_has_failed_task().await;
     let task_status = task.task.status().unwrap_failed();
     assert_eq!(task_status.failure_reason, "Simulated temporary failure");
     assert_eq!(task_status.failed_attempt_number, 2);
@@ -311,25 +308,51 @@ impl Account {
     }
 
     async fn assert_no_tasks(&self) {
-        let tasks = self.tasks().await;
-        assert!(
-            tasks.is_empty(),
-            "Expected no tasks, found {}: {:?}",
-            tasks.len(),
-            tasks
-        );
+        self.await_tasks(0, |_| true).await;
     }
 
     async fn assert_has_tasks(&self, count: usize) -> Vec<TaskId> {
-        let tasks = self.tasks().await;
-        assert!(
-            tasks.len() == count,
-            "Expected {} tasks, found {}: {:?}",
-            count,
-            tasks.len(),
-            tasks
-        );
-        tasks
+        self.await_tasks(count, |_| true).await
+    }
+
+    async fn assert_has_failed_task(&self) -> TaskId {
+        self.await_tasks(1, |task| matches!(task.task.status(), TaskStatus::Failed(_)))
+            .await
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    async fn assert_has_retried_task(&self) -> TaskId {
+        self.await_tasks(1, |task| matches!(task.task.status(), TaskStatus::Retry(_)))
+            .await
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    async fn await_tasks(
+        &self,
+        count: usize,
+        is_expected: impl Fn(&TaskId) -> bool,
+    ) -> Vec<TaskId> {
+        let mut attempt = 0;
+        loop {
+            let tasks = self.tasks().await;
+            if tasks.len() == count && tasks.iter().all(&is_expected) {
+                return tasks;
+            }
+
+            attempt += 1;
+            assert!(
+                attempt < TASK_WAIT_ATTEMPTS,
+                "Expected {} tasks, found {}: {:?}",
+                count,
+                tasks.len(),
+                tasks
+            );
+            tokio::time::sleep(TASK_WAIT_INTERVAL).await;
+        }
     }
 }
 

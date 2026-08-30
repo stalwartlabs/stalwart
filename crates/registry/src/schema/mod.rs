@@ -28,7 +28,6 @@ pub mod structs;
 #[allow(clippy::collapsible_if)]
 #[allow(clippy::derivable_impls)]
 #[allow(clippy::field_reassign_with_default)]
-#[allow(clippy::manual_range_patterns)]
 pub mod structs_impl;
 
 impl Display for Property {

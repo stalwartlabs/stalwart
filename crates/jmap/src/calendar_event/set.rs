@@ -11,8 +11,8 @@ use calcard::{
     common::{PartialDateTime, timezone::Tz},
     icalendar::{
         ICalendar, ICalendarAction, ICalendarComponent, ICalendarComponentType, ICalendarDuration,
-        ICalendarEntry, ICalendarParameter, ICalendarParameterValue, ICalendarProperty,
-        ICalendarRelated, ICalendarValue,
+        ICalendarEntry, ICalendarParameter, ICalendarParameterName, ICalendarParameterValue,
+        ICalendarProperty, ICalendarRelated, ICalendarValue,
     },
     jscalendar::{JSCalendar, JSCalendarDateTime, JSCalendarProperty, JSCalendarValue},
 };
@@ -28,6 +28,7 @@ use groupware::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, Calendar, CalendarEvent,
         CalendarEventData, EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS,
         EVENT_INVITE_SELF,
+        expand::{CalendarEventExpansion, resolve_local},
     },
     scheduling::{
         ItipMessages,
@@ -154,31 +155,99 @@ impl CalendarEventSet for Server {
             }
         }
 
-        // Process updates
-        'update: for (id, object) in request.unwrap_update() {
+        // Group updates and instance removals by event
+        let has_synthetic_ids = will_destroy.iter().any(|id| id.is_synthetic())
+            || request.update.as_ref().is_some_and(|update| {
+                update
+                    .iter()
+                    .any(|(id, _)| matches!(id, MaybeInvalid::Value(id) if id.is_synthetic()))
+            });
+        let is_destroyed_event = |document_id: u32| {
+            will_destroy
+                .iter()
+                .any(|id| !id.is_synthetic() && id.document_id() == document_id)
+        };
+        let will_be_destroyed = |id: Id| {
+            will_destroy.iter().any(|destroy_id| {
+                *destroy_id == id
+                    || (!destroy_id.is_synthetic() && destroy_id.document_id() == id.document_id())
+            })
+        };
+        let mut updates: Vec<EventUpdate> =
+            Vec::with_capacity(request.update.as_ref().map_or(0, |update| update.len()));
+        for (id, object) in request.unwrap_update() {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
                     response.not_updated.append(invalid, SetError::not_found());
-                    continue 'update;
+                    continue;
                 }
             };
-            // Make sure id won't be destroyed
-            if will_destroy.contains(&id) {
+            let document_id = id.document_id();
+            if will_be_destroyed(id) {
                 response.not_updated.append(id, SetError::will_destroy());
-                continue 'update;
-            } else if id.is_synthetic() {
+                continue;
+            }
+            let update = EventUpdate::for_document(&mut updates, document_id, has_synthetic_ids);
+            if let Some(expansion_id) = id.expansion_id() {
+                update.instances.push(InstanceOp {
+                    id,
+                    expansion_id,
+                    patch: Some(object),
+                    target: None,
+                    is_destroy: false,
+                });
+            } else if update.base_id.is_none() {
+                update.base_id = Some(id);
+                update.base_patch = Some(object);
+            } else {
                 response.not_updated.append(
                     id,
                     SetError::invalid_properties()
                         .with_property(JSCalendarProperty::Id)
-                        .with_description("Updating synthetic ids is not yet supported."),
+                        .with_description("Duplicate event id."),
+                );
+            }
+        }
+        for id in will_destroy.iter().copied() {
+            let Some(expansion_id) = id.expansion_id() else {
+                continue;
+            };
+            let document_id = id.document_id();
+            if is_destroyed_event(document_id) {
+                response.not_destroyed.append(id, SetError::will_destroy());
+                continue;
+            }
+            EventUpdate::for_document(&mut updates, document_id, has_synthetic_ids)
+                .instances
+                .push(InstanceOp {
+                    id,
+                    expansion_id,
+                    patch: None,
+                    target: None,
+                    is_destroy: true,
+                });
+        }
+        let mut destroy_events = will_destroy;
+        if has_synthetic_ids {
+            destroy_events.retain(|id| !id.is_synthetic());
+        }
+
+        // Process updates
+        'update: for mut update in updates {
+            let document_id = update.document_id;
+            if update.base_id.is_some() && !update.instances.is_empty() {
+                update.fail(
+                    &mut response,
+                    SetError::invalid_properties()
+                        .with_property(JSCalendarProperty::Id)
+                        .with_description(concat!(
+                            "A base event and its instances cannot be modified ",
+                            "in the same request."
+                        )),
                 );
                 continue 'update;
             }
-
-            // Obtain calendar_event card
-            let document_id = id.document_id();
             let calendar_event_ = if let Some(calendar_event_) = self
                 .store()
                 .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
@@ -190,7 +259,7 @@ impl CalendarEventSet for Server {
             {
                 calendar_event_
             } else {
-                response.not_updated.append(id, SetError::not_found());
+                update.fail(&mut response, SetError::not_found());
                 continue 'update;
             };
             let calendar_event = calendar_event_
@@ -199,25 +268,49 @@ impl CalendarEventSet for Server {
             let mut new_calendar_event = calendar_event
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
+
+            // Resolve synthetic ids into recurrence instances
+            let mut has_instances = false;
+            if !update.instances.is_empty() {
+                match update.plan_instances(&new_calendar_event.data, &mut response) {
+                    InstancePlan::Instances => {
+                        has_instances = true;
+                    }
+                    InstancePlan::BaseEvent => {}
+                    InstancePlan::DestroyEvent(id) => {
+                        destroy_events.push(id);
+                        continue 'update;
+                    }
+                    InstancePlan::Nothing => {
+                        continue 'update;
+                    }
+                }
+            }
+
             let mut js_calendar_group =
                 std::mem::take(&mut new_calendar_event.data.event).into_jscalendar::<Id, BlobId>();
+
+            // Apply per-instance changes to the recurrence overrides of the base event
+            if has_instances && !update.apply_instances(&mut js_calendar_group, &mut response) {
+                continue 'update;
+            }
 
             // Process changes
             if let Err(err) = update_calendar_event(
                 access_token,
-                Some(id),
-                object,
+                update.base_id,
+                update.base_patch.take().unwrap_or_default(),
                 &mut new_calendar_event,
                 &mut js_calendar_group,
             ) {
-                response.not_updated.append(id, err);
+                update.fail(&mut response, err);
                 continue 'update;
             }
 
             // Convert JSCalendar to iCalendar
             let Some(ical) = js_calendar_group.into_icalendar() else {
-                response.not_updated.append(
-                    id,
+                update.fail(
+                    &mut response,
                     SetError::invalid_properties()
                         .with_description("Failed to convert calendar event to iCalendar."),
                 );
@@ -239,8 +332,8 @@ impl CalendarEventSet for Server {
                 (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
                 (None, None) | (None, Some(_)) => {}
                 _ => {
-                    response.not_updated.append(
-                        id,
+                    update.fail(
+                        &mut response,
                         SetError::invalid_properties()
                             .with_property(JSCalendarProperty::Uid)
                             .with_description("You cannot change the UID of a calendar event."),
@@ -252,8 +345,8 @@ impl CalendarEventSet for Server {
             // Validate new calendarIds
             for calendar_id in new_calendar_event.added_calendar_ids(calendar_event.inner) {
                 if !cache.has_container_id(&calendar_id) {
-                    response.not_updated.append(
-                        id,
+                    update.fail(
+                        &mut response,
                         SetError::invalid_properties()
                             .with_property(JSCalendarProperty::CalendarIds)
                             .with_description(format!(
@@ -266,8 +359,8 @@ impl CalendarEventSet for Server {
                     .as_ref()
                     .is_some_and(|ids| !ids.contains(calendar_id))
                 {
-                    response.not_updated.append(
-                        id,
+                    update.fail(
+                        &mut response,
                         SetError::forbidden().with_description(format!(
                             "You are not allowed to add calendar events to calendar {}.",
                             Id::from(calendar_id)
@@ -281,8 +374,8 @@ impl CalendarEventSet for Server {
             if let Some(can_delete_calendars) = &can_delete_calendars {
                 for calendar_id in new_calendar_event.removed_calendar_ids(calendar_event.inner) {
                     if !can_delete_calendars.contains(calendar_id) {
-                        response.not_updated.append(
-                            id,
+                        update.fail(
+                            &mut response,
                             SetError::forbidden().with_description(format!(
                                 "You are not allowed to remove calendar events from calendar {}.",
                                 Id::from(calendar_id)
@@ -297,8 +390,8 @@ impl CalendarEventSet for Server {
             if let Some(can_modify_calendars) = &can_modify_calendars {
                 for calendar_id in new_calendar_event.unchanged_calendar_ids(calendar_event.inner) {
                     if !can_modify_calendars.contains(calendar_id) {
-                        response.not_updated.append(
-                            id,
+                        update.fail(
+                            &mut response,
                             SetError::forbidden().with_description(format!(
                                 "You are not allowed to modify calendar {}.",
                                 Id::from(calendar_id)
@@ -312,8 +405,8 @@ impl CalendarEventSet for Server {
             // Check size and quota
             new_calendar_event.size = new_calendar_event.data.event.size() as u32;
             if new_calendar_event.size as usize > self.core.groupware.max_ical_size {
-                response.not_updated.append(
-                    id,
+                update.fail(
+                    &mut response,
                     SetError::invalid_properties().with_description(format!(
                         "Event size {} exceeds the maximum allowed size of {} bytes.",
                         new_calendar_event.size, self.core.groupware.max_ical_size
@@ -347,8 +440,8 @@ impl CalendarEventSet for Server {
                     &new_calendar_event.data.event,
                     account_info.addresses(),
                 ) {
-                    response.not_updated.append(
-                        id,
+                    update.fail(
+                        &mut response,
                         SetError::no_supported_schedule_methods(calendar_address),
                     );
                     continue 'update;
@@ -390,8 +483,8 @@ impl CalendarEventSet for Server {
 
                             itip_messages = Some(ItipMessages::new(messages));
                         } else {
-                            response.not_updated.append(
-                                id,
+                            update.fail(
+                                &mut response,
                                 SetError::invalid_properties()
                                     .with_property(JSCalendarProperty::Participants)
                                     .with_description(concat!(
@@ -404,8 +497,8 @@ impl CalendarEventSet for Server {
                     }
                     Err(err) => {
                         if err.is_jmap_error() {
-                            response.not_updated.append(
-                                id,
+                            update.fail(
+                                &mut response,
                                 SetError::invalid_properties()
                                     .with_property(JSCalendarProperty::Participants)
                                     .with_description(err.to_string()),
@@ -431,7 +524,7 @@ impl CalendarEventSet for Server {
                 {
                     Ok(_) => {}
                     Err(err) if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota)) => {
-                        response.not_updated.append(id, SetError::over_quota());
+                        update.fail(&mut response, SetError::over_quota());
                         continue 'update;
                     }
                     Err(err) => return Err(err.caused_by(trc::location!())),
@@ -472,23 +565,15 @@ impl CalendarEventSet for Server {
                     .caused_by(trc::location!())?;
             }
 
-            response.updated.append(id, None);
+            update.succeed(&mut response);
         }
 
         // Process deletions
-        'destroy: for id in will_destroy {
+        'destroy: for id in destroy_events {
             let document_id = id.document_id();
 
             if !cache.has_item_id(&document_id) {
                 response.not_destroyed.append(id, SetError::not_found());
-                continue;
-            } else if id.is_synthetic() {
-                response.not_destroyed.append(
-                    id,
-                    SetError::invalid_properties()
-                        .with_property(JSCalendarProperty::Id)
-                        .with_description("Deleting synthetic ids is not yet supported."),
-                );
                 continue;
             }
 
@@ -999,6 +1084,559 @@ fn update_calendar_event<'x>(
     }
 
     Ok(use_default_alerts.then_some(show_without_time))
+}
+
+struct EventUpdate<'x> {
+    document_id: u32,
+    base_id: Option<Id>,
+    base_patch: Option<Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>>,
+    instances: Vec<InstanceOp<'x>>,
+}
+
+struct InstanceOp<'x> {
+    id: Id,
+    expansion_id: u32,
+    patch: Option<Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>>,
+    target: Option<InstanceTarget>,
+    is_destroy: bool,
+}
+
+struct InstanceTarget {
+    is_override: bool,
+    recurrence_id: i64,
+    recurrence_id_naive: i64,
+    start_naive: i64,
+    duration: i64,
+}
+
+enum InstancePlan {
+    Instances,
+    BaseEvent,
+    DestroyEvent(Id),
+    Nothing,
+}
+
+enum InstanceResolution {
+    Instance(InstanceTarget),
+    BaseEvent,
+    ThisAndFuture,
+    NotFound,
+}
+
+trait JSCalendarEvent<'x> {
+    fn event_mut(
+        &mut self,
+    ) -> Option<&mut Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>>;
+}
+
+impl<'x> JSCalendarEvent<'x> for JSCalendar<'x, Id, BlobId> {
+    fn event_mut(
+        &mut self,
+    ) -> Option<&mut Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>> {
+        self.0
+            .as_object_mut()?
+            .get_mut(&Key::Property(JSCalendarProperty::Entries))?
+            .as_array_mut()?
+            .first_mut()
+    }
+}
+
+impl<'x> EventUpdate<'x> {
+    fn for_document<'y>(
+        updates: &'y mut Vec<EventUpdate<'x>>,
+        document_id: u32,
+        has_synthetic_ids: bool,
+    ) -> &'y mut EventUpdate<'x> {
+        let index = if has_synthetic_ids {
+            updates
+                .iter()
+                .position(|update| update.document_id == document_id)
+        } else {
+            None
+        };
+
+        match index {
+            Some(index) => &mut updates[index],
+            None => {
+                updates.push(EventUpdate {
+                    document_id,
+                    base_id: None,
+                    base_patch: None,
+                    instances: Vec::new(),
+                });
+                updates.last_mut().unwrap()
+            }
+        }
+    }
+
+    fn fail(
+        &self,
+        response: &mut SetResponse<calendar_event::CalendarEvent>,
+        err: SetError<JSCalendarProperty<Id>>,
+    ) {
+        if let Some(id) = self.base_id {
+            response.not_updated.append(id, err.clone());
+        }
+        for instance in &self.instances {
+            instance.fail(response, err.clone());
+        }
+    }
+
+    fn succeed(&self, response: &mut SetResponse<calendar_event::CalendarEvent>) {
+        if let Some(id) = self.base_id {
+            response.updated.append(id, None);
+        }
+        for instance in &self.instances {
+            if instance.is_destroy {
+                response.destroyed.push(instance.id);
+            } else {
+                response.updated.append(instance.id, None);
+            }
+        }
+    }
+
+    fn plan_instances(
+        &mut self,
+        data: &CalendarEventData,
+        response: &mut SetResponse<calendar_event::CalendarEvent>,
+    ) -> InstancePlan {
+        let mut expansion_ids = self
+            .instances
+            .iter()
+            .map(|instance| instance.expansion_id)
+            .collect::<AHashSet<_>>();
+        let expansions = data
+            .expand_from_ids(&mut expansion_ids, Tz::UTC)
+            .unwrap_or_default();
+        let uid = data.event.uids().next();
+        let mut has_base_event = false;
+
+        self.instances.retain_mut(|instance| {
+            match expansions
+                .iter()
+                .find(|expansion| expansion.expansion_id == instance.expansion_id)
+                .filter(|expansion| expansion.is_valid())
+                .map_or(InstanceResolution::NotFound, |expansion| {
+                    InstanceTarget::resolve(expansion, data, uid)
+                }) {
+                InstanceResolution::Instance(target) => {
+                    instance.target = Some(target);
+                    true
+                }
+                InstanceResolution::BaseEvent => {
+                    has_base_event = true;
+                    true
+                }
+                InstanceResolution::ThisAndFuture => {
+                    instance.fail(
+                        response,
+                        SetError::invalid_properties()
+                            .with_property(JSCalendarProperty::Id)
+                            .with_description(concat!(
+                                "Occurrences of a this-and-future change cannot be ",
+                                "modified individually."
+                            )),
+                    );
+                    false
+                }
+                InstanceResolution::NotFound => {
+                    instance.fail(response, SetError::not_found());
+                    false
+                }
+            }
+        });
+
+        if has_base_event {
+            if self.instances.len() > 1 {
+                self.fail(
+                    response,
+                    SetError::invalid_properties()
+                        .with_property(JSCalendarProperty::Id)
+                        .with_description(concat!(
+                            "A base event and its instances cannot be modified ",
+                            "in the same request."
+                        )),
+                );
+                return InstancePlan::Nothing;
+            }
+
+            let instance = self.instances.pop().unwrap();
+            return if instance.is_destroy {
+                InstancePlan::DestroyEvent(instance.id)
+            } else {
+                self.base_id = Some(instance.id);
+                self.base_patch = instance.patch;
+                InstancePlan::BaseEvent
+            };
+        }
+
+        if self.instances.is_empty() {
+            InstancePlan::Nothing
+        } else {
+            InstancePlan::Instances
+        }
+    }
+
+    fn apply_instances(
+        &mut self,
+        js_calendar_group: &mut JSCalendar<'x, Id, BlobId>,
+        response: &mut SetResponse<calendar_event::CalendarEvent>,
+    ) -> bool {
+        let Some(js_calendar_event) = js_calendar_group.event_mut() else {
+            self.fail(
+                response,
+                SetError::invalid_properties()
+                    .with_description("Failed to convert calendar event to JSCalendar."),
+            );
+            return false;
+        };
+        let tz = js_calendar_event
+            .as_object_and_get(&Key::Property(JSCalendarProperty::TimeZone))
+            .and_then(|tz| tz.as_str())
+            .and_then(|tz| Tz::from_str(tz.as_ref()).ok())
+            .unwrap_or(Tz::UTC);
+        let duration = js_calendar_event
+            .as_object_and_get(&Key::Property(JSCalendarProperty::Duration))
+            .cloned();
+
+        self.instances.retain_mut(|instance| {
+            let Some(target) = instance.target.take() else {
+                return false;
+            };
+            let key = match target.find_override(js_calendar_event, tz) {
+                Some(key) => key,
+                None if !target.is_override => {
+                    JSCalendarDateTime::new(target.recurrence_id_naive, true)
+                }
+                None => {
+                    instance.fail(
+                        response,
+                        SetError::invalid_properties()
+                            .with_property(JSCalendarProperty::RecurrenceOverrides)
+                            .with_description(
+                                "Failed to resolve the recurrence id of this instance.",
+                            ),
+                    );
+                    return false;
+                }
+            };
+
+            match target.apply(
+                js_calendar_event,
+                key,
+                duration.as_ref(),
+                instance.patch.take(),
+                instance.id,
+            ) {
+                Ok(_) => true,
+                Err(err) => {
+                    instance.fail(response, err);
+                    false
+                }
+            }
+        });
+
+        !self.instances.is_empty()
+    }
+}
+
+impl InstanceOp<'_> {
+    fn fail(
+        &self,
+        response: &mut SetResponse<calendar_event::CalendarEvent>,
+        err: SetError<JSCalendarProperty<Id>>,
+    ) {
+        if self.is_destroy {
+            response.not_destroyed.append(self.id, err);
+        } else {
+            response.not_updated.append(self.id, err);
+        }
+    }
+}
+
+impl InstanceTarget {
+    fn resolve(
+        expansion: &CalendarEventExpansion,
+        data: &CalendarEventData,
+        uid: Option<&str>,
+    ) -> InstanceResolution {
+        let Some(component) = data.event.components.get(expansion.comp_id as usize) else {
+            return InstanceResolution::NotFound;
+        };
+        if component
+            .property(&ICalendarProperty::Uid)
+            .and_then(|entry| entry.values.first())
+            .and_then(|value| value.as_text())
+            .is_some_and(|value| uid.is_some_and(|uid| uid != value))
+        {
+            return InstanceResolution::NotFound;
+        }
+
+        let is_override = component.is_recurrence_override();
+        if !is_override && !component.is_recurrent() {
+            return InstanceResolution::BaseEvent;
+        }
+
+        let (recurrence_id, recurrence_id_naive) = if is_override {
+            match Self::recurrence_id(component, data, expansion.comp_id) {
+                Some(recurrence_id) => recurrence_id,
+                None => return InstanceResolution::NotFound,
+            }
+        } else {
+            (expansion.start, expansion.start_naive)
+        };
+
+        if is_override && !Self::is_own_occurrence(component, data, expansion) {
+            return InstanceResolution::ThisAndFuture;
+        }
+
+        InstanceResolution::Instance(InstanceTarget {
+            is_override,
+            recurrence_id,
+            recurrence_id_naive,
+            start_naive: expansion.start_naive,
+            duration: expansion.end - expansion.start,
+        })
+    }
+
+    fn is_own_occurrence(
+        component: &ICalendarComponent,
+        data: &CalendarEventData,
+        expansion: &CalendarEventExpansion,
+    ) -> bool {
+        !component
+            .property(&ICalendarProperty::RecurrenceId)
+            .is_some_and(|entry| {
+                entry
+                    .parameters(&ICalendarParameterName::Range)
+                    .next()
+                    .is_some()
+            })
+            || data
+                .expand_single(expansion.comp_id, Tz::UTC)
+                .is_some_and(|first| first.start_naive == expansion.start_naive)
+    }
+
+    fn recurrence_id(
+        component: &ICalendarComponent,
+        data: &CalendarEventData,
+        comp_id: u32,
+    ) -> Option<(i64, i64)> {
+        let entry = component.property(&ICalendarProperty::RecurrenceId)?;
+        let tz = entry
+            .tz_id()
+            .and_then(|tz| Tz::from_str(tz).ok())
+            .or_else(|| {
+                data.time_ranges
+                    .iter()
+                    .find(|range| range.id as u32 == comp_id)
+                    .and_then(|range| Tz::from_id(range.start_tz))
+            })
+            .unwrap_or(Tz::UTC);
+        let date_time = entry
+            .values
+            .first()?
+            .as_partial_date_time()?
+            .to_date_time()?
+            .to_date_time_with_tz(tz)?;
+
+        Some((
+            date_time.timestamp(),
+            date_time.naive_local().and_utc().timestamp(),
+        ))
+    }
+
+    fn find_override(
+        &self,
+        js_calendar_event: &Value<'_, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
+        tz: Tz,
+    ) -> Option<JSCalendarDateTime> {
+        js_calendar_event
+            .as_object_and_get(&Key::Property(JSCalendarProperty::RecurrenceOverrides))?
+            .as_object()?
+            .keys()
+            .filter_map(|key| match key {
+                Key::Property(JSCalendarProperty::DateTime(date_time)) => Some(date_time),
+                _ => None,
+            })
+            .find(|date_time| {
+                date_time.timestamp == self.recurrence_id_naive
+                    || resolve_local(tz, date_time.timestamp) == Some(self.recurrence_id)
+            })
+            .cloned()
+    }
+
+    fn apply<'x>(
+        &self,
+        js_calendar_event: &mut Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
+        key: JSCalendarDateTime,
+        duration: Option<&Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>>,
+        patch: Option<Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>>,
+        id: Id,
+    ) -> Result<(), SetError<JSCalendarProperty<Id>>> {
+        let invalid_event =
+            || SetError::invalid_properties().with_description("Failed to parse stored event.");
+        let key = Key::Property(JSCalendarProperty::DateTime(key));
+
+        let patch = match patch {
+            Some(patch) => patch.into_object().ok_or_else(|| {
+                SetError::invalid_properties()
+                    .with_property(JSCalendarProperty::RecurrenceOverrides)
+                    .with_description("Expected a patch object.")
+            })?,
+            None => {
+                js_calendar_event
+                    .as_object_mut()
+                    .ok_or_else(invalid_event)?
+                    .insert_or_get_mut(
+                        Key::Property(JSCalendarProperty::RecurrenceOverrides),
+                        Value::Object(Map::new()),
+                    )
+                    .as_object_mut()
+                    .ok_or_else(invalid_event)?
+                    .insert(
+                        key,
+                        Value::Object(Map::from(vec![(
+                            Key::Property(JSCalendarProperty::Excluded),
+                            Value::Bool(true),
+                        )])),
+                    );
+
+                return Ok(());
+            }
+        };
+
+        for (property, value) in patch.iter() {
+            Self::validate(property, value, id)?;
+        }
+
+        let instance = js_calendar_event
+            .as_object_mut()
+            .ok_or_else(invalid_event)?
+            .insert_or_get_mut(
+                Key::Property(JSCalendarProperty::RecurrenceOverrides),
+                Value::Object(Map::new()),
+            )
+            .as_object_mut()
+            .ok_or_else(invalid_event)?
+            .insert_or_get_mut(key, Value::Object(Map::new()))
+            .as_object_mut()
+            .ok_or_else(invalid_event)?;
+
+        if !instance.contains_key(&Key::Property(JSCalendarProperty::Start)) {
+            instance.insert(
+                Key::Property(JSCalendarProperty::Start),
+                Value::Element(JSCalendarValue::DateTime(JSCalendarDateTime::new(
+                    self.start_naive,
+                    true,
+                ))),
+            );
+        }
+        if !instance.contains_key(&Key::Property(JSCalendarProperty::Duration)) {
+            instance.insert(
+                Key::Property(JSCalendarProperty::Duration),
+                duration.cloned().unwrap_or_else(|| {
+                    Value::Element(JSCalendarValue::Duration(ICalendarDuration::from_seconds(
+                        self.duration,
+                    )))
+                }),
+            );
+        }
+
+        for (property, value) in patch.into_vec() {
+            if matches!(Self::validate(&property, &value, id), Ok(true)) {
+                instance.insert(property, value);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate(
+        property: &Key<'_, JSCalendarProperty<Id>>,
+        value: &Value<'_, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
+        id: Id,
+    ) -> Result<bool, SetError<JSCalendarProperty<Id>>> {
+        let Key::Property(property) = property else {
+            return Err(SetError::invalid_properties()
+                .with_property(property.to_owned())
+                .with_description("Invalid property."));
+        };
+        let rejected = SetError::invalid_properties()
+            .with_property(property.clone())
+            .with_description("This property cannot be modified on a single occurrence.");
+
+        match property {
+            JSCalendarProperty::Id => {
+                if crate::matches_id(value, id) {
+                    Ok(false)
+                } else {
+                    Err(SetError::invalid_properties()
+                        .with_property(JSCalendarProperty::Id)
+                        .with_description("This property is immutable."))
+                }
+            }
+            JSCalendarProperty::Pointer(pointer) => {
+                let mut tokens = pointer.iter();
+                let (Some(JsonPointerItem::Key(Key::Property(first))), third) =
+                    (tokens.next(), tokens.nth(1))
+                else {
+                    return Err(rejected);
+                };
+
+                if Self::is_event_property(first) {
+                    Err(rejected)
+                } else {
+                    Ok(!Self::is_inherited_property(first)
+                        && !matches!(
+                            (first, third),
+                            (
+                                JSCalendarProperty::Participants,
+                                Some(JsonPointerItem::Key(Key::Property(
+                                    JSCalendarProperty::CalendarAddress
+                                )))
+                            )
+                        ))
+                }
+            }
+            property if Self::is_event_property(property) => Err(rejected),
+            property => Ok(!Self::is_inherited_property(property)),
+        }
+    }
+
+    fn is_event_property(property: &JSCalendarProperty<Id>) -> bool {
+        matches!(
+            property,
+            JSCalendarProperty::BaseEventId
+                | JSCalendarProperty::CalendarIds
+                | JSCalendarProperty::IsDraft
+                | JSCalendarProperty::IsOrigin
+                | JSCalendarProperty::UtcStart
+                | JSCalendarProperty::UtcEnd
+                | JSCalendarProperty::UseDefaultAlerts
+                | JSCalendarProperty::MayInviteSelf
+                | JSCalendarProperty::MayInviteOthers
+                | JSCalendarProperty::HideAttendees
+        )
+    }
+
+    fn is_inherited_property(property: &JSCalendarProperty<Id>) -> bool {
+        matches!(
+            property,
+            JSCalendarProperty::Type
+                | JSCalendarProperty::Method
+                | JSCalendarProperty::OrganizerCalendarAddress
+                | JSCalendarProperty::Privacy
+                | JSCalendarProperty::ProdId
+                | JSCalendarProperty::RecurrenceId
+                | JSCalendarProperty::RecurrenceIdTimeZone
+                | JSCalendarProperty::SentBy
+                | JSCalendarProperty::Uid
+                | JSCalendarProperty::RecurrenceOverrides
+                | JSCalendarProperty::RecurrenceRule
+                | JSCalendarProperty::RelatedTo
+        )
+    }
 }
 
 fn patch_parent_ids(

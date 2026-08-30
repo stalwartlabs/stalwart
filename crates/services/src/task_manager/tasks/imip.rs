@@ -16,7 +16,7 @@ use groupware::{
     calendar::itip::ItipIngest,
     scheduling::{
         ItipSummary, ItipValue,
-        format::{TextFormatter, hyperlink},
+        format::{DateStyle, TextFormatter, hyperlink},
     },
 };
 use mail_builder::{
@@ -176,6 +176,7 @@ async fn send_imip(
                     "Reply-To",
                     HeaderType::Text(itip_message.from.as_str().into()),
                 )
+                .message_id(server.core.network.message_id())
                 .subject(&tpl.subject)
                 .body(MimePart::new(
                     ContentType::new("multipart/mixed"),
@@ -438,7 +439,7 @@ pub async fn build_itip_template(
                 ICalendarProperty::Conference => locale.calendar_conference,
                 _ => continue,
             };
-            let value = formatter.field_to_string(&entry.value, locale.calendar_date_template_long);
+            let value = formatter.field_to_string(&entry.value, DateStyle::Long);
 
             let old_entry = old_entries.next();
 
@@ -482,7 +483,7 @@ pub async fn build_itip_template(
                 );
                 detail.insert(
                     CalendarTemplateVariable::OldValue,
-                    formatter.field_to_string(&old_entry.value, locale.calendar_date_template),
+                    formatter.field_to_string(&old_entry.value, DateStyle::Short),
                 );
             }
             details.push(detail);
@@ -495,6 +496,8 @@ pub async fn build_itip_template(
         );
     }
     variables.insert_single(CalendarTemplateVariable::PageTitle, subject.clone());
+    variables.insert_single(CalendarTemplateVariable::Lang, locale.name.to_string());
+    variables.insert_single(CalendarTemplateVariable::Dir, locale.direction.to_string());
     variables.insert_single(CalendarTemplateVariable::LogoCid, format!("cid:{logo_cid}"));
 
     if let Some(guests) = fields

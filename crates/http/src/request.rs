@@ -6,7 +6,7 @@
 
 use crate::{
     HttpSessionManager,
-    api::{ManagementApi, ToManageHttpResponse},
+    api::{AuthChallenge, ManagementApi, ToManageHttpResponse},
     auth::{
         authenticate::{Authenticator, HttpHeaders},
         oauth::{
@@ -44,6 +44,12 @@ use jmap::{
     websocket::upgrade::WebSocketUpgrade,
 };
 use jmap_proto::request::{Request, capability::Session};
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+use scim::request::ScimRequestHandler;
+// SPDX-SnippetEnd
 use percent_encoding::percent_decode_str;
 use registry::schema::enums::Permission;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
@@ -436,13 +442,46 @@ impl ParseHttp for Server {
                 }
                 _ => (),
             },
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            "scim" => {
+                let (_in_flight, access_token) = if req.authorization().is_some() {
+                    match self.authenticate_headers(&req, &session).await {
+                        Ok((in_flight, access_token)) => (in_flight, Some(access_token)),
+                        Err(err) => {
+                            let response =
+                                scim::error::Error::from(err).into_response(session.session_id);
+                            return Ok(response);
+                        }
+                    }
+                } else if let Err(err) = self
+                    .is_http_anonymous_request_allowed(session.remote_ip)
+                    .await
+                {
+                    return Ok(scim::error::Error::from(err).into_response(session.session_id));
+                } else {
+                    (None, None)
+                };
+
+                return Ok(self.handle_scim_request(req, session, access_token).await);
+            }
+            // SPDX-SnippetEnd
             "api" => {
                 // Allow CORS preflight requests
                 if req.method() == Method::OPTIONS {
                     return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                 }
 
-                return self.handle_api_request(&mut req, &session).await;
+                return Ok(match self.handle_api_request(&mut req, &session).await {
+                    Ok(response) => response,
+                    Err(err) => {
+                        let response = err.into_http_response(AuthChallenge::Bearer);
+                        trc::error!(err.span_id(session.session_id));
+                        response
+                    }
+                });
             }
             "mail" => {
                 if req.method() == Method::GET
@@ -801,7 +840,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                     {
                         Ok(response) => response,
                         Err(err) => {
-                            let response = err.into_http_response();
+                            let response = err.into_http_response(AuthChallenge::BearerAndBasic);
                             trc::error!(err.span_id(session.session_id));
                             response
                         }

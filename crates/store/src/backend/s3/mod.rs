@@ -26,7 +26,10 @@ impl S3Store {
             structs::S3StoreRegion::UsWest1 => Region::UsWest1,
             structs::S3StoreRegion::UsWest2 => Region::UsWest2,
             structs::S3StoreRegion::CaCentral1 => Region::CaCentral1,
-            structs::S3StoreRegion::AfSouth1 => Region::AfSouth1,
+            structs::S3StoreRegion::AfSouth1 => Region::Custom {
+                region: "af-south-1".into(),
+                endpoint: "s3.af-south-1.amazonaws.com".into(),
+            },
             structs::S3StoreRegion::ApEast1 => Region::ApEast1,
             structs::S3StoreRegion::ApSouth1 => Region::ApSouth1,
             structs::S3StoreRegion::ApNortheast1 => Region::ApNortheast1,

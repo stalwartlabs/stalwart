@@ -37,17 +37,52 @@ pub mod sign;
 pub mod throttle;
 pub mod vrfy;
 
+const EVENT_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl TestServer {
     pub async fn read_event(&mut self) -> QueueEvent {
-        match tokio::time::timeout(Duration::from_millis(100), self.queue_rx.recv()).await {
+        if let Some(event) = self.queue_events.pop_front() {
+            return event;
+        }
+
+        match tokio::time::timeout(EVENT_TIMEOUT, self.queue_rx.recv()).await {
             Ok(Some(event)) => event,
             Ok(None) => panic!("Channel closed."),
             Err(_) => panic!("No queue event received."),
         }
     }
 
+    pub async fn read_event_matching(
+        &mut self,
+        expected: impl Fn(&QueueEvent) -> bool,
+    ) -> QueueEvent {
+        if let Some(idx) = self.queue_events.iter().position(|event| expected(event)) {
+            return self.queue_events.remove(idx).unwrap();
+        }
+
+        loop {
+            match tokio::time::timeout(EVENT_TIMEOUT, self.queue_rx.recv()).await {
+                Ok(Some(event)) => {
+                    if expected(&event) {
+                        return event;
+                    }
+                    self.queue_events.push_back(event);
+                }
+                Ok(None) => panic!("Channel closed."),
+                Err(_) => panic!(
+                    "No matching queue event received, pending events: {:?}",
+                    self.queue_events
+                ),
+            }
+        }
+    }
+
     pub async fn try_read_event(&mut self) -> Option<QueueEvent> {
-        match tokio::time::timeout(Duration::from_millis(100), self.queue_rx.recv()).await {
+        if let Some(event) = self.queue_events.pop_front() {
+            return Some(event);
+        }
+
+        match tokio::time::timeout(EVENT_TIMEOUT, self.queue_rx.recv()).await {
             Ok(Some(event)) => Some(event),
             Ok(None) => panic!("Channel closed."),
             Err(_) => None,
@@ -55,6 +90,10 @@ impl TestServer {
     }
 
     pub fn assert_no_events(&mut self) {
+        if let Some(event) = self.queue_events.pop_front() {
+            panic!("Expected empty queue but got {event:?}");
+        }
+
         match self.queue_rx.try_recv() {
             Err(TryRecvError::Empty) => (),
             Ok(event) => panic!("Expected empty queue but got {event:?}"),
@@ -72,16 +111,20 @@ impl TestServer {
     }
 
     pub async fn expect_reload_settings(&mut self) {
-        self.read_event().await.assert_reload_settings();
+        self.read_event_matching(QueueEvent::is_reload_settings).await;
+    }
+
+    pub async fn expect_refresh(&mut self) {
+        self.read_event_matching(QueueEvent::is_refresh).await;
     }
 
     pub async fn expect_message(&mut self) -> MessageWrapper {
-        self.read_event().await.assert_refresh();
+        self.expect_refresh().await;
         self.last_queued_message().await
     }
 
     pub async fn consume_message(&mut self) -> MessageWrapper {
-        self.read_event().await.assert_refresh();
+        self.expect_refresh().await;
         let message = self.last_queued_message().await;
         message
             .clone()
@@ -230,7 +273,7 @@ impl TestServer {
     }
 
     pub async fn read_report(&mut self) -> ReportingEvent {
-        match tokio::time::timeout(Duration::from_millis(100), self.report_rx.recv()).await {
+        match tokio::time::timeout(EVENT_TIMEOUT, self.report_rx.recv()).await {
             Ok(Some(event)) => event,
             Ok(None) => panic!("Channel closed."),
             Err(_) => panic!("No report event received."),
@@ -238,7 +281,7 @@ impl TestServer {
     }
 
     pub async fn try_read_report(&mut self) -> Option<ReportingEvent> {
-        match tokio::time::timeout(Duration::from_millis(100), self.report_rx.recv()).await {
+        match tokio::time::timeout(EVENT_TIMEOUT, self.report_rx.recv()).await {
             Ok(Some(event)) => Some(event),
             Ok(None) => panic!("Channel closed."),
             Err(_) => None,
@@ -258,9 +301,26 @@ pub trait TestQueueEvent {
     fn assert_refresh(self);
     fn assert_done(self);
     fn assert_refresh_or_done(self);
+    fn is_reload_settings(&self) -> bool;
+    fn is_refresh(&self) -> bool;
 }
 
 impl TestQueueEvent for QueueEvent {
+    fn is_reload_settings(&self) -> bool {
+        matches!(self, QueueEvent::ReloadSettings)
+    }
+
+    fn is_refresh(&self) -> bool {
+        matches!(
+            self,
+            QueueEvent::Refresh
+                | QueueEvent::WorkerDone {
+                    status: QueueEventStatus::Deferred,
+                    ..
+                }
+        )
+    }
+
     fn assert_refresh(self) {
         match self {
             QueueEvent::Refresh

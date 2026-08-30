@@ -243,6 +243,16 @@ impl<'x> TryFrom<Variable<'x>> for AggregateFrequency {
     }
 }
 
+impl ReportAnalysis {
+    pub fn is_report_address(&self, address: &str) -> bool {
+        self.addresses.iter().any(|addr_match| match addr_match {
+            AddressMatch::StartsWith(prefix) => address.starts_with(prefix),
+            AddressMatch::EndsWith(suffix) => address.ends_with(suffix),
+            AddressMatch::Equals(value) => address == value,
+        })
+    }
+}
+
 impl FromStr for AddressMatch {
     type Err = String;
 

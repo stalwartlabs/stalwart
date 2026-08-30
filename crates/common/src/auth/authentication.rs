@@ -90,7 +90,7 @@ impl Server {
                         if username.is_master() {
                             let address = username.account().address();
                             if let Some(account_id) =
-                                self.account_id_from_email(address, false).await?
+                                self.impersonated_account_id(username.account()).await?
                             {
                                 trc::event!(
                                     Auth(trc::AuthEvent::Success),
@@ -265,18 +265,9 @@ impl Server {
                     ])?;
                     let address = username.account().address();
                     let master_address = auth_as_address;
-                    let mut account_id = self.account_id_from_email(address, false).await?;
-                    if account_id.is_none()
-                        && let Some(impersonated_domain) = username.account().domain()
-                        && let Some(impersonated_domain_cache) =
-                            self.domain(impersonated_domain).await?
-                        && let Some(directory) =
-                            self.get_directory_for_cached_domain(&impersonated_domain_cache)
-                        && let Recipient::Account(account) = directory.recipient(address).await?
+                    if let Some(account_id) =
+                        self.impersonated_account_id(username.account()).await?
                     {
-                        account_id = Some(Box::pin(self.synchronize_account(account)).await?.id);
-                    }
-                    if let Some(account_id) = account_id {
                         trc::event!(
                             Auth(trc::AuthEvent::Success),
                             AccountName = address.to_string(),
@@ -377,6 +368,24 @@ impl Server {
                 }
             }
         }
+    }
+
+    async fn impersonated_account_id(&self, username: &Username) -> trc::Result<Option<u32>> {
+        let address = username.address();
+
+        if let Some(account_id) = self.account_id_from_email(address, false).await? {
+            return Ok(Some(account_id));
+        }
+
+        if let Some(domain) = username.domain()
+            && let Some(domain_cache) = self.domain(domain).await?
+            && let Some(directory) = self.get_directory_for_cached_domain(&domain_cache)
+            && let Recipient::Account(account) = directory.recipient(address).await?
+        {
+            return Ok(Some(Box::pin(self.synchronize_account(account)).await?.id));
+        }
+
+        Ok(None)
     }
 
     async fn validate_credential(

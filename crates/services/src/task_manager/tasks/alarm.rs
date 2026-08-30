@@ -18,7 +18,7 @@ use groupware::{
     calendar::{ArchivedCalendarEvent, CalendarEvent},
     scheduling::{
         ItipTime, ItipValue,
-        format::{TextFormatter, hyperlink},
+        format::{DateStyle, TextFormatter, hyperlink},
     },
     strip_mailto_scheme,
 };
@@ -212,6 +212,7 @@ async fn send_email_alarm(
         .header("To", HeaderType::Text(tpl.to.as_str().into()))
         .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
         .header("Reply-To", HeaderType::Text(account_main_email.into()))
+        .message_id(server.core.network.message_id())
         .subject(tpl.subject)
         .body(MimePart::new(
             ContentType::new("multipart/related"),
@@ -573,14 +574,14 @@ async fn build_template(
             start: alarm.event_start.timestamp(),
             tz_id: alarm.event_start_tz as u16,
         }),
-        locale.calendar_date_template,
+        DateStyle::Short,
     );
     let end = formatter.field_to_string(
         &ItipValue::Time(ItipTime {
             start: alarm.event_end.timestamp(),
             tz_id: alarm.event_end_tz as u16,
         }),
-        locale.calendar_date_template,
+        DateStyle::Short,
     );
     let subject = format!(
         "{}: {} @ {}",
@@ -599,6 +600,8 @@ async fn build_template(
     let logo_cid = format!("cid:{logo_cid}");
     let mut variables = Variables::new();
     variables.insert_single(CalendarTemplateVariable::PageTitle, subject.as_str());
+    variables.insert_single(CalendarTemplateVariable::Lang, locale.name);
+    variables.insert_single(CalendarTemplateVariable::Dir, locale.direction);
     variables.insert_single(
         CalendarTemplateVariable::Header,
         locale.calendar_alarm_header,

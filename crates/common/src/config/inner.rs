@@ -33,7 +33,7 @@ use store::{LookupStores, registry::bootstrap::Bootstrap};
 use utils::{
     UnwrapFailure,
     cache::{Cache, CacheWithTtl},
-    snowflake::SnowflakeIdGenerator,
+    snowflake::{MAX_NODE_ID, SnowflakeIdGenerator},
     tls::build_tls_connector,
 };
 
@@ -49,6 +49,9 @@ impl Data {
 
         // Build and test snowflake id generator
         let node_id = bp.node_id();
+        if node_id > MAX_NODE_ID {
+            panic!("Node id {node_id} exceeds {MAX_NODE_ID}, panicking to avoid data corruption");
+        }
         SnowflakeIdGenerator::set_node_id(node_id as u64);
         let id_generator = SnowflakeIdGenerator::new();
         if !id_generator.is_valid() {

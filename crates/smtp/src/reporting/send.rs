@@ -14,6 +14,12 @@ use crate::{
 use common::{Server, expr::if_block::IfBlock, ipc::ReportingEvent};
 
 pub trait MtaReportSend: Sync + Send {
+    fn is_local_report_domain(
+        &self,
+        domain: &str,
+        session_id: u64,
+    ) -> impl Future<Output = bool> + Send;
+
     fn send_report(
         &self,
         from_addr: &str,
@@ -40,6 +46,21 @@ pub trait MtaReportSend: Sync + Send {
 }
 
 impl MtaReportSend for Server {
+    async fn is_local_report_domain(&self, domain: &str, session_id: u64) -> bool {
+        match self.domain(domain).await {
+            Ok(domain) => domain.is_some(),
+            Err(err) => {
+                trc::error!(
+                    err.caused_by(trc::location!())
+                        .span_id(session_id)
+                        .details("Failed to lookup local domain")
+                );
+
+                false
+            }
+        }
+    }
+
     async fn send_report(
         &self,
         from_addr: &str,

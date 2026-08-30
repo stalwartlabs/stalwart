@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::registry::mapping::{ObjectResponse, RegistrySetResponse, ValidationResult};
+use crate::registry::mapping::{ObjectResponse, ValidationResult};
 use common::{
     Server,
-    auth::{Permissions, PermissionsGroup, permissions::BuildPermissions},
+    auth::{AccessToken, Permissions, PermissionsGroup, permissions::BuildPermissions},
 };
 use directory::core::secret::{hash_secret, is_password_hash};
 use jmap_proto::error::set::SetError;
@@ -33,8 +33,9 @@ pub enum AccountUpdate<'x> {
     Create(&'x str),
 }
 
-pub(crate) async fn validate_account(
-    set: &RegistrySetResponse<'_>,
+pub async fn validate_account(
+    server: &Server,
+    access_token: &AccessToken,
     mut account: &mut Account,
     old_account: AccountUpdate<'_>,
 ) -> ValidationResult {
@@ -42,27 +43,27 @@ pub(crate) async fn validate_account(
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
-    if set.server.core.is_enterprise_edition()
+    if server.core.is_enterprise_edition()
         && matches!(old_account, AccountUpdate::Create(_))
-        && !set.server.can_create_account().await?
+        && !server.can_create_account().await?
     {
         return Ok(Err(SetError::forbidden().with_description(format!(
             "Enterprise licensed account limit reached: {} accounts licensed.",
-            set.server.licensed_accounts()
+            server.licensed_accounts()
         ))));
     }
     // SPDX-SnippetEnd
 
     let is_external_directory = if let Account::User(account) = account {
-        set.server
+        server
             .domain_by_id(account.domain_id.document_id())
             .await?
-            .and_then(|domain| set.server.get_directory_for_cached_domain(&domain))
+            .and_then(|domain| server.get_directory_for_cached_domain(&domain))
             .is_some()
     } else {
         false
     };
-    let recover_account_id = if set.server.registry().is_recovery_mode()
+    let recover_account_id = if server.registry().is_recovery_mode()
         && let AccountUpdate::Create(client_id) = old_account
         && let Some(account_id) = client_id
             .strip_prefix("restore-")
@@ -122,12 +123,8 @@ pub(crate) async fn validate_account(
                                         && credential
                                             .expires_at
                                             .is_some_and(|exp| exp.timestamp() <= now() as i64)
-                                        && let Some(expires_at) = set
-                                            .server
-                                            .core
-                                            .network
-                                            .security
-                                            .password_default_expiration
+                                        && let Some(expires_at) =
+                                            server.core.network.security.password_default_expiration
                                     {
                                         credential.expires_at = Some(UTCDateTime::from_timestamp(
                                             (now() + expires_at) as i64,
@@ -140,7 +137,7 @@ pub(crate) async fn validate_account(
                                     ) && is_password_hash(&credential.secret))
                                     {
                                         if let Err(err) =
-                                            set.server.is_secure_password(&credential.secret, &[])
+                                            server.is_secure_password(&credential.secret, &[])
                                         {
                                             return Ok(Err(SetError::invalid_properties()
                                                 .with_property(Property::Secret)
@@ -148,11 +145,7 @@ pub(crate) async fn validate_account(
                                         }
 
                                         credential.secret = hash_secret(
-                                            set.server
-                                                .core
-                                                .network
-                                                .security
-                                                .password_hash_algorithm,
+                                            server.core.network.security.password_hash_algorithm,
                                             std::mem::take(&mut credential.secret).into_bytes(),
                                         )
                                         .await
@@ -187,7 +180,7 @@ pub(crate) async fn validate_account(
                         }
                     }
                 } else if let Err(err) = validate_credential_creation(
-                    set.server,
+                    server,
                     credential,
                     is_external_directory,
                     has_password,
@@ -216,14 +209,16 @@ pub(crate) async fn validate_account(
         }
         (Account::User(account), AccountUpdate::Create(_)) => {
             // Validate tenant quotas
-            if let Err(err) = validate_tenant_quota(set, TenantStorageQuota::MaxAccounts).await? {
+            if let Err(err) =
+                validate_tenant_quota(server, access_token, TenantStorageQuota::MaxAccounts).await?
+            {
                 return Ok(Err(err));
             }
 
             // Validate credentials
             for (index, credential) in account.credentials.values_mut().enumerate() {
                 if let Err(err) = validate_credential_creation(
-                    set.server,
+                    server,
                     credential,
                     is_external_directory,
                     index > 0,
@@ -239,7 +234,9 @@ pub(crate) async fn validate_account(
         }
         (Account::Group(_), AccountUpdate::Create(_)) => {
             // Validate tenant quotas
-            if let Err(err) = validate_tenant_quota(set, TenantStorageQuota::MaxGroups).await? {
+            if let Err(err) =
+                validate_tenant_quota(server, access_token, TenantStorageQuota::MaxGroups).await?
+            {
                 return Ok(Err(err));
             }
 
@@ -256,9 +253,8 @@ pub(crate) async fn validate_account(
     };
 
     let mut result = if validate_permissions {
-        Ok(set
-            .server
-            .can_set_permissions(set.access_token, account)
+        Ok(server
+            .can_set_permissions(access_token, account)
             .await?
             .map(|_| ObjectResponse::default())
             .map_err(build_set_error))
@@ -269,7 +265,7 @@ pub(crate) async fn validate_account(
     if let Some(account_id) = recover_account_id
         && let Ok(Ok(result)) = &mut result
     {
-        restore_account_id(set.server, account_id).await?;
+        restore_account_id(server, account_id).await?;
         result.id = Some(account_id.into());
     }
 
@@ -330,13 +326,16 @@ async fn validate_credential_creation(
 }
 
 pub(crate) async fn validate_role(
-    set: &RegistrySetResponse<'_>,
+    server: &Server,
+    access_token: &AccessToken,
     role: &mut Role,
     old_role: Option<&Role>,
 ) -> ValidationResult {
     if old_role.is_none() {
         // Validate tenant quotas
-        if let Err(err) = validate_tenant_quota(set, TenantStorageQuota::MaxRoles).await? {
+        if let Err(err) =
+            validate_tenant_quota(server, access_token, TenantStorageQuota::MaxRoles).await?
+        {
             return Ok(Err(err));
         }
     }
@@ -346,8 +345,7 @@ pub(crate) async fn validate_role(
             || old_role.disabled_permissions != role.disabled_permissions
             || old_role.role_ids != role.role_ids
     }) {
-        Ok(set
-            .access_token
+        Ok(access_token
             .can_grant_permissions(
                 PermissionsGroup {
                     enabled: Permissions::from_permission(role.enabled_permissions.as_slice()),
@@ -367,12 +365,13 @@ pub(crate) async fn validate_role(
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
 // SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
-pub(crate) async fn validate_tenant_quota(
-    set: &RegistrySetResponse<'_>,
+pub async fn validate_tenant_quota(
+    server: &Server,
+    access_token: &AccessToken,
     quota: TenantStorageQuota,
 ) -> ValidationResult {
-    if let Some(tenant_id) = set.access_token.tenant_id() {
-        let tenant = set.server.tenant(tenant_id).await?;
+    if let Some(tenant_id) = access_token.tenant_id() {
+        let tenant = server.tenant(tenant_id).await?;
         if let Some(quotas) = tenant
             .quota_objects
             .as_ref()
@@ -404,13 +403,13 @@ pub(crate) async fn validate_tenant_quota(
             };
             let query = RegistryQuery::new(object_type).with_tenant(tenant_id.into());
             let count = if let Some(type_filter) = type_filter {
-                set.server
+                server
                     .registry()
                     .query::<Vec<Id>>(query.equal(Property::Type, type_filter.to_id()))
                     .await?
                     .len() as u32
             } else {
-                set.server
+                server
                     .registry()
                     .query::<RegistryObjectCounter>(query)
                     .await?
@@ -431,14 +430,15 @@ pub(crate) async fn validate_tenant_quota(
 // SPDX-SnippetEnd
 
 #[cfg(not(feature = "enterprise"))]
-pub(crate) async fn validate_tenant_quota(
-    _set: &RegistrySetResponse<'_>,
+pub async fn validate_tenant_quota(
+    _server: &Server,
+    _access_token: &AccessToken,
     _quota: TenantStorageQuota,
 ) -> ValidationResult {
     ValidationResult::Ok(Ok(ObjectResponse::default()))
 }
 
-pub(crate) async fn schedule_account_destruction(
+pub async fn schedule_account_destruction(
     server: &Server,
     account_id: Id,
     account: &Account,

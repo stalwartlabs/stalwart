@@ -23,9 +23,6 @@ TODO: Not yet implemented:
     - Per-user properties (However, the database schema is ready to support this)
     - mayInviteSelf, mayInviteOthers and hideAttendees (stored but not enforced)
 
-- CalendarEvent/set
-   - synthetic id update and removal
-
 - Principal/getAvailability
   - If there are overlapping BusyPeriod time ranges with different "busyStatus" properties
     the server MUST choose the value in the following order: confirmed > unavailable > tentative.

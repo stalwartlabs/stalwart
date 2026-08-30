@@ -9,15 +9,26 @@ use calcard::{
     common::timezone::Tz,
     icalendar::{ICalendarDay, ICalendarFrequency, ICalendarRecurrenceRule, ICalendarWeekday},
 };
-use chrono::{DateTime, Locale as ChronoLocale, NaiveDate, TimeZone, Weekday};
-use common::i18n::{self, Locale};
+use chrono::{DateTime, NaiveDate, TimeZone, Weekday};
+use common::i18n::{self, Locale, PluralForms};
+use icu_datetime::{DateTimeFormatter, fieldsets};
 use icu_locale_core::{Locale as IcuLocale, locale};
 use icu_plurals::{PluralCategory, PluralRuleType, PluralRules, PluralRulesOptions};
-use std::{fmt::Write, str::FromStr};
+use std::fmt::Write;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateStyle {
+    Short,
+    Long,
+}
 
 pub struct TextFormatter {
     pub locale: &'static Locale,
-    pub chrono_locale: ChronoLocale,
+    date_short: DateTimeFormatter<fieldsets::YMDT>,
+    date_long: DateTimeFormatter<fieldsets::YMDT>,
+    weekday_short: DateTimeFormatter<fieldsets::E>,
+    weekday: DateTimeFormatter<fieldsets::E>,
+    month: DateTimeFormatter<fieldsets::M>,
     cardinal: PluralRules,
     ordinal: PluralRules,
 }
@@ -25,11 +36,20 @@ pub struct TextFormatter {
 impl TextFormatter {
     pub fn new(language: &str) -> trc::Result<Self> {
         let locale = i18n::locale_or_default(language);
-        let icu_locale =
-            IcuLocale::try_from_str(&locale.name.replace('_', "-")).unwrap_or(locale!("en-US"));
-        let prefs = (&icu_locale).into();
+        let icu_locale = IcuLocale::try_from_str(locale.name).unwrap_or(locale!("en-US"));
+        let failed = |detail: &'static str| {
+            move |err: icu_datetime::DateTimeFormatterLoadError| {
+                trc::EventType::Calendar(trc::CalendarEvent::ItipMessageError)
+                    .into_err()
+                    .caused_by(trc::location!())
+                    .details(detail)
+                    .ctx(trc::Key::Reason, err.to_string())
+            }
+        };
+        let plural_prefs = (&icu_locale).into();
+        let datetime_prefs = (&icu_locale).into();
         let plural_rules = |options| {
-            PluralRules::try_new(prefs, options).map_err(|err| {
+            PluralRules::try_new(plural_prefs, options).map_err(|err| {
                 trc::EventType::Calendar(trc::CalendarEvent::ItipMessageError)
                     .into_err()
                     .caused_by(trc::location!())
@@ -40,7 +60,22 @@ impl TextFormatter {
 
         Ok(Self {
             locale,
-            chrono_locale: ChronoLocale::from_str(locale.name).unwrap_or(ChronoLocale::en_US),
+            date_short: DateTimeFormatter::try_new(
+                datetime_prefs,
+                fieldsets::YMD::medium().with_time_hm(),
+            )
+            .map_err(failed("Failed to load short date formatter"))?,
+            date_long: DateTimeFormatter::try_new(
+                datetime_prefs,
+                fieldsets::YMD::long().with_time_hm(),
+            )
+            .map_err(failed("Failed to load long date formatter"))?,
+            weekday_short: DateTimeFormatter::try_new(datetime_prefs, fieldsets::E::short())
+                .map_err(failed("Failed to load short weekday formatter"))?,
+            weekday: DateTimeFormatter::try_new(datetime_prefs, fieldsets::E::long())
+                .map_err(failed("Failed to load weekday formatter"))?,
+            month: DateTimeFormatter::try_new(datetime_prefs, fieldsets::M::long())
+                .map_err(failed("Failed to load month formatter"))?,
             cardinal: plural_rules(PluralRulesOptions::default())?,
             ordinal: plural_rules(
                 PluralRulesOptions::default().with_type(PluralRuleType::Ordinal),
@@ -48,20 +83,27 @@ impl TextFormatter {
         })
     }
 
-    pub fn field(&self, out: &mut String, value: &ItipValue, template: &str) {
+    pub fn field(&self, out: &mut String, value: &ItipValue, style: DateStyle) {
         match value {
             ItipValue::Text(text) => out.push_str(text),
             ItipValue::Time(time) => {
                 let tz = Tz::from_id(time.tz_id).unwrap_or(Tz::UTC);
-                let _ = write!(
-                    out,
-                    "{}",
-                    tz.from_utc_datetime(
+                let (weekday, date) = match style {
+                    DateStyle::Short => (&self.weekday_short, &self.date_short),
+                    DateStyle::Long => (&self.weekday, &self.date_long),
+                };
+                let local = tz
+                    .from_utc_datetime(
                         &DateTime::from_timestamp(time.start, 0)
                             .unwrap_or_default()
-                            .naive_local()
+                            .naive_local(),
                     )
-                    .format_localized(template, self.chrono_locale)
+                    .naive_local();
+                let _ = write!(
+                    out,
+                    "{}, {}",
+                    weekday.format(&local.date()),
+                    date.format(&local)
                 );
 
                 if let Some(name) = tz.name().filter(|name| !name.is_empty()) {
@@ -73,9 +115,9 @@ impl TextFormatter {
         }
     }
 
-    pub fn field_to_string(&self, value: &ItipValue, template: &str) -> String {
+    pub fn field_to_string(&self, value: &ItipValue, style: DateStyle) -> String {
         let mut out = String::with_capacity(32);
-        self.field(&mut out, value, template);
+        self.field(&mut out, value, style);
         out
     }
 
@@ -155,10 +197,10 @@ impl TextFormatter {
             if out.len() > start {
                 out.push_str(", ");
             }
-            let form = plural_form(
-                self.locale.calendar_rrule_count,
-                self.cardinal.category_for(*count),
-            );
+            let form = self
+                .cardinal
+                .category_for(*count)
+                .plural_form(&self.locale.calendar_rrule_count);
             write_number(out, form, "$n", *count as u64);
         }
     }
@@ -225,15 +267,18 @@ impl TextFormatter {
             ICalendarFrequency::Monthly => self.locale.calendar_rrule_monthly,
             ICalendarFrequency::Yearly => self.locale.calendar_rrule_yearly,
         };
-        let form = plural_form(entry, self.cardinal.category_for(interval as u32));
+        let form = self
+            .cardinal
+            .category_for(interval as u32)
+            .plural_form(&entry);
         write_number(out, form, "$n", interval as u64);
     }
 
     fn write_ordinal(&self, out: &mut String, n: u32) {
-        let form = plural_form(
-            self.locale.calendar_rrule_ordinal,
-            self.ordinal.category_for(n),
-        );
+        let form = self
+            .ordinal
+            .category_for(n)
+            .plural_form(&self.locale.calendar_rrule_ordinal);
         write_number(out, form, "$n", n as u64);
     }
 
@@ -253,8 +298,7 @@ impl TextFormatter {
     }
 
     fn write_counted(&self, out: &mut String, value: i32, template: &str) {
-        let count = value.unsigned_abs();
-        let form = plural_form(template, self.cardinal.category_for(count));
+        let count = value.unsigned_abs() as u64;
 
         if value < 0 {
             let (before, after) = self
@@ -263,10 +307,10 @@ impl TextFormatter {
                 .split_once("$ordinal")
                 .unwrap_or((self.locale.calendar_rrule_from_end, ""));
             out.push_str(before);
-            write_number(out, form, "$n", count as u64);
+            write_number(out, template, "$n", count);
             out.push_str(after);
         } else {
-            write_number(out, form, "$n", count as u64);
+            write_number(out, template, "$n", count);
         }
     }
 
@@ -282,13 +326,13 @@ impl TextFormatter {
         };
 
         if let Some(date) = NaiveDate::from_isoywd_opt(2024, 1, weekday) {
-            let _ = write!(out, "{}", date.format_localized("%A", self.chrono_locale));
+            let _ = write!(out, "{}", self.weekday.format(&date));
         }
     }
 
     fn write_month(&self, out: &mut String, month: u8) {
         if let Some(date) = NaiveDate::from_ymd_opt(2024, month.clamp(1, 12) as u32, 1) {
-            let _ = write!(out, "{}", date.format_localized("%B", self.chrono_locale));
+            let _ = write!(out, "{}", self.month.format(&date));
         }
     }
 
@@ -298,54 +342,54 @@ impl TextFormatter {
             return;
         };
 
-        let nth = self.locale.calendar_rrule_nth_weekday;
-        let (before, rest) = nth.split_once("$ordinal").unwrap_or((nth, ""));
-        let (middle, after) = rest.split_once("$weekday").unwrap_or((rest, ""));
-
-        if occurrence < 0 {
+        let (wrap_before, wrap_after) = if occurrence < 0 {
             let from_end = self.locale.calendar_rrule_from_end;
-            let (wrap_before, wrap_after) =
-                from_end.split_once("$ordinal").unwrap_or((from_end, ""));
-            out.push_str(wrap_before);
-            out.push_str(before);
-            self.write_ordinal(out, occurrence.unsigned_abs() as u32);
-            out.push_str(middle);
-            self.write_weekday(out, day.weekday);
-            out.push_str(after);
-            out.push_str(wrap_after);
+            from_end.split_once("$ordinal").unwrap_or((from_end, ""))
         } else {
-            out.push_str(before);
-            self.write_ordinal(out, occurrence as u32);
-            out.push_str(middle);
-            self.write_weekday(out, day.weekday);
-            out.push_str(after);
+            ("", "")
+        };
+
+        out.push_str(wrap_before);
+
+        let mut rest = self.locale.calendar_rrule_nth_weekday;
+        loop {
+            let Some((at, placeholder)) = ["$ordinal", "$weekday"]
+                .into_iter()
+                .filter_map(|placeholder| rest.find(placeholder).map(|at| (at, placeholder)))
+                .min()
+            else {
+                out.push_str(rest);
+                break;
+            };
+
+            out.push_str(&rest[..at]);
+            if placeholder == "$ordinal" {
+                self.write_ordinal(out, occurrence.unsigned_abs() as u32);
+            } else {
+                self.write_weekday(out, day.weekday);
+            }
+            rest = &rest[at + placeholder.len()..];
         }
+
+        out.push_str(wrap_after);
     }
 }
 
-fn plural_form(entry: &str, category: PluralCategory) -> &str {
-    let wanted = match category {
-        PluralCategory::Zero => "zero",
-        PluralCategory::One => "one",
-        PluralCategory::Two => "two",
-        PluralCategory::Few => "few",
-        PluralCategory::Many => "many",
-        PluralCategory::Other => "other",
-    };
-    let mut fallback = None;
+trait PluralCategoryExt {
+    fn plural_form(&self, forms: &PluralForms) -> &'static str;
+}
 
-    for form in entry.split(';') {
-        let Some((name, text)) = form.split_once('=') else {
-            return entry;
-        };
-        if name == wanted {
-            return text;
-        } else if name == "other" {
-            fallback = Some(text);
+impl PluralCategoryExt for PluralCategory {
+    fn plural_form(&self, forms: &PluralForms) -> &'static str {
+        match self {
+            PluralCategory::Zero => forms.zero,
+            PluralCategory::One => forms.one,
+            PluralCategory::Two => forms.two,
+            PluralCategory::Few => forms.few,
+            PluralCategory::Many => forms.many,
+            PluralCategory::Other => forms.other,
         }
     }
-
-    fallback.unwrap_or(entry)
 }
 
 fn write_number(out: &mut String, template: &str, placeholder: &str, value: u64) {
@@ -371,7 +415,7 @@ pub fn hyperlink(value: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextFormatter, plural_form};
+    use super::{PluralCategoryExt, PluralForms, TextFormatter, i18n};
     use calcard::icalendar::{
         ICalendarDay, ICalendarFrequency, ICalendarRecurrenceRule, ICalendarWeekday,
     };
@@ -394,14 +438,52 @@ mod tests {
     }
 
     #[test]
+    fn every_shipped_locale_loads_icu_data() {
+        for locale in i18n::ALL_LOCALES {
+            let formatter = TextFormatter::new(locale.name)
+                .unwrap_or_else(|err| panic!("{}: {err:?}", locale.name));
+            assert_eq!(formatter.locale.name, locale.name);
+
+            let mut out = String::new();
+            formatter.recurrence(
+                &mut out,
+                &ICalendarRecurrenceRule {
+                    freq: ICalendarFrequency::Monthly,
+                    interval: Some(2),
+                    count: Some(5),
+                    bymonthday: vec![3, -1],
+                    byday: vec![ICalendarDay {
+                        ordwk: Some(2),
+                        weekday: ICalendarWeekday::Monday,
+                    }],
+                    ..Default::default()
+                },
+            );
+            assert!(!out.is_empty(), "{} produced no text", locale.name);
+        }
+    }
+
+    #[test]
     fn plural_form_selects_category_and_falls_back_to_other() {
-        let entry = "one=single;few=a few;other=many";
-        assert_eq!(plural_form(entry, PluralCategory::One), "single");
-        assert_eq!(plural_form(entry, PluralCategory::Few), "a few");
-        assert_eq!(plural_form(entry, PluralCategory::Many), "many");
+        let forms = PluralForms {
+            zero: "many",
+            one: "single",
+            two: "many",
+            few: "a few",
+            many: "many",
+            other: "many",
+        };
+        assert_eq!(PluralCategory::One.plural_form(&forms), "single");
+        assert_eq!(PluralCategory::Few.plural_form(&forms), "a few");
+        assert_eq!(PluralCategory::Many.plural_form(&forms), "many");
+        assert_eq!(PluralCategory::Other.plural_form(&forms), "many");
+
+        // Categories a locale omits are filled from "other" at build time
+        let polish = i18n::locale("pl-PL").expect("locale must exist");
+        assert_eq!(polish.calendar_rrule_secondly.many, "Co $n sekund");
         assert_eq!(
-            plural_form("no categories", PluralCategory::One),
-            "no categories"
+            polish.calendar_rrule_secondly.zero,
+            polish.calendar_rrule_secondly.other
         );
     }
 

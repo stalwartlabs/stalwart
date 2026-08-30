@@ -5,26 +5,11 @@
  */
 
 use crate::{
-    IterateParams, RegistryStore, RegistryStoreInner, Store, U64_LEN, ValueKey,
-    backend::ephemeral::EphemeralStore,
+    RegistryStore, RegistryStoreInner, Store, backend::ephemeral::EphemeralStore,
     registry::local::RegistryInit,
-    write::{
-        BatchBuilder, ValueClass,
-        assert::AssertValue,
-        key::{DeserializeBigEndian, KeySerializer, node_id_from_key},
-        now,
-    },
 };
 use rand::{RngExt, distr::Alphanumeric, rng};
-use registry::{
-    schema::{enums::ClusterNodeStatus, structs::ClusterNode},
-    types::datetime::UTCDateTime,
-};
-use std::{path::PathBuf, time::Duration};
-use trc::AddContext;
-
-const STALE_NODE_TIMEOUT: u64 = 60 * 60; // 1 hour
-const DEAD_NODE_TIMEOUT: u64 = 60 * 60 * 24; // 24 hours
+use std::path::PathBuf;
 
 impl RegistryStore {
     pub async fn init(local: PathBuf, acquire_node_id: bool) -> Result<Self, String> {
@@ -86,176 +71,11 @@ impl RegistryStore {
             .await
             .map_err(|err| format!("Failed to create tables: {err}"))?;
 
-        if !acquire_node_id {
-            return Ok(Self(inner.into()));
-        }
-
-        // Obtain node id
-        let mut retry_count = 0;
-        loop {
-            let mut found_node_id = false;
-            let mut batch = BatchBuilder::new();
-            let now = now();
-            let mut node_ids = Vec::new();
-            inner
-                .store
-                .iterate(
-                    IterateParams::new(
-                        ValueKey::from(ValueClass::NodeId(0)),
-                        ValueKey::from(ValueClass::NodeId(u16::MAX)),
-                    )
-                    .ascending(),
-                    |key, value| {
-                        if let Some(node_id) = node_id_from_key(key) {
-                            let last_renewal = now.saturating_sub(value.deserialize_be_u64(0)?);
-                            let hostname = value
-                                .get(U64_LEN..)
-                                .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                                .filter(|text| !text.is_empty())
-                                .ok_or_else(|| trc::StoreEvent::DataCorruption.into_err())?;
-                            let hash = xxhash_rust::xxh3::xxh3_64(value);
-
-                            if hostname == inner.env_hostname || last_renewal > STALE_NODE_TIMEOUT {
-                                if !found_node_id {
-                                    inner.node_id = node_id;
-                                    batch
-                                        .assert_value(
-                                            ValueClass::NodeId(node_id),
-                                            AssertValue::Hash(hash),
-                                        )
-                                        .set(
-                                            ValueClass::NodeId(node_id),
-                                            KeySerializer::new(hostname.len() + U64_LEN)
-                                                .write(now)
-                                                .write(hostname)
-                                                .finalize(),
-                                        );
-                                    found_node_id = true;
-                                } else if last_renewal > DEAD_NODE_TIMEOUT {
-                                    batch
-                                        .assert_value(
-                                            ValueClass::NodeId(node_id),
-                                            AssertValue::Hash(hash),
-                                        )
-                                        .clear(ValueClass::NodeId(node_id));
-                                }
-                            } else {
-                                node_ids.push(node_id);
-                            }
-                        }
-                        Ok(true)
-                    },
-                )
-                .await
-                .map_err(|err| format!("Failed to iterate store: {err}"))?;
-
-            if !found_node_id {
-                if !node_ids.is_empty() {
-                    node_ids.sort_unstable();
-                    let mut last_node_id = 0;
-                    for node_id in node_ids {
-                        if node_id > last_node_id {
-                            break;
-                        }
-                        last_node_id = node_id + 1;
-                    }
-                    inner.node_id = last_node_id;
-                } else {
-                    inner.node_id = 0;
-                }
-
-                batch
-                    .assert_value(ValueClass::NodeId(inner.node_id), ())
-                    .set(
-                        ValueClass::NodeId(inner.node_id),
-                        KeySerializer::new(inner.env_hostname.len() + U64_LEN)
-                            .write(now)
-                            .write(&inner.env_hostname)
-                            .finalize(),
-                    );
-            }
-
-            match inner.store.write_batch(&mut batch).await {
-                Ok(_) => break,
-                Err(err) => {
-                    if err.is_assertion_failure() && retry_count < 5 {
-                        retry_count += 1;
-                        continue;
-                    } else {
-                        return Err(format!("Failed to write node id to store: {err}"));
-                    }
-                }
-            }
+        if acquire_node_id {
+            inner.acquire_node_id().await?;
         }
 
         Ok(Self(inner.into()))
-    }
-
-    pub fn node_id(&self) -> u16 {
-        self.0.node_id
-    }
-
-    pub fn refresh_node_id_interval(&self) -> Duration {
-        Duration::from_secs(STALE_NODE_TIMEOUT / 2)
-    }
-
-    pub async fn cluster_node_list(&self) -> trc::Result<Vec<ClusterNode>> {
-        let mut results = Vec::new();
-        let now = now();
-
-        self.0
-            .store
-            .iterate(
-                IterateParams::new(
-                    ValueKey::from(ValueClass::NodeId(0)),
-                    ValueKey::from(ValueClass::NodeId(u16::MAX)),
-                )
-                .ascending(),
-                |key, value| {
-                    if let Some(node_id) = node_id_from_key(key) {
-                        let last_renewal = value.deserialize_be_u64(0)?;
-                        let last_renewal_since_now = now.saturating_sub(last_renewal);
-                        let hostname = value
-                            .get(U64_LEN..)
-                            .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                            .filter(|text| !text.is_empty())
-                            .ok_or_else(|| trc::StoreEvent::DataCorruption.into_err())?;
-
-                        results.push(ClusterNode {
-                            hostname: hostname.to_string(),
-                            last_renewal: UTCDateTime::from_timestamp(last_renewal.cast_signed()),
-                            node_id: node_id as u64,
-                            status: if last_renewal_since_now > DEAD_NODE_TIMEOUT {
-                                ClusterNodeStatus::Inactive
-                            } else if last_renewal_since_now > STALE_NODE_TIMEOUT {
-                                ClusterNodeStatus::Stale
-                            } else {
-                                ClusterNodeStatus::Active
-                            },
-                        });
-                    }
-                    Ok(true)
-                },
-            )
-            .await
-            .map(|_| results)
-    }
-
-    pub async fn refresh_node_id_lease(&self) -> trc::Result<()> {
-        let mut batch = BatchBuilder::new();
-        batch.set(
-            ValueClass::NodeId(self.0.node_id),
-            KeySerializer::new(self.0.env_hostname.len() + U64_LEN)
-                .write(now())
-                .write(&self.0.env_hostname)
-                .finalize(),
-        );
-        self.0
-            .store
-            .write_batch(&mut batch)
-            .await
-            .caused_by(trc::location!())
-            .map(|_| ())
     }
 
     #[inline(always)]

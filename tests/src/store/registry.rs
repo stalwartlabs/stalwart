@@ -90,6 +90,7 @@ pub async fn test(test: &TestServer) {
             encrypt_on_append: false,
             public_key: 0u64.into(),
         }),
+        external_id: "8f7c1e2a-4b3d-4f1a-9c2e-7d5b6a8f0e11".to_string().into(),
         locale: Locale::EnUS,
         member_group_ids: Map::new(vec![2000u64.into(), 2001u64.into()]),
         member_tenant_id: None,

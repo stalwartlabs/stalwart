@@ -211,6 +211,7 @@ pub async fn jmap_tests() {
 
     calendar::calendars::test(&test).await;
     calendar::event::test(&test).await;
+    calendar::instance::test(&test).await;
     calendar::notification::test(&test).await;
     calendar::alarm::test(&test).await;
 

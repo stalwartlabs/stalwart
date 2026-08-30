@@ -431,10 +431,11 @@ impl RegistrySet for Server {
                     let mut tasks = Vec::new();
                     let result = match &mut new_object.inner {
                         ObjectInner::Account(account) => {
-                            validate_account(&set, account, modification.as_account()).await?
+                            validate_account(self, access_token, account, modification.as_account())
+                                .await?
                         }
                         ObjectInner::Role(role) => {
-                            validate_role(&set, role, modification.as_role()).await?
+                            validate_role(self, access_token, role, modification.as_role()).await?
                         }
                         // SPDX-SnippetBegin
                         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -465,7 +466,12 @@ impl RegistrySet for Server {
                             validate_dns_server(&set, dns, modification.as_dns_server()).await?
                         }
                         ObjectInner::MailingList(_) if is_create => {
-                            validate_tenant_quota(&set, TenantStorageQuota::MaxMailingLists).await?
+                            validate_tenant_quota(
+                                self,
+                                access_token,
+                                TenantStorageQuota::MaxMailingLists,
+                            )
+                            .await?
                         }
                         ObjectInner::OAuthClient(client) => {
                             if let Some(secret) = client.secret.as_mut()
@@ -481,14 +487,23 @@ impl RegistrySet for Server {
                                 .caused_by(trc::location!())?;
                             }
                             if is_create {
-                                validate_tenant_quota(&set, TenantStorageQuota::MaxOauthClients)
-                                    .await?
+                                validate_tenant_quota(
+                                    self,
+                                    access_token,
+                                    TenantStorageQuota::MaxOauthClients,
+                                )
+                                .await?
                             } else {
                                 Ok(ObjectResponse::default())
                             }
                         }
                         ObjectInner::Directory(_) if is_create => {
-                            validate_tenant_quota(&set, TenantStorageQuota::MaxDirectories).await?
+                            validate_tenant_quota(
+                                self,
+                                access_token,
+                                TenantStorageQuota::MaxDirectories,
+                            )
+                            .await?
                         }
                         ObjectInner::AcmeProvider(provider) if is_create => {
                             validate_acme_provider(&set, provider, unpatched_properties).await?

@@ -278,7 +278,8 @@ pub(crate) async fn bootstrap_set(
             }
         }
         let mut bp_check =
-            store::registry::bootstrap::Bootstrap::new_uninitialized(tmp_registry.clone());
+            store::registry::bootstrap::Bootstrap::new_uninitialized(tmp_registry.clone())
+                .with_data_store(store.clone());
         let _ = Storage::parse(&mut bp_check).await;
         if !bp_check.errors.is_empty() {
             set.response

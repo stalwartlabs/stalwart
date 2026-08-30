@@ -221,6 +221,12 @@ async fn store_maintenance(
                 .await
                 .caused_by(trc::location!())?;
 
+            server
+                .registry()
+                .purge_dead_nodes()
+                .await
+                .caused_by(trc::location!())?;
+
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL

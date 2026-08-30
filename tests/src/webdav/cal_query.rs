@@ -286,6 +286,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
                 expansion_id: i as u32,
                 start,
                 end,
+                start_naive: 0,
             }
         })
         .collect::<Vec<_>>();
@@ -353,6 +354,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
     });
     for event in events.iter_mut().chain(events_archive.iter_mut()) {
         event.expansion_id = 0;
+        event.start_naive = 0;
     }
 
     assert_eq!(events, events_archive);

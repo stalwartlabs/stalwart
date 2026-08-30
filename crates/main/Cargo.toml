@@ -29,6 +29,7 @@ common = { path = "../common" }
 email = { path = "../email" }
 directory = { path = "../directory" }
 http = { path = "../http" }
+scim = { path = "../scim" }
 dav = { path = "../dav" }
 groupware = { path = "../groupware" }
 services = { path = "../services" }
@@ -67,6 +68,7 @@ enterprise = [ "jmap/enterprise",
                "email/enterprise",
                "spam-filter/enterprise",
                "http/enterprise",
+               "scim/enterprise",
                "dav/enterprise",
                "groupware/enterprise",
                "trc/enterprise",

@@ -15,6 +15,7 @@ use crate::{
         security::Security,
     },
 };
+use mail_builder::mime::make_boundary;
 use registry::schema::{
     enums::{AcmeChallengeType, ClusterTaskType, ProviderInfo, ServiceProtocol},
     prelude::{ObjectType, Property},
@@ -362,6 +363,10 @@ impl Network {
         }
 
         network
+    }
+
+    pub fn message_id(&self) -> String {
+        format!("{}@{}", make_boundary("."), self.server_name)
     }
 }
 

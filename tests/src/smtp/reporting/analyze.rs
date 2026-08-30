@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    smtp::{inbound::TestQueueEvent, session::TestSession},
+    smtp::session::TestSession,
     utils::server::TestServerBuilder,
 };
 use ahash::AHashMap;
@@ -237,8 +237,54 @@ async fn report_analyze() {
     session
         .send_message("john@test.org", &["bill@foobar.org"], "test:no_dkim", "250")
         .await;
-    test.read_event().await.assert_refresh();
+    test.expect_refresh().await;
     test.last_queued_message().await;
+
+    // Messages sent to a report address that contain no report must be delivered
+    session
+        .send_message(
+            "john@test.org",
+            &["reports@foobar.org"],
+            concat!(
+                "From: john@test.org\r\n",
+                "To: reports@foobar.org\r\n",
+                "Subject: Your MX is refusing my connections\r\n",
+                "\r\n",
+                "Could you have a look at this?"
+            ),
+            "250",
+        )
+        .await;
+    let message = test.expect_message().await;
+    assert_eq!(
+        message.message.recipients.last().unwrap().address(),
+        "reports@foobar.org"
+    );
+
+    // Reports addressed to both a report address and a regular mailbox are
+    // discarded only for the report address
+    session
+        .send_message(
+            "john@test.org",
+            &["reports@foobar.org", "bill@foobar.org"],
+            &report_message(
+                "application/zip",
+                &format!("{attachment_name}.zip"),
+                &zip("report.xml", DMARC_REPORT.as_bytes(), None, None),
+            ),
+            "250",
+        )
+        .await;
+    let message = test.expect_message().await;
+    assert_eq!(
+        message
+            .message
+            .recipients
+            .iter()
+            .map(|rcpt| rcpt.address())
+            .collect::<Vec<_>>(),
+        vec!["bill@foobar.org"]
+    );
 }
 
 fn gzip(data: &[u8]) -> Vec<u8> {

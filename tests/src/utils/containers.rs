@@ -31,6 +31,7 @@ static OPENLDAP: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static CHALLTESTSRV: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static PEBBLE: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static POWERDNS: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
+static SCIM_TESTER: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 
 const POWERDNS_ZONE_INIT: &str = r#"set -e
 for i in $(seq 1 60); do
@@ -287,6 +288,41 @@ pub async fn ensure_keycloak() {
         })
         .await;
     wait_for_http("http://localhost:9080/realms/stalwart/.well-known/openid-configuration").await;
+}
+
+pub async fn ensure_scim_tester() -> &'static ContainerAsync<GenericImage> {
+    SCIM_TESTER
+        .get_or_init(|| async {
+            let image = GenericBuildableImage::new("stalwart-test-scim-tester", "local")
+                .with_dockerfile_string(include_str!("../../docker/scim/Dockerfile"))
+                .build_image()
+                .await
+                .expect("Failed to build the SCIM tester image");
+            image
+                .with_host("host.docker.internal", Host::HostGateway)
+                .with_startup_timeout(READY_TIMEOUT)
+                .with_container_name("stalwart-test-scim-tester")
+                .with_reuse(ReuseDirective::Always)
+                .start()
+                .await
+                .expect("Failed to start the SCIM tester container")
+        })
+        .await
+}
+
+pub async fn scim_tester_exec(args: &[&str]) -> (String, String) {
+    let mut result = ensure_scim_tester()
+        .await
+        .exec(ExecCommand::new(args.iter().copied()).with_cmd_ready_condition(CmdWaitFor::exit()))
+        .await
+        .expect("Failed to exec the SCIM driver");
+    let stdout = result.stdout_to_vec().await.unwrap_or_default();
+    let stderr = result.stderr_to_vec().await.unwrap_or_default();
+
+    (
+        String::from_utf8_lossy(&stdout).into_owned(),
+        String::from_utf8_lossy(&stderr).into_owned(),
+    )
 }
 
 pub async fn ensure_acme() {

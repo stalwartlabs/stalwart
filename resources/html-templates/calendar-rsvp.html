@@ -809,6 +809,13 @@
             }
 
             var labels = FALLBACK;
+            function applyDirection(resp) {
+                if (!resp || !resp.language) return;
+                var root = document.documentElement;
+                root.lang = resp.language;
+                root.dir = resp.dir === 'rtl' ? 'rtl' : 'ltr';
+            }
+
             function t(key, name) {
                 var value = (labels && labels[key]) || FALLBACK[key] || key;
                 if (name != null) value = value.replace('$name', name);
@@ -1129,6 +1136,7 @@
 
             post({ token: token }).then(function (resp) {
                 loadCustomLogo(organizerDomain(resp));
+                applyDirection(resp);
                 if (resp && resp.labels) labels = resp.labels;
                 if (!resp || resp.type !== 'invitation') {
                     fail(resp && resp.title, resp && resp.message);

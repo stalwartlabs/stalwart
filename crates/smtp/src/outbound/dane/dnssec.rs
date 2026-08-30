@@ -26,6 +26,7 @@ use mail_auth::{
 };
 use std::{
     future::Future,
+    net::{Ipv4Addr, Ipv6Addr},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -40,6 +41,16 @@ pub trait TlsaLookup: Sync + Send {
         &self,
         key: impl ToFqdn + Sync + Send,
     ) -> impl Future<Output = mail_auth::Result<TlsaResult>> + Send;
+
+    fn ipv4_lookup_dnssec(
+        &self,
+        key: impl ToFqdn + Sync + Send,
+    ) -> impl Future<Output = mail_auth::Result<RecordSet<Ipv4Addr>>> + Send;
+
+    fn ipv6_lookup_dnssec(
+        &self,
+        key: impl ToFqdn + Sync + Send,
+    ) -> impl Future<Output = mail_auth::Result<RecordSet<Ipv6Addr>>> + Send;
 }
 
 pub enum TlsaResult {
@@ -246,6 +257,162 @@ impl TlsaLookup for Server {
             _ => Ok(TlsaResult::Missing),
         }
     }
+
+    async fn ipv4_lookup_dnssec(
+        &self,
+        key: impl ToFqdn + Sync + Send,
+    ) -> mail_auth::Result<RecordSet<Ipv4Addr>> {
+        if !self.core.smtp.resolvers.dnssec_available {
+            return self
+                .core
+                .smtp
+                .resolvers
+                .dns
+                .ipv4_lookup(key, Some(&self.inner.cache.dns_ipv4))
+                .await;
+        }
+
+        let key = key.to_fqdn();
+        if let Some(value) = self.inner.cache.dns_ipv4.get::<str>(key.as_ref())
+            && value.dnssec_status != DnssecStatus::Indeterminate
+        {
+            return Ok(value);
+        }
+
+        #[cfg(any(test, feature = "test_mode"))]
+        if true {
+            return mail_auth::common::resolver::mock_resolve(key.as_ref());
+        }
+
+        let name = Name::from_str_relaxed::<&str>(key.as_ref())?;
+        let lookup = match self
+            .core
+            .smtp
+            .resolvers
+            .dnssec
+            .resolver
+            .ipv4_lookup(name.clone())
+            .await
+        {
+            Ok(lookup) => lookup,
+            Err(err) => {
+                if let Some(denial) = NegativeAnswer::from_error(&err)
+                    && denial.response_code == ResponseCode::NoError
+                {
+                    let records = RecordSet {
+                        rrset: Arc::new([]),
+                        dnssec_status: denial.dnssec_status,
+                    };
+                    if let Some(valid_until) = denial.valid_until {
+                        self.inner.cache.dns_ipv4.insert_with_expiry(
+                            key,
+                            records.clone(),
+                            valid_until,
+                        );
+                    }
+                    return Ok(records);
+                }
+                return Err(err.into());
+            }
+        };
+
+        let answers = lookup.answers();
+        let records = RecordSet {
+            rrset: answers
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::A(addr) => Some(addr.0),
+                    _ => None,
+                })
+                .collect::<Arc<[Ipv4Addr]>>(),
+            dnssec_status: tlsa_base_status(&name, answers, RecordType::A),
+        };
+
+        self.inner
+            .cache
+            .dns_ipv4
+            .insert_with_expiry(key, records.clone(), lookup.valid_until());
+
+        Ok(records)
+    }
+
+    async fn ipv6_lookup_dnssec(
+        &self,
+        key: impl ToFqdn + Sync + Send,
+    ) -> mail_auth::Result<RecordSet<Ipv6Addr>> {
+        if !self.core.smtp.resolvers.dnssec_available {
+            return self
+                .core
+                .smtp
+                .resolvers
+                .dns
+                .ipv6_lookup(key, Some(&self.inner.cache.dns_ipv6))
+                .await;
+        }
+
+        let key = key.to_fqdn();
+        if let Some(value) = self.inner.cache.dns_ipv6.get::<str>(key.as_ref())
+            && value.dnssec_status != DnssecStatus::Indeterminate
+        {
+            return Ok(value);
+        }
+
+        #[cfg(any(test, feature = "test_mode"))]
+        if true {
+            return mail_auth::common::resolver::mock_resolve(key.as_ref());
+        }
+
+        let name = Name::from_str_relaxed::<&str>(key.as_ref())?;
+        let lookup = match self
+            .core
+            .smtp
+            .resolvers
+            .dnssec
+            .resolver
+            .ipv6_lookup(name.clone())
+            .await
+        {
+            Ok(lookup) => lookup,
+            Err(err) => {
+                if let Some(denial) = NegativeAnswer::from_error(&err)
+                    && denial.response_code == ResponseCode::NoError
+                {
+                    let records = RecordSet {
+                        rrset: Arc::new([]),
+                        dnssec_status: denial.dnssec_status,
+                    };
+                    if let Some(valid_until) = denial.valid_until {
+                        self.inner.cache.dns_ipv6.insert_with_expiry(
+                            key,
+                            records.clone(),
+                            valid_until,
+                        );
+                    }
+                    return Ok(records);
+                }
+                return Err(err.into());
+            }
+        };
+
+        let answers = lookup.answers();
+        let records = RecordSet {
+            rrset: answers
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::AAAA(addr) => Some(addr.0),
+                    _ => None,
+                })
+                .collect::<Arc<[Ipv6Addr]>>(),
+            dnssec_status: tlsa_base_status(&name, answers, RecordType::AAAA),
+        };
+
+        self.inner
+            .cache
+            .dns_ipv6
+            .insert_with_expiry(key, records.clone(), lookup.valid_until());
+
+        Ok(records)
+    }
 }
 
 struct NegativeAnswer {
@@ -302,7 +469,33 @@ fn proof_to_dnssec_status(proof: Proof) -> DnssecStatus {
     }
 }
 
-fn least_secure(a: DnssecStatus, b: DnssecStatus) -> DnssecStatus {
+fn tlsa_base_status(query: &Name, answers: &[Record], address_type: RecordType) -> DnssecStatus {
+    let mut addresses: Option<DnssecStatus> = None;
+    let mut alias: Option<DnssecStatus> = None;
+
+    for record in answers {
+        let status = proof_to_dnssec_status(record.proof);
+        if record.record_type() == address_type {
+            addresses = Some(match addresses {
+                Some(current) => least_secure(current, status),
+                None => status,
+            });
+        } else if record.record_type() == RecordType::CNAME && &record.name == query {
+            alias = Some(match alias {
+                Some(current) => least_secure(current, status),
+                None => status,
+            });
+        }
+    }
+
+    match (addresses, alias) {
+        (Some(DnssecStatus::Insecure), Some(DnssecStatus::Secure)) => DnssecStatus::Secure,
+        (Some(status), _) => status,
+        (None, _) => DnssecStatus::Indeterminate,
+    }
+}
+
+pub(crate) fn least_secure(a: DnssecStatus, b: DnssecStatus) -> DnssecStatus {
     fn rank(status: DnssecStatus) -> u8 {
         match status {
             DnssecStatus::Bogus => 0,
@@ -313,4 +506,122 @@ fn least_secure(a: DnssecStatus, b: DnssecStatus) -> DnssecStatus {
     }
 
     if rank(a) <= rank(b) { a } else { b }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mail_auth::hickory_resolver::proto::rr::rdata::{A, CNAME};
+    use std::net::Ipv4Addr;
+
+    fn name(value: &str) -> Name {
+        Name::from_ascii(value).unwrap()
+    }
+
+    fn address(owner: &str, proof: Proof) -> Record {
+        let mut record =
+            Record::from_rdata(name(owner), 3600, RData::A(A(Ipv4Addr::new(192, 0, 2, 1))));
+        record.proof = proof;
+        record
+    }
+
+    fn alias(owner: &str, target: &str, proof: Proof) -> Record {
+        let mut record = Record::from_rdata(name(owner), 3600, RData::CNAME(CNAME(name(target))));
+        record.proof = proof;
+        record
+    }
+
+    #[test]
+    fn tlsa_base_status_follows_address_records() {
+        let query = name("mx.example.org.");
+
+        for (proof, expected) in [
+            (Proof::Secure, DnssecStatus::Secure),
+            (Proof::Insecure, DnssecStatus::Insecure),
+            (Proof::Bogus, DnssecStatus::Bogus),
+            (Proof::Indeterminate, DnssecStatus::Indeterminate),
+        ] {
+            assert_eq!(
+                tlsa_base_status(&query, &[address("mx.example.org.", proof)], RecordType::A),
+                expected,
+                "proof {proof}"
+            );
+        }
+    }
+
+    #[test]
+    fn tlsa_base_status_is_indeterminate_without_addresses() {
+        assert_eq!(
+            tlsa_base_status(&name("mx.example.org."), &[], RecordType::A),
+            DnssecStatus::Indeterminate
+        );
+    }
+
+    #[test]
+    fn tlsa_base_status_takes_least_secure_address() {
+        let query = name("mx.example.org.");
+
+        assert_eq!(
+            tlsa_base_status(
+                &query,
+                &[
+                    address("mx.example.org.", Proof::Secure),
+                    address("mx.example.org.", Proof::Insecure),
+                ],
+                RecordType::A
+            ),
+            DnssecStatus::Insecure
+        );
+    }
+
+    #[test]
+    fn tlsa_base_status_keeps_secure_alias_to_insecure_zone() {
+        let query = name("mx.example.org.");
+
+        assert_eq!(
+            tlsa_base_status(
+                &query,
+                &[
+                    alias("mx.example.org.", "mx.provider.net.", Proof::Secure),
+                    address("mx.provider.net.", Proof::Insecure),
+                ],
+                RecordType::A
+            ),
+            DnssecStatus::Secure
+        );
+    }
+
+    #[test]
+    fn tlsa_base_status_skips_insecure_alias() {
+        let query = name("mx.example.org.");
+
+        assert_eq!(
+            tlsa_base_status(
+                &query,
+                &[
+                    alias("mx.example.org.", "mx.provider.net.", Proof::Insecure),
+                    address("mx.provider.net.", Proof::Insecure),
+                ],
+                RecordType::A
+            ),
+            DnssecStatus::Insecure
+        );
+    }
+
+    #[test]
+    fn tlsa_base_status_ignores_alias_below_query_name() {
+        let query = name("mx.example.org.");
+
+        assert_eq!(
+            tlsa_base_status(
+                &query,
+                &[
+                    alias("mx.provider.net.", "mx.other.net.", Proof::Secure),
+                    address("mx.other.net.", Proof::Insecure),
+                ],
+                RecordType::A
+            ),
+            DnssecStatus::Insecure
+        );
+    }
 }

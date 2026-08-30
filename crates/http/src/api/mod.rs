@@ -326,15 +326,15 @@ impl ManagementApi for Server {
 }
 
 pub trait ToManageHttpResponse {
-    fn into_http_response(self) -> HttpResponse;
+    fn into_http_response(self, challenge: AuthChallenge) -> HttpResponse;
 }
 
 impl ToManageHttpResponse for &trc::Error {
-    fn into_http_response(self) -> HttpResponse {
+    fn into_http_response(self, challenge: AuthChallenge) -> HttpResponse {
         match self.as_ref() {
             trc::EventType::Auth(
                 trc::AuthEvent::Failed | trc::AuthEvent::Error | trc::AuthEvent::TokenExpired,
-            ) => HttpResponse::unauthorized(true),
+            ) => HttpResponse::unauthorized(challenge),
             _ => self.to_request_error().into_http_response(),
         }
     }
@@ -352,22 +352,32 @@ pub fn accept_language(req: &HttpRequest) -> &str {
         .unwrap_or("en")
 }
 
+const BEARER_CHALLENGE: &str = concat!(
+    "Bearer realm=\"Stalwart Server\", ",
+    "resource_metadata=\"/.well-known/oauth-protected-resource\""
+);
+const BASIC_CHALLENGE: &str = "Basic realm=\"Stalwart Server\"";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthChallenge {
+    Bearer,
+    BearerAndBasic,
+}
+
 pub trait UnauthorizedResponse {
-    fn unauthorized(include_realms: bool) -> Self;
+    fn unauthorized(challenge: AuthChallenge) -> Self;
 }
 
 impl UnauthorizedResponse for HttpResponse {
-    fn unauthorized(include_realms: bool) -> Self {
-        (if include_realms {
-            HttpResponse::new(StatusCode::UNAUTHORIZED)
-                .with_header(
-                    header::WWW_AUTHENTICATE,
-                    "Bearer realm=\"Stalwart Server\", resource_metadata=\"/.well-known/oauth-protected-resource\"",
-                )
-                .with_header(header::WWW_AUTHENTICATE, "Basic realm=\"Stalwart Server\"")
+    fn unauthorized(challenge: AuthChallenge) -> Self {
+        let response = HttpResponse::new(StatusCode::UNAUTHORIZED)
+            .with_header(header::WWW_AUTHENTICATE, BEARER_CHALLENGE);
+
+        if challenge == AuthChallenge::BearerAndBasic {
+            response.with_header(header::WWW_AUTHENTICATE, BASIC_CHALLENGE)
         } else {
-            HttpResponse::new(StatusCode::UNAUTHORIZED)
-        })
+            response
+        }
         .with_content_type("application/problem+json")
         .with_text_body(serde_json::to_string(&RequestError::unauthorized()).unwrap_or_default())
     }

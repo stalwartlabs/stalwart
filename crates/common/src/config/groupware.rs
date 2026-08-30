@@ -66,6 +66,8 @@ pub struct GroupwareConfig {
 pub enum CalendarTemplateVariable {
     #[default]
     PageTitle,
+    Lang,
+    Dir,
     Header,
     Footer,
     EventTitle,
@@ -168,6 +170,8 @@ impl FromStr for CalendarTemplateVariable {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "page_title" => Ok(CalendarTemplateVariable::PageTitle),
+            "lang" => Ok(CalendarTemplateVariable::Lang),
+            "dir" => Ok(CalendarTemplateVariable::Dir),
             "header" => Ok(CalendarTemplateVariable::Header),
             "footer" => Ok(CalendarTemplateVariable::Footer),
             "event_title" => Ok(CalendarTemplateVariable::EventTitle),

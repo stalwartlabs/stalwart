@@ -11,7 +11,7 @@ use mail_auth::{
     report::{Feedback, Report, tlsrpt::TlsReport},
     zip,
 };
-use mail_parser::{Message, MimeHeaders, PartType};
+use mail_parser::{Message, MessagePart, MimeHeaders, PartType};
 use registry::{
     schema::structs::{ArfExternalReport, DmarcExternalReport, TlsExternalReport},
     types::datetime::UTCDateTime,
@@ -38,10 +38,97 @@ enum Format<D, T, A> {
     Arf(A),
 }
 
-struct ReportData<'x> {
+pub(crate) struct ReportData<'x> {
     compression: Compression,
     format: Format<(), (), ()>,
     data: &'x [u8],
+}
+
+impl<'x> ReportData<'x> {
+    fn from_part(part: &'x MessagePart<'x>) -> Option<Self> {
+        match &part.body {
+            PartType::Text(report) => {
+                if part
+                    .content_type()
+                    .and_then(|ct| ct.subtype())
+                    .is_some_and(|t| t.eq_ignore_ascii_case("xml"))
+                    || part
+                        .attachment_name()
+                        .and_then(|n| n.rsplit_once('.'))
+                        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("xml"))
+                {
+                    Some(ReportData {
+                        compression: Compression::None,
+                        format: Format::Dmarc(()),
+                        data: report.as_bytes(),
+                    })
+                } else if part.is_content_type("message", "feedback-report") {
+                    Some(ReportData {
+                        compression: Compression::None,
+                        format: Format::Arf(()),
+                        data: report.as_bytes(),
+                    })
+                } else {
+                    None
+                }
+            }
+            PartType::Binary(report) | PartType::InlineBinary(report) => {
+                if part.is_content_type("message", "feedback-report") {
+                    return Some(ReportData {
+                        compression: Compression::None,
+                        format: Format::Arf(()),
+                        data: report.as_ref(),
+                    });
+                }
+
+                let subtype = part
+                    .content_type()
+                    .and_then(|ct| ct.subtype())
+                    .unwrap_or("");
+                let attachment_name = part.attachment_name();
+                let ext = attachment_name
+                    .and_then(|f| f.rsplit_once('.'))
+                    .map_or("", |(_, e)| e);
+                let tls_parts = subtype.rsplit_once('+');
+                let compression = match (tls_parts.map(|(_, c)| c).unwrap_or(subtype), ext) {
+                    ("gzip", _) => Compression::Gzip,
+                    ("zip", _) => Compression::Zip,
+                    (_, "gz") => Compression::Gzip,
+                    (_, "zip") => Compression::Zip,
+                    _ => Compression::None,
+                };
+                let format = match (tls_parts.map(|(c, _)| c).unwrap_or(subtype), ext) {
+                    ("xml", _) => Format::Dmarc(()),
+                    ("tlsrpt", _) | (_, "json") => Format::Tls(()),
+                    _ => {
+                        if attachment_name.is_some_and(|n| n.contains(".xml") || n.contains('!')) {
+                            Format::Dmarc(())
+                        } else {
+                            return None;
+                        }
+                    }
+                };
+
+                Some(ReportData {
+                    compression,
+                    format,
+                    data: report.as_ref(),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn extract(message: &'x Message<'x>) -> Vec<Self> {
+        message.parts.iter().filter_map(Self::from_part).collect()
+    }
+
+    pub(crate) fn is_present(message: &Message<'_>) -> bool {
+        message
+            .parts
+            .iter()
+            .any(|part| ReportData::from_part(part).is_some())
+    }
 }
 
 pub trait AnalyzeReport: Sync + Send {
@@ -65,84 +152,7 @@ impl AnalyzeReport for Server {
                     .collect()
             });
             let subject: String = message.subject().unwrap_or_default().into();
-            let mut reports = Vec::new();
-
-            for part in &message.parts {
-                match &part.body {
-                    PartType::Text(report) => {
-                        if part
-                            .content_type()
-                            .and_then(|ct| ct.subtype())
-                            .is_some_and(|t| t.eq_ignore_ascii_case("xml"))
-                            || part
-                                .attachment_name()
-                                .and_then(|n| n.rsplit_once('.'))
-                                .is_some_and(|(_, e)| e.eq_ignore_ascii_case("xml"))
-                        {
-                            reports.push(ReportData {
-                                compression: Compression::None,
-                                format: Format::Dmarc(()),
-                                data: report.as_bytes(),
-                            });
-                        } else if part.is_content_type("message", "feedback-report") {
-                            reports.push(ReportData {
-                                compression: Compression::None,
-                                format: Format::Arf(()),
-                                data: report.as_bytes(),
-                            });
-                        }
-                    }
-                    PartType::Binary(report) | PartType::InlineBinary(report) => {
-                        if part.is_content_type("message", "feedback-report") {
-                            reports.push(ReportData {
-                                compression: Compression::None,
-                                format: Format::Arf(()),
-                                data: report.as_ref(),
-                            });
-                            continue;
-                        }
-
-                        let subtype = part
-                            .content_type()
-                            .and_then(|ct| ct.subtype())
-                            .unwrap_or("");
-                        let attachment_name = part.attachment_name();
-                        let ext = attachment_name
-                            .and_then(|f| f.rsplit_once('.'))
-                            .map_or("", |(_, e)| e);
-                        let tls_parts = subtype.rsplit_once('+');
-                        let compression = match (tls_parts.map(|(_, c)| c).unwrap_or(subtype), ext)
-                        {
-                            ("gzip", _) => Compression::Gzip,
-                            ("zip", _) => Compression::Zip,
-                            (_, "gz") => Compression::Gzip,
-                            (_, "zip") => Compression::Zip,
-                            _ => Compression::None,
-                        };
-                        let format = match (tls_parts.map(|(c, _)| c).unwrap_or(subtype), ext) {
-                            ("xml", _) => Format::Dmarc(()),
-                            ("tlsrpt", _) | (_, "json") => Format::Tls(()),
-                            _ => {
-                                if attachment_name
-                                    .is_some_and(|n| n.contains(".xml") || n.contains('!'))
-                                {
-                                    Format::Dmarc(())
-                                } else {
-                                    continue;
-                                }
-                            }
-                        };
-
-                        reports.push(ReportData {
-                            compression,
-                            format,
-                            data: report.as_ref(),
-                        });
-                    }
-                    _ => (),
-                }
-            }
-
+            let reports = ReportData::extract(&message);
             let max_size = core.core.smtp.report.analysis.max_size;
 
             for report in reports {

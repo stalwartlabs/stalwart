@@ -82,13 +82,7 @@ impl CalendarGet for Server {
             })
             .await
             .caused_by(trc::location!())?
-            .or_else(|| {
-                if calendar_ids.len() == 1 {
-                    calendar_ids.iter().next()
-                } else {
-                    None
-                }
-            });
+            .or_else(|| cache.document_ids(true).min());
 
         let ids = if let Some(ids) = ids {
             ids

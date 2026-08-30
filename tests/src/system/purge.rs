@@ -26,6 +26,8 @@ use registry::schema::{
 use store::{IterateParams, LogKey, U32_LEN, U64_LEN, write::key::DeserializeBigEndian};
 use types::id::Id;
 
+const EXPUNGE_TRASH_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub async fn test(test: &mut TestServer) {
     println!("Running Account purge tests...");
     let inbox_id = Id::from(INBOX_ID).to_string();
@@ -38,7 +40,7 @@ pub async fn test(test: &mut TestServer) {
         .registry_update_setting(
             DataRetention {
                 max_changes_history: Some(1),
-                expunge_trash_after: Some(1000u64.into()),
+                expunge_trash_after: Some(EXPUNGE_TRASH_AFTER.into()),
                 ..Default::default()
             },
             &[Property::MaxChangesHistory, Property::ExpungeTrashAfter],
@@ -113,7 +115,7 @@ pub async fn test(test: &mut TestServer) {
             let (changes_, is_truncated) = get_changes(&test.server).await;
             assert!(!is_truncated);
             changes = changes_;
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(EXPUNGE_TRASH_AFTER + std::time::Duration::from_secs(1)).await;
         } else {
             break;
         }

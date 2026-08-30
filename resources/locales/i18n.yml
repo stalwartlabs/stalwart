@@ -2,1049 +2,2770 @@
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
 
 calendar.alarm_subject_prefix:
-  en_US: Notification
-  es_ES: Notificación
-  fr_FR: Notification
-  de_DE: Benachrichtigung
-  it_IT: Notifica
-  pt_PT: Notificação
-  nl_NL: Melding
-  da_DK: Notifikation
-  ca_ES: Notificació
-  el_GR: Ειδοποίηση
-  sv_SE: Notifikation
-  pl_PL: Powiadomienie
+  en-US: Notification
+  es-ES: Notificación
+  fr-FR: Notification
+  de-DE: Benachrichtigung
+  it-IT: Notifica
+  pt-PT: Notificação
+  nl-NL: Melding
+  da-DK: Notifikation
+  ca-ES: Notificació
+  el-GR: Ειδοποίηση
+  sv-SE: Notifikation
+  pl-PL: Powiadomienie
+  pt-BR: Notificação
+  ru-RU: Уведомление
+  uk-UA: Сповіщення
+  bg-BG: Известие
+  cs-CZ: Oznámení
+  sk-SK: Oznámenie
+  sl-SI: Obvestilo
+  hr-HR: Obavijest
+  lt-LT: Pranešimas
+  hu-HU: Értesítés
+  ro-RO: Notificare
+  fi-FI: Ilmoitus
+  nb-NO: Varsel
+  tr-TR: Bildirim
+  zh-CN: 通知
+  zh-TW: 通知
+  ja-JP: 通知
+  ko-KR: 알림
+  th-TH: การแจ้งเตือน
+  vi-VN: Thông báo
+  id-ID: Notifikasi
+  hi-IN: सूचना
+  ar-SA: إشعار
+  he-IL: התראה
+  fa-IR: اعلان
 
 calendar.alarm_header:
-  en_US: You have an upcoming event
-  es_ES: Tienes un evento próximo
-  fr_FR: Vous avez un événement à venir
-  de_DE: Sie haben einen bevorstehenden Termin
-  it_IT: Hai un evento in programma
-  pt_PT: Você tem um evento próximo
-  nl_NL: U heeft een aankomende gebeurtenis
-  da_DK: Du har en kommende begivenhed
-  ca_ES: Tens un esdeveniment d'aquí poc
-  el_GR: Έχετε μία επερχόμενη εκδήλωση
-  sv_SE: Du har en kommande händelse
-  pl_PL: Masz nadchodzące wydarzenie
+  en-US: You have an upcoming event
+  es-ES: Tienes un evento próximo
+  fr-FR: Vous avez un événement à venir
+  de-DE: Sie haben einen bevorstehenden Termin
+  it-IT: Hai un evento in programma
+  pt-PT: Tem um evento próximo
+  nl-NL: U heeft een aankomende gebeurtenis
+  da-DK: Du har en kommende begivenhed
+  ca-ES: Tens un esdeveniment pròxim
+  el-GR: Έχετε μία επερχόμενη εκδήλωση
+  sv-SE: Du har en kommande händelse
+  pl-PL: Masz nadchodzące wydarzenie
+  pt-BR: Você tem um evento próximo
+  ru-RU: У вас предстоящее событие
+  uk-UA: У вас незабаром подія
+  bg-BG: Имате предстоящо събитие
+  cs-CZ: Máte nadcházející událost
+  sk-SK: Máte nadchádzajúcu udalosť
+  sl-SI: Imate prihajajoč dogodek
+  hr-HR: Imate nadolazeći događaj
+  lt-LT: Turite artėjantį įvykį
+  hu-HU: Közelgő eseménye van
+  ro-RO: Aveți un eveniment în curând
+  fi-FI: Sinulla on tuleva tapahtuma
+  nb-NO: Du har en kommende hendelse
+  tr-TR: Yaklaşan bir etkinliğiniz var
+  zh-CN: 您有一个即将开始的活动
+  zh-TW: 您有一個即將到來的活動
+  ja-JP: まもなく予定があります
+  ko-KR: 다가오는 일정이 있습니다
+  th-TH: คุณมีกิจกรรมที่กำลังจะมาถึง
+  vi-VN: Bạn có một sự kiện sắp diễn ra
+  id-ID: Anda memiliki acara mendatang
+  hi-IN: आपका एक आगामी इवेंट है
+  ar-SA: لديك حدث قادم
+  he-IL: יש לך אירוע קרוב
+  fa-IR: شما رویداد پیش‌رو دارید
 
 calendar.alarm_footer:
-  en_US: You are receiving this email because you have enabled calendar notifications. To stop receiving these emails, login to the self-service portal and disable event notifications.
-  es_ES: Recibe este correo porque ha habilitado las notificaciones de calendario. Para dejar de recibir estos correos, inicie sesión en el portal de autoservicio y desactive las notificaciones de eventos.
-  fr_FR: Vous recevez cet e-mail car vous avez activé les notifications de calendrier. Pour arrêter de recevoir ces e-mails, connectez-vous au portail libre-service et désactivez les notifications d'événements.
-  de_DE: Sie erhalten diese E-Mail, weil Sie Kalender-Benachrichtigungen aktiviert haben. Um diese E-Mails nicht mehr zu erhalten, melden Sie sich im Self-Service-Portal an und deaktivieren Sie Ereignisbenachrichtigungen.
-  it_IT: Ricevi questa email perché hai abilitato le notifiche del calendario. Per smettere di ricevere queste email, accedi al portale self-service e disabilita le notifiche degli eventi.
-  pt_PT: Você está recebendo este e-mail porque habilitou as notificações do calendário. Para parar de receber estes e-mails, faça login no portal de autoatendimento e desative as notificações de eventos.
-  nl_NL: U ontvangt deze e-mail omdat u kalendernotificaties heeft ingeschakeld. Om deze e-mails niet meer te ontvangen, logt u in op de selfservice-portal en schakelt u gebeurtenismeldingen uit.
-  da_DK: Du modtager denne e-mail, fordi du har aktiveret kalendernotifikationer. Du kan deaktivere notifikationer i selvbetjeningsportalen.
-  ca_ES: Estàs revent aquest correu perquè tens habilitada les notificacions del calendari. Per no rebre més aquests correus, identificat al portal d'autoservei i desactiva les notificacions d'esdeveniments.
-  el_GR: Λαμβάνεται αυτό το e-mail γιατί έχετε ένεργοποιήσει τις ειδοποιήσεις ημερολογίου. Για διακοπή της λήψης τους, μπείτε στη πύλη αυτοεξυπηρέτησης και απενεργοποιείστε τις ειδοποιήσεις εκδηλώσεων.
-  sv_SE: Du får det här mejlet för att du har slagit på kalendernotifikationer. För att sluta få dessa mejl, stäng av inställningen i självbetjäningsportalen.
-  pl_PL: Otrzymujesz tę wiadomość, ponieważ włączyłeś powiadomienia kalendarza. Aby przestać je otrzymywać, zaloguj się do portalu samoobsługowego i wyłącz powiadomienia o wydarzeniach.
+  en-US: You are receiving this email because you have enabled calendar notifications. To stop receiving these emails, login to the self-service portal and disable event notifications.
+  es-ES: Recibes este correo porque has habilitado las notificaciones de calendario. Para dejar de recibir estos correos, inicia sesión en el portal de autoservicio y desactiva las notificaciones de eventos.
+  fr-FR: Vous recevez cet e-mail car vous avez activé les notifications de calendrier. Pour arrêter de recevoir ces e-mails, connectez-vous au portail libre-service et désactivez les notifications d'événements.
+  de-DE: Sie erhalten diese E-Mail, weil Sie Kalender-Benachrichtigungen aktiviert haben. Um diese E-Mails nicht mehr zu erhalten, melden Sie sich im Self-Service-Portal an und deaktivieren Sie Ereignisbenachrichtigungen.
+  it-IT: Ricevi questa email perché hai abilitato le notifiche del calendario. Per smettere di ricevere queste email, accedi al portale self-service e disabilita le notifiche degli eventi.
+  pt-PT: Está a receber este e-mail porque ativou as notificações do calendário. Para deixar de receber estes e-mails, inicie sessão no portal de autosserviço e desative as notificações de eventos.
+  nl-NL: U ontvangt deze e-mail omdat u kalendernotificaties heeft ingeschakeld. Om deze e-mails niet meer te ontvangen, logt u in op de selfservice-portal en schakelt u gebeurtenismeldingen uit.
+  da-DK: Du modtager denne e-mail, fordi du har aktiveret kalendernotifikationer. Du kan deaktivere notifikationer i selvbetjeningsportalen.
+  ca-ES: Estàs rebent aquest correu perquè tens habilitades les notificacions del calendari. Per no rebre més aquests correus, identifica't al portal d'autoservei i desactiva les notificacions d'esdeveniments.
+  el-GR: Λαμβάνετε αυτό το e-mail γιατί έχετε ενεργοποιήσει τις ειδοποιήσεις ημερολογίου. Για διακοπή της λήψης τους, μπείτε στην πύλη αυτοεξυπηρέτησης και απενεργοποιήστε τις ειδοποιήσεις εκδηλώσεων.
+  sv-SE: Du får det här mejlet eftersom du har slagit på kalendernotifikationer. Logga in i självbetjäningsportalen och stäng av händelsenotifikationer om du inte vill få fler.
+  pl-PL: Otrzymujesz tę wiadomość, ponieważ włączyłeś powiadomienia kalendarza. Aby przestać je otrzymywać, zaloguj się do portalu samoobsługowego i wyłącz powiadomienia o wydarzeniach.
+  pt-BR: Você está recebendo este e-mail porque ativou as notificações do calendário. Para parar de receber estes e-mails, faça login no portal de autoatendimento e desative as notificações de eventos.
+  ru-RU: Вы получаете это письмо, потому что включили уведомления календаря. Чтобы больше не получать такие письма, войдите в портал самообслуживания и отключите уведомления о событиях.
+  uk-UA: Ви отримуєте цей лист, тому що увімкнули сповіщення календаря. Щоб більше не отримувати такі листи, увійдіть на портал самообслуговування та вимкніть сповіщення про події.
+  bg-BG: Получавате този имейл, защото сте включили известията от календара. За да спрете да ги получавате, влезте в портала за самообслужване и изключете известията за събития.
+  cs-CZ: Tento e-mail dostáváte, protože jste zapnuli oznámení kalendáře. Pokud je již nechcete dostávat, přihlaste se do samoobslužného portálu a vypněte oznámení o událostech.
+  sk-SK: Tento e-mail dostávate, pretože ste zapli oznámenia kalendára. Ak ich už nechcete dostávať, prihláste sa do samoobslužného portálu a vypnite oznámenia o udalostiach.
+  sl-SI: To e-pošto prejemate, ker ste vklopili obvestila koledarja. Če jih ne želite več prejemati, se prijavite v samopostrežni portal in izklopite obvestila o dogodkih.
+  hr-HR: Ovu e-poštu primate jer ste uključili obavijesti kalendara. Ako ih više ne želite primati, prijavite se na samoposlužni portal i isključite obavijesti o događajima.
+  lt-LT: Šį el. laišką gaunate, nes įjungėte kalendoriaus pranešimus. Jei nebenorite jų gauti, prisijunkite prie savitarnos portalo ir išjunkite pranešimus apie įvykius.
+  hu-HU: Azért kapja ezt az e-mailt, mert bekapcsolta a naptárértesítéseket. Ha nem szeretne több ilyen e-mailt kapni, jelentkezzen be az önkiszolgáló portálra, és kapcsolja ki az eseményértesítéseket.
+  ro-RO: Primiți acest e-mail deoarece ați activat notificările de calendar. Pentru a nu le mai primi, conectați-vă la portalul de autoservire și dezactivați notificările despre evenimente.
+  fi-FI: Saat tämän sähköpostin, koska olet ottanut kalenteri-ilmoitukset käyttöön. Jos et halua enää saada näitä viestejä, kirjaudu itsepalveluportaaliin ja poista tapahtumailmoitukset käytöstä.
+  nb-NO: Du mottar denne e-posten fordi du har slått på kalendervarsler. Logg inn på selvbetjeningsportalen og slå av hendelsesvarsler hvis du ikke vil motta flere.
+  tr-TR: Takvim bildirimlerini açtığınız için bu e-postayı alıyorsunuz. Bu e-postaları almayı durdurmak için self servis portalında oturum açın ve etkinlik bildirimlerini kapatın.
+  zh-CN: 您收到此邮件是因为您启用了日历通知。如需停止接收此类邮件，请登录自助服务门户并关闭活动通知。
+  zh-TW: 您收到這封郵件是因為您已啟用行事曆通知。若要停止接收這類郵件，請登入自助服務入口網站並關閉活動通知。
+  ja-JP: カレンダー通知を有効にしているため、このメールが送信されています。今後このメールを受け取らないようにするには、セルフサービスポータルにログインして予定の通知を無効にしてください。
+  ko-KR: 캘린더 알림을 사용 설정했기 때문에 이 이메일을 받고 있습니다. 더 이상 받지 않으려면 셀프 서비스 포털에 로그인하여 일정 알림을 사용 중지하세요.
+  th-TH: คุณได้รับอีเมลนี้เพราะคุณเปิดการแจ้งเตือนปฏิทินไว้ หากไม่ต้องการรับอีเมลเหล่านี้อีก โปรดเข้าสู่ระบบพอร์ทัลบริการตนเองและปิดการแจ้งเตือนกิจกรรม
+  vi-VN: Bạn nhận được email này vì bạn đã bật thông báo lịch. Để ngừng nhận những email này, hãy đăng nhập vào cổng tự phục vụ và tắt thông báo sự kiện.
+  id-ID: Anda menerima email ini karena Anda mengaktifkan notifikasi kalender. Untuk berhenti menerima email ini, masuk ke portal layanan mandiri dan nonaktifkan notifikasi acara.
+  hi-IN: आपको यह ईमेल इसलिए मिल रहा है क्योंकि आपने कैलेंडर सूचनाएँ चालू की हैं। ये ईमेल पाना बंद करने के लिए, सेल्फ-सर्विस पोर्टल में साइन इन करें और इवेंट सूचनाएँ बंद करें।
+  ar-SA: تتلقى هذه الرسالة لأنك فعّلت إشعارات التقويم. لإيقاف تلقي هذه الرسائل، سجّل الدخول إلى بوابة الخدمة الذاتية وعطّل إشعارات الأحداث.
+  he-IL: קיבלת הודעה זו כי הפעלת התראות יומן. כדי להפסיק לקבל הודעות אלה, יש להיכנס לפורטל השירות העצמי ולכבות את התראות האירועים.
+  fa-IR: این ایمیل را دریافت می‌کنید چون اعلان‌های تقویم را فعال کرده‌اید. برای توقف دریافت این ایمیل‌ها، به درگاه خودخدمت وارد شوید و اعلان‌های رویداد را غیرفعال کنید.
 
 calendar.alarm_open:
-  en_US: View Event
-  es_ES: Ver Evento
-  fr_FR: Voir l'Événement
-  de_DE: Termin Anzeigen
-  it_IT: Visualizza Evento
-  pt_PT: Ver Evento
-  nl_NL: Gebeurtenis Bekijken
-  da_DK: Vis begivenhed
-  ca_ES: Veure esdeveniment
-  el_GR: Προβολή Εκδήλωσης
-  sv_SE: Visa händelse
-  pl_PL: Wyświetl wydarzenie
+  en-US: View Event
+  es-ES: Ver evento
+  fr-FR: Voir l'événement
+  de-DE: Termin anzeigen
+  it-IT: Visualizza evento
+  pt-PT: Ver evento
+  nl-NL: Gebeurtenis bekijken
+  da-DK: Vis begivenhed
+  ca-ES: Veure esdeveniment
+  el-GR: Προβολή εκδήλωσης
+  sv-SE: Visa händelse
+  pl-PL: Wyświetl wydarzenie
+  pt-BR: Ver evento
+  ru-RU: Открыть событие
+  uk-UA: Переглянути подію
+  bg-BG: Преглед на събитието
+  cs-CZ: Zobrazit událost
+  sk-SK: Zobraziť udalosť
+  sl-SI: Prikaži dogodek
+  hr-HR: Prikaži događaj
+  lt-LT: Peržiūrėti įvykį
+  hu-HU: Esemény megtekintése
+  ro-RO: Vezi evenimentul
+  fi-FI: Näytä tapahtuma
+  nb-NO: Vis hendelse
+  tr-TR: Etkinliği görüntüle
+  zh-CN: 查看活动
+  zh-TW: 查看活動
+  ja-JP: 予定を表示
+  ko-KR: 일정 보기
+  th-TH: ดูกิจกรรม
+  vi-VN: Xem sự kiện
+  id-ID: Lihat acara
+  hi-IN: इवेंट देखें
+  ar-SA: عرض الحدث
+  he-IL: הצגת האירוע
+  fa-IR: مشاهده رویداد
 
 calendar.organizer:
-  en_US: Organizer
-  es_ES: Organizador
-  fr_FR: Organisateur
-  de_DE: Organisator
-  it_IT: Organizzatore
-  pt_PT: Organizador
-  nl_NL: Organisator
-  da_DK: Arrangør
-  ca_ES: Organitzador
-  el_GR: Διοργανωτής
-  sv_SE: Arrangör
-  pl_PL: Organizator
+  en-US: Organizer
+  es-ES: Organizador
+  fr-FR: Organisateur
+  de-DE: Organisator
+  it-IT: Organizzatore
+  pt-PT: Organizador
+  nl-NL: Organisator
+  da-DK: Arrangør
+  ca-ES: Organitzador
+  el-GR: Διοργανωτής
+  sv-SE: Arrangör
+  pl-PL: Organizator
+  pt-BR: Organizador
+  ru-RU: Организатор
+  uk-UA: Організатор
+  bg-BG: Организатор
+  cs-CZ: Organizátor
+  sk-SK: Organizátor
+  sl-SI: Organizator
+  hr-HR: Organizator
+  lt-LT: Organizatorius
+  hu-HU: Szervező
+  ro-RO: Organizator
+  fi-FI: Järjestäjä
+  nb-NO: Arrangør
+  tr-TR: Düzenleyen
+  zh-CN: 组织者
+  zh-TW: 主辦人
+  ja-JP: 主催者
+  ko-KR: 주최자
+  th-TH: ผู้จัด
+  vi-VN: Người tổ chức
+  id-ID: Penyelenggara
+  hi-IN: आयोजक
+  ar-SA: المنظم
+  he-IL: מארגן
+  fa-IR: برگزارکننده
 
 calendar.attendees:
-  en_US: Guests
-  es_ES: Invitados
-  fr_FR: Invités
-  de_DE: Gäste
-  it_IT: Ospiti
-  pt_PT: Convidados
-  nl_NL: Gasten
-  da_DK: Gæster
-  ca_ES: Invitats
-  el_GR: Συμμετέχωντες
-  sv_SE: Gäster
-  pl_PL: Goście
+  en-US: Guests
+  es-ES: Invitados
+  fr-FR: Invités
+  de-DE: Gäste
+  it-IT: Ospiti
+  pt-PT: Convidados
+  nl-NL: Gasten
+  da-DK: Gæster
+  ca-ES: Invitats
+  el-GR: Συμμετέχοντες
+  sv-SE: Gäster
+  pl-PL: Goście
+  pt-BR: Convidados
+  ru-RU: Гости
+  uk-UA: Гості
+  bg-BG: Гости
+  cs-CZ: Hosté
+  sk-SK: Hostia
+  sl-SI: Gostje
+  hr-HR: Gosti
+  lt-LT: Svečiai
+  hu-HU: Vendégek
+  ro-RO: Invitați
+  fi-FI: Vieraat
+  nb-NO: Gjester
+  tr-TR: Konuklar
+  zh-CN: 来宾
+  zh-TW: 來賓
+  ja-JP: ゲスト
+  ko-KR: 참석자
+  th-TH: ผู้เข้าร่วม
+  vi-VN: Khách mời
+  id-ID: Tamu
+  hi-IN: अतिथि
+  ar-SA: الضيوف
+  he-IL: אורחים
+  fa-IR: مهمانان
 
 calendar.start:
-  en_US: Start
-  es_ES: Inicio
-  fr_FR: Début
-  de_DE: Beginn
-  it_IT: Inizio
-  pt_PT: Início
-  nl_NL: Begin
-  da_DK: Start
-  ca_ES: Inici
-  el_GR: Έναρξη
-  sv_SE: Start
-  pl_PL: Start
+  en-US: Start
+  es-ES: Inicio
+  fr-FR: Début
+  de-DE: Beginn
+  it-IT: Inizio
+  pt-PT: Início
+  nl-NL: Begin
+  da-DK: Start
+  ca-ES: Inici
+  el-GR: Έναρξη
+  sv-SE: Start
+  pl-PL: Początek
+  pt-BR: Início
+  ru-RU: Начало
+  uk-UA: Початок
+  bg-BG: Начало
+  cs-CZ: Začátek
+  sk-SK: Začiatok
+  sl-SI: Začetek
+  hr-HR: Početak
+  lt-LT: Pradžia
+  hu-HU: Kezdés
+  ro-RO: Început
+  fi-FI: Alkaa
+  nb-NO: Start
+  tr-TR: Başlangıç
+  zh-CN: 开始
+  zh-TW: 開始
+  ja-JP: 開始
+  ko-KR: 시작
+  th-TH: เริ่ม
+  vi-VN: Bắt đầu
+  id-ID: Mulai
+  hi-IN: प्रारंभ
+  ar-SA: البداية
+  he-IL: התחלה
+  fa-IR: شروع
 
 calendar.end:
-  en_US: End
-  es_ES: Fin
-  fr_FR: Fin
-  de_DE: Ende
-  it_IT: Fine
-  pt_PT: Fim
-  nl_NL: Einde
-  da_DK: Slut
-  ca_ES: Fi
-  el_GR: Λήξη
-  sv_SE: Slut
-  pl_PL: Koniec
+  en-US: End
+  es-ES: Fin
+  fr-FR: Fin
+  de-DE: Ende
+  it-IT: Fine
+  pt-PT: Fim
+  nl-NL: Einde
+  da-DK: Slut
+  ca-ES: Fi
+  el-GR: Λήξη
+  sv-SE: Slut
+  pl-PL: Koniec
+  pt-BR: Fim
+  ru-RU: Окончание
+  uk-UA: Завершення
+  bg-BG: Край
+  cs-CZ: Konec
+  sk-SK: Koniec
+  sl-SI: Konec
+  hr-HR: Kraj
+  lt-LT: Pabaiga
+  hu-HU: Befejezés
+  ro-RO: Sfârșit
+  fi-FI: Päättyy
+  nb-NO: Slutt
+  tr-TR: Bitiş
+  zh-CN: 结束
+  zh-TW: 結束
+  ja-JP: 終了
+  ko-KR: 종료
+  th-TH: สิ้นสุด
+  vi-VN: Kết thúc
+  id-ID: Selesai
+  hi-IN: समाप्ति
+  ar-SA: النهاية
+  he-IL: סיום
+  fa-IR: پایان
 
 calendar.location:
-  en_US: Location
-  es_ES: Ubicación
-  fr_FR: Lieu
-  de_DE: Ort
-  it_IT: Luogo
-  pt_PT: Local
-  nl_NL: Locatie
-  da_DK: Lokation
-  ca_ES: Lloc
-  el_GR: Τοποθεσία
-  sv_SE: Plats
-  pl_PL: Lokalizacja
+  en-US: Location
+  es-ES: Ubicación
+  fr-FR: Lieu
+  de-DE: Ort
+  it-IT: Luogo
+  pt-PT: Local
+  nl-NL: Locatie
+  da-DK: Lokation
+  ca-ES: Lloc
+  el-GR: Τοποθεσία
+  sv-SE: Plats
+  pl-PL: Lokalizacja
+  pt-BR: Local
+  ru-RU: Место
+  uk-UA: Місце
+  bg-BG: Място
+  cs-CZ: Místo
+  sk-SK: Miesto
+  sl-SI: Kraj
+  hr-HR: Mjesto
+  lt-LT: Vieta
+  hu-HU: Helyszín
+  ro-RO: Locație
+  fi-FI: Sijainti
+  nb-NO: Sted
+  tr-TR: Konum
+  zh-CN: 地点
+  zh-TW: 地點
+  ja-JP: 場所
+  ko-KR: 장소
+  th-TH: สถานที่
+  vi-VN: Địa điểm
+  id-ID: Lokasi
+  hi-IN: स्थान
+  ar-SA: الموقع
+  he-IL: מיקום
+  fa-IR: مکان
 
 calendar.conference:
-  en_US: Conference
-  es_ES: Conferencia
-  fr_FR: Conférence
-  de_DE: Konferenz
-  it_IT: Conferenza
-  pt_PT: Conferência
-  nl_NL: Conferentie
-  da_DK: Konference
-  ca_ES: Conferència
-  el_GR: Διάσκεψη
-  sv_SE: Konferens
-  pl_PL: Konferencja
-
-calendar.date_template:
-  # English: "Sun May 25, 2025 9:30am"
-  en_US: "%a %b %-d, %Y %-I:%M%P"
-  # Spanish: "dom 25 may 2025 9:30h" (day month year hour and minute)
-  es_ES: "%a %-d %b %Y %-H:%Mh"
-  # French: "dim 25 mai 2025 9:30h" (day month year hour and minute)
-  fr_FR: "%a %-d %b %Y %-H:%Mh"
-  # German: "So 25. Mai 2025 9:30 Uhr" (day date month year hour and minute)
-  de_DE: "%a %-d. %b %Y %-H:%M Uhr"
-  # Italian: "dom 25 mag 2025 ore 9:30" (day date month year hour and minute)
-  it_IT: "%a %-d %b %Y ore %-H:%M"
-  # Portuguese: "dom 25 mai 2025 9:30h" (day date month year hour and minute)
-  pt_PT: "%a %-d %b %Y %-H:%Mh"
-  # Dutch: "zo 25 mei 2025 9:30u" (weekday date month year hour and minute)
-  nl_NL: "%a %-d %b %Y %-H:%Mu"
-  # Danish: "søn 25. maj 2025 kl. 9:30" (weekday date month year hour and minute)
-  da_DK: "%a %-d. %b %Y kl. %-H:%M"
-  # Catalan: "diu 25 mai 2025 9:30h" (day month year hour and minute)
-  ca_ES: "%a %-d %b %Y %-H:%Mh"
-  # Greek: "Κυρ 25 Μαϊ 2025 9:30 η ώρα" (day month year hour and minute)
-  el_GR: "%a %-d %b %Y %-H:%M η ώρα"
-  # Svenska: "sön 25 maj 2025 kl. 9:30" (weekday date month year hour and minute)
-  sv_SE: "%a %-d %b %Y kl. %-H:%M"
-  # Polish: "nie 25 maj 2025 09:00" (weekday day month year hour and minute)
-  pl_PL: "%a %d %b %Y %H:%M"
-
-calendar.date_template_long:
-  # English: "Sunday May 25, 2025 9:30am"
-  en_US: "%A %B %-d, %Y %-I:%M%P"
-  # Spanish: "domingo 25 mayo 2025 9:30h" (day month year hour and minute)
-  es_ES: "%A %-d %B %Y %-H:%Mh"
-  # French: "dimanche 25 mai 2025 9:30h" (day month year hour and minute)
-  fr_FR: "%A %-d %B %Y %-H:%Mh"
-  # German: "Sonntag 25. Mai 2025 9:30 Uhr" (day date month year hour and minute)
-  de_DE: "%A %-d. %B %Y %-H:%M Uhr"
-  # Italian: "domenica 25 maggio 2025 ore 9:30" (day date month year hour and minute)
-  it_IT: "%A %-d %B %Y ore %-H:%M"
-  # Portuguese: "domingo 25 maio 2025 9:30h" (day date month year hour and minute)
-  pt_PT: "%A %-d %B %Y %-H:%Mh"
-  # Dutch: "zondag 25 mei 2025 9:30u" (weekday date month year hour and minute)
-  nl_NL: "%A %-d %B %Y %-H:%Mu"
-  # Danish: "søndag 25. maj 2025 kl. 9:30" (weekday date month year hour and minute)
-  da_DK: "%A %-d. %B %Y kl. %-H:%M"
-  # Catalan: "diumenge 25 maig 2025 9:30h" (day month year hour and minute)
-  ca_ES: "%A %-d %B %Y %-H:%Mh"
-  # Greek: "Κυριακή 25 Μαΐου 2025 9:30 η ώρα" (day month year hour and minute)
-  el_GR: "%A %-d %B %Y %-H:%M η ώρα"
-
-  # Svenska: "söndag 25 maj 2025 kl. 9:30" (weekday date month year hour and minute)
-  sv_SE: "%A %-d. %B %Y kl. %-H:%M"
-
-  # Polish: "niedziela 25 maj 2025 09:00" (weekday day month year hour and minute)
-  pl_PL: "%A %d %b %Y %H:%M"
+  en-US: Conference
+  es-ES: Conferencia
+  fr-FR: Conférence
+  de-DE: Konferenz
+  it-IT: Conferenza
+  pt-PT: Conferência
+  nl-NL: Conferentie
+  da-DK: Konference
+  ca-ES: Conferència
+  el-GR: Διάσκεψη
+  sv-SE: Konferens
+  pl-PL: Konferencja
+  pt-BR: Conferência
+  ru-RU: Конференция
+  uk-UA: Конференція
+  bg-BG: Конференция
+  cs-CZ: Konference
+  sk-SK: Konferencia
+  sl-SI: Konferenca
+  hr-HR: Konferencija
+  lt-LT: Konferencija
+  hu-HU: Konferencia
+  ro-RO: Conferință
+  fi-FI: Konferenssi
+  nb-NO: Konferanse
+  tr-TR: Konferans
+  zh-CN: 会议
+  zh-TW: 會議
+  ja-JP: 会議
+  ko-KR: 회의
+  th-TH: การประชุม
+  vi-VN: Hội nghị
+  id-ID: Konferensi
+  hi-IN: कॉन्फ़्रेंस
+  ar-SA: مؤتمر
+  he-IL: שיחת ועידה
+  fa-IR: کنفرانس
 
 calendar.invitation:
-  en_US: Invitation
-  es_ES: Invitación
-  fr_FR: Invitation
-  de_DE: Einladung
-  it_IT: Invito
-  pt_PT: Convite
-  nl_NL: Uitnodiging
-  da_DK: Invitation
-  ca_ES: Invitació
-  el_GR: Πρόσκληση
-  sv_SE: Inbjudan
-  pl_PL: Zaproszenie
+  en-US: Invitation
+  es-ES: Invitación
+  fr-FR: Invitation
+  de-DE: Einladung
+  it-IT: Invito
+  pt-PT: Convite
+  nl-NL: Uitnodiging
+  da-DK: Invitation
+  ca-ES: Invitació
+  el-GR: Πρόσκληση
+  sv-SE: Inbjudan
+  pl-PL: Zaproszenie
+  pt-BR: Convite
+  ru-RU: Приглашение
+  uk-UA: Запрошення
+  bg-BG: Покана
+  cs-CZ: Pozvánka
+  sk-SK: Pozvánka
+  sl-SI: Vabilo
+  hr-HR: Pozivnica
+  lt-LT: Kvietimas
+  hu-HU: Meghívó
+  ro-RO: Invitație
+  fi-FI: Kutsu
+  nb-NO: Invitasjon
+  tr-TR: Davet
+  zh-CN: 邀请
+  zh-TW: 邀請
+  ja-JP: 招待
+  ko-KR: 초대
+  th-TH: คำเชิญ
+  vi-VN: Lời mời
+  id-ID: Undangan
+  hi-IN: आमंत्रण
+  ar-SA: دعوة
+  he-IL: הזמנה
+  fa-IR: دعوت‌نامه
 
 calendar.updated_invitation:
-  en_US: Updated invitation
-  es_ES: Invitación actualizada
-  fr_FR: Invitation mise à jour
-  de_DE: Aktualisierte Einladung
-  it_IT: Invito aggiornato
-  pt_PT: Convite atualizado
-  nl_NL: Bijgewerkte uitnodiging
-  da_DK: Opdateret invitation
-  ca_ES: Invitació actualitzada
-  el_GR: Ενημερωμένη πρόσκληση
-  sv_SE: Uppdaterad inbjudan
-  pl_PL: Zaktualizowane zaproszenie
+  en-US: Updated invitation
+  es-ES: Invitación actualizada
+  fr-FR: Invitation mise à jour
+  de-DE: Aktualisierte Einladung
+  it-IT: Invito aggiornato
+  pt-PT: Convite atualizado
+  nl-NL: Bijgewerkte uitnodiging
+  da-DK: Opdateret invitation
+  ca-ES: Invitació actualitzada
+  el-GR: Ενημερωμένη πρόσκληση
+  sv-SE: Uppdaterad inbjudan
+  pl-PL: Zaktualizowane zaproszenie
+  pt-BR: Convite atualizado
+  ru-RU: Обновлённое приглашение
+  uk-UA: Оновлене запрошення
+  bg-BG: Актуализирана покана
+  cs-CZ: Aktualizovaná pozvánka
+  sk-SK: Aktualizovaná pozvánka
+  sl-SI: Posodobljeno vabilo
+  hr-HR: Ažurirana pozivnica
+  lt-LT: Atnaujintas kvietimas
+  hu-HU: Frissített meghívó
+  ro-RO: Invitație actualizată
+  fi-FI: Päivitetty kutsu
+  nb-NO: Oppdatert invitasjon
+  tr-TR: Güncellenmiş davet
+  zh-CN: 更新的邀请
+  zh-TW: 已更新的邀請
+  ja-JP: 更新された招待
+  ko-KR: 업데이트된 초대
+  th-TH: คำเชิญที่อัปเดต
+  vi-VN: Lời mời đã cập nhật
+  id-ID: Undangan yang diperbarui
+  hi-IN: अपडेट किया गया आमंत्रण
+  ar-SA: دعوة محدَّثة
+  he-IL: הזמנה מעודכנת
+  fa-IR: دعوت‌نامه به‌روزشده
 
 calendar.event_updated:
-  en_US: This event has been updated
-  es_ES: Este evento ha sido actualizado
-  fr_FR: Cet événement a été mis à jour
-  de_DE: Dieses Ereignis wurde aktualisiert
-  it_IT: Questo evento è stato aggiornato
-  pt_PT: Este evento foi atualizado
-  nl_NL: Dit evenement is bijgewerkt
-  da_DK: Denne begivenhed er blevet opdateret
-  ca_ES: Aquest esdeveniment s'ha actualitzat
-  el_GR: Αυτή η εκδήλωση ενημερώθηκε
-  sv_SE: Den här händelsen har blivit uppdaterad
-  pl_PL: To wydarzenie zostało zaktualizowane
+  en-US: This event has been updated
+  es-ES: Este evento ha sido actualizado
+  fr-FR: Cet événement a été mis à jour
+  de-DE: Dieses Ereignis wurde aktualisiert
+  it-IT: Questo evento è stato aggiornato
+  pt-PT: Este evento foi atualizado
+  nl-NL: Dit evenement is bijgewerkt
+  da-DK: Denne begivenhed er blevet opdateret
+  ca-ES: Aquest esdeveniment s'ha actualitzat
+  el-GR: Αυτή η εκδήλωση ενημερώθηκε
+  sv-SE: Den här händelsen har blivit uppdaterad
+  pl-PL: To wydarzenie zostało zaktualizowane
+  pt-BR: Este evento foi atualizado
+  ru-RU: Это событие было обновлено
+  uk-UA: Цю подію оновлено
+  bg-BG: Това събитие беше актуализирано
+  cs-CZ: Tato událost byla aktualizována
+  sk-SK: Táto udalosť bola aktualizovaná
+  sl-SI: Ta dogodek je bil posodobljen
+  hr-HR: Ovaj događaj je ažuriran
+  lt-LT: Šis įvykis buvo atnaujintas
+  hu-HU: Ezt az eseményt frissítették
+  ro-RO: Acest eveniment a fost actualizat
+  fi-FI: Tätä tapahtumaa on päivitetty
+  nb-NO: Denne hendelsen er oppdatert
+  tr-TR: Bu etkinlik güncellendi
+  zh-CN: 此活动已更新
+  zh-TW: 此活動已更新
+  ja-JP: この予定は更新されました
+  ko-KR: 이 일정이 업데이트되었습니다
+  th-TH: กิจกรรมนี้ได้รับการอัปเดตแล้ว
+  vi-VN: Sự kiện này đã được cập nhật
+  id-ID: Acara ini telah diperbarui
+  hi-IN: यह इवेंट अपडेट किया गया है
+  ar-SA: تم تحديث هذا الحدث
+  he-IL: האירוע עודכן
+  fa-IR: این رویداد به‌روزرسانی شد
 
 calendar.cancelled:
-  en_US: Cancelled
-  es_ES: Cancelado
-  fr_FR: Annulé
-  de_DE: Abgesagt
-  it_IT: Annullato
-  pt_PT: Cancelado
-  nl_NL: Geannuleerd
-  da_DK: Aflyst
-  ca_ES: Cancel·lat
-  el_GR: Ακυρώθηκε
-  sv_SE: Inställd
-  pl_PL: Anulowane
+  en-US: Cancelled
+  es-ES: Cancelado
+  fr-FR: Annulé
+  de-DE: Abgesagt
+  it-IT: Annullato
+  pt-PT: Cancelado
+  nl-NL: Geannuleerd
+  da-DK: Aflyst
+  ca-ES: Cancel·lat
+  el-GR: Ακυρώθηκε
+  sv-SE: Inställd
+  pl-PL: Odwołane
+  pt-BR: Cancelado
+  ru-RU: Отменено
+  uk-UA: Скасовано
+  bg-BG: Отменено
+  cs-CZ: Zrušeno
+  sk-SK: Zrušené
+  sl-SI: Odpovedano
+  hr-HR: Otkazano
+  lt-LT: Atšaukta
+  hu-HU: Lemondva
+  ro-RO: Anulat
+  fi-FI: Peruttu
+  nb-NO: Avlyst
+  tr-TR: İptal edildi
+  zh-CN: 已取消
+  zh-TW: 已取消
+  ja-JP: キャンセル済み
+  ko-KR: 취소됨
+  th-TH: ยกเลิกแล้ว
+  vi-VN: Đã hủy
+  id-ID: Dibatalkan
+  hi-IN: रद्द
+  ar-SA: ملغى
+  he-IL: בוטל
+  fa-IR: لغو شد
 
 calendar.event_cancelled:
-  en_US: This event has been canceled
-  es_ES: Este evento ha sido cancelado
-  fr_FR: Cet événement a été annulé
-  de_DE: Dieses Ereignis wurde abgesagt
-  it_IT: Questo evento è stato annullato
-  pt_PT: Este evento foi cancelado
-  nl_NL: Dit evenement is geannuleerd
-  da_DK: Denne begivenhed er blevet aflyst
-  ca_ES: Aquest esdeveniment s'ha cancel·lat
-  el_GR: Αυτή η εκδήλωση ακυρώθηκε
-  sv_SE: Den här händelsen har blivit inställd
-  pl_PL: To wydarzenie zostało anulowane
+  en-US: This event has been canceled
+  es-ES: Este evento ha sido cancelado
+  fr-FR: Cet événement a été annulé
+  de-DE: Dieses Ereignis wurde abgesagt
+  it-IT: Questo evento è stato annullato
+  pt-PT: Este evento foi cancelado
+  nl-NL: Dit evenement is geannuleerd
+  da-DK: Denne begivenhed er blevet aflyst
+  ca-ES: Aquest esdeveniment s'ha cancel·lat
+  el-GR: Αυτή η εκδήλωση ακυρώθηκε
+  sv-SE: Den här händelsen har blivit inställd
+  pl-PL: To wydarzenie zostało odwołane
+  pt-BR: Este evento foi cancelado
+  ru-RU: Это событие было отменено
+  uk-UA: Цю подію скасовано
+  bg-BG: Това събитие беше отменено
+  cs-CZ: Tato událost byla zrušena
+  sk-SK: Táto udalosť bola zrušená
+  sl-SI: Ta dogodek je bil odpovedan
+  hr-HR: Ovaj događaj je otkazan
+  lt-LT: Šis įvykis buvo atšauktas
+  hu-HU: Ezt az eseményt lemondták
+  ro-RO: Acest eveniment a fost anulat
+  fi-FI: Tämä tapahtuma on peruttu
+  nb-NO: Denne hendelsen er avlyst
+  tr-TR: Bu etkinlik iptal edildi
+  zh-CN: 此活动已取消
+  zh-TW: 此活動已取消
+  ja-JP: この予定はキャンセルされました
+  ko-KR: 이 일정이 취소되었습니다
+  th-TH: กิจกรรมนี้ถูกยกเลิกแล้ว
+  vi-VN: Sự kiện này đã bị hủy
+  id-ID: Acara ini telah dibatalkan
+  hi-IN: यह इवेंट रद्द कर दिया गया है
+  ar-SA: تم إلغاء هذا الحدث
+  he-IL: האירוע בוטל
+  fa-IR: این رویداد لغو شد
 
 calendar.accepted:
-  en_US: Accepted
-  es_ES: Aceptado
-  fr_FR: Accepté
-  de_DE: Angenommen
-  it_IT: Accettato
-  pt_PT: Aceito
-  nl_NL: Geaccepteerd
-  da_DK: Accepteret
-  ca_ES: Acceptat
-  el_GR: Αποδοχή
-  sv_SE: Accepterat
-  pl_PL: Zaakceptowano
+  en-US: Accepted
+  es-ES: Aceptado
+  fr-FR: Accepté
+  de-DE: Angenommen
+  it-IT: Accettato
+  pt-PT: Aceite
+  nl-NL: Geaccepteerd
+  da-DK: Accepteret
+  ca-ES: Acceptat
+  el-GR: Αποδοχή
+  sv-SE: Accepterat
+  pl-PL: Zaakceptowano
+  pt-BR: Aceito
+  ru-RU: Принято
+  uk-UA: Прийнято
+  bg-BG: Прието
+  cs-CZ: Přijato
+  sk-SK: Prijaté
+  sl-SI: Sprejeto
+  hr-HR: Prihvaćeno
+  lt-LT: Priimta
+  hu-HU: Elfogadva
+  ro-RO: Acceptat
+  fi-FI: Hyväksytty
+  nb-NO: Akseptert
+  tr-TR: Kabul edildi
+  zh-CN: 已接受
+  zh-TW: 已接受
+  ja-JP: 承諾
+  ko-KR: 수락함
+  th-TH: ตอบรับแล้ว
+  vi-VN: Đã chấp nhận
+  id-ID: Diterima
+  hi-IN: स्वीकृत
+  ar-SA: مقبول
+  he-IL: אושר
+  fa-IR: پذیرفته شد
 
 calendar.participant_accepted:
-  en_US: Participant $name accepted the invitation
-  es_ES: El participante $name aceptó la invitación
-  fr_FR: Le participant $name a accepté l'invitation
-  de_DE: Teilnehmer $name hat die Einladung angenommen
-  it_IT: Il partecipante $name ha accettato l'invito
-  pt_PT: O participante $name aceitou o convite
-  nl_NL: Deelnemer $name heeft de uitnodiging geaccepteerd
-  da_DK: Deltager $name accepterede invitationen
-  ca_ES: El participatn $name a acceptat la invitació
-  el_GR: Το συμμετέχων πρόσωπο $name αποδέχτηκε τη πρόσκληση
-  sv_SE: Deltagaren $name har tackat ja till inbjudan
-  pl_PL: Uczestnik $name zaakceptował zaproszenie
+  en-US: Participant $name accepted the invitation
+  es-ES: El participante $name aceptó la invitación
+  fr-FR: Le participant $name a accepté l'invitation
+  de-DE: Teilnehmer $name hat die Einladung angenommen
+  it-IT: Il partecipante $name ha accettato l'invito
+  pt-PT: O participante $name aceitou o convite
+  nl-NL: Deelnemer $name heeft de uitnodiging geaccepteerd
+  da-DK: Deltager $name accepterede invitationen
+  ca-ES: El participant $name ha acceptat la invitació
+  el-GR: Το συμμετέχον πρόσωπο $name αποδέχτηκε την πρόσκληση
+  sv-SE: Deltagaren $name har tackat ja till inbjudan
+  pl-PL: Uczestnik $name zaakceptował zaproszenie
+  pt-BR: O participante $name aceitou o convite
+  ru-RU: Участник $name принял приглашение
+  uk-UA: Учасник $name прийняв запрошення
+  bg-BG: Участникът $name прие поканата
+  cs-CZ: Účastník $name přijal pozvánku
+  sk-SK: Účastník $name prijal pozvánku
+  sl-SI: Udeleženec $name je sprejel vabilo
+  hr-HR: Sudionik $name prihvatio je pozivnicu
+  lt-LT: Dalyvis $name priėmė kvietimą
+  hu-HU: $name résztvevő elfogadta a meghívót
+  ro-RO: Participantul $name a acceptat invitația
+  fi-FI: Osallistuja $name hyväksyi kutsun
+  nb-NO: Deltakeren $name aksepterte invitasjonen
+  tr-TR: Katılımcı $name daveti kabul etti
+  zh-CN: 参与者 $name 已接受邀请
+  zh-TW: 參與者 $name 已接受邀請
+  ja-JP: 参加者 $name が招待を承諾しました
+  ko-KR: 참석자 $name 님이 초대를 수락했습니다
+  th-TH: ผู้เข้าร่วม $name ตอบรับคำเชิญแล้ว
+  vi-VN: Người tham dự $name đã chấp nhận lời mời
+  id-ID: Peserta $name menerima undangan
+  hi-IN: प्रतिभागी $name ने आमंत्रण स्वीकार किया
+  ar-SA: قبل المشارك $name الدعوة
+  he-IL: המשתתף $name אישר את ההזמנה
+  fa-IR: شرکت‌کننده $name دعوت را پذیرفت
 
 calendar.declined:
-  en_US: Declined
-  es_ES: Rechazado
-  fr_FR: Refusé
-  de_DE: Abgelehnt
-  it_IT: Rifiutato
-  pt_PT: Recusado
-  nl_NL: Afgewezen
-  da_DK: Afvist
-  ca_ES: Rebutjat
-  el_GR: Απορρίφθηκε
-  sv_SE: Avböjt
-  pl_PL: Odrzucono
+  en-US: Declined
+  es-ES: Rechazado
+  fr-FR: Refusé
+  de-DE: Abgelehnt
+  it-IT: Rifiutato
+  pt-PT: Recusado
+  nl-NL: Afgewezen
+  da-DK: Afvist
+  ca-ES: Rebutjat
+  el-GR: Απορρίφθηκε
+  sv-SE: Avböjt
+  pl-PL: Odrzucono
+  pt-BR: Recusado
+  ru-RU: Отклонено
+  uk-UA: Відхилено
+  bg-BG: Отхвърлено
+  cs-CZ: Odmítnuto
+  sk-SK: Odmietnuté
+  sl-SI: Zavrnjeno
+  hr-HR: Odbijeno
+  lt-LT: Atmesta
+  hu-HU: Elutasítva
+  ro-RO: Refuzat
+  fi-FI: Hylätty
+  nb-NO: Avslått
+  tr-TR: Reddedildi
+  zh-CN: 已拒绝
+  zh-TW: 已拒絕
+  ja-JP: 辞退
+  ko-KR: 거절함
+  th-TH: ปฏิเสธแล้ว
+  vi-VN: Đã từ chối
+  id-ID: Ditolak
+  hi-IN: अस्वीकृत
+  ar-SA: مرفوض
+  he-IL: נדחה
+  fa-IR: رد شد
 
 calendar.participant_declined:
-  en_US: Participant $name declined the invitation
-  es_ES: El participante $name rechazó la invitación
-  fr_FR: Le participant $name a refusé l'invitation
-  de_DE: Teilnehmer $name hat die Einladung abgelehnt
-  it_IT: Il partecipante $name ha rifiutato l'invito
-  pt_PT: O participante $name recusou o convite
-  nl_NL: Deelnemer $name heeft de uitnodiging afgewezen
-  da_DK: Deltager $name afslog invitationen
-  ca_ES: El participatn $name ha rebutjat la invitació
-  el_GR: Το συμμετέχων πρόσωπο $name απέρριψε τη πρόσκληση
-  sv_SE: Deltagaren $name har tackat nej till inbjudan
-  pl_PL: Uczestnik $name odrzucił zaproszenie
+  en-US: Participant $name declined the invitation
+  es-ES: El participante $name rechazó la invitación
+  fr-FR: Le participant $name a refusé l'invitation
+  de-DE: Teilnehmer $name hat die Einladung abgelehnt
+  it-IT: Il partecipante $name ha rifiutato l'invito
+  pt-PT: O participante $name recusou o convite
+  nl-NL: Deelnemer $name heeft de uitnodiging afgewezen
+  da-DK: Deltager $name afslog invitationen
+  ca-ES: El participant $name ha rebutjat la invitació
+  el-GR: Το συμμετέχον πρόσωπο $name απέρριψε την πρόσκληση
+  sv-SE: Deltagaren $name har tackat nej till inbjudan
+  pl-PL: Uczestnik $name odrzucił zaproszenie
+  pt-BR: O participante $name recusou o convite
+  ru-RU: Участник $name отклонил приглашение
+  uk-UA: Учасник $name відхилив запрошення
+  bg-BG: Участникът $name отхвърли поканата
+  cs-CZ: Účastník $name odmítl pozvánku
+  sk-SK: Účastník $name odmietol pozvánku
+  sl-SI: Udeleženec $name je zavrnil vabilo
+  hr-HR: Sudionik $name odbio je pozivnicu
+  lt-LT: Dalyvis $name atmetė kvietimą
+  hu-HU: $name résztvevő elutasította a meghívót
+  ro-RO: Participantul $name a refuzat invitația
+  fi-FI: Osallistuja $name hylkäsi kutsun
+  nb-NO: Deltakeren $name avslo invitasjonen
+  tr-TR: Katılımcı $name daveti reddetti
+  zh-CN: 参与者 $name 已拒绝邀请
+  zh-TW: 參與者 $name 已拒絕邀請
+  ja-JP: 参加者 $name が招待を辞退しました
+  ko-KR: 참석자 $name 님이 초대를 거절했습니다
+  th-TH: ผู้เข้าร่วม $name ปฏิเสธคำเชิญแล้ว
+  vi-VN: Người tham dự $name đã từ chối lời mời
+  id-ID: Peserta $name menolak undangan
+  hi-IN: प्रतिभागी $name ने आमंत्रण अस्वीकार किया
+  ar-SA: رفض المشارك $name الدعوة
+  he-IL: המשתתף $name דחה את ההזמנה
+  fa-IR: شرکت‌کننده $name دعوت را رد کرد
 
 calendar.tentative:
-  en_US: Tentative
-  es_ES: Provisional
-  fr_FR: Provisoire
-  de_DE: Vorläufig
-  it_IT: Provvisorio
-  pt_PT: Provisório
-  nl_NL: Voorlopig
-  da_DK: Foreløbig
-  ca_ES: Provisional
-  el_GR: Μη δεσμευτικά
-  sv_SE: Möjligen
-  pl_PL: Wstępnie
+  en-US: Tentative
+  es-ES: Provisional
+  fr-FR: Provisoire
+  de-DE: Vorläufig
+  it-IT: Provvisorio
+  pt-PT: Provisório
+  nl-NL: Voorlopig
+  da-DK: Foreløbig
+  ca-ES: Provisional
+  el-GR: Μη δεσμευτικά
+  sv-SE: Preliminärt
+  pl-PL: Wstępnie
+  pt-BR: Provisório
+  ru-RU: Предварительно
+  uk-UA: Попередньо
+  bg-BG: Условно
+  cs-CZ: Předběžně
+  sk-SK: Predbežne
+  sl-SI: Pogojno
+  hr-HR: Uvjetno
+  lt-LT: Preliminariai
+  hu-HU: Feltételes
+  ro-RO: Provizoriu
+  fi-FI: Alustava
+  nb-NO: Foreløpig
+  tr-TR: Kararsız
+  zh-CN: 待定
+  zh-TW: 待定
+  ja-JP: 仮承諾
+  ko-KR: 미정
+  th-TH: ยังไม่แน่นอน
+  vi-VN: Tạm thời
+  id-ID: Sementara
+  hi-IN: अस्थायी
+  ar-SA: مبدئي
+  he-IL: באופן זמני
+  fa-IR: موقت
 
 calendar.participant_tentative:
-  en_US: Participant $name tentatively accepted the invitation
-  es_ES: El participante $name aceptó provisionalmente la invitación
-  fr_FR: Le participant $name a accepté provisoirement l'invitation
-  de_DE: Teilnehmer $name hat die Einladung vorläufig angenommen
-  it_IT: Il partecipante $name ha accettato provvisoriamente l'invito
-  pt_PT: O participante $name aceitou provisoriamente o convite
-  nl_NL: Deelnemer $name heeft de uitnodiging voorlopig geaccepteerd
-  da_DK: Deltager $name accepterede foreløbigt invitationen
-  ca_ES: El participan $name accepta provisionalment la invitació a l'esdeveniment
-  el_GR: Το συμμετέχων πρόσωπο $name αποδέχτηκε μη δεσμευτικά τη πρόσκληση
-  sv_SE: Deltagaren $name har preliminärt tackat ja till inbjudan
-  pl_PL: Uczestnik $name wstępnie zaakceptował zaproszenie
+  en-US: Participant $name tentatively accepted the invitation
+  es-ES: El participante $name aceptó provisionalmente la invitación
+  fr-FR: Le participant $name a accepté provisoirement l'invitation
+  de-DE: Teilnehmer $name hat die Einladung vorläufig angenommen
+  it-IT: Il partecipante $name ha accettato provvisoriamente l'invito
+  pt-PT: O participante $name aceitou provisoriamente o convite
+  nl-NL: Deelnemer $name heeft de uitnodiging voorlopig geaccepteerd
+  da-DK: Deltager $name accepterede foreløbigt invitationen
+  ca-ES: El participant $name ha acceptat provisionalment la invitació
+  el-GR: Το συμμετέχον πρόσωπο $name αποδέχτηκε μη δεσμευτικά την πρόσκληση
+  sv-SE: Deltagaren $name har preliminärt tackat ja till inbjudan
+  pl-PL: Uczestnik $name wstępnie zaakceptował zaproszenie
+  pt-BR: O participante $name aceitou provisoriamente o convite
+  ru-RU: Участник $name предварительно принял приглашение
+  uk-UA: Учасник $name попередньо прийняв запрошення
+  bg-BG: Участникът $name прие условно поканата
+  cs-CZ: Účastník $name předběžně přijal pozvánku
+  sk-SK: Účastník $name predbežne prijal pozvánku
+  sl-SI: Udeleženec $name je pogojno sprejel vabilo
+  hr-HR: Sudionik $name uvjetno je prihvatio pozivnicu
+  lt-LT: Dalyvis $name preliminariai priėmė kvietimą
+  hu-HU: $name résztvevő feltételesen elfogadta a meghívót
+  ro-RO: Participantul $name a acceptat provizoriu invitația
+  fi-FI: Osallistuja $name hyväksyi kutsun alustavasti
+  nb-NO: Deltakeren $name aksepterte invitasjonen foreløpig
+  tr-TR: Katılımcı $name daveti geçici olarak kabul etti
+  zh-CN: 参与者 $name 已暂定接受邀请
+  zh-TW: 參與者 $name 已暫時接受邀請
+  ja-JP: 参加者 $name が招待を仮承諾しました
+  ko-KR: 참석자 $name 님이 초대를 잠정 수락했습니다
+  th-TH: ผู้เข้าร่วม $name ตอบรับคำเชิญเบื้องต้นแล้ว
+  vi-VN: Người tham dự $name đã tạm chấp nhận lời mời
+  id-ID: Peserta $name menerima undangan untuk sementara
+  hi-IN: प्रतिभागी $name ने आमंत्रण अस्थायी रूप से स्वीकार किया
+  ar-SA: قبل المشارك $name الدعوة مبدئيًا
+  he-IL: המשתתף $name אישר את ההזמנה באופן זמני
+  fa-IR: شرکت‌کننده $name دعوت را به‌طور موقت پذیرفت
 
 calendar.delegated:
-  en_US: Delegated
-  es_ES: Delegado
-  fr_FR: Délégué
-  de_DE: Delegiert
-  it_IT: Delegato
-  pt_PT: Delegado
-  nl_NL: Gedelegeerd
-  da_DK: Delegeret
-  ca_ES: Delegat
-  el_GR: Ανατέθηκε
-  sv_SE: Delegerat
-  pl_PL: Delegowane
+  en-US: Delegated
+  es-ES: Delegado
+  fr-FR: Délégué
+  de-DE: Delegiert
+  it-IT: Delegato
+  pt-PT: Delegado
+  nl-NL: Gedelegeerd
+  da-DK: Delegeret
+  ca-ES: Delegat
+  el-GR: Ανατέθηκε
+  sv-SE: Delegerat
+  pl-PL: Delegowane
+  pt-BR: Delegado
+  ru-RU: Делегировано
+  uk-UA: Делеговано
+  bg-BG: Делегирано
+  cs-CZ: Delegováno
+  sk-SK: Delegované
+  sl-SI: Preneseno
+  hr-HR: Delegirano
+  lt-LT: Deleguota
+  hu-HU: Átruházva
+  ro-RO: Delegat
+  fi-FI: Delegoitu
+  nb-NO: Delegert
+  tr-TR: Devredildi
+  zh-CN: 已转交
+  zh-TW: 已轉交
+  ja-JP: 委任
+  ko-KR: 위임됨
+  th-TH: มอบหมายแล้ว
+  vi-VN: Đã ủy quyền
+  id-ID: Didelegasikan
+  hi-IN: प्रत्यायोजित
+  ar-SA: مفوَّض
+  he-IL: הואצל
+  fa-IR: واگذارشده
 
 calendar.participant_delegated:
-  en_US: Participant $name delegated the invitation
-  es_ES: El participante $name delegó la invitación
-  fr_FR: Le participant $name a délégué l'invitation
-  de_DE: Teilnehmer $name hat die Einladung delegiert
-  it_IT: Il partecipante $name ha delegato l'invito
-  pt_PT: O participante $name delegou o convite
-  nl_NL: Deelnemer $name heeft de uitnodiging gedelegeerd
-  da_DK: Deltager $name delegerede invitationen
-  ca_ES: El participant $name ha delegat la invitació
-  el_GR: Το συμμετέχων πρόσωπο $name ανέθεσε τη πρόσκληση
-  sv_SE: Deltagaren $name delegerade inbjudan
-  pl_PL: Uczestnik $name przekazał zaproszenie
+  en-US: Participant $name delegated the invitation
+  es-ES: El participante $name delegó la invitación
+  fr-FR: Le participant $name a délégué l'invitation
+  de-DE: Teilnehmer $name hat die Einladung delegiert
+  it-IT: Il partecipante $name ha delegato l'invito
+  pt-PT: O participante $name delegou o convite
+  nl-NL: Deelnemer $name heeft de uitnodiging gedelegeerd
+  da-DK: Deltager $name delegerede invitationen
+  ca-ES: El participant $name ha delegat la invitació
+  el-GR: Το συμμετέχον πρόσωπο $name ανέθεσε την πρόσκληση
+  sv-SE: Deltagaren $name delegerade inbjudan
+  pl-PL: Uczestnik $name przekazał zaproszenie
+  pt-BR: O participante $name delegou o convite
+  ru-RU: Участник $name делегировал приглашение
+  uk-UA: Учасник $name делегував запрошення
+  bg-BG: Участникът $name делегира поканата
+  cs-CZ: Účastník $name delegoval pozvánku
+  sk-SK: Účastník $name delegoval pozvánku
+  sl-SI: Udeleženec $name je vabilo prenesel naprej
+  hr-HR: Sudionik $name proslijedio je pozivnicu
+  lt-LT: Dalyvis $name perdavė kvietimą
+  hu-HU: $name résztvevő továbbadta a meghívót
+  ro-RO: Participantul $name a delegat invitația
+  fi-FI: Osallistuja $name välitti kutsun eteenpäin
+  nb-NO: Deltakeren $name delegerte invitasjonen
+  tr-TR: Katılımcı $name daveti devretti
+  zh-CN: 参与者 $name 已转交邀请
+  zh-TW: 參與者 $name 已轉交邀請
+  ja-JP: 参加者 $name が招待を委任しました
+  ko-KR: 참석자 $name 님이 초대를 위임했습니다
+  th-TH: ผู้เข้าร่วม $name มอบหมายคำเชิญแล้ว
+  vi-VN: Người tham dự $name đã chuyển lời mời
+  id-ID: Peserta $name mendelegasikan undangan
+  hi-IN: प्रतिभागी $name ने आमंत्रण किसी और को सौंपा
+  ar-SA: فوَّض المشارك $name الدعوة
+  he-IL: המשתתף $name העביר את ההזמנה
+  fa-IR: شرکت‌کننده $name دعوت را واگذار کرد
 
 calendar.reply:
-  en_US: Reply
-  es_ES: Respuesta
-  fr_FR: Réponse
-  de_DE: Antwort
-  it_IT: Risposta
-  pt_PT: Resposta
-  nl_NL: Antwoord
-  da_DK: Svar
-  ca_ES: Resposta
-  el_GR: Απάντηση
-  sv_SE: Svar
-  pl_PL: Odpowiedź
+  en-US: Reply
+  es-ES: Respuesta
+  fr-FR: Réponse
+  de-DE: Antwort
+  it-IT: Risposta
+  pt-PT: Resposta
+  nl-NL: Antwoord
+  da-DK: Svar
+  ca-ES: Resposta
+  el-GR: Απάντηση
+  sv-SE: Svar
+  pl-PL: Odpowiedź
+  pt-BR: Resposta
+  ru-RU: Ответ
+  uk-UA: Відповідь
+  bg-BG: Отговор
+  cs-CZ: Odpověď
+  sk-SK: Odpoveď
+  sl-SI: Odgovor
+  hr-HR: Odgovor
+  lt-LT: Atsakymas
+  hu-HU: Válasz
+  ro-RO: Răspuns
+  fi-FI: Vastaus
+  nb-NO: Svar
+  tr-TR: Yanıt
+  zh-CN: 回复
+  zh-TW: 回覆
+  ja-JP: 返信
+  ko-KR: 회신
+  th-TH: ตอบกลับ
+  vi-VN: Phản hồi
+  id-ID: Balasan
+  hi-IN: उत्तर
+  ar-SA: رد
+  he-IL: תשובה
+  fa-IR: پاسخ
 
 calendar.participant_reply:
-  en_US: Participant $name replied to the invitation
-  es_ES: El participante $name respondió a la invitación
-  fr_FR: Le participant $name a répondu à l'invitation
-  de_DE: Teilnehmer $name hat auf die Einladung geantwortet
-  it_IT: Il partecipante $name ha risposto all'invito
-  pt_PT: O participante $name respondeu ao convite
-  nl_NL: Deelnemer $name heeft gereageerd op de uitnodiging
-  da_DK: Deltager $name svarede på invitationen
-  ca_ES: El participant $name ha respost a la invitació
-  el_GR: Το συμμετέχων πρόσωπο $name απάντησε στη πρόσκληση
-  sv_SE: Deltagaren $name har svarat på inbjudan
-  pl_PL: Uczestnik $name odpowiedział na zaproszenie
+  en-US: Participant $name replied to the invitation
+  es-ES: El participante $name respondió a la invitación
+  fr-FR: Le participant $name a répondu à l'invitation
+  de-DE: Teilnehmer $name hat auf die Einladung geantwortet
+  it-IT: Il partecipante $name ha risposto all'invito
+  pt-PT: O participante $name respondeu ao convite
+  nl-NL: Deelnemer $name heeft gereageerd op de uitnodiging
+  da-DK: Deltager $name svarede på invitationen
+  ca-ES: El participant $name ha respost a la invitació
+  el-GR: Το συμμετέχον πρόσωπο $name απάντησε στην πρόσκληση
+  sv-SE: Deltagaren $name har svarat på inbjudan
+  pl-PL: Uczestnik $name odpowiedział na zaproszenie
+  pt-BR: O participante $name respondeu ao convite
+  ru-RU: Участник $name ответил на приглашение
+  uk-UA: Учасник $name відповів на запрошення
+  bg-BG: Участникът $name отговори на поканата
+  cs-CZ: Účastník $name odpověděl na pozvánku
+  sk-SK: Účastník $name odpovedal na pozvánku
+  sl-SI: Udeleženec $name je odgovoril na vabilo
+  hr-HR: Sudionik $name odgovorio je na pozivnicu
+  lt-LT: Dalyvis $name atsakė į kvietimą
+  hu-HU: $name résztvevő válaszolt a meghívóra
+  ro-RO: Participantul $name a răspuns la invitație
+  fi-FI: Osallistuja $name vastasi kutsuun
+  nb-NO: Deltakeren $name svarte på invitasjonen
+  tr-TR: Katılımcı $name daveti yanıtladı
+  zh-CN: 参与者 $name 已回复邀请
+  zh-TW: 參與者 $name 已回覆邀請
+  ja-JP: 参加者 $name が招待に返信しました
+  ko-KR: 참석자 $name 님이 초대에 회신했습니다
+  th-TH: ผู้เข้าร่วม $name ตอบกลับคำเชิญแล้ว
+  vi-VN: Người tham dự $name đã phản hồi lời mời
+  id-ID: Peserta $name membalas undangan
+  hi-IN: प्रतिभागी $name ने आमंत्रण का उत्तर दिया
+  ar-SA: رد المشارك $name على الدعوة
+  he-IL: המשתתף $name השיב להזמנה
+  fa-IR: شرکت‌کننده $name به دعوت پاسخ داد
 
 calendar.summary:
-  en_US: Summary
-  es_ES: Resumen
-  fr_FR: Résumé
-  de_DE: Zusammenfassung
-  it_IT: Riepilogo
-  pt_PT: Resumo
-  nl_NL: Samenvatting
-  da_DK: Resumé
-  ca_ES: Resum
-  el_GR: Περίληψη
-  sv_SE: Sammanfattning
-  pl_PL: Podsumowanie
+  en-US: Summary
+  es-ES: Resumen
+  fr-FR: Résumé
+  de-DE: Zusammenfassung
+  it-IT: Riepilogo
+  pt-PT: Resumo
+  nl-NL: Samenvatting
+  da-DK: Resumé
+  ca-ES: Resum
+  el-GR: Περίληψη
+  sv-SE: Sammanfattning
+  pl-PL: Podsumowanie
+  pt-BR: Resumo
+  ru-RU: Сводка
+  uk-UA: Підсумок
+  bg-BG: Обобщение
+  cs-CZ: Souhrn
+  sk-SK: Zhrnutie
+  sl-SI: Povzetek
+  hr-HR: Sažetak
+  lt-LT: Santrauka
+  hu-HU: Összefoglaló
+  ro-RO: Rezumat
+  fi-FI: Yhteenveto
+  nb-NO: Sammendrag
+  tr-TR: Özet
+  zh-CN: 摘要
+  zh-TW: 摘要
+  ja-JP: 概要
+  ko-KR: 요약
+  th-TH: สรุป
+  vi-VN: Tóm tắt
+  id-ID: Ringkasan
+  hi-IN: सारांश
+  ar-SA: الملخص
+  he-IL: סיכום
+  fa-IR: خلاصه
 
 calendar.description:
-  en_US: Description
-  es_ES: Descripción
-  fr_FR: Description
-  de_DE: Beschreibung
-  it_IT: Descrizione
-  pt_PT: Descrição
-  nl_NL: Beschrijving
-  da_DK: Beskrivelse
-  ca_ES: Descripció
-  el_GR: Περιγραφή
-  sv_SE: Beskrivning
-  pl_PL: Opis
+  en-US: Description
+  es-ES: Descripción
+  fr-FR: Description
+  de-DE: Beschreibung
+  it-IT: Descrizione
+  pt-PT: Descrição
+  nl-NL: Beschrijving
+  da-DK: Beskrivelse
+  ca-ES: Descripció
+  el-GR: Περιγραφή
+  sv-SE: Beskrivning
+  pl-PL: Opis
+  pt-BR: Descrição
+  ru-RU: Описание
+  uk-UA: Опис
+  bg-BG: Описание
+  cs-CZ: Popis
+  sk-SK: Popis
+  sl-SI: Opis
+  hr-HR: Opis
+  lt-LT: Aprašymas
+  hu-HU: Leírás
+  ro-RO: Descriere
+  fi-FI: Kuvaus
+  nb-NO: Beskrivelse
+  tr-TR: Açıklama
+  zh-CN: 描述
+  zh-TW: 說明
+  ja-JP: 説明
+  ko-KR: 설명
+  th-TH: รายละเอียด
+  vi-VN: Mô tả
+  id-ID: Deskripsi
+  hi-IN: विवरण
+  ar-SA: الوصف
+  he-IL: תיאור
+  fa-IR: توضیحات
 
 calendar.when:
-  en_US: When
-  es_ES: Cuándo
-  fr_FR: Quand
-  de_DE: Wann
-  it_IT: Quando
-  pt_PT: Quando
-  nl_NL: Wanneer
-  da_DK: Hvornår
-  ca_ES: Quan
-  el_GR: Πότε
-  sv_SE: När
-  pl_PL: Kiedy
+  en-US: When
+  es-ES: Cuándo
+  fr-FR: Quand
+  de-DE: Wann
+  it-IT: Quando
+  pt-PT: Quando
+  nl-NL: Wanneer
+  da-DK: Hvornår
+  ca-ES: Quan
+  el-GR: Πότε
+  sv-SE: När
+  pl-PL: Kiedy
+  pt-BR: Quando
+  ru-RU: Когда
+  uk-UA: Коли
+  bg-BG: Кога
+  cs-CZ: Kdy
+  sk-SK: Kedy
+  sl-SI: Kdaj
+  hr-HR: Kada
+  lt-LT: Kada
+  hu-HU: Mikor
+  ro-RO: Când
+  fi-FI: Milloin
+  nb-NO: Når
+  tr-TR: Ne zaman
+  zh-CN: 时间
+  zh-TW: 時間
+  ja-JP: 日時
+  ko-KR: 일시
+  th-TH: เมื่อใด
+  vi-VN: Thời gian
+  id-ID: Kapan
+  hi-IN: कब
+  ar-SA: الوقت
+  he-IL: מתי
+  fa-IR: زمان
 
 calendar.changed:
-  en_US: Changed
-  es_ES: Cambiado
-  fr_FR: Modifié
-  de_DE: Geändert
-  it_IT: Modificato
-  pt_PT: Alterado
-  nl_NL: Gewijzigd
-  da_DK: Ændret
-  ca_ES: Canviat
-  el_GR: Μεταβλήθηκε
-  sv_SE: Ändrat
-  pl_PL: Zmieniono
+  en-US: Changed
+  es-ES: Cambiado
+  fr-FR: Modifié
+  de-DE: Geändert
+  it-IT: Modificato
+  pt-PT: Alterado
+  nl-NL: Gewijzigd
+  da-DK: Ændret
+  ca-ES: Canviat
+  el-GR: Μεταβλήθηκε
+  sv-SE: Ändrat
+  pl-PL: Zmieniono
+  pt-BR: Alterado
+  ru-RU: Изменено
+  uk-UA: Змінено
+  bg-BG: Променено
+  cs-CZ: Změněno
+  sk-SK: Zmenené
+  sl-SI: Spremenjeno
+  hr-HR: Promijenjeno
+  lt-LT: Pakeista
+  hu-HU: Módosítva
+  ro-RO: Modificat
+  fi-FI: Muutettu
+  nb-NO: Endret
+  tr-TR: Değiştirildi
+  zh-CN: 已更改
+  zh-TW: 已變更
+  ja-JP: 変更
+  ko-KR: 변경됨
+  th-TH: เปลี่ยนแปลงแล้ว
+  vi-VN: Đã thay đổi
+  id-ID: Diubah
+  hi-IN: बदला गया
+  ar-SA: تم التغيير
+  he-IL: שונה
+  fa-IR: تغییر کرد
 
 calendar.reply_as:
-  en_US: Reply as $name for this event series
-  es_ES: Responder como $name para esta serie de eventos
-  fr_FR: Répondre en tant que $name pour cette série d'événements
-  de_DE: Als $name für diese Ereignisserie antworten
-  it_IT: Rispondi come $name per questa serie di eventi
-  pt_PT: Responder como $name para esta série de eventos
-  nl_NL: Antwoord als $name voor deze evenementenreeks
-  da_DK: Svar som $name for denne begivenhedsserie
-  ca_ES: Respondre com a $name per aquesta serie d'esdeveniments
-  el_GR: Απάντηση ως $name για αυτή τη σειρά εκδηλώσεων
-  sv_SE: Svara som $name på den här inbjudan
-  pl_PL: Odpowiedz jako $name dla tej serii wydarzeń
+  en-US: Reply as $name for this event series
+  es-ES: Responder como $name para esta serie de eventos
+  fr-FR: Répondre en tant que $name pour cette série d'événements
+  de-DE: Als $name für diese Ereignisserie antworten
+  it-IT: Rispondi come $name per questa serie di eventi
+  pt-PT: Responder como $name para esta série de eventos
+  nl-NL: Antwoord als $name voor deze evenementenreeks
+  da-DK: Svar som $name for denne begivenhedsserie
+  ca-ES: Respondre com a $name per a aquesta sèrie d'esdeveniments
+  el-GR: Απάντηση ως $name για αυτή τη σειρά εκδηλώσεων
+  sv-SE: Svara som $name för den här händelseserien
+  pl-PL: Odpowiedz jako $name dla tej serii wydarzeń
+  pt-BR: Responder como $name para esta série de eventos
+  ru-RU: Ответить как $name для этой серии событий
+  uk-UA: Відповісти як $name для цієї серії подій
+  bg-BG: Отговор като $name за тази поредица от събития
+  cs-CZ: Odpovědět jako $name pro tuto řadu událostí
+  sk-SK: Odpovedať ako $name pre túto sériu udalostí
+  sl-SI: Odgovori kot $name za to serijo dogodkov
+  hr-HR: Odgovori kao $name za ovu seriju događaja
+  lt-LT: Atsakyti kaip $name į šią įvykių seriją
+  hu-HU: Válasz $name nevében erre az eseménysorozatra
+  ro-RO: Răspundeți ca $name pentru această serie de evenimente
+  fi-FI: Vastaa nimellä $name tähän tapahtumasarjaan
+  nb-NO: Svar som $name for denne hendelsesserien
+  tr-TR: Bu etkinlik serisi için $name olarak yanıtla
+  zh-CN: 以 $name 的身份回复此活动系列
+  zh-TW: 以 $name 的身分回覆此活動系列
+  ja-JP: この一連の予定に $name として返信
+  ko-KR: 이 반복 일정에 $name 이름으로 회신
+  th-TH: ตอบกลับในนาม $name สำหรับกิจกรรมชุดนี้
+  vi-VN: Trả lời với tư cách $name cho chuỗi sự kiện này
+  id-ID: Balas sebagai $name untuk rangkaian acara ini
+  hi-IN: इस इवेंट शृंखला के लिए $name के रूप में उत्तर दें
+  ar-SA: الرد باسم $name على سلسلة الأحداث هذه
+  he-IL: תשובה בשם $name לסדרת האירועים הזו
+  fa-IR: پاسخ به این مجموعه رویداد با نام $name
 
 calendar.yes:
-  en_US: Yes
-  es_ES: Sí
-  fr_FR: Oui
-  de_DE: Ja
-  it_IT: Sì
-  pt_PT: Sim
-  nl_NL: Ja
-  da_DK: Ja
-  ca_ES: Sí
-  el_GR: Ναι
-  sv_SE: Ja
-  pl_PL: Tak
+  en-US: Yes
+  es-ES: Sí
+  fr-FR: Oui
+  de-DE: Ja
+  it-IT: Sì
+  pt-PT: Sim
+  nl-NL: Ja
+  da-DK: Ja
+  ca-ES: Sí
+  el-GR: Ναι
+  sv-SE: Ja
+  pl-PL: Tak
+  pt-BR: Sim
+  ru-RU: Да
+  uk-UA: Так
+  bg-BG: Да
+  cs-CZ: Ano
+  sk-SK: Áno
+  sl-SI: Da
+  hr-HR: Da
+  lt-LT: Taip
+  hu-HU: Igen
+  ro-RO: Da
+  fi-FI: Kyllä
+  nb-NO: Ja
+  tr-TR: Evet
+  zh-CN: 是
+  zh-TW: 是
+  ja-JP: はい
+  ko-KR: 예
+  th-TH: ใช่
+  vi-VN: Có
+  id-ID: Ya
+  hi-IN: हाँ
+  ar-SA: نعم
+  he-IL: כן
+  fa-IR: بله
 
 calendar.no:
-  en_US: No
-  es_ES: No
-  fr_FR: Non
-  de_DE: Nein
-  it_IT: No
-  pt_PT: Não
-  nl_NL: Nee
-  da_DK: Nej
-  ca_ES: No
-  el_GR: Όχι
-  sv_SE: Nej
-  pl_PL: Nie
+  en-US: No
+  es-ES: No
+  fr-FR: Non
+  de-DE: Nein
+  it-IT: No
+  pt-PT: Não
+  nl-NL: Nee
+  da-DK: Nej
+  ca-ES: No
+  el-GR: Όχι
+  sv-SE: Nej
+  pl-PL: Nie
+  pt-BR: Não
+  ru-RU: Нет
+  uk-UA: Ні
+  bg-BG: Не
+  cs-CZ: Ne
+  sk-SK: Nie
+  sl-SI: Ne
+  hr-HR: Ne
+  lt-LT: Ne
+  hu-HU: Nem
+  ro-RO: Nu
+  fi-FI: Ei
+  nb-NO: Nei
+  tr-TR: Hayır
+  zh-CN: 否
+  zh-TW: 否
+  ja-JP: いいえ
+  ko-KR: 아니요
+  th-TH: ไม่
+  vi-VN: Không
+  id-ID: Tidak
+  hi-IN: नहीं
+  ar-SA: لا
+  he-IL: לא
+  fa-IR: خیر
 
 calendar.maybe:
-  en_US: Maybe
-  es_ES: Quizás
-  fr_FR: Peut-être
-  de_DE: Vielleicht
-  it_IT: Forse
-  pt_PT: Talvez
-  nl_NL: Misschien
-  da_DK: Måske
-  ca_ES: Potser
-  el_GR: Ίσως
-  sv_SE: Kanske
-  pl_PL: Może
+  en-US: Maybe
+  es-ES: Quizás
+  fr-FR: Peut-être
+  de-DE: Vielleicht
+  it-IT: Forse
+  pt-PT: Talvez
+  nl-NL: Misschien
+  da-DK: Måske
+  ca-ES: Potser
+  el-GR: Ίσως
+  sv-SE: Kanske
+  pl-PL: Może
+  pt-BR: Talvez
+  ru-RU: Возможно
+  uk-UA: Можливо
+  bg-BG: Може би
+  cs-CZ: Možná
+  sk-SK: Možno
+  sl-SI: Mogoče
+  hr-HR: Možda
+  lt-LT: Galbūt
+  hu-HU: Talán
+  ro-RO: Poate
+  fi-FI: Ehkä
+  nb-NO: Kanskje
+  tr-TR: Belki
+  zh-CN: 可能
+  zh-TW: 可能
+  ja-JP: 未定
+  ko-KR: 미정
+  th-TH: อาจจะ
+  vi-VN: Có thể
+  id-ID: Mungkin
+  hi-IN: शायद
+  ar-SA: ربما
+  he-IL: אולי
+  fa-IR: شاید
 
 calendar.imip_footer_1:
-  en_US: You're receiving this e-mail as you're listed as a participant for this event.
-  es_ES: Recibes este correo electrónico porque estás registrado como participante de este evento.
-  fr_FR: Vous recevez cet e-mail car vous êtes inscrit comme participant à cet événement.
-  de_DE: Sie erhalten diese E-Mail, weil Sie als Teilnehmer für dieses Ereignis aufgeführt sind.
-  it_IT: Ricevi questa e-mail perché sei elencato come partecipante a questo evento.
-  pt_PT: Você está recebendo este e-mail porque está listado como participante deste evento.
-  nl_NL: U ontvangt deze e-mail omdat u staat vermeld als deelnemer aan dit evenement.
-  da_DK: Du modtager denne e-mail, fordi du er opført som deltager i denne begivenhed.
-  ca_ES: Reps aquest correu electrònic perquè ets registrat com a participant d'aquest esdeveniment.
-  el_GR: Λαμβάνετε αυτό το e-mail καθώς είστε στη λίστα συμμετεχόντων αυτής της εκδήλωσης.
-  sv_SE: Du får det här mejlet för att du är uppskriven som deltagare i den här händelsen
-  pl_PL: Otrzymujesz tego e-maila, ponieważ jesteś uczestnikiem tego wydarzenia.
+  en-US: You're receiving this e-mail as you're listed as a participant for this event.
+  es-ES: Recibes este correo electrónico porque estás registrado como participante de este evento.
+  fr-FR: Vous recevez cet e-mail car vous êtes inscrit comme participant à cet événement.
+  de-DE: Sie erhalten diese E-Mail, weil Sie als Teilnehmer für dieses Ereignis aufgeführt sind.
+  it-IT: Ricevi questa e-mail perché sei elencato come partecipante a questo evento.
+  pt-PT: Está a receber este e-mail porque está indicado como participante neste evento.
+  nl-NL: U ontvangt deze e-mail omdat u staat vermeld als deelnemer aan dit evenement.
+  da-DK: Du modtager denne e-mail, fordi du er opført som deltager i denne begivenhed.
+  ca-ES: Reps aquest correu electrònic perquè estàs registrat com a participant d'aquest esdeveniment.
+  el-GR: Λαμβάνετε αυτό το e-mail καθώς είστε στη λίστα συμμετεχόντων αυτής της εκδήλωσης.
+  sv-SE: Du får det här mejlet eftersom du är uppskriven som deltagare i den här händelsen.
+  pl-PL: Otrzymujesz tego e-maila, ponieważ jesteś uczestnikiem tego wydarzenia.
+  pt-BR: Você está recebendo este e-mail porque está listado como participante deste evento.
+  ru-RU: Вы получаете это письмо, так как указаны участником этого события.
+  uk-UA: Ви отримуєте цей лист, оскільки вас зазначено учасником цієї події.
+  bg-BG: Получавате този имейл, защото сте посочени като участник в това събитие.
+  cs-CZ: Tento e-mail dostáváte, protože jste uvedeni jako účastník této události.
+  sk-SK: Tento e-mail dostávate, pretože ste uvedený ako účastník tejto udalosti.
+  sl-SI: To e-pošto prejemate, ker ste navedeni kot udeleženec tega dogodka.
+  hr-HR: Ovu e-poštu primate jer ste navedeni kao sudionik ovog događaja.
+  lt-LT: Šį el. laišką gaunate, nes esate nurodytas kaip šio įvykio dalyvis.
+  hu-HU: Azért kapja ezt az e-mailt, mert az esemény résztvevői között szerepel.
+  ro-RO: Primiți acest e-mail deoarece sunteți listat ca participant la acest eveniment.
+  fi-FI: Saat tämän sähköpostin, koska sinut on merkitty tämän tapahtuman osallistujaksi.
+  nb-NO: Du mottar denne e-posten fordi du er oppført som deltaker på denne hendelsen.
+  tr-TR: Bu etkinliğin katılımcısı olarak listelendiğiniz için bu e-postayı alıyorsunuz.
+  zh-CN: 您收到此邮件是因为您被列为此活动的参与者。
+  zh-TW: 您收到這封郵件是因為您被列為此活動的參與者。
+  ja-JP: この予定の参加者として登録されているため、このメールが送信されています。
+  ko-KR: 이 일정의 참석자로 등록되어 있어 이 이메일을 받고 있습니다.
+  th-TH: คุณได้รับอีเมลนี้เพราะคุณอยู่ในรายชื่อผู้เข้าร่วมกิจกรรมนี้
+  vi-VN: Bạn nhận được email này vì bạn có tên trong danh sách người tham dự sự kiện này.
+  id-ID: Anda menerima email ini karena Anda terdaftar sebagai peserta acara ini.
+  hi-IN: आपको यह ईमेल इसलिए मिल रहा है क्योंकि आप इस इवेंट में प्रतिभागी के रूप में सूचीबद्ध हैं।
+  ar-SA: تتلقى هذه الرسالة لأنك مُدرَج كمشارك في هذا الحدث.
+  he-IL: קיבלת הודעה זו כי את/ה רשום/ה כמשתתף באירוע זה.
+  fa-IR: این ایمیل را دریافت می‌کنید چون به‌عنوان شرکت‌کننده این رویداد فهرست شده‌اید.
 
 calendar.imip_footer_2:
-  en_US: Forwarding this e-mail could allow any recipient to reply to the organizer, join the guest list, extend the invitation to others, or alter your RSVP.
-  es_ES: Reenviar este correo electrónico podría permitir que cualquier destinatario responda al organizador, se una a la lista de invitados, extienda la invitación a otros o modifique tu confirmación de asistencia.
-  fr_FR: Le transfert de cet e-mail pourrait permettre à tout destinataire de répondre à l'organisateur, de rejoindre la liste des invités, d'étendre l'invitation à d'autres ou de modifier votre RSVP.
-  de_DE: Das Weiterleiten dieser E-Mail könnte es jedem Empfänger ermöglichen, dem Organisator zu antworten, der Gästeliste beizutreten, die Einladung an andere weiterzugeben oder Ihre Zusage zu ändern.
-  it_IT: L'inoltro di questa e-mail potrebbe consentire a qualsiasi destinatario di rispondere all'organizzatore, unirsi alla lista degli ospiti, estendere l'invito ad altri o modificare la tua conferma di partecipazione.
-  pt_PT: Encaminhar este e-mail pode permitir que qualquer destinatário responda ao organizador, se junte à lista de convidados, estenda o convite a outros ou altere sua confirmação de presença.
-  nl_NL: Het doorsturen van deze e-mail kan elke ontvanger in staat stellen om te reageren op de organisator, deel te nemen aan de gastenlijst, de uitnodiging uit te breiden naar anderen, of uw RSVP te wijzigen.
-  da_DK: Videresendelse af denne e-mail kan give andre mulighed for at svare arrangøren, tilslutte sig gæstelisten, videreformidle invitationen eller ændre din tilmelding.
-  ca_ES: Reenviar aquest correu electrònic podria fer que qualsevol destinatari respongues a l'organitzador, afegir-se a la llista de convidats, estengui la invitació a d'altres o modificar la teva confirmació d'assistència.
-  el_GR: Προωθόντας αυτό το e-mail μπορεί να επιτρέψει σε οποιοδήποτε παραλήπτη να απαντήση στον οργανωτή, να μπει στη λίστα επισκεπτών, να επεκτείνει τη πρόσκληση σε άλλους ή να αλλάξει την παρουσία σας.
-  sv_SE: Att vidarebefordra det här mejlet kan göra det möjligt för vilken mottagare som helst att skicka svar till arrangören, lägga till sig själv på gästlistan, skicka inbjudan vidare till andra, samt ändra ditt svar.
-  pl_PL: Przekazanie tej wiadomości e-mail może umożliwić każdemu odbiorcy odpowiedź do organizatora, dołączenie do listy gości, przesłanie zaproszenia innym osobom lub zmianę Twojej odpowiedzi RSVP.
+  en-US: Forwarding this e-mail could allow any recipient to reply to the organizer, join the guest list, extend the invitation to others, or alter your RSVP.
+  es-ES: Reenviar este correo electrónico podría permitir que cualquier destinatario responda al organizador, se una a la lista de invitados, extienda la invitación a otros o modifique tu confirmación de asistencia.
+  fr-FR: Le transfert de cet e-mail pourrait permettre à tout destinataire de répondre à l'organisateur, de rejoindre la liste des invités, d'étendre l'invitation à d'autres ou de modifier votre réponse.
+  de-DE: Das Weiterleiten dieser E-Mail könnte es jedem Empfänger ermöglichen, dem Organisator zu antworten, der Gästeliste beizutreten, die Einladung an andere weiterzugeben oder Ihre Antwort zu ändern.
+  it-IT: L'inoltro di questa e-mail potrebbe consentire a qualsiasi destinatario di rispondere all'organizzatore, unirsi alla lista degli ospiti, estendere l'invito ad altri o modificare la tua conferma di partecipazione.
+  pt-PT: Encaminhar este e-mail pode permitir que qualquer destinatário responda ao organizador, se junte à lista de convidados, estenda o convite a outros ou altere a sua confirmação de presença.
+  nl-NL: Het doorsturen van deze e-mail kan elke ontvanger in staat stellen om te reageren op de organisator, deel te nemen aan de gastenlijst, de uitnodiging aan anderen door te geven, of uw antwoord te wijzigen.
+  da-DK: Videresendelse af denne e-mail kan give andre mulighed for at svare arrangøren, tilslutte sig gæstelisten, videreformidle invitationen eller ændre din tilmelding.
+  ca-ES: Reenviar aquest correu electrònic podria permetre que qualsevol destinatari respongui a l'organitzador, s'afegeixi a la llista de convidats, estengui la invitació a altres persones o modifiqui la teva confirmació d'assistència.
+  el-GR: Η προώθηση αυτού του e-mail μπορεί να επιτρέψει σε οποιονδήποτε παραλήπτη να απαντήσει στον διοργανωτή, να μπει στη λίστα καλεσμένων, να επεκτείνει την πρόσκληση σε άλλους ή να αλλάξει τη δήλωση παρουσίας σας.
+  sv-SE: Att vidarebefordra det här mejlet kan göra det möjligt för vilken mottagare som helst att skicka svar till arrangören, lägga till sig själv på gästlistan, skicka inbjudan vidare till andra, samt ändra ditt svar.
+  pl-PL: Przekazanie tej wiadomości e-mail może umożliwić każdemu odbiorcy odpowiedź do organizatora, dołączenie do listy gości, przesłanie zaproszenia innym osobom lub zmianę Twojej odpowiedzi RSVP.
+  pt-BR: Encaminhar este e-mail pode permitir que qualquer destinatário responda ao organizador, entre na lista de convidados, estenda o convite a outros ou altere sua confirmação de presença.
+  ru-RU: Пересылка этого письма может позволить любому получателю ответить организатору, добавиться в список гостей, переслать приглашение другим или изменить ваш ответ.
+  uk-UA: Пересилання цього листа може дозволити будь-якому одержувачу відповісти організатору, долучитися до списку гостей, переслати запрошення іншим або змінити вашу відповідь.
+  bg-BG: Препращането на този имейл може да позволи на всеки получател да отговори на организатора, да се включи в списъка с гости, да препрати поканата на други или да промени вашия отговор.
+  cs-CZ: Přeposlání tohoto e-mailu může komukoli z příjemců umožnit odpovědět organizátorovi, přidat se na seznam hostů, předat pozvánku dalším nebo změnit vaši odpověď.
+  sk-SK: Preposlanie tohto e-mailu môže komukoľvek z príjemcov umožniť odpovedať organizátorovi, pridať sa do zoznamu hostí, poslať pozvánku ďalším alebo zmeniť vašu odpoveď.
+  sl-SI: Posredovanje te e-pošte lahko vsakemu prejemniku omogoči, da odgovori organizatorju, se doda na seznam gostov, vabilo posreduje drugim ali spremeni vaš odgovor.
+  hr-HR: Prosljeđivanje ove e-pošte može svakom primatelju omogućiti da odgovori organizatoru, pridruži se popisu gostiju, proslijedi pozivnicu drugima ili promijeni vaš odgovor.
+  lt-LT: Persiuntus šį el. laišką bet kuris gavėjas galės atsakyti organizatoriui, prisidėti prie svečių sąrašo, persiųsti kvietimą kitiems arba pakeisti jūsų atsakymą.
+  hu-HU: Az e-mail továbbítása lehetővé teheti bármely címzettnek, hogy válaszoljon a szervezőnek, felkerüljön a vendéglistára, továbbküldje a meghívót másoknak, vagy módosítsa az Ön válaszát.
+  ro-RO: Redirecționarea acestui e-mail ar putea permite oricărui destinatar să răspundă organizatorului, să se adauge pe lista de invitați, să trimită invitația altora sau să vă modifice răspunsul.
+  fi-FI: Tämän viestin välittäminen voi antaa kenelle tahansa vastaanottajalle mahdollisuuden vastata järjestäjälle, liittyä vieraslistalle, välittää kutsun muille tai muuttaa vastaustasi.
+  nb-NO: Videresending av denne e-posten kan gi enhver mottaker mulighet til å svare arrangøren, bli med på gjestelisten, sende invitasjonen videre til andre eller endre svaret ditt.
+  tr-TR: Bu e-postayı iletmek, herhangi bir alıcının düzenleyene yanıt vermesine, konuk listesine katılmasına, daveti başkalarına iletmesine veya yanıtınızı değiştirmesine olanak tanıyabilir.
+  zh-CN: 转发此邮件可能会使任何收件人能够回复组织者、加入来宾名单、将邀请转发给他人或更改您的回复。
+  zh-TW: 轉寄這封郵件可能會讓任何收件者回覆主辦人、加入來賓名單、將邀請轉寄給他人或變更您的回覆。
+  ja-JP: このメールを転送すると、受信者が主催者に返信したり、ゲストリストに参加したり、他の人に招待を転送したり、あなたの出欠を変更したりできる場合があります。
+  ko-KR: 이 이메일을 전달하면 수신자가 주최자에게 회신하거나, 참석자 목록에 참여하거나, 다른 사람에게 초대를 전달하거나, 회신을 변경할 수 있습니다.
+  th-TH: การส่งต่ออีเมลนี้อาจทำให้ผู้รับคนใดก็ตามตอบกลับผู้จัด เข้าร่วมรายชื่อผู้เข้าร่วม ส่งต่อคำเชิญให้ผู้อื่น หรือเปลี่ยนการตอบรับของคุณได้
+  vi-VN: Việc chuyển tiếp email này có thể cho phép bất kỳ người nhận nào trả lời người tổ chức, tham gia danh sách khách mời, chuyển lời mời cho người khác hoặc thay đổi phản hồi của bạn.
+  id-ID: Meneruskan email ini dapat memungkinkan penerima mana pun membalas penyelenggara, bergabung dengan daftar tamu, meneruskan undangan kepada orang lain, atau mengubah jawaban Anda.
+  hi-IN: इस ईमेल को अग्रेषित करने से कोई भी प्राप्तकर्ता आयोजक को उत्तर दे सकता है, अतिथि सूची में शामिल हो सकता है, आमंत्रण दूसरों को भेज सकता है या आपका उत्तर बदल सकता है।
+  ar-SA: قد تتيح إعادة توجيه هذه الرسالة لأي مستلم الرد على المنظم، أو الانضمام إلى قائمة الضيوف، أو إرسال الدعوة إلى آخرين، أو تغيير ردك.
+  he-IL: העברת הודעה זו עלולה לאפשר לכל נמען להשיב למארגן, להצטרף לרשימת האורחים, להעביר את ההזמנה לאחרים או לשנות את תשובתך.
+  fa-IR: هدایت این ایمیل ممکن است به هر گیرنده‌ای اجازه دهد به برگزارکننده پاسخ دهد، به فهرست مهمانان بپیوندد، دعوت را برای دیگران بفرستد یا پاسخ شما را تغییر دهد.
 
 calendar.rsvp_recorded:
-  en_US: Your RSVP has been recorded.
-  es_ES: Tu confirmación de asistencia ha sido registrada.
-  fr_FR: Votre RSVP a été enregistré.
-  de_DE: Ihre Zusage wurde aufgezeichnet.
-  it_IT: La tua conferma di partecipazione è stata registrata.
-  pt_PT: Sua confirmação de presença foi registrada.
-  nl_NL: Uw RSVP is geregistreerd.
-  da_DK: Din tilmelding er blevet registreret.
-  ca_ES: La teva confirmació d'assistència ha sigut registrada.
-  el_GR: Η κοινοποίηση της παρουσίας σας καταγράφηκε.
-  sv_SE: Ditt svar har registrerats.
-  pl_PL: Twoja odpowiedź RSVP została zarejestrowana.
+  en-US: Your RSVP has been recorded.
+  es-ES: Tu confirmación de asistencia ha sido registrada.
+  fr-FR: Votre réponse a été enregistrée.
+  de-DE: Ihre Antwort wurde gespeichert.
+  it-IT: La tua conferma di partecipazione è stata registrata.
+  pt-PT: A sua confirmação de presença foi registada.
+  nl-NL: Uw antwoord is geregistreerd.
+  da-DK: Din tilmelding er blevet registreret.
+  ca-ES: La teva confirmació d'assistència s'ha registrat.
+  el-GR: Η κοινοποίηση της παρουσίας σας καταγράφηκε.
+  sv-SE: Ditt svar har registrerats.
+  pl-PL: Twoja odpowiedź RSVP została zarejestrowana.
+  pt-BR: Sua confirmação de presença foi registrada.
+  ru-RU: Ваш ответ записан.
+  uk-UA: Вашу відповідь записано.
+  bg-BG: Отговорът ви беше записан.
+  cs-CZ: Vaše odpověď byla zaznamenána.
+  sk-SK: Vaša odpoveď bola zaznamenaná.
+  sl-SI: Vaš odgovor je bil zabeležen.
+  hr-HR: Vaš odgovor je zabilježen.
+  lt-LT: Jūsų atsakymas užregistruotas.
+  hu-HU: A válaszát rögzítettük.
+  ro-RO: Răspunsul dumneavoastră a fost înregistrat.
+  fi-FI: Vastauksesi on kirjattu.
+  nb-NO: Svaret ditt er registrert.
+  tr-TR: Yanıtınız kaydedildi.
+  zh-CN: 您的回复已记录。
+  zh-TW: 您的回覆已記錄。
+  ja-JP: 出欠の返信を記録しました。
+  ko-KR: 회신이 기록되었습니다.
+  th-TH: บันทึกการตอบรับของคุณแล้ว
+  vi-VN: Phản hồi của bạn đã được ghi nhận.
+  id-ID: Jawaban Anda telah dicatat.
+  hi-IN: आपका उत्तर दर्ज कर लिया गया है।
+  ar-SA: تم تسجيل ردك.
+  he-IL: תשובתך נרשמה.
+  fa-IR: پاسخ شما ثبت شد.
 
 calendar.rsvp_failed:
-  en_US: Failed to record your RSVP.
-  es_ES: No se pudo registrar tu confirmación de asistencia.
-  fr_FR: Impossible d'enregistrer votre RSVP.
-  de_DE: Ihre Zusage konnte nicht aufgezeichnet werden.
-  it_IT: Impossibile registrare la tua conferma di partecipazione.
-  pt_PT: Falha ao registrar sua confirmação de presença.
-  nl_NL: Kan uw RSVP niet registreren.
-  da_DK: Kunne ikke registrere din tilmelding.
-  ca_ES: No s'ha pogut registrar la teva confirmació d'assistència.
-  el_GR: Αποτυχία κατα τη καταγραφή της παρουσίας σας
-  sv_SE: Det gick inte att registrera ditt svar.
-  pl_PL: Nie udało się zarejestrować Twojej odpowiedzi RSVP.
+  en-US: Failed to record your RSVP.
+  es-ES: No se pudo registrar tu confirmación de asistencia.
+  fr-FR: Impossible d'enregistrer votre réponse.
+  de-DE: Ihre Antwort konnte nicht gespeichert werden.
+  it-IT: Impossibile registrare la tua conferma di partecipazione.
+  pt-PT: Falha ao registar a sua confirmação de presença.
+  nl-NL: Kan uw antwoord niet registreren.
+  da-DK: Kunne ikke registrere din tilmelding.
+  ca-ES: No s'ha pogut registrar la teva confirmació d'assistència.
+  el-GR: Αποτυχία κατά την καταγραφή της παρουσίας σας.
+  sv-SE: Det gick inte att registrera ditt svar.
+  pl-PL: Nie udało się zarejestrować Twojej odpowiedzi RSVP.
+  pt-BR: Falha ao registrar sua confirmação de presença.
+  ru-RU: Не удалось записать ваш ответ.
+  uk-UA: Не вдалося записати вашу відповідь.
+  bg-BG: Записването на отговора ви беше неуспешно.
+  cs-CZ: Vaši odpověď se nepodařilo zaznamenat.
+  sk-SK: Vašu odpoveď sa nepodarilo zaznamenať.
+  sl-SI: Vašega odgovora ni bilo mogoče zabeležiti.
+  hr-HR: Bilježenje vašeg odgovora nije uspjelo.
+  lt-LT: Nepavyko užregistruoti jūsų atsakymo.
+  hu-HU: Nem sikerült rögzíteni a válaszát.
+  ro-RO: Înregistrarea răspunsului dumneavoastră a eșuat.
+  fi-FI: Vastauksesi kirjaaminen epäonnistui.
+  nb-NO: Kunne ikke registrere svaret ditt.
+  tr-TR: Yanıtınız kaydedilemedi.
+  zh-CN: 无法记录您的回复。
+  zh-TW: 無法記錄您的回覆。
+  ja-JP: 出欠の返信を記録できませんでした。
+  ko-KR: 회신을 기록하지 못했습니다.
+  th-TH: ไม่สามารถบันทึกการตอบรับของคุณได้
+  vi-VN: Không ghi nhận được phản hồi của bạn.
+  id-ID: Gagal mencatat jawaban Anda.
+  hi-IN: आपका उत्तर दर्ज नहीं किया जा सका।
+  ar-SA: تعذر تسجيل ردك.
+  he-IL: רישום תשובתך נכשל.
+  fa-IR: ثبت پاسخ شما ناموفق بود.
 
 calendar.event_not_found:
-  en_US: The event you are trying to RSVP to was not found.
-  es_ES: No se encontró el evento al que intentas confirmar asistencia.
-  fr_FR: L'événement auquel vous essayez de répondre n'a pas été trouvé.
-  de_DE: Das Ereignis, für das Sie eine Zusage geben möchten, wurde nicht gefunden.
-  it_IT: L'evento a cui stai cercando di confermare la partecipazione non è stato trovato.
-  pt_PT: O evento para o qual você está tentando confirmar presença não foi encontrado.
-  nl_NL: Het evenement waarvoor u probeert te reageren is niet gevonden.
-  da_DK: Begivenheden du forsøger at tilmelde dig blev ikke fundet.
-  ca_ES: L'esdeveniment al que intentes confirmar l'assistència no es troba.
-  el_GR: Η εκδήλωση που θέλετε να κοινοποιήσετε την παρουσία σας δεν υπάρχει.
-  sv_SE: Händelsen du försöker OSA till kunde inte hittas.
-  pl_PL: Wydarzenie, na które próbujesz odpowiedzieć RSVP, nie zostało znalezione.
+  en-US: The event you are trying to RSVP to was not found.
+  es-ES: No se encontró el evento al que intentas confirmar asistencia.
+  fr-FR: L'événement auquel vous essayez de répondre n'a pas été trouvé.
+  de-DE: Das Ereignis, auf das Sie antworten möchten, wurde nicht gefunden.
+  it-IT: L'evento a cui stai cercando di confermare la partecipazione non è stato trovato.
+  pt-PT: O evento para o qual está a tentar confirmar presença não foi encontrado.
+  nl-NL: Het evenement waarop u probeert te reageren is niet gevonden.
+  da-DK: Begivenheden du forsøger at tilmelde dig blev ikke fundet.
+  ca-ES: No s'ha trobat l'esdeveniment al qual intentes confirmar l'assistència.
+  el-GR: Η εκδήλωση που θέλετε να κοινοποιήσετε την παρουσία σας δεν υπάρχει.
+  sv-SE: Händelsen du försöker OSA till kunde inte hittas.
+  pl-PL: Wydarzenie, na które próbujesz odpowiedzieć RSVP, nie zostało znalezione.
+  pt-BR: O evento para o qual você está tentando confirmar presença não foi encontrado.
+  ru-RU: Событие, на которое вы пытаетесь ответить, не найдено.
+  uk-UA: Подію, на яку ви намагаєтеся відповісти, не знайдено.
+  bg-BG: Събитието, на което се опитвате да отговорите, не беше намерено.
+  cs-CZ: Událost, na kterou se pokoušíte odpovědět, nebyla nalezena.
+  sk-SK: Udalosť, na ktorú sa pokúšate odpovedať, sa nenašla.
+  sl-SI: Dogodka, na katerega želite odgovoriti, ni bilo mogoče najti.
+  hr-HR: Događaj na koji pokušavate odgovoriti nije pronađen.
+  lt-LT: Įvykis, į kurį bandote atsakyti, nerastas.
+  hu-HU: Az esemény, amelyre válaszolni próbál, nem található.
+  ro-RO: Evenimentul la care încercați să răspundeți nu a fost găsit.
+  fi-FI: Tapahtumaa, johon yrität vastata, ei löytynyt.
+  nb-NO: Hendelsen du prøver å svare på, ble ikke funnet.
+  tr-TR: Yanıtlamaya çalıştığınız etkinlik bulunamadı.
+  zh-CN: 未找到您要回复的活动。
+  zh-TW: 找不到您要回覆的活動。
+  ja-JP: 返信しようとしている予定が見つかりませんでした。
+  ko-KR: 회신하려는 일정을 찾을 수 없습니다.
+  th-TH: ไม่พบกิจกรรมที่คุณต้องการตอบรับ
+  vi-VN: Không tìm thấy sự kiện bạn muốn phản hồi.
+  id-ID: Acara yang ingin Anda jawab tidak ditemukan.
+  hi-IN: जिस इवेंट का आप उत्तर देना चाहते हैं वह नहीं मिला।
+  ar-SA: لم يتم العثور على الحدث الذي تحاول الرد عليه.
+  he-IL: האירוע שאליו ניסית להשיב לא נמצא.
+  fa-IR: رویدادی که می‌خواهید به آن پاسخ دهید یافت نشد.
 
 calendar.invalid_rsvp:
-  en_US: The RSVP request was invalid or malformed.
-  es_ES: La solicitud de confirmación de asistencia era inválida o estaba mal formada.
-  fr_FR: La demande de RSVP était invalide ou mal formée.
-  de_DE: Die Zusage-Anfrage war ungültig oder fehlerhaft.
-  it_IT: La richiesta di conferma di partecipazione era non valida o mal formata.
-  pt_PT: A solicitação de confirmação de presença era inválida ou mal formada.
-  nl_NL: Het RSVP-verzoek was ongeldig of onjuist gevormd.
-  da_DK: Tilmeldingsanmodningen var ugyldig eller forkert udformet.
-  ca_ES: La sol·licitud de confirmació d'assistència no era vàlida o estava mal formada.
-  el_GR: Η αίτητη για κοινοποίηση παρουσίας είναι άκυρη ή έχει πρόβλημα.
-  sv_SE: Svaret på inbjudan var ogiltigt eller i fel format.
-  pl_PL: Żądanie RSVP było nieprawidłowe lub źle sformułowane.
+  en-US: The RSVP request was invalid or malformed.
+  es-ES: La solicitud de confirmación de asistencia era inválida o estaba mal formada.
+  fr-FR: La demande de réponse était invalide ou mal formée.
+  de-DE: Die Antwortanfrage war ungültig oder fehlerhaft.
+  it-IT: La richiesta di conferma di partecipazione era non valida o mal formata.
+  pt-PT: O pedido de confirmação de presença era inválido ou estava mal formado.
+  nl-NL: Het antwoord was ongeldig of onjuist opgemaakt.
+  da-DK: Tilmeldingsanmodningen var ugyldig eller forkert udformet.
+  ca-ES: La sol·licitud de confirmació d'assistència no era vàlida o estava mal formada.
+  el-GR: Η αίτηση κοινοποίησης παρουσίας ήταν άκυρη ή εσφαλμένα διαμορφωμένη.
+  sv-SE: Svaret på inbjudan var ogiltigt eller i fel format.
+  pl-PL: Żądanie RSVP było nieprawidłowe lub źle sformułowane.
+  pt-BR: A solicitação de confirmação de presença era inválida ou estava malformada.
+  ru-RU: Запрос ответа недействителен или составлен неверно.
+  uk-UA: Запит на відповідь недійсний або хибно сформований.
+  bg-BG: Заявката за отговор беше невалидна или неправилно оформена.
+  cs-CZ: Požadavek na odpověď byl neplatný nebo poškozený.
+  sk-SK: Požiadavka na odpoveď bola neplatná alebo poškodená.
+  sl-SI: Zahteva za odgovor je bila neveljavna ali napačno oblikovana.
+  hr-HR: Zahtjev za odgovor bio je neispravan ili neispravno oblikovan.
+  lt-LT: Atsakymo užklausa buvo netinkama arba su klaidomis.
+  hu-HU: A válaszkérés érvénytelen vagy hibás volt.
+  ro-RO: Cererea de răspuns a fost invalidă sau incorect formată.
+  fi-FI: Vastauspyyntö oli virheellinen tai puutteellinen.
+  nb-NO: Svarforespørselen var ugyldig eller feilformatert.
+  tr-TR: Yanıt isteği geçersiz veya hatalı biçimlendirilmiş.
+  zh-CN: 回复请求无效或格式错误。
+  zh-TW: 回覆要求無效或格式錯誤。
+  ja-JP: 返信のリクエストが無効か、形式が正しくありません。
+  ko-KR: 회신 요청이 잘못되었거나 형식이 올바르지 않습니다.
+  th-TH: คำขอตอบรับไม่ถูกต้องหรือมีรูปแบบผิดพลาด
+  vi-VN: Yêu cầu phản hồi không hợp lệ hoặc sai định dạng.
+  id-ID: Permintaan jawaban tidak valid atau salah format.
+  hi-IN: उत्तर अनुरोध अमान्य या त्रुटिपूर्ण था।
+  ar-SA: طلب الرد غير صالح أو تالف.
+  he-IL: בקשת התשובה אינה תקינה או פגומה.
+  fa-IR: درخواست پاسخ نامعتبر یا نادرست بود.
 
 calendar.not_participant:
-  en_US: You are no longer a participant in this event.
-  es_ES: Ya no eres participante de este evento.
-  fr_FR: Vous n'êtes plus participant à cet événement.
-  de_DE: Sie sind kein Teilnehmer dieses Ereignisses mehr.
-  it_IT: Non sei più un partecipante a questo evento.
-  pt_PT: Você não é mais um participante deste evento.
-  nl_NL: U bent geen deelnemer meer aan dit evenement.
-  da_DK: Du deltager ikke længere i denne begivenhed.
-  ca_ES: Ja no ets un participant d'aquest esdeveniment.
-  el_GR: Δε συμμετέχετε πια σε αυτή την εκδήλωση.
-  sv_SE: Du är inte längre en deltagare i den här händelse.
-  pl_PL: Nie jesteś już uczestnikiem tego wydarzenia.
+  en-US: You are no longer a participant in this event.
+  es-ES: Ya no eres participante de este evento.
+  fr-FR: Vous n'êtes plus participant à cet événement.
+  de-DE: Sie sind kein Teilnehmer dieses Ereignisses mehr.
+  it-IT: Non sei più un partecipante a questo evento.
+  pt-PT: Já não é participante deste evento.
+  nl-NL: U bent geen deelnemer meer aan dit evenement.
+  da-DK: Du deltager ikke længere i denne begivenhed.
+  ca-ES: Ja no ets un participant d'aquest esdeveniment.
+  el-GR: Δε συμμετέχετε πια σε αυτή την εκδήλωση.
+  sv-SE: Du är inte längre deltagare i den här händelsen.
+  pl-PL: Nie jesteś już uczestnikiem tego wydarzenia.
+  pt-BR: Você não é mais um participante deste evento.
+  ru-RU: Вы больше не участник этого события.
+  uk-UA: Ви більше не є учасником цієї події.
+  bg-BG: Вече не сте участник в това събитие.
+  cs-CZ: Již nejste účastníkem této události.
+  sk-SK: Už nie ste účastníkom tejto udalosti.
+  sl-SI: Niste več udeleženec tega dogodka.
+  hr-HR: Više niste sudionik ovog događaja.
+  lt-LT: Jūs nebesate šio įvykio dalyvis.
+  hu-HU: Ön már nem résztvevője ennek az eseménynek.
+  ro-RO: Nu mai sunteți participant la acest eveniment.
+  fi-FI: Et ole enää tämän tapahtuman osallistuja.
+  nb-NO: Du er ikke lenger deltaker på denne hendelsen.
+  tr-TR: Artık bu etkinliğin katılımcısı değilsiniz.
+  zh-CN: 您已不再是此活动的参与者。
+  zh-TW: 您已不再是此活動的參與者。
+  ja-JP: あなたはこの予定の参加者ではなくなりました。
+  ko-KR: 더 이상 이 일정의 참석자가 아닙니다.
+  th-TH: คุณไม่ได้เป็นผู้เข้าร่วมกิจกรรมนี้อีกต่อไป
+  vi-VN: Bạn không còn là người tham dự sự kiện này.
+  id-ID: Anda bukan lagi peserta acara ini.
+  hi-IN: अब आप इस इवेंट के प्रतिभागी नहीं हैं।
+  ar-SA: لم تعد مشاركًا في هذا الحدث.
+  he-IL: אינך עוד משתתף באירוע זה.
+  fa-IR: شما دیگر شرکت‌کننده این رویداد نیستید.
 
 calendar.rsvp_send:
-  en_US: Send response
-  es_ES: Enviar respuesta
-  fr_FR: Envoyer la réponse
-  de_DE: Antwort senden
-  it_IT: Invia risposta
-  pt_PT: Enviar resposta
-  nl_NL: Antwoord versturen
-  da_DK: Send svar
-  ca_ES: Envia la resposta
-  el_GR: Αποστολή απάντησης
-  sv_SE: Skicka svar
-  pl_PL: Wyślij odpowiedź
+  en-US: Send response
+  es-ES: Enviar respuesta
+  fr-FR: Envoyer la réponse
+  de-DE: Antwort senden
+  it-IT: Invia risposta
+  pt-PT: Enviar resposta
+  nl-NL: Antwoord versturen
+  da-DK: Send svar
+  ca-ES: Envia la resposta
+  el-GR: Αποστολή απάντησης
+  sv-SE: Skicka svar
+  pl-PL: Wyślij odpowiedź
+  pt-BR: Enviar resposta
+  ru-RU: Отправить ответ
+  uk-UA: Надіслати відповідь
+  bg-BG: Изпращане на отговор
+  cs-CZ: Odeslat odpověď
+  sk-SK: Odoslať odpoveď
+  sl-SI: Pošlji odgovor
+  hr-HR: Pošalji odgovor
+  lt-LT: Siųsti atsakymą
+  hu-HU: Válasz küldése
+  ro-RO: Trimite răspunsul
+  fi-FI: Lähetä vastaus
+  nb-NO: Send svar
+  tr-TR: Yanıt gönder
+  zh-CN: 发送回复
+  zh-TW: 傳送回覆
+  ja-JP: 返信を送信
+  ko-KR: 회신 보내기
+  th-TH: ส่งการตอบกลับ
+  vi-VN: Gửi phản hồi
+  id-ID: Kirim jawaban
+  hi-IN: उत्तर भेजें
+  ar-SA: إرسال الرد
+  he-IL: שליחת תשובה
+  fa-IR: ارسال پاسخ
 
 calendar.rsvp_update:
-  en_US: Update response
-  es_ES: Actualizar respuesta
-  fr_FR: Mettre à jour la réponse
-  de_DE: Antwort aktualisieren
-  it_IT: Aggiorna risposta
-  pt_PT: Atualizar resposta
-  nl_NL: Antwoord bijwerken
-  da_DK: Opdater svar
-  ca_ES: Actualitza la resposta
-  el_GR: Ενημέρωση απάντησης
-  sv_SE: Uppdatera svar
-  pl_PL: Zaktualizuj odpowiedź
+  en-US: Update response
+  es-ES: Actualizar respuesta
+  fr-FR: Mettre à jour la réponse
+  de-DE: Antwort aktualisieren
+  it-IT: Aggiorna risposta
+  pt-PT: Atualizar resposta
+  nl-NL: Antwoord bijwerken
+  da-DK: Opdater svar
+  ca-ES: Actualitza la resposta
+  el-GR: Ενημέρωση απάντησης
+  sv-SE: Uppdatera svar
+  pl-PL: Zaktualizuj odpowiedź
+  pt-BR: Atualizar resposta
+  ru-RU: Обновить ответ
+  uk-UA: Оновити відповідь
+  bg-BG: Актуализиране на отговора
+  cs-CZ: Aktualizovat odpověď
+  sk-SK: Aktualizovať odpoveď
+  sl-SI: Posodobi odgovor
+  hr-HR: Ažuriraj odgovor
+  lt-LT: Atnaujinti atsakymą
+  hu-HU: Válasz frissítése
+  ro-RO: Actualizează răspunsul
+  fi-FI: Päivitä vastaus
+  nb-NO: Oppdater svar
+  tr-TR: Yanıtı güncelle
+  zh-CN: 更新回复
+  zh-TW: 更新回覆
+  ja-JP: 返信を更新
+  ko-KR: 회신 업데이트
+  th-TH: อัปเดตการตอบกลับ
+  vi-VN: Cập nhật phản hồi
+  id-ID: Perbarui jawaban
+  hi-IN: उत्तर अपडेट करें
+  ar-SA: تحديث الرد
+  he-IL: עדכון התשובה
+  fa-IR: به‌روزرسانی پاسخ
 
 calendar.rsvp_change:
-  en_US: Change my response
-  es_ES: Cambiar mi respuesta
-  fr_FR: Modifier ma réponse
-  de_DE: Meine Antwort ändern
-  it_IT: Cambia la mia risposta
-  pt_PT: Alterar a minha resposta
-  nl_NL: Mijn antwoord wijzigen
-  da_DK: Ret mit svar
-  ca_ES: Canvia la meva resposta
-  el_GR: Αλλαγή της απάντησής μου
-  sv_SE: Ändra mitt svar
-  pl_PL: Zmień moją odpowiedź
+  en-US: Change my response
+  es-ES: Cambiar mi respuesta
+  fr-FR: Modifier ma réponse
+  de-DE: Meine Antwort ändern
+  it-IT: Cambia la mia risposta
+  pt-PT: Alterar a minha resposta
+  nl-NL: Mijn antwoord wijzigen
+  da-DK: Ret mit svar
+  ca-ES: Canvia la meva resposta
+  el-GR: Αλλαγή της απάντησής μου
+  sv-SE: Ändra mitt svar
+  pl-PL: Zmień moją odpowiedź
+  pt-BR: Alterar minha resposta
+  ru-RU: Изменить мой ответ
+  uk-UA: Змінити мою відповідь
+  bg-BG: Промяна на отговора ми
+  cs-CZ: Změnit mou odpověď
+  sk-SK: Zmeniť moju odpoveď
+  sl-SI: Spremeni moj odgovor
+  hr-HR: Promijeni moj odgovor
+  lt-LT: Keisti mano atsakymą
+  hu-HU: Válaszom módosítása
+  ro-RO: Schimbă răspunsul meu
+  fi-FI: Muuta vastaustani
+  nb-NO: Endre svaret mitt
+  tr-TR: Yanıtımı değiştir
+  zh-CN: 更改我的回复
+  zh-TW: 變更我的回覆
+  ja-JP: 返信を変更
+  ko-KR: 회신 변경
+  th-TH: เปลี่ยนการตอบกลับของฉัน
+  vi-VN: Thay đổi phản hồi của tôi
+  id-ID: Ubah jawaban saya
+  hi-IN: मेरा उत्तर बदलें
+  ar-SA: تغيير ردي
+  he-IL: שינוי התשובה שלי
+  fa-IR: تغییر پاسخ من
 
 calendar.rsvp_comment:
-  en_US: Note to the organizer (optional)
-  es_ES: Nota para el organizador (opcional)
-  fr_FR: Message pour l'organisateur (facultatif)
-  de_DE: Nachricht an den Organisator (optional)
-  it_IT: Nota per l'organizzatore (facoltativa)
-  pt_PT: Nota para o organizador (opcional)
-  nl_NL: Bericht aan de organisator (optioneel)
-  da_DK: Besked til arrangøren (valgfri)
-  ca_ES: Nota per a l'organitzador (opcional)
-  el_GR: Σημείωμα προς τον διοργανωτή (προαιρετικό)
-  sv_SE: Meddelande till arrangören (valfritt)
-  pl_PL: Wiadomość do organizatora (opcjonalnie)
+  en-US: Note to the organizer (optional)
+  es-ES: Nota para el organizador (opcional)
+  fr-FR: Message pour l'organisateur (facultatif)
+  de-DE: Nachricht an den Organisator (optional)
+  it-IT: Nota per l'organizzatore (facoltativa)
+  pt-PT: Nota para o organizador (opcional)
+  nl-NL: Bericht aan de organisator (optioneel)
+  da-DK: Besked til arrangøren (valgfri)
+  ca-ES: Nota per a l'organitzador (opcional)
+  el-GR: Σημείωμα προς τον διοργανωτή (προαιρετικό)
+  sv-SE: Meddelande till arrangören (valfritt)
+  pl-PL: Wiadomość do organizatora (opcjonalnie)
+  pt-BR: Nota para o organizador (opcional)
+  ru-RU: Заметка организатору (необязательно)
+  uk-UA: Нотатка організатору (необов'язково)
+  bg-BG: Бележка до организатора (незадължително)
+  cs-CZ: Poznámka pro organizátora (nepovinné)
+  sk-SK: Poznámka pre organizátora (nepovinné)
+  sl-SI: Opomba organizatorju (neobvezno)
+  hr-HR: Napomena organizatoru (nije obavezno)
+  lt-LT: Pastaba organizatoriui (nebūtina)
+  hu-HU: Üzenet a szervezőnek (nem kötelező)
+  ro-RO: Notă pentru organizator (opțional)
+  fi-FI: Viesti järjestäjälle (valinnainen)
+  nb-NO: Melding til arrangøren (valgfritt)
+  tr-TR: Düzenleyene not (isteğe bağlı)
+  zh-CN: 给组织者的备注（可选）
+  zh-TW: 給主辦人的備註（選填）
+  ja-JP: 主催者へのメモ（任意）
+  ko-KR: 주최자에게 보낼 메모 (선택사항)
+  th-TH: ข้อความถึงผู้จัด (ไม่บังคับ)
+  vi-VN: Ghi chú cho người tổ chức (không bắt buộc)
+  id-ID: Catatan untuk penyelenggara (opsional)
+  hi-IN: आयोजक के लिए टिप्पणी (वैकल्पिक)
+  ar-SA: ملاحظة إلى المنظم (اختياري)
+  he-IL: הערה למארגן (לא חובה)
+  fa-IR: یادداشت برای برگزارکننده (اختیاری)
 
 calendar.rsvp_comment_hint:
-  en_US: Add a short message for the organizer.
-  es_ES: Añade un mensaje breve para el organizador.
-  fr_FR: Ajoutez un court message pour l'organisateur.
-  de_DE: Fügen Sie eine kurze Nachricht für den Organisator hinzu.
-  it_IT: Aggiungi un breve messaggio per l'organizzatore.
-  pt_PT: Adicione uma mensagem breve para o organizador.
-  nl_NL: Voeg een kort bericht toe voor de organisator.
-  da_DK: Tilføj en kort besked til arrangøren.
-  ca_ES: Afegeix un missatge breu per a l'organitzador.
-  el_GR: Προσθέστε ένα σύντομο μήνυμα για τον διοργανωτή.
-  sv_SE: Lägg till ett kort meddelande till arrangören.
-  pl_PL: Dodaj krótką wiadomość do organizatora.
+  en-US: Add a short message for the organizer.
+  es-ES: Añade un mensaje breve para el organizador.
+  fr-FR: Ajoutez un court message pour l'organisateur.
+  de-DE: Fügen Sie eine kurze Nachricht für den Organisator hinzu.
+  it-IT: Aggiungi un breve messaggio per l'organizzatore.
+  pt-PT: Adicione uma mensagem breve para o organizador.
+  nl-NL: Voeg een kort bericht toe voor de organisator.
+  da-DK: Tilføj en kort besked til arrangøren.
+  ca-ES: Afegeix un missatge breu per a l'organitzador.
+  el-GR: Προσθέστε ένα σύντομο μήνυμα για τον διοργανωτή.
+  sv-SE: Lägg till ett kort meddelande till arrangören.
+  pl-PL: Dodaj krótką wiadomość do organizatora.
+  pt-BR: Adicione uma mensagem breve para o organizador.
+  ru-RU: Добавьте короткое сообщение для организатора.
+  uk-UA: Додайте коротке повідомлення для організатора.
+  bg-BG: Добавете кратко съобщение за организатора.
+  cs-CZ: Přidejte krátkou zprávu pro organizátora.
+  sk-SK: Pridajte krátku správu pre organizátora.
+  sl-SI: Dodajte kratko sporočilo za organizatorja.
+  hr-HR: Dodajte kratku poruku za organizatora.
+  lt-LT: Pridėkite trumpą žinutę organizatoriui.
+  hu-HU: Írjon rövid üzenetet a szervezőnek.
+  ro-RO: Adăugați un scurt mesaj pentru organizator.
+  fi-FI: Lisää lyhyt viesti järjestäjälle.
+  nb-NO: Legg til en kort melding til arrangøren.
+  tr-TR: Düzenleyen için kısa bir mesaj ekleyin.
+  zh-CN: 为组织者添加一条简短留言。
+  zh-TW: 為主辦人新增一則簡短訊息。
+  ja-JP: 主催者への短いメッセージを追加します。
+  ko-KR: 주최자에게 보낼 짧은 메시지를 추가하세요.
+  th-TH: เพิ่มข้อความสั้น ๆ ถึงผู้จัด
+  vi-VN: Thêm một tin nhắn ngắn cho người tổ chức.
+  id-ID: Tambahkan pesan singkat untuk penyelenggara.
+  hi-IN: आयोजक के लिए एक छोटा संदेश जोड़ें।
+  ar-SA: أضف رسالة قصيرة إلى المنظم.
+  he-IL: אפשר להוסיף הודעה קצרה למארגן.
+  fa-IR: یک پیام کوتاه برای برگزارکننده بنویسید.
 
 calendar.rsvp_expired:
-  en_US: This RSVP link has expired. Ask the organizer to send a new invitation.
-  es_ES: Este enlace de confirmación ha caducado. Pide al organizador que envíe una nueva invitación.
-  fr_FR: Ce lien de réponse a expiré. Demandez à l'organisateur d'envoyer une nouvelle invitation.
-  de_DE: Dieser Antwortlink ist abgelaufen. Bitten Sie den Organisator um eine neue Einladung.
-  it_IT: Questo collegamento di risposta è scaduto. Chiedi all'organizzatore di inviare un nuovo invito.
-  pt_PT: Esta ligação de resposta expirou. Peça ao organizador que envie um novo convite.
-  nl_NL: Deze antwoordlink is verlopen. Vraag de organisator om een nieuwe uitnodiging.
-  da_DK: Dette svarlink er udløbet. Bed arrangøren om at sende en ny invitation.
-  ca_ES: Aquest enllaç de resposta ha caducat. Demana a l'organitzador que enviï una nova invitació.
-  el_GR: Αυτός ο σύνδεσμος απάντησης έχει λήξει. Ζητήστε από τον διοργανωτή να στείλει νέα πρόσκληση.
-  sv_SE: Den här svarslänken har gått ut. Be arrangören skicka en ny inbjudan.
-  pl_PL: Ten link odpowiedzi wygasł. Poproś organizatora o nowe zaproszenie.
+  en-US: This RSVP link has expired. Ask the organizer to send a new invitation.
+  es-ES: Este enlace de confirmación ha caducado. Pide al organizador que envíe una nueva invitación.
+  fr-FR: Ce lien de réponse a expiré. Demandez à l'organisateur d'envoyer une nouvelle invitation.
+  de-DE: Dieser Antwortlink ist abgelaufen. Bitten Sie den Organisator um eine neue Einladung.
+  it-IT: Questo collegamento di risposta è scaduto. Chiedi all'organizzatore di inviare un nuovo invito.
+  pt-PT: Esta ligação de resposta expirou. Peça ao organizador que envie um novo convite.
+  nl-NL: Deze antwoordlink is verlopen. Vraag de organisator om een nieuwe uitnodiging.
+  da-DK: Dette svarlink er udløbet. Bed arrangøren om at sende en ny invitation.
+  ca-ES: Aquest enllaç de resposta ha caducat. Demana a l'organitzador que enviï una nova invitació.
+  el-GR: Αυτός ο σύνδεσμος απάντησης έχει λήξει. Ζητήστε από τον διοργανωτή να στείλει νέα πρόσκληση.
+  sv-SE: Den här svarslänken har gått ut. Be arrangören skicka en ny inbjudan.
+  pl-PL: Ten link odpowiedzi wygasł. Poproś organizatora o nowe zaproszenie.
+  pt-BR: Este link de resposta expirou. Peça ao organizador que envie um novo convite.
+  ru-RU: Срок действия этой ссылки истёк. Попросите организатора отправить новое приглашение.
+  uk-UA: Термін дії цього посилання минув. Попросіть організатора надіслати нове запрошення.
+  bg-BG: Срокът на тази връзка изтече. Помолете организатора да изпрати нова покана.
+  cs-CZ: Platnost tohoto odkazu vypršela. Požádejte organizátora o novou pozvánku.
+  sk-SK: Platnosť tohto odkazu vypršala. Požiadajte organizátora o novú pozvánku.
+  sl-SI: Ta povezava je potekla. Prosite organizatorja, naj pošlje novo vabilo.
+  hr-HR: Ova poveznica je istekla. Zatražite od organizatora novu pozivnicu.
+  lt-LT: Šios nuorodos galiojimas baigėsi. Paprašykite organizatoriaus atsiųsti naują kvietimą.
+  hu-HU: Ez a hivatkozás lejárt. Kérje meg a szervezőt, hogy küldjön új meghívót.
+  ro-RO: Acest link a expirat. Cereți organizatorului să trimită o nouă invitație.
+  fi-FI: Tämä linkki on vanhentunut. Pyydä järjestäjää lähettämään uusi kutsu.
+  nb-NO: Denne lenken er utløpt. Be arrangøren sende en ny invitasjon.
+  tr-TR: Bu bağlantının süresi doldu. Düzenleyenden yeni bir davet göndermesini isteyin.
+  zh-CN: 此链接已过期。请联系组织者重新发送邀请。
+  zh-TW: 此連結已過期。請主辦人重新寄送邀請。
+  ja-JP: このリンクは有効期限が切れています。主催者に新しい招待を送ってもらってください。
+  ko-KR: 이 링크는 만료되었습니다. 주최자에게 새 초대를 요청하세요.
+  th-TH: ลิงก์นี้หมดอายุแล้ว โปรดขอให้ผู้จัดส่งคำเชิญใหม่
+  vi-VN: Liên kết này đã hết hạn. Hãy đề nghị người tổ chức gửi lời mời mới.
+  id-ID: Tautan ini telah kedaluwarsa. Mintalah penyelenggara mengirim undangan baru.
+  hi-IN: यह लिंक समाप्त हो चुका है। आयोजक से नया आमंत्रण भेजने के लिए कहें।
+  ar-SA: انتهت صلاحية هذا الرابط. اطلب من المنظم إرسال دعوة جديدة.
+  he-IL: תוקף הקישור פג. יש לבקש מהמארגן לשלוח הזמנה חדשה.
+  fa-IR: این پیوند منقضی شده است. از برگزارکننده بخواهید دعوت‌نامه جدیدی بفرستد.
 
 calendar.rsvp_error:
-  en_US: Temporary server failure. If the problem persists, contact your administrator.
-  es_ES: Fallo temporal del servidor. Si el problema persiste, contacta con tu administrador.
-  fr_FR: Panne temporaire du serveur. Si le problème persiste, contactez votre administrateur.
-  de_DE: Vorübergehender Serverfehler. Wenn das Problem weiterhin besteht, wenden Sie sich an Ihren Administrator.
-  it_IT: Errore temporaneo del server. Se il problema persiste, contatta il tuo amministratore.
-  pt_PT: Falha temporária do servidor. Se o problema persistir, contacte o seu administrador.
-  nl_NL: Tijdelijke serverfout. Neem contact op met uw beheerder als het probleem aanhoudt.
-  da_DK: Midlertidig serverfejl. Kontakt din administrator, hvis problemet fortsætter.
-  ca_ES: Error temporal del servidor. Si el problema persisteix, contacta amb el teu administrador.
-  el_GR: Προσωρινή αποτυχία διακομιστή. Αν το πρόβλημα παραμείνει, επικοινωνήστε με τον διαχειριστή σας.
-  sv_SE: Tillfälligt serverfel. Kontakta din administratör om problemet kvarstår.
-  pl_PL: Tymczasowy błąd serwera. Jeśli problem będzie się powtarzał, skontaktuj się z administratorem.
+  en-US: Temporary server failure. If the problem persists, contact your administrator.
+  es-ES: Fallo temporal del servidor. Si el problema persiste, contacta con tu administrador.
+  fr-FR: Panne temporaire du serveur. Si le problème persiste, contactez votre administrateur.
+  de-DE: Vorübergehender Serverfehler. Wenn das Problem weiterhin besteht, wenden Sie sich an Ihren Administrator.
+  it-IT: Errore temporaneo del server. Se il problema persiste, contatta il tuo amministratore.
+  pt-PT: Falha temporária do servidor. Se o problema persistir, contacte o seu administrador.
+  nl-NL: Tijdelijke serverfout. Neem contact op met uw beheerder als het probleem aanhoudt.
+  da-DK: Midlertidig serverfejl. Kontakt din administrator, hvis problemet fortsætter.
+  ca-ES: Error temporal del servidor. Si el problema persisteix, contacta amb el teu administrador.
+  el-GR: Προσωρινή αποτυχία διακομιστή. Αν το πρόβλημα παραμείνει, επικοινωνήστε με τον διαχειριστή σας.
+  sv-SE: Tillfälligt serverfel. Kontakta din administratör om problemet kvarstår.
+  pl-PL: Tymczasowy błąd serwera. Jeśli problem będzie się powtarzał, skontaktuj się z administratorem.
+  pt-BR: Falha temporária do servidor. Se o problema persistir, entre em contato com seu administrador.
+  ru-RU: Временный сбой сервера. Если проблема повторяется, обратитесь к администратору.
+  uk-UA: Тимчасовий збій сервера. Якщо проблема не зникає, зверніться до адміністратора.
+  bg-BG: Временна сървърна грешка. Ако проблемът продължава, свържете се с администратора си.
+  cs-CZ: Dočasná chyba serveru. Pokud problém přetrvává, obraťte se na správce.
+  sk-SK: Dočasná chyba servera. Ak problém pretrváva, obráťte sa na správcu.
+  sl-SI: Začasna napaka strežnika. Če težava ne izgine, se obrnite na skrbnika.
+  hr-HR: Privremena pogreška poslužitelja. Ako se problem nastavi, obratite se administratoru.
+  lt-LT: Laikina serverio klaida. Jei problema kartojasi, kreipkitės į administratorių.
+  hu-HU: Átmeneti szerverhiba. Ha a probléma továbbra is fennáll, forduljon a rendszergazdához.
+  ro-RO: Eroare temporară de server. Dacă problema persistă, contactați administratorul.
+  fi-FI: Tilapäinen palvelinvirhe. Jos ongelma jatkuu, ota yhteyttä järjestelmänvalvojaan.
+  nb-NO: Midlertidig serverfeil. Kontakt administratoren hvis problemet vedvarer.
+  tr-TR: Geçici sunucu hatası. Sorun devam ederse yöneticinizle iletişime geçin.
+  zh-CN: 服务器暂时出错。如果问题仍然存在，请联系管理员。
+  zh-TW: 伺服器暫時發生錯誤。若問題持續發生，請聯絡管理員。
+  ja-JP: サーバーの一時的なエラーです。問題が解決しない場合は管理者にお問い合わせください。
+  ko-KR: 일시적인 서버 오류입니다. 문제가 계속되면 관리자에게 문의하세요.
+  th-TH: เซิร์ฟเวอร์ขัดข้องชั่วคราว หากยังพบปัญหา โปรดติดต่อผู้ดูแลระบบ
+  vi-VN: Máy chủ tạm thời gặp sự cố. Nếu vấn đề vẫn tiếp diễn, hãy liên hệ quản trị viên.
+  id-ID: Kegagalan server sementara. Jika masalah berlanjut, hubungi administrator Anda.
+  hi-IN: सर्वर में अस्थायी गड़बड़ी। समस्या बनी रहे तो अपने व्यवस्थापक से संपर्क करें।
+  ar-SA: عطل مؤقت في الخادم. إذا استمرت المشكلة، فاتصل بالمسؤول.
+  he-IL: תקלה זמנית בשרת. אם הבעיה נמשכת, יש לפנות למנהל המערכת.
+  fa-IR: خطای موقت سرور. اگر مشکل ادامه داشت، با مدیر خود تماس بگیرید.
 
 calendar.rsvp_notified:
-  en_US: The organizer has been notified.
-  es_ES: Se ha notificado al organizador.
-  fr_FR: L'organisateur a été prévenu.
-  de_DE: Der Organisator wurde benachrichtigt.
-  it_IT: L'organizzatore è stato avvisato.
-  pt_PT: O organizador foi notificado.
-  nl_NL: De organisator is op de hoogte gebracht.
-  da_DK: Arrangøren er blevet underrettet.
-  ca_ES: S'ha notificat l'organitzador.
-  el_GR: Ο διοργανωτής ειδοποιήθηκε.
-  sv_SE: Arrangören har underrättats.
-  pl_PL: Organizator został powiadomiony.
+  en-US: The organizer has been notified.
+  es-ES: Se ha notificado al organizador.
+  fr-FR: L'organisateur a été prévenu.
+  de-DE: Der Organisator wurde benachrichtigt.
+  it-IT: L'organizzatore è stato avvisato.
+  pt-PT: O organizador foi notificado.
+  nl-NL: De organisator is op de hoogte gebracht.
+  da-DK: Arrangøren er blevet underrettet.
+  ca-ES: S'ha notificat l'organitzador.
+  el-GR: Ο διοργανωτής ειδοποιήθηκε.
+  sv-SE: Arrangören har underrättats.
+  pl-PL: Organizator został powiadomiony.
+  pt-BR: O organizador foi notificado.
+  ru-RU: Организатор уведомлён.
+  uk-UA: Організатора сповіщено.
+  bg-BG: Организаторът беше уведомен.
+  cs-CZ: Organizátor byl informován.
+  sk-SK: Organizátor bol informovaný.
+  sl-SI: Organizator je bil obveščen.
+  hr-HR: Organizator je obaviješten.
+  lt-LT: Organizatorius informuotas.
+  hu-HU: A szervezőt értesítettük.
+  ro-RO: Organizatorul a fost notificat.
+  fi-FI: Järjestäjälle on ilmoitettu.
+  nb-NO: Arrangøren er varslet.
+  tr-TR: Düzenleyen bilgilendirildi.
+  zh-CN: 已通知组织者。
+  zh-TW: 已通知主辦人。
+  ja-JP: 主催者に通知しました。
+  ko-KR: 주최자에게 알렸습니다.
+  th-TH: แจ้งผู้จัดแล้ว
+  vi-VN: Người tổ chức đã được thông báo.
+  id-ID: Penyelenggara telah diberi tahu.
+  hi-IN: आयोजक को सूचित कर दिया गया है।
+  ar-SA: تم إشعار المنظم.
+  he-IL: המארגן קיבל הודעה.
+  fa-IR: برگزارکننده مطلع شد.
 
 calendar.rsvp_you:
-  en_US: you
-  es_ES: tú
-  fr_FR: vous
-  de_DE: Sie
-  it_IT: tu
-  pt_PT: você
-  nl_NL: u
-  da_DK: dig
-  ca_ES: tu
-  el_GR: εσείς
-  sv_SE: du
-  pl_PL: Ty
+  en-US: you
+  es-ES: tú
+  fr-FR: vous
+  de-DE: Sie
+  it-IT: tu
+  pt-PT: você
+  nl-NL: u
+  da-DK: dig
+  ca-ES: tu
+  el-GR: εσείς
+  sv-SE: du
+  pl-PL: Ty
+  pt-BR: você
+  ru-RU: вы
+  uk-UA: ви
+  bg-BG: вие
+  cs-CZ: vy
+  sk-SK: vy
+  sl-SI: vi
+  hr-HR: vi
+  lt-LT: jūs
+  hu-HU: Ön
+  ro-RO: dumneavoastră
+  fi-FI: sinä
+  nb-NO: du
+  tr-TR: siz
+  zh-CN: 您
+  zh-TW: 您
+  ja-JP: あなた
+  ko-KR: 나
+  th-TH: คุณ
+  vi-VN: bạn
+  id-ID: Anda
+  hi-IN: आप
+  ar-SA: أنت
+  he-IL: את/ה
+  fa-IR: شما
 
 calendar.show_more:
-  en_US: Show more
-  es_ES: Mostrar más
-  fr_FR: Afficher plus
-  de_DE: Mehr anzeigen
-  it_IT: Mostra altro
-  pt_PT: Mostrar mais
-  nl_NL: Meer tonen
-  da_DK: Vis mere
-  ca_ES: Mostra'n més
-  el_GR: Εμφάνιση περισσότερων
-  sv_SE: Visa mer
-  pl_PL: Pokaż więcej
+  en-US: Show more
+  es-ES: Mostrar más
+  fr-FR: Afficher plus
+  de-DE: Mehr anzeigen
+  it-IT: Mostra altro
+  pt-PT: Mostrar mais
+  nl-NL: Meer tonen
+  da-DK: Vis mere
+  ca-ES: Mostra'n més
+  el-GR: Εμφάνιση περισσότερων
+  sv-SE: Visa mer
+  pl-PL: Pokaż więcej
+  pt-BR: Mostrar mais
+  ru-RU: Показать больше
+  uk-UA: Показати більше
+  bg-BG: Показване на още
+  cs-CZ: Zobrazit více
+  sk-SK: Zobraziť viac
+  sl-SI: Prikaži več
+  hr-HR: Prikaži više
+  lt-LT: Rodyti daugiau
+  hu-HU: Több megjelenítése
+  ro-RO: Afișează mai mult
+  fi-FI: Näytä enemmän
+  nb-NO: Vis mer
+  tr-TR: Daha fazla göster
+  zh-CN: 显示更多
+  zh-TW: 顯示更多
+  ja-JP: さらに表示
+  ko-KR: 더 보기
+  th-TH: แสดงเพิ่มเติม
+  vi-VN: Hiển thị thêm
+  id-ID: Tampilkan lebih banyak
+  hi-IN: और दिखाएँ
+  ar-SA: عرض المزيد
+  he-IL: הצגת עוד
+  fa-IR: نمایش بیشتر
 
 calendar.show_less:
-  en_US: Show less
-  es_ES: Mostrar menos
-  fr_FR: Afficher moins
-  de_DE: Weniger anzeigen
-  it_IT: Mostra meno
-  pt_PT: Mostrar menos
-  nl_NL: Minder tonen
-  da_DK: Vis mindre
-  ca_ES: Mostra'n menys
-  el_GR: Εμφάνιση λιγότερων
-  sv_SE: Visa mindre
-  pl_PL: Pokaż mniej
+  en-US: Show less
+  es-ES: Mostrar menos
+  fr-FR: Afficher moins
+  de-DE: Weniger anzeigen
+  it-IT: Mostra meno
+  pt-PT: Mostrar menos
+  nl-NL: Minder tonen
+  da-DK: Vis mindre
+  ca-ES: Mostra'n menys
+  el-GR: Εμφάνιση λιγότερων
+  sv-SE: Visa mindre
+  pl-PL: Pokaż mniej
+  pt-BR: Mostrar menos
+  ru-RU: Показать меньше
+  uk-UA: Показати менше
+  bg-BG: Показване на по-малко
+  cs-CZ: Zobrazit méně
+  sk-SK: Zobraziť menej
+  sl-SI: Prikaži manj
+  hr-HR: Prikaži manje
+  lt-LT: Rodyti mažiau
+  hu-HU: Kevesebb megjelenítése
+  ro-RO: Afișează mai puțin
+  fi-FI: Näytä vähemmän
+  nb-NO: Vis mindre
+  tr-TR: Daha az göster
+  zh-CN: 显示更少
+  zh-TW: 顯示較少
+  ja-JP: 表示を減らす
+  ko-KR: 간략히 보기
+  th-TH: แสดงน้อยลง
+  vi-VN: Thu gọn
+  id-ID: Tampilkan lebih sedikit
+  hi-IN: कम दिखाएँ
+  ar-SA: عرض أقل
+  he-IL: הצגה מצומצמת
+  fa-IR: نمایش کمتر
 
 calendar.rrule_secondly:
-  en_US: one=Every second;other=Every $n seconds
-  es_ES: one=Cada segundo;other=Cada $n segundos
-  fr_FR: one=Toutes les secondes;other=Toutes les $n secondes
-  de_DE: one=Sekündlich;other=Alle $n Sekunden
-  it_IT: one=Ogni secondo;other=Ogni $n secondi
-  pt_PT: one=Todos os segundos;other=A cada $n segundos
-  nl_NL: one=Elke seconde;other=Elke $n seconden
-  da_DK: one=Hvert sekund;other=Hvert $n. sekund
-  ca_ES: one=Cada segon;other=Cada $n segons
-  el_GR: one=Κάθε δευτερόλεπτο;other=Κάθε $n δευτερόλεπτα
-  sv_SE: one=Varje sekund;other=Var $n:e sekund
-  pl_PL: one=Co sekundę;few=Co $n sekundy;many=Co $n sekund;other=Co $n sekundy
+  en-US: one=Every second;other=Every $n seconds
+  es-ES: one=Cada segundo;other=Cada $n segundos
+  fr-FR: one=Toutes les secondes;other=Toutes les $n secondes
+  de-DE: one=Sekündlich;other=Alle $n Sekunden
+  it-IT: one=Ogni secondo;other=Ogni $n secondi
+  pt-PT: one=Todos os segundos;other=A cada $n segundos
+  nl-NL: one=Elke seconde;other=Elke $n seconden
+  da-DK: one=Hvert sekund;other=Hvert $n. sekund
+  ca-ES: one=Cada segon;other=Cada $n segons
+  el-GR: one=Κάθε δευτερόλεπτο;other=Κάθε $n δευτερόλεπτα
+  sv-SE: one=Varje sekund;other=Var $n:e sekund
+  pl-PL: one=Co sekundę;few=Co $n sekundy;many=Co $n sekund;other=Co $n sekundy
+  pt-BR: one=A cada segundo;other=A cada $n segundos
+  ru-RU: one=Каждую секунду;few=Каждые $n секунды;many=Каждые $n секунд;other=Каждые $n секунды
+  uk-UA: one=Щосекунди;few=Кожні $n секунди;many=Кожні $n секунд;other=Кожні $n секунди
+  bg-BG: one=Всяка секунда;other=На всеки $n секунди
+  cs-CZ: one=Každou sekundu;few=Každé $n sekundy;other=Každých $n sekund
+  sk-SK: one=Každú sekundu;few=Každé $n sekundy;other=Každých $n sekúnd
+  sl-SI: one=Vsako sekundo;two=Vsaki $n sekundi;few=Vsake $n sekunde;other=Vsakih $n sekund
+  hr-HR: one=Svake sekunde;few=Svake $n sekunde;other=Svakih $n sekundi
+  lt-LT: one=Kas sekundę;few=Kas $n sekundes;other=Kas $n sekundžių
+  hu-HU: one=Másodpercenként;other=Minden $n. másodpercben
+  ro-RO: one=În fiecare secundă;few=La fiecare $n secunde;other=La fiecare $n de secunde
+  fi-FI: one=Joka sekunti;other=$n sekunnin välein
+  nb-NO: one=Hvert sekund;other=Hvert $n. sekund
+  tr-TR: one=Her saniye;other=Her $n saniyede bir
+  zh-CN: other=每$n秒
+  zh-TW: other=每$n秒
+  ja-JP: other=$n秒ごと
+  ko-KR: other=$n초마다
+  th-TH: other=ทุก $n วินาที
+  vi-VN: other=Mỗi $n giây
+  id-ID: other=Setiap $n detik
+  hi-IN: one=हर सेकंड;other=हर $n सेकंड
+  ar-SA: one=كل ثانية;two=كل ثانيتين;few=كل $n ثوانٍ;many=كل $n ثانية;other=كل $n ثانية
+  he-IL: one=בכל שנייה;two=בכל שתי שניות;other=בכל $n שניות
+  fa-IR: one=هر ثانیه;other=هر $n ثانیه
 
 calendar.rrule_minutely:
-  en_US: one=Every minute;other=Every $n minutes
-  es_ES: one=Cada minuto;other=Cada $n minutos
-  fr_FR: one=Toutes les minutes;other=Toutes les $n minutes
-  de_DE: one=Minütlich;other=Alle $n Minuten
-  it_IT: one=Ogni minuto;other=Ogni $n minuti
-  pt_PT: one=Todos os minutos;other=A cada $n minutos
-  nl_NL: one=Elke minuut;other=Elke $n minuten
-  da_DK: one=Hvert minut;other=Hvert $n. minut
-  ca_ES: one=Cada minut;other=Cada $n minuts
-  el_GR: one=Κάθε λεπτό;other=Κάθε $n λεπτά
-  sv_SE: one=Varje minut;other=Var $n:e minut
-  pl_PL: one=Co minutę;few=Co $n minuty;many=Co $n minut;other=Co $n minuty
+  en-US: one=Every minute;other=Every $n minutes
+  es-ES: one=Cada minuto;other=Cada $n minutos
+  fr-FR: one=Toutes les minutes;other=Toutes les $n minutes
+  de-DE: one=Minütlich;other=Alle $n Minuten
+  it-IT: one=Ogni minuto;other=Ogni $n minuti
+  pt-PT: one=Todos os minutos;other=A cada $n minutos
+  nl-NL: one=Elke minuut;other=Elke $n minuten
+  da-DK: one=Hvert minut;other=Hvert $n. minut
+  ca-ES: one=Cada minut;other=Cada $n minuts
+  el-GR: one=Κάθε λεπτό;other=Κάθε $n λεπτά
+  sv-SE: one=Varje minut;other=Var $n:e minut
+  pl-PL: one=Co minutę;few=Co $n minuty;many=Co $n minut;other=Co $n minuty
+  pt-BR: one=A cada minuto;other=A cada $n minutos
+  ru-RU: one=Каждую минуту;few=Каждые $n минуты;many=Каждые $n минут;other=Каждые $n минуты
+  uk-UA: one=Щохвилини;few=Кожні $n хвилини;many=Кожні $n хвилин;other=Кожні $n хвилини
+  bg-BG: one=Всяка минута;other=На всеки $n минути
+  cs-CZ: one=Každou minutu;few=Každé $n minuty;other=Každých $n minut
+  sk-SK: one=Každú minútu;few=Každé $n minúty;other=Každých $n minút
+  sl-SI: one=Vsako minuto;two=Vsaki $n minuti;few=Vsake $n minute;other=Vsakih $n minut
+  hr-HR: one=Svake minute;few=Svake $n minute;other=Svakih $n minuta
+  lt-LT: one=Kas minutę;few=Kas $n minutes;other=Kas $n minučių
+  hu-HU: one=Percenként;other=Minden $n. percben
+  ro-RO: one=În fiecare minut;few=La fiecare $n minute;other=La fiecare $n de minute
+  fi-FI: one=Joka minuutti;other=$n minuutin välein
+  nb-NO: one=Hvert minutt;other=Hvert $n. minutt
+  tr-TR: one=Her dakika;other=Her $n dakikada bir
+  zh-CN: other=每$n分钟
+  zh-TW: other=每$n分鐘
+  ja-JP: other=$n分ごと
+  ko-KR: other=$n분마다
+  th-TH: other=ทุก $n นาที
+  vi-VN: other=Mỗi $n phút
+  id-ID: other=Setiap $n menit
+  hi-IN: one=हर मिनट;other=हर $n मिनट
+  ar-SA: one=كل دقيقة;two=كل دقيقتين;few=كل $n دقائق;many=كل $n دقيقة;other=كل $n دقيقة
+  he-IL: one=בכל דקה;two=בכל שתי דקות;other=בכל $n דקות
+  fa-IR: one=هر دقیقه;other=هر $n دقیقه
 
 calendar.rrule_hourly:
-  en_US: one=Every hour;other=Every $n hours
-  es_ES: one=Cada hora;other=Cada $n horas
-  fr_FR: one=Toutes les heures;other=Toutes les $n heures
-  de_DE: one=Stündlich;other=Alle $n Stunden
-  it_IT: one=Ogni ora;other=Ogni $n ore
-  pt_PT: one=Todas as horas;other=A cada $n horas
-  nl_NL: one=Elk uur;other=Elke $n uur
-  da_DK: one=Hver time;other=Hver $n. time
-  ca_ES: one=Cada hora;other=Cada $n hores
-  el_GR: one=Κάθε ώρα;other=Κάθε $n ώρες
-  sv_SE: one=Varje timme;other=Var $n:e timme
-  pl_PL: one=Co godzinę;few=Co $n godziny;many=Co $n godzin;other=Co $n godziny
+  en-US: one=Every hour;other=Every $n hours
+  es-ES: one=Cada hora;other=Cada $n horas
+  fr-FR: one=Toutes les heures;other=Toutes les $n heures
+  de-DE: one=Stündlich;other=Alle $n Stunden
+  it-IT: one=Ogni ora;other=Ogni $n ore
+  pt-PT: one=Todas as horas;other=A cada $n horas
+  nl-NL: one=Elk uur;other=Elke $n uur
+  da-DK: one=Hver time;other=Hver $n. time
+  ca-ES: one=Cada hora;other=Cada $n hores
+  el-GR: one=Κάθε ώρα;other=Κάθε $n ώρες
+  sv-SE: one=Varje timme;other=Var $n:e timme
+  pl-PL: one=Co godzinę;few=Co $n godziny;many=Co $n godzin;other=Co $n godziny
+  pt-BR: one=A cada hora;other=A cada $n horas
+  ru-RU: one=Каждый час;few=Каждые $n часа;many=Каждые $n часов;other=Каждые $n часа
+  uk-UA: one=Щогодини;few=Кожні $n години;many=Кожні $n годин;other=Кожні $n години
+  bg-BG: one=Всеки час;other=На всеки $n часа
+  cs-CZ: one=Každou hodinu;few=Každé $n hodiny;other=Každých $n hodin
+  sk-SK: one=Každú hodinu;few=Každé $n hodiny;other=Každých $n hodín
+  sl-SI: one=Vsako uro;two=Vsaki $n uri;few=Vsake $n ure;other=Vsakih $n ur
+  hr-HR: one=Svakog sata;few=Svaka $n sata;other=Svakih $n sati
+  lt-LT: one=Kas valandą;few=Kas $n valandas;other=Kas $n valandų
+  hu-HU: one=Óránként;other=Minden $n. órában
+  ro-RO: one=În fiecare oră;few=La fiecare $n ore;other=La fiecare $n de ore
+  fi-FI: one=Joka tunti;other=$n tunnin välein
+  nb-NO: one=Hver time;other=Hver $n. time
+  tr-TR: one=Her saat;other=Her $n saatte bir
+  zh-CN: other=每$n小时
+  zh-TW: other=每$n小時
+  ja-JP: other=$n時間ごと
+  ko-KR: other=$n시간마다
+  th-TH: other=ทุก $n ชั่วโมง
+  vi-VN: other=Mỗi $n giờ
+  id-ID: other=Setiap $n jam
+  hi-IN: one=हर घंटे;other=हर $n घंटे
+  ar-SA: one=كل ساعة;two=كل ساعتين;few=كل $n ساعات;many=كل $n ساعة;other=كل $n ساعة
+  he-IL: one=בכל שעה;two=בכל שעתיים;other=בכל $n שעות
+  fa-IR: one=هر ساعت;other=هر $n ساعت
 
 calendar.rrule_daily:
-  en_US: one=Every day;other=Every $n days
-  es_ES: one=Todos los días;other=Cada $n días
-  fr_FR: one=Tous les jours;other=Tous les $n jours
-  de_DE: one=Täglich;other=Alle $n Tage
-  it_IT: one=Ogni giorno;other=Ogni $n giorni
-  pt_PT: one=Todos os dias;other=A cada $n dias
-  nl_NL: one=Elke dag;other=Elke $n dagen
-  da_DK: one=Hver dag;other=Hver $n. dag
-  ca_ES: one=Cada dia;other=Cada $n dies
-  el_GR: one=Κάθε μέρα;other=Κάθε $n μέρες
-  sv_SE: one=Varje dag;other=Var $n:e dag
-  pl_PL: one=Codziennie;few=Co $n dni;many=Co $n dni;other=Co $n dni
+  en-US: one=Every day;other=Every $n days
+  es-ES: one=Todos los días;other=Cada $n días
+  fr-FR: one=Tous les jours;other=Tous les $n jours
+  de-DE: one=Täglich;other=Alle $n Tage
+  it-IT: one=Ogni giorno;other=Ogni $n giorni
+  pt-PT: one=Todos os dias;other=A cada $n dias
+  nl-NL: one=Elke dag;other=Elke $n dagen
+  da-DK: one=Hver dag;other=Hver $n. dag
+  ca-ES: one=Cada dia;other=Cada $n dies
+  el-GR: one=Κάθε μέρα;other=Κάθε $n μέρες
+  sv-SE: one=Varje dag;other=Var $n:e dag
+  pl-PL: one=Codziennie;few=Co $n dni;many=Co $n dni;other=Co $n dni
+  pt-BR: one=Todos os dias;other=A cada $n dias
+  ru-RU: one=Каждый день;few=Каждые $n дня;many=Каждые $n дней;other=Каждые $n дня
+  uk-UA: one=Щодня;few=Кожні $n дні;many=Кожні $n днів;other=Кожні $n дні
+  bg-BG: one=Всеки ден;other=На всеки $n дни
+  cs-CZ: one=Každý den;few=Každé $n dny;other=Každých $n dní
+  sk-SK: one=Každý deň;few=Každé $n dni;other=Každých $n dní
+  sl-SI: one=Vsak dan;two=Vsaka $n dneva;few=Vsake $n dni;other=Vsakih $n dni
+  hr-HR: one=Svakog dana;few=Svaka $n dana;other=Svakih $n dana
+  lt-LT: one=Kas dieną;few=Kas $n dienas;other=Kas $n dienų
+  hu-HU: one=Naponta;other=Minden $n. napon
+  ro-RO: one=În fiecare zi;few=La fiecare $n zile;other=La fiecare $n de zile
+  fi-FI: one=Joka päivä;other=$n päivän välein
+  nb-NO: one=Hver dag;other=Hver $n. dag
+  tr-TR: one=Her gün;other=Her $n günde bir
+  zh-CN: other=每$n天
+  zh-TW: other=每$n天
+  ja-JP: other=$n日ごと
+  ko-KR: other=$n일마다
+  th-TH: other=ทุก $n วัน
+  vi-VN: other=Mỗi $n ngày
+  id-ID: other=Setiap $n hari
+  hi-IN: one=हर दिन;other=हर $n दिन
+  ar-SA: one=كل يوم;two=كل يومين;few=كل $n أيام;many=كل $n يومًا;other=كل $n يوم
+  he-IL: one=בכל יום;two=בכל יומיים;other=בכל $n ימים
+  fa-IR: one=هر روز;other=هر $n روز
 
 calendar.rrule_weekly:
-  en_US: one=Every week;other=Every $n weeks
-  es_ES: one=Cada semana;other=Cada $n semanas
-  fr_FR: one=Toutes les semaines;other=Toutes les $n semaines
-  de_DE: one=Wöchentlich;other=Alle $n Wochen
-  it_IT: one=Ogni settimana;other=Ogni $n settimane
-  pt_PT: one=Todas as semanas;other=A cada $n semanas
-  nl_NL: one=Elke week;other=Elke $n weken
-  da_DK: one=Hver uge;other=Hver $n. uge
-  ca_ES: one=Cada setmana;other=Cada $n setmanes
-  el_GR: one=Κάθε εβδομάδα;other=Κάθε $n εβδομάδες
-  sv_SE: one=Varje vecka;other=Var $n:e vecka
-  pl_PL: one=Co tydzień;few=Co $n tygodnie;many=Co $n tygodni;other=Co $n tygodnia
+  en-US: one=Every week;other=Every $n weeks
+  es-ES: one=Cada semana;other=Cada $n semanas
+  fr-FR: one=Toutes les semaines;other=Toutes les $n semaines
+  de-DE: one=Wöchentlich;other=Alle $n Wochen
+  it-IT: one=Ogni settimana;other=Ogni $n settimane
+  pt-PT: one=Todas as semanas;other=A cada $n semanas
+  nl-NL: one=Elke week;other=Elke $n weken
+  da-DK: one=Hver uge;other=Hver $n. uge
+  ca-ES: one=Cada setmana;other=Cada $n setmanes
+  el-GR: one=Κάθε εβδομάδα;other=Κάθε $n εβδομάδες
+  sv-SE: one=Varje vecka;other=Var $n:e vecka
+  pl-PL: one=Co tydzień;few=Co $n tygodnie;many=Co $n tygodni;other=Co $n tygodnia
+  pt-BR: one=Toda semana;other=A cada $n semanas
+  ru-RU: one=Каждую неделю;few=Каждые $n недели;many=Каждые $n недель;other=Каждые $n недели
+  uk-UA: one=Щотижня;few=Кожні $n тижні;many=Кожні $n тижнів;other=Кожні $n тижні
+  bg-BG: one=Всяка седмица;other=На всеки $n седмици
+  cs-CZ: one=Každý týden;few=Každé $n týdny;other=Každých $n týdnů
+  sk-SK: one=Každý týždeň;few=Každé $n týždne;other=Každých $n týždňov
+  sl-SI: one=Vsak teden;two=Vsaka $n tedna;few=Vsake $n tedne;other=Vsakih $n tednov
+  hr-HR: one=Svakog tjedna;few=Svaka $n tjedna;other=Svakih $n tjedana
+  lt-LT: one=Kas savaitę;few=Kas $n savaites;other=Kas $n savaičių
+  hu-HU: one=Hetente;other=Minden $n. héten
+  ro-RO: one=În fiecare săptămână;few=La fiecare $n săptămâni;other=La fiecare $n de săptămâni
+  fi-FI: one=Joka viikko;other=$n viikon välein
+  nb-NO: one=Hver uke;other=Hver $n. uke
+  tr-TR: one=Her hafta;other=Her $n haftada bir
+  zh-CN: other=每$n周
+  zh-TW: other=每$n週
+  ja-JP: other=$n週間ごと
+  ko-KR: other=$n주마다
+  th-TH: other=ทุก $n สัปดาห์
+  vi-VN: other=Mỗi $n tuần
+  id-ID: other=Setiap $n minggu
+  hi-IN: one=हर सप्ताह;other=हर $n सप्ताह
+  ar-SA: one=كل أسبوع;two=كل أسبوعين;few=كل $n أسابيع;many=كل $n أسبوعًا;other=كل $n أسبوع
+  he-IL: one=בכל שבוע;two=בכל שבועיים;other=בכל $n שבועות
+  fa-IR: one=هر هفته;other=هر $n هفته
 
 calendar.rrule_monthly:
-  en_US: one=Every month;other=Every $n months
-  es_ES: one=Cada mes;other=Cada $n meses
-  fr_FR: one=Tous les mois;other=Tous les $n mois
-  de_DE: one=Monatlich;other=Alle $n Monate
-  it_IT: one=Ogni mese;other=Ogni $n mesi
-  pt_PT: one=Todos os meses;other=A cada $n meses
-  nl_NL: one=Elke maand;other=Elke $n maanden
-  da_DK: one=Hver måned;other=Hver $n. måned
-  ca_ES: one=Cada mes;other=Cada $n mesos
-  el_GR: one=Κάθε μήνα;other=Κάθε $n μήνες
-  sv_SE: one=Varje månad;other=Var $n:e månad
-  pl_PL: one=Co miesiąc;few=Co $n miesiące;many=Co $n miesięcy;other=Co $n miesiąca
+  en-US: one=Every month;other=Every $n months
+  es-ES: one=Cada mes;other=Cada $n meses
+  fr-FR: one=Tous les mois;other=Tous les $n mois
+  de-DE: one=Monatlich;other=Alle $n Monate
+  it-IT: one=Ogni mese;other=Ogni $n mesi
+  pt-PT: one=Todos os meses;other=A cada $n meses
+  nl-NL: one=Elke maand;other=Elke $n maanden
+  da-DK: one=Hver måned;other=Hver $n. måned
+  ca-ES: one=Cada mes;other=Cada $n mesos
+  el-GR: one=Κάθε μήνα;other=Κάθε $n μήνες
+  sv-SE: one=Varje månad;other=Var $n:e månad
+  pl-PL: one=Co miesiąc;few=Co $n miesiące;many=Co $n miesięcy;other=Co $n miesiąca
+  pt-BR: one=Todo mês;other=A cada $n meses
+  ru-RU: one=Каждый месяц;few=Каждые $n месяца;many=Каждые $n месяцев;other=Каждые $n месяца
+  uk-UA: one=Щомісяця;few=Кожні $n місяці;many=Кожні $n місяців;other=Кожні $n місяці
+  bg-BG: one=Всеки месец;other=На всеки $n месеца
+  cs-CZ: one=Každý měsíc;few=Každé $n měsíce;other=Každých $n měsíců
+  sk-SK: one=Každý mesiac;few=Každé $n mesiace;other=Každých $n mesiacov
+  sl-SI: one=Vsak mesec;two=Vsaka $n meseca;few=Vsake $n mesece;other=Vsakih $n mesecev
+  hr-HR: one=Svakog mjeseca;few=Svaka $n mjeseca;other=Svakih $n mjeseci
+  lt-LT: one=Kas mėnesį;few=Kas $n mėnesius;other=Kas $n mėnesių
+  hu-HU: one=Havonta;other=Minden $n. hónapban
+  ro-RO: one=În fiecare lună;few=La fiecare $n luni;other=La fiecare $n de luni
+  fi-FI: one=Joka kuukausi;other=$n kuukauden välein
+  nb-NO: one=Hver måned;other=Hver $n. måned
+  tr-TR: one=Her ay;other=Her $n ayda bir
+  zh-CN: other=每$n个月
+  zh-TW: other=每$n個月
+  ja-JP: other=$nか月ごと
+  ko-KR: other=$n개월마다
+  th-TH: other=ทุก $n เดือน
+  vi-VN: other=Mỗi $n tháng
+  id-ID: other=Setiap $n bulan
+  hi-IN: one=हर महीने;other=हर $n महीने
+  ar-SA: one=كل شهر;two=كل شهرين;few=كل $n أشهر;many=كل $n شهرًا;other=كل $n شهر
+  he-IL: one=בכל חודש;two=בכל חודשיים;other=בכל $n חודשים
+  fa-IR: one=هر ماه;other=هر $n ماه
 
 calendar.rrule_yearly:
-  en_US: one=Every year;other=Every $n years
-  es_ES: one=Cada año;other=Cada $n años
-  fr_FR: one=Tous les ans;other=Tous les $n ans
-  de_DE: one=Jährlich;other=Alle $n Jahre
-  it_IT: one=Ogni anno;other=Ogni $n anni
-  pt_PT: one=Todos os anos;other=A cada $n anos
-  nl_NL: one=Elk jaar;other=Elke $n jaar
-  da_DK: one=Hvert år;other=Hvert $n. år
-  ca_ES: one=Cada any;other=Cada $n anys
-  el_GR: one=Κάθε χρόνο;other=Κάθε $n χρόνια
-  sv_SE: one=Varje år;other=Vart $n:e år
-  pl_PL: one=Co rok;few=Co $n lata;many=Co $n lat;other=Co $n roku
+  en-US: one=Every year;other=Every $n years
+  es-ES: one=Cada año;other=Cada $n años
+  fr-FR: one=Tous les ans;other=Tous les $n ans
+  de-DE: one=Jährlich;other=Alle $n Jahre
+  it-IT: one=Ogni anno;other=Ogni $n anni
+  pt-PT: one=Todos os anos;other=A cada $n anos
+  nl-NL: one=Elk jaar;other=Elke $n jaar
+  da-DK: one=Hvert år;other=Hvert $n. år
+  ca-ES: one=Cada any;other=Cada $n anys
+  el-GR: one=Κάθε χρόνο;other=Κάθε $n χρόνια
+  sv-SE: one=Varje år;other=Vart $n:e år
+  pl-PL: one=Co rok;few=Co $n lata;many=Co $n lat;other=Co $n roku
+  pt-BR: one=Todo ano;other=A cada $n anos
+  ru-RU: one=Каждый год;few=Каждые $n года;many=Каждые $n лет;other=Каждые $n года
+  uk-UA: one=Щороку;few=Кожні $n роки;many=Кожні $n років;other=Кожні $n роки
+  bg-BG: one=Всяка година;other=На всеки $n години
+  cs-CZ: one=Každý rok;few=Každé $n roky;other=Každých $n let
+  sk-SK: one=Každý rok;few=Každé $n roky;other=Každých $n rokov
+  sl-SI: one=Vsako leto;two=Vsaki $n leti;few=Vsaka $n leta;other=Vsakih $n let
+  hr-HR: one=Svake godine;few=Svake $n godine;other=Svakih $n godina
+  lt-LT: one=Kas metus;few=Kas $n metus;other=Kas $n metų
+  hu-HU: one=Évente;other=Minden $n. évben
+  ro-RO: one=În fiecare an;few=La fiecare $n ani;other=La fiecare $n de ani
+  fi-FI: one=Joka vuosi;other=$n vuoden välein
+  nb-NO: one=Hvert år;other=Hvert $n. år
+  tr-TR: one=Her yıl;other=Her $n yılda bir
+  zh-CN: other=每$n年
+  zh-TW: other=每$n年
+  ja-JP: other=$n年ごと
+  ko-KR: other=$n년마다
+  th-TH: other=ทุก $n ปี
+  vi-VN: other=Mỗi $n năm
+  id-ID: other=Setiap $n tahun
+  hi-IN: one=हर साल;other=हर $n साल
+  ar-SA: one=كل سنة;two=كل سنتين;few=كل $n سنوات;many=كل $n سنة;other=كل $n سنة
+  he-IL: one=בכל שנה;two=בכל שנתיים;other=בכל $n שנים
+  fa-IR: one=هر سال;other=هر $n سال
 
 calendar.rrule_count:
-  en_US: one=$n time;other=$n times
-  es_ES: one=$n vez;other=$n veces
-  fr_FR: one=$n fois;other=$n fois
-  de_DE: one=$n Mal;other=$n Mal
-  it_IT: one=$n volta;other=$n volte
-  pt_PT: one=$n vez;other=$n vezes
-  nl_NL: one=$n keer;other=$n keer
-  da_DK: one=$n gang;other=$n gange
-  ca_ES: one=$n vegada;other=$n vegades
-  el_GR: one=$n φορά;other=$n φορές
-  sv_SE: one=$n gång;other=$n gånger
-  pl_PL: one=$n raz;few=$n razy;many=$n razy;other=$n razy
+  en-US: one=$n time;other=$n times
+  es-ES: one=$n vez;other=$n veces
+  fr-FR: one=$n fois;other=$n fois
+  de-DE: one=$n Mal;other=$n Mal
+  it-IT: one=$n volta;other=$n volte
+  pt-PT: one=$n vez;other=$n vezes
+  nl-NL: one=$n keer;other=$n keer
+  da-DK: one=$n gang;other=$n gange
+  ca-ES: one=$n vegada;other=$n vegades
+  el-GR: one=$n φορά;other=$n φορές
+  sv-SE: one=$n gång;other=$n gånger
+  pl-PL: one=$n raz;few=$n razy;many=$n razy;other=$n razy
+  pt-BR: one=$n vez;other=$n vezes
+  ru-RU: one=$n раз;few=$n раза;many=$n раз;other=$n раза
+  uk-UA: one=$n раз;few=$n рази;many=$n разів;other=$n раза
+  bg-BG: one=$n път;other=$n пъти
+  cs-CZ: one=$nkrát;other=$nkrát
+  sk-SK: one=$n-krát;other=$n-krát
+  sl-SI: one=$n-krat;other=$n-krat
+  hr-HR: one=$n put;few=$n puta;other=$n puta
+  lt-LT: one=$n kartą;few=$n kartus;other=$n kartų
+  hu-HU: one=$n alkalommal;other=$n alkalommal
+  ro-RO: one=o dată;few=de $n ori;other=de $n de ori
+  fi-FI: one=$n kerta;other=$n kertaa
+  nb-NO: one=$n gang;other=$n ganger
+  tr-TR: one=$n kez;other=$n kez
+  zh-CN: other=共$n次
+  zh-TW: other=共$n次
+  ja-JP: other=$n回
+  ko-KR: other=$n회
+  th-TH: other=$n ครั้ง
+  vi-VN: other=$n lần
+  id-ID: other=$n kali
+  hi-IN: one=$n बार;other=$n बार
+  ar-SA: one=مرة واحدة;two=مرتين;few=$n مرات;many=$n مرة;other=$n مرة
+  he-IL: one=פעם אחת;two=פעמיים;other=$n פעמים
+  fa-IR: one=$n بار;other=$n بار
 
 calendar.rrule_ordinal:
-  en_US: one=$nst;two=$nnd;few=$nrd;other=$nth
-  es_ES: other=$n.º
-  fr_FR: one=$ner;other=$ne
-  de_DE: other=$n.
-  it_IT: other=$nº
-  pt_PT: other=$n.º
-  nl_NL: other=$ne
-  da_DK: other=$n.
-  ca_ES: other=$nè
-  el_GR: other=$nο
-  sv_SE: other=$n:e
-  pl_PL: other=$n.
+  en-US: one=$nst;two=$nnd;few=$nrd;other=$nth
+  es-ES: other=$n.º
+  fr-FR: one=$ner;other=$ne
+  de-DE: other=$n.
+  it-IT: other=$nº
+  pt-PT: other=$n.º
+  nl-NL: other=$ne
+  da-DK: other=$n.
+  ca-ES: one=$nr;two=$nn;few=$nt;other=$nè
+  el-GR: other=$nη
+  sv-SE: other=$n:e
+  pl-PL: other=$n.
+  pt-BR: other=$nº
+  ru-RU: other=$n-й
+  uk-UA: other=$n-й
+  bg-BG: other=$n-и
+  cs-CZ: other=$n.
+  sk-SK: other=$n.
+  sl-SI: other=$n.
+  hr-HR: other=$n.
+  lt-LT: other=$n.
+  hu-HU: other=$n.
+  ro-RO: other=a $n-a
+  fi-FI: other=$n.
+  nb-NO: other=$n.
+  tr-TR: other=$n.
+  zh-CN: other=第$n
+  zh-TW: other=第$n
+  ja-JP: other=第$n
+  ko-KR: other=$n번째
+  th-TH: other=ที่ $n
+  vi-VN: other=thứ $n
+  id-ID: other=ke-$n
+  hi-IN: other=$nवाँ
+  ar-SA: other=$n
+  he-IL: other=ה-$n
+  fa-IR: other=$nم
 
 calendar.rrule_on:
-  en_US: on $list
-  es_ES: los $list
-  fr_FR: le $list
-  de_DE: am $list
-  it_IT: il $list
-  pt_PT: às $list
-  nl_NL: op $list
-  da_DK: på $list
-  ca_ES: els $list
-  el_GR: κάθε $list
-  sv_SE: på $list
-  pl_PL: w $list
+  en-US: on $list
+  es-ES: los $list
+  fr-FR: le $list
+  de-DE: am $list
+  it-IT: il $list
+  pt-PT: às $list
+  nl-NL: op $list
+  da-DK: på $list
+  ca-ES: els $list
+  el-GR: κάθε $list
+  sv-SE: på $list
+  pl-PL: w $list
+  pt-BR: às $list
+  ru-RU: в $list
+  uk-UA: у $list
+  bg-BG: в $list
+  cs-CZ: v $list
+  sk-SK: v $list
+  sl-SI: v $list
+  hr-HR: u $list
+  lt-LT: $list
+  hu-HU: $list
+  ro-RO: $list
+  fi-FI: $list
+  nb-NO: på $list
+  tr-TR: $list günleri
+  zh-CN: 在$list
+  zh-TW: 在$list
+  ja-JP: $list
+  ko-KR: $list
+  th-TH: $list
+  vi-VN: vào $list
+  id-ID: pada $list
+  hi-IN: $list को
+  ar-SA: في $list
+  he-IL: ב$list
+  fa-IR: در $list
 
 calendar.rrule_on_the:
-  en_US: on the $list
-  es_ES: el día $list
-  fr_FR: le $list
-  de_DE: am $list
-  it_IT: il giorno $list
-  pt_PT: no dia $list
-  nl_NL: op de $list
-  da_DK: den $list
-  ca_ES: el dia $list
-  el_GR: στις $list
-  sv_SE: den $list
-  pl_PL: $list dnia
+  en-US: on the $list
+  es-ES: el día $list
+  fr-FR: le $list
+  de-DE: am $list
+  it-IT: il giorno $list
+  pt-PT: no dia $list
+  nl-NL: op de $list
+  da-DK: den $list
+  ca-ES: el dia $list
+  el-GR: στις $list
+  sv-SE: den $list
+  pl-PL: dnia $list
+  pt-BR: no dia $list
+  ru-RU: $list числа
+  uk-UA: $list числа
+  bg-BG: на $list
+  cs-CZ: dne $list
+  sk-SK: dňa $list
+  sl-SI: dne $list
+  hr-HR: dana $list
+  lt-LT: $list dieną
+  hu-HU: a hónap $list napján
+  ro-RO: în ziua $list
+  fi-FI: kuukauden $list päivänä
+  nb-NO: den $list
+  tr-TR: ayın $list günü
+  zh-CN: $list
+  zh-TW: $list
+  ja-JP: $list
+  ko-KR: $list
+  th-TH: วัน$list
+  vi-VN: vào ngày $list
+  id-ID: pada tanggal $list
+  hi-IN: $list को
+  ar-SA: في اليوم $list
+  he-IL: ביום $list
+  fa-IR: در روز $list
 
 calendar.rrule_in:
-  en_US: in $list
-  es_ES: en $list
-  fr_FR: en $list
-  de_DE: im $list
-  it_IT: a $list
-  pt_PT: em $list
-  nl_NL: in $list
-  da_DK: i $list
-  ca_ES: al $list
-  el_GR: τον $list
-  sv_SE: i $list
-  pl_PL: w $list
+  en-US: in $list
+  es-ES: en $list
+  fr-FR: en $list
+  de-DE: im $list
+  it-IT: a $list
+  pt-PT: em $list
+  nl-NL: in $list
+  da-DK: i $list
+  ca-ES: al $list
+  el-GR: τον $list
+  sv-SE: i $list
+  pl-PL: w $list
+  pt-BR: em $list
+  ru-RU: в $list
+  uk-UA: у $list
+  bg-BG: през $list
+  cs-CZ: v $list
+  sk-SK: v $list
+  sl-SI: v $list
+  hr-HR: u $list
+  lt-LT: $list
+  hu-HU: $list hónapban
+  ro-RO: în $list
+  fi-FI: $list
+  nb-NO: i $list
+  tr-TR: $list ayında
+  zh-CN: $list
+  zh-TW: $list
+  ja-JP: $list
+  ko-KR: $list
+  th-TH: ใน $list
+  vi-VN: vào $list
+  id-ID: pada $list
+  hi-IN: $list में
+  ar-SA: في $list
+  he-IL: ב$list
+  fa-IR: در $list
 
 calendar.rrule_at:
-  en_US: at $list
-  es_ES: a las $list
-  fr_FR: à $list
-  de_DE: um $list
-  it_IT: alle $list
-  pt_PT: às $list
-  nl_NL: om $list
-  da_DK: kl. $list
-  ca_ES: a les $list
-  el_GR: στις $list
-  sv_SE: kl. $list
-  pl_PL: o $list
+  en-US: at $list
+  es-ES: a las $list
+  fr-FR: à $list
+  de-DE: um $list
+  it-IT: alle $list
+  pt-PT: às $list
+  nl-NL: om $list
+  da-DK: kl. $list
+  ca-ES: a les $list
+  el-GR: στις $list
+  sv-SE: kl. $list
+  pl-PL: o $list
+  pt-BR: às $list
+  ru-RU: в $list
+  uk-UA: о $list
+  bg-BG: в $list
+  cs-CZ: v $list
+  sk-SK: o $list
+  sl-SI: ob $list
+  hr-HR: u $list
+  lt-LT: $list val.
+  hu-HU: $list órakor
+  ro-RO: la $list
+  fi-FI: klo $list
+  nb-NO: kl. $list
+  tr-TR: saat $list
+  zh-CN: $list
+  zh-TW: $list
+  ja-JP: $list
+  ko-KR: $list
+  th-TH: เวลา $list
+  vi-VN: lúc $list
+  id-ID: pukul $list
+  hi-IN: $list बजे
+  ar-SA: في الساعة $list
+  he-IL: בשעה $list
+  fa-IR: ساعت $list
 
 calendar.rrule_nth_weekday:
-  en_US: the $ordinal $weekday
-  es_ES: el $ordinal $weekday
-  fr_FR: le $ordinal $weekday
-  de_DE: der $ordinal $weekday
-  it_IT: il $ordinal $weekday
-  pt_PT: a $ordinal $weekday
-  nl_NL: de $ordinal $weekday
-  da_DK: den $ordinal $weekday
-  ca_ES: el $ordinal $weekday
-  el_GR: την $ordinal $weekday
-  sv_SE: den $ordinal $weekday
-  pl_PL: $ordinal $weekday
+  en-US: the $ordinal $weekday
+  es-ES: $ordinal $weekday
+  fr-FR: $ordinal $weekday
+  de-DE: $ordinal $weekday
+  it-IT: $ordinal $weekday
+  pt-PT: $ordinal $weekday
+  nl-NL: de $ordinal $weekday
+  da-DK: den $ordinal $weekday
+  ca-ES: $ordinal $weekday
+  el-GR: $ordinal $weekday
+  sv-SE: den $ordinal $weekday
+  pl-PL: $ordinal $weekday
+  pt-BR: $ordinal $weekday
+  ru-RU: $ordinal $weekday
+  uk-UA: $ordinal $weekday
+  bg-BG: $ordinal $weekday
+  cs-CZ: $ordinal $weekday
+  sk-SK: $ordinal $weekday
+  sl-SI: $ordinal $weekday
+  hr-HR: $ordinal $weekday
+  lt-LT: $ordinal $weekday
+  hu-HU: a $ordinal $weekday
+  ro-RO: $ordinal $weekday
+  fi-FI: $ordinal $weekday
+  nb-NO: den $ordinal $weekday
+  tr-TR: $ordinal $weekday
+  zh-CN: $ordinal个$weekday
+  zh-TW: $ordinal個$weekday
+  ja-JP: $ordinal$weekday
+  ko-KR: $ordinal $weekday
+  th-TH: $weekday$ordinal
+  vi-VN: $weekday lần $ordinal
+  id-ID: $weekday $ordinal
+  hi-IN: $ordinal $weekday
+  ar-SA: $weekday رقم $ordinal
+  he-IL: $weekday $ordinal
+  fa-IR: $weekday $ordinal
 
 calendar.rrule_from_end:
-  en_US: $ordinal from the end
-  es_ES: $ordinal desde el final
-  fr_FR: $ordinal en partant de la fin
-  de_DE: $ordinal von hinten
-  it_IT: $ordinal dalla fine
-  pt_PT: $ordinal a contar do fim
-  nl_NL: $ordinal vanaf het einde
-  da_DK: $ordinal fra slutningen
-  ca_ES: $ordinal des del final
-  el_GR: $ordinal από το τέλος
-  sv_SE: $ordinal från slutet
-  pl_PL: $ordinal od końca
+  en-US: $ordinal from the end
+  es-ES: $ordinal desde el final
+  fr-FR: $ordinal en partant de la fin
+  de-DE: $ordinal von hinten
+  it-IT: $ordinal dalla fine
+  pt-PT: $ordinal a contar do fim
+  nl-NL: $ordinal vanaf het einde
+  da-DK: $ordinal fra slutningen
+  ca-ES: $ordinal des del final
+  el-GR: $ordinal από το τέλος
+  sv-SE: $ordinal från slutet
+  pl-PL: $ordinal od końca
+  pt-BR: $ordinal a partir do fim
+  ru-RU: $ordinal с конца
+  uk-UA: $ordinal з кінця
+  bg-BG: $ordinal от края
+  cs-CZ: $ordinal od konce
+  sk-SK: $ordinal od konca
+  sl-SI: $ordinal od konca
+  hr-HR: $ordinal od kraja
+  lt-LT: $ordinal nuo pabaigos
+  hu-HU: $ordinal a végétől
+  ro-RO: $ordinal de la sfârșit
+  fi-FI: $ordinal lopusta
+  nb-NO: $ordinal fra slutten
+  tr-TR: sondan $ordinal
+  zh-CN: 倒数$ordinal
+  zh-TW: 倒數$ordinal
+  ja-JP: 最後から$ordinal
+  ko-KR: 마지막에서 $ordinal
+  th-TH: $ordinal จากท้าย
+  vi-VN: $ordinal từ cuối
+  id-ID: $ordinal dari akhir
+  hi-IN: अंत से $ordinal
+  ar-SA: $ordinal من النهاية
+  he-IL: $ordinal מהסוף
+  fa-IR: $ordinal از آخر
 
 calendar.rrule_and:
-  en_US: $a and $b
-  es_ES: $a y $b
-  fr_FR: $a et $b
-  de_DE: $a und $b
-  it_IT: $a e $b
-  pt_PT: $a e $b
-  nl_NL: $a en $b
-  da_DK: $a og $b
-  ca_ES: $a i $b
-  el_GR: $a και $b
-  sv_SE: $a och $b
-  pl_PL: $a i $b
+  en-US: $a and $b
+  es-ES: $a y $b
+  fr-FR: $a et $b
+  de-DE: $a und $b
+  it-IT: $a e $b
+  pt-PT: $a e $b
+  nl-NL: $a en $b
+  da-DK: $a og $b
+  ca-ES: $a i $b
+  el-GR: $a και $b
+  sv-SE: $a och $b
+  pl-PL: $a i $b
+  pt-BR: $a e $b
+  ru-RU: $a и $b
+  uk-UA: $a і $b
+  bg-BG: $a и $b
+  cs-CZ: $a a $b
+  sk-SK: $a a $b
+  sl-SI: $a in $b
+  hr-HR: $a i $b
+  lt-LT: $a ir $b
+  hu-HU: $a és $b
+  ro-RO: $a și $b
+  fi-FI: $a ja $b
+  nb-NO: $a og $b
+  tr-TR: $a ve $b
+  zh-CN: $a和$b
+  zh-TW: $a和$b
+  ja-JP: $aと$b
+  ko-KR: $a 및 $b
+  th-TH: $a และ $b
+  vi-VN: $a và $b
+  id-ID: $a dan $b
+  hi-IN: $a और $b
+  ar-SA: $a و$b
+  he-IL: $a ו-$b
+  fa-IR: $a و $b
 
 calendar.rrule_week_no:
-  en_US: week $n
-  es_ES: semana $n
-  fr_FR: semaine $n
-  de_DE: Woche $n
-  it_IT: settimana $n
-  pt_PT: semana $n
-  nl_NL: week $n
-  da_DK: uge $n
-  ca_ES: setmana $n
-  el_GR: εβδομάδα $n
-  sv_SE: vecka $n
-  pl_PL: tydzień $n
+  en-US: week $n
+  es-ES: semana $n
+  fr-FR: semaine $n
+  de-DE: Woche $n
+  it-IT: settimana $n
+  pt-PT: semana $n
+  nl-NL: week $n
+  da-DK: uge $n
+  ca-ES: setmana $n
+  el-GR: εβδομάδα $n
+  sv-SE: vecka $n
+  pl-PL: tydzień $n
+  pt-BR: semana $n
+  ru-RU: неделя $n
+  uk-UA: тиждень $n
+  bg-BG: седмица $n
+  cs-CZ: týden $n
+  sk-SK: týždeň $n
+  sl-SI: teden $n
+  hr-HR: tjedan $n
+  lt-LT: $n savaitė
+  hu-HU: $n. hét
+  ro-RO: săptămâna $n
+  fi-FI: viikko $n
+  nb-NO: uke $n
+  tr-TR: $n. hafta
+  zh-CN: 第$n周
+  zh-TW: 第$n週
+  ja-JP: 第$n週
+  ko-KR: $n주차
+  th-TH: สัปดาห์ที่ $n
+  vi-VN: tuần $n
+  id-ID: minggu $n
+  hi-IN: सप्ताह $n
+  ar-SA: الأسبوع $n
+  he-IL: שבוע $n
+  fa-IR: هفته $n
 
 calendar.rrule_year_day:
-  en_US: day $n of the year
-  es_ES: día $n del año
-  fr_FR: jour $n de l'année
-  de_DE: Tag $n des Jahres
-  it_IT: giorno $n dell'anno
-  pt_PT: dia $n do ano
-  nl_NL: dag $n van het jaar
-  da_DK: dag $n i året
-  ca_ES: dia $n de l'any
-  el_GR: ημέρα $n του έτους
-  sv_SE: dag $n på året
-  pl_PL: dzień $n roku
+  en-US: day $n of the year
+  es-ES: día $n del año
+  fr-FR: jour $n de l'année
+  de-DE: Tag $n des Jahres
+  it-IT: giorno $n dell'anno
+  pt-PT: dia $n do ano
+  nl-NL: dag $n van het jaar
+  da-DK: dag $n i året
+  ca-ES: dia $n de l'any
+  el-GR: ημέρα $n του έτους
+  sv-SE: dag $n på året
+  pl-PL: dzień $n roku
+  pt-BR: dia $n do ano
+  ru-RU: день $n года
+  uk-UA: день $n року
+  bg-BG: ден $n от годината
+  cs-CZ: den $n v roce
+  sk-SK: deň $n v roku
+  sl-SI: dan $n v letu
+  hr-HR: dan $n u godini
+  lt-LT: metų $n diena
+  hu-HU: az év $n. napja
+  ro-RO: ziua $n din an
+  fi-FI: vuoden $n. päivä
+  nb-NO: dag $n i året
+  tr-TR: yılın $n. günü
+  zh-CN: 一年中的第$n天
+  zh-TW: 一年中的第$n天
+  ja-JP: 年間の$n日目
+  ko-KR: 연중 $n일째
+  th-TH: วันที่ $n ของปี
+  vi-VN: ngày $n của năm
+  id-ID: hari ke-$n dalam setahun
+  hi-IN: वर्ष का $nवाँ दिन
+  ar-SA: اليوم $n من السنة
+  he-IL: יום $n בשנה
+  fa-IR: روز $n سال
 
 calendar.rrule_setpos:
-  en_US: limited to occurrence $list
-  es_ES: limitado a la aparición $list
-  fr_FR: limité à l'occurrence $list
-  de_DE: begrenzt auf Vorkommen $list
-  it_IT: limitato all'occorrenza $list
-  pt_PT: limitado à ocorrência $list
-  nl_NL: beperkt tot voorkomen $list
-  da_DK: begrænset til forekomst $list
-  ca_ES: limitat a l'aparició $list
-  el_GR: περιορισμένο στην εμφάνιση $list
-  sv_SE: begränsat till förekomst $list
-  pl_PL: ograniczone do wystąpienia $list
+  en-US: limited to occurrence $list
+  es-ES: limitado a la aparición $list
+  fr-FR: limité à l'occurrence $list
+  de-DE: begrenzt auf Vorkommen $list
+  it-IT: limitato all'occorrenza $list
+  pt-PT: limitado à ocorrência $list
+  nl-NL: beperkt tot voorkomen $list
+  da-DK: begrænset til forekomst $list
+  ca-ES: limitat a l'aparició $list
+  el-GR: περιορισμένο στην εμφάνιση $list
+  sv-SE: begränsat till förekomst $list
+  pl-PL: ograniczone do wystąpienia $list
+  pt-BR: limitado à ocorrência $list
+  ru-RU: ограничено вхождением $list
+  uk-UA: обмежено входженням $list
+  bg-BG: ограничено до появяване $list
+  cs-CZ: omezeno na výskyt $list
+  sk-SK: obmedzené na výskyt $list
+  sl-SI: omejeno na pojavitev $list
+  hr-HR: ograničeno na pojavljivanje $list
+  lt-LT: apribota iki pasikartojimo $list
+  hu-HU: csak a $list előfordulás
+  ro-RO: limitat la apariția $list
+  fi-FI: rajattu esiintymään $list
+  nb-NO: begrenset til forekomst $list
+  tr-TR: $list tekrarla sınırlı
+  zh-CN: 仅限$list次
+  zh-TW: 僅限$list次
+  ja-JP: $list番目のみ
+  ko-KR: $list 발생만
+  th-TH: จำกัดเฉพาะครั้ง$list
+  vi-VN: giới hạn ở lần xuất hiện $list
+  id-ID: terbatas pada kemunculan $list
+  hi-IN: केवल $list पुनरावृत्ति
+  ar-SA: مقصور على التكرار $list
+  he-IL: מוגבל למופע $list
+  fa-IR: محدود به تکرار $list
 
 calendar.rsvp_reply_as:
-  en_US: Replying as $name
-  es_ES: Respondiendo como $name
-  fr_FR: Réponse en tant que $name
-  de_DE: Antwort als $name
-  it_IT: Rispondi come $name
-  pt_PT: A responder como $name
-  nl_NL: Antwoorden als $name
-  da_DK: Svarer som $name
-  ca_ES: Responent com a $name
-  el_GR: Απάντηση ως $name
-  sv_SE: Svarar som $name
-  pl_PL: Odpowiadasz jako $name
+  en-US: Replying as $name
+  es-ES: Respondiendo como $name
+  fr-FR: Réponse en tant que $name
+  de-DE: Antwort als $name
+  it-IT: Stai rispondendo come $name
+  pt-PT: A responder como $name
+  nl-NL: Antwoorden als $name
+  da-DK: Svarer som $name
+  ca-ES: Responent com a $name
+  el-GR: Απάντηση ως $name
+  sv-SE: Svarar som $name
+  pl-PL: Odpowiadasz jako $name
+  pt-BR: Respondendo como $name
+  ru-RU: Отвечаете как $name
+  uk-UA: Відповідаєте як $name
+  bg-BG: Отговаряте като $name
+  cs-CZ: Odpovídáte jako $name
+  sk-SK: Odpovedáte ako $name
+  sl-SI: Odgovarjate kot $name
+  hr-HR: Odgovarate kao $name
+  lt-LT: Atsakote kaip $name
+  hu-HU: Válasz $name nevében
+  ro-RO: Răspundeți ca $name
+  fi-FI: Vastaat nimellä $name
+  nb-NO: Svarer som $name
+  tr-TR: $name olarak yanıtlıyorsunuz
+  zh-CN: 正在以 $name 的身份回复
+  zh-TW: 正在以 $name 的身分回覆
+  ja-JP: $name として返信中
+  ko-KR: $name 이름으로 회신 중
+  th-TH: กำลังตอบกลับในนาม $name
+  vi-VN: Đang trả lời với tư cách $name
+  id-ID: Membalas sebagai $name
+  hi-IN: $name के रूप में उत्तर दिया जा रहा है
+  ar-SA: الرد باسم $name
+  he-IL: משיב בשם $name
+  fa-IR: در حال پاسخ با نام $name

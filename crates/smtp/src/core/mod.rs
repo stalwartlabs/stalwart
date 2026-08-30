@@ -305,4 +305,11 @@ impl SessionAddress {
             dsn_info: None,
         }
     }
+
+    pub fn report_address(&self) -> &str {
+        self.dsn_info
+            .as_ref()
+            .and_then(|v| v.strip_prefix("rfc822;"))
+            .unwrap_or(&self.address_lcase)
+    }
 }
