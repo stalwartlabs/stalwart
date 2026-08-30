@@ -17,7 +17,13 @@ impl<T: Key> IterateParams<T> {
             first: false,
             ascending: true,
             values: true,
+            expected_rows: None,
         }
+    }
+
+    pub fn expect_rows(mut self, expected_rows: usize) -> Self {
+        self.expected_rows = Some(expected_rows);
+        self
     }
 
     pub fn set_ascending(mut self, ascending: bool) -> Self {

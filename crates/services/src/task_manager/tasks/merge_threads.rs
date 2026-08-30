@@ -13,7 +13,6 @@ use email::message::{
 use registry::schema::structs::TaskMergeThreads;
 use std::str::FromStr;
 use std::time::Duration;
-use utils::hash128::Hash128;
 use store::{
     IterateParams, Key, U32_LEN, ValueKey,
     ahash::AHashMap,
@@ -25,6 +24,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::EmailField,
 };
+use utils::hash128::Hash128;
 
 const MAX_RETRIES: usize = 5;
 

@@ -217,7 +217,8 @@ mod commit_limits {
         }
 
         pub(crate) fn is_chunk_full(&self, fetched: usize) -> bool {
-            self.chunk_size.is_some_and(|chunk_size| fetched >= chunk_size)
+            self.chunk_size
+                .is_some_and(|chunk_size| fetched >= chunk_size)
         }
 
         pub(crate) fn progressed(&mut self) {

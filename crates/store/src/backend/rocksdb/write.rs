@@ -73,8 +73,12 @@ impl RocksDbStore {
         let to = to.serialize(0);
 
         self.spawn_worker(move || {
-            db.delete_range_cf(&db.subspace_handle(subspace), from.as_slice(), to.as_slice())
-                .map_err(into_error)
+            db.delete_range_cf(
+                &db.subspace_handle(subspace),
+                from.as_slice(),
+                to.as_slice(),
+            )
+            .map_err(into_error)
         })
         .await
     }

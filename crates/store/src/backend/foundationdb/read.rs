@@ -5,7 +5,8 @@
  */
 
 use super::{
-    FdbStore, MAX_READ_VERSION_AGE, MAX_VALUE_SIZE, REFRESH_READ_VERSION_AFTER, into_error,
+    FdbStore, MAX_ITERATOR_MODE_ROWS, MAX_READ_VERSION_AGE, MAX_VALUE_SIZE,
+    REFRESH_READ_VERSION_AFTER, into_error,
 };
 use crate::{
     Deserialize, IterateParams, Key, ValueKey, WITH_SUBSPACE,
@@ -43,10 +44,9 @@ impl FdbStore {
         let key = key.serialize(WITH_SUBSPACE);
         let mut retry_count = 0;
         let start = Instant::now();
+        let mut trx = self.read_trx().await?;
 
         loop {
-            let trx = self.read_trx().await?;
-
             match read_chunked_value(&key, &trx, true).await {
                 Ok(ChunkedValue::Single(bytes)) => {
                     return U::deserialize_with_key(key.get(1..).unwrap_or_default(), &bytes)
@@ -58,7 +58,8 @@ impl FdbStore {
                 }
                 Ok(ChunkedValue::None) => return Ok(None),
                 Err(err) => {
-                    self.on_read_error(trx, err, &mut retry_count, start)
+                    trx = self
+                        .on_read_error(trx, err, &mut retry_count, start)
                         .await?;
                 }
             }
@@ -69,15 +70,14 @@ impl FdbStore {
         let key = key.serialize(WITH_SUBSPACE);
         let mut retry_count = 0;
         let start = Instant::now();
+        let mut trx = self.read_trx().await?;
 
         loop {
-            let trx = self.read_trx().await?;
-
-            match read_chunked_value(&key, &trx, true).await {
-                Ok(ChunkedValue::Single(_) | ChunkedValue::Chunked { .. }) => return Ok(true),
-                Ok(ChunkedValue::None) => return Ok(false),
+            match trx.get(&key, true).await {
+                Ok(value) => return Ok(value.is_some()),
                 Err(err) => {
-                    self.on_read_error(trx, err, &mut retry_count, start)
+                    trx = self
+                        .on_read_error(trx, err, &mut retry_count, start)
                         .await?;
                 }
             }
@@ -97,20 +97,35 @@ impl FdbStore {
         if !params.first {
             let mut last_key = vec![];
             let mut chunked_key: Option<ChunkedValueCollector> = None;
+            let mut next_trx: Option<Transaction> = None;
 
             'outer: loop {
-                let begin_selector = if last_key.is_empty() {
-                    KeySelector::first_greater_or_equal(&begin)
+                let (begin_selector, end_selector) = if last_key.is_empty() {
+                    (
+                        KeySelector::first_greater_or_equal(&begin),
+                        KeySelector::first_greater_than(&end),
+                    )
+                } else if params.ascending {
+                    (
+                        KeySelector::first_greater_than(&last_key),
+                        KeySelector::first_greater_than(&end),
+                    )
                 } else {
-                    KeySelector::first_greater_than(&last_key)
+                    (
+                        KeySelector::first_greater_or_equal(&begin),
+                        KeySelector::first_greater_or_equal(&last_key),
+                    )
                 };
 
-                let trx = self.read_trx().await?;
+                let trx = match next_trx.take() {
+                    Some(trx) => trx,
+                    None => self.read_trx().await?,
+                };
                 let mut values = trx.get_ranges(
                     RangeOption {
                         begin: begin_selector,
-                        end: KeySelector::first_greater_than(&end),
-                        mode: options::StreamingMode::WantAll,
+                        end: end_selector,
+                        mode: streaming_mode(params.expected_rows),
                         reverse: !params.ascending,
                         ..Default::default()
                     },
@@ -182,6 +197,7 @@ impl FdbStore {
                             if e.code() == 1007 && !last_key_.is_empty() {
                                 // Transaction is too old to perform reads or be committed
                                 last_key = last_key_;
+                                self.version.expire();
                                 continue 'outer;
                             } else if e.is_retryable()
                                 && retry_count < MAX_COMMIT_ATTEMPTS
@@ -194,7 +210,8 @@ impl FdbStore {
                                     last_key = last_key_;
                                 }
                                 self.version.expire();
-                                trx.on_error(e).await.map_err(into_error)?;
+                                let trx = trx.on_error(e).await.map_err(into_error)?;
+                                next_trx = Some(self.apply_read_version(trx).await?);
                                 retry_count += 1;
                                 continue 'outer;
                             } else {
@@ -205,8 +222,9 @@ impl FdbStore {
                 }
             }
         } else {
+            let mut trx = self.read_trx().await?;
+
             loop {
-                let trx = self.read_trx().await?;
                 let mut values = trx.get_ranges_keyvalues(
                     RangeOption {
                         begin: KeySelector::first_greater_or_equal(&begin),
@@ -226,7 +244,7 @@ impl FdbStore {
                     Ok(None) => break,
                     Err(e) => {
                         drop(values);
-                        self.on_read_error(trx, e, &mut retry_count, start).await?;
+                        trx = self.on_read_error(trx, e, &mut retry_count, start).await?;
                     }
                 }
             }
@@ -251,6 +269,7 @@ impl FdbStore {
             resume: Option<(Vec<u8>, bool)>,
             done: bool,
             chunk: Option<MultiChunk>,
+            mode: options::StreamingMode,
         }
 
         let mut states = ranges
@@ -261,13 +280,18 @@ impl FdbStore {
                 resume: None,
                 done: false,
                 chunk: None,
+                mode: streaming_mode(params.expected_rows),
             })
             .collect::<Vec<_>>();
         let mut retry_count = 0;
         let start = Instant::now();
+        let mut next_trx: Option<Transaction> = None;
 
         'outer: loop {
-            let trx = self.read_trx().await?;
+            let trx = match next_trx.take() {
+                Some(trx) => trx,
+                None => self.read_trx().await?,
+            };
             let mut streams = SelectAll::new();
             for (idx, state) in states.iter_mut().enumerate() {
                 if state.done {
@@ -284,7 +308,7 @@ impl FdbStore {
                         RangeOption {
                             begin,
                             end: KeySelector::first_greater_than(state.end.clone()),
-                            mode: options::StreamingMode::WantAll,
+                            mode: state.mode,
                             reverse: false,
                             ..Default::default()
                         },
@@ -372,7 +396,8 @@ impl FdbStore {
                 && start.elapsed() < MAX_COMMIT_TIME
             {
                 self.version.expire();
-                trx.on_error(error).await.map_err(into_error)?;
+                let trx = trx.on_error(error).await.map_err(into_error)?;
+                next_trx = Some(self.apply_read_version(trx).await?);
                 retry_count += 1;
                 continue 'outer;
             } else {
@@ -388,26 +413,26 @@ impl FdbStore {
         let key = key.into().serialize(WITH_SUBSPACE);
         let mut retry_count = 0;
         let start = Instant::now();
+        let mut trx = self.read_trx().await?;
 
         loop {
-            let trx = self.read_trx().await?;
             match trx.get(&key, true).await {
                 Ok(Some(bytes)) => return deserialize_i64_le(&key, &bytes),
                 Ok(None) => return Ok(0),
                 Err(e) => {
-                    self.on_read_error(trx, e, &mut retry_count, start).await?;
+                    trx = self.on_read_error(trx, e, &mut retry_count, start).await?;
                 }
             }
         }
     }
 
-    async fn on_read_error(
+    pub(super) async fn on_read_error(
         &self,
         trx: Transaction,
         err: FdbError,
         retry_count: &mut u32,
         start: Instant,
-    ) -> trc::Result<()> {
+    ) -> trc::Result<Transaction> {
         if err.is_retryable()
             && *retry_count < MAX_COMMIT_ATTEMPTS
             && start.elapsed() < MAX_COMMIT_TIME
@@ -416,9 +441,9 @@ impl FdbStore {
             // load (code 1009); expire it so the retry obtains a fresh read version, then let
             // FoundationDB back off before retrying.
             self.version.expire();
-            trx.on_error(err).await.map_err(into_error)?;
+            let trx = trx.on_error(err).await.map_err(into_error)?;
             *retry_count += 1;
-            Ok(())
+            self.apply_read_version(trx).await
         } else {
             Err(into_error(err))
         }
@@ -426,6 +451,10 @@ impl FdbStore {
 
     pub(crate) async fn read_trx(&self) -> trc::Result<Transaction> {
         let trx = self.db.create_trx().map_err(into_error)?;
+        self.apply_read_version(trx).await
+    }
+
+    pub(super) async fn apply_read_version(&self, trx: Transaction) -> trc::Result<Transaction> {
         let version = self.version.current();
         let age = self.version.age();
 
@@ -447,6 +476,15 @@ impl FdbStore {
     }
 }
 
+fn streaming_mode(expected_rows: Option<usize>) -> options::StreamingMode {
+    match expected_rows {
+        Some(expected_rows) if expected_rows <= MAX_ITERATOR_MODE_ROWS => {
+            options::StreamingMode::Iterator
+        }
+        _ => options::StreamingMode::WantAll,
+    }
+}
+
 pub(crate) async fn read_chunked_value(
     key: &[u8],
     trx: &Transaction,
@@ -454,25 +492,31 @@ pub(crate) async fn read_chunked_value(
 ) -> Result<ChunkedValue, FdbError> {
     if let Some(bytes) = trx.get(key, snapshot).await? {
         if bytes.len() < MAX_VALUE_SIZE {
-            Ok(ChunkedValue::Single(bytes))
-        } else {
-            let mut value = Vec::with_capacity(bytes.len() * 2);
-            value.extend_from_slice(&bytes);
-            let mut key = KeySerializer::new(key.len() + 1)
-                .write(key)
-                .write(0u8)
-                .finalize();
-
-            while let Some(bytes) = trx.get(&key, snapshot).await? {
-                value.extend_from_slice(&bytes);
-                *key.last_mut().unwrap() += 1;
-            }
-
-            Ok(ChunkedValue::Chunked {
-                bytes: value,
-                n_chunks: *key.last().unwrap(),
-            })
+            return Ok(ChunkedValue::Single(bytes));
         }
+
+        let mut chunk_key = KeySerializer::new(key.len() + 1)
+            .write(key)
+            .write(0u8)
+            .finalize();
+        let Some(chunk) = trx.get(&chunk_key, snapshot).await? else {
+            return Ok(ChunkedValue::Single(bytes));
+        };
+
+        let mut value = Vec::with_capacity(bytes.len() + chunk.len());
+        value.extend_from_slice(&bytes);
+        value.extend_from_slice(&chunk);
+        *chunk_key.last_mut().unwrap() += 1;
+
+        while let Some(chunk) = trx.get(&chunk_key, snapshot).await? {
+            value.extend_from_slice(&chunk);
+            *chunk_key.last_mut().unwrap() += 1;
+        }
+
+        Ok(ChunkedValue::Chunked {
+            bytes: value,
+            n_chunks: *chunk_key.last().unwrap(),
+        })
     } else {
         Ok(ChunkedValue::None)
     }

@@ -31,8 +31,10 @@ impl SubspaceSql {
     fn new(subspace: Subspace) -> Self {
         let table = subspace.name();
         let range = |order: &str, limit: &str, columns: &str| {
-            format!("SELECT {columns} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k {order}{limit}")
-                .into_boxed_str()
+            format!(
+                "SELECT {columns} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k {order}{limit}"
+            )
+            .into_boxed_str()
         };
 
         Self {
@@ -71,8 +73,7 @@ impl SubspaceSql {
 
     #[inline(always)]
     pub(crate) fn iterate(&self, first: bool, ascending: bool, values: bool) -> &str {
-        &self.iterate
-            [((first as usize) << 2) | ((!ascending as usize) << 1) | (values as usize)]
+        &self.iterate[((first as usize) << 2) | ((!ascending as usize) << 1) | (values as usize)]
     }
 }
 

@@ -59,10 +59,11 @@ impl SqliteStore {
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         let manager = self.conn_pool.clone();
-        let sql = self
-            .sql
-            .get(params.begin.subspace())
-            .iterate(params.first, params.ascending, params.values);
+        let sql = self.sql.get(params.begin.subspace()).iterate(
+            params.first,
+            params.ascending,
+            params.values,
+        );
 
         self.block_worker(move || {
             let conn = manager.get().map_err(into_error)?;

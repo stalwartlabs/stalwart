@@ -128,7 +128,7 @@ pub async fn lookup_tests() {
         for _ in 0..100 {
             let store = store.clone();
             tasks.push(tokio::spawn(async move {
-                store.try_lock(0, "lock".as_bytes(), 1).await.unwrap()
+                store.try_lock(0, "lock".as_bytes(), 60).await.unwrap()
             }));
         }
         // Only one should return true
@@ -140,8 +140,7 @@ pub async fn lookup_tests() {
         }
         assert_eq!(1, count, "Iteration {}", iteration);
 
-        // Wait 2 seconds for the lock to expire
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        store.remove_lock(0, "lock".as_bytes()).await.unwrap();
     }
     store.purge_in_memory_store().await.unwrap();
 

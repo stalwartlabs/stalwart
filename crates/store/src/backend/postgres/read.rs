@@ -72,7 +72,11 @@ impl PostgresStore {
         let mut retry = ChunkedRetry::unbounded(ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE);
 
         loop {
-            let limit = if params.first { Some(1) } else { retry.chunk_size() };
+            let limit = if params.first {
+                Some(1)
+            } else {
+                retry.chunk_size()
+            };
             let s = conn
                 .prepare_cached(&match limit {
                     Some(limit) => format!(

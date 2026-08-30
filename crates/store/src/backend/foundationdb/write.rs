@@ -23,7 +23,8 @@ use foundationdb::{
 };
 use futures::TryStreamExt;
 use std::{borrow::Cow, cmp::Ordering, ops::Range, time::Instant};
-use trc::AddContext;
+
+const PURGE_BATCH_SIZE: usize = 1024;
 
 struct CounterKeys {
     buf: Vec<u8>,
@@ -45,14 +46,33 @@ impl FdbStore {
         let mut log_buf = Vec::new();
         let mut log_scratch = Vec::new();
 
-        loop {
+        let mut next_trx: Option<Transaction> = None;
+
+        'retry: loop {
             let mut cursor = BatchCursor::new(&batch);
             result.rollback(mark);
 
-            let trx = self.db.create_trx().map_err(into_error)?;
+            let trx = match next_trx.take() {
+                Some(trx) => trx,
+                None => self.db.create_trx().map_err(into_error)?,
+            };
 
-            if !counter_keys.is_empty() {
-                allocate_counters(&trx, &batch, &counter_keys, result).await?;
+            if !counter_keys.is_empty()
+                && let Err(err) = allocate_counters(&trx, &batch, &counter_keys, result).await
+            {
+                match err {
+                    ApplyError::Retryable(err) => {
+                        next_trx = Some(
+                            self.on_write_error(trx, err, &mut retry_count, start)
+                                .await?,
+                        );
+                        continue 'retry;
+                    }
+                    ApplyError::Fatal(err) => {
+                        trx.cancel();
+                        return Err(err);
+                    }
+                }
             }
 
             let mut key_buf = Vec::with_capacity(64);
@@ -72,10 +92,18 @@ impl FdbStore {
                                 }
                             }
                             ValueOp::MergeFnc(merge_op) => {
-                                let chunked_value = read_chunked_value(&key_buf, &trx, false)
+                                let chunked_value = match read_chunked_value(&key_buf, &trx, false)
                                     .await
-                                    .map_err(into_error)
-                                    .caused_by(trc::location!())?;
+                                {
+                                    Ok(chunked_value) => chunked_value,
+                                    Err(err) => {
+                                        next_trx = Some(
+                                            self.on_write_error(trx, err, &mut retry_count, start)
+                                                .await?,
+                                        );
+                                        continue 'retry;
+                                    }
+                                };
                                 let mut current_value = None;
                                 let (merge_result, prev_num_chunks) = match &chunked_value {
                                     ChunkedValue::Single(slice) => {
@@ -131,9 +159,17 @@ impl FdbStore {
                                 trx.atomic_op(&key_buf, &by.to_le_bytes()[..], MutationType::Add);
                             }
                             ValueOp::AddAndGet(by) => {
-                                let num = if let Some(bytes) =
-                                    trx.get(&key_buf, false).await.map_err(into_error)?
-                                {
+                                let current = match trx.get(&key_buf, false).await {
+                                    Ok(current) => current,
+                                    Err(err) => {
+                                        next_trx = Some(
+                                            self.on_write_error(trx, err, &mut retry_count, start)
+                                                .await?,
+                                        );
+                                        continue 'retry;
+                                    }
+                                };
+                                let num = if let Some(bytes) = current {
                                     deserialize_i64_le(&key_buf, &bytes)? + *by
                                 } else {
                                     *by
@@ -189,7 +225,13 @@ impl FdbStore {
                                 assert_value.matches(bytes.as_ref())
                             }
                             Ok(ChunkedValue::None) => assert_value.is_none(),
-                            Err(_) => false,
+                            Err(err) => {
+                                next_trx = Some(
+                                    self.on_write_error(trx, err, &mut retry_count, start)
+                                        .await?,
+                                );
+                                continue 'retry;
+                            }
                         };
 
                         if !matches {
@@ -215,6 +257,25 @@ impl FdbStore {
         }
     }
 
+    async fn on_write_error(
+        &self,
+        trx: Transaction,
+        err: FdbError,
+        retry_count: &mut u32,
+        start: Instant,
+    ) -> trc::Result<Transaction> {
+        if err.is_retryable()
+            && *retry_count < MAX_COMMIT_ATTEMPTS
+            && start.elapsed() < MAX_COMMIT_TIME
+        {
+            let trx = trx.on_error(err).await.map_err(into_error)?;
+            *retry_count += 1;
+            Ok(trx)
+        } else {
+            Err(into_error(err))
+        }
+    }
+
     pub(crate) async fn commit(&self, trx: Transaction, will_retry: bool) -> trc::Result<bool> {
         match trx.commit().await {
             Ok(result) => {
@@ -234,67 +295,148 @@ impl FdbStore {
     }
 
     pub(crate) async fn purge_store(&self) -> trc::Result<()> {
-        // Obtain all zero counters
-        let mut delete_keys = Vec::new();
         for subspace in Subspace::ALL
             .iter()
             .copied()
             .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
         {
-            let trx = self.db.create_trx().map_err(into_error)?;
-            let from_key = [subspace.byte(), 0u8];
-            let to_key = [subspace.byte(), u8::MAX, u8::MAX, u8::MAX, u8::MAX, u8::MAX];
-
-            let mut values = trx.get_ranges_keyvalues(
-                RangeOption {
-                    begin: KeySelector::first_greater_or_equal(&from_key[..]),
-                    end: KeySelector::first_greater_or_equal(&to_key[..]),
-                    mode: options::StreamingMode::WantAll,
-                    reverse: false,
-                    ..Default::default()
-                },
-                true,
-            );
-
-            while let Some(value) = values.try_next().await.map_err(into_error)? {
-                if value.value().iter().all(|byte| *byte == 0) {
-                    delete_keys.push(value.key().to_vec());
-                }
-            }
-        }
-
-        if delete_keys.is_empty() {
-            return Ok(());
-        }
-
-        // Delete keys
-        let integer = 0i64.to_le_bytes();
-        for chunk in delete_keys.chunks(1024) {
+            let from_key = [subspace.byte()];
+            let to_key = [subspace.byte() + 1];
+            let mut delete_keys: Vec<Vec<u8>> = Vec::new();
+            let mut last_key: Vec<u8> = Vec::new();
             let mut retry_count = 0;
-            loop {
-                let trx = self.db.create_trx().map_err(into_error)?;
-                for key in chunk {
-                    trx.atomic_op(key, &integer, MutationType::CompareAndClear);
-                }
+            let mut start = Instant::now();
+            let mut next_trx: Option<Transaction> = None;
 
-                if self.commit(trx, retry_count < MAX_COMMIT_ATTEMPTS).await? {
-                    break;
+            'scan: loop {
+                let trx = match next_trx.take() {
+                    Some(trx) => trx,
+                    None => self.read_trx().await?,
+                };
+                trx.set_option(options::TransactionOption::PriorityBatch)
+                    .map_err(into_error)?;
+                let mut made_progress = false;
+
+                let begin = if last_key.is_empty() {
+                    KeySelector::first_greater_or_equal(&from_key[..])
                 } else {
-                    retry_count += 1;
+                    KeySelector::first_greater_than(last_key.clone())
+                };
+                let mut values = trx.get_ranges_keyvalues(
+                    RangeOption {
+                        begin,
+                        end: KeySelector::first_greater_or_equal(&to_key[..]),
+                        mode: options::StreamingMode::WantAll,
+                        reverse: false,
+                        ..Default::default()
+                    },
+                    true,
+                );
+
+                loop {
+                    match values.try_next().await {
+                        Ok(Some(value)) => {
+                            made_progress = true;
+                            last_key.clear();
+                            last_key.extend_from_slice(value.key());
+
+                            if value.value().iter().all(|byte| *byte == 0) {
+                                delete_keys.push(value.key().to_vec());
+
+                                if delete_keys.len() >= PURGE_BATCH_SIZE {
+                                    drop(values);
+                                    self.purge_counters(&mut delete_keys).await?;
+                                    retry_count = 0;
+                                    start = Instant::now();
+                                    continue 'scan;
+                                }
+                            }
+                        }
+                        Ok(None) => break 'scan,
+                        Err(err) => {
+                            drop(values);
+                            if made_progress {
+                                retry_count = 0;
+                                start = Instant::now();
+                            }
+                            if err.is_retryable()
+                                && retry_count < MAX_COMMIT_ATTEMPTS
+                                && start.elapsed() < MAX_COMMIT_TIME
+                            {
+                                self.version.expire();
+                                let trx = trx.on_error(err).await.map_err(into_error)?;
+                                next_trx = Some(self.apply_read_version(trx).await?);
+                                retry_count += 1;
+                                continue 'scan;
+                            }
+                            return Err(into_error(err));
+                        }
+                    }
                 }
             }
+
+            self.purge_counters(&mut delete_keys).await?;
         }
 
         Ok(())
     }
 
+    async fn purge_counters(&self, delete_keys: &mut Vec<Vec<u8>>) -> trc::Result<()> {
+        if delete_keys.is_empty() {
+            return Ok(());
+        }
+
+        let integer = 0i64.to_le_bytes();
+        let start = Instant::now();
+        let mut retry_count = 0;
+
+        loop {
+            let trx = self.db.create_trx().map_err(into_error)?;
+            trx.set_option(options::TransactionOption::PriorityBatch)
+                .map_err(into_error)?;
+            for key in delete_keys.iter() {
+                trx.atomic_op(key, &integer, MutationType::CompareAndClear);
+            }
+
+            if self
+                .commit(
+                    trx,
+                    retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME,
+                )
+                .await?
+            {
+                delete_keys.clear();
+                return Ok(());
+            }
+
+            tokio::time::sleep(commit_backoff(retry_count)).await;
+            retry_count += 1;
+        }
+    }
+
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
         let from = from.serialize(WITH_SUBSPACE);
         let to = to.serialize(WITH_SUBSPACE);
+        let start = Instant::now();
+        let mut retry_count = 0;
 
-        let trx = self.db.create_trx().map_err(into_error)?;
-        trx.clear_range(&from, &to);
-        self.commit(trx, false).await.map(|_| ())
+        loop {
+            let trx = self.db.create_trx().map_err(into_error)?;
+            trx.clear_range(&from, &to);
+
+            if self
+                .commit(
+                    trx,
+                    retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME,
+                )
+                .await?
+            {
+                return Ok(());
+            }
+
+            tokio::time::sleep(commit_backoff(retry_count)).await;
+            retry_count += 1;
+        }
     }
 }
 
@@ -344,7 +486,7 @@ async fn chunk_value(
     class: &ValueClass,
     prev_num_chunks: Option<usize>,
 ) -> bool {
-    let num_chunks = if value.len() > MAX_VALUE_SIZE {
+    let num_chunks = if value.len() >= MAX_VALUE_SIZE {
         value.len().div_ceil(MAX_VALUE_SIZE)
     } else {
         1
@@ -366,7 +508,7 @@ async fn chunk_value(
         clear_chunks(trx, key, Some((num_chunks - 1) as u8)).await;
     }
 
-    if value.len() > MAX_VALUE_SIZE {
+    if value.len() >= MAX_VALUE_SIZE {
         for (pos, chunk) in value.chunks(MAX_VALUE_SIZE).enumerate() {
             match pos.cmp(&1) {
                 Ordering::Less => {}
@@ -384,6 +526,17 @@ async fn chunk_value(
     }
 
     true
+}
+
+enum ApplyError {
+    Retryable(FdbError),
+    Fatal(trc::Error),
+}
+
+impl From<trc::Error> for ApplyError {
+    fn from(err: trc::Error) -> Self {
+        ApplyError::Fatal(err)
+    }
 }
 
 impl CounterKeys {
@@ -447,7 +600,7 @@ async fn allocate_counters(
     batch: &Batch<'_>,
     keys: &CounterKeys,
     result: &mut AssignedIds,
-) -> trc::Result<()> {
+) -> Result<(), ApplyError> {
     let num_accounts = batch.change_accounts.len();
     let mut cursors = vec![0i64; keys.reservation_total.len()];
 
@@ -457,7 +610,7 @@ async fn allocate_counters(
             (chunk_start..chunk_end).map(|index| trx.get(keys.key(index), false)),
         )
         .await
-        .map_err(into_error)?;
+        .map_err(ApplyError::Retryable)?;
 
         for (offset, value) in values.into_iter().enumerate() {
             let index = chunk_start + offset;

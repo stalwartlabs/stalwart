@@ -70,8 +70,7 @@ impl SqliteStore {
                 for allocation in batch.allocations() {
                     key_buf.clear();
                     allocation.serialize_key_into(&mut key_buf, 0);
-                    let last_id =
-                        incr_counter(&trx, sql, &key_buf, allocation.increment_by())?;
+                    let last_id = incr_counter(&trx, sql, &key_buf, allocation.increment_by())?;
                     result.apply(allocation, last_id);
                 }
             }

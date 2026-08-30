@@ -314,6 +314,7 @@ pub struct IterateParams<T: Key> {
     first: bool,
     ascending: bool,
     values: bool,
+    expected_rows: Option<usize>,
 }
 
 #[derive(Clone, Default)]

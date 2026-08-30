@@ -518,7 +518,8 @@ async fn read_queue(
                 ValueKey::from(ValueClass::SearchIndex(from_class)),
                 ValueKey::from(ValueClass::SearchIndex(to_class)),
             )
-            .ascending(),
+            .ascending()
+            .expect_rows(max_items),
             |key, value| {
                 let item = QueuedItem {
                     id_prefix: key.deserialize_be_u32(1)?,

@@ -41,6 +41,7 @@ pub async fn blob_tests() {
     );
 
     // Test blob quota
+    wait_for_quota_bucket_start().await;
     assert!(test.server.blob_has_quota(0, 1024).await.unwrap().allowed);
     assert!(!test.server.blob_has_quota(0, 1024).await.unwrap().allowed);
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -434,6 +435,17 @@ pub async fn blob_tests() {
     }
 
     test.temp_dir.delete();
+}
+
+async fn wait_for_quota_bucket_start() {
+    let subsec_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos() as u64;
+    tokio::time::sleep(std::time::Duration::from_nanos(
+        (1_000_000_000 - subsec_nanos) + 50_000_000,
+    ))
+    .await;
 }
 
 async fn test_store(store: BlobStore) {

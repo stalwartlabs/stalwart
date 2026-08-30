@@ -45,8 +45,7 @@ impl<'db> CfCache<'db> {
     pub(crate) fn get(&mut self, subspace: Subspace) -> &Arc<BoundColumnFamily<'db>> {
         let db = self.db;
 
-        self.handles[subspace.byte() as usize]
-            .get_or_insert_with(|| db.subspace_handle(subspace))
+        self.handles[subspace.byte() as usize].get_or_insert_with(|| db.subspace_handle(subspace))
     }
 }
 

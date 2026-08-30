@@ -864,6 +864,80 @@ pub async fn test(test: &TestServer) {
         .await
         .unwrap();
 
+        println!("Running FoundationDB chunk boundary test...");
+        for (item_id, size) in [
+            (10u64, MAX_VALUE_SIZE - 1),
+            (11, MAX_VALUE_SIZE),
+            (12, MAX_VALUE_SIZE + 1),
+            (13, MAX_VALUE_SIZE * 3),
+        ] {
+            let value = value_gen([(b'z', size)]);
+            db.write_batch(
+                BatchBuilder::new()
+                    .with_account_id(0)
+                    .with_collection(Collection::Email)
+                    .with_document(0)
+                    .set(
+                        ValueClass::Registry(RegistryClass::Item {
+                            object_id: 200,
+                            item_id,
+                        }),
+                        value.clone(),
+                    ),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                db.get_value::<store::write::serialize::RawValue>(registry_item_key(200, item_id))
+                    .await
+                    .unwrap()
+                    .map(|v| v.0),
+                Some(value),
+                "value of {size} bytes did not round-trip"
+            );
+            assert!(
+                db.key_exists(registry_item_key(200, item_id))
+                    .await
+                    .unwrap(),
+                "key_exists returned false for a {size} byte value"
+            );
+        }
+
+        assert!(
+            !db.key_exists(registry_item_key(200, 99)).await.unwrap(),
+            "key_exists returned true for a missing key"
+        );
+
+        let shrunk = value_gen([(b'y', 16)]);
+        db.write_batch(
+            BatchBuilder::new()
+                .with_account_id(0)
+                .with_collection(Collection::Email)
+                .with_document(0)
+                .set(
+                    ValueClass::Registry(RegistryClass::Item {
+                        object_id: 200,
+                        item_id: 11,
+                    }),
+                    shrunk.clone(),
+                ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.get_value::<store::write::serialize::RawValue>(registry_item_key(200, 11))
+                .await
+                .unwrap()
+                .map(|v| v.0),
+            Some(shrunk),
+            "shrinking an exactly-MAX_VALUE_SIZE value spliced a stale tail"
+        );
+
+        db.delete_range(registry_item_key(200, 0), registry_item_key(200, u64::MAX))
+            .await
+            .unwrap();
+
         // Read-your-writes through the cached read version: overwrite a key in a tight loop
         println!("Running FoundationDB read-your-writes test...");
         for n in 0u64..200 {
@@ -1243,6 +1317,43 @@ pub async fn test(test: &TestServer) {
             .await
             .unwrap();
             assert_eq!(n, 900000);
+
+            println!("Running FoundationDB slow descending iterate test...");
+            let mut seen = HashSet::new();
+            let mut delivered = 0u64;
+            let mut previous: Option<u64> = None;
+            db.iterate(
+                store::IterateParams::new(registry_item_key(0, 0), registry_item_key(0, u64::MAX))
+                    .descending(),
+                |key, value| {
+                    let (_, item_id) = parse_registry_item_key(key);
+                    assert_eq!(
+                        std::str::from_utf8(value).unwrap(),
+                        format!("value{item_id:10}")
+                    );
+                    if let Some(previous) = previous {
+                        assert!(
+                            item_id <= previous,
+                            "descending scan moved backwards: {item_id} delivered after {previous}"
+                        );
+                    }
+                    previous = Some(item_id);
+                    seen.insert(item_id);
+                    delivered += 1;
+                    if delivered.is_multiple_of(10000) {
+                        println!("Descending scan delivered {delivered} rows");
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                    }
+                    Ok(true)
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                seen.len(),
+                900000,
+                "descending scan lost rows across transaction retries"
+            );
 
             println!("Running FoundationDB slow iterate_many test...");
             let third = 300000u64;

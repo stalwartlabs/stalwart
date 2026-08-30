@@ -17,6 +17,8 @@ pub mod write;
 
 const MAX_VALUE_SIZE: usize = 100000;
 
+const MAX_ITERATOR_MODE_ROWS: usize = 256;
+
 const REFRESH_READ_VERSION_AFTER: Duration = Duration::from_secs(1);
 const MAX_READ_VERSION_AGE: Duration = Duration::from_secs(4);
 
