@@ -141,7 +141,7 @@ impl HasQueueQuota for Server {
                     .storage
                     .data
                     .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaSize(
-                        key,
+                        key.into(),
                     ))))
                     .await
                     .unwrap_or(0) as u64;
@@ -158,7 +158,7 @@ impl HasQueueQuota for Server {
                     .storage
                     .data
                     .get_counter(ValueKey::from(ValueClass::Queue(QueueClass::QuotaCount(
-                        key,
+                        key.into(),
                     ))))
                     .await
                     .unwrap_or(0) as u64;
@@ -203,11 +203,11 @@ impl MessageWrapper {
             for entry in std::mem::take(&mut self.message.metadata) {
                 match entry {
                     Metadata::QueueCount { id, key } if quota_ids.contains(&id) => {
-                        batch.add(ValueClass::Queue(QueueClass::QuotaCount(key)), -1);
+                        batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.into())), -1);
                     }
                     Metadata::QueueSize { id, key } if quota_ids.contains(&id) => {
                         batch.add(
-                            ValueClass::Queue(QueueClass::QuotaSize(key)),
+                            ValueClass::Queue(QueueClass::QuotaSize(key.into())),
                             -(self.message.size as i64),
                         );
                     }

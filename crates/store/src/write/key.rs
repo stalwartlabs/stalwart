@@ -8,7 +8,7 @@ use super::{
     AnyKey, BlobOp, InMemoryClass, QueueClass, TaskQueueClass, TelemetryClass, ValueClass,
 };
 use crate::{
-    IndexKey, IndexKeyPrefix, Key, LogKey, Subspace, U16_LEN, U32_LEN, U64_LEN, U128_LEN, ValueKey,
+    IndexKey, IndexKeyPrefix, Key, LogKey, Subspace, U16_LEN, U32_LEN, U64_LEN, ValueKey,
     WITH_SUBSPACE,
     search::{GLOBAL_BUCKET_SHIFT, SearchField},
     write::{
@@ -22,7 +22,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::{EmailField, Field, MailboxField},
 };
-use utils::codec::leb128::Leb128_;
+use utils::{codec::leb128::Leb128_, hash128::Hash128};
 
 pub struct KeySerializer<B = Vec<u8>> {
     pub buf: B,
@@ -110,9 +110,9 @@ impl KeySerialize for u64 {
     }
 }
 
-impl KeySerialize for u128 {
+impl KeySerialize for Hash128 {
     fn serialize(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.to_be_bytes());
+        buf.extend_from_slice(self.as_be_bytes());
     }
 }
 
@@ -586,7 +586,7 @@ impl ValueClass {
                 (U32_LEN * 2)
                     + 3
                     + match p {
-                        IndexPropertyClass::Hash { .. } => U128_LEN,
+                        IndexPropertyClass::Hash { .. } => Hash128::LEN,
                         IndexPropertyClass::Integer { .. } => U64_LEN,
                     }
             }
@@ -615,7 +615,7 @@ impl ValueClass {
             ValueClass::Queue(q) => match q {
                 QueueClass::Message(_) => U64_LEN,
                 QueueClass::MessageEvent(_) => U64_LEN * 3,
-                QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => U128_LEN + 1,
+                QueueClass::QuotaCount(_) | QueueClass::QuotaSize(_) => Hash128::LEN + 1,
             },
             ValueClass::Telemetry(telemetry) => match telemetry {
                 TelemetryClass::Span(_) | TelemetryClass::Metric(_) => U64_LEN,
@@ -884,7 +884,7 @@ impl IndexPropertyClass {
         IndexKeyPrefix::len()
             + 1
             + match self {
-                IndexPropertyClass::Hash { .. } => U128_LEN,
+                IndexPropertyClass::Hash { .. } => Hash128::LEN,
                 IndexPropertyClass::Integer { .. } => U64_LEN,
             }
             + U32_LEN

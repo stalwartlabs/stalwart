@@ -479,11 +479,11 @@ impl MessageWrapper {
         for metadata in &self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
-                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(*key)), 1);
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount((*key).into())), 1);
                 }
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
-                        ValueClass::Queue(QueueClass::QuotaSize(*key)),
+                        ValueClass::Queue(QueueClass::QuotaSize((*key).into())),
                         self.message.size as i64,
                     );
                 }
@@ -810,11 +810,11 @@ impl MessageWrapper {
         for metadata in self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
-                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key)), -1);
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.into())), -1);
                 }
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
-                        ValueClass::Queue(QueueClass::QuotaSize(key)),
+                        ValueClass::Queue(QueueClass::QuotaSize(key.into())),
                         -(self.message.size as i64),
                     );
                 }
@@ -959,11 +959,11 @@ impl MessageWrapper {
         for metadata in self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
-                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key)), -1);
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.into())), -1);
                 }
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
-                        ValueClass::Queue(QueueClass::QuotaSize(key)),
+                        ValueClass::Queue(QueueClass::QuotaSize(key.into())),
                         -(self.message.size as i64),
                     );
                 }

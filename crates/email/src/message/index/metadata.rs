@@ -32,6 +32,7 @@ use types::{
     field::EmailField,
     keyword::{HASATTACHMENT, HASNOATTACHMENT},
 };
+use utils::hash128::Hash128;
 
 impl MessageMetadata {
     #[inline(always)]
@@ -110,14 +111,14 @@ impl ArchivedMessageMetadata {
             .clear(EmailField::SortKeys)
             .clear(ValueClass::IndexProperty(IndexPropertyClass::Hash {
                 property: EmailField::Threading.into(),
-                hash: xxh3_128(
+                hash: Hash128::from(xxh3_128(
                     if !thread_name.is_empty() {
                         thread_name
                     } else {
                         "!"
                     }
                     .as_bytes(),
-                ),
+                )),
             }))
             .clear(BlobOp::Link {
                 hash: BlobHash::from(&self.blob_hash),

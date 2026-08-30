@@ -22,6 +22,7 @@ use types::{
 };
 use utils::{
     cheeky_hash::CheekyHash,
+    hash128::Hash128,
     map::{bitmap::Bitmap, vec_map::VecMap},
 };
 
@@ -632,7 +633,7 @@ pub enum ValueClass {
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum IndexPropertyClass {
-    Hash { property: u8, hash: u128 },
+    Hash { property: u8, hash: Hash128 },
     Integer { property: u8, value: u64 },
 }
 
@@ -756,8 +757,8 @@ pub enum RegistryClass {
 pub enum QueueClass {
     Message(u64),
     MessageEvent(QueueEvent),
-    QuotaCount(u128),
-    QuotaSize(u128),
+    QuotaCount(Hash128),
+    QuotaSize(Hash128),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]

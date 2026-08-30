@@ -56,7 +56,7 @@ use types::{
     keyword::Keyword,
     special_use::SpecialUse,
 };
-use utils::{sanitize_email, snowflake::SnowflakeIdGenerator};
+use utils::{hash128::Hash128, sanitize_email, snowflake::SnowflakeIdGenerator};
 
 #[derive(Default)]
 pub struct IngestedEmail {
@@ -132,7 +132,7 @@ pub trait EmailIngest: Sync + Send {
 
 pub struct ThreadResult {
     pub thread_id: Option<u32>,
-    pub thread_hash: u128,
+    pub thread_hash: Hash128,
     pub merge_ids: Vec<u32>,
     pub duplicate_ids: Vec<u32>,
 }
@@ -764,14 +764,14 @@ impl EmailIngest for Server {
     ) -> trc::Result<ThreadResult> {
         let mut result = ThreadResult {
             thread_id: None,
-            thread_hash: xxh3_128(
+            thread_hash: Hash128::from(xxh3_128(
                 if !thread_name.is_empty() {
                     thread_name
                 } else {
                     "!"
                 }
                 .as_bytes(),
-            ),
+            )),
             merge_ids: vec![],
             duplicate_ids: vec![],
         };

@@ -13,6 +13,7 @@ pub mod cheeky_hash;
 pub mod codec;
 pub mod cron;
 pub mod glob;
+pub mod hash128;
 pub mod http;
 pub mod map;
 pub mod snowflake;

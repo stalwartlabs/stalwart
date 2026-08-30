@@ -13,6 +13,7 @@ use email::message::{
 use registry::schema::structs::TaskMergeThreads;
 use std::str::FromStr;
 use std::time::Duration;
+use utils::hash128::Hash128;
 use store::{
     IterateParams, Key, U32_LEN, ValueKey,
     ahash::AHashMap,
@@ -51,7 +52,7 @@ async fn merge_threads(
     server: &Server,
     task_merge_threads: &TaskMergeThreads,
 ) -> trc::Result<TaskResult> {
-    let Ok(thread_hash) = u128::from_str(&task_merge_threads.thread_name) else {
+    let Ok(thread_hash) = Hash128::from_str(&task_merge_threads.thread_name) else {
         return Ok(TaskResult::permanent("Invalid thread hash"));
     };
     let Ok(mut message_ids) = task_merge_threads
