@@ -9,8 +9,8 @@ use crate::{
     Key, Shape, Subspace,
     backend::postgres::{DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, into_pool_error},
     write::{
-        Advance, AssignedIds, Batch, BatchCursor, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME,
-        MergeResult, ValueOp, commit_backoff,
+        Advance, AssignedIds, Batch, BatchCursor, ChunkedRetry, LogSet, MAX_COMMIT_ATTEMPTS,
+        MAX_COMMIT_TIME, MergeResult, ValueOp, commit_backoff,
     },
 };
 use ahash::AHashMap;
@@ -30,40 +30,44 @@ impl PostgresStore {
         mut batch: Batch<'_>,
         assigned_ids: &mut AssignedIds,
     ) -> trc::Result<()> {
-        let mut conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let start = Instant::now();
         let mut retry_count = 0;
         let mark = assigned_ids.mark();
 
         loop {
             assigned_ids.rollback(mark);
-            match self.write_trx(&mut conn, &mut batch, assigned_ids).await {
+            let mut conn = self.conn_pool.get().await.map_err(into_pool_error)?;
+            let err = match self.write_trx(&mut conn, &mut batch, assigned_ids).await {
                 Ok(()) => {
                     return Ok(());
                 }
-                Err(err) => {
-                    match err {
-                        CommitError::Postgres(err) => match err.code() {
-                            Some(
-                                &SqlState::T_R_SERIALIZATION_FAILURE
-                                | &SqlState::T_R_DEADLOCK_DETECTED,
-                            ) if retry_count < MAX_COMMIT_ATTEMPTS
-                                && start.elapsed() < MAX_COMMIT_TIME => {}
-                            Some(&SqlState::UNIQUE_VIOLATION) => {
-                                return Err(trc::StoreEvent::AssertValueFailed
-                                    .into_err()
-                                    .reason("Unique violation")
-                                    .caused_by(trc::location!()));
-                            }
-                            _ => return Err(into_error(err)),
-                        },
-                        CommitError::Internal(err) => return Err(err),
-                    }
+                Err(err) => err,
+            };
+            drop(conn);
 
-                    tokio::time::sleep(commit_backoff(retry_count)).await;
-                    retry_count += 1;
-                }
+            match err {
+                CommitError::Postgres(err) => match err.code() {
+                    Some(
+                        &SqlState::T_R_SERIALIZATION_FAILURE
+                        | &SqlState::T_R_DEADLOCK_DETECTED
+                        | &SqlState::LOCK_NOT_AVAILABLE
+                        | &SqlState::QUERY_CANCELED
+                        | &SqlState::IDLE_IN_TRANSACTION_SESSION_TIMEOUT,
+                    ) if retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME => {
+                    }
+                    Some(&SqlState::UNIQUE_VIOLATION) => {
+                        return Err(trc::StoreEvent::AssertValueFailed
+                            .into_err()
+                            .reason("Unique violation")
+                            .caused_by(trc::location!()));
+                    }
+                    _ => return Err(into_error(err)),
+                },
+                CommitError::Internal(err) => return Err(err),
             }
+
+            tokio::time::sleep(commit_backoff(retry_count)).await;
+            retry_count += 1;
         }
     }
 
@@ -370,9 +374,10 @@ impl PostgresStore {
             Err(err) => return Err(into_error(err)),
         }
 
-        let mut chunk_size = DELETE_CHUNK_SIZE;
+        let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
 
         loop {
+            let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
             let boundary = conn
                 .prepare_cached(&format!(
                     "SELECT k FROM {table} WHERE k >= $1 AND k < $2 ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
@@ -386,8 +391,10 @@ impl PostgresStore {
                         Some(row) => Some(row.try_get::<_, Vec<u8>>(0).map_err(into_error)?),
                         None => None,
                     },
-                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                    Err(err) if is_timeout_error(&err) => {
+                        if !retry.degrade().await {
+                            return Err(into_error(err));
+                        }
                         break;
                     }
                     Err(err) => return Err(into_error(err)),
@@ -397,9 +404,11 @@ impl PostgresStore {
                     .execute(&delete, &[&from, next.as_ref().unwrap_or(&to)])
                     .await
                 {
-                    Ok(_) => (),
-                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                    Ok(_) => retry.progressed(),
+                    Err(err) if is_timeout_error(&err) => {
+                        if !retry.degrade().await {
+                            return Err(into_error(err));
+                        }
                         break;
                     }
                     Err(err) => return Err(into_error(err)),
@@ -436,10 +445,11 @@ async fn purge_table(conn: &Object, table: &str) -> trc::Result<()> {
         .prepare_cached(&format!("DELETE FROM {table} WHERE v = 0 AND k >= $1"))
         .await
         .map_err(into_error)?;
-    let mut chunk_size = DELETE_CHUNK_SIZE;
+    let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
     let mut from = Vec::new();
 
     loop {
+        let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
         let boundary = conn
             .prepare_cached(&format!(
                 "SELECT k FROM {table} WHERE k >= $1 ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
@@ -453,8 +463,10 @@ async fn purge_table(conn: &Object, table: &str) -> trc::Result<()> {
                     Some(row) => Some(row.try_get::<_, Vec<u8>>(0).map_err(into_error)?),
                     None => None,
                 },
-                Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                    chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                Err(err) if is_timeout_error(&err) => {
+                    if !retry.degrade().await {
+                        return Err(into_error(err));
+                    }
                     break;
                 }
                 Err(err) => return Err(into_error(err)),
@@ -466,9 +478,11 @@ async fn purge_table(conn: &Object, table: &str) -> trc::Result<()> {
             };
 
             match result {
-                Ok(_) => (),
-                Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                    chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                Ok(_) => retry.progressed(),
+                Err(err) if is_timeout_error(&err) => {
+                    if !retry.degrade().await {
+                        return Err(into_error(err));
+                    }
                     break;
                 }
                 Err(err) => return Err(into_error(err)),

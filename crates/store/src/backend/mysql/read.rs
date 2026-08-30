@@ -5,7 +5,11 @@
  */
 
 use super::{MysqlStore, into_error, is_timeout_error};
-use crate::{Deserialize, IterateParams, Key, ValueKey, write::ValueClass};
+use crate::{
+    Deserialize, IterateParams, Key, ValueKey,
+    backend::mysql::{ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE},
+    write::{ChunkedRetry, ValueClass},
+};
 use futures::TryStreamExt;
 use mysql_async::{IsolationLevel, Row, TxOpts, prelude::Queryable};
 
@@ -58,46 +62,35 @@ impl MysqlStore {
     ) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let table = params.begin.subspace().name();
-        let begin = params.begin.serialize(0);
-        let end = params.end.serialize(0);
         let keys = if params.values { "k, v" } else { "k" };
-
-        let s = conn
-            .prep(&match (params.first, params.ascending) {
-                (true, true) => {
-                    format!(
-                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC LIMIT 1"
-                    )
-                }
-                (true, false) => {
-                    format!(
-                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k DESC LIMIT 1"
-                    )
-                }
-                (false, true) => {
-                    format!("SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k ASC")
-                }
-                (false, false) => {
-                    format!("SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k DESC")
-                }
-            })
-            .await
-            .map_err(into_error)?;
-        let mut from = begin;
-        let mut to = end;
-        let mut resume_key = None;
+        let order = if params.ascending { "ASC" } else { "DESC" };
+        let mut from = params.begin.serialize(0);
+        let mut to = params.end.serialize(0);
+        let mut resume_key: Option<Vec<u8>> = None;
+        let mut retry = ChunkedRetry::unbounded(ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE);
 
         loop {
+            let limit = if params.first { Some(1) } else { retry.chunk_size() };
+            let s = conn
+                .prep(&match limit {
+                    Some(limit) => format!(
+                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k {order} LIMIT {limit}"
+                    ),
+                    None => format!(
+                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k {order}"
+                    ),
+                })
+                .await
+                .map_err(into_error)?;
             let mut last_key = None;
-            let mut timed_out = false;
+            let mut fetched = 0;
+            let mut timed_out = None;
 
+            match conn
+                .exec_stream::<Row, _, _>(&s, (from.clone(), to.clone()))
+                .await
             {
-                let mut rows = conn
-                    .exec_stream::<Row, _, _>(&s, (from.clone(), to.clone()))
-                    .await
-                    .map_err(into_error)?;
-
-                loop {
+                Ok(mut rows) => loop {
                     match rows.try_next().await {
                         Ok(Some(mut row)) => {
                             let value = if params.values {
@@ -112,6 +105,7 @@ impl MysqlStore {
                                 .unwrap_or_else(|| Ok(vec![]))
                                 .map_err(into_error)?;
 
+                            fetched += 1;
                             if resume_key.take().is_some_and(|resumed| resumed == key) {
                                 continue;
                             }
@@ -124,18 +118,28 @@ impl MysqlStore {
                         }
                         Ok(None) => break,
                         Err(err) => {
-                            if params.first || last_key.is_none() || !is_timeout_error(&err) {
+                            if params.first || !is_timeout_error(&err) {
                                 return Err(into_error(err));
                             }
-                            timed_out = true;
+                            timed_out = Some(err);
                             break;
                         }
                     }
+                },
+                Err(err) => {
+                    if params.first || !is_timeout_error(&err) {
+                        return Err(into_error(err));
+                    }
+                    timed_out = Some(err);
                 }
             }
 
             match last_key {
-                Some(last_key) if timed_out => {
+                Some(last_key) => {
+                    retry.progressed();
+                    if timed_out.is_none() && !(!params.first && retry.is_chunk_full(fetched)) {
+                        return Ok(());
+                    }
                     if params.ascending {
                         from.clone_from(&last_key);
                     } else {
@@ -143,7 +147,11 @@ impl MysqlStore {
                     }
                     resume_key = Some(last_key);
                 }
-                _ => return Ok(()),
+                None => match timed_out {
+                    Some(err) if !retry.degrade().await => return Err(into_error(err)),
+                    Some(_) => (),
+                    None => return Ok(()),
+                },
             }
         }
     }

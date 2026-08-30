@@ -6,8 +6,9 @@
 
 use super::{PostgresStore, into_error, is_timeout_error};
 use crate::{
-    Deserialize, IterateParams, Key, ValueKey, backend::postgres::into_pool_error,
-    write::ValueClass,
+    Deserialize, IterateParams, Key, ValueKey,
+    backend::postgres::{ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE, into_pool_error},
+    write::{ChunkedRetry, ValueClass},
 };
 use futures::{TryStreamExt, pin_mut};
 use std::fmt::Write;
@@ -61,88 +62,99 @@ impl PostgresStore {
     ) -> trc::Result<()> {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let table = params.begin.subspace().name();
-        let begin = params.begin.serialize(0);
-        let end = params.end.serialize(0);
         let keys = if params.values { "k, v" } else { "k" };
-
-        let s = conn
-            .prepare_cached(&match (params.first, params.ascending) {
-                (true, true) => {
-                    format!(
-                        "SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k ASC LIMIT 1"
-                    )
-                }
-                (true, false) => {
-                    format!(
-                    "SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k DESC LIMIT 1"
-                )
-                }
-                (false, true) => {
-                    format!("SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k ASC")
-                }
-                (false, false) => {
-                    format!("SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k DESC")
-                }
-            })
-            .await.map_err(into_error)?;
-        let mut from = begin;
-        let mut to = end;
-        let mut resume_key: Option<Vec<u8>> = None;
+        let order = if params.ascending { "ASC" } else { "DESC" };
+        let mut from = params.begin.serialize(0);
+        let mut to = params.end.serialize(0);
+        let mut last_key = Vec::new();
+        let mut resume_key = Vec::new();
+        let mut resuming = false;
+        let mut retry = ChunkedRetry::unbounded(ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE);
 
         loop {
-            let mut last_key = None;
-            let mut timed_out = false;
+            let limit = if params.first { Some(1) } else { retry.chunk_size() };
+            let s = conn
+                .prepare_cached(&match limit {
+                    Some(limit) => format!(
+                        "SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k {order} LIMIT {limit}"
+                    ),
+                    None => format!(
+                        "SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k {order}"
+                    ),
+                })
+                .await
+                .map_err(into_error)?;
+            let mut has_last_key = false;
+            let mut fetched = 0;
+            let mut timed_out = None;
 
-            {
-                let rows = conn
-                    .query_raw(&s, &[&from, &to])
-                    .await
-                    .map_err(into_error)?;
+            match conn.query_raw(&s, &[&from, &to]).await {
+                Ok(rows) => {
+                    pin_mut!(rows);
 
-                pin_mut!(rows);
+                    loop {
+                        match rows.try_next().await {
+                            Ok(Some(row)) => {
+                                let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
+                                let value = if params.values {
+                                    row.try_get::<_, &[u8]>(1).map_err(into_error)?
+                                } else {
+                                    b"".as_slice()
+                                };
 
-                loop {
-                    match rows.try_next().await {
-                        Ok(Some(row)) => {
-                            let key = row.try_get::<_, &[u8]>(0).map_err(into_error)?;
-                            let value = if params.values {
-                                row.try_get::<_, &[u8]>(1).map_err(into_error)?
-                            } else {
-                                b"".as_slice()
-                            };
+                                fetched += 1;
+                                if resuming {
+                                    resuming = false;
+                                    if key == resume_key.as_slice() {
+                                        continue;
+                                    }
+                                }
 
-                            if resume_key.take().is_some_and(|resumed| resumed == key) {
-                                continue;
+                                if !cb(key, value)? {
+                                    return Ok(());
+                                }
+
+                                last_key.clear();
+                                last_key.extend_from_slice(key);
+                                has_last_key = true;
                             }
-
-                            if !cb(key, value)? {
-                                return Ok(());
+                            Ok(None) => break,
+                            Err(err) => {
+                                if params.first || !is_timeout_error(&err) {
+                                    return Err(into_error(err));
+                                }
+                                timed_out = Some(err);
+                                break;
                             }
-
-                            last_key = Some(key.to_vec());
-                        }
-                        Ok(None) => break,
-                        Err(err) => {
-                            if params.first || last_key.is_none() || !is_timeout_error(&err) {
-                                return Err(into_error(err));
-                            }
-                            timed_out = true;
-                            break;
                         }
                     }
+                }
+                Err(err) => {
+                    if params.first || !is_timeout_error(&err) {
+                        return Err(into_error(err));
+                    }
+                    timed_out = Some(err);
                 }
             }
 
-            match last_key {
-                Some(last_key) if timed_out => {
-                    if params.ascending {
-                        from.clone_from(&last_key);
-                    } else {
-                        to.clone_from(&last_key);
-                    }
-                    resume_key = Some(last_key);
+            if has_last_key {
+                retry.progressed();
+                if timed_out.is_none() && !(!params.first && retry.is_chunk_full(fetched)) {
+                    return Ok(());
                 }
-                _ => return Ok(()),
+                if params.ascending {
+                    from.clone_from(&last_key);
+                } else {
+                    to.clone_from(&last_key);
+                }
+                resume_key.clone_from(&last_key);
+                resuming = true;
+            } else {
+                match timed_out {
+                    Some(err) if !retry.degrade().await => return Err(into_error(err)),
+                    Some(_) => (),
+                    None => return Ok(()),
+                }
             }
         }
     }

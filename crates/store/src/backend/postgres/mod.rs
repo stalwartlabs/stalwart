@@ -60,6 +60,8 @@ fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
 
 pub(crate) const DELETE_CHUNK_SIZE: usize = 1000;
 pub(crate) const MIN_DELETE_CHUNK_SIZE: usize = 10;
+pub(crate) const ITERATE_CHUNK_SIZE: usize = 1000;
+pub(crate) const MIN_ITERATE_CHUNK_SIZE: usize = 10;
 
 #[inline(always)]
 pub(crate) fn is_timeout_error(err: &tokio_postgres::Error) -> bool {

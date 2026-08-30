@@ -30,12 +30,16 @@ fn into_error(err: impl Display) -> trc::Error {
     trc::StoreEvent::MysqlError.reason(err)
 }
 
+const ER_DUP_ENTRY: u16 = 1062;
 const ER_LOCK_WAIT_TIMEOUT: u16 = 1205;
+const ER_LOCK_DEADLOCK: u16 = 1213;
 const ER_STATEMENT_TIMEOUT: u16 = 1969;
 const ER_QUERY_TIMEOUT: u16 = 3024;
 
 pub(crate) const DELETE_CHUNK_SIZE: usize = 1000;
 pub(crate) const MIN_DELETE_CHUNK_SIZE: usize = 10;
+pub(crate) const ITERATE_CHUNK_SIZE: usize = 1000;
+pub(crate) const MIN_ITERATE_CHUNK_SIZE: usize = 10;
 
 #[inline(always)]
 pub(crate) fn is_timeout_error(err: &mysql_async::Error) -> bool {

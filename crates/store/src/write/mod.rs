@@ -151,6 +151,15 @@ pub(crate) use commit_limits::commit_backoff;
     feature = "foundation",
     feature = "sqlite"
 ))]
+pub(crate) use commit_limits::ChunkedRetry;
+
+#[cfg(any(
+    feature = "rocks",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "foundation",
+    feature = "sqlite"
+))]
 mod commit_limits {
     use rand::RngExt;
     use std::time::Duration;
@@ -174,6 +183,64 @@ mod commit_limits {
             .min(MAX_COMMIT_BACKOFF_US);
 
         Duration::from_micros(rand::rng().random_range(0..=ceiling))
+    }
+
+    pub(crate) struct ChunkedRetry {
+        chunk_size: Option<usize>,
+        first_chunk_size: usize,
+        min_chunk_size: usize,
+        retry_count: u32,
+    }
+
+    impl ChunkedRetry {
+        pub(crate) fn unbounded(first_chunk_size: usize, min_chunk_size: usize) -> Self {
+            Self {
+                chunk_size: None,
+                first_chunk_size,
+                min_chunk_size,
+                retry_count: 0,
+            }
+        }
+
+        pub(crate) fn bounded(first_chunk_size: usize, min_chunk_size: usize) -> Self {
+            Self {
+                chunk_size: Some(first_chunk_size),
+                first_chunk_size,
+                min_chunk_size,
+                retry_count: 0,
+            }
+        }
+
+        pub(crate) fn chunk_size(&self) -> Option<usize> {
+            self.chunk_size
+        }
+
+        pub(crate) fn is_chunk_full(&self, fetched: usize) -> bool {
+            self.chunk_size.is_some_and(|chunk_size| fetched >= chunk_size)
+        }
+
+        pub(crate) fn progressed(&mut self) {
+            self.retry_count = 0;
+        }
+
+        pub(crate) async fn degrade(&mut self) -> bool {
+            match self.chunk_size {
+                None => {
+                    self.chunk_size = Some(self.first_chunk_size);
+                    true
+                }
+                Some(chunk_size) if chunk_size > self.min_chunk_size => {
+                    self.chunk_size = Some((chunk_size / 2).max(self.min_chunk_size));
+                    true
+                }
+                Some(_) if self.retry_count < MAX_COMMIT_ATTEMPTS => {
+                    tokio::time::sleep(commit_backoff(self.retry_count)).await;
+                    self.retry_count += 1;
+                    true
+                }
+                Some(_) => false,
+            }
+        }
     }
 }
 

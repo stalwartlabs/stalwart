@@ -18,6 +18,8 @@ use mysql_async::{
     Conn, OptsBuilder, Pool, PoolConstraints, PoolOpts, SslOpts, prelude::Queryable,
 };
 
+const STMT_CACHE_SIZE: usize = 128;
+
 impl MysqlStore {
     pub async fn open(config: structs::MySqlStore) -> Result<Store, String> {
         let mut opts = OptsBuilder::default()
@@ -27,6 +29,7 @@ impl MysqlStore {
             .db_name(Some(config.database))
             .max_allowed_packet(config.max_allowed_packet.map(|v| v as usize))
             .wait_timeout(config.timeout.map(|t| t.as_secs() as usize))
+            .stmt_cache_size(STMT_CACHE_SIZE)
             .client_found_rows(true)
             .tcp_port(config.port as u16);
 
@@ -98,7 +101,7 @@ impl MysqlStore {
                     };
                     format!("k VARBINARY(255) NOT NULL, v {value_type} NOT NULL, PRIMARY KEY (k)")
                 }
-                Shape::Presence => "k BLOB, PRIMARY KEY (k(400))".to_string(),
+                Shape::Presence => "k VARBINARY(767) NOT NULL, PRIMARY KEY (k)".to_string(),
                 Shape::Counter => {
                     "k VARBINARY(255) NOT NULL, v BIGINT NOT NULL DEFAULT 0, PRIMARY KEY (k)"
                         .to_string()

@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, MysqlStore, into_error, is_timeout_error};
+use super::{
+    DELETE_CHUNK_SIZE, ER_DUP_ENTRY, ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT, MIN_DELETE_CHUNK_SIZE,
+    MysqlStore, into_error, is_timeout_error,
+};
 use crate::{
     Key, Shape, Subspace,
     write::{
-        Advance, AssignedIds, Batch, BatchCursor, LogSet, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME,
-        MergeResult, ValueOp, commit_backoff,
+        Advance, AssignedIds, Batch, BatchCursor, ChunkedRetry, LogSet, MAX_COMMIT_ATTEMPTS,
+        MAX_COMMIT_TIME, MergeResult, ValueOp, commit_backoff,
     },
 };
 use ahash::AHashMap;
@@ -42,13 +45,17 @@ impl MysqlStore {
                 Err(err) => err,
             };
 
-            let _ = conn.query_drop("ROLLBACK;").await;
-
             match err {
                 CommitError::Mysql(Error::Server(err))
-                    if [1062, 1213].contains(&err.code)
+                    if [ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT].contains(&err.code)
                         && retry_count < MAX_COMMIT_ATTEMPTS
                         && start.elapsed() < MAX_COMMIT_TIME => {}
+                CommitError::Mysql(Error::Server(err)) if err.code == ER_DUP_ENTRY => {
+                    return Err(trc::StoreEvent::AssertValueFailed
+                        .into_err()
+                        .reason("Unique violation")
+                        .caused_by(trc::location!()));
+                }
                 CommitError::Mysql(err) => {
                     return Err(into_error(err));
                 }
@@ -85,7 +92,6 @@ impl MysqlStore {
                     "ON DUPLICATE KEY UPDATE v = LAST_INSERT_ID(v + :v)"
                 ))
                 .await?;
-            let last_id = trx.prep("SELECT LAST_INSERT_ID()").await?;
             let mut key_buf = Vec::with_capacity(16);
 
             for allocation in batch.allocations() {
@@ -96,10 +102,7 @@ impl MysqlStore {
                     params! {"k" => &key_buf, "v" => allocation.increment_by()},
                 )
                 .await?;
-                let counter = trx
-                    .exec_first::<i64, _, _>(&last_id, ())
-                    .await?
-                    .ok_or_else(missing_last_insert_id)?;
+                let counter = trx.last_insert_id().ok_or_else(missing_last_insert_id)? as i64;
                 result.apply(allocation, counter);
             }
         }
@@ -159,7 +162,9 @@ impl MysqlStore {
                                 }
                             } else {
                                 let s = trx
-                                    .prep(format!("INSERT IGNORE INTO {table} (k) VALUES (?)"))
+                                    .prep(format!(
+                                        "INSERT INTO {table} (k) VALUES (?) ON DUPLICATE KEY UPDATE k = k"
+                                    ))
                                     .await?;
                                 trx.exec_drop(&s, (key,)).await?;
                             }
@@ -243,15 +248,8 @@ impl MysqlStore {
                                 ))
                                 .await?;
                             trx.exec_drop(&s, params! {"k" => key, "v" => &*by}).await?;
-                            let s = trx.prep("SELECT LAST_INSERT_ID()").await?;
                             result.push_counter_id(
-                                trx.exec_first::<i64, _, _>(&s, ()).await?.ok_or_else(|| {
-                                    mysql_async::Error::Io(mysql_async::IoError::Io(
-                                        std::io::Error::other(
-                                            "LAST_INSERT_ID() did not return a value",
-                                        ),
-                                    ))
-                                })?,
+                                trx.last_insert_id().ok_or_else(missing_last_insert_id)? as i64,
                             );
                         }
                         ValueOp::Clear => {
@@ -272,7 +270,8 @@ impl MysqlStore {
                     let key = &key_buf;
 
                     let s = if set {
-                        trx.prep("INSERT IGNORE INTO i (k) VALUES (?)").await?
+                        trx.prep("INSERT INTO i (k) VALUES (?) ON DUPLICATE KEY UPDATE k = k")
+                            .await?
                     } else {
                         trx.prep("DELETE FROM i WHERE k = ?").await?
                     };
@@ -360,9 +359,10 @@ impl MysqlStore {
             Err(err) => return Err(into_error(err)),
         }
 
-        let mut chunk_size = DELETE_CHUNK_SIZE;
+        let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
 
         loop {
+            let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
             let boundary = conn
                 .prep(format!(
                     "SELECT k FROM {table} WHERE k >= ? AND k < ? ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
@@ -376,8 +376,10 @@ impl MysqlStore {
                     .await
                 {
                     Ok(next) => next,
-                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                    Err(err) if is_timeout_error(&err) => {
+                        if !retry.degrade().await {
+                            return Err(into_error(err));
+                        }
                         break;
                     }
                     Err(err) => return Err(into_error(err)),
@@ -387,9 +389,11 @@ impl MysqlStore {
                     .exec_drop(&delete, (&from, next.as_ref().unwrap_or(&to)))
                     .await
                 {
-                    Ok(_) => (),
-                    Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                        chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                    Ok(_) => retry.progressed(),
+                    Err(err) if is_timeout_error(&err) => {
+                        if !retry.degrade().await {
+                            return Err(into_error(err));
+                        }
                         break;
                     }
                     Err(err) => return Err(into_error(err)),
@@ -426,10 +430,11 @@ async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
         .prep(format!("DELETE FROM {table} WHERE v = 0 AND k >= ?"))
         .await
         .map_err(into_error)?;
-    let mut chunk_size = DELETE_CHUNK_SIZE;
+    let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
     let mut from = Vec::new();
 
     loop {
+        let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
         let boundary = conn
             .prep(format!(
                 "SELECT k FROM {table} WHERE k >= ? ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
@@ -440,8 +445,10 @@ async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
         loop {
             let next = match conn.exec_first::<Vec<u8>, _, _>(&boundary, (&from,)).await {
                 Ok(next) => next,
-                Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                    chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                Err(err) if is_timeout_error(&err) => {
+                    if !retry.degrade().await {
+                        return Err(into_error(err));
+                    }
                     break;
                 }
                 Err(err) => return Err(into_error(err)),
@@ -453,9 +460,11 @@ async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
             };
 
             match result {
-                Ok(_) => (),
-                Err(err) if is_timeout_error(&err) && chunk_size > MIN_DELETE_CHUNK_SIZE => {
-                    chunk_size = (chunk_size / 2).max(MIN_DELETE_CHUNK_SIZE);
+                Ok(_) => retry.progressed(),
+                Err(err) if is_timeout_error(&err) => {
+                    if !retry.degrade().await {
+                        return Err(into_error(err));
+                    }
                     break;
                 }
                 Err(err) => return Err(into_error(err)),

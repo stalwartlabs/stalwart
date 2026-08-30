@@ -106,14 +106,20 @@ impl PostgresStore {
             .filter(|subspace| !subspace.is_internal_fts())
         {
             let table = subspace.name();
-            let columns = match subspace.shape() {
-                Shape::Value => "k BYTEA PRIMARY KEY, v BYTEA NOT NULL",
-                Shape::Presence => "k BYTEA PRIMARY KEY",
-                Shape::Counter => "k BYTEA PRIMARY KEY, v BIGINT NOT NULL DEFAULT 0",
+            let (columns, storage) = match subspace.shape() {
+                Shape::Value => (
+                    "k BYTEA PRIMARY KEY, v BYTEA NOT NULL",
+                    " WITH (fillfactor = 85)",
+                ),
+                Shape::Presence => ("k BYTEA PRIMARY KEY", ""),
+                Shape::Counter => (
+                    "k BYTEA PRIMARY KEY, v BIGINT NOT NULL DEFAULT 0",
+                    " WITH (fillfactor = 60)",
+                ),
             };
 
             conn.execute(
-                &format!("CREATE TABLE IF NOT EXISTS {table} ({columns})"),
+                &format!("CREATE TABLE IF NOT EXISTS {table} ({columns}){storage}"),
                 &[],
             )
             .await
