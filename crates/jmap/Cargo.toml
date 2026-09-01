@@ -47,7 +47,7 @@ rand = "0.10.2"
 pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
 lz4_flex = { version = "0.14", default-features = false }
 aes-gcm = "0.11.0"
-aes-gcm-siv = "0.11.1"
+aes-gcm-siv = "0.12.1"
 rsa = "0.9.10"
 rkyv = { version = "0.8.17", features = ["little_endian"] }
 compact_str = "0.10.0"
