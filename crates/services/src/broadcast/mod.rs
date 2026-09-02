@@ -128,6 +128,7 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                                 continue;
                             }
                             CacheInvalidation::DomainNegative => (11u8, 0),
+                            CacheInvalidation::MessageCache(id) => (12u8, *id),
                         };
 
                         serialized.push(marker);
@@ -279,6 +280,7 @@ where
                                 }
                             }
                             11 => CacheInvalidation::DomainNegative,
+                            12 => CacheInvalidation::MessageCache(id),
                             _ => return Err(()),
                         });
                     }

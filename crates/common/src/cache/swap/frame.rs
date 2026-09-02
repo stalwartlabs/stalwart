@@ -19,19 +19,25 @@ pub struct SwapFrame<'x> {
 }
 
 impl<'x> SwapFrame<'x> {
-    pub fn wrap(part: SwapPart, change_id: u64, count: u32, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(HEADER_LEN + payload.len());
-        out.extend_from_slice(&MAGIC.to_le_bytes());
-        out.extend_from_slice(&VERSION.to_le_bytes());
-        out.push(part.code());
-        out.push(0);
-        out.extend_from_slice(&change_id.to_le_bytes());
-        out.extend_from_slice(&count.to_le_bytes());
-        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        out.extend_from_slice(&xxhash_rust::xxh3::xxh3_64(payload).to_le_bytes());
-        debug_assert_eq!(out.len(), HEADER_LEN);
-        out.extend_from_slice(payload);
-        out
+    pub fn reserve_header() -> Vec<u8> {
+        vec![0u8; HEADER_LEN]
+    }
+
+    pub fn seal(out: &mut [u8], part: SwapPart, change_id: u64, count: u32) {
+        let Some(payload_len) = out.len().checked_sub(HEADER_LEN) else {
+            return;
+        };
+        let checksum = xxhash_rust::xxh3::xxh3_64(&out[HEADER_LEN..]);
+        let header = &mut out[..HEADER_LEN];
+
+        header[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        header[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        header[6] = part.code();
+        header[7] = 0;
+        header[8..16].copy_from_slice(&change_id.to_le_bytes());
+        header[16..20].copy_from_slice(&count.to_le_bytes());
+        header[20..24].copy_from_slice(&(payload_len as u32).to_le_bytes());
+        header[24..32].copy_from_slice(&checksum.to_le_bytes());
     }
 
     pub fn parse(buf: &'x [u8]) -> Option<Self> {

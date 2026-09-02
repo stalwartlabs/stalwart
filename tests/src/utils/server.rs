@@ -19,6 +19,7 @@ use ahash::AHashMap;
 use common::{
     BuildServer, Caches, Core, Data, DavResources, Inner, Server,
     auth::RECOVERY_ADMIN_ID,
+    cache::swap::SwapTier,
     config::{
         server::{Listeners, ServerProtocol},
         storage::Storage,
@@ -365,7 +366,7 @@ impl TestServerBuilder {
         // Parse components
         let core = Box::pin(Core::parse(&mut self.bootstrap, storage)).await;
         let data = Data::parse(&mut self.bootstrap).await;
-        let cache = Caches::parse(&mut self.bootstrap, &core.storage).await;
+        let (cache, swap_rx) = Caches::parse(&mut self.bootstrap, &core.storage).await;
 
         // Enable telemetry
         telemetry.enable(true);
@@ -377,6 +378,9 @@ impl TestServerBuilder {
             ipc,
             cache,
         });
+
+        // Start the cache swap tier writer
+        SwapTier::start(&inner, swap_rx);
 
         // Parse TCP acceptors
         servers
@@ -588,13 +592,14 @@ impl TestServer {
         let (ipc, ipc_rxs) = build_ipc(false);
 
         let mut bp = Bootstrap::new_uninitialized(self.server.registry().clone());
+        let (cache, _swap_rx) = Caches::parse(&mut bp, &self.server.core.storage).await;
 
         (
             Inner {
                 shared_core: self.server.core.as_ref().clone().into_shared(),
                 data: Default::default(),
                 ipc,
-                cache: Caches::parse(&mut bp, &self.server.core.storage).await,
+                cache,
             }
             .into(),
             ipc_rxs,

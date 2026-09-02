@@ -346,7 +346,7 @@ pub struct ArenaRef {
 impl ArenaRef {
     #[inline(always)]
     pub fn range(&self) -> std::ops::Range<usize> {
-        self.off as usize..(self.off + self.len) as usize
+        self.off as usize..(self.off as usize + self.len as usize)
     }
 
     #[inline(always)]

@@ -5,11 +5,13 @@
  */
 
 use super::{SwapPart, frame::SwapFrame};
+use crate::storage::dav::CONTAINER_FLAG;
 use crate::{
     ArenaRef, CachedName, DavPath, DavResource, DavResourceMetadata, DavResources, PathChunk,
     PathIndex, ResourceChunk, ResourceStore, TinyCalendarPreferences, UpdateLock,
 };
 use calcard::common::timezone::Tz;
+use rkyv::with::InlineAsBox;
 use std::sync::Arc;
 use types::acl::AclGrant;
 use utils::map::bitmap::Bitmap;
@@ -211,7 +213,7 @@ impl ArchivedFlatResource {
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
-pub struct ArchivedResources {
+pub struct ArchivedResources<'x> {
     pub base_path: String,
     pub item_change_id: u64,
     pub container_change_id: u64,
@@ -219,14 +221,15 @@ pub struct ArchivedResources {
     pub total: u32,
     pub path_total: u32,
     pub unified_id_space: bool,
-    pub chunks: Vec<ArchivedResourceChunk>,
-    pub path_chunks: Vec<ArchivedPathChunk>,
+    pub chunks: Vec<ArchivedResourceChunk<'x>>,
+    pub path_chunks: Vec<ArchivedPathChunk<'x>>,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
-pub struct ArchivedResourceChunk {
+pub struct ArchivedResourceChunk<'x> {
     pub records: Vec<FlatResource>,
-    pub bytes: Vec<u8>,
+    #[rkyv(with = InlineAsBox)]
+    pub bytes: &'x [u8],
     pub name_offsets: Vec<u32>,
     pub name_lengths: Vec<u32>,
     pub name_parents: Vec<u32>,
@@ -238,8 +241,9 @@ pub struct ArchivedResourceChunk {
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
-pub struct ArchivedPathChunk {
-    pub bytes: Vec<u8>,
+pub struct ArchivedPathChunk<'x> {
+    #[rkyv(with = InlineAsBox)]
+    pub bytes: &'x [u8],
     pub path_offsets: Vec<u32>,
     pub path_lengths: Vec<u32>,
     pub parent_ids: Vec<u32>,
@@ -247,8 +251,60 @@ pub struct ArchivedPathChunk {
     pub document_ids: Vec<u32>,
 }
 
+fn fits_within(arena: ArenaRef, limit: usize) -> bool {
+    (arena.off as usize)
+        .checked_add(arena.len as usize)
+        .is_some_and(|end| end <= limit)
+}
+
+impl DavResource {
+    fn fits_within(&self, bytes: usize, names: usize, acls: usize, prefs: usize) -> bool {
+        match &self.data {
+            DavResourceMetadata::File {
+                name,
+                acls: acl_ref,
+                ..
+            }
+            | DavResourceMetadata::AddressBook {
+                name,
+                acls: acl_ref,
+                ..
+            } => fits_within(*name, bytes) && fits_within(*acl_ref, acls),
+            DavResourceMetadata::Calendar {
+                name,
+                acls: acl_ref,
+                preferences,
+                ..
+            } => {
+                fits_within(*name, bytes)
+                    && fits_within(*acl_ref, acls)
+                    && fits_within(*preferences, prefs)
+            }
+            DavResourceMetadata::CalendarEvent {
+                names: name_refs,
+                uid,
+                ..
+            }
+            | DavResourceMetadata::ContactCard {
+                names: name_refs,
+                uid,
+                ..
+            } => fits_within(*name_refs, names) && fits_within(*uid, bytes),
+            DavResourceMetadata::CalendarEventNotification {
+                names: name_refs, ..
+            } => fits_within(*name_refs, names),
+        }
+    }
+}
+
 impl DavResources {
     pub fn to_snapshot(&self) -> Option<Vec<u8>> {
+        let (chunks, path_chunks) = self.pack();
+        self.seal_snapshot(chunks, path_chunks)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn pack(&self) -> (Vec<ArchivedResourceChunk<'_>>, Vec<ArchivedPathChunk<'_>>) {
         let mut chunks = Vec::with_capacity(self.resources.chunks.len());
         for chunk in &self.resources.chunks {
             let mut name_offsets = Vec::with_capacity(chunk.names.len());
@@ -278,7 +334,7 @@ impl DavResources {
 
             chunks.push(ArchivedResourceChunk {
                 records: chunk.records.iter().map(FlatResource::pack).collect(),
-                bytes: chunk.bytes.to_vec(),
+                bytes: &chunk.bytes,
                 name_offsets,
                 name_lengths,
                 name_parents,
@@ -306,7 +362,7 @@ impl DavResources {
             }
 
             path_chunks.push(ArchivedPathChunk {
-                bytes: chunk.bytes.to_vec(),
+                bytes: &chunk.bytes,
                 path_offsets,
                 path_lengths,
                 parent_ids,
@@ -315,25 +371,38 @@ impl DavResources {
             });
         }
 
-        let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&ArchivedResources {
-            base_path: self.base_path.clone(),
-            item_change_id: self.item_change_id,
-            container_change_id: self.container_change_id,
-            containers_end: self.resources.containers_end as u32,
-            total: self.resources.total as u32,
-            path_total: self.paths.total as u32,
-            unified_id_space: self.resources.unified_id_space,
-            chunks,
-            path_chunks,
-        })
+        (chunks, path_chunks)
+    }
+
+    fn seal_snapshot(
+        &self,
+        chunks: Vec<ArchivedResourceChunk<'_>>,
+        path_chunks: Vec<ArchivedPathChunk<'_>>,
+    ) -> Option<Vec<u8>> {
+        let mut out = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(
+            &ArchivedResources {
+                base_path: self.base_path.clone(),
+                item_change_id: self.item_change_id,
+                container_change_id: self.container_change_id,
+                containers_end: self.resources.containers_end as u32,
+                total: self.resources.total as u32,
+                path_total: self.paths.total as u32,
+                unified_id_space: self.resources.unified_id_space,
+                chunks,
+                path_chunks,
+            },
+            SwapFrame::reserve_header(),
+        )
         .ok()?;
 
-        Some(SwapFrame::wrap(
+        SwapFrame::seal(
+            &mut out,
             SwapPart::Resources,
             self.highest_change_id,
             self.resources.total as u32,
-            &payload,
-        ))
+        );
+
+        Some(out)
     }
 
     pub fn from_snapshot(buf: &[u8]) -> Option<Self> {
@@ -345,9 +414,19 @@ impl DavResources {
         let archived =
             rkyv::access::<ArchivedArchivedResources, rkyv::rancor::Error>(frame.payload()).ok()?;
 
+        let containers_end = archived.containers_end.to_native() as usize;
+        let unified_id_space = archived.unified_id_space;
+        if containers_end > archived.chunks.len()
+            || (unified_id_space && containers_end != archived.chunks.len())
+        {
+            return None;
+        }
+
         let mut chunks = Vec::with_capacity(archived.chunks.len());
         let mut total = 0usize;
-        for chunk in archived.chunks.iter() {
+        let mut container_ids: Vec<(u32, bool)> = Vec::new();
+        let mut item_ids: Vec<(u32, bool)> = Vec::new();
+        for (slot, chunk) in archived.chunks.iter().enumerate() {
             let names_len = chunk.name_offsets.len();
             if chunk.name_lengths.len() != names_len || chunk.name_parents.len() != names_len {
                 return None;
@@ -361,11 +440,7 @@ impl DavResources {
                 return None;
             }
 
-            let bytes: Box<[u8]> = chunk.bytes.as_slice().into();
-            let mut records = Vec::with_capacity(chunk.records.len());
-            for record in chunk.records.iter() {
-                records.push(record.unpack()?);
-            }
+            let bytes: Box<[u8]> = (&*chunk.bytes).into();
 
             let names: Box<[CachedName]> = (0..names_len)
                 .map(|slot| CachedName {
@@ -376,6 +451,12 @@ impl DavResources {
                     parent_id: chunk.name_parents[slot].to_native(),
                 })
                 .collect();
+            if names
+                .iter()
+                .any(|name| !fits_within(name.name, bytes.len()))
+            {
+                return None;
+            }
 
             let acls: Box<[AclGrant]> = (0..acls_len)
                 .map(|slot| AclGrant {
@@ -391,6 +472,25 @@ impl DavResources {
                     flags: chunk.pref_flags[slot].to_native(),
                 })
                 .collect();
+
+            let ids = if slot < containers_end {
+                &mut container_ids
+            } else {
+                &mut item_ids
+            };
+            let mut records = Vec::with_capacity(chunk.records.len());
+            let mut previous_id: Option<u32> = None;
+            for record in chunk.records.iter() {
+                let record = record.unpack()?;
+                if !record.fits_within(bytes.len(), names_len, acls_len, prefs_len)
+                    || previous_id.is_some_and(|previous| previous >= record.document_id)
+                {
+                    return None;
+                }
+                previous_id = Some(record.document_id);
+                ids.push((record.document_id, record.is_container()));
+                records.push(record);
+            }
 
             total += records.len();
             let min_id = records
@@ -409,10 +509,24 @@ impl DavResources {
             }));
         }
 
-        let containers_end = archived.containers_end.to_native() as usize;
-        if total != archived.total.to_native() as usize || containers_end > chunks.len() {
+        if total != archived.total.to_native() as usize {
             return None;
         }
+
+        for ids in [&mut container_ids, &mut item_ids] {
+            if !ids.is_sorted_by_key(|(document_id, _)| *document_id) {
+                ids.sort_unstable_by_key(|(document_id, _)| *document_id);
+            }
+        }
+        let resolves = |document_id: u32, want_container: bool| {
+            let ids = if unified_id_space || want_container {
+                &container_ids
+            } else {
+                &item_ids
+            };
+            ids.binary_search_by_key(&document_id, |(document_id, _)| *document_id)
+                .is_ok_and(|slot| ids[slot].1 == want_container)
+        };
 
         let mut path_chunks = Vec::with_capacity(archived.path_chunks.len());
         let mut path_total = 0usize;
@@ -426,21 +540,28 @@ impl DavResources {
                 return None;
             }
 
+            let bytes: Box<[u8]> = (&*chunk.bytes).into();
+            let paths: Box<[DavPath]> = (0..paths_len)
+                .map(|slot| DavPath {
+                    path: ArenaRef {
+                        off: chunk.path_offsets[slot].to_native(),
+                        len: chunk.path_lengths[slot].to_native(),
+                    },
+                    parent_id: chunk.parent_ids[slot].to_native(),
+                    hierarchy_seq: chunk.hierarchy_seqs[slot].to_native(),
+                    document_id: chunk.document_ids[slot].to_native(),
+                })
+                .collect();
+            for path in paths.iter() {
+                if !fits_within(path.path, bytes.len())
+                    || !resolves(path.document_id, path.hierarchy_seq & CONTAINER_FLAG != 0)
+                {
+                    return None;
+                }
+            }
+
             path_total += paths_len;
-            path_chunks.push(Arc::new(PathChunk {
-                paths: (0..paths_len)
-                    .map(|slot| DavPath {
-                        path: ArenaRef {
-                            off: chunk.path_offsets[slot].to_native(),
-                            len: chunk.path_lengths[slot].to_native(),
-                        },
-                        parent_id: chunk.parent_ids[slot].to_native(),
-                        hierarchy_seq: chunk.hierarchy_seqs[slot].to_native(),
-                        document_id: chunk.document_ids[slot].to_native(),
-                    })
-                    .collect(),
-                bytes: chunk.bytes.as_slice().into(),
-            }));
+            path_chunks.push(Arc::new(PathChunk { paths, bytes }));
         }
 
         if path_total != archived.path_total.to_native() as usize {
@@ -457,7 +578,7 @@ impl DavResources {
                 chunks,
                 containers_end,
                 total,
-                unified_id_space: archived.unified_id_space,
+                unified_id_space,
             },
             item_change_id: archived.item_change_id.to_native(),
             container_change_id: archived.container_change_id.to_native(),
@@ -775,6 +896,52 @@ mod tests {
         let encoded = resources.to_snapshot().expect("encode");
         let decoded = DavResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn an_inconsistent_payload_with_a_valid_checksum_is_rejected() {
+        let resources = calcard(200);
+
+        let (mut chunks, path_chunks) = resources.pack();
+        chunks[0].records[0].ref_a_off = u32::MAX - 1;
+        assert!(
+            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+                .is_none(),
+            "an arena offset past the end of the chunk was accepted"
+        );
+
+        let (mut chunks, path_chunks) = resources.pack();
+        chunks[0].records[0].ref_b_len = u32::MAX;
+        assert!(
+            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+                .is_none(),
+            "an arena length past the end of the chunk was accepted"
+        );
+
+        let (mut chunks, path_chunks) = resources.pack();
+        let records = &mut chunks[0].records;
+        records.swap(0, 1);
+        assert!(
+            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+                .is_none(),
+            "records that are not ascending by document id were accepted, which breaks find"
+        );
+
+        let (chunks, mut path_chunks) = resources.pack();
+        path_chunks[0].document_ids[0] = 900_000;
+        assert!(
+            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+                .is_none(),
+            "a path pointing at a document that is not in the store was accepted"
+        );
+
+        let (chunks, mut path_chunks) = resources.pack();
+        path_chunks[0].path_lengths[0] = u32::MAX;
+        assert!(
+            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+                .is_none(),
+            "a path reaching past the end of its byte arena was accepted"
+        );
     }
 
     #[test]

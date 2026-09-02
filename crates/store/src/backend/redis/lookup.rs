@@ -159,6 +159,7 @@ impl RedisStore {
         data: &[u8],
         chunk_size: usize,
         expires: Option<u64>,
+        previous_chunks: u32,
     ) -> trc::Result<()> {
         match &self.pool {
             RedisPool::Single(pool) => {
@@ -168,6 +169,7 @@ impl RedisStore {
                     data,
                     chunk_size,
                     expires,
+                    previous_chunks,
                 )
                 .await
             }
@@ -178,6 +180,7 @@ impl RedisStore {
                     data,
                     chunk_size,
                     expires,
+                    previous_chunks,
                 )
                 .await
             }
@@ -188,6 +191,7 @@ impl RedisStore {
                     data,
                     chunk_size,
                     expires,
+                    previous_chunks,
                 )
                 .await
             }
@@ -236,6 +240,7 @@ impl RedisStore {
         count: u32,
     ) -> trc::Result<Option<Vec<u8>>> {
         let mut pipeline = redis::pipe();
+        pipeline.atomic();
         for index in 0..count {
             pipeline.cmd("GET").arg(chunk_key(prefix, index));
         }
@@ -263,8 +268,12 @@ impl RedisStore {
         data: &[u8],
         chunk_size: usize,
         expires: Option<u64>,
+        previous_chunks: u32,
     ) -> trc::Result<()> {
         let mut pipeline = redis::pipe();
+        pipeline.atomic();
+
+        let mut written = 0u32;
         for (index, chunk) in data.chunks(chunk_size).enumerate() {
             let key = chunk_key(prefix, index as u32);
             match expires {
@@ -275,6 +284,11 @@ impl RedisStore {
                     pipeline.cmd("SET").arg(key).arg(chunk);
                 }
             }
+            written = index as u32 + 1;
+        }
+
+        for index in written..previous_chunks {
+            pipeline.cmd("DEL").arg(chunk_key(prefix, index));
         }
 
         pipeline.query_async::<()>(conn).await.map_err(into_error)
@@ -288,6 +302,7 @@ impl RedisStore {
         to: u32,
     ) -> trc::Result<()> {
         let mut pipeline = redis::pipe();
+        pipeline.atomic();
         for index in from..to {
             pipeline.cmd("DEL").arg(chunk_key(prefix, index));
         }

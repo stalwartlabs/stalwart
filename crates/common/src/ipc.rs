@@ -114,6 +114,7 @@ pub enum RegistryChange {
 pub enum CacheInvalidation {
     AccessToken(u32),
     DavResources(u32),
+    MessageCache(u32),
     Domain(u32),
     Account(u32),
     DkimSignature(u32),

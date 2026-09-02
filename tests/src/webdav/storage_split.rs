@@ -7,13 +7,13 @@
 use crate::utils::server::TestServer;
 use crate::webdav::*;
 use dav_proto::schema::property::{DavProperty, WebDavProperty};
-use types::dead_property::DeadElementTag;
 use groupware::calendar::{CalendarEvent, EVENT_HAS_DEAD_PROPERTIES};
 use groupware::contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard};
 use store::{
     SerializeInfallible, ValueKey,
     write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
 };
+use types::dead_property::DeadElementTag;
 use types::{
     collection::Collection,
     field::{CalendarEventField, ContactField, Field, PrincipalField},
@@ -52,11 +52,7 @@ async fn meta_and_content(
     let meta = test
         .server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-            account_id,
-            collection,
-            document_id,
-        ))
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(account_id, collection, document_id))
         .await
         .unwrap();
     let content = test
@@ -369,7 +365,10 @@ async fn etag_changes_on_payload_and_metadata_writes(test: &TestServer) {
         .with_status(StatusCode::OK)
         .header("etag")
         .to_string();
-    assert_ne!(after_proppatch, after_move, "a rename did not move the ETag");
+    assert_ne!(
+        after_proppatch, after_move,
+        "a rename did not move the ETag"
+    );
 
     client
         .request("DELETE", moved_path, "")

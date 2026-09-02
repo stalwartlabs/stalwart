@@ -6,7 +6,10 @@
 
 use common::{
     MessageStoreCache, MessagesCache, Server, UpdateLock,
-    cache::{LockResult, swap::SwapKey},
+    cache::{
+        LockResult,
+        swap::{BLOCKING_CODEC_THRESHOLD, SwapKey},
+    },
 };
 use email::{full_email_cache_build, update_email_cache};
 use mailbox::{full_mailbox_cache_build, update_mailbox_cache};
@@ -17,7 +20,6 @@ use store::{
 };
 use trc::{AddContext, StoreEvent};
 use types::collection::SyncCollection;
-use utils::cache::Cache;
 
 pub mod email;
 pub mod mailbox;
@@ -38,7 +40,7 @@ impl MessageCacheFetch for Server {
                 let start_time = Instant::now();
                 match restore_cache_build(self, account_id).await {
                     Some(cache) => {
-                        if admit(cache_store, account_id, &cache) {
+                        if admit(self, account_id, &cache) {
                             let _ = guard.insert(cache.clone());
                         }
                         cache
@@ -47,12 +49,18 @@ impl MessageCacheFetch for Server {
                         let cache =
                             full_cache_build(self, account_id, Arc::new(UpdateLock::new())).await?;
 
-                        if admit(cache_store, account_id, &cache) {
+                        if admit(self, account_id, &cache) {
                             let _ = guard.insert(cache.clone());
                             self.inner.cache.swap.notify_changed(
                                 account_id,
                                 SyncCollection::Email,
                                 cache.emails.len() as u32,
+                            );
+                        } else {
+                            self.inner.cache.swap.notify_refresh_messages(
+                                account_id,
+                                cache.emails.len() as u32,
+                                &cache,
                             );
                         }
 
@@ -108,12 +116,19 @@ impl MessageCacheFetch for Server {
             };
 
             let cache = full_cache_build(self, account_id, lock.clone()).await?;
-            if admit(cache_store, account_id, &cache) {
+            if admit(self, account_id, &cache) {
                 cache_store.update(account_id, cache.clone());
                 self.inner.cache.swap.notify_changed(
                     account_id,
                     SyncCollection::Email,
                     cache.emails.len() as u32,
+                );
+            } else {
+                cache_store.remove(&account_id);
+                self.inner.cache.swap.notify_refresh_messages(
+                    account_id,
+                    cache.emails.len() as u32,
+                    &cache,
                 );
             }
 
@@ -166,12 +181,19 @@ impl MessageCacheFetch for Server {
         let cache = change_set.apply(self, account_id, cache.as_ref()).await?;
 
         let cache = Arc::new(cache);
-        if admit(cache_store, account_id, &cache) {
+        if admit(self, account_id, &cache) {
             cache_store.update(account_id, cache.clone());
             self.inner.cache.swap.notify_changed(
                 account_id,
                 SyncCollection::Email,
                 change_set.items.len() as u32,
+            );
+        } else {
+            cache_store.remove(&account_id);
+            self.inner.cache.swap.notify_refresh_messages(
+                account_id,
+                change_set.items.len() as u32,
+                &cache,
             );
         }
 
@@ -285,11 +307,8 @@ impl ChangeSet {
 }
 
 #[inline(always)]
-fn admit(
-    cache_store: &Cache<u32, Arc<MessageStoreCache>>,
-    account_id: u32,
-    cache: &Arc<MessageStoreCache>,
-) -> bool {
+fn admit(server: &Server, account_id: u32, cache: &Arc<MessageStoreCache>) -> bool {
+    let cache_store = &server.inner.cache.messages;
     if !cache_store.is_oversized(&account_id, cache) {
         return true;
     }
@@ -328,7 +347,16 @@ async fn restore_cache_build(server: &Server, account_id: u32) -> Option<Arc<Mes
         }
     };
 
-    let emails = MessagesCache::from_snapshot(&snapshot).or_else(|| {
+    let snapshot_len = snapshot.len();
+    let emails = if snapshot_len >= BLOCKING_CODEC_THRESHOLD {
+        tokio::task::spawn_blocking(move || MessagesCache::from_snapshot(&snapshot))
+            .await
+            .ok()
+            .flatten()
+    } else {
+        MessagesCache::from_snapshot(&snapshot)
+    }
+    .or_else(|| {
         trc::event!(
             Store(StoreEvent::SwapMiss),
             AccountId = account_id,
@@ -388,7 +416,7 @@ async fn restore_cache_build(server: &Server, account_id: u32) -> Option<Arc<Mes
         Collection = SyncCollection::Email.as_str(),
         ChangeId = snapshot_change_id,
         Total = vec![cache.emails.len(), cache.mailboxes.items.len()],
-        Size = snapshot.len(),
+        Size = snapshot_len,
         Elapsed = start_time.elapsed(),
     );
 

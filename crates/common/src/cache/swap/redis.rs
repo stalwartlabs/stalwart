@@ -59,22 +59,25 @@ impl RedisSwapStore {
         let prefix = key.redis_prefix();
         let previous_chunks = self.stored_chunk_count(&prefix).await;
 
-        self.write_chunks(&prefix, data).await?;
-
-        let written = data.len().div_ceil(self.chunk_size) as u32;
-        if previous_chunks > written {
-            self.delete_chunks(&prefix, written, previous_chunks)
-                .await?;
-        }
-
-        Ok(())
+        self.write_chunks(&prefix, data, previous_chunks).await
     }
 
-    async fn write_chunks(&self, prefix: &[u8], data: &[u8]) -> trc::Result<()> {
+    async fn write_chunks(
+        &self,
+        prefix: &[u8],
+        data: &[u8],
+        previous_chunks: u32,
+    ) -> trc::Result<()> {
         match &self.store {
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store
-                .chunks_set(prefix, data, self.chunk_size, Some(self.retention))
+                .chunks_set(
+                    prefix,
+                    data,
+                    self.chunk_size,
+                    Some(self.retention),
+                    previous_chunks,
+                )
                 .await
                 .caused_by(trc::location!()),
             // SPDX-SnippetBegin
@@ -82,7 +85,13 @@ impl RedisSwapStore {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             InMemoryStore::Sharded(store) => store
-                .chunks_set(prefix, data, self.chunk_size, Some(self.retention))
+                .chunks_set(
+                    prefix,
+                    data,
+                    self.chunk_size,
+                    Some(self.retention),
+                    previous_chunks,
+                )
                 .await
                 .caused_by(trc::location!()),
             // SPDX-SnippetEnd
@@ -93,8 +102,15 @@ impl RedisSwapStore {
     pub async fn remove(&self, key: SwapKey) -> trc::Result<()> {
         let prefix = key.redis_prefix();
 
-        let chunks = self.stored_chunk_count(&prefix).await.max(1);
+        let chunks = match self.stored_chunk_count(&prefix).await {
+            0 => self.max_chunk_count(),
+            chunks => chunks,
+        };
         self.delete_chunks(&prefix, 0, chunks).await
+    }
+
+    fn max_chunk_count(&self) -> u32 {
+        self.max_size.div_ceil(self.chunk_size).max(1) as u32
     }
 
     async fn delete_chunks(&self, prefix: &[u8], from: u32, to: u32) -> trc::Result<()> {

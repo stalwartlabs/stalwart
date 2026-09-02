@@ -189,6 +189,7 @@ impl CacheInvalidationBuilder {
                 self.invalidate(CacheInvalidation::AccessToken(id));
                 self.invalidate(CacheInvalidation::Account(id));
                 self.invalidate(CacheInvalidation::DavResources(id));
+                self.invalidate(CacheInvalidation::MessageCache(id));
             }
             ObjectInner::Domain(_) => {
                 self.invalidate(CacheInvalidation::Domain(id));
@@ -378,6 +379,10 @@ impl Server {
                     cache.events.remove(id);
                     cache.scheduling.remove(id);
                     cache.swap.remove_resources(*id).await;
+                }
+                CacheInvalidation::MessageCache(id) => {
+                    cache.messages.remove(id);
+                    cache.swap.forget(*id);
                 }
                 CacheInvalidation::Domain(id) => {
                     cache.domains.remove(id);

@@ -9,6 +9,7 @@ use crate::{
     Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUid,
     TlsConnectors,
     auth::{AccessTokenInner, AccountCache, DomainCache, MailingListCache, RoleCache, TenantCache},
+    cache::swap::SwapReceiver,
     config::{
         mailstore::spamfilter::SpamClassifier,
         server::tls::parse_certificates,
@@ -99,19 +100,24 @@ impl Data {
 }
 
 impl Caches {
-    pub async fn parse(bp: &mut Bootstrap, storage: &crate::config::storage::Storage) -> Self {
+    pub async fn parse(
+        bp: &mut Bootstrap,
+        storage: &crate::config::storage::Storage,
+    ) -> (Self, SwapReceiver) {
         let cache = bp.setting_infallible::<structs::Cache>().await;
         let dav_estimate = (std::mem::size_of::<DavResources>()
             + (500 * std::mem::size_of::<DavResource>())) as u64;
-        let swap = crate::cache::swap::SwapTier::build(bp, cache.swap, storage).await;
+        let (swap, swap_rx) = crate::cache::swap::SwapTier::build(bp, cache.swap, storage).await;
 
-        Caches {
+        let caches = Caches {
             swap,
             access_tokens: Cache::new_single_shard(
                 cache.access_tokens,
                 (std::mem::size_of::<AccessTokenInner>() + 255) as u64,
-            ),
-            http_auth: Cache::new(cache.http_auth, (50 + std::mem::size_of::<u32>()) as u64),
+            )
+            .with_name("accessTokens"),
+            http_auth: Cache::new(cache.http_auth, (50 + std::mem::size_of::<u32>()) as u64)
+                .with_name("httpAuth"),
             messages: Cache::new_single_shard(
                 cache.messages,
                 (std::mem::size_of::<u32>()
@@ -125,7 +131,7 @@ impl Caches {
             contacts: Cache::new_single_shard(cache.contacts, dav_estimate).with_name("contacts"),
             scheduling: Cache::new_single_shard(cache.scheduling, dav_estimate)
                 .with_name("scheduling"),
-            emails: Cache::new(cache.email_addresses, 255u64),
+            emails: Cache::new(cache.email_addresses, 255u64).with_name("emailAddresses"),
             emails_negative: CacheWithTtl::new(
                 cache.email_addresses_negative,
                 (std::mem::size_of::<DomainCache>() + 255) as u64,
@@ -133,7 +139,8 @@ impl Caches {
             domain_names: Cache::new(
                 cache.domain_names,
                 (std::mem::size_of::<DomainCache>() + 255) as u64,
-            ),
+            )
+            .with_name("domainNames"),
             domain_names_negative: CacheWithTtl::new(
                 cache.domain_names_negative,
                 (std::mem::size_of::<DomainCache>() + 255) as u64,
@@ -141,24 +148,30 @@ impl Caches {
             domains: Cache::new(
                 cache.domains,
                 (std::mem::size_of::<DomainCache>() + 255) as u64,
-            ),
+            )
+            .with_name("domains"),
             accounts: Cache::new(
                 cache.accounts,
                 (std::mem::size_of::<AccountCache>() + 255) as u64,
-            ),
-            roles: Cache::new(cache.roles, (std::mem::size_of::<RoleCache>() + 255) as u64),
+            )
+            .with_name("accounts"),
+            roles: Cache::new(cache.roles, (std::mem::size_of::<RoleCache>() + 255) as u64)
+                .with_name("roles"),
             tenants: Cache::new(
                 cache.tenants,
                 (std::mem::size_of::<TenantCache>() + 255) as u64,
-            ),
+            )
+            .with_name("tenants"),
             lists: Cache::new(
                 cache.mailing_lists,
                 (std::mem::size_of::<MailingListCache>() + 255) as u64,
-            ),
+            )
+            .with_name("mailingLists"),
             dkim_signers: Cache::new(
                 cache.dkim_signatures,
                 (std::mem::size_of::<DkimSigners>() + 255) as u64,
-            ),
+            )
+            .with_name("dkimSignatures"),
             dns_txt: CacheWithTtl::new(cache.dns_txt, (std::mem::size_of::<Txt>() + 255) as u64),
             dns_mx: CacheWithTtl::new(cache.dns_mx, ((std::mem::size_of::<MX>() + 255) * 2) as u64),
             dns_ptr: CacheWithTtl::new(cache.dns_ptr, (std::mem::size_of::<IpAddr>() + 255) as u64),
@@ -182,7 +195,9 @@ impl Caches {
             directory_recipients: CacheWithTtl::new(cache.directory_recipients, 255u64),
             directory_recipients_ttl: cache.directory_recipients_ttl.into_inner(),
             negative_cache_ttl: cache.negative_ttl.into_inner(),
-        }
+        };
+
+        (caches, swap_rx)
     }
 
     #[allow(clippy::type_complexity)]

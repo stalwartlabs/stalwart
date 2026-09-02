@@ -9,7 +9,6 @@ pub mod backends;
 pub mod lifecycle;
 
 use crate::utils::server::TestServerBuilder;
-use common::cache::swap::SwapTier;
 use registry::schema::{
     prelude::Object,
     structs::{
@@ -33,6 +32,7 @@ pub async fn cache_tests() {
                 min_account_size: 0,
                 ..Default::default()
             }),
+            files: 2048,
             ..Default::default()
         }))
         .await;
@@ -52,7 +52,6 @@ pub async fn cache_tests() {
         test.server.inner.cache.swap.is_enabled(),
         "the swap tier did not come up from the registry settings"
     );
-    SwapTier::start(&test.server.inner);
 
     backends::test(&test).await;
     accounting::test(&test, accounts[0], accounts[1]).await;

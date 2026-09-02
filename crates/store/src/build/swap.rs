@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{BlobStore, InMemoryStore, backend::fs::FsStore, registry::bootstrap::Bootstrap};
+use crate::{BlobStore, InMemoryStore, registry::bootstrap::Bootstrap};
 use registry::schema::structs;
+
+const NO_FILESYSTEM: &str = "The filesystem blob store cannot back the cache swap tier because \
+                             it skips writes whose length is unchanged, which silently discards \
+                             a snapshot after a flag change. Configure the local file cache swap \
+                             backend instead";
 
 #[allow(unreachable_patterns)]
 impl BlobStore {
@@ -15,7 +20,13 @@ impl BlobStore {
         configured: &BlobStore,
     ) -> Result<Self, String> {
         match config {
-            structs::BlobSwapStore::Default => Ok(configured.clone()),
+            structs::BlobSwapStore::Default => {
+                if matches!(configured, BlobStore::Fs(_)) {
+                    Err(NO_FILESYSTEM.to_string())
+                } else {
+                    Ok(configured.clone())
+                }
+            }
             #[cfg(feature = "foundation")]
             structs::BlobSwapStore::FoundationDb(store) => {
                 crate::backend::foundationdb::FdbStore::open(store)
@@ -38,7 +49,7 @@ impl BlobStore {
             structs::BlobSwapStore::Azure(store) => {
                 crate::backend::azure::AzureStore::open(store).await
             }
-            structs::BlobSwapStore::FileSystem(store) => FsStore::open(store).await,
+            structs::BlobSwapStore::FileSystem(_) => Err(NO_FILESYSTEM.to_string()),
             _ => {
                 Err("Binary was not compiled with the selected cache swap blob backend".to_string())
             }

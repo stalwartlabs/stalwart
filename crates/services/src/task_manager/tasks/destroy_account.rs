@@ -5,7 +5,7 @@
  */
 
 use crate::task_manager::TaskResult;
-use common::Server;
+use common::{Server, cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation};
 use email::{message::metadata::MessageMetadata, sieve::SieveScript};
 use groupware::file::FileNode;
 use registry::{
@@ -157,6 +157,15 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
 
     // Unlink all accounts's blobs
     destroy_account_blobs(server, account_id).await?;
+
+    // Drop the resident caches and the writer's pending state on every node
+    server
+        .invalidate_caches(
+            CacheInvalidationBuilder::from(CacheInvalidation::MessageCache(account_id))
+                .with_invalidation(CacheInvalidation::DavResources(account_id)),
+        )
+        .await?;
+    server.inner.cache.swap.forget(account_id);
 
     // Remove persisted cache snapshots
     server.inner.cache.swap.remove_account(account_id).await;

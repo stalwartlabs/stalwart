@@ -26,7 +26,7 @@ pub async fn test(test: &TestServer) {
     println!("Running cache swap tier tests...");
 
     let root = test.temp_dir.path.join("swap");
-    let file_tier = SwapTier::new(
+    let (file_tier, _file_rx) = SwapTier::new(
         SwapBackend::File(
             FileSwapStore::open(&structs::LocalFileSwap {
                 path: root.to_string_lossy().into_owned(),
@@ -40,11 +40,12 @@ pub async fn test(test: &TestServer) {
     run_suite("local file", &file_tier).await;
     corrupt_snapshot_is_discarded(&root).await;
 
-    let blob_tier = SwapTier::new(
+    let (blob_tier, _blob_rx) = SwapTier::new(
         SwapBackend::Blob(BlobSwapStore::new(
             test.server.blob_store().clone(),
             test.server.store().clone(),
             7 * 24 * 3600,
+            SwapCadence::default().max_account_size,
         )),
         SwapCadence::default(),
     );
@@ -63,7 +64,7 @@ pub async fn test(test: &TestServer) {
         .await
         .expect("Failed to open the Redis store");
 
-        let redis_tier = SwapTier::new(
+        let (redis_tier, _redis_rx) = SwapTier::new(
             SwapBackend::Redis(RedisSwapStore::new(store, 4096, 3600, 64 * 1024 * 1024)),
             SwapCadence::default(),
         );
@@ -182,7 +183,7 @@ async fn run_suite(backend: &str, tier: &SwapTier) {
 }
 
 async fn corrupt_snapshot_is_discarded(root: &std::path::Path) {
-    let tier = SwapTier::new(
+    let (tier, _rx) = SwapTier::new(
         SwapBackend::File(
             FileSwapStore::open(&structs::LocalFileSwap {
                 path: root.to_string_lossy().into_owned(),

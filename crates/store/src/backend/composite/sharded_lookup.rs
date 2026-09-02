@@ -91,12 +91,15 @@ impl ShardedInMemory {
         data: &[u8],
         chunk_size: usize,
         expires: Option<u64>,
+        previous_chunks: u32,
     ) -> trc::Result<()> {
         Box::pin(async move {
             match self.get_store(prefix) {
                 #[cfg(feature = "redis")]
                 InMemoryStore::Redis(store) => {
-                    store.chunks_set(prefix, data, chunk_size, expires).await
+                    store
+                        .chunks_set(prefix, data, chunk_size, expires, previous_chunks)
+                        .await
                 }
                 _ => Err(trc::StoreEvent::NotSupported.into_err()),
             }

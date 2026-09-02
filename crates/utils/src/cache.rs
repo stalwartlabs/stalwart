@@ -7,7 +7,7 @@
 use arcstr::ArcStr;
 use mail_auth::{DnssecStatus, MX, RecordSet, ResolverCache, Txt};
 use quick_cache::{
-    Equivalent, Lifecycle, Options, OptionsBuilder, Weighter,
+    Equivalent, Options, OptionsBuilder, Weighter,
     sync::{DefaultLifecycle, PlaceholderGuard},
 };
 use std::{
@@ -20,50 +20,8 @@ use std::{
 
 const HOT_ALLOCATION: f64 = 0.97;
 
-pub type EvictionHandler<K, V> = Box<dyn Fn(&K, &V) + Send + Sync>;
-
-pub struct EvictionSlot<K, V>(std::sync::OnceLock<EvictionHandler<K, V>>);
-
-impl<K, V> Default for EvictionSlot<K, V> {
-    fn default() -> Self {
-        Self(std::sync::OnceLock::new())
-    }
-}
-
-impl<K, V> EvictionSlot<K, V> {
-    #[inline(always)]
-    fn notify(&self, key: &K, value: &V) {
-        if let Some(handler) = self.0.get() {
-            handler(key, value);
-        }
-    }
-}
-
-pub struct EvictionLifecycle<K, V>(Arc<EvictionSlot<K, V>>);
-
-impl<K, V> Clone for EvictionLifecycle<K, V> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<K, V> Lifecycle<K, V> for EvictionLifecycle<K, V> {
-    type RequestState = ();
-
-    fn on_evict(&self, _: &mut Self::RequestState, key: K, value: V) {
-        self.0.notify(&key, &value);
-    }
-}
-
 pub struct Cache<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> {
-    inner: quick_cache::sync::Cache<
-        K,
-        V,
-        CacheItemWeighter,
-        ahash::RandomState,
-        EvictionLifecycle<K, V>,
-    >,
-    eviction: Arc<EvictionSlot<K, V>>,
+    inner: quick_cache::sync::Cache<K, V, CacheItemWeighter, ahash::RandomState>,
     admission_limit: u64,
     name: &'static str,
 }
@@ -103,12 +61,11 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     }
 
     fn build(options: Options, name: &'static str) -> Self {
-        let eviction = Arc::new(EvictionSlot::default());
         let inner = quick_cache::sync::Cache::with_options(
             options,
             CacheItemWeighter,
             ahash::RandomState::default(),
-            EvictionLifecycle(eviction.clone()),
+            DefaultLifecycle::default(),
         );
         let shard_capacity = inner.shard_capacity();
         let admission_limit = ((shard_capacity as f64 * HOT_ALLOCATION) as u64)
@@ -116,14 +73,9 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
 
         Self {
             inner,
-            eviction,
             admission_limit,
             name,
         }
-    }
-
-    pub fn on_evict(&self, handler: EvictionHandler<K, V>) {
-        let _ = self.eviction.0.set(handler);
     }
 
     #[inline(always)]
@@ -148,7 +100,7 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
         key: &Q,
     ) -> Result<
         V,
-        PlaceholderGuard<'a, K, V, CacheItemWeighter, ahash::RandomState, EvictionLifecycle<K, V>>,
+        PlaceholderGuard<'a, K, V, CacheItemWeighter, ahash::RandomState, DefaultLifecycle<K, V>>,
     >
     where
         Q: Hash + Equivalent<K> + ToOwned<Owned = K> + ?Sized,
@@ -209,15 +161,7 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
     }
 
     #[inline(always)]
-    pub fn inner(
-        &self,
-    ) -> &quick_cache::sync::Cache<
-        K,
-        V,
-        CacheItemWeighter,
-        ahash::RandomState,
-        EvictionLifecycle<K, V>,
-    > {
+    pub fn inner(&self) -> &quick_cache::sync::Cache<K, V, CacheItemWeighter, ahash::RandomState> {
         &self.inner
     }
 
@@ -614,59 +558,6 @@ mod tests {
         assert_eq!(
             misses, 0,
             "concurrent oversized writes must never evict the resident entry"
-        );
-    }
-
-    #[test]
-    fn eviction_handler_sees_every_evicted_entry() {
-        let cache = Cache::<u32, Sized>::new_single_shard(100_000, 1000);
-        let evicted: StdArc<parking_lot::Mutex<Vec<(u32, u64)>>> = Default::default();
-
-        let seen = evicted.clone();
-        cache.on_evict(Box::new(move |key: &u32, value: &Sized| {
-            seen.lock().push((*key, value.weight()));
-        }));
-
-        for key in 0..40u32 {
-            cache.insert(key, Sized::of(10_000));
-        }
-
-        let evicted = evicted.lock();
-        assert!(
-            !evicted.is_empty(),
-            "no eviction was reported after overfilling the cache"
-        );
-        for (key, weight) in evicted.iter() {
-            assert!(*key < 40, "an unknown key was reported as evicted");
-            assert_eq!(
-                *weight, 10_000,
-                "the evicted value was not handed to the callback intact"
-            );
-        }
-        assert!(
-            evicted.iter().any(|(key, _)| cache.get(key).is_none()),
-            "an entry reported as evicted is still resident"
-        );
-    }
-
-    #[test]
-    fn eviction_handler_is_not_called_for_rejected_oversized_writes() {
-        let cache = cache();
-        let calls: StdArc<std::sync::atomic::AtomicUsize> = Default::default();
-
-        let seen = calls.clone();
-        cache.on_evict(Box::new(move |_: &u32, _: &Sized| {
-            seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }));
-
-        cache.insert(0, Sized::of(1000));
-        cache.insert(1, Sized::of(CAPACITY as usize + 1));
-
-        assert!(cache.get(&0).is_some(), "the resident entry was destroyed");
-        assert_eq!(
-            calls.load(std::sync::atomic::Ordering::Relaxed),
-            0,
-            "a write rejected by the size pre-check reached the eviction handler"
         );
     }
 

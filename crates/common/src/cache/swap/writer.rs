@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{SwapCadence, SwapKey, SwapPart, SwapTier};
+use super::{BLOCKING_CODEC_THRESHOLD, SwapCadence, SwapKey, SwapPart, SwapReceiver, SwapTier};
 use crate::{DavResources, Inner, MessageStoreCache};
 use ahash::AHashMap;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use types::collection::SyncCollection;
 
 pub const QUEUE_DEPTH: usize = 1024;
@@ -19,10 +19,10 @@ const METRICS_INTERVAL: Duration = Duration::from_secs(300);
 
 pub enum SwapSignal {
     Changed(SwapTarget, u32),
-    EvictedMessages(u32, Arc<MessageStoreCache>),
-    EvictedResources(SwapTarget, Arc<DavResources>),
+    Refresh(SwapTarget, u32, Snapshot),
+    Forget(u32),
     Flush(oneshot::Sender<()>),
-    Stop,
+    Stop(oneshot::Sender<usize>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -56,13 +56,14 @@ impl SwapTarget {
     }
 }
 
-enum Snapshot {
+#[derive(Clone)]
+pub enum Snapshot {
     Messages(Arc<MessageStoreCache>),
     Resources(Arc<DavResources>),
 }
 
 impl Snapshot {
-    fn size(&self) -> u64 {
+    pub fn size(&self) -> u64 {
         match self {
             Snapshot::Messages(cache) => cache.size,
             Snapshot::Resources(cache) => cache.size,
@@ -89,12 +90,25 @@ impl Snapshot {
             Snapshot::Resources(cache) => cache.to_snapshot(),
         }
     }
+
+    async fn encode_off_runtime(&self) -> Option<Vec<u8>> {
+        if self.size() < BLOCKING_CODEC_THRESHOLD as u64 {
+            return self.encode();
+        }
+
+        let snapshot = self.clone();
+        tokio::task::spawn_blocking(move || snapshot.encode())
+            .await
+            .ok()
+            .flatten()
+    }
 }
 
 #[derive(Default)]
 struct PendingAccount {
     changes: u32,
     last_write: Option<Instant>,
+    persisted_change_id: Option<u64>,
 }
 
 impl PendingAccount {
@@ -136,6 +150,25 @@ impl SwapWriter {
         entry.changes = entry.changes.saturating_add(changes);
     }
 
+    fn is_due(&self, target: SwapTarget) -> bool {
+        let cadence = self.cadence();
+        self.pending
+            .get(&target)
+            .is_some_and(|entry| entry.is_due(&cadence))
+    }
+
+    fn forget(&mut self, account_id: u32) {
+        self.pending
+            .retain(|target, _| target.account_id != account_id);
+    }
+
+    fn unwritten(&self) -> usize {
+        self.pending
+            .values()
+            .filter(|entry| entry.changes > 0)
+            .count()
+    }
+
     fn peek(&self, target: SwapTarget) -> Option<Snapshot> {
         let caches = &self.inner.cache;
         match target.collection {
@@ -163,21 +196,23 @@ impl SwapWriter {
         }
     }
 
+    fn mark_absent(&mut self, target: SwapTarget) {
+        match self.pending.get_mut(&target) {
+            Some(entry) if entry.last_write.is_some() => entry.changes = 0,
+            _ => {
+                self.pending.remove(&target);
+            }
+        }
+    }
+
     async fn flush_if_due(&mut self, target: SwapTarget) {
-        let cadence = self.cadence();
-        if !self
-            .pending
-            .get(&target)
-            .is_some_and(|entry| entry.is_due(&cadence))
-        {
+        if !self.is_due(target) {
             return;
         }
 
         match self.peek(target) {
-            Some(snapshot) => self.write(target, &snapshot).await,
-            None => {
-                self.pending.remove(&target);
-            }
+            Some(snapshot) => self.write_if_changed(target, &snapshot).await,
+            None => self.mark_absent(target),
         }
     }
 
@@ -196,21 +231,31 @@ impl SwapWriter {
     }
 
     async fn flush_all(&mut self) {
-        let targets = self
+        let mut targets = self
             .pending
             .iter()
             .filter(|(_, entry)| entry.changes > 0)
-            .map(|(target, _)| *target)
+            .map(|(target, entry)| (*target, entry.changes))
             .collect::<Vec<_>>();
+        targets.sort_unstable_by(|(_, left), (_, right)| right.cmp(left));
 
-        for target in targets {
+        for (target, _) in targets {
             match self.peek(target) {
-                Some(snapshot) => self.write(target, &snapshot).await,
-                None => {
-                    self.pending.remove(&target);
-                }
+                Some(snapshot) => self.write_if_changed(target, &snapshot).await,
+                None => self.mark_absent(target),
             }
         }
+    }
+
+    async fn write_if_changed(&mut self, target: SwapTarget, snapshot: &Snapshot) {
+        if let Some(entry) = self.pending.get_mut(&target)
+            && entry.persisted_change_id == Some(snapshot.change_id())
+        {
+            entry.changes = 0;
+            return;
+        }
+
+        self.write(target, snapshot).await;
     }
 
     async fn write(&mut self, target: SwapTarget, snapshot: &Snapshot) {
@@ -225,7 +270,9 @@ impl SwapWriter {
                 Limit = cadence.max_account_size,
                 Details = "Cache snapshot exceeds the configured maximum size",
             );
-            self.pending.remove(&target);
+            let entry = self.pending.entry(target).or_default();
+            entry.changes = 0;
+            entry.last_write = Some(Instant::now());
             return;
         }
         if size < cadence.min_account_size {
@@ -234,7 +281,7 @@ impl SwapWriter {
         }
 
         let start_time = Instant::now();
-        let Some(encoded) = snapshot.encode() else {
+        let Some(encoded) = snapshot.encode_off_runtime().await else {
             trc::event!(
                 Store(trc::StoreEvent::SwapError),
                 AccountId = target.account_id,
@@ -251,8 +298,10 @@ impl SwapWriter {
                 let entry = self.pending.entry(target).or_default();
                 entry.changes = 0;
                 entry.last_write = Some(Instant::now());
+                entry.persisted_change_id = Some(snapshot.change_id());
                 self.bytes_written += bytes;
                 self.snapshots_written += 1;
+                self.tier().record_write();
 
                 trc::event!(
                     Store(trc::StoreEvent::SwapWrite),
@@ -285,12 +334,7 @@ impl SwapWriter {
         self.pending.shrink_to_fit();
     }
 
-    fn report_metrics(&mut self) {
-        let elapsed = self.window_started.elapsed();
-        if elapsed.is_zero() {
-            return;
-        }
-
+    fn pending_ages(&self) -> Vec<String> {
         let mut ages = self
             .pending
             .values()
@@ -300,7 +344,7 @@ impl SwapWriter {
             .collect::<Vec<_>>();
         ages.sort_unstable();
 
-        let percentile = |ages: &[u64], fraction: f64| -> u64 {
+        let percentile = |fraction: f64| -> u64 {
             if ages.is_empty() {
                 0
             } else {
@@ -308,15 +352,24 @@ impl SwapWriter {
             }
         };
 
+        vec![
+            percentile(0.5).to_string(),
+            percentile(0.95).to_string(),
+            ages.last().copied().unwrap_or_default().to_string(),
+        ]
+    }
+
+    fn report_metrics(&mut self) {
+        let elapsed = self.window_started.elapsed();
+        if elapsed.is_zero() {
+            return;
+        }
+
         trc::event!(
             Store(trc::StoreEvent::SwapWrite),
             Total = vec![self.snapshots_written as usize, self.pending.len()],
             Size = (self.bytes_written as f64 * 3600.0 / elapsed.as_secs_f64()) as u64,
-            Details = vec![
-                percentile(&ages, 0.5).to_string(),
-                percentile(&ages, 0.95).to_string(),
-                ages.last().copied().unwrap_or_default().to_string(),
-            ],
+            Details = self.pending_ages(),
             Elapsed = elapsed,
         );
 
@@ -327,9 +380,7 @@ impl SwapWriter {
 }
 
 impl SwapTier {
-    pub fn spawn_writer(inner: Arc<Inner>) -> mpsc::Sender<SwapSignal> {
-        let (tx, mut rx) = mpsc::channel::<SwapSignal>(QUEUE_DEPTH);
-
+    pub fn spawn_writer(inner: Arc<Inner>, mut rx: SwapReceiver) {
         tokio::spawn(async move {
             let mut writer = SwapWriter {
                 inner,
@@ -349,20 +400,25 @@ impl SwapTier {
                             writer.record_changes(target, changes);
                             writer.flush_if_due(target).await;
                         }
-                        Some(SwapSignal::EvictedMessages(account_id, cache)) => {
-                            let target = SwapTarget::messages(account_id);
-                            writer.write(target, &Snapshot::Messages(cache)).await;
-                            writer.pending.remove(&target);
+                        Some(SwapSignal::Refresh(target, changes, snapshot)) => {
+                            writer.record_changes(target, changes);
+                            if writer.is_due(target) {
+                                writer.write_if_changed(target, &snapshot).await;
+                            }
                         }
-                        Some(SwapSignal::EvictedResources(target, cache)) => {
-                            writer.write(target, &Snapshot::Resources(cache)).await;
-                            writer.pending.remove(&target);
+                        Some(SwapSignal::Forget(account_id)) => {
+                            writer.forget(account_id);
                         }
                         Some(SwapSignal::Flush(ack)) => {
                             writer.flush_all().await;
                             let _ = ack.send(());
                         }
-                        Some(SwapSignal::Stop) | None => {
+                        Some(SwapSignal::Stop(ack)) => {
+                            writer.flush_all().await;
+                            let _ = ack.send(writer.unwritten());
+                            break;
+                        }
+                        None => {
                             writer.flush_all().await;
                             break;
                         }
@@ -375,7 +431,5 @@ impl SwapTier {
                 }
             }
         });
-
-        tx
     }
 }

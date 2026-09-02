@@ -17,22 +17,42 @@ pub struct BlobSwapStore {
     blob: BlobStore,
     data: Store,
     retention: u64,
+    max_size: usize,
 }
 
 impl BlobSwapStore {
-    pub fn new(blob: BlobStore, data: Store, retention: u64) -> Self {
+    pub fn new(blob: BlobStore, data: Store, retention: u64, max_size: u64) -> Self {
         BlobSwapStore {
             blob,
             data,
             retention: retention.max(1),
+            max_size: max_size as usize,
         }
     }
 
     pub async fn load(&self, key: SwapKey) -> trc::Result<Option<Vec<u8>>> {
-        self.blob
+        let Some(data) = self
+            .blob
             .get_blob(key.blob_hash().as_slice(), 0..usize::MAX)
             .await
-            .caused_by(trc::location!())
+            .caused_by(trc::location!())?
+        else {
+            return Ok(None);
+        };
+
+        if data.len() > self.max_size {
+            trc::event!(
+                Store(trc::StoreEvent::SwapError),
+                AccountId = key.account_id,
+                Collection = key.collection.as_str(),
+                Size = data.len(),
+                Limit = self.max_size,
+                Details = "Cache snapshot in the blob store exceeds the configured maximum size",
+            );
+            return Ok(None);
+        }
+
+        Ok(Some(data))
     }
 
     pub async fn store(&self, key: SwapKey, data: &[u8]) -> trc::Result<()> {

@@ -5,15 +5,24 @@
  */
 
 use crate::utils::server::TestServer;
-use common::{Server, auth::AccessToken, cache::swap::SwapKey};
+use common::{
+    Server,
+    auth::AccessToken,
+    cache::{
+        invalidate::CacheInvalidationBuilder,
+        swap::{SwapKey, SwapPart},
+    },
+    ipc::CacheInvalidation,
+};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::INBOX_ID,
     message::ingest::{EmailIngest, IngestEmail, IngestSource},
 };
-use groupware::cache::GroupwareCache;
+use groupware::{cache::GroupwareCache, file::FileNode};
 use mail_parser::MessageParser;
-use types::collection::SyncCollection;
+use store::write::BatchBuilder;
+use types::collection::{Collection, SyncCollection};
 
 pub async fn test(test: &TestServer, account_id: u32) {
     println!("Running cache swap lifecycle tests...");
@@ -21,13 +30,9 @@ pub async fn test(test: &TestServer, account_id: u32) {
     message_cache_survives_an_eviction(test, account_id).await;
     resource_cache_survives_an_eviction(test, account_id).await;
     a_snapshot_from_the_future_is_discarded(test, account_id).await;
-
-    test.server
-        .inner
-        .cache
-        .swap
-        .remove_account(account_id)
-        .await;
+    an_update_is_persisted_once(test, account_id).await;
+    an_uncacheable_account_is_persisted_on_a_cadence(test, account_id).await;
+    a_destroyed_account_leaves_no_snapshot(test, account_id).await;
 }
 
 async fn ingest(server: &Server, account_id: u32, subject: &str, received_at: u64) -> u32 {
@@ -159,6 +164,143 @@ async fn resource_cache_survives_an_eviction(test: &TestServer, account_id: u32)
     for (a, b) in before.resources.iter().zip(after.resources.iter()) {
         assert_eq!(a.document_id(), b.document_id());
         assert_eq!(a.is_container(), b.is_container());
+    }
+}
+
+async fn an_update_is_persisted_once(test: &TestServer, account_id: u32) {
+    let server = &test.server;
+
+    server.get_cached_messages(account_id).await.unwrap();
+    server.inner.cache.swap.flush().await;
+
+    let changes = 5u64;
+    let before = server.inner.cache.swap.snapshots_written();
+    for i in 0..changes {
+        ingest(
+            server,
+            account_id,
+            &format!("cadence-{i}"),
+            1_900_000_000 + i,
+        )
+        .await;
+        server.get_cached_messages(account_id).await.unwrap();
+    }
+    server.inner.cache.swap.flush().await;
+
+    let written = server.inner.cache.swap.snapshots_written() - before;
+    assert!(
+        written <= changes,
+        "{changes} changes produced {written} snapshot writes; a cache update is still \
+         enqueuing the snapshot it displaced, which doubles every write"
+    );
+}
+
+async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, account_id: u32) {
+    let server = &test.server;
+    let key = SwapKey::new(account_id, SyncCollection::FileNode, SwapPart::Resources);
+    server.inner.cache.swap.remove(key).await.unwrap();
+
+    let access_token = AccessToken::from_id_maybe_invalid(account_id);
+    let mut batch = BatchBuilder::new();
+    for i in 0..40u32 {
+        let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
+        FileNode {
+            name: format!("swap-folder-{i:04}-with-a-name-long-enough-to-weigh"),
+            ..Default::default()
+        }
+        .insert(
+            access_token.account_tenant_ids(),
+            account_id,
+            document_id,
+            true,
+            true,
+            &mut batch,
+        )
+        .expect("failed to stage a file node");
+    }
+    server
+        .commit_batch(batch)
+        .await
+        .expect("failed to create the file nodes");
+
+    let resources = server
+        .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+        .await
+        .unwrap();
+    assert!(
+        server.inner.cache.files.peek(&account_id).is_none(),
+        "the file cache budget is not small enough for this test to exercise the \
+         uncacheable path"
+    );
+    server.inner.cache.swap.flush().await;
+
+    let snapshot = server
+        .inner
+        .cache
+        .swap
+        .load(key)
+        .await
+        .unwrap()
+        .expect("an account that is too large to cache was never persisted");
+    assert_eq!(
+        u64::from_le_bytes(snapshot[8..16].try_into().unwrap()),
+        resources.highest_change_id,
+        "the persisted snapshot is not at the change id of the account"
+    );
+
+    let before = server.inner.cache.swap.snapshots_written();
+    for _ in 0..5 {
+        server
+            .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+            .await
+            .unwrap();
+    }
+    server.inner.cache.swap.flush().await;
+
+    assert_eq!(
+        server.inner.cache.swap.snapshots_written(),
+        before,
+        "an account that is too large to cache wrote a snapshot on every request"
+    );
+}
+
+async fn a_destroyed_account_leaves_no_snapshot(test: &TestServer, account_id: u32) {
+    let server = &test.server;
+
+    server.get_cached_messages(account_id).await.unwrap();
+    server.inner.cache.swap.flush().await;
+    assert!(
+        server
+            .inner
+            .cache
+            .swap
+            .load(SwapKey::messages(account_id))
+            .await
+            .unwrap()
+            .is_some(),
+        "the account under test has no snapshot to destroy"
+    );
+
+    server
+        .invalidate_caches(CacheInvalidationBuilder::from(
+            CacheInvalidation::MessageCache(account_id),
+        ))
+        .await
+        .unwrap();
+    server.inner.cache.swap.forget(account_id);
+    server.inner.cache.swap.remove_account(account_id).await;
+
+    assert!(
+        server.inner.cache.messages.peek(&account_id).is_none(),
+        "the destroyed account is still resident in the message cache"
+    );
+
+    server.inner.cache.swap.flush().await;
+    for key in SwapKey::all_parts(account_id) {
+        assert!(
+            server.inner.cache.swap.load(key).await.unwrap().is_none(),
+            "a snapshot of the destroyed account came back after a flush"
+        );
     }
 }
 

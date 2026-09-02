@@ -23,7 +23,7 @@ use common::{
     auth::AccountCache,
     cache::{
         LockResult,
-        swap::{SwapKey, SwapPart},
+        swap::{BLOCKING_CODEC_THRESHOLD, SwapKey, SwapPart},
     },
     storage::dav::ResourceChunkBuilder,
 };
@@ -132,10 +132,9 @@ impl GroupwareCache for Server {
                 let start_time = Instant::now();
                 match restore_cache_build(self, account_id, collection).await {
                     Some(cache) => {
-                        if guard.insert(cache.clone()).is_err() {
-                            cache_store.update(account_id, cache.clone());
+                        if admit(cache_store, account_id, collection, &cache) {
+                            let _ = guard.insert(cache.clone());
                         }
-                        warn_if_uncacheable(cache_store, account_id, collection, &cache);
                         cache
                     }
                     None => {
@@ -148,15 +147,21 @@ impl GroupwareCache for Server {
                         )
                         .await?;
 
-                        if guard.insert(cache.clone()).is_err() {
-                            cache_store.update(account_id, cache.clone());
+                        if admit(cache_store, account_id, collection, &cache) {
+                            let _ = guard.insert(cache.clone());
+                            self.inner.cache.swap.notify_changed(
+                                account_id,
+                                collection,
+                                cache.resources.len() as u32,
+                            );
+                        } else {
+                            self.inner.cache.swap.notify_refresh_resources(
+                                account_id,
+                                collection,
+                                cache.resources.len() as u32,
+                                &cache,
+                            );
                         }
-                        warn_if_uncacheable(cache_store, account_id, collection, &cache);
-                        self.inner.cache.swap.notify_changed(
-                            account_id,
-                            collection,
-                            cache.resources.len() as u32,
-                        );
 
                         trc::event!(
                             Store(StoreEvent::CacheMiss),
@@ -197,13 +202,22 @@ impl GroupwareCache for Server {
                 access_account_id,
             )
             .await?;
-            cache_store.update(account_id, cache.clone());
-            warn_if_uncacheable(cache_store, account_id, collection, &cache);
-            self.inner.cache.swap.notify_changed(
-                account_id,
-                collection,
-                cache.resources.len() as u32,
-            );
+            if admit(cache_store, account_id, collection, &cache) {
+                cache_store.update(account_id, cache.clone());
+                self.inner.cache.swap.notify_changed(
+                    account_id,
+                    collection,
+                    cache.resources.len() as u32,
+                );
+            } else {
+                cache_store.remove(&account_id);
+                self.inner.cache.swap.notify_refresh_resources(
+                    account_id,
+                    collection,
+                    cache.resources.len() as u32,
+                    &cache,
+                );
+            }
 
             trc::event!(
                 Store(StoreEvent::CacheStale),
@@ -400,12 +414,21 @@ impl GroupwareCache for Server {
 
         cache.update_lock.set_revision(cache.highest_change_id);
         let cache = Arc::new(cache);
-        cache_store.update(account_id, cache.clone());
-        warn_if_uncacheable(cache_store, account_id, collection, &cache);
-        self.inner
-            .cache
-            .swap
-            .notify_changed(account_id, collection, num_changes as u32);
+        if admit(cache_store, account_id, collection, &cache) {
+            cache_store.update(account_id, cache.clone());
+            self.inner
+                .cache
+                .swap
+                .notify_changed(account_id, collection, num_changes as u32);
+        } else {
+            cache_store.remove(&account_id);
+            self.inner.cache.swap.notify_refresh_resources(
+                account_id,
+                collection,
+                num_changes as u32,
+                &cache,
+            );
+        }
 
         trc::event!(
             Store(StoreEvent::CacheUpdate),
@@ -628,22 +651,24 @@ async fn process_changes(
 }
 
 #[inline(always)]
-fn warn_if_uncacheable(
+fn admit(
     cache_store: &Cache<u32, Arc<DavResources>>,
     account_id: u32,
     collection: SyncCollection,
     cache: &Arc<DavResources>,
-) {
-    let capacity = cache_store.weight_capacity();
-    if cache.size > capacity {
-        trc::event!(
-            Store(StoreEvent::CacheEntryTooLarge),
-            AccountId = account_id,
-            Collection = collection.as_str(),
-            Size = cache.size,
-            Limit = capacity,
-        );
+) -> bool {
+    if !cache_store.is_oversized(&account_id, cache) {
+        return true;
     }
+
+    trc::event!(
+        Store(StoreEvent::CacheEntryTooLarge),
+        AccountId = account_id,
+        Collection = collection.as_str(),
+        Size = cache.size,
+        Limit = cache_store.admission_limit(),
+    );
+    false
 }
 
 async fn restore_cache_build(
@@ -670,7 +695,16 @@ async fn restore_cache_build(
         }
     };
 
-    let restored = DavResources::from_snapshot(&snapshot).or_else(|| {
+    let snapshot_len = snapshot.len();
+    let restored = if snapshot_len >= BLOCKING_CODEC_THRESHOLD {
+        tokio::task::spawn_blocking(move || DavResources::from_snapshot(&snapshot))
+            .await
+            .ok()
+            .flatten()
+    } else {
+        DavResources::from_snapshot(&snapshot)
+    }
+    .or_else(|| {
         trc::event!(
             Store(StoreEvent::SwapMiss),
             AccountId = account_id,
@@ -710,7 +744,7 @@ async fn restore_cache_build(
         Collection = collection.as_str(),
         ChangeId = restored.highest_change_id,
         Total = restored.resources.len(),
-        Size = snapshot.len(),
+        Size = snapshot_len,
         Elapsed = start_time.elapsed(),
     );
 

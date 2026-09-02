@@ -213,11 +213,9 @@ impl CardUpdateRequestHandler for Server {
             new_content.card = vcard;
 
             // Validate quota
-            let extra_bytes = (SizeWriter::vcard(
-                &new_content.card,
-                self.core.groupware.vcard_version,
-            ) as u64)
-                .saturating_sub(u32::from(card.inner.size) as u64);
+            let extra_bytes =
+                (SizeWriter::vcard(&new_content.card, self.core.groupware.vcard_version) as u64)
+                    .saturating_sub(u32::from(card.inner.size) as u64);
             if extra_bytes > 0 {
                 self.has_available_quota(self.account(account_id).await?.as_ref(), extra_bytes)
                     .await?;

@@ -7,49 +7,75 @@
 use super::{SwapPart, frame::SwapFrame};
 use crate::{ColBlock, CustomKeywords, MessageUid, MessagesCache};
 use compact_str::CompactString;
-use rkyv::rend::unaligned::{i32_ule, u32_ule, u64_ule};
+use rkyv::{
+    rend::unaligned::{i32_ule, u32_ule, u64_ule},
+    with::InlineAsBox,
+};
 use std::sync::Arc;
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
-pub struct ArchivedBlock {
-    pub document_ids: Vec<u32>,
-    pub change_ids: Vec<u64>,
-    pub received_at: Vec<u32>,
-    pub sent_at: Vec<i32>,
-    pub sizes: Vec<u32>,
-    pub keywords: Vec<u32>,
-    pub thread_ids: Vec<u32>,
-    pub mb_offsets: Vec<u32>,
-    pub mb_arena: Vec<u64>,
+pub struct ArchivedBlock<'x> {
+    #[rkyv(with = InlineAsBox)]
+    pub document_ids: &'x [u32],
+    #[rkyv(with = InlineAsBox)]
+    pub change_ids: &'x [u64],
+    #[rkyv(with = InlineAsBox)]
+    pub received_at: &'x [u32],
+    #[rkyv(with = InlineAsBox)]
+    pub sent_at: &'x [i32],
+    #[rkyv(with = InlineAsBox)]
+    pub sizes: &'x [u32],
+    #[rkyv(with = InlineAsBox)]
+    pub keywords: &'x [u32],
+    #[rkyv(with = InlineAsBox)]
+    pub thread_ids: &'x [u32],
+    #[rkyv(with = InlineAsBox)]
+    pub mb_offsets: &'x [u32],
+    #[rkyv(with = InlineAsBox)]
+    pub mb_arena: &'x [u64],
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
-pub struct ArchivedMessages {
+pub struct ArchivedMessages<'x> {
     pub change_id: u64,
     pub len: u32,
-    pub starts: Vec<u32>,
-    pub blocks: Vec<ArchivedBlock>,
+    #[rkyv(with = InlineAsBox)]
+    pub starts: &'x [u32],
+    pub blocks: Vec<ArchivedBlock<'x>>,
     pub index_ids: Vec<u32>,
     pub index_positions: Vec<u32>,
     pub custom_ids: Vec<u32>,
     pub custom_offsets: Vec<u32>,
-    pub custom_names: Vec<String>,
+    #[rkyv(with = rkyv::with::Map<InlineAsBox>)]
+    pub custom_names: Vec<&'x str>,
 }
 
 impl MessagesCache {
     pub fn to_snapshot(&self) -> Option<Vec<u8>> {
+        let arenas = self.mailbox_arenas();
+        Self::seal_snapshot(&self.pack(&arenas), self.change_id, self.len as u32)
+    }
+
+    fn mailbox_arenas(&self) -> Vec<Vec<u64>> {
+        self.blocks
+            .iter()
+            .map(|block| block.mb_arena.iter().map(MessageUid::pack).collect())
+            .collect()
+    }
+
+    fn pack<'x>(&'x self, arenas: &'x [Vec<u64>]) -> ArchivedMessages<'x> {
         let mut blocks = Vec::with_capacity(self.blocks.len());
-        for block in &self.blocks {
+        for (block, mb_arena) in self.blocks.iter().zip(arenas.iter()) {
             blocks.push(ArchivedBlock {
-                document_ids: block.document_ids.to_vec(),
-                change_ids: block.change_ids.to_vec(),
-                received_at: block.received_at.to_vec(),
-                sent_at: block.sent_at.to_vec(),
-                sizes: block.sizes.to_vec(),
-                keywords: block.keywords.to_vec(),
-                thread_ids: block.thread_ids.to_vec(),
-                mb_offsets: block.mb_offsets.to_vec(),
-                mb_arena: block.mb_arena.iter().map(MessageUid::pack).collect(),
+                document_ids: &block.document_ids,
+                change_ids: &block.change_ids,
+                received_at: &block.received_at,
+                sent_at: &block.sent_at,
+                sizes: &block.sizes,
+                keywords: &block.keywords,
+                thread_ids: &block.thread_ids,
+                mb_offsets: &block.mb_offsets,
+                mb_arena,
             });
         }
 
@@ -67,30 +93,38 @@ impl MessagesCache {
         for entry in self.keywords.iter() {
             custom_ids.push(entry.document_id);
             for name in entry.names.iter() {
-                custom_names.push(name.to_string());
+                custom_names.push(name.as_str());
             }
             custom_offsets.push(custom_names.len() as u32);
         }
 
-        let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&ArchivedMessages {
+        ArchivedMessages {
             change_id: self.change_id,
             len: self.len as u32,
-            starts: self.starts.clone(),
+            starts: &self.starts,
             blocks,
             index_ids,
             index_positions,
             custom_ids,
             custom_offsets,
             custom_names,
-        })
+        }
+    }
+
+    fn seal_snapshot(
+        archived: &ArchivedMessages<'_>,
+        change_id: u64,
+        count: u32,
+    ) -> Option<Vec<u8>> {
+        let mut out = rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(
+            archived,
+            SwapFrame::reserve_header(),
+        )
         .ok()?;
 
-        Some(SwapFrame::wrap(
-            SwapPart::Messages,
-            self.change_id,
-            self.len as u32,
-            &payload,
-        ))
+        SwapFrame::seal(&mut out, SwapPart::Messages, change_id, count);
+
+        Some(out)
     }
 
     pub fn from_snapshot(buf: &[u8]) -> Option<Self> {
@@ -117,7 +151,7 @@ impl MessagesCache {
 
         let mut blocks = Vec::with_capacity(archived.blocks.len());
         let mut total = 0usize;
-        for block in archived.blocks.iter() {
+        for (slot, block) in archived.blocks.iter().enumerate() {
             let count = block.document_ids.len();
             if block.change_ids.len() != count
                 || block.received_at.len() != count
@@ -138,6 +172,9 @@ impl MessagesCache {
             {
                 return None;
             }
+            if starts[slot] as usize != total {
+                return None;
+            }
 
             total += count;
             blocks.push(ColBlock {
@@ -156,19 +193,24 @@ impl MessagesCache {
             return None;
         }
 
-        if archived
-            .index_positions
-            .iter()
-            .any(|position| position.to_native() as usize >= len)
-        {
-            return None;
-        }
-        let index: Arc<[(u32, u32)]> = archived
+        let mut index = Vec::with_capacity(len);
+        let mut previous_id: Option<u32> = None;
+        for (document_id, position) in archived
             .index_ids
             .iter()
             .zip(archived.index_positions.iter())
-            .map(|(document_id, position)| (document_id.to_native(), position.to_native()))
-            .collect();
+        {
+            let document_id = document_id.to_native();
+            let position = position.to_native();
+            if position as usize >= len
+                || previous_id.is_some_and(|previous| previous >= document_id)
+            {
+                return None;
+            }
+            previous_id = Some(document_id);
+            index.push((document_id, position));
+        }
+        let index: Arc<[(u32, u32)]> = index.into();
 
         let custom_count = archived.custom_ids.len();
         if archived.custom_offsets.len() != custom_count + 1 {
@@ -182,7 +224,7 @@ impl MessagesCache {
             keywords.push(CustomKeywords {
                 names: names
                     .iter()
-                    .map(|name| CompactString::from(name.as_str()))
+                    .map(|name| CompactString::from(&**name))
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
                 document_id: document_id.to_native(),
@@ -370,6 +412,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn an_inconsistent_payload_with_a_valid_checksum_is_rejected() {
+        let cache = sample(CACHE_CHUNK + 200);
+        let arenas = cache.mailbox_arenas();
+        assert!(cache.blocks.len() > 1, "fixture must span several blocks");
+
+        let broken_starts = vec![1u32; cache.blocks.len()];
+        let mut archived = cache.pack(&arenas);
+        archived.starts = &broken_starts;
+        let encoded =
+            MessagesCache::seal_snapshot(&archived, cache.change_id, cache.len as u32).unwrap();
+        assert!(
+            MessagesCache::from_snapshot(&encoded).is_none(),
+            "block start offsets that do not match the block lengths were accepted"
+        );
+
+        let mut archived = cache.pack(&arenas);
+        archived.index_ids.swap(0, 1);
+        let encoded =
+            MessagesCache::seal_snapshot(&archived, cache.change_id, cache.len as u32).unwrap();
+        assert!(
+            MessagesCache::from_snapshot(&encoded).is_none(),
+            "an index that is not strictly ascending was accepted, which breaks by_id"
+        );
+
+        let mut archived = cache.pack(&arenas);
+        archived.index_positions[3] = cache.len as u32;
+        let encoded =
+            MessagesCache::seal_snapshot(&archived, cache.change_id, cache.len as u32).unwrap();
+        assert!(
+            MessagesCache::from_snapshot(&encoded).is_none(),
+            "an index position past the end of the cache was accepted"
+        );
     }
 
     #[test]
