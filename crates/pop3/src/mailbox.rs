@@ -39,7 +39,7 @@ impl<T: SessionStream> Session<T> {
             .await
             .caused_by(trc::location!())?;
 
-        if cache.emails.items.is_empty() {
+        if cache.emails.is_empty() {
             return Ok(Mailbox::default());
         }
 
@@ -51,14 +51,13 @@ impl<T: SessionStream> Session<T> {
         // Sort by UID
         let message_map = cache
             .emails
-            .items
             .iter()
             .filter_map(|message| {
                 message
-                    .mailboxes
+                    .mailboxes()
                     .iter()
                     .find(|m| m.mailbox_id == INBOX_ID)
-                    .map(|m| (m.uid, (message.document_id, message.size)))
+                    .map(|m| (m.uid, (message.document_id(), message.size())))
             })
             .collect::<BTreeMap<u32, (u32, u32)>>();
 

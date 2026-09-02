@@ -18,7 +18,7 @@ use calcard::{
 };
 use common::{DavResourcePath, DavResources, PROD_ID, Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::request::FreeBusyQuery};
-use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
+use groupware::{cache::GroupwareCache, calendar::CalendarEventContent};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::str::FromStr;
@@ -35,6 +35,7 @@ use types::{
     TimeRange,
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
 };
 
 pub(crate) trait CalendarFreebusyRequestHandler: Sync + Send {
@@ -153,7 +154,7 @@ impl CalendarFreebusyRequestHandler for Server {
                     shared_ids
                         .as_ref()
                         .is_none_or(|ids| ids.contains(resource.document_id()))
-                        && is_resource_in_time_range(resource.resource, &range)
+                        && is_resource_in_time_range(resource.resource.resource, &range)
                 })
                 .map(|resource| resource.document_id())
                 .collect::<Vec<_>>();
@@ -166,10 +167,11 @@ impl CalendarFreebusyRequestHandler for Server {
             for document_id in document_ids {
                 let Some(archive) = self
                     .store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                         account_id,
                         Collection::CalendarEvent,
                         document_id,
+                        CalendarEventField::Content,
                     ))
                     .await
                     .caused_by(trc::location!())?
@@ -177,7 +179,7 @@ impl CalendarFreebusyRequestHandler for Server {
                     continue;
                 };
                 let event = archive
-                    .unarchive::<CalendarEvent>()
+                    .unarchive::<CalendarEventContent>()
                     .caused_by(trc::location!())?;
 
                 /*

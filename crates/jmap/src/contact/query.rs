@@ -5,7 +5,7 @@
  */
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
-use common::{DavResourceMetadata, Server, auth::AccessToken};
+use common::{Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -156,12 +156,9 @@ impl ContactCardQuery for Server {
                         let before = before.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::ContactCard { created_at, .. } = &r.data
-                                {
-                                    (*created_at < before).then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.created_at()
+                                    .filter(|created_at| *created_at < before)
+                                    .map(|_| r.document_id())
                             }),
                         )));
                     }
@@ -169,12 +166,9 @@ impl ContactCardQuery for Server {
                         let after = after.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::ContactCard { created_at, .. } = &r.data
-                                {
-                                    (*created_at > after).then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.created_at()
+                                    .filter(|created_at| *created_at > after)
+                                    .map(|_| r.document_id())
                             }),
                         )));
                     }
@@ -182,17 +176,9 @@ impl ContactCardQuery for Server {
                         let before = before.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::ContactCard {
-                                    modified_at,
-                                    created_at,
-                                    ..
-                                } = &r.data
-                                {
-                                    ((*modified_at as i64 + *created_at) < before)
-                                        .then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.modified_at()
+                                    .filter(|modified_at| *modified_at < before)
+                                    .map(|_| r.document_id())
                             }),
                         )));
                     }
@@ -200,17 +186,9 @@ impl ContactCardQuery for Server {
                         let after = after.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::ContactCard {
-                                    modified_at,
-                                    created_at,
-                                    ..
-                                } = &r.data
-                                {
-                                    ((*modified_at as i64 + *created_at) > after)
-                                        .then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.modified_at()
+                                    .filter(|modified_at| *modified_at > after)
+                                    .map(|_| r.document_id())
                             }),
                         )));
                     }
@@ -246,11 +224,8 @@ impl ContactCardQuery for Server {
                         .resources
                         .iter()
                         .filter_map(|r| {
-                            if let DavResourceMetadata::ContactCard { created_at, .. } = &r.data {
-                                Some((r.document_id, *created_at))
-                            } else {
-                                None
-                            }
+                            r.created_at()
+                                .map(|created_at| (r.document_id(), created_at))
                         })
                         .collect::<Vec<_>>();
                     items.sort_by_key(|(document_id, created_at)| (*created_at, *document_id));
@@ -269,16 +244,8 @@ impl ContactCardQuery for Server {
                         .resources
                         .iter()
                         .filter_map(|r| {
-                            if let DavResourceMetadata::ContactCard {
-                                modified_at,
-                                created_at,
-                                ..
-                            } = &r.data
-                            {
-                                Some((r.document_id, *modified_at as i64 + *created_at))
-                            } else {
-                                None
-                            }
+                            r.modified_at()
+                                .map(|modified_at| (r.document_id(), modified_at))
                         })
                         .collect::<Vec<_>>();
                     items.sort_by_key(|(document_id, modified_at)| (*modified_at, *document_id));

@@ -533,6 +533,35 @@ pub enum BlobStoreBase {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct BlobStoreSwap {
+    #[serde(rename = "store")]
+    pub store: BlobSwapStore,
+    #[serde(rename = "retention")]
+    pub retention: Duration,
+    #[serde(rename = "flushChanges")]
+    pub flush_changes: u64,
+    #[serde(rename = "flushInterval")]
+    pub flush_interval: Duration,
+    #[serde(rename = "maxAccountSize")]
+    pub max_account_size: u64,
+    #[serde(rename = "minAccountSize")]
+    pub min_account_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum BlobSwapStore {
+    Default,
+    S3(S3Store),
+    Azure(AzureStore),
+    FileSystem(FileSystemStore),
+    FoundationDb(FoundationDbStore),
+    PostgreSql(PostgreSqlStore),
+    MySql(MySqlStore),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BlockedIp {
     #[serde(rename = "address")]
     pub address: IpAddrOrMask,
@@ -626,6 +655,21 @@ pub struct Cache {
     pub dkim_signatures: u64,
     #[serde(rename = "negativeTtl")]
     pub negative_ttl: Duration,
+    #[serde(rename = "directoryRecipients")]
+    pub directory_recipients: u64,
+    #[serde(rename = "directoryRecipientsTtl")]
+    pub directory_recipients_ttl: Duration,
+    #[serde(rename = "swap")]
+    pub swap: CacheSwap,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum CacheSwap {
+    Disabled,
+    LocalFile(LocalFileSwap),
+    Redis(RedisSwap),
+    BlobStore(BlobStoreSwap),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3327,6 +3371,21 @@ pub struct LdapDirectory {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct LocalFileSwap {
+    #[serde(rename = "path")]
+    pub path: String,
+    #[serde(rename = "flushChanges")]
+    pub flush_changes: u64,
+    #[serde(rename = "flushInterval")]
+    pub flush_interval: Duration,
+    #[serde(rename = "maxAccountSize")]
+    pub max_account_size: u64,
+    #[serde(rename = "minAccountSize")]
+    pub min_account_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Log {
     #[serde(rename = "timestamp")]
     pub timestamp: UTCDateTime,
@@ -4476,6 +4535,34 @@ pub struct RedisStore {
     pub pool_timeout_wait: Option<Duration>,
     #[serde(rename = "poolTimeoutRecycle")]
     pub pool_timeout_recycle: Option<Duration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RedisSwap {
+    #[serde(rename = "store")]
+    pub store: RedisSwapStore,
+    #[serde(rename = "chunkSize")]
+    pub chunk_size: u64,
+    #[serde(rename = "retention")]
+    pub retention: Duration,
+    #[serde(rename = "flushChanges")]
+    pub flush_changes: u64,
+    #[serde(rename = "flushInterval")]
+    pub flush_interval: Duration,
+    #[serde(rename = "maxAccountSize")]
+    pub max_account_size: u64,
+    #[serde(rename = "minAccountSize")]
+    pub min_account_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum RedisSwapStore {
+    Default,
+    Redis(RedisStore),
+    RedisCluster(RedisClusterStore),
+    RedisSentinel(RedisSentinelStore),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

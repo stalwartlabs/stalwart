@@ -13,8 +13,8 @@ use common::{Server, auth::AccessToken};
 use groupware::{
     cache::GroupwareCache,
     calendar::{
-        ArchivedChangedBy, CalendarEventNotification, EVENT_NOTIFICATION_IS_CHANGE,
-        EVENT_NOTIFICATION_IS_DRAFT,
+        ArchivedChangedBy, CalendarEventNotification, CalendarEventNotificationContent,
+        EVENT_NOTIFICATION_IS_CHANGE, EVENT_NOTIFICATION_IS_DRAFT,
     },
 };
 use jmap_proto::{
@@ -33,6 +33,7 @@ use trc::AddContext;
 use types::{
     blob::BlobId,
     collection::{Collection, SyncCollection},
+    field::CalendarNotificationField,
     id::Id,
 };
 
@@ -83,26 +84,88 @@ impl CalendarEventNotificationGet for Server {
             not_found: not_found_ids,
         };
 
+        let mut needs_meta = false;
+        let mut needs_content = false;
+        for property in &properties {
+            match property {
+                CalendarEventNotificationProperty::Id
+                | CalendarEventNotificationProperty::Created
+                | CalendarEventNotificationProperty::CalendarEventId => (),
+                CalendarEventNotificationProperty::Comment
+                | CalendarEventNotificationProperty::Event
+                | CalendarEventNotificationProperty::EventPatch => {
+                    needs_content = true;
+                }
+                CalendarEventNotificationProperty::Type => {
+                    needs_meta = true;
+                    needs_content = true;
+                }
+                _ => {
+                    needs_meta = true;
+                }
+            }
+        }
+
         for id in ids {
             // Obtain the event object
             let document_id = id.document_id();
-            let _event = if let Some(event) = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::CalendarEventNotification,
-                    document_id,
-                ))
-                .await?
-            {
-                event
-            } else {
+            let Some(resource) = cache.item_by_id(document_id) else {
                 response.push_not_found(id);
                 continue;
             };
-            let event = _event
-                .unarchive::<CalendarEventNotification>()
-                .caused_by(trc::location!())?;
+
+            let _event;
+            let event = if needs_meta {
+                _event = match self
+                    .store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                        account_id,
+                        Collection::CalendarEventNotification,
+                        document_id,
+                    ))
+                    .await?
+                {
+                    Some(event) => event,
+                    None => {
+                        response.push_not_found(id);
+                        continue;
+                    }
+                };
+                Some(
+                    _event
+                        .unarchive::<CalendarEventNotification>()
+                        .caused_by(trc::location!())?,
+                )
+            } else {
+                None
+            };
+
+            let _content;
+            let content = if needs_content {
+                _content = match self
+                    .store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                        account_id,
+                        Collection::CalendarEventNotification,
+                        document_id,
+                        CalendarNotificationField::Content,
+                    ))
+                    .await?
+                {
+                    Some(content) => content,
+                    None => {
+                        response.push_not_found(id);
+                        continue;
+                    }
+                };
+                Some(
+                    _content
+                        .unarchive::<CalendarEventNotificationContent>()
+                        .caused_by(trc::location!())?,
+                )
+            } else {
+                None
+            };
             let mut result = CalendarEventNotificationObject {
                 id,
                 ..Default::default()
@@ -111,13 +174,15 @@ impl CalendarEventNotificationGet for Server {
                 match property {
                     CalendarEventNotificationProperty::Id => {}
                     CalendarEventNotificationProperty::Created => {
-                        result.created = Some(UTCDate::from_timestamp(event.created.to_native()));
+                        result.created = resource.created_at().map(UTCDate::from_timestamp);
                     }
                     CalendarEventNotificationProperty::CalendarEventId => {
-                        result.calendar_event_id =
-                            event.event_id.as_ref().map(|id| id.to_native().into());
+                        result.calendar_event_id = resource
+                            .event_id()
+                            .filter(|id| *id != u32::MAX)
+                            .map(|id| id.into());
                     }
-                    CalendarEventNotificationProperty::ChangedBy => {
+                    CalendarEventNotificationProperty::ChangedBy if let Some(event) = event => {
                         let mut changed_by = PersonObject::default();
 
                         match &event.changed_by {
@@ -137,8 +202,8 @@ impl CalendarEventNotificationGet for Server {
 
                         result.changed_by = Some(changed_by);
                     }
-                    CalendarEventNotificationProperty::Comment => {
-                        result.comment = event
+                    CalendarEventNotificationProperty::Comment if let Some(content) = content => {
+                        result.comment = content
                             .event
                             .components
                             .iter()
@@ -148,23 +213,27 @@ impl CalendarEventNotificationGet for Server {
                             .and_then(|e| e.values.first().and_then(|v| v.as_text()))
                             .map(|v| v.to_string());
                     }
-                    CalendarEventNotificationProperty::Type => {
+                    CalendarEventNotificationProperty::Type
+                        if let (Some(event), Some(content)) = (event, content) =>
+                    {
                         result.notification_type =
                             Some(if event.flags & EVENT_NOTIFICATION_IS_CHANGE != 0 {
                                 CalendarEventNotificationType::Updated
-                            } else if !event.event.components.is_empty() {
+                            } else if !content.event.components.is_empty() {
                                 CalendarEventNotificationType::Created
                             } else {
                                 CalendarEventNotificationType::Destroyed
                             });
                     }
-                    CalendarEventNotificationProperty::IsDraft => {
+                    CalendarEventNotificationProperty::IsDraft if let Some(event) = event => {
                         result.is_draft = Some(event.flags & EVENT_NOTIFICATION_IS_DRAFT != 0);
                     }
-                    CalendarEventNotificationProperty::Event => {
+                    CalendarEventNotificationProperty::Event
+                        if let (Some(event), Some(content)) = (event, content) =>
+                    {
                         if event.flags & EVENT_NOTIFICATION_IS_CHANGE == 0 && result.event.is_none()
                         {
-                            let js_event = rkyv_deserialize::<_, ICalendar>(&event.event)
+                            let js_event = rkyv_deserialize::<_, ICalendar>(&content.event)
                                 .caused_by(trc::location!())?
                                 .into_jscalendar_with_opt::<Id, BlobId>(
                                     ConversionOptions::default()
@@ -174,20 +243,21 @@ impl CalendarEventNotificationGet for Server {
                             result.event = js_event.into();
                         }
                     }
-                    CalendarEventNotificationProperty::EventPatch => {
-                        if event.flags & EVENT_NOTIFICATION_IS_CHANGE != 0
-                            && result.event_patch.is_none()
-                        {
-                            let js_event = rkyv_deserialize::<_, ICalendar>(&event.event)
-                                .caused_by(trc::location!())?
-                                .into_jscalendar_with_opt::<Id, BlobId>(
-                                    ConversionOptions::default()
-                                        .include_ical_components(false)
-                                        .return_first(true),
-                                );
-                            result.event_patch = js_event.into();
-                        }
+                    CalendarEventNotificationProperty::EventPatch
+                        if let (Some(event), Some(content)) = (event, content)
+                            && event.flags & EVENT_NOTIFICATION_IS_CHANGE != 0
+                            && result.event_patch.is_none() =>
+                    {
+                        let js_event = rkyv_deserialize::<_, ICalendar>(&content.event)
+                            .caused_by(trc::location!())?
+                            .into_jscalendar_with_opt::<Id, BlobId>(
+                                ConversionOptions::default()
+                                    .include_ical_components(false)
+                                    .return_first(true),
+                            );
+                        result.event_patch = js_event.into();
                     }
+                    _ => {}
                 }
             }
             response.list.push(result);

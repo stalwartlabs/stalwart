@@ -25,7 +25,7 @@ use dav_proto::{
 };
 use groupware::{
     cache::GroupwareCache,
-    calendar::{Calendar, CalendarEvent, SupportedComponent, Timezone},
+    calendar::{Calendar, CalendarEvent, CalendarEventContent, SupportedComponent, Timezone},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -39,6 +39,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
 };
 use utils::map::bitmap::Bitmap;
 
@@ -62,6 +63,7 @@ pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
     fn apply_event_properties(
         &self,
         event: &mut CalendarEvent,
+        content: Option<&mut CalendarEventContent>,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
@@ -129,6 +131,18 @@ impl CalendarPropPatchRequestHandler for Server {
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let etag = if resource.is_container() {
+            archive.etag()
+        } else {
+            format!(
+                "\"{}\"",
+                archive
+                    .unarchive::<CalendarEvent>()
+                    .caused_by(trc::location!())?
+                    .etag
+                    .to_native()
+            )
+        };
 
         // Validate headers
         self.validate_headers(
@@ -138,7 +152,7 @@ impl CalendarPropPatchRequestHandler for Server {
                 account_id,
                 collection,
                 document_id: document_id.into(),
-                etag: archive.etag().into(),
+                etag: etag.into(),
                 path: resource_.resource.unwrap(),
                 ..Default::default()
             }],
@@ -205,6 +219,16 @@ impl CalendarPropPatchRequestHandler for Server {
                 calendar.etag().into()
             }
         } else {
+            // A request that names no dead property leaves the payload untouched
+            let touches_content = request
+                .set
+                .iter()
+                .any(|property| matches!(property.property, DavProperty::DeadProperty(_)))
+                || request
+                    .remove
+                    .iter()
+                    .any(|property| matches!(property, DavProperty::DeadProperty(_)));
+
             // Deserialize
             let event = archive
                 .to_unarchived::<CalendarEvent>()
@@ -213,37 +237,87 @@ impl CalendarPropPatchRequestHandler for Server {
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
 
+            let content_ = if touches_content {
+                self.store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                        account_id,
+                        Collection::CalendarEvent,
+                        document_id,
+                        CalendarEventField::Content,
+                    ))
+                    .await
+                    .caused_by(trc::location!())?
+            } else {
+                None
+            };
+            let content = content_
+                .as_ref()
+                .map(|content| content.to_unarchived::<CalendarEventContent>())
+                .transpose()
+                .caused_by(trc::location!())?;
+            let mut new_content = content
+                .as_ref()
+                .map(|content| content.deserialize::<CalendarEventContent>())
+                .transpose()
+                .caused_by(trc::location!())?;
+
             // Remove properties
             if !request.set_first && !request.remove.is_empty() {
                 remove_event_properties(
                     &mut new_event,
+                    new_content.as_mut(),
                     std::mem::take(&mut request.remove),
                     &mut items,
                 );
             }
 
             // Set properties
-            is_success = self.apply_event_properties(&mut new_event, true, request.set, &mut items);
+            is_success = self.apply_event_properties(
+                &mut new_event,
+                new_content.as_mut(),
+                true,
+                request.set,
+                &mut items,
+            );
 
             // Remove properties
             if is_success && !request.remove.is_empty() {
-                remove_event_properties(&mut new_event, request.remove, &mut items);
+                remove_event_properties(
+                    &mut new_event,
+                    new_content.as_mut(),
+                    request.remove,
+                    &mut items,
+                );
             }
 
             if is_success {
-                new_event
-                    .update(
-                        access_token.account_tenant_ids(),
-                        event,
-                        account_id,
-                        document_id,
-                        None,
-                        &mut batch,
-                    )
-                    .caused_by(trc::location!())?
-                    .etag()
+                match (new_content, content) {
+                    (Some(new_content), Some(content)) => new_event
+                        .update_full(
+                            new_content,
+                            access_token.account_tenant_ids(),
+                            event,
+                            content.inner,
+                            account_id,
+                            document_id,
+                            None,
+                            &mut batch,
+                        )
+                        .caused_by(trc::location!())?,
+                    _ => new_event
+                        .update_meta(
+                            access_token.account_tenant_ids(),
+                            event,
+                            account_id,
+                            document_id,
+                            None,
+                            &mut batch,
+                        )
+                        .caused_by(trc::location!())?,
+                }
+                .into()
             } else {
-                event.etag().into()
+                format!("\"{}\"", event.inner.etag.to_native()).into()
             }
         };
 
@@ -443,11 +517,13 @@ impl CalendarPropPatchRequestHandler for Server {
     fn apply_event_properties(
         &self,
         event: &mut CalendarEvent,
+        content: Option<&mut CalendarEventContent>,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) -> bool {
         let mut has_errors = false;
+        let mut content = content;
 
         for property in properties {
             match (&property.property, property.value) {
@@ -469,16 +545,17 @@ impl CalendarPropPatchRequestHandler for Server {
                     items.insert_ok(property.property);
                 }
                 (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
-                    if self.core.groupware.dead_property_size.is_some() =>
+                    if self.core.groupware.dead_property_size.is_some() && content.is_some() =>
                 {
+                    let dead_properties = &mut content.as_mut().unwrap().dead_properties;
                     if is_update {
-                        event.dead_properties.remove_element(dead);
+                        dead_properties.remove_element(dead);
                     }
 
-                    if event.dead_properties.size() + values.size() + dead.size()
+                    if dead_properties.size() + values.size() + dead.size()
                         < self.core.groupware.dead_property_size.unwrap()
                     {
-                        event.dead_properties.add_element(dead.clone(), values.0);
+                        dead_properties.add_element(dead.clone(), values.0);
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -509,17 +586,23 @@ impl CalendarPropPatchRequestHandler for Server {
 
 fn remove_event_properties(
     event: &mut CalendarEvent,
+    content: Option<&mut CalendarEventContent>,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
 ) {
+    let mut content = content;
     for property in properties {
         match &property {
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 event.display_name = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
-            DavProperty::DeadProperty(dead) => {
-                event.dead_properties.remove_element(dead);
+            DavProperty::DeadProperty(dead) if content.is_some() => {
+                content
+                    .as_mut()
+                    .unwrap()
+                    .dead_properties
+                    .remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             _ => {

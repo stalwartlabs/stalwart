@@ -31,7 +31,7 @@ use rand::{RngExt, distr::Alphanumeric};
 use store::{
     ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
 };
 use trc::AddContext;
 use types::{
@@ -227,20 +227,10 @@ impl CalendarSet for Server {
         }
 
         // Process deletions
-        let mut reset_default_calendar = false;
+        let mut destroyed_calendars: Vec<u32> = Vec::new();
         if !will_destroy.is_empty() {
             let mut destroy_children = AHashSet::new();
             let mut destroy_parents = AHashSet::new();
-            let default_calendar_id = self
-                .store()
-                .get_value::<u32>(ValueKey {
-                    account_id,
-                    collection: Collection::Principal.into(),
-                    document_id: 0,
-                    class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
-                })
-                .await
-                .caused_by(trc::location!())?;
             let on_destroy_remove_events =
                 request.arguments.on_destroy_remove_events.unwrap_or(false);
             for id in will_destroy {
@@ -310,9 +300,7 @@ impl CalendarSet for Server {
                     )
                     .caused_by(trc::location!())?;
 
-                if default_calendar_id == Some(document_id) {
-                    reset_default_calendar = true;
-                }
+                destroyed_calendars.push(document_id);
 
                 response.destroyed.push(id);
             }
@@ -344,13 +332,16 @@ impl CalendarSet for Server {
                             .all(|n| destroy_parents.contains(&n.parent_id.to_native()))
                         {
                             // Event only belongs to calendars being deleted, delete it
-                            DestroyArchive(event).delete_all(
-                                &account_info,
-                                account_id,
-                                document_id,
-                                false,
-                                &mut batch,
-                            )?;
+                            DestroyArchive(event)
+                                .delete_all(
+                                    self,
+                                    &account_info,
+                                    account_id,
+                                    document_id,
+                                    false,
+                                    &mut batch,
+                                )
+                                .await?;
                         } else {
                             // Unlink calendar id from event
                             let mut new_event = event
@@ -359,7 +350,7 @@ impl CalendarSet for Server {
                             new_event
                                 .names
                                 .retain(|n| !destroy_parents.contains(&n.parent_id));
-                            new_event.update(
+                            new_event.update_meta(
                                 access_token.account_tenant_ids(),
                                 event,
                                 account_id,
@@ -388,12 +379,14 @@ impl CalendarSet for Server {
                     .with_document(0)
                     .set(PrincipalField::DefaultCalendarId, default_calendar_id);
             }
-        } else if reset_default_calendar {
+        } else if !destroyed_calendars.is_empty() {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Principal)
-                .with_document(0)
-                .clear(PrincipalField::DefaultCalendarId);
+                .with_document(0);
+            for document_id in destroyed_calendars {
+                batch.clear_if_equals(PrincipalField::DefaultCalendarId, document_id);
+            }
         }
 
         // Write changes

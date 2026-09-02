@@ -214,9 +214,8 @@ async fn email_tests(test: &TestServer) {
         let cache = server.get_cached_messages(TEST_USER_ID).await.unwrap();
         let email_ids = cache
             .emails
-            .items
             .iter()
-            .map(|e| e.document_id)
+            .map(|e| e.document_id())
             .collect::<RoaringBitmap>();
         let mailbox_ids = cache
             .mailboxes
@@ -229,7 +228,7 @@ async fn email_tests(test: &TestServer) {
         for mailbox in mailboxes.iter() {
             let mailbox_id = Id::from_str(mailbox).unwrap().document_id();
             let email_ids_in_mailbox =
-                RoaringBitmap::from_iter(cache.in_mailbox(mailbox_id).map(|m| m.document_id));
+                RoaringBitmap::from_iter(cache.in_mailbox(mailbox_id).map(|m| m.document_id()));
             let mut email_ids_check = email_ids_in_mailbox.clone();
             email_ids_check &= &email_ids;
             assert_eq!(email_ids_in_mailbox, email_ids_check);

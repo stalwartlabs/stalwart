@@ -7,7 +7,7 @@
 use crate::{
     blob::download::BlobDownload, changes::state::JmapCacheState, email::ingested_into_object,
 };
-use common::{Server, auth::AccessToken, ipc::PushNotification};
+use common::{MAX_RECEIVED_AT, Server, auth::AccessToken, ipc::PushNotification};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::JUNK_ID,
@@ -167,6 +167,10 @@ impl EmailImport for Server {
                 );
                 continue;
             }
+            let received_at = email
+                .received_at
+                .map(|date| date.timestamp().clamp(0, MAX_RECEIVED_AT as i64) as u64);
+
             match self
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
@@ -182,7 +186,7 @@ impl EmailImport for Server {
                     },
                     mailbox_ids,
                     keywords: email.keywords,
-                    received_at: email.received_at.map(|r| r.into()),
+                    received_at,
                     session_id: session.session_id,
                 })
                 .await

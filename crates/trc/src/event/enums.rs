@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 637;
+pub const TOTAL_EVENT_COUNT: usize = 641;
 pub const TOTAL_METRIC_COUNT: usize = 369;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -818,6 +818,10 @@ pub enum StoreEvent {
     CacheStale = 52,
     CacheUpdate = 577,
     CacheEntryTooLarge = 633,
+    SwapHit = 637,
+    SwapMiss = 638,
+    SwapWrite = 639,
+    SwapError = 640,
     BlobMissingMarker = 507,
     DataWrite = 513,
     DataIterate = 512,

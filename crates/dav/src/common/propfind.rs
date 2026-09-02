@@ -5,7 +5,7 @@
  */
 
 use super::{
-    ArchivedResource, DavCollection, DavQuery, DavQueryFilter, ETag, SyncType,
+    ArchivedResource, DavCollection, DavQuery, DavQueryFilter, SyncType,
     acl::{DavAclHandler, Privileges},
     lock::{LockData, build_lock_key},
     uri::{UriResource, Urn},
@@ -52,27 +52,30 @@ use dav_proto::{
 };
 use groupware::calendar::{SCHEDULE_INBOX_ID, SupportedComponent};
 use groupware::{
-    DavCalendarResource, DavResourceName, cache::GroupwareCache, calendar::ArchivedTimezone,
+    DavCalendarResource, DavResourceName,
+    cache::GroupwareCache,
+    calendar::{ArchivedTimezone, CalendarEvent, EVENT_HAS_DEAD_PROPERTIES},
+    contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use registry::schema::{enums::Permission, prelude::ObjectType};
 use std::sync::Arc;
 use store::{
-    ValueKey,
-    registry::RegistryQuery,
-    write::{Archive, ArchiveBytes},
-};
-use store::{
     ahash::AHashMap,
     query::log::{Change, Query},
     roaring::RoaringBitmap,
+};
+use store::{
+    registry::RegistryQuery,
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
     dead_property::DeadProperty,
+    field::{CalendarEventField, CalendarNotificationField, ContactField, Field},
 };
 use utils::map::bitmap::Bitmap;
 
@@ -98,6 +101,30 @@ pub(crate) trait PropFindRequestHandler: Sync + Send {
 
 pub(crate) struct PropFindData {
     pub accounts: AHashMap<u32, PropFindAccountData>,
+}
+
+fn content_field(collection: Collection) -> Option<Field> {
+    match collection {
+        Collection::CalendarEvent => Some(CalendarEventField::Content.field()),
+        Collection::CalendarEventNotification => Some(CalendarNotificationField::Content.field()),
+        Collection::ContactCard => Some(ContactField::Content.field()),
+        _ => None,
+    }
+}
+
+fn has_dead_properties(
+    archive: &Archive<ArchiveBytes>,
+    collection: Collection,
+) -> trc::Result<bool> {
+    match collection {
+        Collection::CalendarEvent => Ok(archive.unarchive::<CalendarEvent>()?.flags.to_native()
+            & EVENT_HAS_DEAD_PROPERTIES
+            != 0),
+        Collection::ContactCard => Ok(archive.unarchive::<ContactCard>()?.flags.to_native()
+            & CARD_HAS_DEAD_PROPERTIES
+            != 0),
+        _ => Ok(false),
+    }
 }
 
 #[derive(Default)]
@@ -417,6 +444,104 @@ impl PropFindRequestHandler for Server {
             .account(access_token.account_id())
             .await
             .caused_by(trc::location!())?;
+
+        let needs_content = query_filter.is_some()
+            || properties.iter().any(|property| {
+                matches!(
+                    property,
+                    DavProperty::CardDav(CardDavProperty::AddressData { .. })
+                        | DavProperty::CalDav(CalDavProperty::CalendarData(_))
+                )
+            });
+        let needs_dead_properties = skip_not_found
+            || properties
+                .iter()
+                .any(|property| matches!(property, DavProperty::DeadProperty(_)));
+
+        let mut paths = paths;
+        if query_filter.is_none() && paths.len() > limit {
+            paths.truncate(limit);
+        }
+
+        let mut groups: AHashMap<(u32, Collection), RoaringBitmap> = AHashMap::with_capacity(4);
+        for item in &paths {
+            if is_scheduling && item.is_container {
+                continue;
+            }
+            let collection = if item.is_container {
+                collection_container
+            } else {
+                collection_children
+            };
+            groups
+                .entry((item.account_id, collection))
+                .or_default()
+                .insert(item.document_id);
+        }
+
+        let mut metadata: AHashMap<(u32, u8, u32), Archive<ArchiveBytes>> =
+            AHashMap::with_capacity(paths.len());
+        for ((account_id, collection), documents) in &groups {
+            let (account_id, collection) = (*account_id, *collection);
+            self.archives(
+                account_id,
+                collection,
+                Field::ARCHIVE,
+                documents,
+                |document_id, archive| {
+                    metadata.insert((account_id, collection.into(), document_id), archive);
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+        }
+
+        let mut contents: AHashMap<(u32, u8, u32), Archive<ArchiveBytes>> = AHashMap::new();
+        if let Some(content_field) = content_field(collection_children)
+            && (needs_content || needs_dead_properties)
+        {
+            for ((account_id, collection), documents) in &groups {
+                let (account_id, collection) = (*account_id, *collection);
+                if collection != collection_children {
+                    continue;
+                }
+
+                let documents = if needs_content {
+                    documents.clone()
+                } else {
+                    let mut carriers = RoaringBitmap::new();
+                    for document_id in documents.iter() {
+                        if let Some(archive) =
+                            metadata.get(&(account_id, collection.into(), document_id))
+                            && has_dead_properties(archive, collection)
+                                .caused_by(trc::location!())?
+                        {
+                            carriers.insert(document_id);
+                        }
+                    }
+                    carriers
+                };
+
+                if documents.is_empty() {
+                    continue;
+                }
+
+                self.archives(
+                    account_id,
+                    collection,
+                    content_field,
+                    &documents,
+                    |document_id, archive| {
+                        contents.insert((account_id, collection.into(), document_id), archive);
+                        Ok(true)
+                    },
+                )
+                .await
+                .caused_by(trc::location!())?;
+            }
+        }
+
         'outer: for item in paths {
             let account_id = item.account_id;
             let personal_id = access_token.personal_id(account_id, collection_container);
@@ -428,24 +553,19 @@ impl PropFindRequestHandler for Server {
             };
 
             // Unarchive resource
-            let archive_;
             let archive = if is_scheduling && item.is_container {
-                archive_ = Archive::default();
                 ArchivedResource::CalendarEventNotificationCollection(
                     item.document_id == SCHEDULE_INBOX_ID,
                 )
-            } else if let Some(archive) = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    collection,
-                    document_id,
-                ))
-                .await
-                .caused_by(trc::location!())?
+            } else if let Some(archive_) =
+                metadata.get(&(account_id, collection.into(), document_id))
             {
-                archive_ = archive;
-                ArchivedResource::from_archive(&archive_, collection).caused_by(trc::location!())?
+                ArchivedResource::from_archive(
+                    archive_,
+                    contents.get(&(account_id, collection.into(), document_id)),
+                    collection,
+                )
+                .caused_by(trc::location!())?
             } else {
                 response.add_response(Response::new_status([item.name], StatusCode::NOT_FOUND));
                 continue;
@@ -455,9 +575,10 @@ impl PropFindRequestHandler for Server {
             let mut calendar_filter = None;
             if let Some(query_filter) = &query_filter {
                 match (query_filter, &archive) {
-                    (DavQueryFilter::Addressbook(filter), ArchivedResource::ContactCard(card))
-                        if !vcard_query(&card.inner.card, filter) =>
-                    {
+                    (
+                        DavQueryFilter::Addressbook(filter),
+                        ArchivedResource::ContactCard(_, Some(content)),
+                    ) if !vcard_query(&content.card, filter) => {
                         continue;
                     }
                     (
@@ -466,7 +587,7 @@ impl PropFindRequestHandler for Server {
                             timezone,
                             max_time_range,
                         },
-                        ArchivedResource::CalendarEvent(event),
+                        ArchivedResource::CalendarEvent(_, Some(content)),
                     ) => {
                         let default_tz = if let Some(tz) = try_parse_tz(timezone) {
                             tz
@@ -480,8 +601,8 @@ impl PropFindRequestHandler for Server {
                             Tz::UTC
                         };
                         let mut query_handler =
-                            CalendarQueryHandler::new(event.inner, *max_time_range, default_tz);
-                        if !query_handler.filter(event.inner, filter) {
+                            CalendarQueryHandler::new(content, *max_time_range, default_tz);
+                        if !query_handler.filter(content, filter) {
                             continue;
                         }
                         calendar_filter = Some(query_handler);
@@ -541,7 +662,7 @@ impl PropFindRequestHandler for Server {
                         WebDavProperty::GetETag => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::String(archive_.etag()),
+                                DavValue::String(archive.etag()),
                             ));
                         }
                         WebDavProperty::GetCTag => {
@@ -697,7 +818,7 @@ impl PropFindRequestHandler for Server {
                                     property.clone(),
                                     vec![SupportedPrivilege::all_scheduling_privileges(matches!(
                                         archive,
-                                        ArchivedResource::CalendarEventNotification(_)
+                                        ArchivedResource::CalendarEventNotification(..)
                                             | ArchivedResource::CalendarEventNotificationCollection(
                                                 true
                                             )
@@ -710,7 +831,7 @@ impl PropFindRequestHandler for Server {
                                 Privilege::scheduling(
                                     matches!(
                                         archive,
-                                        ArchivedResource::CalendarEventNotification(_)
+                                        ArchivedResource::CalendarEventNotification(..)
                                             | ArchivedResource::CalendarEventNotificationCollection(
                                                 true
                                             )
@@ -844,12 +965,12 @@ impl PropFindRequestHandler for Server {
                                 properties,
                                 version,
                             },
-                            ArchivedResource::ContactCard(card),
+                            ArchivedResource::ContactCard(_, Some(content)),
                         ) => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
                                 DavValue::CData(serialize_vcard_with_props(
-                                    &card.inner.card,
+                                    &content.card,
                                     properties,
                                     (*version)
                                         .or(query.vcard_version)
@@ -986,14 +1107,19 @@ impl PropFindRequestHandler for Server {
                         }
                         (
                             CalDavProperty::CalendarData(data),
-                            ArchivedResource::CalendarEvent(event),
+                            ArchivedResource::CalendarEvent(event, Some(content)),
                         ) => {
                             if calendar_filter.is_some() || !data.properties.is_empty() {
                                 if let Some(ical) = calendar_filter
                                     .get_or_insert_with(|| {
-                                        CalendarQueryHandler::new(event.inner, None, Tz::UTC)
+                                        CalendarQueryHandler::new(content, None, Tz::UTC)
                                     })
-                                    .serialize_ical(event.inner, data, &mut ical_instances_limit)
+                                    .serialize_ical(
+                                        content,
+                                        event.inner.size.to_native(),
+                                        data,
+                                        &mut ical_instances_limit,
+                                    )
                                 {
                                     fields.push(DavPropertyValue::new(
                                         property.clone(),
@@ -1006,22 +1132,23 @@ impl PropFindRequestHandler for Server {
                             } else {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
-                                    DavValue::CData(event.inner.data.event.to_string()),
+                                    DavValue::CData(content.data.event.to_string()),
                                 ));
                             }
                         }
                         (
                             CalDavProperty::CalendarData(_),
-                            ArchivedResource::CalendarEventNotification(event),
+                            ArchivedResource::CalendarEventNotification(_, Some(content)),
                         ) => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::CData(event.inner.event.to_string()),
+                                DavValue::CData(content.event.to_string()),
                             ));
                         }
-                        (CalDavProperty::ScheduleTag, ArchivedResource::CalendarEvent(event))
-                            if event.inner.schedule_tag.is_some() =>
-                        {
+                        (
+                            CalDavProperty::ScheduleTag,
+                            ArchivedResource::CalendarEvent(event, _),
+                        ) if event.inner.schedule_tag.is_some() => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
                                 DavValue::String(format!(
@@ -1201,9 +1328,10 @@ async fn get(
         .map(|containers| {
             RoaringBitmap::from_iter(resources.resources.iter().filter_map(|r| {
                 if r.child_names()
-                    .is_some_and(|n| n.iter().any(|n| containers.contains(n.parent_id)))
+                    .iter()
+                    .any(|n| containers.contains(n.parent_id))
                 {
-                    Some(r.document_id)
+                    Some(r.document_id())
                 } else {
                     None
                 }

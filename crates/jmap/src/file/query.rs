@@ -82,7 +82,7 @@ impl FileNodeQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if is_top_level == r.parent_id().is_none() {
-                                    Some(r.document_id)
+                                    Some(r.document_id())
                                 } else {
                                     None
                                 }
@@ -99,7 +99,7 @@ impl FileNodeQuery for Server {
                             Some(is_container) => {
                                 RoaringBitmap::from_iter(cache.resources.iter().filter_map(|r| {
                                     if r.is_container() == is_container {
-                                        Some(r.document_id)
+                                        Some(r.document_id())
                                     } else {
                                         None
                                     }
@@ -114,7 +114,7 @@ impl FileNodeQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.container_name().is_some_and(|n| n == name) {
-                                    Some(r.document_id)
+                                    Some(r.document_id())
                                 } else {
                                     None
                                 }
@@ -125,7 +125,7 @@ impl FileNodeQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.container_name().is_some_and(|n| name.matches(n)) {
-                                    Some(r.document_id)
+                                    Some(r.document_id())
                                 } else {
                                     None
                                 }
@@ -137,7 +137,7 @@ impl FileNodeQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.size().is_some_and(|s| s >= size) {
-                                    Some(r.document_id)
+                                    Some(r.document_id())
                                 } else {
                                     None
                                 }
@@ -149,7 +149,7 @@ impl FileNodeQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 if r.size().is_some_and(|s| s <= size) {
-                                    Some(r.document_id)
+                                    Some(r.document_id())
                                 } else {
                                     None
                                 }
@@ -196,7 +196,7 @@ impl FileNodeQuery for Server {
             .with_mask(if access_token.is_shared(account_id) {
                 cache.shared_documents(access_token, [Acl::Read, Acl::ReadItems], true)
             } else {
-                cache.resources.iter().map(|r| r.document_id).collect()
+                cache.resources.iter().map(|r| r.document_id()).collect()
             })
             .filter()
             .into_bitmap();
@@ -235,7 +235,7 @@ impl FileNodeQuery for Server {
             let by_id = cache
                 .resources
                 .iter()
-                .map(|r| (r.document_id, r))
+                .map(|r| (r.document_id(), r))
                 .collect::<AHashMap<_, _>>();
             let mut ids = results.iter().collect::<Vec<_>>();
             ids.sort_unstable_by(|a, b| {

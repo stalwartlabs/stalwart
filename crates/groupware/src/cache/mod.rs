@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    cache::calcard::{build_scheduling_resources, path_from_scheduling, resource_from_scheduling},
+    cache::calcard::{build_scheduling_paths, build_scheduling_resources, push_scheduling},
     calendar::{
         CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarEventNotification,
         CalendarPreferences,
@@ -15,13 +15,19 @@ use crate::{
 };
 use ahash::AHashSet;
 use calcard::{
-    build_calcard_resources, build_simple_hierarchy, resource_from_addressbook,
-    resource_from_calendar, resource_from_card, resource_from_event,
+    build_calcard_paths, build_calcard_resources, push_addressbook, push_calendar, push_card,
+    push_event,
 };
 use common::{
-    DavResource, DavResources, Server, UpdateLock, auth::AccountCache, cache::LockResult,
+    DAV_CHUNK, DavResourceRef, DavResources, ResourceStore, Server, UpdateLock,
+    auth::AccountCache,
+    cache::{
+        LockResult,
+        swap::{SwapKey, SwapPart},
+    },
+    storage::dav::ResourceChunkBuilder,
 };
-use file::{build_file_resources, build_nested_hierarchy, resource_from_file};
+use file::{build_file_resources, build_nested_hierarchy, push_file};
 use std::{sync::Arc, time::Instant};
 use store::{
     ValueKey,
@@ -38,6 +44,40 @@ use utils::cache::Cache;
 
 pub mod calcard;
 pub mod file;
+
+#[derive(Default)]
+pub struct ChunkAccumulator {
+    builders: Vec<ResourceChunkBuilder>,
+}
+
+impl ChunkAccumulator {
+    pub fn current(&mut self) -> &mut ResourceChunkBuilder {
+        if self
+            .builders
+            .last()
+            .is_none_or(|builder| builder.len() >= DAV_CHUNK)
+        {
+            self.builders
+                .push(ResourceChunkBuilder::with_capacity(DAV_CHUNK.min(64)));
+        }
+        self.builders.last_mut().unwrap()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.builders.iter().all(|builder| builder.is_empty())
+    }
+
+    pub fn len(&self) -> usize {
+        self.builders.iter().map(|builder| builder.len()).sum()
+    }
+
+    pub fn finish(self) -> Vec<ResourceChunkBuilder> {
+        self.builders
+            .into_iter()
+            .filter(|builder| !builder.is_empty())
+            .collect()
+    }
+}
 
 pub trait GroupwareCache: Sync + Send {
     fn fetch_dav_resources(
@@ -90,30 +130,46 @@ impl GroupwareCache for Server {
             Ok(cache) => cache,
             Err(guard) => {
                 let start_time = Instant::now();
-                let cache = full_cache_build(
-                    self,
-                    account_id,
-                    collection,
-                    Arc::new(UpdateLock::new()),
-                    access_account_id,
-                )
-                .await?;
+                match restore_cache_build(self, account_id, collection).await {
+                    Some(cache) => {
+                        if guard.insert(cache.clone()).is_err() {
+                            cache_store.update(account_id, cache.clone());
+                        }
+                        warn_if_uncacheable(cache_store, account_id, collection, &cache);
+                        cache
+                    }
+                    None => {
+                        let cache = full_cache_build(
+                            self,
+                            account_id,
+                            collection,
+                            Arc::new(UpdateLock::new()),
+                            access_account_id,
+                        )
+                        .await?;
 
-                if guard.insert(cache.clone()).is_err() {
-                    cache_store.update(account_id, cache.clone());
+                        if guard.insert(cache.clone()).is_err() {
+                            cache_store.update(account_id, cache.clone());
+                        }
+                        warn_if_uncacheable(cache_store, account_id, collection, &cache);
+                        self.inner.cache.swap.notify_changed(
+                            account_id,
+                            collection,
+                            cache.resources.len() as u32,
+                        );
+
+                        trc::event!(
+                            Store(StoreEvent::CacheMiss),
+                            AccountId = account_id,
+                            Collection = collection.as_str(),
+                            Total = cache.resources.len(),
+                            ChangeId = cache.highest_change_id,
+                            Elapsed = start_time.elapsed(),
+                        );
+
+                        return Ok(cache);
+                    }
                 }
-                warn_if_uncacheable(cache_store, account_id, collection, &cache);
-
-                trc::event!(
-                    Store(StoreEvent::CacheMiss),
-                    AccountId = account_id,
-                    Collection = collection.as_str(),
-                    Total = cache.resources.len(),
-                    ChangeId = cache.highest_change_id,
-                    Elapsed = start_time.elapsed(),
-                );
-
-                return Ok(cache);
             }
         };
 
@@ -143,6 +199,11 @@ impl GroupwareCache for Server {
             .await?;
             cache_store.update(account_id, cache.clone());
             warn_if_uncacheable(cache_store, account_id, collection, &cache);
+            self.inner.cache.swap.notify_changed(
+                account_id,
+                collection,
+                cache.resources.len() as u32,
+            );
 
             trc::event!(
                 Store(StoreEvent::CacheStale),
@@ -194,82 +255,68 @@ impl GroupwareCache for Server {
         let cache = if !matches!(collection, SyncCollection::CalendarEventNotification) {
             let mut updated_resources = AHashMap::with_capacity(8);
             let has_no_children = collection == SyncCollection::FileNode;
+            let mut staging = ResourceChunkBuilder::with_capacity(8);
 
             process_changes(
                 self,
                 account_id,
                 collection,
                 has_no_children,
+                &mut staging,
                 &mut updated_resources,
                 changes.changes,
             )
             .await?;
 
+            let staging = staging.finish();
             let mut rebuild_hierarchy = false;
-            let mut resources = Vec::with_capacity(cache.resources.len());
-
-            for resource in &cache.resources {
-                let is_container = has_no_children || resource.is_container();
-                if let Some(updated_resource) =
-                    updated_resources.remove(&(is_container, resource.document_id))
-                {
-                    if let Some(updated_resource) = updated_resource {
-                        rebuild_hierarchy =
-                            rebuild_hierarchy || updated_resource.has_hierarchy_changes(resource);
-                        resources.push(updated_resource);
-                    } else {
-                        // Deleted resource
-                        rebuild_hierarchy = true;
+            for ((is_container, document_id), slot) in &updated_resources {
+                match slot {
+                    Some(slot) => {
+                        let updated = DavResourceRef {
+                            chunk: &staging,
+                            resource: &staging.records[*slot as usize],
+                        };
+                        match cache.resources.find(*document_id, *is_container) {
+                            Some(previous) => {
+                                rebuild_hierarchy =
+                                    rebuild_hierarchy || updated.has_hierarchy_changes(&previous);
+                            }
+                            None => rebuild_hierarchy = true,
+                        }
                     }
-                } else {
-                    resources.push(resource.clone());
+                    None => rebuild_hierarchy = true,
                 }
             }
 
-            // Add new resources
-            for resource in updated_resources.into_values().flatten() {
-                resources.push(resource);
-                rebuild_hierarchy = true;
-            }
-
-            if rebuild_hierarchy {
-                let mut cache = DavResources {
-                    base_path: cache.base_path.clone(),
-                    paths: Default::default(),
-                    resources,
-                    item_change_id: changes.item_change_id.unwrap_or(cache.item_change_id),
-                    container_change_id: changes
-                        .container_change_id
-                        .unwrap_or(cache.container_change_id),
-                    highest_change_id: changes.to_change_id,
-                    size: std::mem::size_of::<DavResources>() as u64,
-                    update_lock: lock.clone(),
-                };
-
-                if matches!(collection, SyncCollection::FileNode) {
-                    build_nested_hierarchy(&mut cache);
+            let resources = cache.resources.rebuild(&staging, &updated_resources);
+            let paths = if rebuild_hierarchy {
+                Arc::new(if matches!(collection, SyncCollection::FileNode) {
+                    build_nested_hierarchy(&resources)
                 } else {
-                    build_simple_hierarchy(&mut cache);
-                }
-                cache
+                    build_calcard_paths(&resources)
+                })
             } else {
-                DavResources {
-                    base_path: cache.base_path.clone(),
-                    paths: cache.paths.clone(),
-                    resources,
-                    item_change_id: changes.item_change_id.unwrap_or(cache.item_change_id),
-                    container_change_id: changes
-                        .container_change_id
-                        .unwrap_or(cache.container_change_id),
-                    highest_change_id: changes.to_change_id,
-                    size: cache.size,
-                    update_lock: lock.clone(),
-                }
-            }
+                cache.paths.clone()
+            };
+
+            let mut cache = DavResources {
+                base_path: cache.base_path.clone(),
+                paths,
+                resources,
+                item_change_id: changes.item_change_id.unwrap_or(cache.item_change_id),
+                container_change_id: changes
+                    .container_change_id
+                    .unwrap_or(cache.container_change_id),
+                highest_change_id: changes.to_change_id,
+                size: 0,
+                update_lock: lock.clone(),
+            };
+            cache.recompute_size();
+            cache
         } else {
             let mut delete_ids = AHashSet::with_capacity(changes.changes.len());
-            let mut resources = Vec::with_capacity(cache.resources.len());
-            let mut paths = AHashSet::with_capacity(cache.paths.len());
+            let mut inserted = Vec::new();
 
             for change in changes.changes {
                 match change {
@@ -285,14 +332,7 @@ impl GroupwareCache for Server {
                             .await
                             .caused_by(trc::location!())?
                         {
-                            let resource = resource_from_scheduling(
-                                archive
-                                    .unarchive::<CalendarEventNotification>()
-                                    .caused_by(trc::location!())?,
-                                document_id,
-                            );
-                            paths.insert(path_from_scheduling(document_id, resources.len(), false));
-                            resources.push(resource);
+                            inserted.push((document_id, archive));
                         }
                     }
                     Change::DeleteItem(document_id) => {
@@ -301,36 +341,71 @@ impl GroupwareCache for Server {
                     _ => {}
                 }
             }
+            inserted.sort_unstable_by_key(|(document_id, _)| *document_id);
 
-            for resource in &cache.resources {
-                if !delete_ids.contains(&resource.document_id) {
-                    paths.insert(path_from_scheduling(
-                        resource.document_id,
-                        resources.len(),
-                        resource.is_container(),
-                    ));
-                    resources.push(resource.clone());
+            let mut containers = ChunkAccumulator::default();
+            let mut items = ChunkAccumulator::default();
+            let mut inserted = inserted.into_iter().peekable();
+
+            for resource in cache.resources.iter() {
+                if resource.is_container() {
+                    containers.current().push_from(&resource);
+                    continue;
                 }
+                if delete_ids.contains(&resource.document_id()) {
+                    continue;
+                }
+                while inserted
+                    .peek()
+                    .is_some_and(|(document_id, _)| *document_id < resource.document_id())
+                {
+                    let (document_id, archive) = inserted.next().unwrap();
+                    push_scheduling(
+                        items.current(),
+                        archive
+                            .unarchive::<CalendarEventNotification>()
+                            .caused_by(trc::location!())?,
+                        document_id,
+                    );
+                }
+                items.current().push_from(&resource);
+            }
+            for (document_id, archive) in inserted {
+                push_scheduling(
+                    items.current(),
+                    archive
+                        .unarchive::<CalendarEventNotification>()
+                        .caused_by(trc::location!())?,
+                    document_id,
+                );
             }
 
-            DavResources {
+            let resources = ResourceStore::from_sorted(containers.finish(), items.finish(), false);
+            let paths = build_scheduling_paths(&resources);
+            let mut cache = DavResources {
                 base_path: cache.base_path.clone(),
-                paths,
+                paths: Arc::new(paths),
                 resources,
                 item_change_id: changes.item_change_id.unwrap_or(cache.item_change_id),
                 container_change_id: changes
                     .container_change_id
                     .unwrap_or(cache.container_change_id),
                 highest_change_id: changes.to_change_id,
-                size: cache.size,
+                size: 0,
                 update_lock: cache.update_lock.clone(),
-            }
+            };
+            cache.recompute_size();
+            cache
         };
 
         cache.update_lock.set_revision(cache.highest_change_id);
         let cache = Arc::new(cache);
         cache_store.update(account_id, cache.clone());
         warn_if_uncacheable(cache_store, account_id, collection, &cache);
+        self.inner
+            .cache
+            .swap
+            .notify_changed(account_id, collection, num_changes as u32);
 
         trc::event!(
             Store(StoreEvent::CacheUpdate),
@@ -491,7 +566,8 @@ async fn process_changes(
     account_id: u32,
     collection: SyncCollection,
     has_no_children: bool,
-    updated_resources: &mut AHashMap<(bool, u32), Option<DavResource>>,
+    staging: &mut ResourceChunkBuilder,
+    updated_resources: &mut AHashMap<(bool, u32), Option<u32>>,
     changes: Vec<Change>,
 ) -> trc::Result<()> {
     for change in changes {
@@ -508,15 +584,9 @@ async fn process_changes(
                     .await
                     .caused_by(trc::location!())?
                 {
-                    updated_resources.insert(
-                        (has_no_children, document_id),
-                        Some(resource_from_archive(
-                            archive,
-                            document_id,
-                            collection,
-                            false,
-                        )?),
-                    );
+                    let slot = staging.len() as u32;
+                    push_from_archive(staging, archive, document_id, collection, false)?;
+                    updated_resources.insert((has_no_children, document_id), Some(slot));
                 } else {
                     updated_resources.insert((has_no_children, document_id), None);
                 }
@@ -538,12 +608,11 @@ async fn process_changes(
                 {
                     updated_resources.insert(
                         (true, document_id),
-                        Some(resource_from_archive(
-                            archive,
-                            document_id,
-                            collection,
-                            true,
-                        )?),
+                        Some({
+                            let slot = staging.len() as u32;
+                            push_from_archive(staging, archive, document_id, collection, true)?;
+                            slot
+                        }),
                     );
                 } else {
                     updated_resources.insert((true, document_id), None);
@@ -575,6 +644,77 @@ fn warn_if_uncacheable(
             Limit = capacity,
         );
     }
+}
+
+async fn restore_cache_build(
+    server: &Server,
+    account_id: u32,
+    collection: SyncCollection,
+) -> Option<Arc<DavResources>> {
+    if !server.inner.cache.swap.is_enabled() {
+        return None;
+    }
+
+    let start_time = Instant::now();
+    let key = SwapKey::new(account_id, collection, SwapPart::Resources);
+    let snapshot = match server.inner.cache.swap.load(key).await {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => return None,
+        Err(err) => {
+            trc::error!(
+                err.details("Failed to read the resource cache snapshot")
+                    .ctx(trc::Key::AccountId, account_id)
+                    .ctx(trc::Key::Collection, collection.as_str())
+            );
+            return None;
+        }
+    };
+
+    let restored = DavResources::from_snapshot(&snapshot).or_else(|| {
+        trc::event!(
+            Store(StoreEvent::SwapMiss),
+            AccountId = account_id,
+            Collection = collection.as_str(),
+            Details = "Discarded an unreadable resource cache snapshot",
+        );
+        None
+    })?;
+
+    let last_change_id = server
+        .core
+        .storage
+        .data
+        .get_last_change_id(account_id, collection.into())
+        .await
+        .caused_by(trc::location!())
+        .inspect_err(|err| {
+            trc::error!(err.clone());
+        })
+        .ok()?
+        .unwrap_or_default();
+
+    if restored.highest_change_id > last_change_id {
+        trc::event!(
+            Store(StoreEvent::SwapMiss),
+            AccountId = account_id,
+            Collection = collection.as_str(),
+            ChangeId = restored.highest_change_id,
+            Details = "Discarded a resource cache snapshot newer than the change log",
+        );
+        return None;
+    }
+
+    trc::event!(
+        Store(StoreEvent::SwapHit),
+        AccountId = account_id,
+        Collection = collection.as_str(),
+        ChangeId = restored.highest_change_id,
+        Total = restored.resources.len(),
+        Size = snapshot.len(),
+        Elapsed = start_time.elapsed(),
+    );
+
+    Some(Arc::new(restored))
 }
 
 async fn full_cache_build(
@@ -618,53 +758,65 @@ async fn full_cache_build(
     .map(Arc::new)
 }
 
-fn resource_from_archive(
+fn push_from_archive(
+    builder: &mut ResourceChunkBuilder,
     archive: Archive<ArchiveBytes>,
     document_id: u32,
     collection: SyncCollection,
     is_container: bool,
-) -> trc::Result<DavResource> {
-    Ok(match collection {
+) -> trc::Result<()> {
+    let etag = archive.version.hash().unwrap_or_default();
+
+    match collection {
         SyncCollection::Calendar => {
             if is_container {
-                resource_from_calendar(
+                push_calendar(
+                    builder,
                     archive
                         .unarchive::<Calendar>()
                         .caused_by(trc::location!())?,
                     document_id,
-                )
+                    etag,
+                );
             } else {
-                resource_from_event(
+                push_event(
+                    builder,
                     archive
                         .unarchive::<CalendarEvent>()
                         .caused_by(trc::location!())?,
                     document_id,
-                )
+                );
             }
         }
         SyncCollection::AddressBook => {
             if is_container {
-                resource_from_addressbook(
+                push_addressbook(
+                    builder,
                     archive
                         .unarchive::<AddressBook>()
                         .caused_by(trc::location!())?,
                     document_id,
-                )
+                    etag,
+                );
             } else {
-                resource_from_card(
+                push_card(
+                    builder,
                     archive
                         .unarchive::<ContactCard>()
                         .caused_by(trc::location!())?,
                     document_id,
-                )
+                );
             }
         }
-        SyncCollection::FileNode => resource_from_file(
+        SyncCollection::FileNode => push_file(
+            builder,
             archive
                 .unarchive::<FileNode>()
                 .caused_by(trc::location!())?,
             document_id,
+            etag,
         ),
         _ => unreachable!(),
-    })
+    }
+    Ok(())
 }

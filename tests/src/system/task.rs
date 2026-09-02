@@ -316,11 +316,13 @@ impl Account {
     }
 
     async fn assert_has_failed_task(&self) -> TaskId {
-        self.await_tasks(1, |task| matches!(task.task.status(), TaskStatus::Failed(_)))
-            .await
-            .into_iter()
-            .next()
-            .unwrap()
+        self.await_tasks(1, |task| {
+            matches!(task.task.status(), TaskStatus::Failed(_))
+        })
+        .await
+        .into_iter()
+        .next()
+        .unwrap()
     }
 
     async fn assert_has_retried_task(&self) -> TaskId {

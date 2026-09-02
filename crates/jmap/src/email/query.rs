@@ -161,7 +161,7 @@ impl EmailQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .in_mailbox(mailbox.document_id())
-                                .map(|item| item.document_id),
+                                .map(|item| item.document_id()),
                         )))
                     }
                     EmailFilter::InMailboxOtherThan(mailboxes) => {
@@ -170,13 +170,13 @@ impl EmailQuery for Server {
                             .map(|m| m.document_id())
                             .collect::<AHashSet<_>>();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            cached_messages.emails.items.iter().filter_map(|item| {
+                            cached_messages.emails.iter().filter_map(|item| {
                                 if item
-                                    .mailboxes
+                                    .mailboxes()
                                     .iter()
                                     .any(|mb| !mailboxes.contains(&mb.mailbox_id))
                                 {
-                                    Some(item.document_id)
+                                    Some(item.document_id())
                                 } else {
                                     None
                                 }
@@ -187,28 +187,28 @@ impl EmailQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .received(date.timestamp(), SearchOperator::LowerThan)
-                                .map(|m| m.document_id),
+                                .map(|m| m.document_id()),
                         )));
                     }
                     EmailFilter::After(date) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .received(date.timestamp(), SearchOperator::GreaterThan)
-                                .map(|m| m.document_id),
+                                .map(|m| m.document_id()),
                         )));
                     }
                     EmailFilter::MinSize(size) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .size(size, SearchOperator::GreaterEqualThan)
-                                .map(|m| m.document_id),
+                                .map(|m| m.document_id()),
                         )));
                     }
                     EmailFilter::MaxSize(size) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .size(size, SearchOperator::LowerThan)
-                                .map(|m| m.document_id),
+                                .map(|m| m.document_id()),
                         )));
                     }
                     EmailFilter::AllInThreadHaveKeyword(keyword) => {
@@ -241,14 +241,14 @@ impl EmailQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .with_keyword(&keyword)
-                                .map(|item| item.document_id),
+                                .map(|item| item.document_id()),
                         )));
                     }
                     EmailFilter::NotKeyword(keyword) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .without_keyword(&keyword)
-                                .map(|item| item.document_id),
+                                .map(|item| item.document_id()),
                         )));
                     }
                     EmailFilter::HasAttachment(has_attach) => {
@@ -261,7 +261,7 @@ impl EmailQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .with_keyword(&keyword)
-                                .map(|item| item.document_id),
+                                .map(|item| item.document_id()),
                         )));
                     }
 
@@ -277,21 +277,21 @@ impl EmailQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .sent(date.timestamp(), SearchOperator::LowerThan)
-                                .map(|m| m.document_id),
+                                .map(|m| m.document_id()),
                         )));
                     }
                     EmailFilter::SentAfter(date) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .sent(date.timestamp(), SearchOperator::GreaterThan)
-                                .map(|m| m.document_id),
+                                .map(|m| m.document_id()),
                         )));
                     }
                     EmailFilter::InThread(id) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cached_messages
                                 .in_thread(id.document_id())
-                                .map(|item| item.document_id),
+                                .map(|item| item.document_id()),
                         )))
                     }
                     other => {
@@ -386,9 +386,8 @@ impl EmailQuery for Server {
                     } else {
                         cached_messages
                             .emails
-                            .items
                             .iter()
-                            .map(|item| item.document_id)
+                            .map(|item| item.document_id())
                             .collect()
                     }),
                 comparators,
@@ -403,7 +402,7 @@ impl EmailQuery for Server {
                 .filter_map(|document_id| {
                     cached_messages
                         .email_by_id(document_id)
-                        .map(|email| email.thread_id)
+                        .map(|email| email.thread_id())
                 })
                 .filter(|thread_id| seen_thread_ids.insert(*thread_id))
                 .count()
@@ -424,7 +423,7 @@ impl EmailQuery for Server {
             for document_id in results {
                 let Some(thread_id) = cached_messages
                     .email_by_id(&document_id)
-                    .map(|email| email.thread_id)
+                    .map(|email| email.thread_id())
                 else {
                     continue;
                 };

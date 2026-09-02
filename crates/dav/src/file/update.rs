@@ -273,7 +273,7 @@ impl FileUpdateRequestHandler for Server {
                 dead_properties: Default::default(),
                 acls: parent
                     .as_ref()
-                    .and_then(|p| p.resource.acls())
+                    .map(|p| p.resource.acls())
                     .map(|acls| acls.to_vec())
                     .unwrap_or_default(),
             };

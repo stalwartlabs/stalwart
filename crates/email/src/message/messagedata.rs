@@ -59,40 +59,58 @@ impl EmailMessageData for Server {
         CB: FnMut(u32, MessageData) -> trc::Result<bool> + Send + Sync,
     {
         let collection: u8 = Collection::Email.into();
-
-        self.core
-            .storage
-            .data
-            .iterate(
+        let ranges = documents
+            .scan_ranges()
+            .into_iter()
+            .map(|(from_document_id, to_document_id)| {
                 IterateParams::new(
                     ValueKey {
                         account_id,
                         collection,
-                        document_id: documents.min(),
+                        document_id: from_document_id,
                         class: ValueClass::Property(Field::ARCHIVE.into()),
                     },
                     ValueKey {
                         account_id,
                         collection,
-                        document_id: documents.max(),
+                        document_id: to_document_id,
                         class: ValueClass::Property(Field::ARCHIVE.into()),
                     },
-                ),
-                |key, value| {
-                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    if documents.contains(document_id) {
-                        MessageData::deserialize(value).and_then(|archive| cb(document_id, archive))
-                    } else {
-                        Ok(true)
-                    }
-                },
-            )
-            .await
-            .add_context(|err| {
-                err.caused_by(trc::location!())
-                    .account_id(account_id)
-                    .collection(collection)
+                )
             })
+            .collect::<Vec<_>>();
+
+        let mut collect = |key: &[u8], value: &[u8]| {
+            let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
+            if documents.contains(document_id) {
+                MessageData::deserialize(value).and_then(|archive| cb(document_id, archive))
+            } else {
+                Ok(true)
+            }
+        };
+
+        match ranges.len() {
+            0 => Ok(()),
+            1 => {
+                self.core
+                    .storage
+                    .data
+                    .iterate(ranges.into_iter().next().unwrap(), &mut collect)
+                    .await
+            }
+            _ => {
+                self.core
+                    .storage
+                    .data
+                    .iterate_many(ranges, &mut collect)
+                    .await
+            }
+        }
+        .add_context(|err| {
+            err.caused_by(trc::location!())
+                .account_id(account_id)
+                .collection(collection)
+        })
     }
 }
 

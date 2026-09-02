@@ -188,6 +188,19 @@ pub enum BlobStoreType {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum BlobSwapStoreType {
+    #[default]
+    Default = 0,
+    S3 = 1,
+    Azure = 2,
+    FileSystem = 3,
+    FoundationDb = 4,
+    PostgreSql = 5,
+    MySql = 6,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum BlockReason {
     #[default]
     RcptToFailure = 0,
@@ -196,6 +209,16 @@ pub enum BlockReason {
     PortScanning = 3,
     Manual = 4,
     Other = 5,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum CacheSwapType {
+    #[default]
+    Disabled = 0,
+    LocalFile = 1,
+    Redis = 2,
+    BlobStore = 3,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2269,6 +2292,16 @@ pub enum RedisProtocol {
     #[default]
     Resp2 = 0,
     Resp3 = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum RedisSwapStoreType {
+    #[default]
+    Default = 0,
+    Redis = 1,
+    RedisCluster = 2,
+    RedisSentinel = 3,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

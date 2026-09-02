@@ -73,6 +73,49 @@ impl ShardedInMemory {
         .await
     }
 
+    pub async fn chunks_get(&self, prefix: &[u8], count: u32) -> trc::Result<Option<Vec<u8>>> {
+        Box::pin(async move {
+            match self.get_store(prefix) {
+                #[cfg(feature = "redis")]
+                InMemoryStore::Redis(store) => store.chunks_get(prefix, count).await,
+                _ => Err(trc::StoreEvent::NotSupported.into_err()),
+            }
+        })
+        .await
+    }
+
+    #[allow(unused_variables)]
+    pub async fn chunks_set(
+        &self,
+        prefix: &[u8],
+        data: &[u8],
+        chunk_size: usize,
+        expires: Option<u64>,
+    ) -> trc::Result<()> {
+        Box::pin(async move {
+            match self.get_store(prefix) {
+                #[cfg(feature = "redis")]
+                InMemoryStore::Redis(store) => {
+                    store.chunks_set(prefix, data, chunk_size, expires).await
+                }
+                _ => Err(trc::StoreEvent::NotSupported.into_err()),
+            }
+        })
+        .await
+    }
+
+    #[allow(unused_variables)]
+    pub async fn chunks_delete(&self, prefix: &[u8], from: u32, to: u32) -> trc::Result<()> {
+        Box::pin(async move {
+            match self.get_store(prefix) {
+                #[cfg(feature = "redis")]
+                InMemoryStore::Redis(store) => store.chunks_delete(prefix, from, to).await,
+                _ => Err(trc::StoreEvent::NotSupported.into_err()),
+            }
+        })
+        .await
+    }
+
     pub async fn counter_incr(&self, kv: KeyValue<i64>) -> trc::Result<i64> {
         Box::pin(async move {
             match self.get_store(&kv.key) {

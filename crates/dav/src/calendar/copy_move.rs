@@ -19,20 +19,20 @@ use dav_proto::{Depth, RequestHeaders};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
-    calendar::{Calendar, CalendarEvent, CalendarPreferences, Timezone},
+    calendar::{Calendar, CalendarEvent, CalendarEventContent, CalendarPreferences, Timezone},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::{BatchBuilder, PendingId, now};
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes, ValueClass},
+    write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
-    field::PrincipalField,
+    field::{CalendarEventField, PrincipalField},
 };
 
 pub(crate) trait CalendarCopyMoveRequestHandler: Sync + Send {
@@ -494,7 +494,7 @@ async fn copy_event(
             .caused_by(trc::location!())?
             .as_ref(),
         to_calendar_id,
-        event.inner.data.event.uids().next(),
+        Some(event.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
     )?;
 
     let changed_by = access_token.account_tenant_ids();
@@ -507,7 +507,7 @@ async fn copy_event(
             parent_id: to_calendar_id,
         });
         new_event
-            .update(
+            .update_meta(
                 changed_by,
                 event,
                 from_account_id,
@@ -517,7 +517,24 @@ async fn copy_event(
             )
             .caused_by(trc::location!())?;
     } else {
-        let next_email_alarm = event.inner.data.next_alarm(now() as i64, Tz::Floating);
+        let content_ = server
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                from_account_id,
+                Collection::CalendarEvent,
+                from_document_id,
+                CalendarEventField::Content,
+            ))
+            .await
+            .caused_by(trc::location!())?
+            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let content = content_
+            .to_unarchived::<CalendarEventContent>()
+            .caused_by(trc::location!())?;
+        let next_email_alarm = content.inner.data.next_alarm(now() as i64, Tz::Floating);
+        let new_content = content
+            .deserialize::<CalendarEventContent>()
+            .caused_by(trc::location!())?;
         let mut new_event = event
             .deserialize::<CalendarEvent>()
             .caused_by(trc::location!())?;
@@ -528,6 +545,7 @@ async fn copy_event(
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
         new_event
             .insert(
+                new_content,
                 changed_by,
                 to_account_id,
                 to_document_id,
@@ -560,6 +578,7 @@ async fn copy_event(
 
             DestroyArchive(event)
                 .delete(
+                    server,
                     &account_info,
                     to_account_id,
                     to_document_id,
@@ -568,6 +587,7 @@ async fn copy_event(
                     false,
                     &mut batch,
                 )
+                .await
                 .caused_by(trc::location!())?;
         }
 
@@ -636,7 +656,7 @@ async fn move_event(
                 .caused_by(trc::location!())?
                 .as_ref(),
             to_calendar_id,
-            event.inner.data.event.uids().next(),
+            Some(event.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
         )?;
     }
 
@@ -669,7 +689,7 @@ async fn move_event(
             parent_id: to_calendar_id,
         });
         new_event
-            .update(
+            .update_meta(
                 access_token.account_tenant_ids(),
                 event.clone(),
                 from_account_id,
@@ -680,9 +700,26 @@ async fn move_event(
             .caused_by(trc::location!())?;
         batch.log_vanished_item(VanishedCollection::Calendar, from_resource_path);
     } else {
-        let next_email_alarm = event.inner.data.next_alarm(now() as i64, Tz::Floating);
+        let content_ = server
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                from_account_id,
+                Collection::CalendarEvent,
+                from_document_id,
+                CalendarEventField::Content,
+            ))
+            .await
+            .caused_by(trc::location!())?
+            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let content = content_
+            .to_unarchived::<CalendarEventContent>()
+            .caused_by(trc::location!())?;
+        let next_email_alarm = content.inner.data.next_alarm(now() as i64, Tz::Floating);
         let mut new_event = event
             .deserialize::<CalendarEvent>()
+            .caused_by(trc::location!())?;
+        let new_content = content
+            .deserialize::<CalendarEventContent>()
             .caused_by(trc::location!())?;
         new_event.names = vec![DavName {
             name: new_name.to_string(),
@@ -691,6 +728,7 @@ async fn move_event(
 
         DestroyArchive(event)
             .delete(
+                server,
                 &account_info,
                 from_account_id,
                 from_document_id,
@@ -699,11 +737,13 @@ async fn move_event(
                 false,
                 &mut batch,
             )
+            .await
             .caused_by(trc::location!())?;
 
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
         new_event
             .insert(
+                new_content,
                 access_token.account_tenant_ids(),
                 to_account_id,
                 to_document_id,
@@ -732,6 +772,7 @@ async fn move_event(
 
             DestroyArchive(event)
                 .delete(
+                    server,
                     &account_info,
                     to_account_id,
                     to_document_id,
@@ -740,6 +781,7 @@ async fn move_event(
                     false,
                     &mut batch,
                 )
+                .await
                 .caused_by(trc::location!())?;
         }
 
@@ -794,7 +836,7 @@ async fn rename_event(
 
     let mut batch = BatchBuilder::new();
     new_event
-        .update(
+        .update_meta(
             access_token.account_tenant_ids(),
             event,
             account_id,
@@ -859,23 +901,11 @@ async fn copy_container(
             .caused_by(trc::location!())?;
 
         // Reset default calendar id
-        let default_calendar_id = server
-            .store()
-            .get_value::<u32>(ValueKey {
-                account_id: from_account_id,
-                collection: Collection::Principal.into(),
-                document_id: 0,
-                class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
-            })
-            .await
-            .caused_by(trc::location!())?;
-        if default_calendar_id.is_some_and(|id| id == from_document_id) {
-            batch
-                .with_account_id(from_account_id)
-                .with_collection(Collection::Principal)
-                .with_document(0)
-                .clear(PrincipalField::DefaultCalendarId);
-        }
+        batch
+            .with_account_id(from_account_id)
+            .with_collection(Collection::Principal)
+            .with_document(0)
+            .clear_if_equals(PrincipalField::DefaultCalendarId, from_document_id);
     }
 
     let preference = calendar.preferences.into_iter().next().unwrap();
@@ -993,7 +1023,7 @@ async fn copy_container(
 
                 new_event.names.push(new_name);
                 new_event
-                    .update(
+                    .update_meta(
                         access_token.account_tenant_ids(),
                         event,
                         from_account_id,
@@ -1003,10 +1033,29 @@ async fn copy_container(
                     )
                     .caused_by(trc::location!())?;
             } else {
-                let next_email_alarm = event.inner.data.next_alarm(now() as i64, Tz::Floating);
+                let content_ = server
+                    .store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                        from_account_id,
+                        Collection::CalendarEvent,
+                        from_child_document_id,
+                        CalendarEventField::Content,
+                    ))
+                    .await
+                    .caused_by(trc::location!())?
+                    .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+                let content = content_
+                    .to_unarchived::<CalendarEventContent>()
+                    .caused_by(trc::location!())?;
+                let next_email_alarm = content.inner.data.next_alarm(now() as i64, Tz::Floating);
+                let new_content = content
+                    .deserialize::<CalendarEventContent>()
+                    .caused_by(trc::location!())?;
+
                 if remove_source {
                     DestroyArchive(event)
                         .delete(
+                            server,
                             &account_info,
                             from_account_id,
                             from_child_document_id,
@@ -1015,6 +1064,7 @@ async fn copy_container(
                             false,
                             &mut batch,
                         )
+                        .await
                         .caused_by(trc::location!())?;
                 }
                 let to_document_id =
@@ -1023,6 +1073,7 @@ async fn copy_container(
                 required_space += new_event.size as u64;
                 new_event
                     .insert(
+                        new_content,
                         access_token.account_tenant_ids(),
                         to_account_id,
                         to_document_id,

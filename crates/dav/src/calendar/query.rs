@@ -33,7 +33,7 @@ use dav_proto::{
 };
 use groupware::{
     cache::GroupwareCache,
-    calendar::{ArchivedCalendarEvent, expand::CalendarEventExpansion},
+    calendar::{ArchivedCalendarEventContent, expand::CalendarEventExpansion},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -105,9 +105,9 @@ impl CalendarQueryRequestHandler for Server {
             if shared_ids
                 .as_ref()
                 .is_none_or(|ids| ids.contains(resource.document_id()))
-                && filter_range
-                    .as_ref()
-                    .is_none_or(|range| is_resource_in_time_range(resource.resource, range))
+                && filter_range.as_ref().is_none_or(|range| {
+                    is_resource_in_time_range(resource.resource.resource, range)
+                })
             {
                 items.push(PropFindItem::new(
                     resources.format_resource(resource),
@@ -219,7 +219,7 @@ pub(crate) struct CalendarQueryHandler {
 
 impl CalendarQueryHandler {
     pub fn new(
-        event: &ArchivedCalendarEvent,
+        event: &ArchivedCalendarEventContent,
         max_time_range: Option<TimeRange>,
         default_tz: Tz,
     ) -> Self {
@@ -243,7 +243,11 @@ impl CalendarQueryHandler {
         }
     }
 
-    pub fn filter(&mut self, event: &ArchivedCalendarEvent, filters: &CalendarFilter) -> bool {
+    pub fn filter(
+        &mut self,
+        event: &ArchivedCalendarEventContent,
+        filters: &CalendarFilter,
+    ) -> bool {
         let ical = &event.data.event;
         let mut is_all = true;
         let mut matches_one = false;
@@ -417,11 +421,12 @@ impl CalendarQueryHandler {
 
     pub fn serialize_ical(
         &mut self,
-        event: &ArchivedCalendarEvent,
+        event: &ArchivedCalendarEventContent,
+        size: u32,
         data: &CalendarData,
         instances_limit: &mut usize,
     ) -> Option<String> {
-        let mut out = String::with_capacity(event.size.to_native() as usize);
+        let mut out = String::with_capacity(size as usize);
         let _v = [0.into()];
         let mut component_iter: Iter<'_, rkyv::primitive::ArchivedU32> = _v.iter();
         let mut component_stack: Vec<(

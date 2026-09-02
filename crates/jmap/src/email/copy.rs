@@ -8,7 +8,7 @@ use crate::{
     changes::state::JmapCacheState,
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
-use common::{Server, auth::AccessToken};
+use common::{MAX_RECEIVED_AT, Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
     message::copy::{CopyMessageError, EmailCopy},
@@ -142,7 +142,8 @@ impl JmapEmailCopy for Server {
                         Key::Property(EmailProperty::ReceivedAt),
                         Value::Element(EmailValue::Date(value)),
                     ) => {
-                        received_at = value.into();
+                        received_at =
+                            (value.timestamp().clamp(0, MAX_RECEIVED_AT as i64) as u64).into();
                     }
                     (property, _) => {
                         response.not_created.append(
@@ -216,14 +217,12 @@ impl JmapEmailCopy for Server {
                     account_id,
                     mailboxes,
                     keywords,
-                    received_at
-                        .map(|dt| dt.timestamp() as u64)
-                        .unwrap_or_else(|| {
-                            from_cache
-                                .email_by_id(&from_message_id.document_id())
-                                .map(|v| v.received_at)
-                                .unwrap_or_else(now)
-                        }),
+                    received_at.unwrap_or_else(|| {
+                        from_cache
+                            .email_by_id(&from_message_id.document_id())
+                            .map(|v| v.received_at())
+                            .unwrap_or_else(now)
+                    }),
                     session.session_id,
                 )
                 .await?

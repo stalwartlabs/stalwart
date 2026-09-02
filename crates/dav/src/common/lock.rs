@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ETag;
 use super::uri::{DavUriResource, OwnedUri, UriResource, Urn};
 use crate::{DavError, DavErrorCondition, DavMethod};
 use common::KV_LOCK_DAV;
-use common::{Server, auth::AccessToken};
+use common::{DavResources, Server, auth::AccessToken};
 use dav_proto::schema::property::{ActiveLock, LockScope, WebDavProperty};
 use dav_proto::schema::request::DavPropertyValue;
 use dav_proto::schema::response::{BaseCondition, List, PropResponse};
@@ -17,13 +16,13 @@ use dav_proto::{RequestHeaders, schema::request::LockInfo};
 use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use store::ValueKey;
+use std::sync::Arc;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
 use store::write::{Archive, ArchiveBytes, ArchiveCompression, Archiver, Compression, now};
 use store::{Serialize, U32_LEN};
 use trc::AddContext;
-use types::collection::Collection;
+use types::collection::{Collection, SyncCollection};
 use types::dead_property::DeadProperty;
 use utils::map::vec_map::VecMap;
 
@@ -433,6 +432,7 @@ impl LockRequestHandler for Server {
             path: "",
             ..Default::default()
         };
+        let mut cached_resources: Option<(u32, SyncCollection, Arc<DavResources>)> = None;
 
         'outer: for if_ in &headers.if_ {
             if if_.list.is_empty() {
@@ -524,17 +524,31 @@ impl LockRequestHandler for Server {
 
                     if let Some(document_id) =
                         resource_state.document_id.filter(|&id| id != u32::MAX)
-                        && let Some(archive) = self
-                            .store()
-                            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                                resource_state.account_id,
-                                resource_state.collection,
-                                document_id,
-                            ))
-                            .await
-                            .caused_by(trc::location!())?
                     {
-                        resource_state.etag = archive.etag().into();
+                        let resources = dav_resources_cached(
+                            self,
+                            access_token,
+                            resource_state.account_id,
+                            resource_state.collection,
+                            &mut cached_resources,
+                        )
+                        .await?;
+
+                        let resource = match resource_state.collection {
+                            Collection::Calendar | Collection::AddressBook => {
+                                resources.container_resource_by_id(document_id)
+                            }
+                            Collection::CalendarEvent
+                            | Collection::ContactCard
+                            | Collection::CalendarEventNotification => {
+                                resources.item_by_id(document_id)
+                            }
+                            _ => resources.resources.find_any(document_id),
+                        };
+
+                        if let Some(resource) = resource {
+                            resource_state.etag = format!("\"{}\"", resource.etag()).into();
+                        }
                     }
                 }
 
@@ -553,15 +567,15 @@ impl LockRequestHandler for Server {
 
                 // Fetch sync token
                 if needs_sync_token && resource_state.sync_token.is_none() {
-                    let id = self
-                        .fetch_dav_resources(
-                            access_token.account_id(),
-                            resource_state.account_id,
-                            resource_state.collection.into(),
-                        )
-                        .await
-                        .caused_by(trc::location!())?
-                        .highest_change_id;
+                    let id = dav_resources_cached(
+                        self,
+                        access_token,
+                        resource_state.account_id,
+                        resource_state.collection,
+                        &mut cached_resources,
+                    )
+                    .await?
+                    .highest_change_id;
                     resource_state.sync_token = Some(Urn::Sync { id, seq: 0 }.to_string());
                 }
             }
@@ -882,6 +896,31 @@ impl ResourceState<'_> {
     pub fn lock_key(&self) -> Vec<u8> {
         build_lock_key(self.account_id, self.collection.main_collection())
     }
+}
+
+async fn dav_resources_cached(
+    server: &Server,
+    access_token: &AccessToken,
+    account_id: u32,
+    collection: Collection,
+    cache: &mut Option<(u32, SyncCollection, Arc<DavResources>)>,
+) -> trc::Result<Arc<DavResources>> {
+    let sync_collection = SyncCollection::from(collection);
+
+    if let Some((cached_account_id, cached_collection, resources)) = cache.as_ref()
+        && *cached_account_id == account_id
+        && *cached_collection == sync_collection
+    {
+        return Ok(resources.clone());
+    }
+
+    let resources = server
+        .fetch_dav_resources(access_token.account_id(), account_id, sync_collection)
+        .await
+        .caused_by(trc::location!())?;
+    *cache = Some((account_id, sync_collection, resources.clone()));
+
+    Ok(resources)
 }
 
 pub(crate) fn build_lock_key(account_id: u32, collection: Collection) -> Vec<u8> {

@@ -94,7 +94,7 @@ impl<T: SessionStream> SessionData<T> {
             if let Some(item) = cache.email_by_id(&document_id)
                 && let Some((imap_id, _)) = state.map_result_id(document_id, is_uid)
             {
-                threads.entry(item.thread_id).or_default().push(imap_id);
+                threads.entry(item.thread_id()).or_default().push(imap_id);
             }
         }
 

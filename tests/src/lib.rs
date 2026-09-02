@@ -16,6 +16,8 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[cfg(test)]
 pub mod automation;
 #[cfg(test)]
+pub mod cache;
+#[cfg(test)]
 pub mod cluster;
 #[cfg(test)]
 pub mod directory;

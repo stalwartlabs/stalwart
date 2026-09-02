@@ -465,7 +465,7 @@ impl ParseHttp for Server {
                     (None, None)
                 };
 
-                return Ok(self.handle_scim_request(req, session, access_token).await);
+                return Ok(Box::pin(self.handle_scim_request(req, session, access_token)).await);
             }
             // SPDX-SnippetEnd
             "api" => {

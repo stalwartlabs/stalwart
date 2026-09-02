@@ -413,7 +413,7 @@ impl<T: SessionStream> SessionData<T> {
                         email
                             .map(|e| cache.expand_keywords(e).collect())
                             .unwrap_or_default(),
-                        email.map(|email| email.received_at).unwrap_or_else(now),
+                        email.map(|email| email.received_at()).unwrap_or_else(now),
                         self.session_id,
                     )
                     .await
@@ -441,7 +441,7 @@ impl<T: SessionStream> SessionData<T> {
                             .and_then(|cache| cache.email_by_id(&existing_id))
                             .and_then(|message| {
                                 message
-                                    .mailboxes
+                                    .mailboxes()
                                     .iter()
                                     .find(|mailbox| mailbox.mailbox_id == dest_mailbox_id)
                             })

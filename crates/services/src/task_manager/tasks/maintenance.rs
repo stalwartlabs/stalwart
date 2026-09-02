@@ -50,7 +50,7 @@ use store::{
 use trc::{AddContext, StoreEvent};
 use types::{
     collection::Collection,
-    field::{EmailField, MailboxField},
+    field::{EmailField, Field, MailboxField},
     id::Id,
 };
 
@@ -463,22 +463,25 @@ async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> 
         Collection::SieveScript,
     ] {
         server
-            .archives(account_id, collection, &(), |_, archive| {
+            .archives(account_id, collection, Field::ARCHIVE, &(), |_, archive| {
                 match collection {
                     Collection::Calendar => {
                         quota += archive.unarchive::<Calendar>()?.size() as i64;
                     }
                     Collection::CalendarEvent => {
-                        quota += archive.unarchive::<CalendarEvent>()?.size() as i64;
+                        quota += archive.unarchive::<CalendarEvent>()?.size.to_native() as i64;
                     }
                     Collection::CalendarEventNotification => {
-                        quota += archive.unarchive::<CalendarEventNotification>()?.size() as i64;
+                        quota += archive
+                            .unarchive::<CalendarEventNotification>()?
+                            .size
+                            .to_native() as i64;
                     }
                     Collection::AddressBook => {
                         quota += archive.unarchive::<AddressBook>()?.size() as i64;
                     }
                     Collection::ContactCard => {
-                        quota += archive.unarchive::<ContactCard>()?.size() as i64;
+                        quota += archive.unarchive::<ContactCard>()?.size.to_native() as i64;
                     }
                     Collection::FileNode => {
                         quota += archive.unarchive::<FileNode>()?.size() as i64;
@@ -589,7 +592,7 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
     }
 
     // Reset all UIDs
-    for message_id in cache.emails.items.iter().map(|i| i.document_id) {
+    for message_id in cache.emails.iter().map(|i| i.document_id()) {
         let Some(data) = server
             .store()
             .get_value::<MessageData>(ValueKey::archive(account_id, Collection::Email, message_id))

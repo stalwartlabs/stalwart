@@ -119,7 +119,7 @@ impl EmailDeletion for Server {
             for thread_id in &thread_ids {
                 if cache
                     .in_thread(thread_id)
-                    .all(|message| deleted_ids.contains(message.document_id))
+                    .all(|message| deleted_ids.contains(message.document_id()))
                 {
                     batch
                         .with_account_id(account_id)

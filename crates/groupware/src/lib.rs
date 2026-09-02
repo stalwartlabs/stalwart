@@ -27,6 +27,93 @@ pub enum DavResourceName {
     Scheduling,
 }
 
+pub struct SizeWriter(usize);
+
+impl std::fmt::Write for SizeWriter {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        self.0 += text.len();
+        Ok(())
+    }
+}
+
+impl SizeWriter {
+    pub fn ical(ical: &calcard::icalendar::ICalendar) -> usize {
+        let mut writer = SizeWriter(0);
+        let _ = ical.write_to(&mut writer);
+        writer.0
+    }
+
+    pub fn vcard(vcard: &calcard::vcard::VCard, version: calcard::vcard::VCardVersion) -> usize {
+        let mut writer = SizeWriter(0);
+        let _ = vcard.write_to(&mut writer, version);
+        writer.0
+    }
+}
+
+#[derive(Default)]
+pub struct MetaHasher(store::xxhash_rust::xxh3::Xxh3);
+
+impl MetaHasher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn bytes(&mut self, value: &[u8]) -> &mut Self {
+        self.0.update(&(value.len() as u64).to_le_bytes());
+        self.0.update(value);
+        self
+    }
+
+    pub fn str(&mut self, value: &str) -> &mut Self {
+        self.bytes(value.as_bytes())
+    }
+
+    pub fn opt_str(&mut self, value: Option<&str>) -> &mut Self {
+        match value {
+            Some(value) => {
+                self.0.update(&[1]);
+                self.str(value)
+            }
+            None => {
+                self.0.update(&[0]);
+                self
+            }
+        }
+    }
+
+    pub fn u16(&mut self, value: u16) -> &mut Self {
+        self.0.update(&value.to_le_bytes());
+        self
+    }
+
+    pub fn u32(&mut self, value: u32) -> &mut Self {
+        self.0.update(&value.to_le_bytes());
+        self
+    }
+
+    pub fn i64(&mut self, value: i64) -> &mut Self {
+        self.0.update(&value.to_le_bytes());
+        self
+    }
+
+    pub fn opt_u32(&mut self, value: Option<u32>) -> &mut Self {
+        match value {
+            Some(value) => {
+                self.0.update(&[1]);
+                self.u32(value)
+            }
+            None => {
+                self.0.update(&[0]);
+                self
+            }
+        }
+    }
+
+    pub fn finish(&self) -> u32 {
+        self.0.digest() as u32
+    }
+}
+
 pub const RFC_3986: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'!')
@@ -196,8 +283,7 @@ pub trait DavCalendarResource {
 impl DavCalendarResource for DavResources {
     fn calendar_default_tz(&self, calendar_id: u32, account_id: u32) -> Option<Tz> {
         self.container_resource_by_id(calendar_id)
-            .and_then(|c| c.calendar_preferences(account_id))
-            .map(|p| p.tz)
+            .and_then(|c| c.calendar_preferences(account_id).map(|p| p.tz))
     }
 }
 

@@ -20,7 +20,7 @@ use common::{
 };
 use groupware::{
     cache::GroupwareCache,
-    calendar::{CALENDAR_SUBSCRIBED, CalendarEvent},
+    calendar::{CALENDAR_SUBSCRIBED, CalendarEventContent},
     strip_mailto_scheme,
 };
 use jmap_proto::{
@@ -44,6 +44,7 @@ use types::{
     TimeRange,
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
     id::Id,
 };
 use utils::sanitize_email;
@@ -135,13 +136,13 @@ impl PrincipalGetAvailability for Server {
             };
 
             // Condition: The event finishes after the "utcStart" argument and starts before the "utcEnd" argument.
-            let mut preferences_cache: AHashMap<u32, Option<&TinyCalendarPreferences>> =
+            let mut preferences_cache: AHashMap<u32, Option<TinyCalendarPreferences>> =
                 AHashMap::default();
             'next_event: for resource in resources.resources.iter().filter(|r| {
                 r.event_time_range().is_some_and(|(start, end)| {
                     shared_ids
                         .as_ref()
-                        .is_none_or(|ids| ids.contains(r.document_id))
+                        .is_none_or(|ids| ids.contains(r.document_id()))
                         && filter.is_in_range(false, start, end)
                 })
             }) {
@@ -149,12 +150,7 @@ impl PrincipalGetAvailability for Server {
                 let mut include_in_availability = None;
                 let mut default_tz = Tz::UTC;
                 let mut is_subscribed = is_account_owner;
-                for calendar_id in resource
-                    .child_names()
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|n| n.parent_id)
-                {
+                for calendar_id in resource.child_names().iter().map(|n| n.parent_id) {
                     match preferences_cache.entry(calendar_id) {
                         Entry::Occupied(e) => {
                             if let Some(prefs) = e.get() {
@@ -167,7 +163,7 @@ impl PrincipalGetAvailability for Server {
                         Entry::Vacant(e) => {
                             if let Some(prefs) = resources
                                 .container_resource_by_id(calendar_id)
-                                .and_then(|r| r.calendar_preferences(principal_id))
+                                .and_then(|r| r.calendar_preferences(principal_id).copied())
                             {
                                 default_tz = prefs.tz;
                                 is_subscribed |= prefs.flags & CALENDAR_SUBSCRIBED != 0;
@@ -193,13 +189,14 @@ impl PrincipalGetAvailability for Server {
                 }
 
                 // Fetch event
-                let document_id = resource.document_id;
+                let document_id = resource.document_id();
                 let Some(archive) = self
                     .store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                         account_id,
                         Collection::CalendarEvent,
                         document_id,
+                        CalendarEventField::Content,
                     ))
                     .await
                     .caused_by(trc::location!())?
@@ -207,7 +204,7 @@ impl PrincipalGetAvailability for Server {
                     continue;
                 };
                 let event = archive
-                    .unarchive::<CalendarEvent>()
+                    .unarchive::<CalendarEventContent>()
                     .caused_by(trc::location!())?;
 
                 // Find the component ids that match the criteria

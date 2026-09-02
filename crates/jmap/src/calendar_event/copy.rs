@@ -10,7 +10,7 @@ use crate::{
 };
 use calcard::jscalendar::JSCalendarProperty;
 use common::{Server, auth::AccessToken};
-use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
+use groupware::{cache::GroupwareCache, calendar::CalendarEventContent};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
@@ -35,6 +35,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
     id::Id,
 };
 use utils::map::vec_map::VecMap;
@@ -144,10 +145,11 @@ impl JmapCalendarEventCopy for Server {
 
             let Some(_calendar_event) = self
                 .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                     from_account_id,
                     Collection::CalendarEvent,
                     from_calendar_event_id,
+                    CalendarEventField::Content,
                 ))
                 .await?
             else {
@@ -162,7 +164,7 @@ impl JmapCalendarEventCopy for Server {
             };
 
             let calendar_event = _calendar_event
-                .deserialize::<CalendarEvent>()
+                .deserialize::<CalendarEventContent>()
                 .caused_by(trc::location!())?;
 
             match self

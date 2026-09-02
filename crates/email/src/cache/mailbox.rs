@@ -18,6 +18,7 @@ use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
     collection::Collection,
+    field::Field,
     special_use::SpecialUse,
 };
 use utils::{map::bitmap::Bitmap, topological::TopologicalSort};
@@ -89,6 +90,7 @@ pub(crate) async fn full_mailbox_cache_build(
         .archives(
             account_id,
             Collection::Mailbox,
+            Field::ARCHIVE,
             &(),
             |document_id, archive| {
                 insert_item(&mut cache, document_id, archive.unarchive::<Mailbox>()?);
@@ -107,6 +109,7 @@ pub(crate) async fn full_mailbox_cache_build(
             .archives(
                 account_id,
                 Collection::Mailbox,
+                Field::ARCHIVE,
                 &(),
                 |document_id, archive| {
                     insert_item(&mut cache, document_id, archive.unarchive::<Mailbox>()?);
@@ -174,8 +177,6 @@ fn build_tree(cache: &mut MailboxesCacheBuilder) {
         } else {
             mailbox.name.clone()
         };
-
-        cache.size += item_size(mailbox);
     }
 
     for folder_id in topological_sort.into_iterator() {
@@ -199,6 +200,10 @@ fn build_tree(cache: &mut MailboxesCacheBuilder) {
                 folder.path = new_path;
             }
         }
+    }
+
+    for mailbox in cache.items.iter() {
+        cache.size += item_size(mailbox);
     }
 }
 

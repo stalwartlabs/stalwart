@@ -7,7 +7,7 @@
 use crate::changes::state::JmapCacheState;
 use calcard::jscontact::{JSContactProperty, JSContactValue, import::ConversionOptions};
 use common::{Server, auth::AccessToken};
-use groupware::{cache::GroupwareCache, contact::ContactCard};
+use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::contact,
@@ -24,6 +24,7 @@ use types::{
     acl::Acl,
     blob::BlobId,
     collection::{Collection, SyncCollection},
+    field::ContactField,
     id::Id,
 };
 
@@ -79,6 +80,7 @@ impl ContactCardGet for Server {
         let mut return_id = return_all_properties;
         let mut return_address_book_ids = return_all_properties;
         let mut return_converted_props = !return_all_properties;
+        let mut needs_content = return_all_properties;
 
         if !return_all_properties {
             for property in &properties {
@@ -91,8 +93,11 @@ impl ContactCardGet for Server {
                     }
                     JSContactProperty::VCard => {
                         return_converted_props = true;
+                        needs_content = true;
                     }
-                    _ => {}
+                    _ => {
+                        needs_content = true;
+                    }
                 }
             }
         }
@@ -105,40 +110,48 @@ impl ContactCardGet for Server {
                 continue;
             }
 
-            let _contact = if let Some(contact) = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::ContactCard,
-                    document_id,
-                ))
-                .await?
-            {
-                contact
-            } else {
+            let Some(resource) = cache.item_by_id(document_id) else {
                 response.push_not_found(id);
                 continue;
             };
 
-            let contact = _contact
-                .deserialize::<ContactCard>()
-                .caused_by(trc::location!())?;
+            let mut result =
+                if needs_content {
+                    let Some(_content) = self
+                        .store()
+                        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                            account_id,
+                            Collection::ContactCard,
+                            document_id,
+                            ContactField::Content,
+                        ))
+                        .await?
+                    else {
+                        response.push_not_found(id);
+                        continue;
+                    };
+                    let content = _content
+                        .deserialize::<ContactCardContent>()
+                        .caused_by(trc::location!())?;
 
-            let jscontact = contact
-                .card
-                .into_jscontact_with_options::<Id, BlobId>(
-                    ConversionOptions::default().include_vcard_parameters(return_converted_props),
-                )
-                .into_inner();
-            let mut result = if return_all_properties {
-                jscontact.into_object().unwrap()
-            } else {
-                Map::from_iter(
-                    jscontact
-                        .into_expanded_object()
-                        .filter(|(k, _)| k.as_property().is_some_and(|p| properties.contains(p))),
-                )
-            };
+                    let jscontact = content
+                        .card
+                        .into_jscontact_with_options::<Id, BlobId>(
+                            ConversionOptions::default()
+                                .include_vcard_parameters(return_converted_props),
+                        )
+                        .into_inner();
+
+                    if return_all_properties {
+                        jscontact.into_object().unwrap()
+                    } else {
+                        Map::from_iter(jscontact.into_expanded_object().filter(|(k, _)| {
+                            k.as_property().is_some_and(|p| properties.contains(p))
+                        }))
+                    }
+                } else {
+                    Map::with_capacity(2)
+                };
 
             if return_id {
                 result.insert_unchecked(
@@ -148,9 +161,13 @@ impl ContactCardGet for Server {
             }
 
             if return_address_book_ids {
-                let mut obj = Map::with_capacity(contact.names.len());
-                for id in contact.names.iter() {
-                    obj.insert_unchecked(JSContactProperty::IdValue(Id::from(id.parent_id)), true);
+                let names = resource.child_names();
+                let mut obj = Map::with_capacity(names.len());
+                for name in names {
+                    obj.insert_unchecked(
+                        JSContactProperty::IdValue(Id::from(name.parent_id)),
+                        true,
+                    );
                 }
                 result.insert_unchecked(JSContactProperty::AddressBookIds, Value::Object(obj));
             }

@@ -22,12 +22,12 @@ use common::{
     auth::{AccessToken, AccountInfo},
 };
 use groupware::{
-    DestroyArchive,
+    DestroyArchive, SizeWriter,
     cache::GroupwareCache,
     calendar::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, Calendar, CalendarEvent,
-        CalendarEventData, EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS,
-        EVENT_INVITE_SELF,
+        CalendarEventContent, CalendarEventData, EVENT_DRAFT, EVENT_HIDE_ATTENDEES,
+        EVENT_INVITE_OTHERS, EVENT_INVITE_SELF,
         expand::{CalendarEventExpansion, resolve_local},
     },
     scheduling::{
@@ -59,6 +59,7 @@ use types::{
     acl::Acl,
     blob::BlobId,
     collection::{Collection, SyncCollection, VanishedCollection},
+    field::CalendarEventField,
     id::Id,
 };
 
@@ -265,14 +266,33 @@ impl CalendarEventSet for Server {
             let calendar_event = calendar_event_
                 .to_unarchived::<CalendarEvent>()
                 .caused_by(trc::location!())?;
+            let Some(content_) = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                    CalendarEventField::Content,
+                ))
+                .await?
+            else {
+                update.fail(&mut response, SetError::not_found());
+                continue 'update;
+            };
+            let content = content_
+                .to_unarchived::<CalendarEventContent>()
+                .caused_by(trc::location!())?;
             let mut new_calendar_event = calendar_event
                 .deserialize::<CalendarEvent>()
+                .caused_by(trc::location!())?;
+            let mut new_content = content
+                .deserialize::<CalendarEventContent>()
                 .caused_by(trc::location!())?;
 
             // Resolve synthetic ids into recurrence instances
             let mut has_instances = false;
             if !update.instances.is_empty() {
-                match update.plan_instances(&new_calendar_event.data, &mut response) {
+                match update.plan_instances(&new_content.data, &mut response) {
                     InstancePlan::Instances => {
                         has_instances = true;
                     }
@@ -288,7 +308,7 @@ impl CalendarEventSet for Server {
             }
 
             let mut js_calendar_group =
-                std::mem::take(&mut new_calendar_event.data.event).into_jscalendar::<Id, BlobId>();
+                std::mem::take(&mut new_content.data.event).into_jscalendar::<Id, BlobId>();
 
             // Apply per-instance changes to the recurrence overrides of the base event
             if has_instances && !update.apply_instances(&mut js_calendar_group, &mut response) {
@@ -316,18 +336,18 @@ impl CalendarEventSet for Server {
                 );
                 continue 'update;
             };
-            new_calendar_event.data.event = ical;
-            stamp_updated(&mut new_calendar_event.data.event, now() as i64);
+            new_content.data.event = ical;
+            stamp_updated(&mut new_content.data.event, now() as i64);
 
             // Assign an organizer when participants were added to an event that had none
             if let Some(organizer_address) = account_info.addresses().first() {
-                itip_assign_organizer(&mut new_calendar_event.data.event, organizer_address);
+                itip_assign_organizer(&mut new_content.data.event, organizer_address);
             }
 
             // Validate UID
             match (
-                new_calendar_event.data.event.uids().next(),
-                calendar_event.inner.data.event.uids().next(),
+                new_content.data.event.uids().next(),
+                Some(calendar_event.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
             ) {
                 (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
                 (None, None) | (None, Some(_)) => {}
@@ -403,7 +423,7 @@ impl CalendarEventSet for Server {
             }
 
             // Check size and quota
-            new_calendar_event.size = new_calendar_event.data.event.size() as u32;
+            new_calendar_event.size = SizeWriter::ical(&new_content.data.event) as u32;
             if new_calendar_event.size as usize > self.core.groupware.max_ical_size {
                 update.fail(
                     &mut response,
@@ -417,12 +437,12 @@ impl CalendarEventSet for Server {
 
             // Obtain previous alarm
             let now = now() as i64;
-            let prev_email_alarm = calendar_event.inner.data.next_alarm(now, Tz::Floating);
+            let prev_email_alarm = content.inner.data.next_alarm(now, Tz::Floating);
 
             // Build event
             let mut next_email_alarm = None;
-            new_calendar_event.data = CalendarEventData::new(
-                new_calendar_event.data.event,
+            new_content.data = CalendarEventData::new(
+                new_content.data.event,
                 Tz::Floating,
                 self.core.groupware.max_ical_instances,
                 &mut next_email_alarm,
@@ -434,12 +454,11 @@ impl CalendarEventSet for Server {
                 && self.core.groupware.itip_enabled
                 && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
-                && new_calendar_event.data.event_range_end() > now
+                && new_content.data.event_range_end() > now
             {
-                if let Some(calendar_address) = itip_unreachable_recipient(
-                    &new_calendar_event.data.event,
-                    account_info.addresses(),
-                ) {
+                if let Some(calendar_address) =
+                    itip_unreachable_recipient(&new_content.data.event, account_info.addresses())
+                {
                     update.fail(
                         &mut response,
                         SetError::no_supported_schedule_methods(calendar_address),
@@ -448,16 +467,16 @@ impl CalendarEventSet for Server {
                 }
 
                 let result = if new_calendar_event.schedule_tag.is_some() {
-                    let old_ical = rkyv_deserialize(&calendar_event.inner.data.event)
-                        .caused_by(trc::location!())?;
+                    let old_ical =
+                        rkyv_deserialize(&content.inner.data.event).caused_by(trc::location!())?;
 
                     itip_update(
-                        &mut new_calendar_event.data.event,
+                        &mut new_content.data.event,
                         &old_ical,
                         account_info.addresses(),
                     )
                 } else {
-                    itip_create(&mut new_calendar_event.data.event, account_info.addresses())
+                    itip_create(&mut new_content.data.event, account_info.addresses())
                 };
 
                 match result {
@@ -539,9 +558,11 @@ impl CalendarEventSet for Server {
                 })
                 .collect::<Vec<_>>();
             new_calendar_event
-                .update(
+                .update_full(
+                    new_content,
                     access_token.account_tenant_ids(),
                     calendar_event,
+                    content.inner,
                     account_id,
                     document_id,
                     None,
@@ -615,12 +636,14 @@ impl CalendarEventSet for Server {
             // Delete event
             DestroyArchive(calendar_event)
                 .delete_all(
+                    self,
                     &account_info,
                     account_id,
                     document_id,
                     send_scheduling_messages,
                     &mut batch,
                 )
+                .await
                 .caused_by(trc::location!())?;
 
             for path in cache.format_resource_paths_by_id(document_id) {
@@ -658,6 +681,7 @@ impl CalendarEventSet for Server {
     ) -> trc::Result<Result<Slot, SetError<JSCalendarProperty<Id>>>> {
         // Process changes
         let mut event = CalendarEvent::default();
+        let mut content = CalendarEventContent::default();
         let use_default_alerts = match update_calendar_event(
             access_token,
             None,
@@ -753,7 +777,7 @@ impl CalendarEventSet for Server {
         }
 
         // Check size and quota
-        let size = ical.size();
+        let size = SizeWriter::ical(&ical);
         if size > self.core.groupware.max_ical_size {
             return Ok(Err(SetError::invalid_properties().with_description(
                 format!(
@@ -765,13 +789,12 @@ impl CalendarEventSet for Server {
 
         // Build event
         let mut next_email_alarm = None;
-        event.data = CalendarEventData::new(
+        content.data = CalendarEventData::new(
             ical,
             Tz::Floating,
             self.core.groupware.max_ical_instances,
             &mut next_email_alarm,
         );
-        event.size = size as u32;
 
         // Scheduling
         let mut itip_messages = None;
@@ -779,17 +802,17 @@ impl CalendarEventSet for Server {
             && self.core.groupware.itip_enabled
             && !account_info.addresses().is_empty()
             && access_token.has_permission(Permission::CalendarSchedulingSend)
-            && event.data.event_range_end() > now() as i64
+            && content.data.event_range_end() > now() as i64
         {
             if let Some(calendar_address) =
-                itip_unreachable_recipient(&event.data.event, account_info.addresses())
+                itip_unreachable_recipient(&content.data.event, account_info.addresses())
             {
                 return Ok(Err(SetError::no_supported_schedule_methods(
                     calendar_address,
                 )));
             }
 
-            match itip_create(&mut event.data.event, account_info.addresses()) {
+            match itip_create(&mut content.data.event, account_info.addresses()) {
                 Ok(messages) => {
                     if messages.iter().map(|r| r.to.len()).sum::<usize>()
                         < self.core.groupware.itip_outbound_max_recipients
@@ -831,6 +854,7 @@ impl CalendarEventSet for Server {
         let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
         event
             .insert(
+                content,
                 access_token.account_tenant_ids(),
                 account_id,
                 document_id,

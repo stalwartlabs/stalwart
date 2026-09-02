@@ -33,7 +33,7 @@ pub mod permissions;
 pub mod rate_limit;
 
 pub const RECOVERY_ADMIN_ID: u32 = u32::MAX;
-const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>());
+const PERMISSIONS_BITSET_SIZE: usize = Permission::COUNT.div_ceil(std::mem::size_of::<usize>() * 8);
 pub type Permissions = Bitset<PERMISSIONS_BITSET_SIZE>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]

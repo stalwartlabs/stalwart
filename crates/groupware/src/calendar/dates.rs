@@ -19,6 +19,8 @@ use store::{
     ahash::{AHashMap, RandomState},
     write::{key::KeySerializer, now},
 };
+#[cfg(test)]
+use utils::codec::leb128::Leb128Reader;
 
 const MAX_TIME_SPAN: i64 = u32::MAX as i64;
 
@@ -141,6 +143,7 @@ impl CalendarEventData {
         let mut events = Vec::with_capacity(groups.len());
         for ((start_tz, end_tz, id, duration), mut instances) in groups {
             instances.sort_unstable();
+            instances.dedup();
             instances.truncate(instances.partition_point(|instance| {
                 instance.saturating_sub(ranges.base_offset) <= MAX_TIME_SPAN
             }));
@@ -293,6 +296,54 @@ impl ArchivedTimezone {
                 .filter_map(|t| t.timezone().map(|x| x.1))
                 .next(),
             ArchivedTimezone::Default => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calendar::CalendarEventData;
+
+    #[test]
+    fn duplicate_expansion_offsets_round_trip() {
+        // RDATE repeats DTSTART, so the expansion yields the same offset twice
+        let ical = ICalendar::parse(concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:duplicate-offsets\r\n",
+            "DTSTART:20240101T120000Z\r\n",
+            "DTEND:20240101T130000Z\r\n",
+            "RDATE:20240101T120000Z\r\n",
+            "RDATE:20240102T120000Z\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
+        ))
+        .expect("failed to parse fixture");
+
+        let mut next_alarm = None;
+        let data = CalendarEventData::new(ical, Tz::UTC, 100, &mut next_alarm);
+
+        for range in data.time_ranges.iter() {
+            let instances = range.instances.as_ref();
+            let (offset_or_count, bytes_read) = instances.read_leb128::<u32>().unwrap();
+
+            if instances.len() > bytes_read {
+                let decoded = store::write::bitpack::BitpackIterator::from_bytes_and_offset(
+                    instances,
+                    bytes_read,
+                    offset_or_count,
+                )
+                .collect::<Vec<_>>();
+
+                let mut sorted = decoded.clone();
+                sorted.sort_unstable();
+                sorted.dedup();
+                assert_eq!(
+                    decoded, sorted,
+                    "expansion offsets must be strictly increasing"
+                );
+            }
         }
     }
 }

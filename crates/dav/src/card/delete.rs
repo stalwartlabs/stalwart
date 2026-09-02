@@ -21,7 +21,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use store::write::{BatchBuilder, ValueClass};
+use store::write::BatchBuilder;
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes},
@@ -137,23 +137,11 @@ impl CardDeleteRequestHandler for Server {
                 .caused_by(trc::location!())?;
 
             // Reset default address book id
-            let default_book_id = self
-                .store()
-                .get_value::<u32>(ValueKey {
-                    account_id,
-                    collection: Collection::Principal.into(),
-                    document_id: 0,
-                    class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
-                })
-                .await
-                .caused_by(trc::location!())?;
-            if default_book_id.is_some_and(|id| id == document_id) {
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::Principal)
-                    .with_document(0)
-                    .clear(PrincipalField::DefaultAddressBookId);
-            }
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .with_document(0)
+                .clear_if_equals(PrincipalField::DefaultAddressBookId, document_id);
         } else {
             // Validate ACL
             let addressbook_id = delete_resource.parent_id().unwrap();
@@ -177,6 +165,9 @@ impl CardDeleteRequestHandler for Server {
                 .await
                 .caused_by(trc::location!())?
                 .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+            let card = card_
+                .to_unarchived::<ContactCard>()
+                .caused_by(trc::location!())?;
 
             // Validate headers
             self.validate_headers(
@@ -186,7 +177,7 @@ impl CardDeleteRequestHandler for Server {
                     account_id,
                     collection: Collection::ContactCard,
                     document_id: document_id.into(),
-                    etag: card_.etag().into(),
+                    etag: format!("\"{}\"", card.inner.etag.to_native()).into(),
                     path: delete_path,
                     ..Default::default()
                 }],
@@ -196,20 +187,18 @@ impl CardDeleteRequestHandler for Server {
             .await?;
 
             // Delete card
-            DestroyArchive(
-                card_
-                    .to_unarchived::<ContactCard>()
-                    .caused_by(trc::location!())?,
-            )
-            .delete(
-                access_token.account_tenant_ids(),
-                account_id,
-                document_id,
-                addressbook_id,
-                resources.format_resource(delete_resource).into(),
-                &mut batch,
-            )
-            .caused_by(trc::location!())?;
+            DestroyArchive(card)
+                .delete(
+                    self,
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    addressbook_id,
+                    resources.format_resource(delete_resource).into(),
+                    &mut batch,
+                )
+                .await
+                .caused_by(trc::location!())?;
         }
 
         self.commit_batch(batch).await.caused_by(trc::location!())?;

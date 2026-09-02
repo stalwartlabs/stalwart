@@ -10,6 +10,7 @@ use crate::utils::{
 };
 use ahash::AHashSet;
 use calcard::jscalendar::JSCalendarProperty;
+use common::NO_ID;
 use dav_proto::Depth;
 use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
@@ -708,9 +709,13 @@ END:VCALENDAR
         resources
             .paths
             .iter()
-            .find(|v| v.parent_id.is_some())
+            .find(|(_, path)| path.parent_id != NO_ID)
+            .map(|(chunk, path)| {
+                std::str::from_utf8(&chunk.bytes[path.path.range()])
+                    .unwrap()
+                    .to_string()
+            })
             .unwrap()
-            .path
     );
 
     let ical = dav_client

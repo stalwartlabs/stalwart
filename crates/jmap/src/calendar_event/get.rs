@@ -21,8 +21,9 @@ use common::{Server, auth::AccessToken};
 use groupware::{
     cache::GroupwareCache,
     calendar::{
-        CalendarEvent, EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS, EVENT_INVITE_SELF,
-        PREF_USE_DEFAULT_ALERTS, expand::CalendarEventExpansion,
+        CalendarEvent, CalendarEventContent, EVENT_DRAFT, EVENT_HIDE_ATTENDEES,
+        EVENT_INVITE_OTHERS, EVENT_INVITE_SELF, PREF_USE_DEFAULT_ALERTS,
+        expand::CalendarEventExpansion,
     },
 };
 use jmap_proto::{
@@ -43,6 +44,7 @@ use types::{
     acl::Acl,
     blob::BlobId,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
     id::Id,
 };
 
@@ -210,6 +212,11 @@ impl CalendarEventGet for Server {
         };
         let default_tz = request.arguments.time_zone.unwrap_or(Tz::UTC);
         let reduce_participants = request.arguments.reduce_participants.unwrap_or(false);
+        let needs_content = return_all_properties
+            || !jscal_properties.is_empty()
+            || return_utc_dates
+            || return_is_origin.is_some()
+            || jmap_properties.contains(&JSCalendarProperty::UseDefaultAlerts);
 
         'outer: while let Some(id) = ids.next() {
             // Obtain the calendar_event object
@@ -218,22 +225,6 @@ impl CalendarEventGet for Server {
                 response.push_not_found(id);
                 continue;
             }
-
-            let Some(_calendar_event) = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::CalendarEvent,
-                    document_id,
-                ))
-                .await?
-            else {
-                response.push_not_found(id);
-                continue;
-            };
-            let mut calendar_event = _calendar_event
-                .deserialize::<CalendarEvent>()
-                .caused_by(trc::location!())?;
 
             // Extract expansion ids from synthetic ids
             let mut expansion_ids = AHashSet::new();
@@ -256,9 +247,103 @@ impl CalendarEventGet for Server {
                 }
             }
 
+            let Some(_calendar_event) = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                ))
+                .await?
+            else {
+                response.push_not_found(id);
+                continue;
+            };
+            let calendar_event = _calendar_event
+                .deserialize::<CalendarEvent>()
+                .caused_by(trc::location!())?;
+
+            // Serve requests that need no payload from the metadata record alone
+            if !needs_content && expansion_ids.is_empty() {
+                let mut result = Map::with_capacity(jmap_properties.len());
+                for property in &jmap_properties {
+                    match property {
+                        JSCalendarProperty::Id => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::Id,
+                                Value::Element(JSCalendarValue::Id(id)),
+                            );
+                        }
+                        JSCalendarProperty::BaseEventId => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::BaseEventId,
+                                Value::Element(JSCalendarValue::Id(id.document_id().into())),
+                            );
+                        }
+                        JSCalendarProperty::CalendarIds => {
+                            let mut obj = Map::with_capacity(calendar_event.names.len());
+                            for name in calendar_event.names.iter() {
+                                obj.insert_unchecked(
+                                    JSCalendarProperty::IdValue(Id::from(name.parent_id)),
+                                    true,
+                                );
+                            }
+                            result.insert_unchecked(
+                                JSCalendarProperty::CalendarIds,
+                                Value::Object(obj),
+                            );
+                        }
+                        JSCalendarProperty::IsDraft => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::IsDraft,
+                                Value::Bool(calendar_event.flags & EVENT_DRAFT != 0),
+                            );
+                        }
+                        JSCalendarProperty::MayInviteSelf => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::MayInviteSelf,
+                                Value::Bool(calendar_event.flags & EVENT_INVITE_SELF != 0),
+                            );
+                        }
+                        JSCalendarProperty::MayInviteOthers => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::MayInviteOthers,
+                                Value::Bool(calendar_event.flags & EVENT_INVITE_OTHERS != 0),
+                            );
+                        }
+                        JSCalendarProperty::HideAttendees => {
+                            result.insert_unchecked(
+                                JSCalendarProperty::HideAttendees,
+                                Value::Bool(calendar_event.flags & EVENT_HIDE_ATTENDEES != 0),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                response.list.push(result.into());
+                continue;
+            }
+
+            let Some(_content) = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                    CalendarEventField::Content,
+                ))
+                .await?
+            else {
+                response.push_not_found(id);
+                continue;
+            };
+            let mut content = _content
+                .deserialize::<CalendarEventContent>()
+                .caused_by(trc::location!())?;
+
             // Reduce participants
             if reduce_participants {
-                for component in &mut calendar_event.data.event.components {
+                for component in &mut content.data.event.components {
                     if component.component_type.is_scheduling_object() {
                         component.entries.retain(|entry| match &entry.name {
                             ICalendarProperty::Attendee => {
@@ -285,10 +370,9 @@ impl CalendarEventGet for Server {
             // Expand synthetic ids
             let mut results = Vec::with_capacity(expansion_ids.len() + 1);
             if !expansion_ids.is_empty() {
-                let ical = &calendar_event.data.event;
-                if let Some(expansions) = calendar_event
-                    .data
-                    .expand_from_ids(&mut expansion_ids, default_tz)
+                let ical = &content.data.event;
+                if let Some(expansions) =
+                    content.data.expand_from_ids(&mut expansion_ids, default_tz)
                 {
                     for expansion in expansions {
                         if !expansion.is_valid() {
@@ -374,7 +458,7 @@ impl CalendarEventGet for Server {
                                             .parameters(&ICalendarParameterName::Range)
                                             .next()
                                             .is_none()
-                                            || calendar_event
+                                            || content
                                                 .data
                                                 .expand_single(expansion.comp_id, default_tz)
                                                 .is_some_and(|first| {
@@ -442,7 +526,7 @@ impl CalendarEventGet for Server {
             }
 
             if include_base_event {
-                let mut event = std::mem::take(&mut calendar_event.data.event);
+                let mut event = std::mem::take(&mut content.data.event);
 
                 // Obtain UTC start/end if requested
                 let expansion = if return_utc_dates
@@ -452,11 +536,8 @@ impl CalendarEventGet for Server {
                         .position(|c| {
                             c.component_type.is_scheduling_object() && !c.is_recurrence_override()
                         })
-                        .and_then(|comp_id| {
-                            calendar_event
-                                .data
-                                .expand_single(comp_id as u32, default_tz)
-                        }) {
+                        .and_then(|comp_id| content.data.expand_single(comp_id as u32, default_tz))
+                {
                     expansion
                 } else {
                     CalendarEventExpansion::default()
@@ -608,7 +689,7 @@ impl CalendarEventGet for Server {
                             result.insert_unchecked(
                                 JSCalendarProperty::UseDefaultAlerts,
                                 Value::Bool(
-                                    calendar_event
+                                    content
                                         .preferences(personal_id)
                                         .is_none_or(|v| v.flags & PREF_USE_DEFAULT_ALERTS != 0),
                                 ),

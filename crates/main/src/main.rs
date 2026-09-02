@@ -116,6 +116,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Start broadcast subscriber
+    let inner = init.inner.clone();
     spawn_broadcast_subscriber(init.inner, shutdown_rx);
 
     // Wait for shutdown signal
@@ -126,6 +127,9 @@ async fn main() -> std::io::Result<()> {
 
     // Stop services
     let _ = shutdown_tx.send(true);
+
+    // Persist the newest cache snapshots before the process exits
+    inner.cache.swap.stop().await;
 
     // Wait for services to finish
     tokio::time::sleep(Duration::from_secs(1)).await;

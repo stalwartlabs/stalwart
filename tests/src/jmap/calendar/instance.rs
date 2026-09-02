@@ -8,6 +8,7 @@ use crate::{
     jmap::calendar::event::assert_eq_ignoring_updated,
     utils::{account::Account, jmap::JmapUtils, server::TestServer},
 };
+use common::NO_ID;
 use groupware::cache::GroupwareCache;
 use hyper::StatusCode;
 use jmap_proto::request::method::MethodObject;
@@ -597,11 +598,14 @@ pub async fn test(test: &TestServer) {
     let calendar_path = resources
         .paths
         .iter()
-        .find(|path| {
-            path.parent_id.is_none()
-                && resources.resources[path.resource_idx].document_id == calendar_document_id
+        .find(|(_, path)| path.parent_id == NO_ID && path.document_id == calendar_document_id)
+        .map(|(chunk, path)| {
+            format!(
+                "{}{}",
+                resources.base_path,
+                std::str::from_utf8(&chunk.bytes[path.path.range()]).unwrap()
+            )
         })
-        .map(|path| format!("{}{}", resources.base_path, path.path))
         .unwrap();
 
     dav_client

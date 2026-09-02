@@ -241,11 +241,11 @@ impl<T: SessionStream> SessionData<T> {
                 let result = match item {
                     Status::DeletedStorage => cache
                         .in_mailbox_with_keyword(mailbox.mailbox_id, &Keyword::Deleted)
-                        .map(|x| x.size)
+                        .map(|x| x.size())
                         .sum::<u32>() as u64,
                     Status::Size => cache
                         .in_mailbox(mailbox.mailbox_id)
-                        .map(|x| x.size)
+                        .map(|x| x.size())
                         .sum::<u32>() as u64,
                     _ => {
                         unreachable!()

@@ -3980,6 +3980,263 @@ impl BlobStoreBase {
     }
 }
 
+impl BlobStoreSwap {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.store;
+        value.validate(errors);
+        let value = &self.flush_changes;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::FlushChanges, 1));
+        }
+        let value = &self.max_account_size;
+        if *value < 2048 {
+            errors.push(ValidationError::min_value(Property::MaxAccountSize, 2048));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for BlobStoreSwap {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.store.pickle(out);
+        self.retention.pickle(out);
+        self.flush_changes.pickle(out);
+        self.flush_interval.pickle(out);
+        self.max_account_size.pickle(out);
+        self.min_account_size.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.store = Pickle::unpickle(stream)?;
+        this.retention = Pickle::unpickle(stream)?;
+        this.flush_changes = Pickle::unpickle(stream)?;
+        this.flush_interval = Pickle::unpickle(stream)?;
+        this.max_account_size = Pickle::unpickle(stream)?;
+        this.min_account_size = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for BlobStoreSwap {
+    fn default() -> Self {
+        Self {
+            store: Default::default(),
+            retention: Duration::from_millis(604800000),
+            flush_changes: 2000u64,
+            flush_interval: Duration::from_millis(600000),
+            max_account_size: 1073741824,
+            min_account_size: 1048576,
+        }
+    }
+}
+
+impl IntoValue for BlobStoreSwap {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(8);
+        map.insert_unchecked(Property::Store, self.store.into_value());
+        map.insert_unchecked(Property::Retention, self.retention.into_value());
+        map.insert_unchecked(Property::FlushChanges, self.flush_changes.into_value());
+        map.insert_unchecked(Property::FlushInterval, self.flush_interval.into_value());
+        map.insert_unchecked(Property::MaxAccountSize, self.max_account_size.into_value());
+        map.insert_unchecked(Property::MinAccountSize, self.min_account_size.into_value());
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for BlobStoreSwap {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Store) => self.store.patch(pointer, value),
+            Some(Property::Retention) => self.retention.patch(pointer, value),
+            Some(Property::FlushChanges) => self.flush_changes.patch(pointer, value),
+            Some(Property::FlushInterval) => self.flush_interval.patch(pointer, value),
+            Some(Property::MaxAccountSize) => self.max_account_size.patch(pointer, value),
+            Some(Property::MinAccountSize) => self.min_account_size.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl BlobSwapStore {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            BlobSwapStore::Default => true,
+            BlobSwapStore::S3(inner) => inner.validate(errors),
+            BlobSwapStore::Azure(inner) => inner.validate(errors),
+            BlobSwapStore::FileSystem(inner) => inner.validate(errors),
+            BlobSwapStore::FoundationDb(inner) => inner.validate(errors),
+            BlobSwapStore::PostgreSql(inner) => inner.validate(errors),
+            BlobSwapStore::MySql(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for BlobSwapStore {
+    fn default() -> Self {
+        BlobSwapStore::Default
+    }
+}
+
+impl Pickle for BlobSwapStore {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            BlobSwapStore::Default => {
+                0u16.pickle(out);
+            }
+            BlobSwapStore::S3(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            BlobSwapStore::Azure(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+            BlobSwapStore::FileSystem(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
+            BlobSwapStore::FoundationDb(inner) => {
+                4u16.pickle(out);
+                inner.pickle(out);
+            }
+            BlobSwapStore::PostgreSql(inner) => {
+                5u16.pickle(out);
+                inner.pickle(out);
+            }
+            BlobSwapStore::MySql(inner) => {
+                6u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(BlobSwapStore::Default),
+            1 => Pickle::unpickle(stream).map(BlobSwapStore::S3),
+            2 => Pickle::unpickle(stream).map(BlobSwapStore::Azure),
+            3 => Pickle::unpickle(stream).map(BlobSwapStore::FileSystem),
+            4 => Pickle::unpickle(stream).map(BlobSwapStore::FoundationDb),
+            5 => Pickle::unpickle(stream).map(BlobSwapStore::PostgreSql),
+            6 => Pickle::unpickle(stream).map(BlobSwapStore::MySql),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for BlobSwapStore {
+    fn into_value(self) -> JmapValue<'static> {
+        match self {
+            BlobSwapStore::Default => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Default".into()));
+                JmapValue::Object(obj)
+            }
+            BlobSwapStore::S3(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("S3".into()));
+                obj
+            }
+            BlobSwapStore::Azure(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Azure".into()));
+                obj
+            }
+            BlobSwapStore::FileSystem(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("FileSystem".into()));
+                obj
+            }
+            BlobSwapStore::FoundationDb(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("FoundationDb".into()));
+                obj
+            }
+            BlobSwapStore::PostgreSql(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("PostgreSql".into()));
+                obj
+            }
+            BlobSwapStore::MySql(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("MySql".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for BlobSwapStore {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                BlobSwapStoreType::Default => *self = BlobSwapStore::Default,
+                BlobSwapStoreType::S3 => *self = BlobSwapStore::S3(Default::default()),
+                BlobSwapStoreType::Azure => *self = BlobSwapStore::Azure(Default::default()),
+                BlobSwapStoreType::FileSystem => {
+                    *self = BlobSwapStore::FileSystem(Default::default())
+                }
+                BlobSwapStoreType::FoundationDb => {
+                    *self = BlobSwapStore::FoundationDb(Default::default())
+                }
+                BlobSwapStoreType::PostgreSql => {
+                    *self = BlobSwapStore::PostgreSql(Default::default())
+                }
+                BlobSwapStoreType::MySql => *self = BlobSwapStore::MySql(Default::default()),
+            }
+        }
+        match self {
+            BlobSwapStore::Default => pointer.assert_eof(),
+            BlobSwapStore::S3(inner) => inner.patch(pointer, value),
+            BlobSwapStore::Azure(inner) => inner.patch(pointer, value),
+            BlobSwapStore::FileSystem(inner) => inner.patch(pointer, value),
+            BlobSwapStore::FoundationDb(inner) => inner.patch(pointer, value),
+            BlobSwapStore::PostgreSql(inner) => inner.patch(pointer, value),
+            BlobSwapStore::MySql(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl BlobSwapStore {
+    pub fn object_type(&self) -> BlobSwapStoreType {
+        match self {
+            BlobSwapStore::Default => BlobSwapStoreType::Default,
+            BlobSwapStore::S3(_) => BlobSwapStoreType::S3,
+            BlobSwapStore::Azure(_) => BlobSwapStoreType::Azure,
+            BlobSwapStore::FileSystem(_) => BlobSwapStoreType::FileSystem,
+            BlobSwapStore::FoundationDb(_) => BlobSwapStoreType::FoundationDb,
+            BlobSwapStore::PostgreSql(_) => BlobSwapStoreType::PostgreSql,
+            BlobSwapStore::MySql(_) => BlobSwapStoreType::MySql,
+        }
+    }
+}
+
 impl ObjectImpl for BlockedIp {
     const FLAGS: u64 = 0;
     const VERSION: u8 = 0;
@@ -4216,7 +4473,7 @@ impl RegistryJsonPropertyPatch for Bootstrap {
 
 impl ObjectImpl for Cache {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Cache;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -4327,6 +4584,15 @@ impl ObjectImpl for Cache {
         if *value < 2048 {
             errors.push(ValidationError::min_value(Property::DkimSignatures, 2048));
         }
+        let value = &self.directory_recipients;
+        if *value < 2048 {
+            errors.push(ValidationError::min_value(
+                Property::DirectoryRecipients,
+                2048,
+            ));
+        }
+        let value = &self.swap;
+        value.validate(errors);
         errors.len() == neb
     }
 
@@ -4361,6 +4627,9 @@ impl Pickle for Cache {
         self.mailing_lists.pickle(out);
         self.dkim_signatures.pickle(out);
         self.negative_ttl.pickle(out);
+        self.directory_recipients.pickle(out);
+        self.directory_recipients_ttl.pickle(out);
+        self.swap.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -4391,6 +4660,15 @@ impl Pickle for Cache {
         this.mailing_lists = Pickle::unpickle(stream)?;
         this.dkim_signatures = Pickle::unpickle(stream)?;
         this.negative_ttl = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.directory_recipients = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.directory_recipients_ttl = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.swap = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -4399,7 +4677,7 @@ impl Default for Cache {
     fn default() -> Self {
         Self {
             access_tokens: 10485760,
-            contacts: 10485760,
+            contacts: 67108864,
             dns_ipv4: 5242880,
             dns_ipv6: 5242880,
             dns_mta_sts: 1048576,
@@ -4408,11 +4686,11 @@ impl Default for Cache {
             dns_rbl: 5242880,
             dns_tlsa: 1048576,
             dns_txt: 5242880,
-            events: 10485760,
-            scheduling: 1048576,
-            files: 10485760,
+            events: 67108864,
+            scheduling: 8388608,
+            files: 67108864,
             http_auth: 1048576,
-            messages: 52428800,
+            messages: 268435456,
             domains: 5242880,
             domain_names: 10485760,
             domain_names_negative: 1048576,
@@ -4424,13 +4702,16 @@ impl Default for Cache {
             mailing_lists: 2097152,
             dkim_signatures: 10485760,
             negative_ttl: Duration::from_millis(3600000),
+            directory_recipients: 5242880,
+            directory_recipients_ttl: Duration::from_millis(600000),
+            swap: Default::default(),
         }
     }
 }
 
 impl IntoValue for Cache {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(28);
+        let mut map = jmap_tools::Map::with_capacity(31);
         map.insert_unchecked(Property::AccessTokens, self.access_tokens.into_value());
         map.insert_unchecked(Property::Contacts, self.contacts.into_value());
         map.insert_unchecked(Property::DnsIpv4, self.dns_ipv4.into_value());
@@ -4463,6 +4744,15 @@ impl IntoValue for Cache {
         map.insert_unchecked(Property::MailingLists, self.mailing_lists.into_value());
         map.insert_unchecked(Property::DkimSignatures, self.dkim_signatures.into_value());
         map.insert_unchecked(Property::NegativeTtl, self.negative_ttl.into_value());
+        map.insert_unchecked(
+            Property::DirectoryRecipients,
+            self.directory_recipients.into_value(),
+        );
+        map.insert_unchecked(
+            Property::DirectoryRecipientsTtl,
+            self.directory_recipients_ttl.into_value(),
+        );
+        map.insert_unchecked(Property::Swap, self.swap.into_value());
         JmapValue::Object(map)
     }
 }
@@ -4502,11 +4792,132 @@ impl RegistryJsonPropertyPatch for Cache {
             Some(Property::MailingLists) => self.mailing_lists.patch(pointer, value),
             Some(Property::DkimSignatures) => self.dkim_signatures.patch(pointer, value),
             Some(Property::NegativeTtl) => self.negative_ttl.patch(pointer, value),
+            Some(Property::DirectoryRecipients) => self.directory_recipients.patch(pointer, value),
+            Some(Property::DirectoryRecipientsTtl) => {
+                self.directory_recipients_ttl.patch(pointer, value)
+            }
+            Some(Property::Swap) => self.swap.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
             }),
             _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl CacheSwap {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            CacheSwap::Disabled => true,
+            CacheSwap::LocalFile(inner) => inner.validate(errors),
+            CacheSwap::Redis(inner) => inner.validate(errors),
+            CacheSwap::BlobStore(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for CacheSwap {
+    fn default() -> Self {
+        CacheSwap::Disabled
+    }
+}
+
+impl Pickle for CacheSwap {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            CacheSwap::Disabled => {
+                0u16.pickle(out);
+            }
+            CacheSwap::LocalFile(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            CacheSwap::Redis(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+            CacheSwap::BlobStore(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(CacheSwap::Disabled),
+            1 => Pickle::unpickle(stream).map(CacheSwap::LocalFile),
+            2 => Pickle::unpickle(stream).map(CacheSwap::Redis),
+            3 => Pickle::unpickle(stream).map(CacheSwap::BlobStore),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for CacheSwap {
+    fn into_value(self) -> JmapValue<'static> {
+        match self {
+            CacheSwap::Disabled => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Disabled".into()));
+                JmapValue::Object(obj)
+            }
+            CacheSwap::LocalFile(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("LocalFile".into()));
+                obj
+            }
+            CacheSwap::Redis(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Redis".into()));
+                obj
+            }
+            CacheSwap::BlobStore(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("BlobStore".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for CacheSwap {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                CacheSwapType::Disabled => *self = CacheSwap::Disabled,
+                CacheSwapType::LocalFile => *self = CacheSwap::LocalFile(Default::default()),
+                CacheSwapType::Redis => *self = CacheSwap::Redis(Default::default()),
+                CacheSwapType::BlobStore => *self = CacheSwap::BlobStore(Default::default()),
+            }
+        }
+        match self {
+            CacheSwap::Disabled => pointer.assert_eof(),
+            CacheSwap::LocalFile(inner) => inner.patch(pointer, value),
+            CacheSwap::Redis(inner) => inner.patch(pointer, value),
+            CacheSwap::BlobStore(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl CacheSwap {
+    pub fn object_type(&self) -> CacheSwapType {
+        match self {
+            CacheSwap::Disabled => CacheSwapType::Disabled,
+            CacheSwap::LocalFile(_) => CacheSwapType::LocalFile,
+            CacheSwap::Redis(_) => CacheSwapType::Redis,
+            CacheSwap::BlobStore(_) => CacheSwapType::BlobStore,
         }
     }
 }
@@ -24107,6 +24518,92 @@ impl RegistryJsonPropertyPatch for LdapDirectory {
     }
 }
 
+impl LocalFileSwap {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.path;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Path));
+        }
+        let value = &self.flush_changes;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::FlushChanges, 1));
+        }
+        let value = &self.max_account_size;
+        if *value < 2048 {
+            errors.push(ValidationError::min_value(Property::MaxAccountSize, 2048));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for LocalFileSwap {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.path.pickle(out);
+        self.flush_changes.pickle(out);
+        self.flush_interval.pickle(out);
+        self.max_account_size.pickle(out);
+        self.min_account_size.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.path = Pickle::unpickle(stream)?;
+        this.flush_changes = Pickle::unpickle(stream)?;
+        this.flush_interval = Pickle::unpickle(stream)?;
+        this.max_account_size = Pickle::unpickle(stream)?;
+        this.min_account_size = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for LocalFileSwap {
+    fn default() -> Self {
+        Self {
+            path: Default::default(),
+            flush_changes: 2000u64,
+            flush_interval: Duration::from_millis(600000),
+            max_account_size: 1073741824,
+            min_account_size: 1048576,
+        }
+    }
+}
+
+impl IntoValue for LocalFileSwap {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(7);
+        map.insert_unchecked(Property::Path, self.path.into_value());
+        map.insert_unchecked(Property::FlushChanges, self.flush_changes.into_value());
+        map.insert_unchecked(Property::FlushInterval, self.flush_interval.into_value());
+        map.insert_unchecked(Property::MaxAccountSize, self.max_account_size.into_value());
+        map.insert_unchecked(Property::MinAccountSize, self.min_account_size.into_value());
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for LocalFileSwap {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Path) => self
+                .path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::FlushChanges) => self.flush_changes.patch(pointer, value),
+            Some(Property::FlushInterval) => self.flush_interval.patch(pointer, value),
+            Some(Property::MaxAccountSize) => self.max_account_size.patch(pointer, value),
+            Some(Property::MinAccountSize) => self.min_account_size.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl ObjectImpl for Log {
     const FLAGS: u64 = 0;
     const VERSION: u8 = 0;
@@ -33138,6 +33635,222 @@ impl RegistryJsonPropertyPatch for RedisStore {
                 value,
             }),
             _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl RedisSwap {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.store;
+        value.validate(errors);
+        let value = &self.chunk_size;
+        if *value < 65536 {
+            errors.push(ValidationError::min_value(Property::ChunkSize, 65536));
+        }
+        let value = &self.flush_changes;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::FlushChanges, 1));
+        }
+        let value = &self.max_account_size;
+        if *value < 2048 {
+            errors.push(ValidationError::min_value(Property::MaxAccountSize, 2048));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for RedisSwap {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.store.pickle(out);
+        self.chunk_size.pickle(out);
+        self.retention.pickle(out);
+        self.flush_changes.pickle(out);
+        self.flush_interval.pickle(out);
+        self.max_account_size.pickle(out);
+        self.min_account_size.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.store = Pickle::unpickle(stream)?;
+        this.chunk_size = Pickle::unpickle(stream)?;
+        this.retention = Pickle::unpickle(stream)?;
+        this.flush_changes = Pickle::unpickle(stream)?;
+        this.flush_interval = Pickle::unpickle(stream)?;
+        this.max_account_size = Pickle::unpickle(stream)?;
+        this.min_account_size = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for RedisSwap {
+    fn default() -> Self {
+        Self {
+            store: Default::default(),
+            chunk_size: 1048576,
+            retention: Duration::from_millis(604800000),
+            flush_changes: 2000u64,
+            flush_interval: Duration::from_millis(600000),
+            max_account_size: 1073741824,
+            min_account_size: 1048576,
+        }
+    }
+}
+
+impl IntoValue for RedisSwap {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(9);
+        map.insert_unchecked(Property::Store, self.store.into_value());
+        map.insert_unchecked(Property::ChunkSize, self.chunk_size.into_value());
+        map.insert_unchecked(Property::Retention, self.retention.into_value());
+        map.insert_unchecked(Property::FlushChanges, self.flush_changes.into_value());
+        map.insert_unchecked(Property::FlushInterval, self.flush_interval.into_value());
+        map.insert_unchecked(Property::MaxAccountSize, self.max_account_size.into_value());
+        map.insert_unchecked(Property::MinAccountSize, self.min_account_size.into_value());
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for RedisSwap {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Store) => self.store.patch(pointer, value),
+            Some(Property::ChunkSize) => self.chunk_size.patch(pointer, value),
+            Some(Property::Retention) => self.retention.patch(pointer, value),
+            Some(Property::FlushChanges) => self.flush_changes.patch(pointer, value),
+            Some(Property::FlushInterval) => self.flush_interval.patch(pointer, value),
+            Some(Property::MaxAccountSize) => self.max_account_size.patch(pointer, value),
+            Some(Property::MinAccountSize) => self.min_account_size.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl RedisSwapStore {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            RedisSwapStore::Default => true,
+            RedisSwapStore::Redis(inner) => inner.validate(errors),
+            RedisSwapStore::RedisCluster(inner) => inner.validate(errors),
+            RedisSwapStore::RedisSentinel(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for RedisSwapStore {
+    fn default() -> Self {
+        RedisSwapStore::Default
+    }
+}
+
+impl Pickle for RedisSwapStore {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            RedisSwapStore::Default => {
+                0u16.pickle(out);
+            }
+            RedisSwapStore::Redis(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            RedisSwapStore::RedisCluster(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+            RedisSwapStore::RedisSentinel(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(RedisSwapStore::Default),
+            1 => Pickle::unpickle(stream).map(RedisSwapStore::Redis),
+            2 => Pickle::unpickle(stream).map(RedisSwapStore::RedisCluster),
+            3 => Pickle::unpickle(stream).map(RedisSwapStore::RedisSentinel),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for RedisSwapStore {
+    fn into_value(self) -> JmapValue<'static> {
+        match self {
+            RedisSwapStore::Default => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Default".into()));
+                JmapValue::Object(obj)
+            }
+            RedisSwapStore::Redis(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Redis".into()));
+                obj
+            }
+            RedisSwapStore::RedisCluster(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RedisCluster".into()));
+                obj
+            }
+            RedisSwapStore::RedisSentinel(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RedisSentinel".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for RedisSwapStore {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                RedisSwapStoreType::Default => *self = RedisSwapStore::Default,
+                RedisSwapStoreType::Redis => *self = RedisSwapStore::Redis(Default::default()),
+                RedisSwapStoreType::RedisCluster => {
+                    *self = RedisSwapStore::RedisCluster(Default::default())
+                }
+                RedisSwapStoreType::RedisSentinel => {
+                    *self = RedisSwapStore::RedisSentinel(Default::default())
+                }
+            }
+        }
+        match self {
+            RedisSwapStore::Default => pointer.assert_eof(),
+            RedisSwapStore::Redis(inner) => inner.patch(pointer, value),
+            RedisSwapStore::RedisCluster(inner) => inner.patch(pointer, value),
+            RedisSwapStore::RedisSentinel(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl RedisSwapStore {
+    pub fn object_type(&self) -> RedisSwapStoreType {
+        match self {
+            RedisSwapStore::Default => RedisSwapStoreType::Default,
+            RedisSwapStore::Redis(_) => RedisSwapStoreType::Redis,
+            RedisSwapStore::RedisCluster(_) => RedisSwapStoreType::RedisCluster,
+            RedisSwapStore::RedisSentinel(_) => RedisSwapStoreType::RedisSentinel,
         }
     }
 }

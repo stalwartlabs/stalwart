@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    smtp::session::TestSession,
-    utils::server::TestServerBuilder,
-};
+use crate::{smtp::session::TestSession, utils::server::TestServerBuilder};
 use ahash::AHashMap;
 use flate2::{Compression, Crc, write::GzEncoder};
 use mail_builder::{

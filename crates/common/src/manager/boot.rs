@@ -152,7 +152,7 @@ impl BootManager {
                 let core: Box<Core> =
                     Box::new(Box::pin(Core::parse(&mut bootstrap, storage)).await);
                 let data = Data::parse(&mut bootstrap).await;
-                let cache = Caches::parse(&mut bootstrap).await;
+                let cache = Caches::parse(&mut bootstrap, &core.storage).await;
 
                 // Enable telemetry
 
@@ -215,6 +215,9 @@ impl BootManager {
                 });
 
                 if !bootstrap.registry.is_recovery_mode() {
+                    // Start the cache swap tier writer
+                    crate::cache::swap::SwapTier::start(&inner);
+
                     // Load spam model
                     if let Err(err) = inner.build_server().spam_model_reload().await {
                         trc::error!(

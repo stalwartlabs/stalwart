@@ -10,9 +10,11 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 use utils::cache::CacheItemWeight;
 
 pub mod directory;
+pub mod email;
 pub mod invalidate;
 pub mod principals;
 pub mod reload;
+pub mod swap;
 
 impl MailboxCache {
     pub fn parent_id(&self) -> Option<u32> {

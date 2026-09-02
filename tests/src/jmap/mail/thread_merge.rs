@@ -267,7 +267,6 @@ async fn test_multi_thread(test: &TestServer) {
             .await
             .unwrap()
             .emails
-            .items
             .len(),
     );
     println!("Deleting all messages...");

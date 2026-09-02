@@ -36,12 +36,11 @@ impl<T: SessionStream> SessionData<T> {
         // Obtain UID next and assign UIDs
         let uid_map = cached_messages
             .emails
-            .items
             .iter()
             .filter_map(|item| {
-                item.mailboxes.iter().find_map(|m| {
+                item.mailboxes().iter().find_map(|m| {
                     if m.mailbox_id == mailbox.mailbox_id {
-                        Some((m.uid, item.document_id))
+                        Some((m.uid, item.document_id()))
                     } else {
                         None
                     }

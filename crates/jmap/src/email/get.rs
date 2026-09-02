@@ -122,10 +122,9 @@ impl EmailGet for Server {
         } else {
             cache
                 .emails
-                .items
                 .iter()
                 .take(self.core.jmap.get_max_objects)
-                .map(|item| Id::from_parts(item.thread_id, item.document_id))
+                .map(|item| Id::from_parts(item.thread_id(), item.document_id()))
                 .collect()
         };
         let mut response = GetResponse {
@@ -268,8 +267,8 @@ impl EmailGet for Server {
                         email.insert_unchecked(EmailProperty::ThreadId, Id::from(id.prefix_id()));
                     }
                     (EmailProperty::MailboxIds, _) => {
-                        let mut obj = Map::with_capacity(data.mailboxes.len());
-                        for id in data.mailboxes.iter() {
+                        let mut obj = Map::with_capacity(data.mailboxes().len());
+                        for id in data.mailboxes().iter() {
                             debug_assert!(id.uid != 0);
                             obj.insert_unchecked(
                                 EmailProperty::IdValue(Id::from(id.mailbox_id)),
@@ -287,18 +286,18 @@ impl EmailGet for Server {
                         email.insert_unchecked(property.clone(), Value::Object(obj));
                     }
                     (EmailProperty::Size, _) => {
-                        email.insert_unchecked(EmailProperty::Size, data.size);
+                        email.insert_unchecked(EmailProperty::Size, data.size());
                     }
                     (EmailProperty::ReceivedAt, _) => {
                         email.insert_unchecked(
                             EmailProperty::ReceivedAt,
-                            EmailValue::Date(UTCDate::from_timestamp(data.received_at as i64)),
+                            EmailValue::Date(UTCDate::from_timestamp(data.received_at() as i64)),
                         );
                     }
                     (EmailProperty::HasAttachment, _) => {
                         email.insert_unchecked(
                             EmailProperty::HasAttachment,
-                            (data.keywords & 1 << HASATTACHMENT) != 0,
+                            (data.keywords() & 1 << HASATTACHMENT) != 0,
                         );
                     }
                     (EmailProperty::BlobId, Some(message)) => {

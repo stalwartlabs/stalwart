@@ -15,7 +15,7 @@ use crate::{
         metadata::MessageMetadata,
     },
 };
-use common::{MessageUid, Server, auth::AccessToken};
+use common::{MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken};
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
@@ -218,7 +218,7 @@ impl EmailIngest for Server {
             let target_mailbox_id = params.mailbox_ids.first().copied().unwrap_or(INBOX_ID);
             if cache
                 .in_mailboxes(&[target_mailbox_id, JUNK_ID])
-                .any(|m| thread_result.duplicate_ids.contains(&m.document_id))
+                .any(|m| thread_result.duplicate_ids.contains(&m.document_id()))
             {
                 trc::event!(
                     MessageIngest(MessageIngestEvent::Duplicate),
@@ -312,10 +312,11 @@ impl EmailIngest for Server {
                             .map(|m| m.document_id)
                             .unwrap_or(SENT_ID);
 
-                        if cache
-                            .in_thread(thread_id)
-                            .any(|m| m.mailboxes.iter().any(|mb| mb.mailbox_id == sent_folder_id))
-                        {
+                        if cache.in_thread(thread_id).any(|m| {
+                            m.mailboxes()
+                                .iter()
+                                .any(|mb| mb.mailbox_id == sent_folder_id)
+                        }) {
                             is_spam = false;
                             if self
                                 .core
@@ -605,7 +606,7 @@ impl EmailIngest for Server {
 
         let mut keywords = 0;
         let mut keywords_extra = Vec::new();
-        let received_at = params.received_at.unwrap_or_else(now);
+        let received_at = params.received_at.unwrap_or_else(now).min(MAX_RECEIVED_AT);
         for keyword in params.keywords {
             match keyword.into_id() {
                 Ok(id) => keywords |= 1 << id,

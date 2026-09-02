@@ -309,6 +309,16 @@ impl BatchBuilder {
         self
     }
 
+    pub fn clear_if_equals<T>(&mut self, class: impl Into<ValueClass>, value: T) -> &mut Self
+    where
+        T: Deserialize + PartialEq + Send + Sync + 'static,
+    {
+        self.merge_fnc(class, move |_, bytes| match bytes {
+            Some(bytes) if T::deserialize(bytes)? == value => Ok(MergeResult::Delete),
+            _ => Ok(MergeResult::Skip),
+        })
+    }
+
     pub fn set_archive_hash(&mut self, hash: Option<u32>) -> &mut Self {
         self.last_archive_hash = hash;
         self

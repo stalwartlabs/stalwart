@@ -80,7 +80,7 @@ impl MailboxDestroy for Server {
         batch.with_account_id(account_id);
 
         let message_ids =
-            RoaringBitmap::from_iter(cache.in_mailbox(document_id).map(|m| m.document_id));
+            RoaringBitmap::from_iter(cache.in_mailbox(document_id).map(|m| m.document_id()));
 
         if !message_ids.is_empty() {
             if remove_emails {

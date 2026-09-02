@@ -52,7 +52,7 @@ async fn set_hide_attendees(test: &TestServer, account_id: u32, document_id: u32
     let account_info = test.server.account_info(account_id).await.unwrap();
     let mut batch = BatchBuilder::new();
     event
-        .update(
+        .update_meta(
             account_info.account_tenant_ids(),
             previous,
             account_id,
@@ -241,7 +241,7 @@ pub async fn test(test: &TestServer) {
             .get_cached_messages(client.account_id)
             .await
             .unwrap();
-        assert_eq!(messages.emails.items.len(), 1);
+        assert_eq!(messages.emails.len(), 1);
         let events = test
             .server
             .fetch_dav_resources(
@@ -382,8 +382,9 @@ pub async fn test(test: &TestServer) {
         .await
         .unwrap()
         .emails
-        .items[0]
-        .document_id;
+        .at(0)
+        .unwrap()
+        .document_id();
     let contents = test.fetch_email(bill_client.account_id, document_id).await;
     let message = MessageParser::new().parse(&contents).unwrap();
     let contents = message

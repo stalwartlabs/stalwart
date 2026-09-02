@@ -389,12 +389,12 @@ impl<T: SessionStream> SessionData<T> {
                         }
                         Attribute::InternalDate => {
                             items.push(DataItem::InternalDate {
-                                date: data.received_at as i64,
+                                date: data.received_at() as i64,
                             });
                         }
                         Attribute::Rfc822Size => {
                             items.push(DataItem::Rfc822Size {
-                                size: data.size as usize,
+                                size: data.size() as usize,
                             });
                         }
                         Attribute::Uid => {
@@ -402,13 +402,13 @@ impl<T: SessionStream> SessionData<T> {
                         }
                         Attribute::ModSeq => {
                             items.push(DataItem::ModSeq {
-                                modseq: data.change_id + 1,
+                                modseq: data.change_id() + 1,
                             });
                         }
                         Attribute::ObjectId => {
                             items.push(DataItem::ObjectId(ObjectId {
-                                email_id: Some(Id::from_parts(data.thread_id, id)),
-                                thread_id: Some(Id::from(data.thread_id)),
+                                email_id: Some(Id::from_parts(data.thread_id(), id)),
+                                thread_id: Some(Id::from(data.thread_id())),
                                 ..Default::default()
                             }));
                         }
@@ -523,7 +523,7 @@ impl<T: SessionStream> SessionData<T> {
                         }
                         Attribute::InternalDate => {
                             items.push(DataItem::InternalDate {
-                                date: data.received_at as i64,
+                                date: data.received_at() as i64,
                             });
                         }
                         Attribute::Preview { .. } => {
@@ -537,7 +537,7 @@ impl<T: SessionStream> SessionData<T> {
                         }
                         Attribute::Rfc822Size => {
                             items.push(DataItem::Rfc822Size {
-                                size: data.size as usize,
+                                size: data.size() as usize,
                             });
                         }
                         Attribute::Uid => {
@@ -626,13 +626,13 @@ impl<T: SessionStream> SessionData<T> {
                         }
                         Attribute::ModSeq => {
                             items.push(DataItem::ModSeq {
-                                modseq: data.change_id + 1,
+                                modseq: data.change_id() + 1,
                             });
                         }
                         Attribute::ObjectId => {
                             items.push(DataItem::ObjectId(ObjectId {
-                                email_id: Some(Id::from_parts(data.thread_id, id)),
-                                thread_id: Some(Id::from(data.thread_id)),
+                                email_id: Some(Id::from_parts(data.thread_id(), id)),
+                                thread_id: Some(Id::from(data.thread_id())),
                                 ..Default::default()
                             }));
                         }
@@ -668,7 +668,7 @@ impl<T: SessionStream> SessionData<T> {
                     .with_document(id);
                 merge_keywords(
                     &mut batch,
-                    data.thread_id,
+                    data.thread_id(),
                     KeywordDiff::added(Keyword::Seen),
                 );
                 batch.commit_point();

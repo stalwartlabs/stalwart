@@ -23,7 +23,7 @@ use crate::{
     ipc::TrainTaskController,
     network::security::BlockedIps,
 };
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use auth::oauth::config::OAuthConfig;
 use calcard::common::timezone::Tz;
@@ -175,6 +175,8 @@ pub struct LogoCache {
 }
 
 pub struct Caches {
+    pub swap: crate::cache::swap::SwapTier,
+
     pub access_tokens: Cache<u32, Arc<AccessTokenInner>>,
     pub http_auth: Cache<Box<str>, HttpAuthCache>,
 
@@ -202,9 +204,12 @@ pub struct Caches {
     pub dns_ptr: CacheWithTtl<IpAddr, RecordSet<Box<str>>>,
     pub dns_ipv4: CacheWithTtl<Box<str>, RecordSet<Ipv4Addr>>,
     pub dns_ipv6: CacheWithTtl<Box<str>, RecordSet<Ipv6Addr>>,
-    pub dns_tlsa: CacheWithTtl<Box<str>, Arc<Tlsa>>,
+    pub dns_tlsa: CacheWithTtl<Box<str>, Option<Arc<Tlsa>>>,
     pub dns_mta_sts: CacheWithTtl<Box<str>, Arc<Policy>>,
     pub dns_rbl: CacheWithTtl<Box<str>, Option<Arc<IpResolver>>>,
+
+    pub directory_recipients: CacheWithTtl<Box<str>, ()>,
+    pub directory_recipients_ttl: Duration,
 
     pub negative_cache_ttl: Duration,
 }
@@ -226,12 +231,31 @@ pub struct MailboxesCache {
     pub size: u64,
 }
 
+pub const CACHE_CHUNK: usize = 16384;
+
+pub const MAX_RECEIVED_AT: u64 = u32::MAX as u64;
+
+#[derive(Debug, Clone)]
+pub struct ColBlock {
+    pub(crate) document_ids: Arc<[u32]>,
+    pub(crate) change_ids: Arc<[u64]>,
+    pub(crate) received_at: Arc<[u32]>,
+    pub(crate) sent_at: Arc<[i32]>,
+    pub(crate) sizes: Arc<[u32]>,
+    pub(crate) keywords: Arc<[u32]>,
+    pub(crate) thread_ids: Arc<[u32]>,
+    pub(crate) mb_offsets: Arc<[u32]>,
+    pub(crate) mb_arena: Arc<[MessageUid]>,
+}
+
 #[derive(Debug, Clone)]
 pub struct MessagesCache {
     pub change_id: u64,
-    pub items: Box<[MessageCache]>,
-    pub index: AHashMap<u32, u32>,
-    pub keywords: Box<[CustomKeywords]>,
+    pub(crate) blocks: Vec<ColBlock>,
+    pub(crate) starts: Vec<u32>,
+    pub(crate) index: Arc<[(u32, u32)]>,
+    pub(crate) keywords: Arc<[CustomKeywords]>,
+    pub(crate) len: usize,
     pub size: u64,
 }
 
@@ -243,17 +267,18 @@ pub struct CustomKeywords {
 
 #[derive(Debug, Clone)]
 pub struct MessageCache {
-    pub document_id: u32,
-    pub mailboxes: TinyVec<[MessageUid; 2]>,
-    pub keywords: u32,
-    pub thread_id: u32,
-    pub change_id: u64,
-    pub size: u32,
-    pub received_at: u64,
-    pub sent_at: i32,
+    pub(crate) document_id: u32,
+    pub(crate) mailboxes: TinyVec<[MessageUid; 2]>,
+    pub(crate) keywords: u32,
+    pub(crate) thread_id: u32,
+    pub(crate) change_id: u64,
+    pub(crate) size: u32,
+    pub(crate) received_at: u64,
+    pub(crate) sent_at: i32,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
 pub struct MessageUid {
     pub mailbox_id: u32,
     pub uid: u32,
@@ -303,11 +328,38 @@ pub struct TlsConnectors {
 
 pub struct NameWrapper(pub String);
 
+#[derive(Debug)]
+pub struct UpdateLock {
+    pub semaphore: Semaphore,
+    pub revision: AtomicU64,
+}
+
+pub const DAV_CHUNK: usize = 4096;
+pub const NO_ID: u32 = u32::MAX;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ArenaRef {
+    pub off: u32,
+    pub len: u32,
+}
+
+impl ArenaRef {
+    #[inline(always)]
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.off as usize..(self.off + self.len) as usize
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DavResources {
     pub base_path: String,
-    pub paths: AHashSet<DavPath>,
-    pub resources: Vec<DavResource>,
+    pub paths: Arc<PathIndex>,
+    pub resources: ResourceStore,
     pub item_change_id: u64,
     pub container_change_id: u64,
     pub highest_change_id: u64,
@@ -315,71 +367,115 @@ pub struct DavResources {
     pub update_lock: Arc<UpdateLock>,
 }
 
-#[derive(Debug)]
-pub struct UpdateLock {
-    pub semaphore: Semaphore,
-    pub revision: AtomicU64,
+#[derive(Debug, Clone, Default)]
+pub struct ResourceStore {
+    pub chunks: Vec<Arc<ResourceChunk>>,
+    pub containers_end: usize,
+    pub total: usize,
+    pub unified_id_space: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default)]
+pub struct ResourceChunk {
+    pub records: Box<[DavResource]>,
+    pub bytes: Box<[u8]>,
+    pub names: Box<[CachedName]>,
+    pub acls: Box<[AclGrant]>,
+    pub prefs: Box<[TinyCalendarPreferences]>,
+    pub min_id: u32,
+    pub max_id: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PathIndex {
+    pub chunks: Vec<Arc<PathChunk>>,
+    pub total: usize,
+}
+
+#[derive(Debug, Default)]
+pub struct PathChunk {
+    pub paths: Box<[DavPath]>,
+    pub bytes: Box<[u8]>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CachedName {
+    pub name: ArenaRef,
+    pub parent_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DavPath {
-    pub path: String,
-    pub parent_id: Option<u32>,
+    pub path: ArenaRef,
+    pub parent_id: u32,
     pub hierarchy_seq: u32,
-    pub resource_idx: usize,
+    pub document_id: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DavResource {
     pub document_id: u32,
     pub data: DavResourceMetadata,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DavResourcePath<'x> {
-    pub path: &'x DavPath,
+pub struct DavResourceRef<'x> {
+    pub chunk: &'x ResourceChunk,
     pub resource: &'x DavResource,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
+pub struct DavResourcePath<'x> {
+    pub path: &'x DavPath,
+    pub path_chunk: &'x PathChunk,
+    pub resource: DavResourceRef<'x>,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum DavResourceMetadata {
     File {
-        name: String,
-        size: Option<u32>,
-        parent_id: Option<u32>,
-        acls: TinyVec<[AclGrant; 2]>,
+        name: ArenaRef,
+        size: u32,
+        parent_id: u32,
+        acls: ArenaRef,
+        etag: u32,
     },
     Calendar {
-        name: String,
-        acls: TinyVec<[AclGrant; 2]>,
-        preferences: TinyVec<[TinyCalendarPreferences; 2]>,
+        name: ArenaRef,
+        acls: ArenaRef,
+        preferences: ArenaRef,
+        etag: u32,
     },
     CalendarEvent {
-        names: TinyVec<[DavName; 2]>,
+        names: ArenaRef,
         start: i64,
         duration: u32,
         created_at: i64,
         modified_at: i32,
-        uid: Arc<str>,
+        uid: ArenaRef,
+        etag: u32,
     },
     CalendarEventNotification {
-        names: TinyVec<[DavName; 2]>,
+        names: ArenaRef,
         created_at: i64,
         event_id: u32,
+        etag: u32,
     },
     AddressBook {
-        name: String,
-        acls: TinyVec<[AclGrant; 2]>,
+        name: ArenaRef,
+        acls: ArenaRef,
+        etag: u32,
     },
     ContactCard {
-        names: TinyVec<[DavName; 2]>,
+        names: ArenaRef,
         created_at: i64,
         modified_at: i32,
-        uid: Arc<str>,
+        uid: ArenaRef,
+        etag: u32,
     },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TinyCalendarPreferences {
     pub account_id: u32,
     pub tz: Tz,

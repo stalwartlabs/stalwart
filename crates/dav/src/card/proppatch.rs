@@ -24,7 +24,7 @@ use dav_proto::{
 };
 use groupware::{
     cache::GroupwareCache,
-    contact::{AddressBook, ContactCard},
+    contact::{AddressBook, ContactCard, ContactCardContent},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -37,6 +37,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::ContactField,
 };
 
 pub(crate) trait CardPropPatchRequestHandler: Sync + Send {
@@ -59,6 +60,7 @@ pub(crate) trait CardPropPatchRequestHandler: Sync + Send {
     fn apply_card_properties(
         &self,
         card: &mut ContactCard,
+        content: Option<&mut ContactCardContent>,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
@@ -126,6 +128,18 @@ impl CardPropPatchRequestHandler for Server {
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let etag = if resource.is_container() {
+            archive.etag()
+        } else {
+            format!(
+                "\"{}\"",
+                archive
+                    .unarchive::<ContactCard>()
+                    .caused_by(trc::location!())?
+                    .etag
+                    .to_native()
+            )
+        };
 
         // Validate headers
         self.validate_headers(
@@ -135,7 +149,7 @@ impl CardPropPatchRequestHandler for Server {
                 account_id,
                 collection,
                 document_id: document_id.into(),
-                etag: archive.etag().into(),
+                etag: etag.into(),
                 path: resource_.resource.unwrap(),
                 ..Default::default()
             }],
@@ -202,6 +216,16 @@ impl CardPropPatchRequestHandler for Server {
                 book.etag().into()
             }
         } else {
+            // A request that names no dead property leaves the payload untouched
+            let touches_content = request
+                .set
+                .iter()
+                .any(|property| matches!(property.property, DavProperty::DeadProperty(_)))
+                || request
+                    .remove
+                    .iter()
+                    .any(|property| matches!(property, DavProperty::DeadProperty(_)));
+
             // Deserialize
             let card = archive
                 .to_unarchived::<ContactCard>()
@@ -210,37 +234,88 @@ impl CardPropPatchRequestHandler for Server {
                 .deserialize::<ContactCard>()
                 .caused_by(trc::location!())?;
 
+            let content_ = if touches_content {
+                self.store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                        account_id,
+                        Collection::ContactCard,
+                        document_id,
+                        ContactField::Content,
+                    ))
+                    .await
+                    .caused_by(trc::location!())?
+            } else {
+                None
+            };
+            let content = content_
+                .as_ref()
+                .map(|content| content.to_unarchived::<ContactCardContent>())
+                .transpose()
+                .caused_by(trc::location!())?;
+            let mut new_content = content
+                .as_ref()
+                .map(|content| content.deserialize::<ContactCardContent>())
+                .transpose()
+                .caused_by(trc::location!())?;
+
             // Remove properties
             if !request.set_first && !request.remove.is_empty() {
                 remove_card_properties(
                     &mut new_card,
+                    new_content.as_mut(),
                     std::mem::take(&mut request.remove),
                     &mut items,
                 );
             }
 
             // Set properties
-            is_success = self.apply_card_properties(&mut new_card, true, request.set, &mut items);
+            is_success = self.apply_card_properties(
+                &mut new_card,
+                new_content.as_mut(),
+                true,
+                request.set,
+                &mut items,
+            );
 
             // Remove properties
             if is_success && !request.remove.is_empty() {
-                remove_card_properties(&mut new_card, request.remove, &mut items);
+                remove_card_properties(
+                    &mut new_card,
+                    new_content.as_mut(),
+                    request.remove,
+                    &mut items,
+                );
             }
 
             if is_success {
-                new_card
-                    .update(
-                        access_token.account_tenant_ids(),
-                        card,
-                        account_id,
-                        document_id,
-                        None,
-                        &mut batch,
-                    )
-                    .caused_by(trc::location!())?
-                    .etag()
+                match (new_content, content) {
+                    (Some(new_content), Some(content)) => new_card
+                        .update_full(
+                            new_content,
+                            self.core.groupware.vcard_version,
+                            access_token.account_tenant_ids(),
+                            card,
+                            content.inner,
+                            account_id,
+                            document_id,
+                            None,
+                            &mut batch,
+                        )
+                        .caused_by(trc::location!())?,
+                    _ => new_card
+                        .update_meta(
+                            access_token.account_tenant_ids(),
+                            card,
+                            account_id,
+                            document_id,
+                            None,
+                            &mut batch,
+                        )
+                        .caused_by(trc::location!())?,
+                }
+                .into()
             } else {
-                card.etag().into()
+                format!("\"{}\"", card.inner.etag.to_native()).into()
             }
         };
 
@@ -367,11 +442,13 @@ impl CardPropPatchRequestHandler for Server {
     fn apply_card_properties(
         &self,
         card: &mut ContactCard,
+        content: Option<&mut ContactCardContent>,
         is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) -> bool {
         let mut has_errors = false;
+        let mut content = content;
 
         for property in properties {
             match (&property.property, property.value) {
@@ -393,16 +470,17 @@ impl CardPropPatchRequestHandler for Server {
                     items.insert_ok(property.property);
                 }
                 (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
-                    if self.core.groupware.dead_property_size.is_some() =>
+                    if self.core.groupware.dead_property_size.is_some() && content.is_some() =>
                 {
+                    let dead_properties = &mut content.as_mut().unwrap().dead_properties;
                     if is_update {
-                        card.dead_properties.remove_element(dead);
+                        dead_properties.remove_element(dead);
                     }
 
-                    if card.dead_properties.size() + values.size() + dead.size()
+                    if dead_properties.size() + values.size() + dead.size()
                         < self.core.groupware.dead_property_size.unwrap()
                     {
-                        card.dead_properties.add_element(dead.clone(), values.0);
+                        dead_properties.add_element(dead.clone(), values.0);
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -433,17 +511,23 @@ impl CardPropPatchRequestHandler for Server {
 
 fn remove_card_properties(
     card: &mut ContactCard,
+    content: Option<&mut ContactCardContent>,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
 ) {
+    let mut content = content;
     for property in properties {
         match &property {
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 card.display_name = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
-            DavProperty::DeadProperty(dead) => {
-                card.dead_properties.remove_element(dead);
+            DavProperty::DeadProperty(dead) if content.is_some() => {
+                content
+                    .as_mut()
+                    .unwrap()
+                    .dead_properties
+                    .remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             _ => {

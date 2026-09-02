@@ -7,8 +7,9 @@
 use super::{ArchivedMailbox, Mailbox};
 use common::storage::index::{
     ArchivedIdField, IndexValue, IndexableAndSerializableObject, IndexableObject,
+    SerializableObject, serialize_object,
 };
-use store::write::{ArchiveCompression, Compression};
+use store::write::{ArchiveCompression, BatchBuilder, Compression, Slot};
 use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for Mailbox {
@@ -55,6 +56,12 @@ impl IndexableAndSerializableObject for Mailbox {
 
 impl ArchiveCompression for Mailbox {
     const COMPRESSION: Compression = Compression::None;
+}
+
+impl SerializableObject for Mailbox {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        serialize_object(self, batch, pending_id)
+    }
 }
 
 #[cfg(test)]

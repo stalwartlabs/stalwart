@@ -15,6 +15,7 @@ use mail_parser::parsers::fields::thread::thread_name;
 use store::{
     IterateParams, U32_LEN, ValueKey,
     ahash::AHashMap,
+    dispatch::DocumentSet,
     roaring::RoaringBitmap,
     search::{QueryResults, SearchComparator, SearchQuery},
     write::{ValueClass, key::DeserializeBigEndian},
@@ -24,8 +25,6 @@ use types::{collection::Collection, field::EmailField, keyword::Keyword};
 
 pub const MAX_SORT_KEY_LEN: usize = 40;
 const SORT_KEY_FIELDS: usize = 3;
-const MAX_SCAN_RANGES: usize = 1024;
-const MAX_SCAN_GAP: u32 = 64;
 
 pub type SortKey = [u8; MAX_SORT_KEY_LEN];
 
@@ -98,10 +97,10 @@ impl EmailSortKeys for Server {
             return Ok(results.into_iter().collect());
         }
 
-        let mut sort_key_fields = Vec::with_capacity(SORT_KEY_FIELDS);
+        let mut sort_key_fields: Vec<MessageSortField> = Vec::with_capacity(SORT_KEY_FIELDS);
         for comparator in &comparators {
             if let MessageComparator::SortKey { field, .. } = comparator
-                && !sort_key_fields.contains(field)
+                && !sort_key_fields.as_slice().contains(field)
             {
                 sort_key_fields.push(*field);
             }
@@ -140,7 +139,8 @@ impl EmailSortKeys for Server {
         let collection: u8 = Collection::Email.into();
         let class = ValueClass::Immutable(EmailField::SortKeys.into());
         let mut sort_keys: [Vec<(SortKey, u32)>; SORT_KEY_FIELDS] = Default::default();
-        let ranges = scan_ranges(documents)
+        let ranges = documents
+            .scan_ranges()
             .into_iter()
             .map(|(from_document_id, to_document_id)| {
                 IterateParams::new(
@@ -233,33 +233,6 @@ impl MessageSortField {
     }
 }
 
-fn scan_ranges(documents: &RoaringBitmap) -> Vec<(u32, u32)> {
-    let (Some(min), Some(max)) = (documents.min(), documents.max()) else {
-        return Vec::new();
-    };
-    let full_range = vec![(min, max)];
-    if documents.len() * MAX_SCAN_GAP as u64 >= (max - min) as u64 {
-        return full_range;
-    }
-
-    let mut ranges = Vec::new();
-    let mut range = (min, min);
-    for document_id in documents.iter().skip(1) {
-        if document_id - range.1 <= MAX_SCAN_GAP {
-            range.1 = document_id;
-        } else {
-            if ranges.len() + 1 >= MAX_SCAN_RANGES {
-                return full_range;
-            }
-            ranges.push(range);
-            range = (document_id, document_id);
-        }
-    }
-    ranges.push(range);
-
-    ranges
-}
-
 fn cache_comparator(
     cache: &MessageStoreCache,
     documents: &RoaringBitmap,
@@ -267,26 +240,31 @@ fn cache_comparator(
     ascending: bool,
 ) -> SearchComparator {
     match field {
-        MessageCacheField::ReceivedAt => SearchComparator::sorted_set(
-            documents
+        MessageCacheField::ReceivedAt => {
+            let mut sorted = documents
                 .iter()
                 .filter_map(|document_id| {
                     cache
-                        .emails
-                        .index
-                        .get(&document_id)
-                        .map(|position| (document_id, *position + 1))
+                        .email_by_id(&document_id)
+                        .map(|item| (item.received_at(), document_id))
                 })
-                .collect(),
-            ascending,
-        ),
+                .collect::<Vec<_>>();
+            sorted.sort_unstable();
+
+            let mut set = AHashMap::with_capacity(sorted.len());
+            for (rank, (_, document_id)) in sorted.into_iter().enumerate() {
+                set.insert(document_id, rank as u32 + 1);
+            }
+
+            SearchComparator::sorted_set(set, ascending)
+        }
         MessageCacheField::Size => SearchComparator::sorted_set(
             documents
                 .iter()
                 .filter_map(|document_id| {
                     cache
                         .email_by_id(&document_id)
-                        .map(|item| (document_id, item.size))
+                        .map(|item| (document_id, item.size()))
                 })
                 .collect(),
             ascending,
@@ -295,9 +273,12 @@ fn cache_comparator(
             let mut sorted = documents
                 .iter()
                 .filter_map(|document_id| {
-                    cache
-                        .email_by_id(&document_id)
-                        .map(|item| (item.received_at as i64 + item.sent_at as i64, document_id))
+                    cache.email_by_id(&document_id).map(|item| {
+                        (
+                            item.received_at() as i64 + item.sent_at() as i64,
+                            document_id,
+                        )
+                    })
                 })
                 .collect::<Vec<_>>();
             sorted.sort_unstable_by_key(|(sent_at, _)| *sent_at);
@@ -484,42 +465,6 @@ mod tests {
                 "b.cristofori@example.com"
             ]),
             "bartolomeo cristofori di francesco b.cri"
-        );
-    }
-
-    #[test]
-    fn sort_key_scan_ranges() {
-        assert_eq!(scan_ranges(&RoaringBitmap::new()), vec![]);
-        assert_eq!(
-            scan_ranges(&RoaringBitmap::from_iter(0..100u32)),
-            vec![(0, 99)]
-        );
-        assert_eq!(
-            scan_ranges(&RoaringBitmap::from_iter([5u32, 60])),
-            vec![(5, 60)]
-        );
-        assert_eq!(
-            scan_ranges(&RoaringBitmap::from_iter([5u32, 900_000])),
-            vec![(5, 5), (900_000, 900_000)]
-        );
-        assert_eq!(
-            scan_ranges(&RoaringBitmap::from_iter([
-                5u32, 6, 7, 5_000, 5_001, 90_000
-            ])),
-            vec![(5, 7), (5_000, 5_001), (90_000, 90_000)]
-        );
-        assert_eq!(
-            scan_ranges(&RoaringBitmap::from_iter(
-                (0..MAX_SCAN_RANGES as u32).map(|id| id * 1_000)
-            ))
-            .len(),
-            MAX_SCAN_RANGES
-        );
-        assert_eq!(
-            scan_ranges(&RoaringBitmap::from_iter(
-                (0..=MAX_SCAN_RANGES as u32).map(|id| id * 1_000)
-            )),
-            vec![(0, MAX_SCAN_RANGES as u32 * 1_000)]
         );
     }
 

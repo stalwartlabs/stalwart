@@ -84,9 +84,8 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
         .await
         .caused_by(trc::location!())?
         .emails
-        .items
         .iter()
-        .map(|v| v.document_id)
+        .map(|v| v.document_id())
     {
         batch.queue_document_index(SearchIndex::Email, account_id, document_id);
 

@@ -21,10 +21,15 @@ use dav_proto::{
 };
 use groupware::{
     calendar::{
-        ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarEventNotification, Calendar,
-        CalendarEvent, CalendarEventNotification,
+        ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarEventContent,
+        ArchivedCalendarEventNotification, ArchivedCalendarEventNotificationContent, Calendar,
+        CalendarEvent, CalendarEventContent, CalendarEventNotification,
+        CalendarEventNotificationContent,
     },
-    contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
+    contact::{
+        AddressBook, ArchivedAddressBook, ArchivedContactCard, ArchivedContactCardContent,
+        ContactCard, ContactCardContent,
+    },
     file::{ArchivedFileNode, FileNode},
 };
 use propfind::PropFindItem;
@@ -300,40 +305,81 @@ impl<'x> DavQuery<'x> {
 
 pub(crate) enum ArchivedResource<'x> {
     Calendar(Archive<&'x ArchivedCalendar>),
-    CalendarEvent(Archive<&'x ArchivedCalendarEvent>),
-    CalendarEventNotification(Archive<&'x ArchivedCalendarEventNotification>),
+    CalendarEvent(
+        Archive<&'x ArchivedCalendarEvent>,
+        Option<&'x ArchivedCalendarEventContent>,
+    ),
+    CalendarEventNotification(
+        Archive<&'x ArchivedCalendarEventNotification>,
+        Option<&'x ArchivedCalendarEventNotificationContent>,
+    ),
     CalendarEventNotificationCollection(bool),
     AddressBook(Archive<&'x ArchivedAddressBook>),
-    ContactCard(Archive<&'x ArchivedContactCard>),
+    ContactCard(
+        Archive<&'x ArchivedContactCard>,
+        Option<&'x ArchivedContactCardContent>,
+    ),
     FileNode(Archive<&'x ArchivedFileNode>),
 }
 
 impl<'x> ArchivedResource<'x> {
     pub fn from_archive(
         archive: &'x Archive<ArchiveBytes>,
+        content: Option<&'x Archive<ArchiveBytes>>,
         collection: Collection,
     ) -> trc::Result<Self> {
         match collection {
             Collection::Calendar => archive
                 .to_unarchived::<Calendar>()
                 .map(ArchivedResource::Calendar),
-            Collection::CalendarEvent => archive
-                .to_unarchived::<CalendarEvent>()
-                .map(ArchivedResource::CalendarEvent),
-            Collection::CalendarEventNotification => archive
-                .to_unarchived::<CalendarEventNotification>()
-                .map(ArchivedResource::CalendarEventNotification),
+            Collection::CalendarEvent => {
+                let content = content
+                    .map(|content| content.unarchive::<CalendarEventContent>())
+                    .transpose()?;
+                archive
+                    .to_unarchived::<CalendarEvent>()
+                    .map(|meta| ArchivedResource::CalendarEvent(meta, content))
+            }
+            Collection::CalendarEventNotification => {
+                let content = content
+                    .map(|content| content.unarchive::<CalendarEventNotificationContent>())
+                    .transpose()?;
+                archive
+                    .to_unarchived::<CalendarEventNotification>()
+                    .map(|meta| ArchivedResource::CalendarEventNotification(meta, content))
+            }
             Collection::AddressBook => archive
                 .to_unarchived::<AddressBook>()
                 .map(ArchivedResource::AddressBook),
             Collection::FileNode => archive
                 .to_unarchived::<FileNode>()
                 .map(ArchivedResource::FileNode),
-            Collection::ContactCard => archive
-                .to_unarchived::<ContactCard>()
-                .map(ArchivedResource::ContactCard),
+            Collection::ContactCard => {
+                let content = content
+                    .map(|content| content.unarchive::<ContactCardContent>())
+                    .transpose()?;
+                archive
+                    .to_unarchived::<ContactCard>()
+                    .map(|meta| ArchivedResource::ContactCard(meta, content))
+            }
             _ => unreachable!(),
         }
+    }
+
+    pub fn etag(&self) -> String {
+        let hash = match self {
+            ArchivedResource::CalendarEvent(archive, _) => archive.inner.etag.to_native(),
+            ArchivedResource::ContactCard(archive, _) => archive.inner.etag.to_native(),
+            ArchivedResource::CalendarEventNotification(archive, _) => {
+                archive.inner.etag.to_native()
+            }
+            ArchivedResource::Calendar(archive) => archive.version.hash().unwrap_or_default(),
+            ArchivedResource::AddressBook(archive) => archive.version.hash().unwrap_or_default(),
+            ArchivedResource::FileNode(archive) => archive.version.hash().unwrap_or_default(),
+            ArchivedResource::CalendarEventNotificationCollection(_) => 0,
+        };
+
+        format!("\"{hash}\"")
     }
 
     pub fn acls(&self) -> Option<&ArchivedVec<ArchivedAclGrant>> {
@@ -348,11 +394,11 @@ impl<'x> ArchivedResource<'x> {
     pub fn created(&self) -> i64 {
         match self {
             ArchivedResource::Calendar(archive) => archive.inner.created.to_native(),
-            ArchivedResource::CalendarEvent(archive) => archive.inner.created.to_native(),
+            ArchivedResource::CalendarEvent(archive, _) => archive.inner.created.to_native(),
             ArchivedResource::AddressBook(archive) => archive.inner.created.to_native(),
-            ArchivedResource::ContactCard(archive) => archive.inner.created.to_native(),
+            ArchivedResource::ContactCard(archive, _) => archive.inner.created.to_native(),
             ArchivedResource::FileNode(archive) => archive.inner.created.to_native(),
-            ArchivedResource::CalendarEventNotification(archive) => {
+            ArchivedResource::CalendarEventNotification(archive, _) => {
                 archive.inner.created.to_native()
             }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
@@ -362,11 +408,11 @@ impl<'x> ArchivedResource<'x> {
     pub fn modified(&self) -> i64 {
         match self {
             ArchivedResource::Calendar(archive) => archive.inner.modified.to_native(),
-            ArchivedResource::CalendarEvent(archive) => archive.inner.modified.to_native(),
+            ArchivedResource::CalendarEvent(archive, _) => archive.inner.modified.to_native(),
             ArchivedResource::AddressBook(archive) => archive.inner.modified.to_native(),
-            ArchivedResource::ContactCard(archive) => archive.inner.modified.to_native(),
+            ArchivedResource::ContactCard(archive, _) => archive.inner.modified.to_native(),
             ArchivedResource::FileNode(archive) => archive.inner.modified.to_native(),
-            ArchivedResource::CalendarEventNotification(archive) => {
+            ArchivedResource::CalendarEventNotification(archive, _) => {
                 archive.inner.modified.to_native()
             }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
@@ -376,11 +422,15 @@ impl<'x> ArchivedResource<'x> {
     pub fn dead_properties(&self) -> Option<&ArchivedDeadProperty> {
         match self {
             ArchivedResource::Calendar(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::CalendarEvent(archive) => Some(&archive.inner.dead_properties),
+            ArchivedResource::CalendarEvent(_, content) => {
+                content.map(|content| &content.dead_properties)
+            }
             ArchivedResource::AddressBook(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::ContactCard(archive) => Some(&archive.inner.dead_properties),
+            ArchivedResource::ContactCard(_, content) => {
+                content.map(|content| &content.dead_properties)
+            }
             ArchivedResource::FileNode(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::CalendarEventNotification(_)
+            ArchivedResource::CalendarEventNotification(..)
             | ArchivedResource::CalendarEventNotificationCollection(_) => None,
         }
     }
@@ -390,11 +440,11 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::FileNode(archive) => {
                 archive.inner.file.as_ref().map(|f| f.size.to_native())
             }
-            ArchivedResource::CalendarEvent(archive) => archive.inner.size.to_native().into(),
-            ArchivedResource::CalendarEventNotification(archive) => {
+            ArchivedResource::CalendarEvent(archive, _) => archive.inner.size.to_native().into(),
+            ArchivedResource::CalendarEventNotification(archive, _) => {
                 archive.inner.size.to_native().into()
             }
-            ArchivedResource::ContactCard(archive) => archive.inner.size.to_native().into(),
+            ArchivedResource::ContactCard(archive, _) => archive.inner.size.to_native().into(),
             ArchivedResource::AddressBook(_)
             | ArchivedResource::Calendar(_)
             | ArchivedResource::CalendarEventNotificationCollection(_) => None,
@@ -408,10 +458,9 @@ impl<'x> ArchivedResource<'x> {
                 .file
                 .as_ref()
                 .and_then(|f| f.media_type.as_deref()),
-            ArchivedResource::CalendarEvent(_) | ArchivedResource::CalendarEventNotification(_) => {
-                "text/calendar".into()
-            }
-            ArchivedResource::ContactCard(_) => "text/vcard".into(),
+            ArchivedResource::CalendarEvent(..)
+            | ArchivedResource::CalendarEventNotification(..) => "text/calendar".into(),
+            ArchivedResource::ContactCard(..) => "text/vcard".into(),
             ArchivedResource::AddressBook(_)
             | ArchivedResource::Calendar(_)
             | ArchivedResource::CalendarEventNotificationCollection(_) => None,
@@ -423,13 +472,13 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::Calendar(archive) => {
                 Some(archive.inner.preferences(account_id).name.as_str())
             }
-            ArchivedResource::CalendarEvent(archive) => archive.inner.display_name.as_deref(),
+            ArchivedResource::CalendarEvent(archive, _) => archive.inner.display_name.as_deref(),
             ArchivedResource::AddressBook(archive) => {
                 Some(archive.inner.preferences(account_id).name.as_str())
             }
-            ArchivedResource::ContactCard(archive) => archive.inner.display_name.as_deref(),
+            ArchivedResource::ContactCard(archive, _) => archive.inner.display_name.as_deref(),
             ArchivedResource::FileNode(archive) => archive.inner.display_name.as_deref(),
-            ArchivedResource::CalendarEventNotification(_)
+            ArchivedResource::CalendarEventNotification(..)
             | ArchivedResource::CalendarEventNotificationCollection(_) => None,
         }
     }

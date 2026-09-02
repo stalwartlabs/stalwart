@@ -18,6 +18,8 @@ use std::str::FromStr;
 use store::write::bitpack::BitpackIterator;
 use utils::codec::leb128::Leb128Reader;
 
+const TZ_BOUND: i64 = 24 * 60 * 60;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CalendarAlarm {
     pub alarm_id: u16,
@@ -72,8 +74,28 @@ impl ArchivedCalendarEventData {
                 // Recurring event
                 let unpacker =
                     BitpackIterator::from_bytes_and_offset(instances, bytes_read, offset_or_count);
+                let naive_bias = match &alarm.delta {
+                    ArchivedAlarmDelta::Start(delta) => Some(delta.to_native()),
+                    ArchivedAlarmDelta::End(delta) => Some(delta.to_native() + duration),
+                    ArchivedAlarmDelta::FixedUtc(_) | ArchivedAlarmDelta::FixedFloating(_) => None,
+                };
+                let best_so_far = next_alarm.as_ref().map(|next| next.alarm_time);
+
                 for start_offset in unpacker {
                     let start_date_naive = start_offset as i64 + base_offset;
+
+                    if let Some(naive_bias) = naive_bias {
+                        let naive_alarm = start_date_naive + naive_bias;
+                        if naive_alarm.saturating_add(TZ_BOUND) <= start_time {
+                            continue;
+                        }
+                        if best_so_far
+                            .is_some_and(|best| naive_alarm.saturating_sub(TZ_BOUND) >= best)
+                        {
+                            break;
+                        }
+                    }
+
                     let end_date_naive = start_date_naive + duration;
                     let (Some(start), Some(end)) = (
                         resolve_local(start_tz, start_date_naive),

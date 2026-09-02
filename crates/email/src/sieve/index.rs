@@ -5,8 +5,11 @@
  */
 
 use super::{ArchivedSieveScript, SieveScript};
-use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
-use store::write::{ArchiveCompression, Compression, Dictionary};
+use common::storage::index::{
+    IndexValue, IndexableAndSerializableObject, IndexableObject, SerializableObject,
+    serialize_object,
+};
+use store::write::{ArchiveCompression, BatchBuilder, Compression, Dictionary, Slot};
 use types::{collection::SyncCollection, field::SieveField};
 
 impl IndexableObject for SieveScript {
@@ -59,4 +62,10 @@ impl IndexableObject for &ArchivedSieveScript {
 
 impl ArchiveCompression for SieveScript {
     const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Sieve));
+}
+
+impl SerializableObject for SieveScript {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        serialize_object(self, batch, pending_id)
+    }
 }

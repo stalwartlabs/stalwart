@@ -15,7 +15,9 @@ use common::{
     network::{ServerInstance, stream::NullIo},
 };
 use groupware::{
-    calendar::{ArchivedCalendarEvent, CalendarEvent},
+    calendar::{
+        ArchivedCalendarEvent, ArchivedCalendarEventContent, CalendarEvent, CalendarEventContent,
+    },
     scheduling::{
         ItipTime, ItipValue,
         format::{DateStyle, TextFormatter, hyperlink},
@@ -43,7 +45,7 @@ use store::{
     write::{Archive, ArchiveBytes, now},
 };
 use trc::{AddContext, TaskManagerEvent};
-use types::collection::Collection;
+use types::{collection::Collection, field::CalendarEventField};
 use utils::{sanitize_email, template::Variables};
 
 use crate::task_manager::TaskResult;
@@ -140,6 +142,27 @@ async fn send_email_alarm(
     // Fetch event
     let Some(event_) = server
         .store()
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+            account_id,
+            Collection::CalendarEvent,
+            document_id,
+            CalendarEventField::Content,
+        ))
+        .await
+        .caused_by(trc::location!())?
+    else {
+        trc::event!(
+            TaskManager(TaskManagerEvent::MetadataNotFound),
+            Details = "Calendar Event metadata not found",
+            AccountId = account_id,
+            DocumentId = document_id,
+        );
+
+        return Ok(TaskResult::Success(vec![]));
+    };
+
+    let Some(meta_) = server
+        .store()
         .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
             account_id,
             Collection::CalendarEvent,
@@ -159,15 +182,19 @@ async fn send_email_alarm(
     };
 
     // Unarchive event
-    let event = event_
+    let meta = meta_
         .unarchive::<CalendarEvent>()
+        .caused_by(trc::location!())?;
+    let event = event_
+        .unarchive::<CalendarEventContent>()
         .caused_by(trc::location!())?;
 
     // Build message body
     let account_main_email = account_info.name();
     let account_main_domain = account_main_email.rsplit('@').next().unwrap_or("localhost");
     let logo_cid = format!("logo.{}@{account_main_domain}", now());
-    let Some(tpl) = build_template(server, &account_info, task, event, &logo_cid).await? else {
+    let Some(tpl) = build_template(server, &account_info, task, meta, event, &logo_cid).await?
+    else {
         return Ok(TaskResult::Success(vec![]));
     };
     let txt_body = html_to_text(&tpl.body);
@@ -325,10 +352,11 @@ async fn send_display_alarm(
     let document_id = task.document_id.document_id();
     let Some(event_) = server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
             account_id,
             Collection::CalendarEvent,
             document_id,
+            CalendarEventField::Content,
         ))
         .await
         .caused_by(trc::location!())?
@@ -345,7 +373,7 @@ async fn send_display_alarm(
 
     // Unarchive event
     let event = event_
-        .unarchive::<CalendarEvent>()
+        .unarchive::<CalendarEventContent>()
         .caused_by(trc::location!())?;
 
     let recurrence_id = task.recurrence_id;
@@ -387,7 +415,7 @@ fn build_next_alarm(
     server: &Server,
     account_id: u32,
     document_id: u32,
-    event: &ArchivedCalendarEvent,
+    event: &ArchivedCalendarEventContent,
 ) -> trc::Result<TaskResult> {
     // Find next alarm time and write to task queue
     let now = now() as i64;
@@ -430,7 +458,8 @@ async fn build_template(
     server: &Server,
     account_info: &AccountInfo,
     alarm: &TaskCalendarAlarmEmail,
-    event: &ArchivedCalendarEvent,
+    meta: &ArchivedCalendarEvent,
+    event: &ArchivedCalendarEventContent,
     logo_cid: &str,
 ) -> trc::Result<Option<Details>> {
     let account_id = alarm.account_id.document_id();
@@ -449,7 +478,7 @@ async fn build_template(
     };
 
     // Build webcal URI
-    let webcal_uri = match event.webcal_uri(server, account_info).await {
+    let webcal_uri = match meta.webcal_uri(server, account_info).await {
         Ok(uri) => uri,
         Err(err) => {
             trc::error!(

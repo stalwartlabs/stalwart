@@ -8614,6 +8614,7 @@ dependencies = [
  "testcontainers",
  "tikv-jemallocator",
  "time",
+ "tinyvec",
  "tokio",
  "tokio-rustls",
  "trc",

@@ -1,0 +1,803 @@
+/*
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
+ */
+
+use super::{SwapPart, frame::SwapFrame};
+use crate::{
+    ArenaRef, CachedName, DavPath, DavResource, DavResourceMetadata, DavResources, PathChunk,
+    PathIndex, ResourceChunk, ResourceStore, TinyCalendarPreferences, UpdateLock,
+};
+use calcard::common::timezone::Tz;
+use std::sync::Arc;
+use types::acl::AclGrant;
+use utils::map::bitmap::Bitmap;
+
+const KIND_FILE: u32 = 1;
+const KIND_CALENDAR: u32 = 2;
+const KIND_CALENDAR_EVENT: u32 = 3;
+const KIND_CALENDAR_EVENT_NOTIFICATION: u32 = 4;
+const KIND_ADDRESS_BOOK: u32 = 5;
+const KIND_CONTACT_CARD: u32 = 6;
+
+#[derive(rkyv::Archive, rkyv::Serialize)]
+pub struct FlatResource {
+    pub start: i64,
+    pub created_at: i64,
+    pub ref_a_off: u32,
+    pub ref_a_len: u32,
+    pub ref_b_off: u32,
+    pub ref_b_len: u32,
+    pub num_a: u32,
+    pub num_b: u32,
+    pub document_id: u32,
+    pub kind: u32,
+    pub etag: u32,
+}
+
+impl FlatResource {
+    fn pack(resource: &DavResource) -> Self {
+        let mut flat = FlatResource {
+            start: 0,
+            created_at: 0,
+            ref_a_off: 0,
+            ref_a_len: 0,
+            ref_b_off: 0,
+            ref_b_len: 0,
+            num_a: 0,
+            num_b: 0,
+            document_id: resource.document_id,
+            kind: 0,
+            etag: resource.etag(),
+        };
+
+        match &resource.data {
+            DavResourceMetadata::File {
+                name,
+                size,
+                parent_id,
+                acls,
+                ..
+            } => {
+                flat.kind = KIND_FILE;
+                flat.set_ref_a(name);
+                flat.set_ref_b(acls);
+                flat.num_a = *size;
+                flat.num_b = *parent_id;
+            }
+            DavResourceMetadata::Calendar {
+                name,
+                acls,
+                preferences,
+                ..
+            } => {
+                flat.kind = KIND_CALENDAR;
+                flat.set_ref_a(name);
+                flat.set_ref_b(acls);
+                flat.num_a = preferences.off;
+                flat.num_b = preferences.len;
+            }
+            DavResourceMetadata::CalendarEvent {
+                names,
+                start,
+                duration,
+                created_at,
+                modified_at,
+                uid,
+                ..
+            } => {
+                flat.kind = KIND_CALENDAR_EVENT;
+                flat.set_ref_a(names);
+                flat.set_ref_b(uid);
+                flat.start = *start;
+                flat.created_at = *created_at;
+                flat.num_a = *duration;
+                flat.num_b = *modified_at as u32;
+            }
+            DavResourceMetadata::CalendarEventNotification {
+                names,
+                created_at,
+                event_id,
+                ..
+            } => {
+                flat.kind = KIND_CALENDAR_EVENT_NOTIFICATION;
+                flat.set_ref_a(names);
+                flat.created_at = *created_at;
+                flat.num_a = *event_id;
+            }
+            DavResourceMetadata::AddressBook { name, acls, .. } => {
+                flat.kind = KIND_ADDRESS_BOOK;
+                flat.set_ref_a(name);
+                flat.set_ref_b(acls);
+            }
+            DavResourceMetadata::ContactCard {
+                names,
+                created_at,
+                modified_at,
+                uid,
+                ..
+            } => {
+                flat.kind = KIND_CONTACT_CARD;
+                flat.set_ref_a(names);
+                flat.set_ref_b(uid);
+                flat.created_at = *created_at;
+                flat.num_b = *modified_at as u32;
+            }
+        }
+
+        flat
+    }
+
+    fn set_ref_a(&mut self, arena: &ArenaRef) {
+        self.ref_a_off = arena.off;
+        self.ref_a_len = arena.len;
+    }
+
+    fn set_ref_b(&mut self, arena: &ArenaRef) {
+        self.ref_b_off = arena.off;
+        self.ref_b_len = arena.len;
+    }
+}
+
+impl ArchivedFlatResource {
+    fn ref_a(&self) -> ArenaRef {
+        ArenaRef {
+            off: self.ref_a_off.to_native(),
+            len: self.ref_a_len.to_native(),
+        }
+    }
+
+    fn ref_b(&self) -> ArenaRef {
+        ArenaRef {
+            off: self.ref_b_off.to_native(),
+            len: self.ref_b_len.to_native(),
+        }
+    }
+
+    fn unpack(&self) -> Option<DavResource> {
+        let data = match self.kind.to_native() {
+            KIND_FILE => DavResourceMetadata::File {
+                name: self.ref_a(),
+                size: self.num_a.to_native(),
+                parent_id: self.num_b.to_native(),
+                acls: self.ref_b(),
+                etag: self.etag.to_native(),
+            },
+            KIND_CALENDAR => DavResourceMetadata::Calendar {
+                name: self.ref_a(),
+                acls: self.ref_b(),
+                preferences: ArenaRef {
+                    off: self.num_a.to_native(),
+                    len: self.num_b.to_native(),
+                },
+                etag: self.etag.to_native(),
+            },
+            KIND_CALENDAR_EVENT => DavResourceMetadata::CalendarEvent {
+                names: self.ref_a(),
+                start: self.start.to_native(),
+                duration: self.num_a.to_native(),
+                created_at: self.created_at.to_native(),
+                modified_at: self.num_b.to_native() as i32,
+                uid: self.ref_b(),
+                etag: self.etag.to_native(),
+            },
+            KIND_CALENDAR_EVENT_NOTIFICATION => DavResourceMetadata::CalendarEventNotification {
+                names: self.ref_a(),
+                created_at: self.created_at.to_native(),
+                event_id: self.num_a.to_native(),
+                etag: self.etag.to_native(),
+            },
+            KIND_ADDRESS_BOOK => DavResourceMetadata::AddressBook {
+                name: self.ref_a(),
+                acls: self.ref_b(),
+                etag: self.etag.to_native(),
+            },
+            KIND_CONTACT_CARD => DavResourceMetadata::ContactCard {
+                names: self.ref_a(),
+                created_at: self.created_at.to_native(),
+                modified_at: self.num_b.to_native() as i32,
+                uid: self.ref_b(),
+                etag: self.etag.to_native(),
+            },
+            _ => return None,
+        };
+
+        Some(DavResource {
+            document_id: self.document_id.to_native(),
+            data,
+        })
+    }
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize)]
+pub struct ArchivedResources {
+    pub base_path: String,
+    pub item_change_id: u64,
+    pub container_change_id: u64,
+    pub containers_end: u32,
+    pub total: u32,
+    pub path_total: u32,
+    pub unified_id_space: bool,
+    pub chunks: Vec<ArchivedResourceChunk>,
+    pub path_chunks: Vec<ArchivedPathChunk>,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize)]
+pub struct ArchivedResourceChunk {
+    pub records: Vec<FlatResource>,
+    pub bytes: Vec<u8>,
+    pub name_offsets: Vec<u32>,
+    pub name_lengths: Vec<u32>,
+    pub name_parents: Vec<u32>,
+    pub acl_accounts: Vec<u32>,
+    pub acl_grants: Vec<u64>,
+    pub pref_accounts: Vec<u32>,
+    pub pref_timezones: Vec<u16>,
+    pub pref_flags: Vec<u16>,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize)]
+pub struct ArchivedPathChunk {
+    pub bytes: Vec<u8>,
+    pub path_offsets: Vec<u32>,
+    pub path_lengths: Vec<u32>,
+    pub parent_ids: Vec<u32>,
+    pub hierarchy_seqs: Vec<u32>,
+    pub document_ids: Vec<u32>,
+}
+
+impl DavResources {
+    pub fn to_snapshot(&self) -> Option<Vec<u8>> {
+        let mut chunks = Vec::with_capacity(self.resources.chunks.len());
+        for chunk in &self.resources.chunks {
+            let mut name_offsets = Vec::with_capacity(chunk.names.len());
+            let mut name_lengths = Vec::with_capacity(chunk.names.len());
+            let mut name_parents = Vec::with_capacity(chunk.names.len());
+            for name in chunk.names.iter() {
+                name_offsets.push(name.name.off);
+                name_lengths.push(name.name.len);
+                name_parents.push(name.parent_id);
+            }
+
+            let mut acl_accounts = Vec::with_capacity(chunk.acls.len());
+            let mut acl_grants = Vec::with_capacity(chunk.acls.len());
+            for acl in chunk.acls.iter() {
+                acl_accounts.push(acl.account_id);
+                acl_grants.push(acl.grants.bitmap);
+            }
+
+            let mut pref_accounts = Vec::with_capacity(chunk.prefs.len());
+            let mut pref_timezones = Vec::with_capacity(chunk.prefs.len());
+            let mut pref_flags = Vec::with_capacity(chunk.prefs.len());
+            for pref in chunk.prefs.iter() {
+                pref_accounts.push(pref.account_id);
+                pref_timezones.push(pref.tz.as_id());
+                pref_flags.push(pref.flags);
+            }
+
+            chunks.push(ArchivedResourceChunk {
+                records: chunk.records.iter().map(FlatResource::pack).collect(),
+                bytes: chunk.bytes.to_vec(),
+                name_offsets,
+                name_lengths,
+                name_parents,
+                acl_accounts,
+                acl_grants,
+                pref_accounts,
+                pref_timezones,
+                pref_flags,
+            });
+        }
+
+        let mut path_chunks = Vec::with_capacity(self.paths.chunks.len());
+        for chunk in &self.paths.chunks {
+            let mut path_offsets = Vec::with_capacity(chunk.paths.len());
+            let mut path_lengths = Vec::with_capacity(chunk.paths.len());
+            let mut parent_ids = Vec::with_capacity(chunk.paths.len());
+            let mut hierarchy_seqs = Vec::with_capacity(chunk.paths.len());
+            let mut document_ids = Vec::with_capacity(chunk.paths.len());
+            for path in chunk.paths.iter() {
+                path_offsets.push(path.path.off);
+                path_lengths.push(path.path.len);
+                parent_ids.push(path.parent_id);
+                hierarchy_seqs.push(path.hierarchy_seq);
+                document_ids.push(path.document_id);
+            }
+
+            path_chunks.push(ArchivedPathChunk {
+                bytes: chunk.bytes.to_vec(),
+                path_offsets,
+                path_lengths,
+                parent_ids,
+                hierarchy_seqs,
+                document_ids,
+            });
+        }
+
+        let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&ArchivedResources {
+            base_path: self.base_path.clone(),
+            item_change_id: self.item_change_id,
+            container_change_id: self.container_change_id,
+            containers_end: self.resources.containers_end as u32,
+            total: self.resources.total as u32,
+            path_total: self.paths.total as u32,
+            unified_id_space: self.resources.unified_id_space,
+            chunks,
+            path_chunks,
+        })
+        .ok()?;
+
+        Some(SwapFrame::wrap(
+            SwapPart::Resources,
+            self.highest_change_id,
+            self.resources.total as u32,
+            &payload,
+        ))
+    }
+
+    pub fn from_snapshot(buf: &[u8]) -> Option<Self> {
+        let frame = SwapFrame::parse(buf)?;
+        if frame.part() != SwapPart::Resources {
+            return None;
+        }
+
+        let archived =
+            rkyv::access::<ArchivedArchivedResources, rkyv::rancor::Error>(frame.payload()).ok()?;
+
+        let mut chunks = Vec::with_capacity(archived.chunks.len());
+        let mut total = 0usize;
+        for chunk in archived.chunks.iter() {
+            let names_len = chunk.name_offsets.len();
+            if chunk.name_lengths.len() != names_len || chunk.name_parents.len() != names_len {
+                return None;
+            }
+            let acls_len = chunk.acl_accounts.len();
+            if chunk.acl_grants.len() != acls_len {
+                return None;
+            }
+            let prefs_len = chunk.pref_accounts.len();
+            if chunk.pref_timezones.len() != prefs_len || chunk.pref_flags.len() != prefs_len {
+                return None;
+            }
+
+            let bytes: Box<[u8]> = chunk.bytes.as_slice().into();
+            let mut records = Vec::with_capacity(chunk.records.len());
+            for record in chunk.records.iter() {
+                records.push(record.unpack()?);
+            }
+
+            let names: Box<[CachedName]> = (0..names_len)
+                .map(|slot| CachedName {
+                    name: ArenaRef {
+                        off: chunk.name_offsets[slot].to_native(),
+                        len: chunk.name_lengths[slot].to_native(),
+                    },
+                    parent_id: chunk.name_parents[slot].to_native(),
+                })
+                .collect();
+
+            let acls: Box<[AclGrant]> = (0..acls_len)
+                .map(|slot| AclGrant {
+                    account_id: chunk.acl_accounts[slot].to_native(),
+                    grants: Bitmap::from(chunk.acl_grants[slot].to_native()),
+                })
+                .collect();
+
+            let prefs: Box<[TinyCalendarPreferences]> = (0..prefs_len)
+                .map(|slot| TinyCalendarPreferences {
+                    account_id: chunk.pref_accounts[slot].to_native(),
+                    tz: Tz::from_id(chunk.pref_timezones[slot].to_native()).unwrap_or_default(),
+                    flags: chunk.pref_flags[slot].to_native(),
+                })
+                .collect();
+
+            total += records.len();
+            let min_id = records
+                .first()
+                .map(|r| r.document_id)
+                .unwrap_or(crate::NO_ID);
+            let max_id = records.last().map(|r| r.document_id).unwrap_or(0);
+            chunks.push(Arc::new(ResourceChunk {
+                records: records.into_boxed_slice(),
+                bytes,
+                names,
+                acls,
+                prefs,
+                min_id,
+                max_id,
+            }));
+        }
+
+        let containers_end = archived.containers_end.to_native() as usize;
+        if total != archived.total.to_native() as usize || containers_end > chunks.len() {
+            return None;
+        }
+
+        let mut path_chunks = Vec::with_capacity(archived.path_chunks.len());
+        let mut path_total = 0usize;
+        for chunk in archived.path_chunks.iter() {
+            let paths_len = chunk.path_offsets.len();
+            if chunk.path_lengths.len() != paths_len
+                || chunk.parent_ids.len() != paths_len
+                || chunk.hierarchy_seqs.len() != paths_len
+                || chunk.document_ids.len() != paths_len
+            {
+                return None;
+            }
+
+            path_total += paths_len;
+            path_chunks.push(Arc::new(PathChunk {
+                paths: (0..paths_len)
+                    .map(|slot| DavPath {
+                        path: ArenaRef {
+                            off: chunk.path_offsets[slot].to_native(),
+                            len: chunk.path_lengths[slot].to_native(),
+                        },
+                        parent_id: chunk.parent_ids[slot].to_native(),
+                        hierarchy_seq: chunk.hierarchy_seqs[slot].to_native(),
+                        document_id: chunk.document_ids[slot].to_native(),
+                    })
+                    .collect(),
+                bytes: chunk.bytes.as_slice().into(),
+            }));
+        }
+
+        if path_total != archived.path_total.to_native() as usize {
+            return None;
+        }
+
+        let mut resources = DavResources {
+            base_path: archived.base_path.to_string(),
+            paths: Arc::new(PathIndex {
+                chunks: path_chunks,
+                total: path_total,
+            }),
+            resources: ResourceStore {
+                chunks,
+                containers_end,
+                total,
+                unified_id_space: archived.unified_id_space,
+            },
+            item_change_id: archived.item_change_id.to_native(),
+            container_change_id: archived.container_change_id.to_native(),
+            highest_change_id: frame.change_id(),
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+        };
+        resources.recompute_size();
+        resources
+            .update_lock
+            .set_revision(resources.highest_change_id);
+
+        Some(resources)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DAV_CHUNK, DavName, storage::dav::ResourceChunkBuilder};
+    use types::acl::Acl;
+
+    fn grants(account_id: u32) -> AclGrant {
+        AclGrant {
+            account_id,
+            grants: Bitmap::from_iter([Acl::Read, Acl::Modify]),
+        }
+    }
+
+    fn calcard(items: usize) -> DavResources {
+        let mut containers = Vec::new();
+        let mut chunk = ResourceChunkBuilder::with_capacity(4);
+        let mut entries = Vec::new();
+
+        for document_id in 0..3u32 {
+            let name = chunk.push_str(&format!("calendar-{document_id}"));
+            let acls = chunk.push_acls(&[grants(document_id + 100), grants(document_id + 200)]);
+            let preferences = chunk.push_prefs(&[TinyCalendarPreferences {
+                account_id: document_id + 300,
+                tz: Tz::UTC,
+                flags: 0b101,
+            }]);
+            chunk.records.push(DavResource {
+                document_id,
+                data: DavResourceMetadata::Calendar {
+                    name,
+                    acls,
+                    preferences,
+                    etag: document_id + 700,
+                },
+            });
+            entries.push((
+                format!("calendar-{document_id}"),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id: crate::NO_ID,
+                    hierarchy_seq: crate::storage::dav::CONTAINER_FLAG,
+                    document_id,
+                },
+            ));
+        }
+        containers.push(chunk);
+
+        let mut items_chunks = Vec::new();
+        let mut chunk = ResourceChunkBuilder::with_capacity(items);
+        for document_id in 0..items as u32 {
+            if chunk.len() == DAV_CHUNK {
+                items_chunks.push(std::mem::replace(
+                    &mut chunk,
+                    ResourceChunkBuilder::with_capacity(DAV_CHUNK),
+                ));
+            }
+            let parent_id = document_id % 3;
+            let names = chunk.push_names(&[DavName {
+                name: format!("event-{document_id}.ics"),
+                parent_id,
+            }]);
+            let uid = chunk.push_str(&format!("uid-{document_id}@example.org"));
+            chunk.records.push(DavResource {
+                document_id,
+                data: DavResourceMetadata::CalendarEvent {
+                    names,
+                    start: 1_700_000_000 + document_id as i64,
+                    duration: 3600 + document_id,
+                    created_at: 1_600_000_000 + document_id as i64,
+                    modified_at: -(document_id as i32) - 1,
+                    etag: document_id + 800,
+                    uid,
+                },
+            });
+            entries.push((
+                format!("calendar-{parent_id}/event-{document_id}.ics"),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id,
+                    hierarchy_seq: 0,
+                    document_id,
+                },
+            ));
+        }
+        items_chunks.push(chunk);
+
+        let mut resources = DavResources {
+            base_path: "/dav/cal/jane".to_string(),
+            paths: Arc::new(PathIndex::pack(entries)),
+            resources: ResourceStore::from_sorted(containers, items_chunks, false),
+            item_change_id: 42,
+            container_change_id: 17,
+            highest_change_id: 42,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+        };
+        resources.recompute_size();
+        resources
+    }
+
+    fn files(count: usize) -> DavResources {
+        let mut chunk = ResourceChunkBuilder::with_capacity(count);
+        let mut entries = Vec::new();
+
+        for document_id in 0..count as u32 {
+            let name = chunk.push_str(&format!("file-{document_id}.txt"));
+            let acls = if document_id % 4 == 0 {
+                chunk.push_acls(&[grants(document_id + 900)])
+            } else {
+                chunk.push_acls(&[])
+            };
+            chunk.records.push(DavResource {
+                document_id,
+                data: DavResourceMetadata::File {
+                    etag: document_id + 900,
+                    name,
+                    size: 1024 + document_id,
+                    parent_id: if document_id == 0 {
+                        crate::NO_ID
+                    } else {
+                        document_id - 1
+                    },
+                    acls,
+                },
+            });
+            entries.push((
+                format!("folder/file-{document_id}.txt"),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id: crate::NO_ID,
+                    hierarchy_seq: 1,
+                    document_id,
+                },
+            ));
+        }
+
+        let mut resources = DavResources {
+            base_path: "/dav/file/jane".to_string(),
+            paths: Arc::new(PathIndex::pack(entries)),
+            resources: ResourceStore::from_sorted(vec![chunk], Vec::new(), true),
+            item_change_id: 7,
+            container_change_id: 7,
+            highest_change_id: 7,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+        };
+        resources.recompute_size();
+        resources
+    }
+
+    fn assert_same(left: &DavResources, right: &DavResources) {
+        assert_eq!(left.base_path, right.base_path);
+        assert_eq!(left.item_change_id, right.item_change_id);
+        assert_eq!(left.container_change_id, right.container_change_id);
+        assert_eq!(left.highest_change_id, right.highest_change_id);
+        assert_eq!(left.size, right.size);
+        assert_eq!(left.resources.total, right.resources.total);
+        assert_eq!(
+            left.resources.containers_end,
+            right.resources.containers_end
+        );
+        assert_eq!(
+            left.resources.unified_id_space,
+            right.resources.unified_id_space
+        );
+        assert_eq!(left.resources.chunks.len(), right.resources.chunks.len());
+        assert_eq!(left.paths.total, right.paths.total);
+        assert_eq!(left.paths.chunks.len(), right.paths.chunks.len());
+
+        for (a, b) in left.resources.iter().zip(right.resources.iter()) {
+            assert_eq!(a.document_id(), b.document_id());
+            assert_eq!(a.is_container(), b.is_container());
+            assert_eq!(a.acls(), b.acls());
+            assert_eq!(a.size(), b.size());
+            assert_eq!(a.parent_id(), b.parent_id());
+            assert_eq!(a.event_time_range(), b.event_time_range());
+            assert_eq!(a.created_at(), b.created_at());
+            assert_eq!(a.modified_at(), b.modified_at());
+            assert_eq!(a.uid(), b.uid());
+            assert_eq!(a.event_id(), b.event_id());
+            assert_eq!(a.container_name(), b.container_name());
+            assert_eq!(a.has_acls(), b.has_acls());
+            for account_id in [100u32, 101, 102, 300, 301, 302] {
+                let left_pref = a.calendar_preferences(account_id);
+                let right_pref = b.calendar_preferences(account_id);
+                assert_eq!(left_pref.is_some(), right_pref.is_some());
+                if let (Some(left_pref), Some(right_pref)) = (left_pref, right_pref) {
+                    assert_eq!(left_pref.account_id, right_pref.account_id);
+                    assert_eq!(left_pref.tz.as_id(), right_pref.tz.as_id());
+                    assert_eq!(left_pref.flags, right_pref.flags);
+                }
+            }
+            assert_eq!(a.child_names().len(), b.child_names().len());
+            for (left_name, right_name) in a.child_names().iter().zip(b.child_names().iter()) {
+                assert_eq!(left_name.parent_id, right_name.parent_id);
+                assert_eq!(a.child_name_at(left_name), b.child_name_at(right_name));
+            }
+        }
+
+        for (chunk, path) in left.paths.iter() {
+            let name = std::str::from_utf8(&chunk.bytes[path.path.range()]).expect("valid path");
+            let found = right.paths.get(name);
+            assert!(found.is_some(), "path {name} missing after round trip");
+            let (_, other) = found.unwrap();
+            assert_eq!(path.document_id, other.document_id);
+            assert_eq!(path.parent_id, other.parent_id);
+            assert_eq!(path.hierarchy_seq, other.hierarchy_seq);
+        }
+
+        for chunk in &left.resources.chunks {
+            for record in chunk.records.iter() {
+                let container = record.is_container();
+                assert_eq!(
+                    right
+                        .resources
+                        .find(record.document_id, container)
+                        .map(|r| r.document_id()),
+                    Some(record.document_id)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn perf_probe() {
+        if std::env::var("SWAP_PERF").is_err() {
+            return;
+        }
+        use std::time::Instant;
+
+        fn p50(mut v: Vec<f64>) -> f64 {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        }
+
+        for n in [50_000usize, 500_000] {
+            let resources = calcard(n);
+            let encoded = resources.to_snapshot().expect("encode");
+            println!("--- calcard {n} ---");
+            println!("chunks         = {}", resources.resources.chunks.len());
+            println!("snapshot bytes = {}", encoded.len());
+            println!(
+                "bytes/resource = {:.2}",
+                encoded.len() as f64 / resources.resources.len() as f64
+            );
+
+            for _ in 0..2 {
+                std::hint::black_box(DavResources::from_snapshot(&encoded));
+            }
+
+            let mut decode = Vec::new();
+            for _ in 0..15 {
+                let t = Instant::now();
+                let out = DavResources::from_snapshot(&encoded).expect("decode");
+                decode.push(t.elapsed().as_secs_f64() * 1000.0);
+                std::hint::black_box(out.resources.len());
+            }
+            println!("decode p50 ms  = {:.4}", p50(decode));
+
+            let mut encode = Vec::new();
+            for _ in 0..10 {
+                let t = Instant::now();
+                let out = resources.to_snapshot().expect("encode");
+                encode.push(t.elapsed().as_secs_f64() * 1000.0);
+                std::hint::black_box(out.len());
+            }
+            println!("encode p50 ms  = {:.4}", p50(encode));
+        }
+    }
+
+    #[test]
+    fn calcard_snapshot_round_trips() {
+        let resources = calcard(500);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn calcard_snapshot_round_trips_many_chunks() {
+        let resources = calcard(DAV_CHUNK + 100);
+        assert!(resources.resources.chunks.len() > 2);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn files_snapshot_round_trips() {
+        let resources = files(300);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn empty_snapshot_round_trips() {
+        let resources = files(0);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn corrupt_snapshot_is_rejected() {
+        let resources = calcard(200);
+        let encoded = resources.to_snapshot().expect("encode");
+
+        assert!(DavResources::from_snapshot(&[]).is_none());
+        assert!(DavResources::from_snapshot(&encoded[..encoded.len() - 1]).is_none());
+
+        let mut bad_part = encoded.clone();
+        bad_part[6] = SwapPart::Messages.code();
+        assert!(DavResources::from_snapshot(&bad_part).is_none());
+
+        for offset in [40usize, 600, 2048] {
+            let mut flipped = encoded.clone();
+            if offset < flipped.len() {
+                flipped[offset] ^= 0x01;
+                assert!(
+                    DavResources::from_snapshot(&flipped).is_none(),
+                    "a payload byte flip at {offset} was not rejected"
+                );
+            }
+        }
+    }
+}

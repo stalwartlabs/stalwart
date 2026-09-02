@@ -18,6 +18,7 @@ impl Server {
         &self,
         account_id: u32,
         collection: Collection,
+        field: Field,
         documents: &I,
         mut cb: CB,
     ) -> trc::Result<()>
@@ -36,13 +37,13 @@ impl Server {
                         account_id,
                         collection,
                         document_id: documents.min(),
-                        class: ValueClass::Property(Field::ARCHIVE.into()),
+                        class: ValueClass::Property(field.into()),
                     },
                     ValueKey {
                         account_id,
                         collection,
                         document_id: documents.max(),
-                        class: ValueClass::Property(Field::ARCHIVE.into()),
+                        class: ValueClass::Property(field.into()),
                     },
                 ),
                 |key, value| {

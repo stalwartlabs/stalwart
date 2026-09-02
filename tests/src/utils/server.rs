@@ -239,6 +239,10 @@ impl TestServerBuilder {
         self
     }
 
+    pub fn tmp_dir(&self) -> &str {
+        self.temp_dir.path.as_os_str().to_str().unwrap()
+    }
+
     pub async fn insert_object(&self, object: impl Into<Object>) -> Id {
         self.bootstrap
             .registry
@@ -361,7 +365,7 @@ impl TestServerBuilder {
         // Parse components
         let core = Box::pin(Core::parse(&mut self.bootstrap, storage)).await;
         let data = Data::parse(&mut self.bootstrap).await;
-        let cache = Caches::parse(&mut self.bootstrap).await;
+        let cache = Caches::parse(&mut self.bootstrap, &core.storage).await;
 
         // Enable telemetry
         telemetry.enable(true);
@@ -590,7 +594,7 @@ impl TestServer {
                 shared_core: self.server.core.as_ref().clone().into_shared(),
                 data: Default::default(),
                 ipc,
-                cache: Caches::parse(&mut bp).await,
+                cache: Caches::parse(&mut bp, &self.server.core.storage).await,
             }
             .into(),
             ipc_rxs,

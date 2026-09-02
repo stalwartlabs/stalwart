@@ -7,14 +7,16 @@
 use crate::{
     DavError, DavMethod,
     common::{
-        ETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
 };
 use common::{Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
-use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{CalendarEvent, CalendarEventContent},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::{
@@ -25,6 +27,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
 };
 
 pub(crate) trait CalendarGetRequestHandler: Sync + Send {
@@ -95,7 +98,7 @@ impl CalendarGetRequestHandler for Server {
             .caused_by(trc::location!())?;
 
         // Validate headers
-        let etag = event_.etag();
+        let etag = format!("\"{}\"", event.etag.to_native());
         let schedule_tag = event.schedule_tag.as_ref().map(|tag| tag.to_native());
         self.validate_headers(
             access_token,
@@ -119,12 +122,25 @@ impl CalendarGetRequestHandler for Server {
             .with_schedule_tag_opt(schedule_tag)
             .with_last_modified(Rfc1123DateTime::new(i64::from(event.modified)).to_string());
 
-        let ical = event.data.event.to_string();
-
-        if !is_head {
-            Ok(response.with_binary_body(ical))
-        } else {
-            Ok(response.with_content_length(ical.len()))
+        if is_head {
+            return Ok(response.with_content_length(event.size.to_native() as usize));
         }
+
+        let content_ = self
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                account_id,
+                Collection::CalendarEvent,
+                resource.document_id(),
+                CalendarEventField::Content,
+            ))
+            .await
+            .caused_by(trc::location!())?
+            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let content = content_
+            .unarchive::<CalendarEventContent>()
+            .caused_by(trc::location!())?;
+
+        Ok(response.with_binary_body(content.data.event.to_string()))
     }
 }

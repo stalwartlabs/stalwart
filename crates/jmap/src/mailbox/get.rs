@@ -120,7 +120,7 @@ impl MailboxGet for Server {
                     MailboxProperty::TotalThreads => Value::Number(
                         cache
                             .in_mailbox(document_id)
-                            .map(|m| m.thread_id)
+                            .map(|m| m.thread_id())
                             .collect::<AHashSet<_>>()
                             .len()
                             .into(),
@@ -128,7 +128,7 @@ impl MailboxGet for Server {
                     MailboxProperty::UnreadThreads => Value::Number(
                         cache
                             .in_mailbox_without_keyword(document_id, &Keyword::Seen)
-                            .map(|m| m.thread_id)
+                            .map(|m| m.thread_id())
                             .collect::<AHashSet<_>>()
                             .len()
                             .into(),

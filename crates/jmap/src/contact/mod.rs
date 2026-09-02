@@ -5,7 +5,7 @@
  */
 
 use calcard::jscontact::JSContactProperty;
-use common::{DavName, DavResources};
+use common::{DavName, DavResources, NO_ID};
 use jmap_proto::error::set::SetError;
 use types::id::Id;
 
@@ -26,11 +26,13 @@ pub(super) fn assert_is_unique_uid(
             for document_id in resources
                 .paths
                 .iter()
-                .filter(move |item| {
-                    item.parent_id
-                        .is_some_and(|id| addressbook_ids.iter().any(|ab| ab.parent_id == id))
+                .filter(move |(_, path)| {
+                    path.parent_id != NO_ID
+                        && addressbook_ids
+                            .iter()
+                            .any(|ab| ab.parent_id == path.parent_id)
                 })
-                .map(|path| resources.resources[path.resource_idx].document_id)
+                .map(|(_, path)| path.document_id)
             {
                 if hits.contains(document_id) {
                     return Ok(Err(SetError::invalid_properties()

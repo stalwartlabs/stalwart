@@ -100,6 +100,10 @@ impl ArchivedDeadProperty {
 }
 
 impl DeadProperty {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn remove_element(&mut self, element: &DeadElementTag) {
         let mut depth = 0;
         let mut remove = false;

@@ -13,7 +13,7 @@ postgres = ["store/postgres", "directory/postgres"]
 mysql = ["store/mysql", "directory/mysql"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
-redis = ["store/redis", "coordinator/redis"]
+redis = ["store/redis", "coordinator/redis", "common/redis"]
 nats = ["coordinator/nats"]
 kafka = ["coordinator/kafka"]
 azure = ["store/azure"]
@@ -81,6 +81,7 @@ biscuit = "0.8.0"
 form_urlencoded = "1.2.2"
 rkyv.workspace = true
 compact_str = "0.10.0"
+tinyvec = { version = "1.12.0", features = ["alloc"] }
 quick-xml = "0.41"
 jmap-tools = { version = "0.1" }
 dns-update = { version = "0.5", features = ["test_provider"] }

@@ -5,8 +5,11 @@
  */
 
 use super::{ArchivedFileNode, FileNode};
-use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
-use store::write::{ArchiveCompression, Compression, Dictionary};
+use common::storage::index::{
+    IndexValue, IndexableAndSerializableObject, IndexableObject, SerializableObject,
+    serialize_object,
+};
+use store::write::{ArchiveCompression, BatchBuilder, Compression, Slot};
 use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for FileNode {
@@ -106,5 +109,11 @@ impl ArchivedFileNode {
 }
 
 impl ArchiveCompression for FileNode {
-    const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+    const COMPRESSION: Compression = Compression::None;
+}
+
+impl SerializableObject for FileNode {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        serialize_object(self, batch, pending_id)
+    }
 }

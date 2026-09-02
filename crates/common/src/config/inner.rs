@@ -99,10 +99,14 @@ impl Data {
 }
 
 impl Caches {
-    pub async fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, storage: &crate::config::storage::Storage) -> Self {
         let cache = bp.setting_infallible::<structs::Cache>().await;
+        let dav_estimate = (std::mem::size_of::<DavResources>()
+            + (500 * std::mem::size_of::<DavResource>())) as u64;
+        let swap = crate::cache::swap::SwapTier::build(bp, cache.swap, storage).await;
 
         Caches {
+            swap,
             access_tokens: Cache::new_single_shard(
                 cache.access_tokens,
                 (std::mem::size_of::<AccessTokenInner>() + 255) as u64,
@@ -114,27 +118,13 @@ impl Caches {
                     + std::mem::size_of::<Arc<MessageStoreCache>>()
                     + (1024 * std::mem::size_of::<MessageUid>())
                     + (15 * (std::mem::size_of::<MailboxCache>() + 60))) as u64,
-            ),
-            files: Cache::new_single_shard(
-                cache.files,
-                (std::mem::size_of::<DavResources>() + (500 * std::mem::size_of::<DavResource>()))
-                    as u64,
-            ),
-            events: Cache::new_single_shard(
-                cache.events,
-                (std::mem::size_of::<DavResources>() + (500 * std::mem::size_of::<DavResource>()))
-                    as u64,
-            ),
-            contacts: Cache::new_single_shard(
-                cache.contacts,
-                (std::mem::size_of::<DavResources>() + (500 * std::mem::size_of::<DavResource>()))
-                    as u64,
-            ),
-            scheduling: Cache::new_single_shard(
-                cache.scheduling,
-                (std::mem::size_of::<DavResources>() + (500 * std::mem::size_of::<DavResource>()))
-                    as u64,
-            ),
+            )
+            .with_name("messages"),
+            files: Cache::new_single_shard(cache.files, dav_estimate).with_name("files"),
+            events: Cache::new_single_shard(cache.events, dav_estimate).with_name("events"),
+            contacts: Cache::new_single_shard(cache.contacts, dav_estimate).with_name("contacts"),
+            scheduling: Cache::new_single_shard(cache.scheduling, dav_estimate)
+                .with_name("scheduling"),
             emails: Cache::new(cache.email_addresses, 255u64),
             emails_negative: CacheWithTtl::new(
                 cache.email_addresses_negative,
@@ -189,6 +179,8 @@ impl Caches {
                 cache.dns_rbl,
                 ((std::mem::size_of::<Ipv4Addr>() + 255) * 2) as u64,
             ),
+            directory_recipients: CacheWithTtl::new(cache.directory_recipients, 255u64),
+            directory_recipients_ttl: cache.directory_recipients_ttl.into_inner(),
             negative_cache_ttl: cache.negative_ttl.into_inner(),
         }
     }

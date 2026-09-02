@@ -11,7 +11,9 @@ use super::{
 use crate::{
     DavResourceName, DestroyArchive, RFC_3986,
     calendar::{
-        ArchivedCalendarEventNotification, CalendarEventNotification, alarm::CalendarAlarmType,
+        ArchivedCalendarEventContent, ArchivedCalendarEventNotification, CalendarEventContent,
+        CalendarEventNotification, CalendarEventNotificationContent, EVENT_HAS_ALARMS,
+        alarm::CalendarAlarmType,
     },
     scheduling::{ItipMessages, event_cancel::itip_cancel},
 };
@@ -19,7 +21,7 @@ use calcard::common::timezone::Tz;
 use common::{
     Server,
     auth::{AccountInfo, AccountTenantIds},
-    storage::index::ObjectIndexBuilder,
+    storage::index::{GroupwareWrite, ObjectIndexBuilder, SplitCurrent, SplitUpdate},
 };
 use registry::{
     schema::structs::{Task, TaskCalendarAlarmEmail, TaskCalendarAlarmNotification, TaskStatus},
@@ -36,7 +38,7 @@ use store::{
 use trc::AddContext;
 use types::{
     collection::{Collection, VanishedCollection},
-    field::CalendarNotificationField,
+    field::{CalendarEventField, CalendarNotificationField},
     id::Id,
 };
 
@@ -128,68 +130,95 @@ impl ItipAutoExpunge for Server {
 }
 
 impl CalendarEvent {
-    pub fn update<'x>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_full(
+        self,
+        content: CalendarEventContent,
+        changed_by: AccountTenantIds,
+        event: Archive<&ArchivedCalendarEvent>,
+        event_content: &ArchivedCalendarEventContent,
+        account_id: u32,
+        document_id: u32,
+        parent_id: Option<Slot>,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<String> {
+        let mut new_event = self;
+        new_event.modified = now() as i64;
+
+        let update = SplitUpdate::full(event, event_content, new_event, content, ())?;
+        let etag = update.etag();
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::CalendarEvent)
+            .with_document(document_id)
+            .custom(update.into_builder(changed_by, parent_id))?
+            .commit_point();
+
+        Ok(etag)
+    }
+
+    pub fn update_meta(
         self,
         changed_by: AccountTenantIds,
         event: Archive<&ArchivedCalendarEvent>,
         account_id: u32,
         document_id: u32,
         parent_id: Option<Slot>,
-        batch: &'x mut BatchBuilder,
-    ) -> trc::Result<&'x mut BatchBuilder> {
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<String> {
         let mut new_event = self;
-
-        // Build event
         new_event.modified = now() as i64;
 
-        // Prepare write batch
+        let update = SplitUpdate::meta_only(event, new_event);
+        let etag = update.etag();
+
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
             .with_document(document_id)
-            .custom(
-                ObjectIndexBuilder::new()
-                    .with_current(event)
-                    .with_changes(new_event)
-                    .with_changed_by(changed_by)
-                    .with_pending_id_opt(parent_id),
-            )
-            .map(|b| b.commit_point())
+            .custom(update.into_builder(changed_by, parent_id))?
+            .commit_point();
+
+        Ok(etag)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert(
         self,
+        content: CalendarEventContent,
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: impl Into<PendingId>,
         parent_id: Option<Slot>,
         next_alarm: Option<CalendarAlarm>,
         batch: &mut BatchBuilder,
-    ) -> trc::Result<&mut BatchBuilder> {
-        // Build event
+    ) -> trc::Result<String> {
         let mut event = self;
         let now = now() as i64;
         event.modified = now;
         event.created = now;
 
-        // Prepare write batch
+        let changes = GroupwareWrite::full(event, content, ())?;
+        let etag = format!("\"{}\"", changes.meta().etag);
+
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
             .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(event)
+                    .with_changes(changes)
                     .with_changed_by(changed_by)
                     .with_pending_id_opt(parent_id),
-            )
-            .map(|batch| {
-                if let Some(next_alarm) = next_alarm {
-                    next_alarm.write_task(batch);
-                }
+            )?;
 
-                batch.commit_point()
-            })
+        if let Some(next_alarm) = next_alarm {
+            next_alarm.write_task(batch);
+        }
+        batch.commit_point();
+
+        Ok(etag)
     }
 }
 
@@ -258,6 +287,7 @@ impl Calendar {
 impl CalendarEventNotification {
     pub fn insert(
         self,
+        content: CalendarEventNotificationContent,
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: impl Into<PendingId>,
@@ -277,7 +307,7 @@ impl CalendarEventNotification {
             .with_pending_document(document_id.into())
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(event)
+                    .with_changes(GroupwareWrite::full(event, content, ())?)
                     .with_changed_by(changed_by)
                     .with_pending_id_opt(event_id),
             )
@@ -316,6 +346,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
                         .caused_by(trc::location!())?,
                 )
                 .delete(
+                    server,
                     account_info,
                     account_id,
                     document_id,
@@ -323,7 +354,8 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
                     None,
                     send_itip,
                     batch,
-                )?;
+                )
+                .await?;
             }
         }
 
@@ -367,8 +399,9 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
 
 impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
     #[allow(clippy::too_many_arguments)]
-    pub fn delete(
+    pub async fn delete(
         self,
+        server: &Server,
         account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
@@ -391,19 +424,23 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     .deserialize::<CalendarEvent>()
                     .caused_by(trc::location!())?;
                 new_event.names.swap_remove(delete_idx);
+                let update = SplitUpdate::meta_only(event, new_event);
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::CalendarEvent)
                     .with_document(document_id)
-                    .custom(
-                        ObjectIndexBuilder::new()
-                            .with_changed_by(account_info.account_tenant_ids())
-                            .with_current(event)
-                            .with_changes(new_event),
-                    )
+                    .custom(update.into_builder(account_info.account_tenant_ids(), None))
                     .caused_by(trc::location!())?;
             } else {
-                self.delete_all(account_info, account_id, document_id, send_itip, batch)?;
+                self.delete_all(
+                    server,
+                    account_info,
+                    account_id,
+                    document_id,
+                    send_itip,
+                    batch,
+                )
+                .await?;
             }
 
             if let Some(delete_path) = delete_path {
@@ -416,9 +453,9 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn delete_all(
+    pub async fn delete_all(
         self,
+        server: &Server,
         account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
@@ -426,31 +463,54 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let event = self.0;
-        // Delete event
+        let now = now() as i64;
+
+        let has_alarms = event.inner.flags.to_native() & EVENT_HAS_ALARMS != 0;
+        let send_itip =
+            send_itip && event.inner.schedule_tag.is_some() && event.inner.event_range_end() > now;
+
+        let content_ = if has_alarms || send_itip {
+            server
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                    CalendarEventField::Content,
+                ))
+                .await
+                .caused_by(trc::location!())?
+        } else {
+            None
+        };
+
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
             .with_document(document_id);
 
-        // Remove next alarm if it exists
-        let now = now() as i64;
-        if let Some(next_alarm) = event.inner.data.next_alarm(now, Tz::Floating) {
-            next_alarm.delete_task(batch);
-        }
-
-        // Scheduling
-        if send_itip
-            && event.inner.schedule_tag.is_some()
-            && event.inner.data.event_range_end() > now
-        {
-            let event = event
-                .deserialize::<CalendarEvent>()
+        if let Some(content_) = &content_ {
+            let content = content_
+                .to_unarchived::<CalendarEventContent>()
                 .caused_by(trc::location!())?;
 
-            if let Ok(messages) = itip_cancel(&event.data.event, account_info.addresses(), true) {
-                ItipMessages::new(vec![messages])
-                    .queue(batch)
+            if has_alarms && let Some(next_alarm) = content.inner.data.next_alarm(now, Tz::Floating)
+            {
+                next_alarm.delete_task(batch);
+            }
+
+            if send_itip {
+                let content = content
+                    .deserialize::<CalendarEventContent>()
                     .caused_by(trc::location!())?;
+
+                if let Ok(messages) =
+                    itip_cancel(&content.data.event, account_info.addresses(), true)
+                {
+                    ItipMessages::new(vec![messages])
+                        .queue(batch)
+                        .caused_by(trc::location!())?;
+                }
             }
         }
 
@@ -458,7 +518,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_changed_by(account_info.account_tenant_ids())
-                    .with_current(event),
+                    .with_current(SplitCurrent::<ArchivedCalendarEvent>::MetaOnly(event)),
             )
             .caused_by(trc::location!())?;
 
@@ -483,7 +543,9 @@ impl DestroyArchive<Archive<&ArchivedCalendarEventNotification>> {
             .custom(
                 ObjectIndexBuilder::<_, ()>::new()
                     .with_changed_by(changed_by)
-                    .with_current(self.0),
+                    .with_current(SplitCurrent::<ArchivedCalendarEventNotification>::MetaOnly(
+                        self.0,
+                    )),
             )
             .caused_by(trc::location!())?
             .commit_point();

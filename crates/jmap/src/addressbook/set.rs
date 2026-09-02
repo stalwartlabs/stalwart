@@ -26,7 +26,7 @@ use rand::{RngExt, distr::Alphanumeric};
 use store::{
     ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
 };
 use trc::AddContext;
 use types::{
@@ -226,20 +226,10 @@ impl AddressBookSet for Server {
         }
 
         // Process deletions
-        let mut reset_default_address_book = false;
+        let mut destroyed_books: Vec<u32> = Vec::new();
         if !will_destroy.is_empty() {
             let mut destroy_children = AHashSet::new();
             let mut destroy_parents = AHashSet::new();
-            let default_address_book_id = self
-                .store()
-                .get_value::<u32>(ValueKey {
-                    account_id,
-                    collection: Collection::Principal.into(),
-                    document_id: 0,
-                    class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
-                })
-                .await
-                .caused_by(trc::location!())?;
 
             let on_destroy_remove_contents = request
                 .arguments
@@ -313,9 +303,7 @@ impl AddressBookSet for Server {
                     )
                     .caused_by(trc::location!())?;
 
-                if default_address_book_id == Some(document_id) {
-                    reset_default_address_book = true;
-                }
+                destroyed_books.push(document_id);
 
                 response.destroyed.push(id);
             }
@@ -343,12 +331,15 @@ impl AddressBookSet for Server {
                             .all(|n| destroy_parents.contains(&n.parent_id.to_native()))
                         {
                             // Card only belongs to address books being deleted, delete it
-                            DestroyArchive(card).delete_all(
-                                access_token.account_tenant_ids(),
-                                account_id,
-                                document_id,
-                                &mut batch,
-                            )?;
+                            DestroyArchive(card)
+                                .delete_all(
+                                    self,
+                                    access_token.account_tenant_ids(),
+                                    account_id,
+                                    document_id,
+                                    &mut batch,
+                                )
+                                .await?;
                         } else {
                             // Unlink addressbook id from card
                             let mut new_card = card
@@ -357,7 +348,7 @@ impl AddressBookSet for Server {
                             new_card
                                 .names
                                 .retain(|n| !destroy_parents.contains(&n.parent_id));
-                            new_card.update(
+                            new_card.update_meta(
                                 access_token.account_tenant_ids(),
                                 card,
                                 account_id,
@@ -389,12 +380,14 @@ impl AddressBookSet for Server {
                         default_address_book_id,
                     );
             }
-        } else if reset_default_address_book {
+        } else if !destroyed_books.is_empty() {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Principal)
-                .with_document(0)
-                .clear(PrincipalField::DefaultAddressBookId);
+                .with_document(0);
+            for document_id in destroyed_books {
+                batch.clear_if_equals(PrincipalField::DefaultAddressBookId, document_id);
+            }
         }
 
         // Write changes

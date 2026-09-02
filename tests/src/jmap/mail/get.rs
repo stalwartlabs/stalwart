@@ -47,7 +47,7 @@ pub async fn test(test: &TestServer) {
             )
             .mailbox_ids([mailbox_id.clone()])
             .keywords(["tag".to_string()])
-            .received_at((blob_len * 1000000) as i64);
+            .received_at(1_700_000_000 + blob_len as i64);
         let id = import_request.create_id();
         let mut response = request.send_single::<EmailImportResponse>().await.unwrap();
         assert_ne!(response.old_state(), Some(response.new_state()));

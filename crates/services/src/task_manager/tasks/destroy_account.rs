@@ -158,6 +158,9 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
     // Unlink all accounts's blobs
     destroy_account_blobs(server, account_id).await?;
 
+    // Remove persisted cache snapshots
+    server.inner.cache.swap.remove_account(account_id).await;
+
     // Destroy account data
     server
         .store()

@@ -96,8 +96,9 @@ socket2 = "0.6"
 [features]
 test_mode = []
 dev_mode = []
-enterprise = []
+enterprise = ["store/enterprise"]
 foundation = []
+redis = ["store/redis"]
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }

@@ -109,6 +109,8 @@ pub const EVENT_INVITE_SELF: u16 = 1;
 pub const EVENT_INVITE_OTHERS: u16 = 1 << 1;
 pub const EVENT_HIDE_ATTENDEES: u16 = 1 << 2;
 pub const EVENT_DRAFT: u16 = 1 << 3;
+pub const EVENT_HAS_DEAD_PROPERTIES: u16 = 1 << 4;
+pub const EVENT_HAS_ALARMS: u16 = 1 << 5;
 
 pub const EVENT_NOTIFICATION_IS_DRAFT: u16 = 1;
 pub const EVENT_NOTIFICATION_IS_CHANGE: u16 = 1 << 1;
@@ -120,28 +122,45 @@ pub const PREF_USE_DEFAULT_ALERTS: u16 = 1;
 )]
 pub struct CalendarEvent {
     pub names: Vec<DavName>,
+    pub uid: String,
     pub display_name: Option<String>,
-    pub data: CalendarEventData,
-    pub preferences: Vec<EventPreferences>,
-    pub flags: u16,
-    pub dead_properties: DeadProperty,
-    pub size: u32,
+    pub start: i64,
+    pub duration: u32,
     pub created: i64,
     pub modified: i64,
+    pub size: u32,
+    pub etag: u32,
+    pub flags: u16,
     pub schedule_tag: Option<u32>,
 }
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
+pub struct CalendarEventContent {
+    pub data: CalendarEventData,
+    pub preferences: Vec<EventPreferences>,
+    pub dead_properties: DeadProperty,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
 pub struct CalendarEventNotification {
-    pub event: ICalendar,
     pub event_id: Option<u32>,
     pub changed_by: ChangedBy,
-    pub flags: u16,
-    pub size: u32,
     pub created: i64,
     pub modified: i64,
+    pub size: u32,
+    pub etag: u32,
+    pub flags: u16,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct CalendarEventNotificationContent {
+    pub event: ICalendar,
 }
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
@@ -267,7 +286,7 @@ impl ArchivedCalendar {
     }
 }
 
-impl CalendarEvent {
+impl CalendarEventContent {
     pub fn preferences(&self, account_id: u32) -> Option<&EventPreferences> {
         self.preferences.iter().find(|p| p.account_id == account_id)
     }
@@ -291,7 +310,9 @@ impl CalendarEvent {
 
         &mut self.preferences[idx]
     }
+}
 
+impl CalendarEvent {
     pub fn added_calendar_ids(
         &self,
         prev_data: &ArchivedCalendarEvent,
@@ -324,7 +345,7 @@ impl CalendarEvent {
     }
 }
 
-impl ArchivedCalendarEvent {
+impl ArchivedCalendarEventContent {
     pub fn preferences(&self, account_id: u32) -> Option<&ArchivedEventPreferences> {
         self.preferences.iter().find(|p| p.account_id == account_id)
     }

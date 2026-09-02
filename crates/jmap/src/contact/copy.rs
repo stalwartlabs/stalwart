@@ -6,7 +6,7 @@
 
 use crate::{changes::state::JmapCacheState, contact::set::ContactCardSet};
 use common::{Server, auth::AccessToken};
-use groupware::{cache::GroupwareCache, contact::ContactCard};
+use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
@@ -31,6 +31,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::ContactField,
     id::Id,
 };
 use utils::map::vec_map::VecMap;
@@ -123,10 +124,11 @@ impl JmapContactCardCopy for Server {
 
             let Some(_contact) = self
                 .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                     from_account_id,
                     Collection::ContactCard,
                     from_contact_id,
+                    ContactField::Content,
                 ))
                 .await?
             else {
@@ -141,7 +143,7 @@ impl JmapContactCardCopy for Server {
             };
 
             let contact = _contact
-                .deserialize::<ContactCard>()
+                .deserialize::<ContactCardContent>()
                 .caused_by(trc::location!())?;
 
             match self

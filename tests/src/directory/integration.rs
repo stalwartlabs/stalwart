@@ -154,7 +154,6 @@ pub async fn test() {
                 .await
                 .unwrap()
                 .emails
-                .index
                 .len(),
             1
         );
@@ -185,7 +184,6 @@ pub async fn test() {
                 .await
                 .unwrap()
                 .emails
-                .index
                 .len(),
             1
         );

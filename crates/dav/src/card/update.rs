@@ -8,7 +8,6 @@ use super::assert_is_unique_uid;
 use crate::{
     DavError, DavErrorCondition, DavMethod,
     common::{
-        ETag, ExtractETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -21,7 +20,11 @@ use dav_proto::{
     RequestHeaders, Return,
     schema::{property::Rfc1123DateTime, response::CardCondition},
 };
-use groupware::{cache::GroupwareCache, contact::ContactCard};
+use groupware::{
+    SizeWriter,
+    cache::GroupwareCache,
+    contact::{ContactCard, ContactCardContent},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::BatchBuilder;
@@ -33,6 +36,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::ContactField,
 };
 
 pub(crate) trait CardUpdateRequestHandler: Sync + Send {
@@ -130,6 +134,20 @@ impl CardUpdateRequestHandler for Server {
             let card = card_
                 .to_unarchived::<ContactCard>()
                 .caused_by(trc::location!())?;
+            let content_ = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::ContactCard,
+                    document_id,
+                    ContactField::Content,
+                ))
+                .await
+                .caused_by(trc::location!())?
+                .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+            let content = content_
+                .to_unarchived::<ContactCardContent>()
+                .caused_by(trc::location!())?;
 
             // Validate headers
             match self
@@ -140,7 +158,7 @@ impl CardUpdateRequestHandler for Server {
                         account_id,
                         collection: Collection::ContactCard,
                         document_id: Some(document_id),
-                        etag: card.etag().into(),
+                        etag: format!("\"{}\"", card.inner.etag.to_native()).into(),
                         path: resource_name.as_ref(),
                         ..Default::default()
                     }],
@@ -154,7 +172,7 @@ impl CardUpdateRequestHandler for Server {
                     if headers.ret == Return::Representation =>
                 {
                     let mut vcard = String::with_capacity(128);
-                    let _ = card.inner.card.write_to(
+                    let _ = content.inner.card.write_to(
                         &mut vcard,
                         headers
                             .vcard_version
@@ -163,7 +181,7 @@ impl CardUpdateRequestHandler for Server {
 
                     return Ok(HttpResponse::new(StatusCode::PRECONDITION_FAILED)
                         .with_content_type("text/vcard; charset=utf-8")
-                        .with_etag(card.etag())
+                        .with_etag(format!("\"{}\"", card.inner.etag.to_native()))
                         .with_last_modified(
                             Rfc1123DateTime::new(i64::from(card.inner.modified)).to_string(),
                         )
@@ -174,7 +192,7 @@ impl CardUpdateRequestHandler for Server {
             }
 
             // Validate UID
-            match (card.inner.card.uid(), vcard.uid()) {
+            match (content.inner.card.uid(), vcard.uid()) {
                 (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
                 (None, None) | (None, Some(_)) => {}
                 _ => {
@@ -185,37 +203,44 @@ impl CardUpdateRequestHandler for Server {
                 }
             }
 
+            // Build node
+            let new_card = card
+                .deserialize::<ContactCard>()
+                .caused_by(trc::location!())?;
+            let mut new_content = content
+                .deserialize::<ContactCardContent>()
+                .caused_by(trc::location!())?;
+            new_content.card = vcard;
+
             // Validate quota
-            let extra_bytes =
-                (bytes.len() as u64).saturating_sub(u32::from(card.inner.size) as u64);
+            let extra_bytes = (SizeWriter::vcard(
+                &new_content.card,
+                self.core.groupware.vcard_version,
+            ) as u64)
+                .saturating_sub(u32::from(card.inner.size) as u64);
             if extra_bytes > 0 {
                 self.has_available_quota(self.account(account_id).await?.as_ref(), extra_bytes)
                     .await?;
             }
 
-            // Build node
-            let mut new_card = card
-                .deserialize::<ContactCard>()
-                .caused_by(trc::location!())?;
-            new_card.size = bytes.len() as u32;
-            new_card.card = vcard;
-
             // Prepare write batch
             let mut batch = BatchBuilder::new();
             let etag = new_card
-                .update(
+                .update_full(
+                    new_content,
+                    self.core.groupware.vcard_version,
                     access_token.account_tenant_ids(),
                     card,
+                    content.inner,
                     account_id,
                     document_id,
                     None,
                     &mut batch,
                 )
-                .caused_by(trc::location!())?
-                .etag();
+                .caused_by(trc::location!())?;
             self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag_opt(etag))
+            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag(etag))
         } else if let Some((Some(parent), name)) = resources.map_parent(resource_name.as_ref()) {
             if !parent.is_container() {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
@@ -266,29 +291,30 @@ impl CardUpdateRequestHandler for Server {
                     name: name.to_string(),
                     parent_id: parent.document_id(),
                 }],
+                ..Default::default()
+            };
+            let content = ContactCardContent {
                 card: vcard,
-                size: bytes.len() as u32,
                 ..Default::default()
             };
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
             let document_id = batch.reserve_document_id(account_id, Collection::ContactCard);
-            card.insert(
-                access_token.account_tenant_ids(),
-                account_id,
-                document_id,
-                None,
-                &mut batch,
-            )
-            .caused_by(trc::location!())?;
-            let etag = self
-                .commit_batch(batch)
-                .await
-                .caused_by(trc::location!())?
-                .etag();
+            let etag = card
+                .insert(
+                    content,
+                    self.core.groupware.vcard_version,
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    None,
+                    &mut batch,
+                )
+                .caused_by(trc::location!())?;
+            self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            Ok(HttpResponse::new(StatusCode::CREATED).with_etag_opt(etag))
+            Ok(HttpResponse::new(StatusCode::CREATED).with_etag(etag))
         } else {
             Err(DavError::Code(StatusCode::CONFLICT))?
         }

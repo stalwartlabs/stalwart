@@ -8,7 +8,6 @@ use crate::{
     DavError, DavErrorCondition, DavMethod,
     calendar::freebusy::CalendarFreebusyRequestHandler,
     common::{
-        ETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -30,7 +29,10 @@ use dav_proto::{
     },
 };
 use groupware::{
-    DestroyArchive, cache::GroupwareCache, calendar::CalendarEventNotification, strip_mailto_scheme,
+    DestroyArchive,
+    cache::GroupwareCache,
+    calendar::{CalendarEventNotification, CalendarEventNotificationContent},
+    strip_mailto_scheme,
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -40,7 +42,10 @@ use store::{
 };
 use store::{ahash::AHashMap, write::BatchBuilder};
 use trc::AddContext;
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    field::CalendarNotificationField,
+};
 use utils::sanitize_email;
 
 pub(crate) trait CalendarEventNotificationHandler: Sync + Send {
@@ -118,7 +123,7 @@ impl CalendarEventNotificationHandler for Server {
             .caused_by(trc::location!())?;
 
         // Validate headers
-        let etag = event_.etag();
+        let etag = format!("\"{}\"", event.etag.to_native());
         self.validate_headers(
             access_token,
             headers,
@@ -140,13 +145,26 @@ impl CalendarEventNotificationHandler for Server {
             .with_etag(etag)
             .with_last_modified(Rfc1123DateTime::new(i64::from(event.modified)).to_string());
 
-        let ical = event.event.to_string();
-
-        if !is_head {
-            Ok(response.with_binary_body(ical))
-        } else {
-            Ok(response.with_content_length(ical.len()))
+        if is_head {
+            return Ok(response.with_content_length(event.size.to_native() as usize));
         }
+
+        let content_ = self
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                account_id,
+                Collection::CalendarEventNotification,
+                resource.document_id(),
+                CalendarNotificationField::Content,
+            ))
+            .await
+            .caused_by(trc::location!())?
+            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let content = content_
+            .unarchive::<CalendarEventNotificationContent>()
+            .caused_by(trc::location!())?;
+
+        Ok(response.with_binary_body(content.event.to_string()))
     }
 
     async fn handle_scheduling_delete_request(
@@ -197,6 +215,9 @@ impl CalendarEventNotificationHandler for Server {
             .await
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let event = event_
+            .to_unarchived::<CalendarEventNotification>()
+            .caused_by(trc::location!())?;
 
         // Validate headers
         self.validate_headers(
@@ -206,7 +227,7 @@ impl CalendarEventNotificationHandler for Server {
                 account_id,
                 collection: Collection::CalendarEventNotification,
                 document_id: document_id.into(),
-                etag: event_.etag().into(),
+                etag: format!("\"{}\"", event.inner.etag.to_native()).into(),
                 path: delete_path,
                 ..Default::default()
             }],
@@ -214,10 +235,6 @@ impl CalendarEventNotificationHandler for Server {
             DavMethod::DELETE,
         )
         .await?;
-
-        let event = event_
-            .to_unarchived::<CalendarEventNotification>()
-            .caused_by(trc::location!())?;
 
         // Delete event
         let mut batch = BatchBuilder::new();

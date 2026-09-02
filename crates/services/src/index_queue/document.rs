@@ -6,14 +6,17 @@
 
 use common::Server;
 use email::message::metadata::MessageMetadata;
-use groupware::{calendar::CalendarEvent, contact::ContactCard};
+use groupware::{calendar::CalendarEventContent, contact::ContactCardContent};
 use store::{
     ValueKey,
     search::IndexDocument,
     write::{Archive, ArchiveBytes, SearchIndex},
 };
 use trc::AddContext;
-use types::{collection::Collection, field::EmailField};
+use types::{
+    collection::Collection,
+    field::{CalendarEventField, ContactField, EmailField},
+};
 
 pub(crate) async fn build_email_document(
     server: &Server,
@@ -73,16 +76,17 @@ pub(crate) async fn build_calendar_document(
 
     match server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
             account_id,
             Collection::CalendarEvent,
             document_id,
+            CalendarEventField::Content,
         ))
         .await?
     {
         Some(metadata_) => Ok(Some(
             metadata_
-                .unarchive::<CalendarEvent>()
+                .unarchive::<CalendarEventContent>()
                 .caused_by(trc::location!())?
                 .index_document(
                     account_id,
@@ -106,16 +110,17 @@ pub(crate) async fn build_contact_document(
 
     match server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
             account_id,
             Collection::ContactCard,
             document_id,
+            ContactField::Content,
         ))
         .await?
     {
         Some(metadata_) => Ok(Some(
             metadata_
-                .unarchive::<ContactCard>()
+                .unarchive::<ContactCardContent>()
                 .caused_by(trc::location!())?
                 .index_document(
                     account_id,

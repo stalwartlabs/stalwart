@@ -124,6 +124,177 @@ impl RedisStore {
         }
     }
 
+    pub async fn chunks_get(&self, prefix: &[u8], count: u32) -> trc::Result<Option<Vec<u8>>> {
+        match &self.pool {
+            RedisPool::Single(pool) => {
+                self.chunks_get_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    count,
+                )
+                .await
+            }
+            RedisPool::Cluster(pool) => {
+                self.chunks_get_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    count,
+                )
+                .await
+            }
+            RedisPool::Sentinel(pool) => {
+                self.chunks_get_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    count,
+                )
+                .await
+            }
+        }
+    }
+
+    pub async fn chunks_set(
+        &self,
+        prefix: &[u8],
+        data: &[u8],
+        chunk_size: usize,
+        expires: Option<u64>,
+    ) -> trc::Result<()> {
+        match &self.pool {
+            RedisPool::Single(pool) => {
+                self.chunks_set_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    data,
+                    chunk_size,
+                    expires,
+                )
+                .await
+            }
+            RedisPool::Cluster(pool) => {
+                self.chunks_set_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    data,
+                    chunk_size,
+                    expires,
+                )
+                .await
+            }
+            RedisPool::Sentinel(pool) => {
+                self.chunks_set_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    data,
+                    chunk_size,
+                    expires,
+                )
+                .await
+            }
+        }
+    }
+
+    pub async fn chunks_delete(&self, prefix: &[u8], from: u32, to: u32) -> trc::Result<()> {
+        if from >= to {
+            return Ok(());
+        }
+        match &self.pool {
+            RedisPool::Single(pool) => {
+                self.chunks_delete_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    from,
+                    to,
+                )
+                .await
+            }
+            RedisPool::Cluster(pool) => {
+                self.chunks_delete_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    from,
+                    to,
+                )
+                .await
+            }
+            RedisPool::Sentinel(pool) => {
+                self.chunks_delete_(
+                    pool.get().await.map_err(into_error)?.as_mut(),
+                    prefix,
+                    from,
+                    to,
+                )
+                .await
+            }
+        }
+    }
+
+    async fn chunks_get_(
+        &self,
+        conn: &mut impl AsyncCommands,
+        prefix: &[u8],
+        count: u32,
+    ) -> trc::Result<Option<Vec<u8>>> {
+        let mut pipeline = redis::pipe();
+        for index in 0..count {
+            pipeline.cmd("GET").arg(chunk_key(prefix, index));
+        }
+
+        let chunks = pipeline
+            .query_async::<Vec<Option<Vec<u8>>>>(conn)
+            .await
+            .map_err(into_error)?;
+
+        let mut data = Vec::with_capacity(chunks.iter().flatten().map(Vec::len).sum());
+        for chunk in chunks {
+            match chunk {
+                Some(chunk) => data.extend_from_slice(&chunk),
+                None => return Ok(None),
+            }
+        }
+
+        Ok(Some(data))
+    }
+
+    async fn chunks_set_(
+        &self,
+        conn: &mut impl AsyncCommands,
+        prefix: &[u8],
+        data: &[u8],
+        chunk_size: usize,
+        expires: Option<u64>,
+    ) -> trc::Result<()> {
+        let mut pipeline = redis::pipe();
+        for (index, chunk) in data.chunks(chunk_size).enumerate() {
+            let key = chunk_key(prefix, index as u32);
+            match expires {
+                Some(expires) => {
+                    pipeline.cmd("SETEX").arg(key).arg(expires).arg(chunk);
+                }
+                None => {
+                    pipeline.cmd("SET").arg(key).arg(chunk);
+                }
+            }
+        }
+
+        pipeline.query_async::<()>(conn).await.map_err(into_error)
+    }
+
+    async fn chunks_delete_(
+        &self,
+        conn: &mut impl AsyncCommands,
+        prefix: &[u8],
+        from: u32,
+        to: u32,
+    ) -> trc::Result<()> {
+        let mut pipeline = redis::pipe();
+        for index in from..to {
+            pipeline.cmd("DEL").arg(chunk_key(prefix, index));
+        }
+
+        pipeline.query_async::<()>(conn).await.map_err(into_error)
+    }
+
     pub async fn key_delete_prefix(&self, prefix: &[u8]) -> trc::Result<()> {
         match &self.pool {
             RedisPool::Single(pool) => {
@@ -331,4 +502,13 @@ impl RedisStore {
             }
         }
     }
+}
+
+fn chunk_key(prefix: &[u8], index: u32) -> Vec<u8> {
+    let mut key = Vec::with_capacity(prefix.len() + 12);
+    key.push(b'{');
+    key.extend_from_slice(prefix);
+    key.extend_from_slice(b"}:");
+    key.extend_from_slice(index.to_string().as_bytes());
+    key
 }

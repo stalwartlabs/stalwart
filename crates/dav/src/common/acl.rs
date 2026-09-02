@@ -121,8 +121,8 @@ impl DavAclHandler for Server {
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
 
-        let container =
-            ArchivedResource::from_archive(&archive, collection).caused_by(trc::location!())?;
+        let container = ArchivedResource::from_archive(&archive, None, collection)
+            .caused_by(trc::location!())?;
 
         // Validate ACL
         let acls = container.acls().unwrap();

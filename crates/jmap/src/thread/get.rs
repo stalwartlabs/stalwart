@@ -44,18 +44,18 @@ impl ThreadGet for Server {
         };
         let mut thread_map: AHashMap<u32, RoaringBitmap> = AHashMap::with_capacity(32);
         let mut all_ids = RoaringBitmap::new();
-        for item in &cache.emails.items {
+        for item in cache.emails.iter() {
             if shared_ids
                 .as_ref()
-                .is_some_and(|ids| !ids.contains(item.document_id))
+                .is_some_and(|ids| !ids.contains(item.document_id()))
             {
                 continue;
             }
             thread_map
-                .entry(item.thread_id)
+                .entry(item.thread_id())
                 .or_default()
-                .insert(item.document_id);
-            all_ids.insert(item.document_id);
+                .insert(item.document_id());
+            all_ids.insert(item.document_id());
         }
 
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
@@ -90,9 +90,9 @@ impl ThreadGet for Server {
                     Map::with_capacity(2).with_key_value(ThreadProperty::Id, id);
                 if add_email_ids {
                     let mut ids = Vec::with_capacity(document_ids.len() as usize);
-                    for m in cache.emails.items.iter() {
-                        if document_ids.remove(m.document_id) {
-                            ids.push(Id::from_parts(thread_id, m.document_id));
+                    for m in cache.emails.iter() {
+                        if document_ids.remove(m.document_id()) {
+                            ids.push(Id::from_parts(thread_id, m.document_id()));
                         }
                     }
                     for id in document_ids.iter() {

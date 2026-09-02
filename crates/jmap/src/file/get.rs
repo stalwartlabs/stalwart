@@ -73,7 +73,7 @@ impl FileNodeGet for Server {
             cache
                 .resources
                 .iter()
-                .map(|r| r.document_id)
+                .map(|r| r.document_id())
                 .collect::<RoaringBitmap>()
         } else {
             cache.shared_documents(access_token, [Acl::Read, Acl::ReadItems], true)

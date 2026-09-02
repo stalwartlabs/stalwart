@@ -101,9 +101,8 @@ pub async fn test(test: &TestServer) {
                 .await
                 .unwrap()
                 .emails
-                .items
                 .iter()
-                .map(|m| m.thread_id)
+                .map(|m| m.thread_id())
                 .collect::<AHashSet<_>>()
                 .len(),
             MAX_THREADS

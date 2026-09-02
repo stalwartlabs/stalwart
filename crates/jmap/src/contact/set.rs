@@ -12,7 +12,11 @@ use common::{
     DavName, DavResources, Server,
     auth::{AccessToken, AccountCache},
 };
-use groupware::{DestroyArchive, cache::GroupwareCache, contact::ContactCard};
+use groupware::{
+    DestroyArchive, SizeWriter,
+    cache::GroupwareCache,
+    contact::{ContactCard, ContactCardContent},
+};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
@@ -33,6 +37,7 @@ use types::{
     acl::Acl,
     blob::BlobId,
     collection::{Collection, SyncCollection, VanishedCollection},
+    field::ContactField,
     id::Id,
 };
 
@@ -157,10 +162,29 @@ impl ContactCardSet for Server {
             let contact_card = contact_card_
                 .to_unarchived::<ContactCard>()
                 .caused_by(trc::location!())?;
+            let Some(content_) = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::ContactCard,
+                    document_id,
+                    ContactField::Content,
+                ))
+                .await?
+            else {
+                response.not_updated.append(id, SetError::not_found());
+                continue 'update;
+            };
+            let content = content_
+                .to_unarchived::<ContactCardContent>()
+                .caused_by(trc::location!())?;
             let mut new_contact_card = contact_card
                 .deserialize::<ContactCard>()
                 .caused_by(trc::location!())?;
-            let mut js_contact = new_contact_card.card.into_jscontact();
+            let mut new_content = content
+                .deserialize::<ContactCardContent>()
+                .caused_by(trc::location!())?;
+            let mut js_contact = new_content.card.into_jscontact();
 
             // Process changes
             if let Err(err) = update_contact_card(
@@ -175,8 +199,7 @@ impl ContactCardSet for Server {
 
             // Convert JSContact to vCard
             if let Some(vcard) = js_contact.into_vcard() {
-                new_contact_card.size = vcard.size() as u32;
-                new_contact_card.card = vcard;
+                new_content.card = vcard;
             } else {
                 response.not_updated.append(
                     id,
@@ -187,7 +210,7 @@ impl ContactCardSet for Server {
             }
 
             // Validate UID
-            match (new_contact_card.card.uid(), contact_card.inner.card.uid()) {
+            match (new_content.card.uid(), content.inner.card.uid()) {
                 (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
                 (None, None) | (None, Some(_)) => {}
                 _ => {
@@ -294,9 +317,12 @@ impl ContactCardSet for Server {
                 })
                 .collect::<Vec<_>>();
             new_contact_card
-                .update(
+                .update_full(
+                    new_content,
+                    self.core.groupware.vcard_version,
                     access_token.account_tenant_ids(),
                     contact_card,
+                    content.inner,
                     account_id,
                     document_id,
                     None,
@@ -356,11 +382,13 @@ impl ContactCardSet for Server {
             // Delete record
             DestroyArchive(contact_card)
                 .delete_all(
+                    self,
                     access_token.account_tenant_ids(),
                     account_id,
                     document_id,
                     &mut batch,
                 )
+                .await
                 .caused_by(trc::location!())?;
 
             for path in cache.format_resource_paths_by_id(document_id) {
@@ -433,7 +461,7 @@ impl ContactCardSet for Server {
         }
 
         // Check size and quota
-        let size = card.size();
+        let size = SizeWriter::vcard(&card, self.core.groupware.vcard_version);
         if size > self.core.groupware.max_vcard_size {
             return Ok(Err(SetError::invalid_properties().with_description(
                 format!(
@@ -454,11 +482,14 @@ impl ContactCardSet for Server {
         let document_id = batch.reserve_document_id(account_id, Collection::ContactCard);
         ContactCard {
             names,
-            size: size as u32,
-            card,
             ..Default::default()
         }
         .insert(
+            ContactCardContent {
+                card,
+                ..Default::default()
+            },
+            self.core.groupware.vcard_version,
             access_token.account_tenant_ids(),
             account_id,
             document_id,

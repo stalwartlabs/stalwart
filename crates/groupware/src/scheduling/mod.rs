@@ -9,10 +9,10 @@ use ahash::{AHashMap, AHashSet};
 use calcard::{
     common::{IanaString, PartialDateTime},
     icalendar::{
-        ICalendar, ICalendarComponent, ICalendarDuration, ICalendarEntry, ICalendarMethod,
-        ICalendarParameter, ICalendarParticipationRole, ICalendarParticipationStatus,
-        ICalendarPeriod, ICalendarProperty, ICalendarRecurrenceRule,
-        ICalendarScheduleForceSendValue, ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
+        ICalendarComponent, ICalendarDuration, ICalendarEntry, ICalendarMethod, ICalendarParameter,
+        ICalendarParticipationRole, ICalendarParticipationStatus, ICalendarPeriod,
+        ICalendarProperty, ICalendarRecurrenceRule, ICalendarScheduleForceSendValue,
+        ICalendarStatus, ICalendarUserTypes, ICalendarValue, Uri,
     },
 };
 use indexmap::IndexSet;
@@ -257,21 +257,6 @@ impl Email {
             None
         }
     }
-}
-
-pub fn ical_size(ical: &ICalendar) -> usize {
-    struct SizeWriter(usize);
-
-    impl std::fmt::Write for SizeWriter {
-        fn write_str(&mut self, text: &str) -> std::fmt::Result {
-            self.0 += text.len();
-            Ok(())
-        }
-    }
-
-    let mut writer = SizeWriter(0);
-    let _ = ical.write_to(&mut writer);
-    writer.0
 }
 
 impl PartialEq for Attendee<'_> {

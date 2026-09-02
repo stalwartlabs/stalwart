@@ -141,6 +141,6 @@ impl DnsCache for Server {
         self.inner
             .cache
             .dns_tlsa
-            .insert_with_expiry(name.to_fqdn(), value, valid_until);
+            .insert_with_expiry(name.to_fqdn(), Some(value), valid_until);
     }
 }

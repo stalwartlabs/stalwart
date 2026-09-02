@@ -119,22 +119,34 @@ impl Server {
             } else {
                 Cow::Borrowed(rcpt)
             };
+            let accept = |address: Cow<'_, str>| {
+                if is_subaddressed {
+                    RcptResolution::Rewrite(address.into_owned())
+                } else {
+                    RcptResolution::Accept
+                }
+            };
+
+            if self
+                .inner
+                .cache
+                .directory_recipients
+                .get(address.as_ref())
+                .is_some()
+            {
+                return Ok(accept(address));
+            }
+
             match directory.recipient(address.as_ref()).await? {
                 Recipient::Account(account) => {
                     Box::pin(self.synchronize_account(account)).await?;
-                    return Ok(if is_subaddressed {
-                        RcptResolution::Rewrite(address.into_owned())
-                    } else {
-                        RcptResolution::Accept
-                    });
+                    self.cache_directory_recipient(address.as_ref());
+                    return Ok(accept(address));
                 }
                 Recipient::Group(group) => {
                     Box::pin(self.synchronize_group(group)).await?;
-                    return Ok(if is_subaddressed {
-                        RcptResolution::Rewrite(address.into_owned())
-                    } else {
-                        RcptResolution::Accept
-                    });
+                    self.cache_directory_recipient(address.as_ref());
+                    return Ok(accept(address));
                 }
                 Recipient::Invalid => {}
             }
@@ -437,6 +449,14 @@ impl Server {
             .await
             .caused_by(trc::location!())
             .map(|_| total)
+    }
+
+    fn cache_directory_recipient(&self, address: &str) {
+        self.inner.cache.directory_recipients.insert(
+            address.into(),
+            (),
+            self.inner.cache.directory_recipients_ttl,
+        );
     }
 }
 

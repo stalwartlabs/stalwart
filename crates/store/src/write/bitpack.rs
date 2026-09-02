@@ -9,13 +9,28 @@ use utils::codec::leb128::Leb128Reader;
 
 use super::key::KeySerializer;
 
-#[derive(Default)]
+const MAX_BLOCK_LEN: usize = BitPacker8x::BLOCK_LEN;
+
 pub struct BitpackIterator<'x> {
     pub(crate) bytes: &'x [u8],
     pub(crate) bytes_offset: usize,
-    pub(crate) chunk: Vec<u32>,
+    pub(crate) chunk: [u32; MAX_BLOCK_LEN],
+    pub(crate) chunk_len: usize,
     pub(crate) chunk_offset: usize,
     pub items_left: u32,
+}
+
+impl Default for BitpackIterator<'_> {
+    fn default() -> Self {
+        BitpackIterator {
+            bytes: &[],
+            bytes_offset: 0,
+            chunk: [0u32; MAX_BLOCK_LEN],
+            chunk_len: 0,
+            chunk_offset: 0,
+            items_left: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -97,9 +112,10 @@ impl Iterator for BitpackIterator<'_> {
     type Item = u32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(item) = self.chunk.get(self.chunk_offset) {
+        if self.chunk_offset < self.chunk_len {
+            let item = self.chunk[self.chunk_offset];
             self.chunk_offset += 1;
-            return Some(*item);
+            return Some(item);
         }
         let block_len = match self.items_left {
             0 => return None,
@@ -117,22 +133,23 @@ impl Iterator for BitpackIterator<'_> {
         let bitpacker = BitBlockPacker::with_block_len(block_len);
         let num_bits = *self.bytes.get(self.bytes_offset)?;
         let bytes_read = ((num_bits as usize) * block_len / 8) + 1;
-        let initial_value = self.chunk.last().copied();
-
-        self.chunk = vec![0u32; block_len];
-        self.chunk_offset = 1;
+        let initial_value = self.chunk_len.checked_sub(1).map(|last| self.chunk[last]);
+        let compressed = self
+            .bytes
+            .get(self.bytes_offset + 1..self.bytes_offset + bytes_read)?;
 
         bitpacker.decompress_strictly_sorted(
             initial_value,
-            self.bytes
-                .get(self.bytes_offset + 1..self.bytes_offset + bytes_read)?,
-            &mut self.chunk[..],
+            compressed,
+            &mut self.chunk[..block_len],
             num_bits,
         );
 
+        self.chunk_len = block_len;
+        self.chunk_offset = 1;
         self.bytes_offset += bytes_read;
         self.items_left -= block_len as u32;
-        self.chunk.first().copied()
+        Some(self.chunk[0])
     }
 }
 

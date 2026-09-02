@@ -5,7 +5,7 @@
  */
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
-use common::{DavResourceMetadata, Server, auth::AccessToken};
+use common::{Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -54,17 +54,9 @@ impl CalendarEventNotificationQuery for Server {
                         let before = before.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEventNotification {
-                                    names,
-                                    created_at,
-                                    ..
-                                } = &r.data
-                                {
-                                    (!names.is_empty() && *created_at < before)
-                                        .then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.created_at()
+                                    .filter(|created_at| !r.is_container() && *created_at < before)
+                                    .map(|_| r.document_id())
                             }),
                         )))
                     }
@@ -72,17 +64,9 @@ impl CalendarEventNotificationQuery for Server {
                         let after = after.timestamp();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEventNotification {
-                                    names,
-                                    created_at,
-                                    ..
-                                } = &r.data
-                                {
-                                    (!names.is_empty() && *created_at > after)
-                                        .then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.created_at()
+                                    .filter(|created_at| !r.is_container() && *created_at > after)
+                                    .map(|_| r.document_id())
                             }),
                         )))
                     }
@@ -93,17 +77,9 @@ impl CalendarEventNotificationQuery for Server {
                             .collect::<AHashSet<_>>();
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEventNotification {
-                                    names,
-                                    event_id,
-                                    ..
-                                } = &r.data
-                                {
-                                    (!names.is_empty() && ids.contains(event_id))
-                                        .then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                r.event_id()
+                                    .filter(|event_id| !r.is_container() && ids.contains(event_id))
+                                    .map(|_| r.document_id())
                             }),
                         )))
                     }
@@ -160,17 +136,9 @@ impl CalendarEventNotificationQuery for Server {
                 .resources
                 .iter()
                 .filter_map(|r| {
-                    if let DavResourceMetadata::CalendarEventNotification {
-                        names,
-                        created_at,
-                        ..
-                    } = &r.data
-                    {
-                        (!names.is_empty() && results.contains(r.document_id))
-                            .then_some((r.document_id, *created_at))
-                    } else {
-                        None
-                    }
+                    r.created_at()
+                        .filter(|_| !r.is_container() && results.contains(r.document_id()))
+                        .map(|created_at| (r.document_id(), created_at))
                 })
                 .collect::<Vec<_>>();
             notifications

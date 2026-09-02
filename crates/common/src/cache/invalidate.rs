@@ -340,12 +340,14 @@ impl Server {
         self.inner.cache.accounts.clear();
         self.inner.cache.roles.clear();
         self.inner.cache.lists.clear();
+        self.inner.cache.directory_recipients.clear();
         self.inner.data.logos.lock().clear();
     }
 
     pub fn invalidate_all_local_negative_caches(&self) {
         self.inner.cache.domain_names_negative.clear();
         self.inner.cache.emails_negative.clear();
+        self.inner.cache.directory_recipients.clear();
     }
 
     pub fn invalidate_local_negative_account_cache(
@@ -375,6 +377,7 @@ impl Server {
                     cache.contacts.remove(id);
                     cache.events.remove(id);
                     cache.scheduling.remove(id);
+                    cache.swap.remove_resources(*id).await;
                 }
                 CacheInvalidation::Domain(id) => {
                     cache.domains.remove(id);

@@ -9,7 +9,9 @@ use crate::{
     core::{ImapUidToId, MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::{auth::BuildAccessToken, ipc::PushNotification, network::SessionStream};
+use common::{
+    MAX_RECEIVED_AT, auth::BuildAccessToken, ipc::PushNotification, network::SessionStream,
+};
 use email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -122,6 +124,10 @@ impl<T: SessionStream> SessionData<T> {
         let mut created_ids = Vec::with_capacity(arguments.messages.len());
         let mut last_change_id = None;
         for message in arguments.messages {
+            let received_at = message
+                .received_at
+                .map(|received_at| received_at.clamp(0, MAX_RECEIVED_AT as i64) as u64);
+
             match self
                 .server
                 .email_ingest(IngestEmail {
@@ -131,7 +137,7 @@ impl<T: SessionStream> SessionData<T> {
                     access_token: &access_token,
                     mailbox_ids: vec![mailbox_id],
                     keywords: message.flags.into_iter().map(Keyword::from).collect(),
-                    received_at: message.received_at.map(|d| d as u64),
+                    received_at,
                     source: IngestSource::Imap {
                         train_classifier: true,
                     },

@@ -11,3 +11,4 @@ pub mod lookup;
 pub mod memory;
 pub mod registry;
 pub mod search;
+pub mod swap;

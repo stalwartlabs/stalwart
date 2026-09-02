@@ -102,7 +102,7 @@ impl FileNodeCopy for Server {
             from_cache
                 .resources
                 .iter()
-                .map(|r| r.document_id)
+                .map(|r| r.document_id())
                 .collect::<RoaringBitmap>()
         } else {
             let mut readable =
@@ -348,8 +348,7 @@ impl FileNodeCopy for Server {
                 let parent_acls = created_folders.get(&parent).cloned().or_else(|| {
                     cache
                         .container_resource_by_id(parent_id)
-                        .and_then(|r| r.acls())
-                        .map(|a| a.to_vec())
+                        .map(|r| r.acls().to_vec())
                 });
                 if !has_acl_changes {
                     if let Some(parent_acls) = parent_acls {

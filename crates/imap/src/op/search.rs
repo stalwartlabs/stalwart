@@ -280,7 +280,7 @@ impl<T: SessionStream> SessionData<T> {
         let message_ids = RoaringBitmap::from_iter(
             cache
                 .in_mailbox(mailbox.id.mailbox_id)
-                .map(|m| m.document_id),
+                .map(|m| m.document_id()),
         );
 
         // Convert query
@@ -331,43 +331,47 @@ impl<T: SessionStream> SessionData<T> {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .with_keyword(&Keyword::Answered)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Before(date) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .received(date, SearchOperator::LowerThan)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Deleted => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                        cache.with_keyword(&Keyword::Deleted).map(|m| m.document_id),
+                        cache
+                            .with_keyword(&Keyword::Deleted)
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Draft => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                        cache.with_keyword(&Keyword::Draft).map(|m| m.document_id),
+                        cache.with_keyword(&Keyword::Draft).map(|m| m.document_id()),
                     )));
                 }
                 Filter::Flagged => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                        cache.with_keyword(&Keyword::Flagged).map(|m| m.document_id),
+                        cache
+                            .with_keyword(&Keyword::Flagged)
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Keyword(keyword) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .with_keyword(&Keyword::from(keyword))
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Larger(size) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .size(size, SearchOperator::GreaterThan)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::On(date) => {
@@ -376,22 +380,21 @@ impl<T: SessionStream> SessionData<T> {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .emails
-                            .items
                             .iter()
-                            .filter(|m| m.received_at >= date_from && m.received_at < date_to)
-                            .map(|m| m.document_id),
+                            .filter(|m| m.received_at() >= date_from && m.received_at() < date_to)
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Seen => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                        cache.with_keyword(&Keyword::Seen).map(|m| m.document_id),
+                        cache.with_keyword(&Keyword::Seen).map(|m| m.document_id()),
                     )));
                 }
                 Filter::SentBefore(date) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .sent(date, SearchOperator::LowerThan)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::SentOn(date) => {
@@ -400,74 +403,75 @@ impl<T: SessionStream> SessionData<T> {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .emails
-                            .items
                             .iter()
                             .filter(|m| {
-                                let sent_at = m.received_at as i64 + m.sent_at as i64;
+                                let sent_at = m.received_at() as i64 + m.sent_at() as i64;
                                 sent_at >= date_from && sent_at < date_to
                             })
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::SentSince(date) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .sent(date, SearchOperator::GreaterEqualThan)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Since(date) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .received(date, SearchOperator::GreaterEqualThan)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Smaller(size) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .size(size, SearchOperator::LowerThan)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Unanswered => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .without_keyword(&Keyword::Answered)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Undeleted => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .without_keyword(&Keyword::Deleted)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Undraft => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .without_keyword(&Keyword::Draft)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Unflagged => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .without_keyword(&Keyword::Flagged)
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Unkeyword(keyword) => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                         cache
                             .without_keyword(&Keyword::from(keyword))
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Unseen => {
                     filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                        cache.without_keyword(&Keyword::Seen).map(|m| m.document_id),
+                        cache
+                            .without_keyword(&Keyword::Seen)
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Recent => {
@@ -496,7 +500,7 @@ impl<T: SessionStream> SessionData<T> {
                                 now().saturating_sub(secs as u64) as i64,
                                 SearchOperator::LowerThan,
                             )
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::Younger(secs) => {
@@ -506,7 +510,7 @@ impl<T: SessionStream> SessionData<T> {
                                 now().saturating_sub(secs as u64) as i64,
                                 SearchOperator::GreaterEqualThan,
                             )
-                            .map(|m| m.document_id),
+                            .map(|m| m.document_id()),
                     )));
                 }
                 Filter::ModSeq((modseq, _)) => {
@@ -546,7 +550,7 @@ impl<T: SessionStream> SessionData<T> {
                 Filter::ThreadId(id) => {
                     if let Ok(id) = Id::from_str(&id) {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            cache.in_thread(id.document_id()).map(|m| m.document_id),
+                            cache.in_thread(id.document_id()).map(|m| m.document_id()),
                         )));
                     } else {
                         return Err(trc::ImapEvent::Error

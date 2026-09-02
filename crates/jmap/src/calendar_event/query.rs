@@ -7,8 +7,11 @@
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use calcard::{common::timezone::Tz, jscalendar::JSCalendarDateTime};
 use chrono::offset::TimeZone;
-use common::{DavResourceMetadata, Server, auth::AccessToken};
-use groupware::{cache::GroupwareCache, calendar::CalendarEvent};
+use common::{Server, auth::AccessToken};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{CalendarEvent, CalendarEventContent},
+};
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::{
@@ -31,6 +34,7 @@ use types::{
     TimeRange,
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
 };
 
 pub trait CalendarEventQuery: Sync + Send {
@@ -89,11 +93,7 @@ impl CalendarEventQuery for Server {
                     CalendarEventFilter::Uid(value) => {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEvent { uid, .. } = &r.data {
-                                    (uid.as_ref() == value).then_some(r.document_id)
-                                } else {
-                                    None
-                                }
+                                (r.uid() == Some(value.as_str())).then_some(r.document_id())
                             }),
                         )));
                     }
@@ -171,8 +171,9 @@ impl CalendarEventQuery for Server {
                         if let Some(after) = local_timestamp(&after, default_tz) {
                             filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                                 cache.resources.iter().filter_map(|r| {
-                                    r.event_time_range()
-                                        .and_then(|(_, end)| (after < end).then_some(r.document_id))
+                                    r.event_time_range().and_then(|(_, end)| {
+                                        (after < end).then_some(r.document_id())
+                                    })
                                 }),
                             )));
                         }
@@ -187,7 +188,7 @@ impl CalendarEventQuery for Server {
                             filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                                 cache.resources.iter().filter_map(|r| {
                                     r.event_time_range().and_then(|(start, _)| {
-                                        (before > start).then_some(r.document_id)
+                                        (before > start).then_some(r.document_id())
                                     })
                                 }),
                             )));
@@ -227,11 +228,8 @@ impl CalendarEventQuery for Server {
                             .resources
                             .iter()
                             .filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEvent { start, .. } = &r.data {
-                                    Some((r.document_id, *start))
-                                } else {
-                                    None
-                                }
+                                r.event_time_range()
+                                    .map(|(start, _)| (r.document_id(), start))
                             })
                             .collect::<Vec<_>>();
                         items.sort_by_key(|(document_id, start)| (*start, *document_id));
@@ -249,13 +247,7 @@ impl CalendarEventQuery for Server {
                         let mut items = cache
                             .resources
                             .iter()
-                            .filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEvent { uid, .. } = &r.data {
-                                    Some((r.document_id, uid.clone()))
-                                } else {
-                                    None
-                                }
-                            })
+                            .filter_map(|r| r.uid().map(|uid| (r.document_id(), uid.to_string())))
                             .collect::<Vec<_>>();
                         items.sort_by(|(doc_id_a, uid_a), (doc_id_b, uid_b)| {
                             let uid_order = uid_a.cmp(uid_b);
@@ -280,13 +272,8 @@ impl CalendarEventQuery for Server {
                             .resources
                             .iter()
                             .filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEvent { created_at, .. } =
-                                    &r.data
-                                {
-                                    Some((r.document_id, *created_at))
-                                } else {
-                                    None
-                                }
+                                r.created_at()
+                                    .map(|created_at| (r.document_id(), created_at))
                             })
                             .collect::<Vec<_>>();
                         items.sort_by_key(|(document_id, created_at)| (*created_at, *document_id));
@@ -305,16 +292,8 @@ impl CalendarEventQuery for Server {
                             .resources
                             .iter()
                             .filter_map(|r| {
-                                if let DavResourceMetadata::CalendarEvent {
-                                    modified_at,
-                                    created_at,
-                                    ..
-                                } = &r.data
-                                {
-                                    Some((r.document_id, *modified_at as i64 + *created_at))
-                                } else {
-                                    None
-                                }
+                                r.modified_at()
+                                    .map(|modified_at| (r.document_id(), modified_at))
                             })
                             .collect::<Vec<_>>();
                         items
@@ -388,14 +367,29 @@ impl CalendarEventQuery for Server {
                 let calendar_event = _calendar_event
                     .unarchive::<CalendarEvent>()
                     .caused_by(trc::location!())?;
+                let Some(_content) = self
+                    .store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                        account_id,
+                        Collection::CalendarEvent,
+                        document_id,
+                        CalendarEventField::Content,
+                    ))
+                    .await?
+                else {
+                    continue;
+                };
+                let content = _content
+                    .unarchive::<CalendarEventContent>()
+                    .caused_by(trc::location!())?;
 
                 // Expand recurrences
                 let uid: Arc<str> = if has_uid_comparator {
-                    Arc::from(calendar_event.data.event.uids().next().unwrap_or_default())
+                    Arc::from(calendar_event.uid.as_str())
                 } else {
                     Arc::from("")
                 };
-                for expansion in calendar_event
+                for expansion in content
                     .data
                     .expand(default_tz, time_range)
                     .unwrap_or_default()

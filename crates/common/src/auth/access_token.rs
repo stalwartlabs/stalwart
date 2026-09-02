@@ -19,7 +19,7 @@ use registry::{
         enums::Permission,
         structs::{self, Account, Roles, UserRoles},
     },
-    types::EnumImpl,
+    types::{EnumImpl, ipmask::IpAddrOrMask},
 };
 use std::{
     hash::{Hash, Hasher},
@@ -809,11 +809,15 @@ impl AccessTokenInner {
     }
 
     pub fn update_size(mut self) -> Self {
-        self.obj_size = (std::mem::size_of::<AccessToken>()
+        self.obj_size = (std::mem::size_of::<AccessTokenInner>()
             + (self.member_of.len() * std::mem::size_of::<u32>())
             + (self.access_to.len() * (std::mem::size_of::<u32>() + std::mem::size_of::<u64>()))
-            + (self.scopes.len() * std::mem::size_of::<AccessScope>()))
-            as u64;
+            + (self.scopes.len() * std::mem::size_of::<AccessScope>())
+            + self
+                .scopes
+                .iter()
+                .map(|scope| scope.allowed_ips.len() * std::mem::size_of::<IpAddrOrMask>())
+                .sum::<usize>()) as u64;
         self
     }
 

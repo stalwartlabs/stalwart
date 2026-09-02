@@ -196,6 +196,7 @@ pub async fn jmap_tests() {
     mail::sieve_script::test(&test).await;
     mail::vacation_response::test(&test).await;
     mail::submission::test(&test).await;
+    mail::cache::test(&test).await;
 
     core::event_source::test(&test).await;
     core::websocket::test(&test).await;

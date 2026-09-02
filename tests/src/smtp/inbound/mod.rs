@@ -56,7 +56,7 @@ impl TestServer {
         &mut self,
         expected: impl Fn(&QueueEvent) -> bool,
     ) -> QueueEvent {
-        if let Some(idx) = self.queue_events.iter().position(|event| expected(event)) {
+        if let Some(idx) = self.queue_events.iter().position(&expected) {
             return self.queue_events.remove(idx).unwrap();
         }
 
@@ -111,7 +111,8 @@ impl TestServer {
     }
 
     pub async fn expect_reload_settings(&mut self) {
-        self.read_event_matching(QueueEvent::is_reload_settings).await;
+        self.read_event_matching(QueueEvent::is_reload_settings)
+            .await;
     }
 
     pub async fn expect_refresh(&mut self) {

@@ -990,6 +990,71 @@ impl<'de> serde::Deserialize<'de> for BlobStoreType {
     }
 }
 
+impl EnumImpl for BlobSwapStoreType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map! {
+            value.as_bytes(),
+            b"Default" => BlobSwapStoreType::Default,
+            b"S3" => BlobSwapStoreType::S3,
+            b"Azure" => BlobSwapStoreType::Azure,
+            b"FileSystem" => BlobSwapStoreType::FileSystem,
+            b"FoundationDb" => BlobSwapStoreType::FoundationDb,
+            b"PostgreSql" => BlobSwapStoreType::PostgreSql,
+            b"MySql" => BlobSwapStoreType::MySql,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            BlobSwapStoreType::Default => "Default",
+            BlobSwapStoreType::S3 => "S3",
+            BlobSwapStoreType::Azure => "Azure",
+            BlobSwapStoreType::FileSystem => "FileSystem",
+            BlobSwapStoreType::FoundationDb => "FoundationDb",
+            BlobSwapStoreType::PostgreSql => "PostgreSql",
+            BlobSwapStoreType::MySql => "MySql",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(BlobSwapStoreType::Default),
+            1 => Some(BlobSwapStoreType::S3),
+            2 => Some(BlobSwapStoreType::Azure),
+            3 => Some(BlobSwapStoreType::FileSystem),
+            4 => Some(BlobSwapStoreType::FoundationDb),
+            5 => Some(BlobSwapStoreType::PostgreSql),
+            6 => Some(BlobSwapStoreType::MySql),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 7;
+}
+
+impl serde::Serialize for BlobSwapStoreType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BlobSwapStoreType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for BlockReason {
     fn parse(value: &str) -> Option<Self> {
         hashify::tiny_map! {
@@ -1043,6 +1108,62 @@ impl serde::Serialize for BlockReason {
 }
 
 impl<'de> serde::Deserialize<'de> for BlockReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for CacheSwapType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map! {
+            value.as_bytes(),
+            b"Disabled" => CacheSwapType::Disabled,
+            b"LocalFile" => CacheSwapType::LocalFile,
+            b"Redis" => CacheSwapType::Redis,
+            b"BlobStore" => CacheSwapType::BlobStore,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            CacheSwapType::Disabled => "Disabled",
+            CacheSwapType::LocalFile => "LocalFile",
+            CacheSwapType::Redis => "Redis",
+            CacheSwapType::BlobStore => "BlobStore",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(CacheSwapType::Disabled),
+            1 => Some(CacheSwapType::LocalFile),
+            2 => Some(CacheSwapType::Redis),
+            3 => Some(CacheSwapType::BlobStore),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for CacheSwapType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CacheSwapType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -9471,6 +9592,62 @@ impl serde::Serialize for RedisProtocol {
 }
 
 impl<'de> serde::Deserialize<'de> for RedisProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for RedisSwapStoreType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::tiny_map! {
+            value.as_bytes(),
+            b"Default" => RedisSwapStoreType::Default,
+            b"Redis" => RedisSwapStoreType::Redis,
+            b"RedisCluster" => RedisSwapStoreType::RedisCluster,
+            b"RedisSentinel" => RedisSwapStoreType::RedisSentinel,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            RedisSwapStoreType::Default => "Default",
+            RedisSwapStoreType::Redis => "Redis",
+            RedisSwapStoreType::RedisCluster => "RedisCluster",
+            RedisSwapStoreType::RedisSentinel => "RedisSentinel",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(RedisSwapStoreType::Default),
+            1 => Some(RedisSwapStoreType::Redis),
+            2 => Some(RedisSwapStoreType::RedisCluster),
+            3 => Some(RedisSwapStoreType::RedisSentinel),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for RedisSwapStoreType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RedisSwapStoreType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

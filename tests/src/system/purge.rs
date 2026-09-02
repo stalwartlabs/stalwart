@@ -137,7 +137,6 @@ pub async fn test(test: &mut TestServer) {
             .await
             .unwrap()
             .emails
-            .items
             .len(),
         6
     );
@@ -164,7 +163,6 @@ pub async fn test(test: &mut TestServer) {
             .await
             .unwrap()
             .emails
-            .items
             .len(),
         4
     );

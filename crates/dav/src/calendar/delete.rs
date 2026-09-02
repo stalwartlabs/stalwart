@@ -22,7 +22,7 @@ use groupware::{
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use registry::schema::enums::Permission;
-use store::write::{BatchBuilder, ValueClass};
+use store::write::BatchBuilder;
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes},
@@ -161,23 +161,11 @@ impl CalendarDeleteRequestHandler for Server {
                 .caused_by(trc::location!())?;
 
             // Reset default calendar id
-            let default_calendar_id = self
-                .store()
-                .get_value::<u32>(ValueKey {
-                    account_id,
-                    collection: Collection::Principal.into(),
-                    document_id: 0,
-                    class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
-                })
-                .await
-                .caused_by(trc::location!())?;
-            if default_calendar_id.is_some_and(|id| id == document_id) {
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::Principal)
-                    .with_document(0)
-                    .clear(PrincipalField::DefaultCalendarId);
-            }
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Principal)
+                .with_document(0)
+                .clear_if_equals(PrincipalField::DefaultCalendarId, document_id);
         } else {
             // Validate ACL
             let calendar_id = delete_resource.parent_id().unwrap();
@@ -197,6 +185,9 @@ impl CalendarDeleteRequestHandler for Server {
                 .await
                 .caused_by(trc::location!())?
                 .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+            let event = event_
+                .to_unarchived::<CalendarEvent>()
+                .caused_by(trc::location!())?;
 
             // Validate headers
             self.validate_headers(
@@ -206,7 +197,7 @@ impl CalendarDeleteRequestHandler for Server {
                     account_id,
                     collection: Collection::CalendarEvent,
                     document_id: document_id.into(),
-                    etag: event_.etag().into(),
+                    etag: format!("\"{}\"", event.inner.etag.to_native()).into(),
                     path: delete_path,
                     ..Default::default()
                 }],
@@ -216,9 +207,6 @@ impl CalendarDeleteRequestHandler for Server {
             .await?;
 
             // Validate schedule tag
-            let event = event_
-                .to_unarchived::<CalendarEvent>()
-                .caused_by(trc::location!())?;
             if headers.if_schedule_tag.is_some()
                 && event.inner.schedule_tag.as_ref().map(|t| t.to_native())
                     != headers.if_schedule_tag
@@ -229,6 +217,7 @@ impl CalendarDeleteRequestHandler for Server {
             // Delete event
             DestroyArchive(event)
                 .delete(
+                    self,
                     &account_info,
                     account_id,
                     document_id,
@@ -237,6 +226,7 @@ impl CalendarDeleteRequestHandler for Server {
                     send_itip,
                     &mut batch,
                 )
+                .await
                 .caused_by(trc::location!())?;
         }
 

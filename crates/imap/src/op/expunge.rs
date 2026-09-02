@@ -147,7 +147,7 @@ impl<T: SessionStream> SessionData<T> {
                 .await
                 .caused_by(trc::location!())?
                 .in_mailbox_with_keyword(mailbox.id.mailbox_id, &Keyword::Deleted)
-                .map(|m| m.document_id),
+                .map(|m| m.document_id()),
         );
 
         // Filter by sequence
@@ -156,8 +156,6 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         // RFC 9738 requires the highest UIDs to be processed first when truncating.
-        // Only messages the session has a UID for can be ordered, so the count that
-        // decides whether to truncate has to come from that same set.
         let mut limited_uid = None;
         if deleted_ids.len() > message_limit as u64 {
             let mut uids = {

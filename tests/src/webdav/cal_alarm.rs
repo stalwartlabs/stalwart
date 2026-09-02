@@ -37,11 +37,11 @@ pub async fn test(test: &TestServer) {
         .get_cached_messages(client.account_id)
         .await
         .unwrap();
-    assert_eq!(messages.emails.items.len(), 2);
+    assert_eq!(messages.emails.len(), 2);
 
-    for (idx, message) in messages.emails.items.iter().enumerate() {
+    for (idx, message) in messages.emails.iter().enumerate() {
         let contents = test
-            .fetch_email(client.account_id, message.document_id)
+            .fetch_email(client.account_id, message.document_id())
             .await;
 
         let message = MessageParser::new().parse(&contents).unwrap();

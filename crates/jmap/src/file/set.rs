@@ -12,7 +12,7 @@ use crate::{
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
 };
-use common::{DavResourceMetadata, DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -262,8 +262,7 @@ impl FileNodeSet for Server {
                     parent
                         .document_id()
                         .and_then(|parent_id| cache.container_resource_by_id(parent_id))
-                        .and_then(|r| r.acls())
-                        .map(|a| a.to_vec())
+                        .map(|r| r.acls().to_vec())
                 });
                 if !has_acl_changes {
                     if let Some(parent_acls) = parent_acls {
@@ -1000,15 +999,14 @@ pub(super) fn find_sibling_collision(
     case_insensitive: bool,
 ) -> Collision {
     if let Some(node_parent_id) = parent.cache_id() {
-        for resource in &cache.resources {
-            if let DavResourceMetadata::File {
-                name, parent_id, ..
-            } = &resource.data
-                && document_id.is_none_or(|id| id != resource.document_id)
-                && node_parent_id == *parent_id
-                && names_equal(&node.name, name, case_insensitive)
+        for resource in cache.resources.iter() {
+            if document_id.is_none_or(|id| id != resource.document_id())
+                && resource.parent_id() == node_parent_id
+                && resource
+                    .container_name()
+                    .is_some_and(|name| names_equal(&node.name, name, case_insensitive))
             {
-                return Collision::Existing(resource.document_id);
+                return Collision::Existing(resource.document_id());
             }
         }
     }
@@ -1040,12 +1038,10 @@ pub(super) fn pick_unique_rename(
     // Collect all sibling names once, instead of rescanning per probe.
     let mut taken: AHashSet<String> = AHashSet::new();
     if let Some(node_parent_id) = parent.cache_id() {
-        for resource in &cache.resources {
-            if let DavResourceMetadata::File {
-                name, parent_id, ..
-            } = &resource.data
-                && document_id.is_none_or(|id| id != resource.document_id)
-                && node_parent_id == *parent_id
+        for resource in cache.resources.iter() {
+            if document_id.is_none_or(|id| id != resource.document_id())
+                && resource.parent_id() == node_parent_id
+                && let Some(name) = resource.container_name()
             {
                 taken.insert(fold(name));
             }

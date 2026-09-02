@@ -10,7 +10,7 @@ use crate::{
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
 use common::{
-    MessageUid, Server, auth::AccessToken, ipc::PushNotification,
+    MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken, ipc::PushNotification,
     storage::index::ObjectIndexBuilder,
 };
 use email::message::headers::{BuildHeader, ValueToHeader};
@@ -243,7 +243,8 @@ impl EmailSet for Server {
                     }
 
                     (EmailProperty::ReceivedAt, Value::Element(EmailValue::Date(value))) => {
-                        received_at = (value.timestamp() as u64).into();
+                        received_at =
+                            (value.timestamp().clamp(0, MAX_RECEIVED_AT as i64) as u64).into();
                     }
 
                     (EmailProperty::SentAt, Value::Element(EmailValue::Date(value))) => {

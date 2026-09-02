@@ -9,7 +9,6 @@ use crate::{
     DavError, DavErrorCondition, DavMethod,
     calendar::ItipPrecondition,
     common::{
-        ETag, ExtractETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -27,8 +26,9 @@ use dav_proto::{
     schema::{property::Rfc1123DateTime, response::CalCondition},
 };
 use groupware::{
+    SizeWriter,
     cache::GroupwareCache,
-    calendar::{CalendarEvent, CalendarEventData},
+    calendar::{CalendarEvent, CalendarEventContent, CalendarEventData},
     scheduling::{
         ItipMessages, event_create::itip_create, event_update::itip_update,
         itip::itip_set_unreachable_status,
@@ -47,6 +47,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    field::CalendarEventField,
 };
 
 pub(crate) trait CalendarUpdateRequestHandler: Sync + Send {
@@ -149,6 +150,20 @@ impl CalendarUpdateRequestHandler for Server {
             let event = event_
                 .to_unarchived::<CalendarEvent>()
                 .caused_by(trc::location!())?;
+            let content_ = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    account_id,
+                    Collection::CalendarEvent,
+                    document_id,
+                    CalendarEventField::Content,
+                ))
+                .await
+                .caused_by(trc::location!())?
+                .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+            let content = content_
+                .to_unarchived::<CalendarEventContent>()
+                .caused_by(trc::location!())?;
 
             // Validate headers
             match self
@@ -159,7 +174,7 @@ impl CalendarUpdateRequestHandler for Server {
                         account_id,
                         collection: Collection::CalendarEvent,
                         document_id: Some(document_id),
-                        etag: event.etag().into(),
+                        etag: format!("\"{}\"", event.inner.etag.to_native()).into(),
                         path: resource_name.as_ref(),
                         ..Default::default()
                     }],
@@ -174,23 +189,23 @@ impl CalendarUpdateRequestHandler for Server {
                 {
                     return Ok(HttpResponse::new(StatusCode::PRECONDITION_FAILED)
                         .with_content_type("text/calendar; charset=utf-8")
-                        .with_etag(event.etag())
+                        .with_etag(format!("\"{}\"", event.inner.etag.to_native()))
                         .with_last_modified(
                             Rfc1123DateTime::new(i64::from(event.inner.modified)).to_string(),
                         )
                         .with_header("Preference-Applied", "return=representation")
-                        .with_binary_body(event.inner.data.event.to_string()));
+                        .with_binary_body(content.inner.data.event.to_string()));
                 }
                 Err(e) => return Err(e),
             }
 
-            if ical == event.inner.data.event {
+            if ical == content.inner.data.event {
                 // No changes, return existing event
                 return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
             }
 
             // Validate iCal
-            if event.inner.data.event.uids().next().unwrap_or_default() != validate_ical(&ical)? {
+            if event.inner.uid.as_str() != validate_ical(&ical)? {
                 return Err(DavError::Condition(DavErrorCondition::new(
                     StatusCode::PRECONDITION_FAILED,
                     CalCondition::NoUidConflict(resources.format_resource(resource).into()),
@@ -207,16 +222,18 @@ impl CalendarUpdateRequestHandler for Server {
 
             // Obtain previous alarm
             let now = now() as i64;
-            let prev_email_alarm = event.inner.data.next_alarm(now, Tz::Floating);
+            let prev_email_alarm = content.inner.data.next_alarm(now, Tz::Floating);
 
             // Build event
             let mut next_email_alarm = None;
             let mut new_event = event
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
-            let old_ical = new_event.data.event;
-            new_event.size = bytes.len() as u32;
-            new_event.data = CalendarEventData::new(
+            let mut new_content = content
+                .deserialize::<CalendarEventContent>()
+                .caused_by(trc::location!())?;
+            let old_ical = new_content.data.event;
+            new_content.data = CalendarEventData::new(
                 ical,
                 Tz::Floating,
                 self.core.groupware.max_ical_instances,
@@ -228,16 +245,16 @@ impl CalendarUpdateRequestHandler for Server {
             if self.core.groupware.itip_enabled
                 && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
-                && new_event.data.event_range_end() > now
+                && new_content.data.event_range_end() > now
             {
                 let result = if new_event.schedule_tag.is_some() {
                     itip_update(
-                        &mut new_event.data.event,
+                        &mut new_content.data.event,
                         &old_ical,
                         account_info.addresses(),
                     )
                 } else {
-                    itip_create(&mut new_event.data.event, account_info.addresses())
+                    itip_create(&mut new_content.data.event, account_info.addresses())
                 };
 
                 match result {
@@ -294,11 +311,11 @@ impl CalendarUpdateRequestHandler for Server {
                     }
                 }
 
-                itip_set_unreachable_status(&mut new_event.data.event, account_info.addresses());
+                itip_set_unreachable_status(&mut new_content.data.event, account_info.addresses());
             }
             // Validate quota
-            let extra_bytes =
-                (bytes.len() as u64).saturating_sub(u32::from(event.inner.size) as u64);
+            let extra_bytes = (SizeWriter::ical(&new_content.data.event) as u64)
+                .saturating_sub(u32::from(event.inner.size) as u64);
             if extra_bytes > 0 {
                 self.has_available_quota(self.account(account_id).await?.as_ref(), extra_bytes)
                     .await?;
@@ -308,16 +325,17 @@ impl CalendarUpdateRequestHandler for Server {
             let mut batch = BatchBuilder::new();
             let schedule_tag = new_event.schedule_tag;
             let etag = new_event
-                .update(
+                .update_full(
+                    new_content,
                     access_token.account_tenant_ids(),
                     event,
+                    content.inner,
                     account_id,
                     document_id,
                     None,
                     &mut batch,
                 )
-                .caused_by(trc::location!())?
-                .etag();
+                .caused_by(trc::location!())?;
             if prev_email_alarm != next_email_alarm {
                 if let Some(prev_alarm) = prev_email_alarm {
                     prev_alarm.delete_task(&mut batch);
@@ -334,7 +352,7 @@ impl CalendarUpdateRequestHandler for Server {
             self.commit_batch(batch).await.caused_by(trc::location!())?;
 
             Ok(HttpResponse::new(StatusCode::NO_CONTENT)
-                .with_etag_opt(etag)
+                .with_etag(etag)
                 .with_schedule_tag_opt(schedule_tag))
         } else if let Some((Some(parent), name)) = resources.map_parent(resource_name.as_ref()) {
             if !parent.is_container() {
@@ -382,13 +400,15 @@ impl CalendarUpdateRequestHandler for Server {
                     name: name.to_string(),
                     parent_id: parent.document_id(),
                 }],
+                ..Default::default()
+            };
+            let mut content = CalendarEventContent {
                 data: CalendarEventData::new(
                     ical,
                     Tz::Floating,
                     self.core.groupware.max_ical_instances,
                     &mut next_email_alarm,
                 ),
-                size: bytes.len() as u32,
                 ..Default::default()
             };
 
@@ -397,9 +417,9 @@ impl CalendarUpdateRequestHandler for Server {
             if self.core.groupware.itip_enabled
                 && !account_info.addresses().is_empty()
                 && access_token.has_permission(Permission::CalendarSchedulingSend)
-                && event.data.event_range_end() > now() as i64
+                && content.data.event_range_end() > now() as i64
             {
-                match itip_create(&mut event.data.event, account_info.addresses()) {
+                match itip_create(&mut content.data.event, account_info.addresses()) {
                     Ok(messages) => {
                         if messages.iter().map(|r| r.to.len()).sum::<usize>()
                             < self.core.groupware.itip_outbound_max_recipients
@@ -432,7 +452,7 @@ impl CalendarUpdateRequestHandler for Server {
                     }
                 }
 
-                itip_set_unreachable_status(&mut event.data.event, account_info.addresses());
+                itip_set_unreachable_status(&mut content.data.event, account_info.addresses());
             }
 
             // Validate quota
@@ -448,8 +468,9 @@ impl CalendarUpdateRequestHandler for Server {
             let mut batch = BatchBuilder::new();
             let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
             let schedule_tag = event.schedule_tag;
-            event
+            let etag = event
                 .insert(
+                    content,
                     access_token.account_tenant_ids(),
                     account_id,
                     document_id,
@@ -463,14 +484,10 @@ impl CalendarUpdateRequestHandler for Server {
                     .queue(&mut batch)
                     .caused_by(trc::location!())?;
             }
-            let etag = self
-                .commit_batch(batch)
-                .await
-                .caused_by(trc::location!())?
-                .etag();
+            self.commit_batch(batch).await.caused_by(trc::location!())?;
 
             Ok(HttpResponse::new(StatusCode::CREATED)
-                .with_etag_opt(etag)
+                .with_etag(etag)
                 .with_schedule_tag_opt(schedule_tag))
         } else {
             Err(DavError::Code(StatusCode::CONFLICT))?

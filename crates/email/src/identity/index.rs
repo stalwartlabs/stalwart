@@ -5,8 +5,11 @@
  */
 
 use super::{ArchivedIdentity, Identity};
-use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
-use store::write::{ArchiveCompression, Compression, Dictionary};
+use common::storage::index::{
+    IndexValue, IndexableAndSerializableObject, IndexableObject, SerializableObject,
+    serialize_object,
+};
+use store::write::{ArchiveCompression, BatchBuilder, Compression, Dictionary, Slot};
 use types::collection::SyncCollection;
 
 impl IndexableObject for Identity {
@@ -37,4 +40,10 @@ impl IndexableAndSerializableObject for Identity {
 
 impl ArchiveCompression for Identity {
     const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+}
+
+impl SerializableObject for Identity {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        serialize_object(self, batch, pending_id)
+    }
 }

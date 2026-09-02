@@ -148,9 +148,9 @@ impl ChangesLookup for Server {
                     let cache = self.get_cached_messages(account_id).await?;
                     let shared = cache.shared_messages(access_token, Acl::ReadItems);
                     let mut threads = RoaringBitmap::new();
-                    for item in &cache.emails.items {
-                        if shared.contains(item.document_id) {
-                            threads.insert(item.thread_id);
+                    for item in cache.emails.iter() {
+                        if shared.contains(item.document_id()) {
+                            threads.insert(item.thread_id());
                         }
                     }
                     threads

@@ -36,17 +36,28 @@ pub struct AddressBookPreferences {
     pub sort_order: u32,
 }
 
+pub const CARD_HAS_DEAD_PROPERTIES: u16 = 1;
+
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
 pub struct ContactCard {
     pub names: Vec<DavName>,
+    pub uid: String,
     pub display_name: Option<String>,
-    pub card: VCard,
-    pub dead_properties: DeadProperty,
     pub created: i64,
     pub modified: i64,
     pub size: u32,
+    pub etag: u32,
+    pub flags: u16,
+}
+
+#[derive(
+    rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
+)]
+pub struct ContactCardContent {
+    pub card: VCard,
+    pub dead_properties: DeadProperty,
 }
 
 impl AddressBook {

@@ -152,7 +152,7 @@ pub async fn test(test: &mut TestServer) {
         .await
         .unwrap();
 
-    assert_eq!(john_cache.emails.items.len(), 1);
+    assert_eq!(john_cache.emails.len(), 1);
     assert_eq!(john_cache.in_mailbox(INBOX_ID).count(), 1);
     assert_eq!(john_cache.in_mailbox(JUNK_ID).count(), 0);
 
@@ -254,13 +254,13 @@ pub async fn test(test: &mut TestServer) {
         .unwrap();
     let inbox_ids = john_cache
         .in_mailbox(INBOX_ID)
-        .map(|e| e.document_id)
+        .map(|e| e.document_id())
         .collect::<RoaringBitmap>();
     let junk_ids = john_cache
         .in_mailbox(JUNK_ID)
-        .map(|e| e.document_id)
+        .map(|e| e.document_id())
         .collect::<RoaringBitmap>();
-    assert_eq!(john_cache.emails.items.len(), 2);
+    assert_eq!(john_cache.emails.len(), 2);
     assert_eq!(inbox_ids.len(), 1);
     assert_eq!(junk_ids.len(), 1);
     assert_message_headers_contains(
@@ -312,13 +312,13 @@ END:VCARD
         .unwrap();
     let inbox_ids = john_cache
         .in_mailbox(INBOX_ID)
-        .map(|e| e.document_id)
+        .map(|e| e.document_id())
         .collect::<RoaringBitmap>();
     let junk_ids = john_cache
         .in_mailbox(JUNK_ID)
-        .map(|e| e.document_id)
+        .map(|e| e.document_id())
         .collect::<RoaringBitmap>();
-    assert_eq!(john_cache.emails.items.len(), 3);
+    assert_eq!(john_cache.emails.len(), 3);
     assert_eq!(inbox_ids.len(), 2);
     assert_eq!(junk_ids.len(), 1);
     dav_client.delete_default_containers().await;
@@ -360,7 +360,6 @@ END:VCARD
             .await
             .unwrap()
             .emails
-            .items
             .len(),
         4
     );
@@ -387,13 +386,13 @@ END:VCARD
         .unwrap();
     let inbox_ids = john_cache
         .in_mailbox(INBOX_ID)
-        .map(|e| e.document_id)
+        .map(|e| e.document_id())
         .collect::<RoaringBitmap>();
     let junk_ids = john_cache
         .in_mailbox(JUNK_ID)
-        .map(|e| e.document_id)
+        .map(|e| e.document_id())
         .collect::<RoaringBitmap>();
-    assert_eq!(john_cache.emails.items.len(), 5);
+    assert_eq!(john_cache.emails.len(), 5);
     assert_eq!(inbox_ids.len(), 3);
     assert_eq!(junk_ids.len(), 1);
     assert_message_headers_contains(
@@ -445,7 +444,6 @@ END:VCARD
                 .await
                 .unwrap()
                 .emails
-                .items
                 .len(),
             num_messages,
             "for {}",
@@ -485,7 +483,6 @@ END:VCARD
                 .await
                 .unwrap()
                 .emails
-                .items
                 .len(),
             num_messages,
             "for {}",
@@ -521,14 +518,14 @@ END:VCARD
         let account_id = account.id().document_id();
         let cache = test.server.get_cached_messages(account_id).await.unwrap();
         assert_eq!(
-            cache.emails.items.len(),
+            cache.emails.len(),
             num_messages,
             "for {}",
             account.id_string()
         );
         let access_token = test.server.access_token(account_id).await.unwrap().build();
 
-        for document_id in cache.in_mailbox(INBOX_ID).map(|e| e.document_id) {
+        for document_id in cache.in_mailbox(INBOX_ID).map(|e| e.document_id()) {
             let metadata = message_metadata(&test.server, account_id, document_id).await;
             let partial_message = test
                 .server
@@ -593,7 +590,6 @@ END:VCARD
         .await
         .unwrap()
         .emails
-        .items
         .len();
 
     lmtp.ingest(
@@ -617,7 +613,6 @@ END:VCARD
             .await
             .unwrap()
             .emails
-            .items
             .len(),
         bill_messages + 1,
         "sub-addressed mailing list member was not delivered"

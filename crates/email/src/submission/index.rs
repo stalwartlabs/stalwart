@@ -5,12 +5,15 @@
  */
 
 use super::{ArchivedEmailSubmission, EmailSubmission};
-use common::storage::index::{IndexValue, IndexableAndSerializableObject, IndexableObject};
+use common::storage::index::{
+    IndexValue, IndexableAndSerializableObject, IndexableObject, SerializableObject,
+    serialize_object,
+};
 use store::{
     U32_LEN, U64_LEN,
     write::{
-        ArchiveCompression, Compression, Dictionary, IndexPropertyClass, ValueClass,
-        key::KeySerializer,
+        ArchiveCompression, BatchBuilder, Compression, Dictionary, IndexPropertyClass, Slot,
+        ValueClass, key::KeySerializer,
     },
 };
 use types::{collection::SyncCollection, field::EmailSubmissionField};
@@ -75,4 +78,10 @@ impl IndexableAndSerializableObject for EmailSubmission {
 
 impl ArchiveCompression for EmailSubmission {
     const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Common));
+}
+
+impl SerializableObject for EmailSubmission {
+    fn serialize_into(self, batch: &mut BatchBuilder, pending_id: Option<Slot>) -> trc::Result<()> {
+        serialize_object(self, batch, pending_id)
+    }
 }

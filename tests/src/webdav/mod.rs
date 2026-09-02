@@ -6,7 +6,7 @@
 
 use crate::utils::server::TestServerBuilder;
 use ahash::AHashMap;
-use common::{DavResource, DavResources};
+use common::DavResources;
 use groupware::DavResourceName;
 use hyper::StatusCode;
 use registry::{
@@ -38,6 +38,7 @@ pub mod multiget;
 pub mod principals;
 pub mod prop;
 pub mod put_get;
+pub mod storage_split;
 pub mod sync;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -194,6 +195,7 @@ pub async fn webdav_tests() {
     card_query::test(&test).await;
     cal_query::test(&test).await;
     cal_alarm::test(&test).await;
+    storage_split::test(&test).await;
     cal_itip::test();
     cal_scheduling::test(&test).await;
 
@@ -212,12 +214,12 @@ pub async fn webdav_tests() {
 }
 
 pub trait DavResourcesTest {
-    fn items(&self) -> Vec<DavResource>;
+    fn items(&self) -> Vec<u32>;
 }
 
 impl DavResourcesTest for DavResources {
-    fn items(&self) -> Vec<DavResource> {
-        self.resources.clone()
+    fn items(&self) -> Vec<u32> {
+        self.resources.iter().map(|r| r.document_id()).collect()
     }
 }
 

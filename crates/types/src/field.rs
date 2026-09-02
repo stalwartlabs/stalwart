@@ -17,6 +17,7 @@ pub struct Field(u8);
 pub enum ContactField {
     Email,
     Archive,
+    Content,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub enum ContactField {
 pub enum CalendarEventField {
     Uid,
     Archive,
+    Content,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +33,7 @@ pub enum CalendarEventField {
 pub enum CalendarNotificationField {
     Created,
     Archive,
+    Content,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,30 +86,63 @@ pub enum PrincipalField {
     PushSubscriptions = 44,
 }
 
-impl From<ContactField> for u8 {
-    fn from(value: ContactField) -> Self {
-        match value {
+impl ContactField {
+    pub const fn as_u8(self) -> u8 {
+        match self {
             ContactField::Email => 1,
             ContactField::Archive => ARCHIVE_FIELD,
+            ContactField::Content => 2,
         }
+    }
+
+    pub const fn field(self) -> Field {
+        Field(self.as_u8())
+    }
+}
+
+impl CalendarEventField {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            CalendarEventField::Uid => 0,
+            CalendarEventField::Archive => ARCHIVE_FIELD,
+            CalendarEventField::Content => 1,
+        }
+    }
+
+    pub const fn field(self) -> Field {
+        Field(self.as_u8())
+    }
+}
+
+impl CalendarNotificationField {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            CalendarNotificationField::Created => 0,
+            CalendarNotificationField::Archive => ARCHIVE_FIELD,
+            CalendarNotificationField::Content => 1,
+        }
+    }
+
+    pub const fn field(self) -> Field {
+        Field(self.as_u8())
+    }
+}
+
+impl From<ContactField> for u8 {
+    fn from(value: ContactField) -> Self {
+        value.as_u8()
     }
 }
 
 impl From<CalendarEventField> for u8 {
     fn from(value: CalendarEventField) -> Self {
-        match value {
-            CalendarEventField::Uid => 0,
-            CalendarEventField::Archive => ARCHIVE_FIELD,
-        }
+        value.as_u8()
     }
 }
 
 impl From<CalendarNotificationField> for u8 {
     fn from(value: CalendarNotificationField) -> Self {
-        match value {
-            CalendarNotificationField::Created => 0,
-            CalendarNotificationField::Archive => ARCHIVE_FIELD,
-        }
+        value.as_u8()
     }
 }
 
@@ -235,7 +271,7 @@ impl From<IdentityField> for Field {
 impl Field {
     pub const ARCHIVE: Field = Field(ARCHIVE_FIELD);
 
-    pub fn new(value: u8) -> Self {
+    pub const fn new(value: u8) -> Self {
         Field(value)
     }
 

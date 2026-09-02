@@ -533,6 +533,20 @@ impl InMemoryStore {
         }
     }
 
+    pub fn supports_chunked_keys(&self) -> bool {
+        match self {
+            #[cfg(feature = "redis")]
+            InMemoryStore::Redis(_) => true,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            InMemoryStore::Sharded(store) => store.stores.iter().all(|store| store.is_redis()),
+            // SPDX-SnippetEnd
+            _ => false,
+        }
+    }
+
     pub fn into_store(self) -> Option<Store> {
         match self {
             InMemoryStore::Store(store) => Some(store),

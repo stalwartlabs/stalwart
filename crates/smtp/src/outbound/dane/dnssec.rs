@@ -158,7 +158,10 @@ impl TlsaLookup for Server {
     async fn tlsa_lookup(&self, key: impl ToFqdn + Sync + Send) -> mail_auth::Result<TlsaResult> {
         let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_tlsa.get(key.as_ref()) {
-            return Ok(TlsaResult::Secure(value));
+            return Ok(match value {
+                Some(tlsa) => TlsaResult::Secure(tlsa),
+                None => TlsaResult::Missing,
+            });
         }
 
         #[cfg(any(test, feature = "test_mode"))]
@@ -181,11 +184,11 @@ impl TlsaLookup for Server {
             Ok(tlsa_lookup) => tlsa_lookup,
             Err(err) => {
                 if let Some(denial) = NegativeAnswer::from_error(&err) {
-                    return Ok(if denial.dnssec_status == DnssecStatus::Bogus {
-                        TlsaResult::Bogus
-                    } else {
-                        TlsaResult::Missing
-                    });
+                    if denial.dnssec_status == DnssecStatus::Bogus {
+                        return Ok(TlsaResult::Bogus);
+                    }
+                    self.cache_missing_tlsa(key, denial.valid_until);
+                    return Ok(TlsaResult::Missing);
                 }
                 return Err(err.into());
             }
@@ -248,13 +251,16 @@ impl TlsaLookup for Server {
 
                 self.inner.cache.dns_tlsa.insert_with_expiry(
                     key,
-                    tlsa.clone(),
+                    Some(tlsa.clone()),
                     tlsa_lookup.valid_until(),
                 );
 
                 Ok(TlsaResult::Secure(tlsa))
             }
-            _ => Ok(TlsaResult::Missing),
+            _ => {
+                self.cache_missing_tlsa(key, Some(tlsa_lookup.valid_until()));
+                Ok(TlsaResult::Missing)
+            }
         }
     }
 
@@ -412,6 +418,20 @@ impl TlsaLookup for Server {
             .insert_with_expiry(key, records.clone(), lookup.valid_until());
 
         Ok(records)
+    }
+}
+
+trait TlsaNegativeCache {
+    fn cache_missing_tlsa(&self, key: Box<str>, valid_until: Option<Instant>);
+}
+
+impl TlsaNegativeCache for Server {
+    fn cache_missing_tlsa(&self, key: Box<str>, valid_until: Option<Instant>) {
+        self.inner.cache.dns_tlsa.insert_with_expiry(
+            key,
+            None,
+            valid_until.unwrap_or_else(|| Instant::now() + self.inner.cache.negative_cache_ttl),
+        );
     }
 }
 
