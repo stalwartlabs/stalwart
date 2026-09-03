@@ -5,7 +5,7 @@
  */
 
 use super::{ImapContext, ToModSeq};
-use crate::core::{SavedSearch, SelectedMailbox, Session, State};
+use crate::core::{MailboxView, SavedSearch, SelectedMailbox, Session, State};
 use common::network::SessionStream;
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
@@ -46,9 +46,11 @@ impl<T: SessionStream> Session<T> {
         let want_objectid = self.is_objectid;
 
         // Refresh mailboxes
-        data.synchronize_mailboxes(false)
+        let mut caches = data
+            .synchronize_mailboxes(false)
             .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
+            .imap_ctx(&arguments.tag, trc::location!())?
+            .caches;
 
         // Resolve the mailbox by its object identifiers (with fallback to the name)
         let mailbox = arguments
@@ -65,12 +67,16 @@ impl<T: SessionStream> Session<T> {
             .or_else(|| data.get_mailbox_by_name(&arguments.mailbox_name));
 
         if let Some(mailbox) = mailbox {
-            // Try obtaining the mailbox from the cache
-            let state = data
-                .fetch_messages(&mailbox, None)
+            let cache = caches
+                .fetch(&data.server, mailbox.account_id)
                 .await
-                .imap_ctx(&arguments.tag, trc::location!())?
-                .unwrap();
+                .imap_ctx(&arguments.tag, trc::location!())?;
+            let view = MailboxView::build(&cache, mailbox.mailbox_id);
+            let uid_validity = data.uid_validity(&mailbox);
+            let uid_next = data
+                .uid_next(&cache, &mailbox)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?;
 
             // Synchronize messages
             let closed_previous = self.state.close_mailbox();
@@ -79,16 +85,15 @@ impl<T: SessionStream> Session<T> {
             // Build new state
             let is_rev2 = self.version.is_rev2();
             let is_utf8 = self.is_utf8;
-            let mailbox_state = data.mailbox_state(&mailbox).unwrap();
-            let total_messages = state.total_messages;
+            let total_messages = view.len();
             let highest_modseq = if is_condstore {
-                HighestModSeq::new(state.modseq.to_modseq()).into()
+                HighestModSeq::new(view.change_id().to_modseq()).into()
             } else {
                 None
             };
             let mailbox = Arc::new(SelectedMailbox {
                 id: mailbox,
-                state: parking_lot::Mutex::new(state),
+                view: parking_lot::Mutex::new(view),
                 saved_search: parking_lot::Mutex::new(SavedSearch::None),
                 is_select,
                 is_condstore,
@@ -113,7 +118,7 @@ impl<T: SessionStream> Session<T> {
                         .ctx(trc::Key::Type, ResponseType::Bad)
                         .id(arguments.tag));
                 }
-                if qresync.uid_validity == mailbox_state.uid_validity as u32 {
+                if qresync.uid_validity == uid_validity {
                     // Send flags for changed messages
                     data.fetch(
                         fetch::Arguments {
@@ -130,6 +135,7 @@ impl<T: SessionStream> Session<T> {
                             include_vanished: true,
                         },
                         mailbox.clone(),
+                        Some(cache),
                         true,
                         true,
                         self.is_uidonly,
@@ -150,8 +156,8 @@ impl<T: SessionStream> Session<T> {
                 AccountId = mailbox.id.account_id,
                 MailboxId = mailbox.id.mailbox_id,
                 Total = total_messages,
-                UidNext = mailbox_state.uid_next,
-                UidValidity = mailbox_state.uid_validity,
+                UidNext = uid_next,
+                UidValidity = uid_validity,
                 Elapsed = op_start.elapsed()
             );
 
@@ -161,8 +167,8 @@ impl<T: SessionStream> Session<T> {
                 total_messages,
                 recent_messages: 0,
                 unseen_seq: 0,
-                uid_validity: mailbox_state.uid_validity as u32,
-                uid_next: mailbox_state.uid_next as u32,
+                uid_validity,
+                uid_next,
                 closed_previous,
                 is_rev2,
                 is_utf8,

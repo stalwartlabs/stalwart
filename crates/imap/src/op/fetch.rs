@@ -6,11 +6,10 @@
 
 use super::{FromModSeq, ImapContext};
 use crate::{
-    core::{SelectedMailbox, Session, SessionData},
+    core::{SelectedMailbox, Session, SessionData, session::OUTPUT_FLUSH_THRESHOLD},
     spawn_op,
 };
-use ahash::AHashMap;
-use common::network::SessionStream;
+use common::{MessageStoreCache, network::SessionStream};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{
@@ -107,6 +106,7 @@ impl<T: SessionStream> Session<T> {
                             .fetch(
                                 arguments,
                                 mailbox.clone(),
+                                None,
                                 is_uid,
                                 is_qresync,
                                 is_uidonly,
@@ -134,6 +134,7 @@ impl<T: SessionStream> SessionData<T> {
         &self,
         mut arguments: Arguments,
         mailbox: Arc<SelectedMailbox>,
+        cache: Option<Arc<MessageStoreCache>>,
         is_uid: bool,
         is_qresync: bool,
         is_uidonly: bool,
@@ -161,55 +162,43 @@ impl<T: SessionStream> SessionData<T> {
 
         // Resync messages if needed
         let account_id = mailbox.id.account_id;
+        let cache = match cache {
+            Some(cache) => cache,
+            None => self
+                .server
+                .get_cached_messages(account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?,
+        };
         let mut modseq = self
-            .synchronize_messages(&mailbox)
+            .sync_view(&mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
         // Convert IMAP ids to JMAP ids.
         let mut ids = mailbox
-            .sequence_to_ids(&arguments.sequence_set, is_uid)
+            .resolve(&arguments.sequence_set, is_uid)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
         // Convert state to modseq
         if let Some(changed_since) = arguments.changed_since {
-            // Obtain changes since the modseq.
-            let changelog = self
-                .server
-                .store()
-                .changes(
-                    account_id,
-                    SyncCollection::Email.into(),
-                    Query::from_modseq(changed_since),
-                )
-                .await
-                .imap_ctx(&arguments.tag, trc::location!())?;
-
-            // Process changes
-            let mut changed_ids = AHashMap::new();
-            let mut has_vanished = false;
-
-            for change in changelog.changes {
-                match change {
-                    Change::InsertItem(id) | Change::UpdateItem(id) => {
-                        let id = (id & u32::MAX as u64) as u32;
-                        if let Some(uid) = ids.get(&id) {
-                            changed_ids.insert(id, *uid);
-                        }
-                        if !has_vanished {
-                            has_vanished = matches!(change, Change::UpdateItem(_));
-                        }
-                    }
-                    Change::DeleteItem(_) => {
-                        has_vanished = true;
-                    }
-                    _ => (),
-                }
-            }
-
             // Send vanished UIDs
-            if arguments.include_vanished && has_vanished {
+            if arguments.include_vanished
+                && self
+                    .server
+                    .store()
+                    .changes(
+                        account_id,
+                        SyncCollection::Email.into(),
+                        Query::from_modseq(changed_since),
+                    )
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?
+                    .changes
+                    .iter()
+                    .any(|change| matches!(change, Change::UpdateItem(_) | Change::DeleteItem(_)))
+            {
                 // Add to vanished all known destroyed Ids
                 let vanished = self
                     .server
@@ -234,7 +223,12 @@ impl<T: SessionStream> SessionData<T> {
             }
 
             // Filter out ids without changes
-            if changed_ids.is_empty() {
+            ids.retain(|resolved| {
+                cache
+                    .email_by_id(&resolved.id)
+                    .is_some_and(|message| message.change_id() >= changed_since)
+            });
+            if ids.is_empty() {
                 // Condstore was just enabled, return highest modseq.
                 if enabled_condstore {
                     self.write_bytes(
@@ -257,7 +251,6 @@ impl<T: SessionStream> SessionData<T> {
                     StatusResponse::completed(Command::Fetch(is_uid)).with_tag(arguments.tag)
                 );
             }
-            ids = changed_ids;
             arguments.attributes.push_unique(Attribute::ModSeq);
         }
 
@@ -312,6 +305,7 @@ impl<T: SessionStream> SessionData<T> {
         if set_seen_flags
             && !self
                 .check_mailbox_acl(
+                    Some(&cache),
                     mailbox.id.account_id,
                     mailbox.id.mailbox_id,
                     Acl::ModifyItems,
@@ -332,33 +326,21 @@ impl<T: SessionStream> SessionData<T> {
 
         // Process each message
         let mut batch = BatchBuilder::new();
-        let mut ids = ids
-            .into_iter()
-            .map(|(id, imap_id)| (imap_id.seqnum, imap_id.uid, id))
-            .collect::<Vec<_>>();
-        ids.sort_unstable_by_key(|(seqnum, _, _)| *seqnum);
+        ids.sort_unstable_by_key(|resolved| resolved.uid);
 
         // RFC 9738 requires the highest UIDs to be processed first when truncating
         let message_limit = message_limit as usize;
         let limited_uid = if ids.len() > message_limit {
             ids.drain(..ids.len() - message_limit);
-            ids.first().map(|(_, uid, _)| *uid)
+            ids.first().map(|resolved| resolved.uid)
         } else {
             None
         };
 
-        let fetched_ids = ids
-            .iter()
-            .map(|id| trc::Value::from(id.2))
-            .collect::<Vec<_>>();
-        let message_cache = self
-            .server
-            .get_cached_messages(account_id)
-            .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
-
-        for (seqnum, uid, id) in ids {
-            let Some(data) = message_cache.email_by_id(&id) else {
+        let mut output = Vec::with_capacity((ids.len() * 64).min(OUTPUT_FLUSH_THRESHOLD));
+        for resolved in &ids {
+            let (seqnum, uid, id) = (resolved.seqnum, resolved.uid, resolved.id);
+            let Some(data) = cache.email_by_id(&id) else {
                 trc::event!(
                     Store(trc::StoreEvent::NotFound),
                     AccountId = account_id,
@@ -372,13 +354,13 @@ impl<T: SessionStream> SessionData<T> {
 
             // Build response
             let mut items = Vec::with_capacity(arguments.attributes.len());
-            let set_seen_flag = set_seen_flags && !message_cache.has_keyword(data, &Keyword::Seen);
+            let set_seen_flag = set_seen_flags && !cache.has_keyword(data, &Keyword::Seen);
 
             if !needs_metadata && !needs_blobs {
                 for attribute in &arguments.attributes {
                     match attribute {
                         Attribute::Flags => {
-                            let mut flags = message_cache
+                            let mut flags = cache
                                 .expand_keywords(data)
                                 .map(Flag::from)
                                 .collect::<Vec<_>>();
@@ -424,7 +406,7 @@ impl<T: SessionStream> SessionData<T> {
 
                 // Add flags to the response if the message was unseen
                 if set_seen_flag && !arguments.attributes.contains(&Attribute::Flags) {
-                    let mut flags = message_cache
+                    let mut flags = cache
                         .expand_keywords(data)
                         .map(Flag::from)
                         .collect::<Vec<_>>();
@@ -433,14 +415,13 @@ impl<T: SessionStream> SessionData<T> {
                 }
 
                 // Serialize fetch item
-                let mut buf = Vec::with_capacity(128);
                 FetchItem {
                     id: if is_uidonly { uid } else { seqnum },
                     is_uidonly,
                     items,
                 }
-                .serialize(&mut buf, is_utf8);
-                self.write_bytes(buf).await?;
+                .serialize(&mut output, is_utf8);
+                self.flush_output(&mut output, false).await?;
             } else {
                 let Some(metadata_) = self
                     .server
@@ -512,7 +493,7 @@ impl<T: SessionStream> SessionData<T> {
                             });
                         }
                         Attribute::Flags => {
-                            let mut flags = message_cache
+                            let mut flags = cache
                                 .expand_keywords(data)
                                 .map(Flag::from)
                                 .collect::<Vec<_>>();
@@ -597,6 +578,7 @@ impl<T: SessionStream> SessionData<T> {
                                 });
                             }
                             Err(_) => {
+                                self.flush_output(&mut output, true).await?;
                                 self.write_error(
                                     trc::ImapEvent::Error
                                         .into_err()
@@ -641,7 +623,7 @@ impl<T: SessionStream> SessionData<T> {
 
                 // Add flags to the response if the message was unseen
                 if set_seen_flag && !arguments.attributes.contains(&Attribute::Flags) {
-                    let mut flags = message_cache
+                    let mut flags = cache
                         .expand_keywords(data)
                         .map(Flag::from)
                         .collect::<Vec<_>>();
@@ -650,14 +632,13 @@ impl<T: SessionStream> SessionData<T> {
                 }
 
                 // Serialize fetch item
-                let mut buf = Vec::with_capacity(128);
                 FetchItem {
                     id: if is_uidonly { uid } else { seqnum },
                     is_uidonly,
                     items,
                 }
-                .serialize(&mut buf, is_utf8);
-                self.write_bytes(buf).await?;
+                .serialize(&mut output, is_utf8);
+                self.flush_output(&mut output, false).await?;
             }
 
             // Add to set flags
@@ -695,12 +676,17 @@ impl<T: SessionStream> SessionData<T> {
             }
         }
 
+        self.flush_output(&mut output, true).await?;
+
         trc::event!(
             Imap(trc::ImapEvent::Fetch),
             SpanId = self.session_id,
             AccountId = account_id,
             MailboxId = mailbox.id.mailbox_id,
-            DocumentId = fetched_ids,
+            DocumentId = ids
+                .iter()
+                .map(|resolved| trc::Value::from(resolved.id))
+                .collect::<Vec<_>>(),
             Details = arguments
                 .attributes
                 .iter()
@@ -813,7 +799,7 @@ impl AsImapDataItemPart for ArchivedMessageMetadataContents {
                 .header_value(&MetadataHeaderName::ContentTransferEncoding)
                 .and_then(|ct| ct.as_text().map(|ct| ct.into()));
 
-            fields.body_size_octets = body.as_ref().map(|b| b.len()).unwrap_or(0);
+            fields.body_size_octets = part.body_to_end().len();
 
             if is_text {
                 if fields.body_subtype.is_none() {

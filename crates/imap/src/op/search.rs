@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{FromModSeq, ToModSeq};
+use super::ToModSeq;
 use crate::{
-    core::{ImapId, SavedSearch, SelectedMailbox, Session, SessionData},
+    core::{Resolved, Row, SavedSearch, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
-use common::network::SessionStream;
+use common::{MessageStoreCache, network::SessionStream};
 use email::{
     cache::{
         MessageCacheFetch,
@@ -30,14 +30,13 @@ use nlp::language::Language;
 use registry::schema::enums::Permission;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use store::{
-    query::log::Query,
     roaring::RoaringBitmap,
     search::{EmailSearchField, KeyValueMatch, SearchFilter, SearchQuery},
     write::{SearchIndex, now},
 };
 use tokio::sync::watch;
 use trc::AddContext;
-use types::{collection::SyncCollection, id::Id, keyword::Keyword};
+use types::{id::Id, keyword::Keyword};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_search(
@@ -138,12 +137,22 @@ impl<T: SessionStream> SessionData<T> {
         &self,
         arguments: Arguments,
         mailbox: Arc<SelectedMailbox>,
-        results_tx: Option<watch::Sender<Arc<Vec<ImapId>>>>,
-        prev_saved_search: Option<Option<Arc<Vec<ImapId>>>>,
+        results_tx: Option<watch::Sender<Arc<Vec<Row>>>>,
+        prev_saved_search: Option<Option<Arc<Vec<Row>>>>,
         is_uid: bool,
         message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<(search::Response, Option<u32>)> {
+        let cache = self
+            .server
+            .get_cached_messages(mailbox.id.account_id)
+            .await
+            .caused_by(trc::location!())?;
+        let modseq = self
+            .sync_view(&mailbox, &cache, None)
+            .await
+            .caused_by(trc::location!())?;
+
         // Run query
         let is_sort = arguments.sort.is_some();
         let (result_set, include_highest_modseq) = self
@@ -151,42 +160,50 @@ impl<T: SessionStream> SessionData<T> {
                 arguments.filter,
                 arguments.sort.unwrap_or_default(),
                 &mailbox,
+                &cache,
                 &prev_saved_search,
             )
             .await?;
-
-        // Obtain modseq
-        let highest_modseq = if include_highest_modseq {
-            self.synchronize_messages(&mailbox)
-                .await?
-                .to_modseq()
-                .into()
-        } else {
-            None
-        };
+        let highest_modseq = include_highest_modseq.then(|| modseq.to_modseq());
 
         // Sort and map ids
-        let mut min: Option<(u32, ImapId)> = None;
-        let mut max: Option<(u32, ImapId)> = None;
-        let mut total = 0;
-        let results_len = result_set.len();
-        let mut saved_results = if results_tx.is_some() {
-            Some(Vec::with_capacity(results_len))
-        } else {
-            None
-        };
-        let mut imap_ids = Vec::with_capacity(results_len);
-        mailbox.map_search_results(
-            result_set.into_iter(),
+        let find_min = arguments.result_options.contains(&ResultOption::Min);
+        let find_max = arguments.result_options.contains(&ResultOption::Max);
+        let mut results = SearchResults {
             is_uid,
-            arguments.result_options.contains(&ResultOption::Min),
-            arguments.result_options.contains(&ResultOption::Max),
-            &mut min,
-            &mut max,
-            &mut total,
-            &mut imap_ids,
-            &mut saved_results,
-        );
+            find_min,
+            find_max,
+            min: None,
+            max: None,
+            total: 0,
+            imap_ids: Vec::with_capacity(result_set.len()),
+            saved_results: results_tx
+                .is_some()
+                .then(|| Vec::with_capacity(result_set.len())),
+        };
+        {
+            let view = mailbox.view.lock();
+            if !is_sort && result_set.len() > view.len() / 8 {
+                let set = RoaringBitmap::from_iter(result_set);
+                view.map_result_set(&set, |resolved| results.push(resolved));
+            } else {
+                for document_id in result_set {
+                    if let Some(resolved) = view.map_result(document_id) {
+                        results.push(resolved);
+                    }
+                }
+            }
+        }
+        results.finish();
+        let SearchResults {
+            min,
+            max,
+            total,
+            mut imap_ids,
+            mut saved_results,
+            ..
+        } = results;
+
         // RFC 9738 exempts SORT, whose ordering is meaningless once truncated
         let mut limited_uid = None;
         if !is_sort {
@@ -194,23 +211,21 @@ impl<T: SessionStream> SessionData<T> {
 
             let message_limit = message_limit as usize;
             if imap_ids.len() > message_limit {
-                let threshold = imap_ids[imap_ids.len() - message_limit];
-                imap_ids.drain(..imap_ids.len() - message_limit);
-                limited_uid = if is_uid {
+                let cutoff = imap_ids.len() - message_limit;
+                let threshold = imap_ids.get(cutoff).copied().unwrap_or_default();
+                imap_ids.drain(..cutoff);
+                let threshold_uid = if is_uid {
                     Some(threshold)
                 } else {
-                    mailbox.seqnum_to_uid(threshold)
+                    mailbox.view.lock().seqnum_to_uid(threshold)
                 };
+                limited_uid = threshold_uid;
 
                 // RFC 9738 requires the saved search to be truncated to match
-                if let Some(saved_results) = saved_results.as_mut() {
-                    saved_results.retain(|imap_id| {
-                        if is_uid {
-                            imap_id.uid >= threshold
-                        } else {
-                            imap_id.seqnum >= threshold
-                        }
-                    });
+                if let (Some(saved_results), Some(threshold_uid)) =
+                    (saved_results.as_mut(), threshold_uid)
+                {
+                    saved_results.retain(|row| row.uid >= threshold_uid);
                 }
             }
         }
@@ -241,8 +256,8 @@ impl<T: SessionStream> SessionData<T> {
         Ok((
             Response {
                 is_uid,
-                min: min.map(|(id, _)| id),
-                max: max.map(|(id, _)| id),
+                min: min.map(|resolved| resolved.imap_id(is_uid)),
+                max: max.map(|resolved| resolved.imap_id(is_uid)),
                 count: if arguments.result_options.contains(&ResultOption::Count) {
                     Some(total)
                 } else {
@@ -268,58 +283,48 @@ impl<T: SessionStream> SessionData<T> {
         imap_filter: Vec<Filter>,
         imap_comparator: Vec<Comparator>,
         mailbox: &SelectedMailbox,
-        prev_saved_search: &Option<Option<Arc<Vec<ImapId>>>>,
+        cache: &MessageStoreCache,
+        prev_saved_search: &Option<Option<Arc<Vec<Row>>>>,
     ) -> trc::Result<(Vec<u32>, bool)> {
         // Obtain message ids
         let mut filters = Vec::with_capacity(imap_filter.len() + 1);
-        let cache = self
-            .server
-            .get_cached_messages(mailbox.id.account_id)
-            .await
-            .caused_by(trc::location!())?;
-        let message_ids = RoaringBitmap::from_iter(
-            cache
-                .in_mailbox(mailbox.id.mailbox_id)
-                .map(|m| m.document_id()),
-        );
+        let message_ids = mailbox.view.lock().document_ids();
 
         // Convert query
         let mut include_highest_modseq = false;
         for filter in imap_filter {
             match filter {
                 Filter::Sequence(sequence, uid_filter) => {
-                    let mut set = RoaringBitmap::new();
-                    if let (Sequence::SavedSearch, Some(prev_saved_search)) =
+                    let resolved = if let (Sequence::SavedSearch, Some(prev_saved_search)) =
                         (&sequence, &prev_saved_search)
                     {
                         if let Some(prev_saved_search) = prev_saved_search {
-                            let state = mailbox.state.lock();
-                            for imap_id in prev_saved_search.iter() {
-                                if let Some(id) = state.uid_to_id.get(&imap_id.uid) {
-                                    set.insert(*id);
-                                }
-                            }
+                            mailbox.view.lock().resolve(
+                                &sequence,
+                                true,
+                                Some(prev_saved_search.as_slice()),
+                            )
                         } else {
                             return Err(trc::ImapEvent::Error
                                 .into_err()
                                 .details("No saved search found."));
                         }
                     } else {
-                        for id in mailbox.sequence_to_ids(&sequence, uid_filter).await?.keys() {
-                            set.insert(*id);
-                        }
-                    }
-                    filters.push(SearchFilter::is_in_set(set));
+                        mailbox.resolve(&sequence, uid_filter).await?
+                    };
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        resolved.iter().map(|resolved| resolved.id),
+                    )));
                 }
                 Filter::UidAfter(uid) => {
                     filters.push(SearchFilter::is_in_set(match uid.checked_add(1) {
-                        Some(min) => mailbox.uids_in_range(Some(min), None),
+                        Some(min) => mailbox.view.lock().uids_in_range(Some(min), None),
                         None => RoaringBitmap::new(),
                     }));
                 }
                 Filter::UidBefore(uid) => {
                     filters.push(SearchFilter::is_in_set(if uid > 1 {
-                        mailbox.uids_in_range(None, Some(uid - 1))
+                        mailbox.view.lock().uids_in_range(None, Some(uid - 1))
                     } else {
                         RoaringBitmap::new()
                     }));
@@ -514,26 +519,14 @@ impl<T: SessionStream> SessionData<T> {
                     )));
                 }
                 Filter::ModSeq((modseq, _)) => {
-                    let mut set = RoaringBitmap::new();
-                    for id in self
-                        .server
-                        .store()
-                        .changes(
-                            mailbox.id.account_id,
-                            SyncCollection::Email.into(),
-                            Query::from_modseq(modseq),
-                        )
-                        .await?
-                        .changes
-                        .into_iter()
-                        .filter_map(|change| change.try_unwrap_item_id())
-                    {
-                        let id = (id & u32::MAX as u64) as u32;
-                        if message_ids.contains(id) {
-                            set.insert(id);
-                        }
-                    }
-                    filters.push(SearchFilter::is_in_set(set));
+                    let mailbox_id = mailbox.id.mailbox_id;
+                    filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                        cache
+                            .emails
+                            .iter()
+                            .filter(|m| m.change_id() >= modseq && m.has_mailbox_id(mailbox_id))
+                            .map(|m| m.document_id()),
+                    )));
                     include_highest_modseq = true;
                 }
                 Filter::EmailId(id) => {
@@ -747,7 +740,7 @@ impl<T: SessionStream> SessionData<T> {
         self.server
             .query_emails(
                 mailbox.id.account_id,
-                &cache,
+                cache,
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(filters)
                     .with_account_id(mailbox.id.account_id)
@@ -760,8 +753,50 @@ impl<T: SessionStream> SessionData<T> {
     }
 }
 
+struct SearchResults {
+    is_uid: bool,
+    find_min: bool,
+    find_max: bool,
+    min: Option<Resolved>,
+    max: Option<Resolved>,
+    total: u32,
+    imap_ids: Vec<u32>,
+    saved_results: Option<Vec<Row>>,
+}
+
+impl SearchResults {
+    fn push(&mut self, resolved: Resolved) {
+        let id = resolved.imap_id(self.is_uid);
+        if self.find_min || self.find_max {
+            if self.find_min && self.min.is_none_or(|min| id < min.imap_id(self.is_uid)) {
+                self.min = Some(resolved);
+            }
+            if self.find_max && self.max.is_none_or(|max| id > max.imap_id(self.is_uid)) {
+                self.max = Some(resolved);
+            }
+        } else {
+            self.imap_ids.push(id);
+            if let Some(saved) = self.saved_results.as_mut() {
+                saved.push(resolved.row());
+            }
+        }
+        self.total += 1;
+    }
+
+    fn finish(&mut self) {
+        if self.find_min || self.find_max {
+            for resolved in [self.min, self.max].into_iter().flatten() {
+                self.imap_ids.push(resolved.imap_id(self.is_uid));
+                if let Some(saved) = self.saved_results.as_mut() {
+                    saved.push(resolved.row());
+                }
+            }
+        }
+    }
+}
+
 impl SelectedMailbox {
-    pub async fn get_saved_search(&self) -> Option<Arc<Vec<ImapId>>> {
+    pub async fn get_saved_search(&self) -> Option<Arc<Vec<Row>>> {
         let mut rx = match &*self.saved_search.lock() {
             SavedSearch::InFlight { rx } => rx.clone(),
             SavedSearch::Results { items } => {
@@ -775,65 +810,10 @@ impl SelectedMailbox {
         let v = rx.borrow();
         Some(v.clone())
     }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn map_search_results(
-        &self,
-        ids: impl Iterator<Item = u32>,
-        is_uid: bool,
-        find_min: bool,
-        find_max: bool,
-        min: &mut Option<(u32, ImapId)>,
-        max: &mut Option<(u32, ImapId)>,
-        total: &mut u32,
-        imap_ids: &mut Vec<u32>,
-        saved_results: &mut Option<Vec<ImapId>>,
-    ) {
-        let state = self.state.lock();
-        let find_min_or_max = find_min || find_max;
-        for document_id in ids {
-            if let Some((id, imap_id)) = state.map_result_id(document_id, is_uid) {
-                if find_min_or_max {
-                    if find_min {
-                        if let Some((prev_min, _)) = min {
-                            if id < *prev_min {
-                                *min = Some((id, imap_id));
-                            }
-                        } else {
-                            *min = Some((id, imap_id));
-                        }
-                    }
-                    if find_max {
-                        if let Some((prev_max, _)) = max {
-                            if id > *prev_max {
-                                *max = Some((id, imap_id));
-                            }
-                        } else {
-                            *max = Some((id, imap_id));
-                        }
-                    }
-                } else {
-                    imap_ids.push(id);
-                    if let Some(r) = saved_results.as_mut() {
-                        r.push(imap_id)
-                    }
-                }
-                *total += 1;
-            }
-        }
-        if find_min || find_max {
-            for (id, imap_id) in [min, max].into_iter().flatten() {
-                imap_ids.push(*id);
-                if let Some(r) = saved_results.as_mut() {
-                    r.push(*imap_id)
-                }
-            }
-        }
-    }
 }
 
 impl SavedSearch {
-    pub async fn unwrap(&self) -> Option<Arc<Vec<ImapId>>> {
+    pub async fn unwrap(&self) -> Option<Arc<Vec<Row>>> {
         match self {
             SavedSearch::InFlight { rx } => {
                 let mut rx = rx.clone();

@@ -6,7 +6,7 @@
 
 use super::{ImapContext, ToModSeq};
 use crate::{
-    core::{ImapUidToId, MailboxId, SelectedMailbox, Session, SessionData},
+    core::{MailboxId, Row, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
 use common::{
@@ -93,7 +93,7 @@ impl<T: SessionStream> SessionData<T> {
         let account_id = mailbox.account_id;
         let mailbox_id = mailbox.mailbox_id;
         if !self
-            .check_mailbox_acl(account_id, mailbox_id, Acl::AddItems)
+            .check_mailbox_acl(None, account_id, mailbox_id, Acl::AddItems)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?
         {
@@ -121,7 +121,7 @@ impl<T: SessionStream> SessionData<T> {
 
         // Append messages
         let mut response = StatusResponse::completed(Command::Append);
-        let mut created_ids = Vec::with_capacity(arguments.messages.len());
+        let mut created = Vec::with_capacity(arguments.messages.len());
         let mut last_change_id = None;
         for message in arguments.messages {
             let received_at = message
@@ -146,11 +146,14 @@ impl<T: SessionStream> SessionData<T> {
                 .await
             {
                 Ok(email) => {
-                    created_ids.push(ImapUidToId {
-                        uid: email.imap_uids[0],
+                    last_change_id = Some(email.change_id);
+                    let Some(&uid) = email.imap_uids.first() else {
+                        continue;
+                    };
+                    created.push(Row {
+                        uid,
                         id: email.document_id,
                     });
-                    last_change_id = Some(email.change_id);
                 }
                 Err(err) => {
                     return Err(
@@ -188,34 +191,30 @@ impl<T: SessionStream> SessionData<T> {
             MailboxName = arguments.mailbox_name.clone(),
             AccountId = account_id,
             MailboxId = mailbox_id,
-            DocumentId = created_ids
+            DocumentId = created
                 .iter()
-                .map(|r| trc::Value::from(r.id))
+                .map(|row| trc::Value::from(row.id))
                 .collect::<Vec<_>>(),
             Elapsed = op_start.elapsed()
         );
 
-        if !created_ids.is_empty() {
-            let uids = created_ids.iter().map(|id| id.uid).collect();
-            match selected_mailbox {
-                Some(selected_mailbox) if selected_mailbox.id == mailbox => {
-                    // Write updated modseq
-                    if is_qresync {
-                        self.write_bytes(
-                            HighestModSeq::new(last_change_id.unwrap_or_default().to_modseq())
-                                .into_bytes(),
-                        )
-                        .await?;
-                    }
-
-                    selected_mailbox.append_messages(created_ids, last_change_id);
+        if !created.is_empty() {
+            let uids = created.iter().map(|row| row.uid).collect();
+            if let Some(selected_mailbox) = selected_mailbox
+                && selected_mailbox.id == mailbox
+            {
+                // Write updated modseq
+                if is_qresync {
+                    self.write_bytes(
+                        HighestModSeq::new(last_change_id.unwrap_or_default().to_modseq())
+                            .into_bytes(),
+                    )
+                    .await?;
                 }
-                _ => {}
-            };
-            let uid_validity = self
-                .mailbox_state(&mailbox)
-                .map(|m| m.uid_validity as u32)
-                .unwrap_or_default();
+
+                selected_mailbox.view.lock().append_local(created);
+            }
+            let uid_validity = self.uid_validity(&mailbox);
 
             response = response.with_code(ResponseCode::AppendUid { uid_validity, uids });
         }

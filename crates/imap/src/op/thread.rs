@@ -63,44 +63,46 @@ impl<T: SessionStream> SessionData<T> {
         is_uid: bool,
         op_start: Instant,
     ) -> trc::Result<Response> {
+        let cache = self
+            .server
+            .get_cached_messages(mailbox.id.account_id)
+            .await
+            .caused_by(trc::location!())?;
+        self.sync_view(&mailbox, &cache, None)
+            .await
+            .caused_by(trc::location!())?;
+
         // Run query
         let (result_set, _) = self
-            .query(arguments.filter, vec![], &mailbox, &None)
+            .query(arguments.filter, vec![], &mailbox, &cache, &None)
             .await?;
 
-        // Synchronize mailbox
-        if !result_set.is_empty() {
-            self.synchronize_messages(&mailbox)
-                .await
-                .caused_by(trc::location!())?;
-        } else {
+        if result_set.is_empty() {
             return Ok(Response {
                 is_uid,
                 threads: vec![],
             });
         }
 
-        // Lock the cache
-        let cache = self
-            .server
-            .get_cached_messages(mailbox.id.account_id)
-            .await
-            .caused_by(trc::location!())?;
-
         // Group messages by thread
         let mut threads: AHashMap<u32, Vec<u32>> = AHashMap::new();
-        let state = mailbox.state.lock();
-        for document_id in result_set {
-            if let Some(item) = cache.email_by_id(&document_id)
-                && let Some((imap_id, _)) = state.map_result_id(document_id, is_uid)
-            {
-                threads.entry(item.thread_id()).or_default().push(imap_id);
+        {
+            let view = mailbox.view.lock();
+            for document_id in result_set {
+                if let Some(item) = cache.email_by_id(&document_id)
+                    && let Some(resolved) = view.map_result(document_id)
+                {
+                    threads
+                        .entry(item.thread_id())
+                        .or_default()
+                        .push(resolved.imap_id(is_uid));
+                }
             }
         }
 
         let mut threads = threads
-            .into_iter()
-            .map(|(_, mut messages)| {
+            .into_values()
+            .map(|mut messages| {
                 messages.sort_unstable();
                 messages
             })

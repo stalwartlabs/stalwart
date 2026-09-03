@@ -5,11 +5,11 @@
  */
 
 use crate::{
-    core::{SelectedMailbox, Session, SessionData, State},
+    core::{AccountCaches, SelectedMailbox, Session, SessionData, State},
     op::ImapContext,
 };
-use ahash::AHashSet;
 use common::{ipc::PushNotification, network::SessionStream};
+use email::cache::MessageCacheFetch;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
@@ -21,10 +21,9 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
-use store::query::log::Query;
 use tokio::io::AsyncReadExt;
 use trc::AddContext;
-use types::{collection::SyncCollection, type_state::DataType};
+use types::type_state::DataType;
 use utils::map::bitmap::Bitmap;
 
 impl<T: SessionStream> Session<T> {
@@ -53,6 +52,10 @@ impl<T: SessionStream> Session<T> {
         let mut push_rx = self
             .server
             .subscribe_push_manager(&data.access_token, types)
+            .await
+            .imap_ctx(&request.tag, trc::location!())?;
+
+        data.seed_mailbox_counters()
             .await
             .imap_ctx(&request.tag, trc::location!())?;
 
@@ -120,7 +123,7 @@ impl<T: SessionStream> Session<T> {
                         }
 
                         if has_mailbox_changes || has_email_changes {
-                            data.write_changes(&mailbox, has_mailbox_changes, has_email_changes, use_vanished, is_uidonly, is_rev2, is_utf8).await?;
+                            data.write_changes(mailbox.as_ref(), has_mailbox_changes, has_email_changes, use_vanished, is_uidonly, is_rev2, is_utf8).await?;
                         }
                     } else {
                         self.write_bytes(&b"* BYE Server shutting down.\r\n"[..]).await.ok();
@@ -136,7 +139,7 @@ impl<T: SessionStream> SessionData<T> {
     #[allow(clippy::too_many_arguments)]
     pub async fn write_changes(
         &self,
-        mailbox: &Option<Arc<SelectedMailbox>>,
+        mailbox: Option<&Arc<SelectedMailbox>>,
         check_mailboxes: bool,
         check_emails: bool,
         use_vanished: bool,
@@ -144,13 +147,36 @@ impl<T: SessionStream> SessionData<T> {
         is_rev2: bool,
         is_utf8: bool,
     ) -> trc::Result<()> {
+        // Synchronize the selected mailbox first so the account counters are current
+        let mut changed_uids = Vec::new();
+        let cache = if check_emails && let Some(mailbox) = mailbox {
+            let cache = self
+                .server
+                .get_cached_messages(mailbox.id.account_id)
+                .await
+                .caused_by(trc::location!())?;
+            self.sync_view(mailbox, &cache, Some(&mut changed_uids))
+                .await
+                .caused_by(trc::location!())?;
+            Some(cache)
+        } else {
+            None
+        };
+
         // Fetch all changed mailboxes
         if check_mailboxes {
-            let changes = self
-                .synchronize_mailboxes(true)
+            let caches = match (mailbox, &cache) {
+                (Some(mailbox), Some(cache)) => {
+                    AccountCaches::with(mailbox.id.account_id, cache.clone())
+                }
+                _ => AccountCaches::default(),
+            };
+            let refresh = self
+                .synchronize_mailboxes_using(true, caches)
                 .await
-                .caused_by(trc::location!())?
-                .unwrap();
+                .caused_by(trc::location!())?;
+            let changes = refresh.changes.unwrap_or_default();
+            let mut caches = refresh.caches;
 
             let mut buf = Vec::with_capacity(64);
 
@@ -177,6 +203,7 @@ impl<T: SessionStream> SessionData<T> {
             for mailbox_name in changes.changed {
                 if let Ok(status) = self
                     .status(
+                        &mut caches,
                         mailbox_name,
                         &[
                             Status::Messages,
@@ -197,75 +224,42 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         // Fetch selected mailbox changes
-        if check_emails {
-            // Synchronize emails
-            if let Some(mailbox) = mailbox {
-                // Obtain changes since last sync
-                let modseq = mailbox.state.lock().modseq;
-                let new_state = self
-                    .write_mailbox_changes(mailbox, use_vanished)
-                    .await
-                    .caused_by(trc::location!())?;
-                if new_state == modseq {
-                    return Ok(());
-                }
+        if let (Some(mailbox), Some(cache)) = (mailbox, cache) {
+            self.flush_view(mailbox, use_vanished)
+                .await
+                .caused_by(trc::location!())?;
 
-                // Obtain changed messages
-                let changelog = self
-                    .server
-                    .store()
-                    .changes(
-                        mailbox.id.account_id,
-                        SyncCollection::Email.into(),
-                        Query::Since(modseq),
+            if !changed_uids.is_empty() {
+                changed_uids.sort_unstable();
+                changed_uids.dedup();
+                let op_start = Instant::now();
+                return self
+                    .fetch(
+                        fetch::Arguments {
+                            tag: "".into(),
+                            sequence_set: Sequence::List {
+                                items: changed_uids
+                                    .into_iter()
+                                    .map(|uid| Sequence::Number { value: uid })
+                                    .collect(),
+                            },
+                            attributes: vec![fetch::Attribute::Flags, fetch::Attribute::Uid],
+                            changed_since: None,
+                            include_vanished: false,
+                        },
+                        mailbox.clone(),
+                        Some(cache),
+                        true,
+                        use_vanished,
+                        is_uidonly,
+                        false,
+                        is_utf8,
+                        u32::MAX,
+                        op_start,
                     )
                     .await
-                    .caused_by(trc::location!())?;
-                let changed_ids = {
-                    let state = mailbox.state.lock();
-                    changelog
-                        .changes
-                        .into_iter()
-                        .filter_map(|change| {
-                            change.try_unwrap_item_id().and_then(|item_id| {
-                                state
-                                    .id_to_imap
-                                    .get(&((item_id & u32::MAX as u64) as u32))
-                                    .map(|id| id.uid)
-                            })
-                        })
-                        .collect::<AHashSet<_>>()
-                };
-
-                if !changed_ids.is_empty() {
-                    let op_start = Instant::now();
-                    return self
-                        .fetch(
-                            fetch::Arguments {
-                                tag: "".into(),
-                                sequence_set: Sequence::List {
-                                    items: changed_ids
-                                        .into_iter()
-                                        .map(|uid| Sequence::Number { value: uid })
-                                        .collect(),
-                                },
-                                attributes: vec![fetch::Attribute::Flags, fetch::Attribute::Uid],
-                                changed_since: None,
-                                include_vanished: false,
-                            },
-                            mailbox.clone(),
-                            true,
-                            use_vanished,
-                            is_uidonly,
-                            false,
-                            is_utf8,
-                            u32::MAX,
-                            op_start,
-                        )
-                        .await
-                        .caused_by(trc::location!())
-                        .map(|_| ());
-                }
+                    .caused_by(trc::location!())
+                    .map(|_| ());
             }
         }
 

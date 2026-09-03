@@ -7,6 +7,7 @@
 use super::ImapContext;
 use crate::core::Session;
 use common::network::SessionStream;
+use email::cache::MessageCacheFetch;
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse, protocol::uidbatches, receiver::Request,
 };
@@ -58,43 +59,62 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Resynchronize so that batches reflect the current mailbox contents
-        data.synchronize_messages(&mailbox)
+        let cache = data
+            .server
+            .get_cached_messages(mailbox.id.account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        data.sync_view(&mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
-        let uids = mailbox.uids_descending();
         let batch_size = arguments.batch_size as usize;
-        let total_batches = uids.len().div_ceil(batch_size);
+        let ranges = {
+            let view = mailbox.view.lock();
+            let live_rows;
+            let rows = if view.has_pending_changes() {
+                live_rows = view.live_rows_by_uid();
+                live_rows.as_slice()
+            } else {
+                view.rows()
+            };
+            let total_batches = rows.len().div_ceil(batch_size);
 
-        if arguments.batch_range.is_none() && total_batches > max_uid_batches as usize {
-            return Err(trc::ImapEvent::Error
-                .into_err()
-                .details(format!(
-                    "A single UIDBATCHES response is limited to {max_uid_batches} ranges."
-                ))
-                .code(ResponseCode::TooMany)
-                .id(arguments.tag));
-        }
-
-        // Batch ranges tile the whole UID space, so each range starts right below
-        // the previous one and the oldest batch always reaches down to UID 1.
-        let (first, last) = match arguments.batch_range {
-            Some((from, to)) => (
-                (from as usize - 1).min(total_batches),
-                (to as usize).min(total_batches),
-            ),
-            None => (0, total_batches),
-        };
-        let mut ranges = Vec::with_capacity(last.saturating_sub(first));
-        let mut high = uids.first().copied().unwrap_or(0);
-        for batch in 0..last {
-            let end = ((batch + 1) * batch_size).min(uids.len());
-            let low = if end == uids.len() { 1 } else { uids[end - 1] };
-            if batch >= first {
-                ranges.push((high, low));
+            if arguments.batch_range.is_none() && total_batches > max_uid_batches as usize {
+                return Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details(format!(
+                        "A single UIDBATCHES response is limited to {max_uid_batches} ranges."
+                    ))
+                    .code(ResponseCode::TooMany)
+                    .id(arguments.tag));
             }
-            high = low.saturating_sub(1);
-        }
+
+            // Batch ranges tile the whole UID space, so each range starts right below
+            // the previous one and the oldest batch always reaches down to UID 1.
+            let (first, last) = match arguments.batch_range {
+                Some((from, to)) => (
+                    (from as usize - 1).min(total_batches),
+                    (to as usize).min(total_batches),
+                ),
+                None => (0, total_batches),
+            };
+            let mut ranges = Vec::with_capacity(last.saturating_sub(first));
+            let mut high = rows.last().map_or(0, |row| row.uid);
+            for batch in 0..last {
+                let end = ((batch + 1) * batch_size).min(rows.len());
+                let low = if end == rows.len() {
+                    1
+                } else {
+                    rows.get(rows.len() - end).map_or(1, |row| row.uid)
+                };
+                if batch >= first {
+                    ranges.push((high, low));
+                }
+                high = low.saturating_sub(1);
+            }
+            ranges
+        };
 
         trc::event!(
             Imap(trc::ImapEvent::UidBatches),

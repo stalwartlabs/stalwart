@@ -104,15 +104,6 @@ impl<T: SessionStream> SessionData<T> {
                 .id(arguments.tag));
         }
 
-        // Update mailbox cache
-        for account in self.mailboxes.lock().iter_mut() {
-            if account.account_id == account_id {
-                account.mailbox_names.remove(&arguments.mailbox_name);
-                account.mailbox_state.remove(&mailbox_id);
-                break;
-            }
-        }
-
         trc::event!(
             Imap(trc::ImapEvent::DeleteMailbox),
             SpanId = self.session_id,

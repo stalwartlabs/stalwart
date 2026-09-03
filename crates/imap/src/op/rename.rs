@@ -9,7 +9,6 @@ use crate::{
     spawn_op,
 };
 use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
-use email::cache::MessageCacheFetch;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{ObjectId, rename::Arguments},
@@ -51,9 +50,11 @@ impl<T: SessionStream> SessionData<T> {
         op_start: Instant,
     ) -> trc::Result<StatusResponse> {
         // Refresh mailboxes
-        self.synchronize_mailboxes(false)
+        let mut caches = self
+            .synchronize_mailboxes(false)
             .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
+            .imap_ctx(&arguments.tag, trc::location!())?
+            .caches;
 
         // Validate mailbox name
         let mut params = self
@@ -66,9 +67,9 @@ impl<T: SessionStream> SessionData<T> {
         let mailbox_id = {
             let mut mailbox_id = None;
             for account in self.mailboxes.lock().iter() {
-                if let Some(mailbox_id_) = account.mailbox_names.get(&arguments.mailbox_name) {
+                if let Some(mailbox_id_) = account.id_by_name(&arguments.mailbox_name) {
                     if account.account_id == params.account_id {
-                        mailbox_id = (*mailbox_id_).into();
+                        mailbox_id = mailbox_id_.into();
                         break;
                     } else {
                         return Err(trc::ImapEvent::Error
@@ -142,9 +143,8 @@ impl<T: SessionStream> SessionData<T> {
                 .account(params.account_id)
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?;
-            let mailbox_count = self
-                .server
-                .get_cached_messages(params.account_id)
+            let mailbox_count = caches
+                .fetch(&self.server, params.account_id)
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?
                 .mailboxes

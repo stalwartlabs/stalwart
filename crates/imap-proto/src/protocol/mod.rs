@@ -502,9 +502,9 @@ impl ResponseCode {
             ResponseCode::UidValidity => b"UIDVALIDITY",
             ResponseCode::Unavailable => b"UNAVAILABLE",
             ResponseCode::UnknownCte => b"UNKNOWN-CTE",
-            ResponseCode::Modified { ids } => {
+            ResponseCode::Modified { ranges } => {
                 buf.extend_from_slice(b"MODIFIED ");
-                serialize_sequence(buf, ids);
+                serialize_sequence_ranges(buf, ranges);
                 return;
             }
             ResponseCode::ObjectId(object_id) => {
@@ -712,6 +712,19 @@ pub fn serialize_sequence(buf: &mut Vec<u8>, list: &[u32]) {
                     break;
                 }
             }
+        }
+    }
+}
+
+pub fn serialize_sequence_ranges(buf: &mut Vec<u8>, ranges: &[(u32, u32)]) {
+    for (pos, (from, to)) in ranges.iter().enumerate() {
+        if pos > 0 {
+            buf.push(b',');
+        }
+        buf.extend_from_slice(from.to_string().as_bytes());
+        if to != from {
+            buf.push(b':');
+            buf.extend_from_slice(to.to_string().as_bytes());
         }
     }
 }

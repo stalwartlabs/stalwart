@@ -300,7 +300,7 @@ impl TestServerBuilder {
                                 || ev == "http.request-body"
                                 || ev == "http.request-url"
                                 || ev == "tls.no-certificates-available"
-                                || ev == "store.cache-hit"
+                                || ev == "cache.hit"
                         })
                         .copied()
                         .collect(),

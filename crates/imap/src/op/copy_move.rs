@@ -6,7 +6,7 @@
 
 use super::ImapContext;
 use crate::{
-    core::{MailboxId, SelectedMailbox, Session, SessionData},
+    core::{AccountCaches, MailboxId, SelectedMailbox, Session, SessionData},
     spawn_op,
 };
 use common::{
@@ -64,9 +64,11 @@ impl<T: SessionStream> Session<T> {
 
         spawn_op!(data, {
             // Refresh mailboxes
-            data.synchronize_mailboxes(false)
+            let caches = data
+                .synchronize_mailboxes(false)
                 .await
-                .imap_ctx(&arguments.tag, trc::location!())?;
+                .imap_ctx(&arguments.tag, trc::location!())?
+                .caches;
 
             // Make sure the mailbox exists.
             let dest_mailbox =
@@ -93,6 +95,7 @@ impl<T: SessionStream> Session<T> {
 
             data.copy_move(
                 arguments,
+                caches,
                 src_mailbox,
                 dest_mailbox,
                 is_move,
@@ -111,6 +114,7 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn copy_move(
         &self,
         arguments: Arguments,
+        mut caches: AccountCaches,
         src_mailbox: Arc<SelectedMailbox>,
         dest_mailbox: MailboxId,
         is_move: bool,
@@ -119,13 +123,17 @@ impl<T: SessionStream> SessionData<T> {
         message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<()> {
-        self.synchronize_messages(&src_mailbox)
+        let cache = caches
+            .fetch(&self.server, src_mailbox.id.account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        self.sync_view(&src_mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
         // Convert IMAP ids to JMAP ids.
-        let ids = src_mailbox
-            .sequence_to_ids(&arguments.sequence_set, is_uid)
+        let mut ids = src_mailbox
+            .resolve(&arguments.sequence_set, is_uid)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -162,6 +170,7 @@ impl<T: SessionStream> SessionData<T> {
         if is_move
             && !self
                 .check_mailbox_acl(
+                    Some(&cache),
                     src_mailbox.id.account_id,
                     src_mailbox.id.mailbox_id,
                     Acl::RemoveItems,
@@ -181,8 +190,23 @@ impl<T: SessionStream> SessionData<T> {
 
         // Verify that the user can append messages to the destination mailbox.
         let dest_mailbox_id = dest_mailbox.mailbox_id;
+        let dest_cache = if src_mailbox.id.account_id != dest_mailbox.account_id {
+            Some(
+                caches
+                    .fetch(&self.server, dest_mailbox.account_id)
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?,
+            )
+        } else {
+            None
+        };
         if !self
-            .check_mailbox_acl(dest_mailbox.account_id, dest_mailbox_id, Acl::AddItems)
+            .check_mailbox_acl(
+                Some(dest_cache.as_deref().unwrap_or(&cache)),
+                dest_mailbox.account_id,
+                dest_mailbox_id,
+                Acl::AddItems,
+            )
             .await
             .imap_ctx(&arguments.tag, trc::location!())?
         {
@@ -198,13 +222,12 @@ impl<T: SessionStream> SessionData<T> {
 
         // RFC 9738 requires the highest UIDs to be processed first when truncating.
         // COPY is atomic, so it is refused outright rather than partially applied.
-        let mut ids = ids;
         let message_limit = message_limit as usize;
         let mut limited_uid = None;
         if ids.len() > message_limit {
-            let mut uids = ids.values().map(|imap_id| imap_id.uid).collect::<Vec<_>>();
-            let cutoff = uids.len() - message_limit;
-            let lowest_uid = *uids.select_nth_unstable(cutoff).1;
+            ids.sort_unstable_by_key(|resolved| resolved.uid);
+            let cutoff = ids.len() - message_limit;
+            let lowest_uid = ids.get(cutoff).map_or(0, |resolved| resolved.uid);
 
             if !is_move {
                 return self
@@ -220,7 +243,7 @@ impl<T: SessionStream> SessionData<T> {
                     .await;
             }
 
-            ids.retain(|_, imap_id| imap_id.uid >= lowest_uid);
+            ids.drain(..cutoff);
             limited_uid = Some(lowest_uid);
         }
 
@@ -239,14 +262,10 @@ impl<T: SessionStream> SessionData<T> {
             let dest_mailbox_id = MessageUid::new_unassigned(dest_mailbox_id);
             let mut batch = BatchBuilder::new();
             let mut pending_copied_ids: Vec<(u32, Slot)> = Vec::with_capacity(ids.len());
-            let cache = self
-                .server
-                .get_cached_messages(account_id)
-                .await
-                .imap_ctx(&arguments.tag, trc::location!())?;
 
             {
-                for (&id, imap_id) in &ids {
+                for imap_id in &ids {
+                    let id = imap_id.id;
                     // Obtain mailbox tags
                     let Some(data) = cache.message_data(id) else {
                         trc::event!(
@@ -395,13 +414,8 @@ impl<T: SessionStream> SessionData<T> {
             let mut dest_change_id = None;
             let dest_account_id = dest_mailbox.account_id;
             let mut destroy_ids = RoaringBitmap::new();
-            let cache = self
-                .server
-                .get_cached_messages(src_account_id)
-                .await
-                .imap_ctx(&arguments.tag, trc::location!())?;
-            let mut dest_cache = None;
-            for (id, imap_id) in ids {
+            for imap_id in &ids {
+                let id = imap_id.id;
                 let email = cache.email_by_id(&id);
                 match self
                     .server
@@ -427,15 +441,6 @@ impl<T: SessionStream> SessionData<T> {
                         }
                     }
                     Err(CopyMessageError::AlreadyExists(existing_id)) => {
-                        if dest_cache.is_none() {
-                            dest_cache = self
-                                .server
-                                .get_cached_messages(dest_account_id)
-                                .await
-                                .imap_ctx(&arguments.tag, trc::location!())?
-                                .into();
-                        }
-
                         if let Some(uid) = dest_cache
                             .as_ref()
                             .and_then(|cache| cache.email_by_id(&existing_id))
@@ -593,10 +598,7 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         // Prepare response
-        let uid_validity = self
-            .mailbox_state(&dest_mailbox)
-            .map(|m| m.uid_validity as u32)
-            .unwrap_or_default();
+        let uid_validity = self.uid_validity(&dest_mailbox);
 
         let mut src_uids = Vec::with_capacity(copied_ids.len());
         let mut dest_uids = Vec::with_capacity(copied_ids.len());
@@ -642,7 +644,12 @@ impl<T: SessionStream> SessionData<T> {
 
             if did_move {
                 // Resynchronize source mailbox on a successful move
-                self.write_mailbox_changes(&src_mailbox, use_vanished)
+                let cache = self
+                    .server
+                    .get_cached_messages(src_mailbox.id.account_id)
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?;
+                self.write_mailbox_changes(&src_mailbox, &cache, use_vanished)
                     .await
                     .imap_ctx(&arguments.tag, trc::location!())?;
             }

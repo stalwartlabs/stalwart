@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use crate::{
-    core::{Session, SessionData},
+    core::{AccountView, Session, SessionData},
     spawn_op,
 };
 use common::network::SessionStream;
@@ -116,9 +116,11 @@ impl<T: SessionStream> SessionData<T> {
         };
 
         // Refresh mailboxes
-        self.synchronize_mailboxes(false)
+        let mut caches = self
+            .synchronize_mailboxes(false)
             .await
-            .imap_ctx(&tag, trc::location!())?;
+            .imap_ctx(&tag, trc::location!())?
+            .caches;
 
         // Process arguments
         let mut filter_subscribed = false;
@@ -209,51 +211,43 @@ impl<T: SessionStream> SessionData<T> {
                 }
             }
 
-            for (mailbox_name, mailbox_id) in &account.mailbox_names {
+            for entry in &account.names {
+                let mailbox_name = &entry.name;
+                let mailbox_id = entry.mailbox_id;
                 if matches_pattern(&patterns, mailbox_name) {
-                    let mailbox = if let Some(mailbox) = account.mailbox_state.get(mailbox_id) {
-                        mailbox
-                    } else {
+                    let Some(mailbox) = account.mailbox(mailbox_id) else {
                         trc::event!(
                             Store(StoreEvent::UnexpectedError),
                             Details = "IMAP mailbox no longer present in account state",
-                            Id = *mailbox_id,
-                            Details = account
-                                .mailbox_state
-                                .keys()
-                                .copied()
-                                .map(trc::Value::from)
-                                .collect::<Vec<_>>()
+                            Id = mailbox_id,
                         );
                         continue;
                     };
-                    let mut has_recursive_match = false;
-                    if recursive_match {
+                    let is_subscribed = mailbox.subscribers.contains(&self.account_id);
+                    let has_recursive_match = recursive_match && {
                         let prefix = format!("{}/", mailbox_name);
-                        for (mailbox_name, mailbox_id) in &account.mailbox_names {
-                            if mailbox_name.starts_with(&prefix)
-                                && account.mailbox_state.get(mailbox_id).unwrap().is_subscribed
-                            {
-                                has_recursive_match = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !filter_subscribed || mailbox.is_subscribed || has_recursive_match {
+                        account.names.iter().any(|child| {
+                            child.name.starts_with(&prefix)
+                                && account.is_subscribed(child.mailbox_id, self.account_id)
+                        })
+                    };
+                    if !filter_subscribed || is_subscribed || has_recursive_match {
                         let mut attributes = Vec::with_capacity(2);
                         if include_children {
-                            attributes.push(if mailbox.has_children {
+                            attributes.push(if account.has_children(mailbox_id) {
                                 Attribute::HasChildren
                             } else {
                                 Attribute::HasNoChildren
                             });
                         }
-                        if include_subscribed && mailbox.is_subscribed {
+                        if include_subscribed && is_subscribed {
                             attributes.push(Attribute::Subscribed);
                         }
                         if include_special_use {
-                            if let Some(special_use) = &mailbox.special_use {
-                                attributes.push(*special_use);
+                            if let Some(special_use) =
+                                AccountView::special_use_attribute(&mailbox.role)
+                            {
+                                attributes.push(special_use);
                             } else if filter_special_use {
                                 continue;
                             }
@@ -276,8 +270,20 @@ impl<T: SessionStream> SessionData<T> {
         let mut status_items = Vec::new();
         if let Some(include_status) = include_status {
             for list_item in &list_items {
+                let Some(mailbox) = self.get_mailbox_by_name(&list_item.mailbox_name) else {
+                    continue;
+                };
+                let cache = caches
+                    .fetch(&self.server, mailbox.account_id)
+                    .await
+                    .imap_ctx(&tag, trc::location!())?;
                 match self
-                    .status(list_item.mailbox_name.clone(), include_status)
+                    .status_in(
+                        &cache,
+                        mailbox,
+                        list_item.mailbox_name.clone(),
+                        include_status,
+                    )
                     .await
                     .imap_ctx(&tag, trc::location!())
                 {

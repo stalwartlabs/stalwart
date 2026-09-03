@@ -75,22 +75,21 @@ impl<T: SessionStream> SessionData<T> {
         };
 
         // Verify if mailbox is already subscribed/unsubscribed
-        for account in self.mailboxes.lock().iter_mut() {
-            if account.account_id == account_id {
-                if let Some(mailbox) = account.mailbox_state.get(&mailbox_id)
-                    && mailbox.is_subscribed == subscribe
-                {
-                    return Err(trc::ImapEvent::Error
-                        .into_err()
-                        .details(if subscribe {
-                            "Mailbox is already subscribed."
-                        } else {
-                            "Mailbox is already unsubscribed."
-                        })
-                        .id(tag));
-                }
-                break;
-            }
+        if self
+            .mailboxes
+            .lock()
+            .iter()
+            .find(|account| account.account_id == account_id)
+            .is_some_and(|account| account.is_subscribed(mailbox_id, self.account_id) == subscribe)
+        {
+            return Err(trc::ImapEvent::Error
+                .into_err()
+                .details(if subscribe {
+                    "Mailbox is already subscribed."
+                } else {
+                    "Mailbox is already unsubscribed."
+                })
+                .id(tag));
         }
 
         // Obtain mailbox
@@ -128,16 +127,6 @@ impl<T: SessionStream> SessionData<T> {
                 .commit_batch(batch)
                 .await
                 .imap_ctx(&tag, trc::location!())?;
-
-            // Update mailbox cache
-            for account in self.mailboxes.lock().iter_mut() {
-                if account.account_id == account_id {
-                    if let Some(mailbox) = account.mailbox_state.get_mut(&mailbox_id) {
-                        mailbox.is_subscribed = subscribe;
-                    }
-                    break;
-                }
-            }
         }
 
         trc::event!(

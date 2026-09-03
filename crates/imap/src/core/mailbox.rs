@@ -4,27 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Account, MailboxId, MailboxSync, Session, SessionData};
-use crate::core::Mailbox;
-use ahash::AHashMap;
+use super::{
+    AccountCaches, AccountView, CounterDelta, Counters, MailboxCounters, MailboxId, MailboxName,
+    MailboxRefresh, MailboxSync, Session, SessionData, UidNext,
+};
 use common::{
+    MessageStoreCache, Server,
     auth::AccessToken,
     network::{SessionStream, limiter::InFlight},
     sharing::EffectiveAcl,
 };
 use email::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
+    cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::INBOX_ID,
 };
-use imap_proto::protocol::list::Attribute;
 use parking_lot::Mutex;
-use std::{collections::BTreeMap, sync::atomic::Ordering};
-use store::{
-    ValueKey,
-    write::{Archive, ArchiveBytes},
-};
+use std::sync::atomic::Ordering;
+use store::{ValueKey, roaring::RoaringBitmap, write::ValueClass};
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection, keyword::Keyword, special_use::SpecialUse};
+use types::{acl::Acl, collection::Collection, special_use::SpecialUse};
 
 impl<T: SessionStream> SessionData<T> {
     pub async fn new(
@@ -32,332 +30,287 @@ impl<T: SessionStream> SessionData<T> {
         access_token: AccessToken,
         in_flight: Option<InFlight>,
     ) -> trc::Result<Self> {
-        let mut session = SessionData {
+        let data = SessionData {
             stream_tx: session.stream_tx.clone(),
             server: session.server.clone(),
             account_id: access_token.account_id(),
             session_id: session.session_id,
-            mailboxes: Mutex::new(vec![]),
+            mailboxes: Mutex::new(Vec::new()),
             state: access_token.state().into(),
             remote_addr: session.remote_addr,
             access_token,
             in_flight,
         };
 
-        // Fetch mailboxes for the main account
-        let mut mailboxes = vec![
-            session
-                .fetch_account_mailboxes(session.account_id, None, &session.access_token, None)
+        let shared = data
+            .access_token
+            .shared_accounts(Collection::Mailbox)
+            .copied()
+            .collect::<Vec<_>>();
+        let mut accounts = Vec::with_capacity(shared.len() + 1);
+        accounts.push(
+            data.account_view(data.account_id, None, &data.access_token)
                 .await
-                .caused_by(trc::location!())?
-                .unwrap(),
-        ];
-
-        // Fetch shared mailboxes
-        for &account_id in session.access_token.shared_accounts(Collection::Mailbox) {
-            let prefix: String = format!(
-                "{}/{}",
-                session.server.core.email.shared_folder,
-                session
-                    .server
-                    .account(account_id)
+                .caused_by(trc::location!())?,
+        );
+        for account_id in shared {
+            let prefix = data.shared_prefix(account_id).await?;
+            accounts.push(
+                data.account_view(account_id, Some(prefix), &data.access_token)
                     .await
-                    .caused_by(trc::location!())?
-                    .name()
-            );
-            mailboxes.push(
-                session
-                    .fetch_account_mailboxes(account_id, prefix.into(), &session.access_token, None)
-                    .await
-                    .caused_by(trc::location!())?
-                    .unwrap(),
+                    .caused_by(trc::location!())?,
             );
         }
+        *data.mailboxes.lock() = accounts;
 
-        session.mailboxes = Mutex::new(mailboxes);
-
-        Ok(session)
+        Ok(data)
     }
 
-    async fn fetch_account_mailboxes(
+    async fn shared_prefix(&self, account_id: u32) -> trc::Result<String> {
+        Ok(format!(
+            "{}/{}",
+            self.server.core.email.shared_folder,
+            self.server
+                .account(account_id)
+                .await
+                .caused_by(trc::location!())?
+                .name()
+        ))
+    }
+
+    async fn account_view(
         &self,
         account_id: u32,
-        mailbox_prefix: Option<String>,
+        prefix: Option<String>,
         access_token: &AccessToken,
-        current_state: Option<u64>,
-    ) -> trc::Result<Option<Account>> {
+    ) -> trc::Result<AccountView> {
         let cache = self
             .server
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        if current_state.is_some_and(|state| state == cache.last_change_id) {
-            return Ok(None);
-        }
-
-        let shared_mailbox_ids = if access_token.is_member(account_id) {
-            None
-        } else {
-            cache.shared_mailboxes(access_token, Acl::Read).into()
-        };
-
-        // Build special uses
-        let mut special_uses = AHashMap::new();
-        for mailbox in &cache.mailboxes.items {
-            if shared_mailbox_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(mailbox.document_id))
-                && !matches!(mailbox.role, SpecialUse::None)
-            {
-                special_uses.insert(mailbox.role, mailbox.document_id);
-            }
-        }
-
-        // Build account
-        let mut account = Account {
+        Ok(AccountView::build(
+            &self.server,
+            &cache,
             account_id,
-            prefix: mailbox_prefix,
-            mailbox_names: BTreeMap::new(),
-            mailbox_state: AHashMap::with_capacity(cache.mailboxes.items.len()),
-            last_change_id: cache.last_change_id,
-        };
-
-        for mailbox in &cache.mailboxes.items {
-            if shared_mailbox_ids
-                .as_ref()
-                .is_some_and(|ids| !ids.contains(mailbox.document_id))
-            {
-                continue;
-            }
-
-            // Build mailbox path and map it to its effective id
-            let mailbox_name = if let Some(prefix) = &account.prefix {
-                let mut name = String::with_capacity(prefix.len() + mailbox.path.len() + 1);
-                name.push_str(prefix.as_str());
-                name.push('/');
-                name.push_str(mailbox.path.as_str());
-                name
-            } else {
-                mailbox.path.clone()
-            };
-            let effective_mailbox_id = self
-                .server
-                .core
-                .email
-                .default_folders
-                .iter()
-                .find(|f| f.name == mailbox_name || f.aliases.iter().any(|a| a == &mailbox_name))
-                .and_then(|f| special_uses.get(&f.special_use))
-                .copied()
-                .unwrap_or(mailbox.document_id);
-            account
-                .mailbox_names
-                .insert(mailbox_name, effective_mailbox_id);
-            account.mailbox_state.insert(
-                mailbox.document_id,
-                Mailbox {
-                    has_children: cache
-                        .mailboxes
-                        .items
-                        .iter()
-                        .any(|child| child.parent_id == mailbox.document_id),
-                    is_subscribed: mailbox.subscribers.contains(&access_token.account_id()),
-                    special_use: match mailbox.role {
-                        SpecialUse::Trash => Some(Attribute::Trash),
-                        SpecialUse::Junk => Some(Attribute::Junk),
-                        SpecialUse::Drafts => Some(Attribute::Drafts),
-                        SpecialUse::Archive => Some(Attribute::Archive),
-                        SpecialUse::Sent => Some(Attribute::Sent),
-                        SpecialUse::Important => Some(Attribute::Important),
-                        SpecialUse::Memos => Some(Attribute::Memos),
-                        SpecialUse::Scheduled => Some(Attribute::Scheduled),
-                        SpecialUse::Snoozed => Some(Attribute::Snoozed),
-                        _ => None,
-                    },
-                    total_messages: cache.in_mailbox(mailbox.document_id).count() as u64,
-                    total_unseen: cache
-                        .in_mailbox_without_keyword(mailbox.document_id, &Keyword::Seen)
-                        .count() as u64,
-                    total_deleted: cache
-                        .in_mailbox_with_keyword(mailbox.document_id, &Keyword::Deleted)
-                        .count() as u64,
-                    uid_validity: mailbox.uid_validity as u64,
-                    uid_next: self
-                        .get_uid_next(&MailboxId {
-                            account_id,
-                            mailbox_id: mailbox.document_id,
-                        })
-                        .await
-                        .caused_by(trc::location!())? as u64,
-                    total_deleted_storage: None,
-                    size: None,
-                },
-            );
-        }
-
-        Ok(account.into())
+            prefix,
+            access_token,
+        ))
     }
 
-    pub async fn synchronize_mailboxes(
+    pub async fn synchronize_mailboxes(&self, return_changes: bool) -> trc::Result<MailboxRefresh> {
+        self.synchronize_mailboxes_using(return_changes, AccountCaches::default())
+            .await
+    }
+
+    pub async fn synchronize_mailboxes_using(
         &self,
         return_changes: bool,
-    ) -> trc::Result<Option<MailboxSync>> {
-        let mut changes = if return_changes {
-            MailboxSync::default().into()
-        } else {
-            None
-        };
+        mut caches: AccountCaches,
+    ) -> trc::Result<MailboxRefresh> {
+        let mut changes = return_changes.then(MailboxSync::default);
 
-        // Obtain access token
         let access_token = self
             .refresh_access_token()
             .await
             .caused_by(trc::location!())?;
         let state = access_token.state();
 
-        // Shared mailboxes might have changed
-        let mut added_accounts = Vec::new();
         if self.state.load(Ordering::Relaxed) != state {
-            // Remove unlinked shared accounts
-            let mut added_account_ids = Vec::new();
-            {
-                let mut mailboxes = self.mailboxes.lock();
-                let mut new_accounts = Vec::with_capacity(mailboxes.len());
+            let added_account_ids = {
+                let mut accounts = self.mailboxes.lock();
                 let has_access_to = access_token
                     .shared_accounts(Collection::Mailbox)
                     .copied()
                     .collect::<Vec<_>>();
-                for account in mailboxes.drain(..) {
-                    if access_token.is_account_id(account.account_id)
-                        || has_access_to.contains(&account.account_id)
-                    {
-                        new_accounts.push(account);
-                    } else {
-                        // Add unshared mailboxes to deleted list
-                        if let Some(changes) = &mut changes {
-                            for (mailbox_name, _) in account.mailbox_names {
-                                changes.deleted.push(mailbox_name);
-                            }
-                        }
+                accounts.retain(|account| {
+                    let keep = access_token.is_account_id(account.account_id)
+                        || has_access_to.contains(&account.account_id);
+                    if !keep && let Some(changes) = &mut changes {
+                        changes
+                            .deleted
+                            .extend(account.names.iter().map(|entry| entry.name.clone()));
                     }
-                }
+                    keep
+                });
+                has_access_to
+                    .iter()
+                    .copied()
+                    .filter(|account_id| {
+                        !accounts
+                            .iter()
+                            .skip(1)
+                            .any(|account| account.account_id == *account_id)
+                    })
+                    .collect::<Vec<_>>()
+            };
 
-                // Add new shared account ids
-                for account_id in has_access_to {
-                    if !new_accounts
-                        .iter()
-                        .skip(1)
-                        .any(|m| m.account_id == account_id)
-                    {
-                        added_account_ids.push(account_id);
-                    }
-                }
-                *mailboxes = new_accounts;
-            }
-
-            // Fetch mailboxes for each new shared account
             for account_id in added_account_ids {
-                let prefix: String = format!(
-                    "{}/{}",
-                    self.server.core.email.shared_folder,
-                    self.server
-                        .account(account_id)
-                        .await
-                        .caused_by(trc::location!())?
-                        .name()
-                );
-                added_accounts.push(
-                    self.fetch_account_mailboxes(account_id, prefix.into(), &access_token, None)
-                        .await?
-                        .unwrap(),
-                );
+                let prefix = self.shared_prefix(account_id).await?;
+                let account = self
+                    .account_view(account_id, Some(prefix), &access_token)
+                    .await?;
+                if let Some(changes) = &mut changes {
+                    changes
+                        .added
+                        .extend(account.names.iter().map(|entry| entry.name.clone()));
+                }
+                self.mailboxes.lock().push(account);
             }
 
-            // Update state
             self.state.store(state, Ordering::Relaxed);
         }
 
-        // Fetch mailbox changes for all accounts
-        let mut changed_accounts = Vec::new();
         let account_states = self
             .mailboxes
             .lock()
             .iter()
-            .map(|m| (m.account_id, m.prefix.clone(), m.last_change_id))
+            .map(|account| (account.account_id, account.mailboxes.change_id))
             .collect::<Vec<_>>();
-        for (account_id, prefix, last_state) in account_states {
-            if let Some(changed_account) = self
-                .fetch_account_mailboxes(account_id, prefix, &access_token, last_state.into())
-                .await
-                .caused_by(trc::location!())?
+
+        for (account_id, container_change_id) in account_states {
+            let cache = caches.fetch(&self.server, account_id).await?;
+            if cache.mailboxes.change_id != container_change_id
+                && !self.refresh_account_structure(account_id, &cache, &access_token, &mut changes)
             {
-                changed_accounts.push(changed_account);
+                continue;
             }
-        }
 
-        // Update mailboxes
-        if !changed_accounts.is_empty() || !added_accounts.is_empty() {
-            let mut mailboxes = self.mailboxes.lock();
-
-            for changed_account in changed_accounts {
-                if let Some(pos) = mailboxes
-                    .iter()
-                    .position(|a| a.account_id == changed_account.account_id)
+            if let Some(changes) = &mut changes {
+                let mut accounts = self.mailboxes.lock();
+                if let Some(account) = accounts
+                    .iter_mut()
+                    .find(|account| account.account_id == account_id)
+                    && let Some(previous) = account.refresh_counters(&cache)
                 {
-                    // Add changes and deletions
-                    if let Some(changes) = &mut changes {
-                        let old_account = &mailboxes[pos];
-                        let new_account = &changed_account;
-
-                        // Add new mailboxes
-                        for (mailbox_name, mailbox_id) in new_account.mailbox_names.iter() {
-                            if let Some(old_mailbox) = old_account.mailbox_state.get(mailbox_id) {
-                                if let Some(mailbox) = new_account.mailbox_state.get(mailbox_id)
-                                    && (mailbox.total_messages != old_mailbox.total_messages
-                                        || mailbox.total_unseen != old_mailbox.total_unseen)
-                                {
-                                    changes.changed.push(mailbox_name.clone());
-                                }
-                            } else {
-                                changes.added.push(mailbox_name.clone());
-                            }
-                        }
-
-                        // Add deleted mailboxes
-                        for (mailbox_name, mailbox_id) in &old_account.mailbox_names {
-                            if !new_account.mailbox_state.contains_key(mailbox_id) {
-                                changes.deleted.push(mailbox_name.clone());
-                            }
+                    for entry in account
+                        .names
+                        .iter()
+                        .filter(|entry| !changes.added.contains(&entry.name))
+                    {
+                        let before = previous
+                            .get(entry.mailbox_id as usize)
+                            .copied()
+                            .unwrap_or_default();
+                        let after = account.counters_of(entry.mailbox_id);
+                        if before.total != after.total || before.unseen != after.unseen {
+                            changes.changed.push(entry.name.clone());
                         }
                     }
-
-                    mailboxes[pos] = changed_account;
-                } else {
-                    // Add newly shared accounts
-                    if let Some(changes) = &mut changes {
-                        changes
-                            .added
-                            .extend(changed_account.mailbox_names.keys().cloned());
-                    }
-
-                    mailboxes.push(changed_account);
                 }
-            }
-
-            if !added_accounts.is_empty() {
-                // Add newly shared accounts
-                if let Some(changes) = &mut changes {
-                    for added_account in &added_accounts {
-                        changes
-                            .added
-                            .extend(added_account.mailbox_names.keys().cloned());
-                    }
-                }
-                mailboxes.extend(added_accounts);
             }
         }
 
-        Ok(changes)
+        Ok(MailboxRefresh { changes, caches })
+    }
+
+    fn refresh_account_structure(
+        &self,
+        account_id: u32,
+        cache: &MessageStoreCache,
+        access_token: &AccessToken,
+        changes: &mut Option<MailboxSync>,
+    ) -> bool {
+        let mut accounts = self.mailboxes.lock();
+        let Some(account) = accounts
+            .iter_mut()
+            .find(|account| account.account_id == account_id)
+        else {
+            return false;
+        };
+
+        let prefix = account.prefix.take();
+        let refreshed = AccountView::build(&self.server, cache, account_id, prefix, access_token);
+        if let Some(changes) = changes {
+            for entry in &refreshed.names {
+                if account.id_by_name(&entry.name).is_none() {
+                    changes.added.push(entry.name.clone());
+                }
+            }
+            for entry in &account.names {
+                if refreshed.id_by_name(&entry.name).is_none() {
+                    changes.deleted.push(entry.name.clone());
+                }
+            }
+        }
+        account.mailboxes = refreshed.mailboxes;
+        account.visible = refreshed.visible;
+        account.names = refreshed.names;
+        account.parents = refreshed.parents;
+        account.prefix = refreshed.prefix;
+        true
+    }
+
+    pub fn ensure_counters(&self, account_id: u32, cache: &MessageStoreCache) {
+        if let Some(account) = self
+            .mailboxes
+            .lock()
+            .iter_mut()
+            .find(|account| account.account_id == account_id)
+        {
+            account.ensure_counters(cache);
+        }
+    }
+
+    pub fn has_counters_at(&self, account_id: u32, change_id: u64) -> bool {
+        self.mailboxes
+            .lock()
+            .iter()
+            .find(|account| account.account_id == account_id)
+            .and_then(|account| account.counters.as_ref())
+            .is_some_and(|counters| counters.change_id == change_id)
+    }
+
+    pub fn take_previous_counters(&self, account_id: u32) -> Option<Vec<Counters>> {
+        self.mailboxes
+            .lock()
+            .iter_mut()
+            .find(|account| account.account_id == account_id)
+            .and_then(|account| account.previous_counters.take())
+    }
+
+    pub fn apply_counter_deltas(
+        &self,
+        account_id: u32,
+        from_change_id: u64,
+        to_change_id: u64,
+        deltas: &[CounterDelta],
+        rebuilt: bool,
+    ) {
+        if let Some(account) = self
+            .mailboxes
+            .lock()
+            .iter_mut()
+            .find(|account| account.account_id == account_id)
+        {
+            account.apply_counter_deltas(from_change_id, to_change_id, deltas, rebuilt);
+        }
+    }
+
+    pub async fn seed_mailbox_counters(&self) -> trc::Result<()> {
+        let account_ids = self
+            .mailboxes
+            .lock()
+            .iter()
+            .map(|account| account.account_id)
+            .collect::<Vec<_>>();
+        for account_id in account_ids {
+            let cache = self
+                .server
+                .get_cached_messages(account_id)
+                .await
+                .caused_by(trc::location!())?;
+            if let Some(account) = self
+                .mailboxes
+                .lock()
+                .iter_mut()
+                .find(|account| account.account_id == account_id)
+            {
+                account.ensure_counters(&cache);
+                account.previous_counters = None;
+            }
+        }
+        Ok(())
     }
 
     pub fn get_mailbox_by_name(&self, mailbox_name: &str) -> Option<MailboxId> {
@@ -366,18 +319,19 @@ impl<T: SessionStream> SessionData<T> {
             if account
                 .prefix
                 .as_ref()
-                .is_none_or(|p| mailbox_name.starts_with(p.as_str()))
+                .is_none_or(|prefix| mailbox_name.starts_with(prefix.as_str()))
             {
-                for (mailbox_name_, mailbox_id_) in account.mailbox_names.iter() {
-                    if (!is_inbox && mailbox_name_ == mailbox_name)
-                        || (is_inbox && *mailbox_id_ == INBOX_ID)
-                    {
-                        return MailboxId {
-                            account_id: account.account_id,
-                            mailbox_id: *mailbox_id_,
-                        }
-                        .into();
+                let mailbox_id = if is_inbox {
+                    account.has_mailbox_id(INBOX_ID).then_some(INBOX_ID)
+                } else {
+                    account.id_by_name(mailbox_name)
+                };
+                if let Some(mailbox_id) = mailbox_id {
+                    return MailboxId {
+                        account_id: account.account_id,
+                        mailbox_id,
                     }
+                    .into();
                 }
             }
         }
@@ -385,54 +339,230 @@ impl<T: SessionStream> SessionData<T> {
     }
 
     pub fn get_mailbox_by_id(&self, account_id: u32, mailbox_id: u32) -> Option<MailboxId> {
-        for account in self.mailboxes.lock().iter() {
-            if account.account_id == account_id
-                && account.mailbox_names.values().any(|id| *id == mailbox_id)
-            {
-                return MailboxId {
-                    account_id,
-                    mailbox_id,
-                }
-                .into();
-            }
+        self.mailboxes
+            .lock()
+            .iter()
+            .find(|account| account.account_id == account_id)
+            .filter(|account| account.has_mailbox_id(mailbox_id))
+            .map(|_| MailboxId {
+                account_id,
+                mailbox_id,
+            })
+    }
+
+    pub fn uid_validity(&self, mailbox: &MailboxId) -> u32 {
+        self.mailboxes
+            .lock()
+            .iter()
+            .find(|account| account.account_id == mailbox.account_id)
+            .map_or(0, |account| account.uid_validity(mailbox.mailbox_id))
+    }
+
+    pub async fn uid_next(
+        &self,
+        cache: &MessageStoreCache,
+        mailbox: &MailboxId,
+    ) -> trc::Result<u32> {
+        let change_id = cache.emails.change_id;
+        if let Some(value) = self
+            .mailboxes
+            .lock()
+            .iter()
+            .find(|account| account.account_id == mailbox.account_id)
+            .and_then(|account| account.cached_uid_next(mailbox.mailbox_id, change_id))
+        {
+            return Ok(value);
         }
-        None
+
+        let value = self
+            .server
+            .core
+            .storage
+            .data
+            .get_counter(ValueKey {
+                account_id: mailbox.account_id,
+                collection: Collection::Mailbox.into(),
+                document_id: mailbox.mailbox_id,
+                class: ValueClass::MailboxUid,
+            })
+            .await
+            .caused_by(trc::location!())
+            .map(|v| (v + 1) as u32)?;
+
+        if let Some(account) = self
+            .mailboxes
+            .lock()
+            .iter_mut()
+            .find(|account| account.account_id == mailbox.account_id)
+        {
+            account.remember_uid_next(UidNext {
+                mailbox_id: mailbox.mailbox_id,
+                change_id,
+                value,
+            });
+        }
+
+        Ok(value)
     }
 
     pub async fn check_mailbox_acl(
         &self,
+        cache: Option<&MessageStoreCache>,
         account_id: u32,
-        document_id: u32,
+        mailbox_id: u32,
         item: Acl,
     ) -> trc::Result<bool> {
         let access_token = self.refresh_access_token().await?;
-        Ok(access_token.is_member(account_id)
-            || self
-                .server
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::Mailbox,
-                    document_id,
-                ))
-                .await
-                .and_then(|mailbox| {
-                    if let Some(mailbox) = mailbox {
-                        Ok(Some(
-                            mailbox
-                                .unarchive::<email::mailbox::Mailbox>()?
-                                .acls
-                                .effective_acl(&access_token)
-                                .contains(item),
-                        ))
-                    } else {
-                        Ok(None)
-                    }
-                })?
-                .ok_or_else(|| {
-                    trc::ImapEvent::Error
-                        .caused_by(trc::location!())
-                        .details("Mailbox no longer exists.")
-                })?)
+        if access_token.is_member(account_id) {
+            return Ok(true);
+        }
+        let fetched;
+        let cache = match cache {
+            Some(cache) => cache,
+            None => {
+                fetched = self
+                    .server
+                    .get_cached_messages(account_id)
+                    .await
+                    .caused_by(trc::location!())?;
+                &fetched
+            }
+        };
+        cache
+            .mailbox_by_id(&mailbox_id)
+            .map(|mailbox| {
+                mailbox
+                    .acls
+                    .as_slice()
+                    .effective_acl(&access_token)
+                    .contains(item)
+            })
+            .ok_or_else(|| {
+                trc::ImapEvent::Error
+                    .caused_by(trc::location!())
+                    .details("Mailbox no longer exists.")
+            })
+    }
+}
+
+impl AccountView {
+    pub fn build(
+        server: &Server,
+        cache: &MessageStoreCache,
+        account_id: u32,
+        prefix: Option<String>,
+        access_token: &AccessToken,
+    ) -> Self {
+        let visible = if access_token.is_member(account_id) {
+            None
+        } else {
+            Some(cache.shared_mailboxes(access_token, Acl::Read))
+        };
+        let is_visible = |mailbox_id: u32| {
+            visible
+                .as_ref()
+                .is_none_or(|visible| visible.contains(mailbox_id))
+        };
+
+        let mut parents = RoaringBitmap::new();
+        let mut special_uses = Vec::new();
+        for mailbox in cache.mailboxes.items.iter() {
+            if let Some(parent_id) = mailbox.parent_id() {
+                parents.insert(parent_id);
+            }
+            if !matches!(mailbox.role, SpecialUse::None) && is_visible(mailbox.document_id) {
+                special_uses.push((mailbox.role, mailbox.document_id));
+            }
+        }
+
+        let mut names = Vec::with_capacity(cache.mailboxes.items.len());
+        for mailbox in cache
+            .mailboxes
+            .items
+            .iter()
+            .filter(|mailbox| is_visible(mailbox.document_id))
+        {
+            let name = match &prefix {
+                Some(prefix) => {
+                    let mut name = String::with_capacity(prefix.len() + mailbox.path.len() + 1);
+                    name.push_str(prefix);
+                    name.push('/');
+                    name.push_str(&mailbox.path);
+                    name
+                }
+                None => mailbox.path.clone(),
+            };
+            let mailbox_id = server
+                .core
+                .email
+                .default_folders
+                .iter()
+                .find(|folder| {
+                    folder.name == name || folder.aliases.iter().any(|alias| alias == &name)
+                })
+                .and_then(|folder| {
+                    special_uses
+                        .iter()
+                        .find(|(role, _)| *role == folder.special_use)
+                        .map(|(_, mailbox_id)| *mailbox_id)
+                })
+                .unwrap_or(mailbox.document_id);
+            names.push(MailboxName { name, mailbox_id });
+        }
+        names.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+
+        AccountView {
+            account_id,
+            prefix,
+            mailboxes: cache.mailboxes.clone(),
+            visible,
+            names,
+            parents,
+            counters: None,
+            previous_counters: None,
+            uid_next: Vec::new(),
+        }
+    }
+
+    pub fn ensure_counters(&mut self, cache: &MessageStoreCache) {
+        if let Some(stale) = self
+            .counters
+            .take_if(|counters| counters.change_id != cache.emails.change_id)
+        {
+            self.previous_counters.get_or_insert(stale.by_mailbox);
+        }
+        if self.counters.is_none() {
+            self.counters = Some(MailboxCounters::compute(cache));
+        }
+    }
+
+    pub fn refresh_counters(&mut self, cache: &MessageStoreCache) -> Option<Vec<Counters>> {
+        self.ensure_counters(cache);
+        self.previous_counters.take()
+    }
+
+    pub fn apply_counter_deltas(
+        &mut self,
+        from_change_id: u64,
+        to_change_id: u64,
+        deltas: &[CounterDelta],
+        rebuilt: bool,
+    ) {
+        match &mut self.counters {
+            Some(counters) if !rebuilt && counters.change_id == from_change_id => {
+                if self.previous_counters.is_none() {
+                    self.previous_counters = Some(counters.by_mailbox.clone());
+                }
+                counters.apply_deltas(deltas, to_change_id);
+            }
+            Some(counters) if counters.change_id == to_change_id => {}
+            Some(counters) => {
+                if self.previous_counters.is_none() {
+                    self.previous_counters = Some(std::mem::take(&mut counters.by_mailbox));
+                }
+                self.counters = None;
+            }
+            None => {}
+        }
     }
 }

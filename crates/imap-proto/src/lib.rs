@@ -159,7 +159,7 @@ pub enum ResponseCode {
 
     // CONDSTORE
     Modified {
-        ids: Vec<u32>,
+        ranges: Vec<(u32, u32)>,
     },
     HighestModseq {
         modseq: u64,

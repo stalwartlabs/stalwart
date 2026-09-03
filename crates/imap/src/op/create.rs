@@ -60,9 +60,11 @@ impl<T: SessionStream> SessionData<T> {
         let op_start = Instant::now();
 
         // Refresh mailboxes
-        self.synchronize_mailboxes(false)
+        let mut caches = self
+            .synchronize_mailboxes(false)
             .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
+            .imap_ctx(&arguments.tag, trc::location!())?
+            .caches;
 
         // Validate mailbox name
         let params = self
@@ -77,9 +79,8 @@ impl<T: SessionStream> SessionData<T> {
             .account(params.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        let mailbox_count = self
-            .server
-            .get_cached_messages(params.account_id)
+        let mailbox_count = caches
+            .fetch(&self.server, params.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?
             .mailboxes
@@ -266,7 +267,7 @@ impl<T: SessionStream> SessionData<T> {
                 };
 
             // Locate parent mailbox
-            if account.mailbox_names.contains_key(&full_path) {
+            if account.id_by_name(&full_path).is_some() {
                 return Err(trc::ImapEvent::Error
                     .into_err()
                     .details(format!("Mailbox '{}' already exists.", full_path))
@@ -279,7 +280,7 @@ impl<T: SessionStream> SessionData<T> {
                     let mut create_path = Vec::with_capacity(path.len());
                     while !path.is_empty() {
                         let mailbox_name: String = path.join("/");
-                        if let Some(&mailbox_id) = account.mailbox_names.get(&mailbox_name) {
+                        if let Some(mailbox_id) = account.id_by_name(&mailbox_name) {
                             parent_mailbox_id = mailbox_id.into();
                             parent_mailbox_name = mailbox_name.into();
                             break;
@@ -303,7 +304,7 @@ impl<T: SessionStream> SessionData<T> {
         // Validate ACLs
         if let Some(parent_mailbox_id) = parent_mailbox_id {
             if !self
-                .check_mailbox_acl(account_id, parent_mailbox_id, Acl::CreateChild)
+                .check_mailbox_acl(None, account_id, parent_mailbox_id, Acl::CreateChild)
                 .await?
             {
                 return Err(trc::ImapEvent::Error

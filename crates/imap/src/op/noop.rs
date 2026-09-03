@@ -16,7 +16,7 @@ impl<T: SessionStream> Session<T> {
 
         if let State::Selected { data, mailbox, .. } = &self.state {
             data.write_changes(
-                &Some(mailbox.clone()),
+                Some(mailbox),
                 false,
                 true,
                 self.is_qresync || self.is_uidonly,

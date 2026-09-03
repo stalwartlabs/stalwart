@@ -6,15 +6,13 @@
 
 use super::ToModSeq;
 use crate::{
-    core::{Mailbox, Session, SessionData},
+    core::{AccountCaches, MailboxId, Session, SessionData},
     op::ImapContext,
     spawn_op,
 };
-use common::network::SessionStream;
-use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
+use common::{MessageStoreCache, network::SessionStream};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
-    parser::PushUnique,
     protocol::{
         ObjectId,
         status::{Status, StatusItem, StatusItemType},
@@ -23,8 +21,7 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::time::Instant;
-use trc::AddContext;
-use types::{id::Id, keyword::Keyword};
+use types::id::Id;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_status(&mut self, requests: Vec<Request<Command>>) -> trc::Result<()> {
@@ -54,23 +51,25 @@ impl<T: SessionStream> Session<T> {
         let data = self.state.session_data();
 
         spawn_op!(data, {
-            let mut did_sync = false;
+            let mut caches = None;
 
             for request in parsed {
                 match request {
                     Ok(arguments) => {
                         let op_start = Instant::now();
-                        if !did_sync {
-                            // Refresh mailboxes
-                            data.synchronize_mailboxes(false)
-                                .await
-                                .imap_ctx(&arguments.tag, trc::location!())?;
-                            did_sync = true;
-                        }
+                        let caches = match &mut caches {
+                            Some(caches) => caches,
+                            None => caches.insert(
+                                data.synchronize_mailboxes(false)
+                                    .await
+                                    .imap_ctx(&arguments.tag, trc::location!())?
+                                    .caches,
+                            ),
+                        };
 
                         // Fetch status
                         let status = data
-                            .status(arguments.mailbox_name, &arguments.items)
+                            .status(caches, arguments.mailbox_name, &arguments.items)
                             .await
                             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -105,7 +104,12 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: SessionStream> SessionData<T> {
-    pub async fn status(&self, mailbox_name: String, items: &[Status]) -> trc::Result<StatusItem> {
+    pub async fn status(
+        &self,
+        caches: &mut AccountCaches,
+        mailbox_name: String,
+        items: &[Status],
+    ) -> trc::Result<StatusItem> {
         // Get mailbox id
         let mailbox = if let Some(mailbox) = self.get_mailbox_by_name(&mailbox_name) {
             mailbox
@@ -152,146 +156,89 @@ impl<T: SessionStream> SessionData<T> {
             };
         };
 
-        // Make sure all requested fields are up to date
-        let mut items_update = Vec::with_capacity(items.len());
-        let mut items_response = Vec::with_capacity(items.len());
+        let cache = caches.fetch(&self.server, mailbox.account_id).await?;
 
-        for account in self.mailboxes.lock().iter_mut() {
-            if account.account_id == mailbox.account_id {
-                let mailbox_state =
-                    if let Some(mailbox_state) = account.mailbox_state.get(&mailbox.mailbox_id) {
-                        mailbox_state
-                    } else {
-                        continue;
-                    };
-                for item in items {
-                    match item {
-                        Status::Messages => {
-                            items_response.push((
-                                *item,
-                                StatusItemType::Number(mailbox_state.total_messages),
-                            ));
-                        }
-                        Status::UidNext => {
-                            items_response
-                                .push((*item, StatusItemType::Number(mailbox_state.uid_next)));
-                        }
-                        Status::UidValidity => {
-                            items_response
-                                .push((*item, StatusItemType::Number(mailbox_state.uid_validity)));
-                        }
-                        Status::Unseen => {
-                            items_response
-                                .push((*item, StatusItemType::Number(mailbox_state.total_unseen)));
-                        }
-                        Status::Deleted => {
-                            items_response
-                                .push((*item, StatusItemType::Number(mailbox_state.total_deleted)));
-                        }
-                        Status::DeletedStorage => {
-                            if let Some(value) = mailbox_state.total_deleted_storage {
-                                items_response.push((*item, StatusItemType::Number(value)));
-                            } else {
-                                items_update.push_unique(*item);
-                            }
-                        }
-                        Status::Size => {
-                            if let Some(value) = mailbox_state.size {
-                                items_response.push((*item, StatusItemType::Number(value)));
-                            } else {
-                                items_update.push_unique(*item);
-                            }
-                        }
-                        Status::HighestModSeq => {
-                            items_response.push((
-                                *item,
-                                StatusItemType::Number(account.last_change_id.to_modseq()),
-                            ));
-                        }
-                        Status::ObjectId => {
-                            items_response.push((
-                                *item,
-                                StatusItemType::ObjectId(ObjectId {
-                                    mailbox_id: Some(Id::from(mailbox.mailbox_id)),
-                                    account_id: Some(Id::from(mailbox.account_id)),
-                                    ..Default::default()
-                                }),
-                            ));
-                        }
-                        Status::Recent => {
-                            items_response.push((*item, StatusItemType::Number(0)));
-                        }
-                    }
-                }
-                break;
-            }
+        self.status_in(&cache, mailbox, mailbox_name, items).await
+    }
+
+    pub async fn status_in(
+        &self,
+        cache: &MessageStoreCache,
+        mailbox: MailboxId,
+        mailbox_name: String,
+        items: &[Status],
+    ) -> trc::Result<StatusItem> {
+        let uid_next = if items.contains(&Status::UidNext) {
+            Some(self.uid_next(cache, &mailbox).await?)
+        } else {
+            None
+        };
+        let needs_counters = items.iter().any(|item| {
+            matches!(
+                item,
+                Status::Messages
+                    | Status::Unseen
+                    | Status::Deleted
+                    | Status::DeletedStorage
+                    | Status::Size
+            )
+        });
+
+        if needs_counters {
+            self.ensure_counters(mailbox.account_id, cache);
         }
 
-        if !items_update.is_empty() {
-            // Retrieve latest values
-            let mut values_update = Vec::with_capacity(items_update.len());
+        let accounts = self.mailboxes.lock();
+        let account = accounts
+            .iter()
+            .find(|account| account.account_id == mailbox.account_id)
+            .ok_or_else(|| {
+                trc::ImapEvent::Error
+                    .into_err()
+                    .details("Mailbox does not exist.")
+                    .code(ResponseCode::NonExistent)
+            })?;
+        let counters = if needs_counters {
+            account.counters_of(mailbox.mailbox_id)
+        } else {
+            Default::default()
+        };
+        let uid_validity = account.uid_validity(mailbox.mailbox_id);
 
-            let cache = self
-                .server
-                .get_cached_messages(mailbox.account_id)
-                .await
-                .caused_by(trc::location!())?;
+        let is_deferred = |item: &Status| matches!(item, Status::Size | Status::DeletedStorage);
 
-            for item in items_update {
-                let result = match item {
-                    Status::DeletedStorage => cache
-                        .in_mailbox_with_keyword(mailbox.mailbox_id, &Keyword::Deleted)
-                        .map(|x| x.size())
-                        .sum::<u32>() as u64,
-                    Status::Size => cache
-                        .in_mailbox(mailbox.mailbox_id)
-                        .map(|x| x.size())
-                        .sum::<u32>() as u64,
-                    _ => {
-                        unreachable!()
-                    }
-                };
-
-                items_response.push((item, StatusItemType::Number(result)));
-                values_update.push((item, result));
-            }
-
-            // Update cache
-            for account in self.mailboxes.lock().iter_mut() {
-                if account.account_id == mailbox.account_id {
-                    let mailbox_state = account
-                        .mailbox_state
-                        .entry(mailbox.mailbox_id)
-                        .or_insert_with(Mailbox::default);
-
-                    for (item, value) in values_update {
-                        match item {
-                            Status::DeletedStorage => {
-                                mailbox_state.total_deleted_storage = value.into()
-                            }
-                            Status::Size => mailbox_state.size = value.into(),
-                            Status::Recent => {
-                                items_response
-                                    .iter_mut()
-                                    .find(|(i, _)| *i == Status::Recent)
-                                    .unwrap()
-                                    .1 = StatusItemType::Number(0);
-                            }
-                            _ => {
-                                unreachable!()
-                            }
-                        }
-                    }
-
-                    break;
-                }
-            }
-        }
-
-        // Generate response
         Ok(StatusItem {
             mailbox_name,
-            items: items_response,
+            items: items
+                .iter()
+                .filter(|item| !is_deferred(item))
+                .chain(items.iter().filter(|item| is_deferred(item)))
+                .map(|item| {
+                    (
+                        *item,
+                        match item {
+                            Status::Messages => StatusItemType::Number(counters.total as u64),
+                            Status::UidNext => {
+                                StatusItemType::Number(uid_next.unwrap_or_default() as u64)
+                            }
+                            Status::UidValidity => StatusItemType::Number(uid_validity as u64),
+                            Status::Unseen => StatusItemType::Number(counters.unseen as u64),
+                            Status::Deleted => StatusItemType::Number(counters.deleted as u64),
+                            Status::DeletedStorage => StatusItemType::Number(counters.deleted_size),
+                            Status::Size => StatusItemType::Number(counters.size),
+                            Status::HighestModSeq => {
+                                StatusItemType::Number(cache.emails.change_id.to_modseq())
+                            }
+                            Status::ObjectId => StatusItemType::ObjectId(ObjectId {
+                                mailbox_id: Some(Id::from(mailbox.mailbox_id)),
+                                account_id: Some(Id::from(mailbox.account_id)),
+                                ..Default::default()
+                            }),
+                            Status::Recent => StatusItemType::Number(0),
+                        },
+                    )
+                })
+                .collect(),
         })
     }
 }

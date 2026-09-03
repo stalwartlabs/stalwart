@@ -5,9 +5,8 @@
  */
 
 use super::{ImapContext, ToModSeq};
-use crate::core::{ImapId, SavedSearch, SelectedMailbox, Session, SessionData};
-use ahash::AHashMap;
-use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use crate::core::{Resolved, SavedSearch, SelectedMailbox, Session, SessionData};
+use common::{MessageStoreCache, network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{delete::EmailDeletion, messagedata::EmailMessageData},
@@ -41,10 +40,16 @@ impl<T: SessionStream> Session<T> {
 
         let op_start = Instant::now();
         let (data, mailbox) = self.state.select_data();
+        let cache = data
+            .server
+            .get_cached_messages(mailbox.id.account_id)
+            .await
+            .imap_ctx(&request.tag, trc::location!())?;
 
         // Validate ACL
         if !data
             .check_mailbox_acl(
+                Some(&cache),
                 mailbox.id.account_id,
                 mailbox.id.mailbox_id,
                 Acl::RemoveItems,
@@ -62,6 +67,10 @@ impl<T: SessionStream> Session<T> {
                 .id(request.tag));
         }
 
+        data.sync_view(&mailbox, &cache, None)
+            .await
+            .imap_ctx(&request.tag, trc::location!())?;
+
         // Parse sequence to operate on
         let sequence = match request.tokens.into_iter().next() {
             Some(Token::Argument(value)) if is_uid => {
@@ -74,7 +83,7 @@ impl<T: SessionStream> Session<T> {
                 })?;
                 Some(
                     mailbox
-                        .sequence_to_ids(&sequence, true)
+                        .resolve(&sequence, true)
                         .await
                         .map_err(|err| err.id(request.tag.clone()))?,
                 )
@@ -92,7 +101,7 @@ impl<T: SessionStream> Session<T> {
 
         // Expunge
         let limited_uid = data
-            .expunge(mailbox.clone(), sequence, message_limit, op_start)
+            .expunge(mailbox.clone(), &cache, sequence, message_limit, op_start)
             .await
             .imap_ctx(&request.tag, trc::location!())?;
 
@@ -100,8 +109,13 @@ impl<T: SessionStream> Session<T> {
         *mailbox.saved_search.lock() = SavedSearch::None;
 
         // Synchronize messages
+        let cache = data
+            .server
+            .get_cached_messages(mailbox.id.account_id)
+            .await
+            .imap_ctx(&request.tag, trc::location!())?;
         let modseq = data
-            .write_mailbox_changes(&mailbox, self.is_qresync || self.is_uidonly)
+            .write_mailbox_changes(&mailbox, &cache, self.is_qresync || self.is_uidonly)
             .await
             .imap_ctx(&request.tag, trc::location!())?;
         let mut response =
@@ -135,34 +149,32 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn expunge(
         &self,
         mailbox: Arc<SelectedMailbox>,
-        sequence: Option<AHashMap<u32, ImapId>>,
+        cache: &MessageStoreCache,
+        sequence: Option<Vec<Resolved>>,
         message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<Option<u32>> {
         // Obtain message ids
         let account_id = mailbox.id.account_id;
         let mut deleted_ids = RoaringBitmap::from_iter(
-            self.server
-                .get_cached_messages(account_id)
-                .await
-                .caused_by(trc::location!())?
+            cache
                 .in_mailbox_with_keyword(mailbox.id.mailbox_id, &Keyword::Deleted)
                 .map(|m| m.document_id()),
         );
 
         // Filter by sequence
         if let Some(sequence) = &sequence {
-            deleted_ids &= RoaringBitmap::from_iter(sequence.keys());
+            deleted_ids &= RoaringBitmap::from_iter(sequence.iter().map(|resolved| resolved.id));
         }
 
         // RFC 9738 requires the highest UIDs to be processed first when truncating.
         let mut limited_uid = None;
         if deleted_ids.len() > message_limit as u64 {
             let mut uids = {
-                let state = mailbox.state.lock();
+                let view = mailbox.view.lock();
                 deleted_ids
                     .iter()
-                    .filter_map(|id| state.id_to_imap.get(&id).map(|imap_id| (imap_id.uid, id)))
+                    .filter_map(|id| view.map_result(id).map(|resolved| (resolved.uid, id)))
                     .collect::<Vec<_>>()
             };
 
