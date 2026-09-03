@@ -143,14 +143,219 @@ impl ColBlock {
         &self.mb_arena[from..to]
     }
 
+    #[inline(always)]
+    fn rank(&self, slot: usize) -> (u64, u32) {
+        (self.received_at[slot] as u64, self.document_ids[slot])
+    }
+
     fn weight(&self) -> u64 {
         ((self.document_ids.len()
             * (std::mem::size_of::<u32>() * 5
                 + std::mem::size_of::<i32>()
-                + std::mem::size_of::<u64>() * 2))
+                + std::mem::size_of::<u64>()))
             + (self.mb_offsets.len() * std::mem::size_of::<u32>())
             + (self.mb_arena.len() * std::mem::size_of::<MessageUid>())
             + std::mem::size_of::<ColBlock>()) as u64
+    }
+}
+
+struct ColBuilder {
+    document_ids: Vec<u32>,
+    change_ids: Vec<u64>,
+    received_at: Vec<u32>,
+    sent_at: Vec<i32>,
+    sizes: Vec<u32>,
+    keywords: Vec<u32>,
+    thread_ids: Vec<u32>,
+    mb_offsets: Vec<u32>,
+    mb_arena: Vec<MessageUid>,
+}
+
+impl ColBuilder {
+    fn with_capacity(rows: usize, arena: usize) -> Self {
+        ColBuilder {
+            document_ids: Vec::with_capacity(rows),
+            change_ids: Vec::with_capacity(rows),
+            received_at: Vec::with_capacity(rows),
+            sent_at: Vec::with_capacity(rows),
+            sizes: Vec::with_capacity(rows),
+            keywords: Vec::with_capacity(rows),
+            thread_ids: Vec::with_capacity(rows),
+            mb_offsets: Vec::with_capacity(rows + 1),
+            mb_arena: Vec::with_capacity(arena),
+        }
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.document_ids.len()
+    }
+
+    #[inline(always)]
+    fn push_record(&mut self, record: &MessageCache) {
+        self.document_ids.push(record.document_id);
+        self.change_ids.push(record.change_id);
+        self.received_at.push(record.received_at_secs());
+        self.sent_at.push(record.sent_at);
+        self.sizes.push(record.size);
+        self.keywords.push(record.keywords);
+        self.thread_ids.push(record.thread_id);
+        self.mb_offsets.push(self.mb_arena.len() as u32);
+        self.mb_arena.extend_from_slice(&record.mailboxes);
+    }
+
+    fn copy_run(&mut self, old: &ColBlock, from: usize, to: usize) {
+        if from >= to {
+            return;
+        }
+        self.document_ids
+            .extend_from_slice(&old.document_ids[from..to]);
+        self.change_ids.extend_from_slice(&old.change_ids[from..to]);
+        self.received_at
+            .extend_from_slice(&old.received_at[from..to]);
+        self.sent_at.extend_from_slice(&old.sent_at[from..to]);
+        self.sizes.extend_from_slice(&old.sizes[from..to]);
+        self.keywords.extend_from_slice(&old.keywords[from..to]);
+        self.thread_ids.extend_from_slice(&old.thread_ids[from..to]);
+
+        let base = old.mb_offsets[from];
+        let shift = self.mb_arena.len() as u32;
+        self.mb_offsets
+            .extend(old.mb_offsets[from..to].iter().map(|o| o - base + shift));
+        self.mb_arena.extend_from_slice(
+            &old.mb_arena[old.mb_offsets[from] as usize..old.mb_offsets[to] as usize],
+        );
+    }
+
+    fn finish_into(mut self, out: &mut Vec<ColBlock>) {
+        let rows = self.len();
+        if rows == 0 {
+            return;
+        }
+        self.mb_offsets.push(self.mb_arena.len() as u32);
+
+        if rows <= CACHE_CHUNK * 2 {
+            out.push(ColBlock {
+                document_ids: self.document_ids.into(),
+                change_ids: self.change_ids.into(),
+                received_at: self.received_at.into(),
+                sent_at: self.sent_at.into(),
+                sizes: self.sizes.into(),
+                keywords: self.keywords.into(),
+                thread_ids: self.thread_ids.into(),
+                mb_offsets: self.mb_offsets.into(),
+                mb_arena: self.mb_arena.into(),
+            });
+            return;
+        }
+
+        let mut from = 0usize;
+        while from < rows {
+            let to = (from + CACHE_CHUNK).min(rows);
+            let base = self.mb_offsets[from];
+            let arena_from = base as usize;
+            let arena_to = self.mb_offsets[to] as usize;
+            let mut mb_offsets = self.mb_offsets[from..to]
+                .iter()
+                .map(|offset| offset - base)
+                .collect::<Vec<_>>();
+            mb_offsets.push((arena_to - arena_from) as u32);
+
+            out.push(ColBlock {
+                document_ids: self.document_ids[from..to].into(),
+                change_ids: self.change_ids[from..to].into(),
+                received_at: self.received_at[from..to].into(),
+                sent_at: self.sent_at[from..to].into(),
+                sizes: self.sizes[from..to].into(),
+                keywords: self.keywords[from..to].into(),
+                thread_ids: self.thread_ids[from..to].into(),
+                mb_offsets: mb_offsets.into(),
+                mb_arena: self.mb_arena[arena_from..arena_to].into(),
+            });
+            from = to;
+        }
+    }
+}
+
+const SHIFT_BUCKET: usize = 1024;
+
+struct PositionShift {
+    keys: Vec<u32>,
+    deltas: Vec<i32>,
+    bucket_first: Vec<u32>,
+    bucket_delta: Vec<i32>,
+    first_key: u32,
+}
+
+impl PositionShift {
+    fn build(
+        insert_positions: impl Iterator<Item = u32>,
+        delete_positions: impl Iterator<Item = u32>,
+        old_len: usize,
+    ) -> Self {
+        let mut keys = Vec::new();
+        let mut deltas = Vec::new();
+        let mut inserted = insert_positions.peekable();
+        let mut deleted = delete_positions.map(|position| position + 1).peekable();
+        let mut total = 0i32;
+        loop {
+            let (key, delta) = match (inserted.peek(), deleted.peek()) {
+                (Some(insert), Some(delete)) if insert > delete => (deleted.next().unwrap(), -1i32),
+                (Some(_), _) => (inserted.next().unwrap(), 1i32),
+                (None, Some(_)) => (deleted.next().unwrap(), -1i32),
+                (None, None) => break,
+            };
+
+            total += delta;
+            if keys.last() == Some(&key) {
+                *deltas.last_mut().unwrap() = total;
+            } else {
+                keys.push(key);
+                deltas.push(total);
+            }
+        }
+
+        let buckets = old_len / SHIFT_BUCKET + 2;
+        let (bucket_first, bucket_delta) = {
+            let mut bucket_first = Vec::with_capacity(buckets);
+            let mut bucket_delta = Vec::with_capacity(buckets);
+            let mut cursor = keys.iter().zip(deltas.iter()).enumerate().peekable();
+            let mut carried = 0i32;
+            for bucket in 0..buckets {
+                let start = (bucket * SHIFT_BUCKET) as u32;
+                while let Some((_, (_, delta))) = cursor.next_if(|(_, (key, _))| **key < start) {
+                    carried = *delta;
+                }
+                bucket_first.push(cursor.peek().map_or(keys.len(), |(at, _)| *at) as u32);
+                bucket_delta.push(carried);
+            }
+            (bucket_first, bucket_delta)
+        };
+
+        PositionShift {
+            first_key: keys.first().copied().unwrap_or(u32::MAX),
+            keys,
+            deltas,
+            bucket_first,
+            bucket_delta,
+        }
+    }
+
+    #[inline(always)]
+    fn at(&self, position: u32) -> i32 {
+        if position < self.first_key {
+            return 0;
+        }
+        let bucket = (position as usize / SHIFT_BUCKET).min(self.bucket_first.len() - 1);
+        let from = self.bucket_first[bucket] as usize;
+
+        self.keys[from..]
+            .iter()
+            .zip(self.deltas[from..].iter())
+            .take_while(|(key, _)| **key <= position)
+            .map(|(_, delta)| *delta)
+            .last()
+            .unwrap_or(self.bucket_delta[bucket])
     }
 }
 
@@ -165,6 +370,14 @@ impl MessagesCache {
             "custom keywords must be ordered by document_id"
         );
 
+        Self::from_records(change_id, &items, keywords.into())
+    }
+
+    fn from_records(
+        change_id: u64,
+        items: &[MessageCache],
+        keywords: Arc<[CustomKeywords]>,
+    ) -> Self {
         let mut blocks = Vec::with_capacity(items.len().div_ceil(CACHE_CHUNK).max(1));
         let mut starts = Vec::with_capacity(blocks.capacity());
         let mut start = 0u32;
@@ -174,7 +387,7 @@ impl MessagesCache {
             blocks.push(ColBlock::from_records(chunk));
         }
 
-        Self::assemble(change_id, blocks, starts, items.len(), keywords.into())
+        Self::assemble(change_id, blocks, starts, items.len(), keywords)
     }
 
     fn assemble(
@@ -238,6 +451,11 @@ impl MessagesCache {
     #[inline(always)]
     pub fn keywords(&self) -> &[CustomKeywords] {
         &self.keywords
+    }
+
+    #[inline(always)]
+    pub fn shared_keywords(&self) -> Arc<[CustomKeywords]> {
+        self.keywords.clone()
     }
 
     #[inline(always)]
@@ -321,8 +539,9 @@ impl MessagesCache {
             }
         }
 
-        for (block_idx, slots) in touched {
+        for (block_idx, mut slots) in touched {
             let block = &mut blocks[block_idx];
+            slots.sort_unstable_by_key(|(slot, _)| *slot);
 
             if slots
                 .iter()
@@ -372,9 +591,10 @@ impl MessagesCache {
                 let mut mb_offsets = Vec::with_capacity(block.len() + 1);
                 let mut mb_arena = Vec::with_capacity(block.mb_arena.len());
                 let mut offset = 0u32;
+                let mut updated = slots.iter().peekable();
                 for slot in 0..block.len() as u32 {
                     mb_offsets.push(offset);
-                    let mailboxes = match slots.iter().find(|(s, _)| *s == slot) {
+                    let mailboxes = match updated.next_if(|(s, _)| *s == slot) {
                         Some((_, record)) => record.mailboxes.as_slice(),
                         None => block.mailboxes(slot),
                     };
@@ -406,6 +626,202 @@ impl MessagesCache {
             len: self.len,
             size,
         }
+    }
+
+    fn locate_insert(&self, rank: (u64, u32)) -> (u32, u32) {
+        let block = self
+            .blocks
+            .partition_point(|block| block.rank(block.len() - 1) < rank);
+        match self.blocks.get(block) {
+            Some(col) => {
+                let (mut low, mut high) = (0usize, col.len());
+                while low < high {
+                    let mid = low + (high - low) / 2;
+                    if col.rank(mid) < rank {
+                        low = mid + 1;
+                    } else {
+                        high = mid;
+                    }
+                }
+                (block as u32, low as u32)
+            }
+            None => {
+                let last = self.blocks.len() - 1;
+                (last as u32, self.blocks[last].len() as u32)
+            }
+        }
+    }
+
+    pub fn splice(
+        &self,
+        change_id: u64,
+        deletes: &[u32],
+        updates: &[(u32, MessageCache)],
+        inserts: &[MessageCache],
+        keywords: Arc<[CustomKeywords]>,
+    ) -> Self {
+        debug_assert!(
+            inserts.is_sorted_by_key(|item| item.sort_rank()),
+            "inserts must be ordered by (received_at, document_id)"
+        );
+        debug_assert!(
+            deletes.is_sorted(),
+            "deletes must be ordered by document id"
+        );
+
+        if self.blocks.is_empty() {
+            return Self::from_records(change_id, inserts, keywords);
+        }
+
+        let mut deletions = deletes
+            .iter()
+            .filter_map(|document_id| {
+                self.position(*document_id)
+                    .and_then(|position| self.locate(position))
+            })
+            .collect::<Vec<_>>();
+        deletions.sort_unstable();
+
+        let mut edits = updates
+            .iter()
+            .filter_map(|(position, record)| {
+                let (block, slot) = self.locate(*position)?;
+                debug_assert_eq!(
+                    self.blocks[block as usize].rank(slot as usize),
+                    (record.received_at_secs() as u64, record.document_id),
+                    "an update must not move a message to a different position"
+                );
+                Some((block, slot, record))
+            })
+            .collect::<Vec<_>>();
+        edits.sort_unstable_by_key(|(block, slot, _)| (*block, *slot));
+
+        let insertions = inserts
+            .iter()
+            .map(|record| {
+                let (block, slot) =
+                    self.locate_insert((record.received_at_secs() as u64, record.document_id));
+                (block, slot, record)
+            })
+            .collect::<Vec<_>>();
+
+        let extra_arena = inserts
+            .iter()
+            .map(|record| record.mailboxes.len())
+            .sum::<usize>();
+        let mut blocks: Vec<ColBlock> = Vec::with_capacity(self.blocks.len() + 1);
+        let mut inserted_index: Vec<(u32, u32)> = Vec::with_capacity(inserts.len());
+        let mut out_position = 0u32;
+        let mut pending_deletes = deletions.iter().peekable();
+        let mut pending_edits = edits.iter().peekable();
+        let mut pending_inserts = insertions.iter().peekable();
+
+        for (block_idx, old) in self.blocks.iter().enumerate() {
+            let block_idx = block_idx as u32;
+            let is_touched = pending_deletes
+                .peek()
+                .is_some_and(|(block, _)| *block == block_idx)
+                || pending_edits
+                    .peek()
+                    .is_some_and(|(block, _, _)| *block == block_idx)
+                || pending_inserts
+                    .peek()
+                    .is_some_and(|(block, _, _)| *block == block_idx);
+            if !is_touched {
+                out_position += old.len() as u32;
+                blocks.push(old.clone());
+                continue;
+            }
+
+            let mut builder = ColBuilder::with_capacity(
+                old.len() + inserts.len(),
+                old.mb_arena.len() + extra_arena,
+            );
+            let block_start = out_position;
+            let mut run = 0usize;
+
+            for slot in 0..=old.len() {
+                let is_delete = pending_deletes
+                    .peek()
+                    .is_some_and(|(block, at)| *block == block_idx && *at as usize == slot);
+                let is_edit = pending_edits
+                    .peek()
+                    .is_some_and(|(block, at, _)| *block == block_idx && *at as usize == slot);
+                let is_insert = pending_inserts
+                    .peek()
+                    .is_some_and(|(block, at, _)| *block == block_idx && *at as usize == slot);
+                if !is_delete && !is_edit && !is_insert && slot < old.len() {
+                    continue;
+                }
+
+                builder.copy_run(old, run, slot);
+                run = slot;
+
+                while let Some((_, _, record)) = pending_inserts
+                    .next_if(|(block, at, _)| *block == block_idx && *at as usize == slot)
+                {
+                    inserted_index.push((record.document_id, block_start + builder.len() as u32));
+                    builder.push_record(record);
+                }
+
+                if slot == old.len() {
+                    break;
+                }
+                if is_delete {
+                    pending_deletes.next();
+                    run = slot + 1;
+                } else if let Some((_, _, record)) = pending_edits
+                    .next_if(|(block, at, _)| *block == block_idx && *at as usize == slot)
+                {
+                    builder.push_record(record);
+                    run = slot + 1;
+                }
+            }
+
+            out_position += builder.len() as u32;
+            builder.finish_into(&mut blocks);
+        }
+
+        let mut starts = Vec::with_capacity(blocks.len());
+        let mut start = 0u32;
+        for block in &blocks {
+            starts.push(start);
+            start += block.len() as u32;
+        }
+        let len = start as usize;
+
+        let shift = PositionShift::build(
+            insertions
+                .iter()
+                .map(|(block, slot, _)| self.starts[*block as usize] + slot),
+            deletions
+                .iter()
+                .map(|(block, slot)| self.starts[*block as usize] + slot),
+            self.len,
+        );
+        inserted_index.sort_unstable_by_key(|(document_id, _)| *document_id);
+
+        let mut index = Vec::with_capacity(len);
+        let mut added = inserted_index.iter().peekable();
+        let mut removed = deletes.iter().peekable();
+        for (document_id, position) in self.index.iter() {
+            while let Some(entry) = added.next_if(|(id, _)| *id < *document_id) {
+                index.push(*entry);
+            }
+            while removed.next_if(|id| **id < *document_id).is_some() {}
+            if removed.next_if(|id| **id == *document_id).is_some() {
+                continue;
+            }
+            index.push((
+                *document_id,
+                (*position as i32 + shift.at(*position)) as u32,
+            ));
+        }
+        index.extend(added.copied());
+
+        debug_assert_eq!(index.len(), len, "the index must cover every message");
+
+        Self::from_parts(change_id, blocks, starts, index.into(), keywords, len)
     }
 
     #[inline(always)]
@@ -510,5 +926,368 @@ impl<'x> MessageRef<'x> {
             self.received_at(),
             self.sent_at(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::CACHE_CHUNK;
+
+    const BASE: u64 = 1_700_000_000;
+
+    fn message(document_id: u32, received_at: u64) -> MessageCache {
+        let mailboxes = (0..((document_id % 3) + 1))
+            .map(|slot| MessageUid {
+                mailbox_id: (document_id + slot) % 11,
+                uid: document_id + slot,
+            })
+            .collect();
+
+        MessageCache::new(
+            document_id,
+            mailboxes,
+            document_id % 29,
+            document_id / 5,
+            (document_id as u64) * 3,
+            500 + document_id,
+            received_at,
+            -20 + (document_id as i32 % 400),
+        )
+    }
+
+    fn sample(count: u32) -> Vec<MessageCache> {
+        let mut items = (0..count)
+            .map(|document_id| message(document_id, BASE + (document_id % 13) as u64))
+            .collect::<Vec<_>>();
+        items.sort_unstable_by_key(|item| item.sort_rank());
+        items
+    }
+
+    fn custom_keywords(items: &[MessageCache]) -> Vec<CustomKeywords> {
+        let mut keywords = items
+            .iter()
+            .filter(|item| item.document_id % 11 == 0)
+            .map(|item| CustomKeywords {
+                names: vec![CompactString::from(format!("label-{}", item.document_id))]
+                    .into_boxed_slice(),
+                document_id: item.document_id,
+            })
+            .collect::<Vec<_>>();
+        keywords.sort_unstable_by_key(|entry| entry.document_id);
+        keywords
+    }
+
+    fn build(items: &[MessageCache]) -> MessagesCache {
+        MessagesCache::new(1, items.to_vec(), custom_keywords(items))
+    }
+
+    fn assert_equivalent(spliced: &MessagesCache, expected: &[MessageCache]) {
+        let rebuilt = build(expected);
+
+        assert_eq!(spliced.len(), rebuilt.len(), "length");
+        assert_eq!(spliced.starts.len(), spliced.blocks.len(), "starts");
+        for block in &spliced.blocks {
+            assert!(
+                block.len() > 0 && block.len() <= CACHE_CHUNK * 2,
+                "block of {} rows is out of bounds",
+                block.len()
+            );
+        }
+
+        for (left, right) in spliced.iter().zip(rebuilt.iter()) {
+            assert_eq!(left.position(), right.position(), "position");
+            assert_eq!(left.document_id(), right.document_id(), "document id");
+            assert_eq!(left.change_id(), right.change_id(), "change id");
+            assert_eq!(left.received_at(), right.received_at(), "received at");
+            assert_eq!(left.sent_at(), right.sent_at(), "sent at");
+            assert_eq!(left.size(), right.size(), "size");
+            assert_eq!(left.keywords(), right.keywords(), "keywords");
+            assert_eq!(left.thread_id(), right.thread_id(), "thread id");
+            assert_eq!(left.mailboxes(), right.mailboxes(), "mailboxes");
+        }
+
+        assert_eq!(spliced.index.len(), rebuilt.index.len(), "index length");
+        assert!(
+            spliced
+                .index
+                .is_sorted_by_key(|(document_id, _)| *document_id),
+            "the index must stay ordered by document id"
+        );
+        for (document_id, _) in rebuilt.index.iter() {
+            assert_eq!(
+                spliced.position(*document_id),
+                rebuilt.position(*document_id),
+                "position of document {document_id}"
+            );
+            assert_eq!(
+                spliced.custom_keywords_of(*document_id),
+                rebuilt.custom_keywords_of(*document_id),
+                "custom keywords of document {document_id}"
+            );
+        }
+    }
+
+    fn splice(
+        cache: &MessagesCache,
+        items: &[MessageCache],
+        deletes: &[u32],
+        updates: &[u32],
+        inserts: &[MessageCache],
+    ) -> (MessagesCache, Vec<MessageCache>) {
+        let mut expected = items
+            .iter()
+            .filter(|item| !deletes.contains(&item.document_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        expected.extend(inserts.iter().cloned());
+        expected.sort_unstable_by_key(|item| item.sort_rank());
+
+        let updates = updates
+            .iter()
+            .map(|document_id| {
+                let position = cache.position(*document_id).expect("unknown document");
+                let mut record = cache.by_id(*document_id).unwrap().to_record();
+                record.keywords ^= 1 << 3;
+                record.change_id += 100;
+                record.mailboxes.push(MessageUid {
+                    mailbox_id: 31,
+                    uid: *document_id,
+                });
+                (position, record)
+            })
+            .collect::<Vec<_>>();
+
+        for (_, record) in &updates {
+            let slot = expected
+                .iter_mut()
+                .find(|item| item.document_id == record.document_id)
+                .expect("an updated document must survive");
+            *slot = record.clone();
+        }
+
+        let mut deletes = deletes.to_vec();
+        deletes.sort_unstable();
+        let keywords = custom_keywords(&expected);
+
+        (
+            cache.splice(1, &deletes, &updates, inserts, keywords.into()),
+            expected,
+        )
+    }
+
+    #[test]
+    fn locate_resolves_block_boundaries() {
+        let items = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = build(&items);
+
+        assert_eq!(cache.blocks.len(), 3);
+        assert_eq!(
+            cache.starts,
+            vec![0, CACHE_CHUNK as u32, CACHE_CHUNK as u32 * 2]
+        );
+
+        for position in [
+            0,
+            CACHE_CHUNK as u32 - 1,
+            CACHE_CHUNK as u32,
+            CACHE_CHUNK as u32 * 2 - 1,
+            CACHE_CHUNK as u32 * 2,
+            cache.len() as u32 - 1,
+        ] {
+            let item = cache.at(position).expect("position must resolve");
+            assert_eq!(item.position(), position);
+            assert_eq!(
+                item.document_id(),
+                items[position as usize].document_id,
+                "position {position}"
+            );
+            assert_eq!(cache.position(item.document_id()), Some(position));
+        }
+
+        assert!(cache.at(cache.len() as u32).is_none());
+    }
+
+    #[test]
+    fn patch_rewrites_one_block_at_a_time() {
+        let items = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = build(&items);
+
+        let touched = [
+            CACHE_CHUNK as u32 + 5,
+            CACHE_CHUNK as u32 + 6,
+            CACHE_CHUNK as u32 * 2 + 0,
+        ];
+        let (patched, expected) = {
+            let updates = touched
+                .iter()
+                .map(|position| {
+                    let mut record = cache.at(*position).unwrap().to_record();
+                    record.keywords ^= 1 << 4;
+                    record.change_id += 7;
+                    record.mailboxes.push(MessageUid {
+                        mailbox_id: 42,
+                        uid: record.document_id,
+                    });
+                    (*position, record)
+                })
+                .collect::<Vec<_>>();
+
+            let mut expected = items.clone();
+            for (position, record) in &updates {
+                expected[*position as usize] = record.clone();
+            }
+
+            (cache.patch(1, &updates, cache.shared_keywords()), expected)
+        };
+
+        assert_equivalent(&patched, &expected);
+        assert!(
+            Arc::ptr_eq(
+                &cache.blocks[0].document_ids,
+                &patched.blocks[0].document_ids
+            ),
+            "an untouched block must be shared, not rebuilt"
+        );
+    }
+
+    #[test]
+    fn patch_rewrites_a_whole_block_of_mailboxes() {
+        let items = sample(CACHE_CHUNK as u32 + 10);
+        let cache = build(&items);
+
+        let updates = (0..CACHE_CHUNK as u32)
+            .map(|position| {
+                let mut record = cache.at(position).unwrap().to_record();
+                record.mailboxes.clear();
+                record.mailboxes.push(MessageUid {
+                    mailbox_id: 42,
+                    uid: record.document_id,
+                });
+                (position, record)
+            })
+            .collect::<Vec<_>>();
+
+        let mut expected = items.clone();
+        for (position, record) in &updates {
+            expected[*position as usize] = record.clone();
+        }
+
+        let patched = cache.patch(1, &updates, cache.shared_keywords());
+        assert_equivalent(&patched, &expected);
+    }
+
+    #[test]
+    fn splice_appends_to_the_last_block() {
+        let items = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = build(&items);
+        let inserts = vec![message(90_000, BASE + 500)];
+
+        let (spliced, expected) = splice(&cache, &items, &[], &[], &inserts);
+        assert_equivalent(&spliced, &expected);
+        assert_eq!(spliced.blocks.len(), 3);
+        assert!(Arc::ptr_eq(
+            &cache.blocks[0].document_ids,
+            &spliced.blocks[0].document_ids
+        ));
+    }
+
+    #[test]
+    fn splice_inserts_out_of_order() {
+        let items = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = build(&items);
+        let mut inserts = vec![
+            message(90_001, BASE - 100),
+            message(90_002, BASE + 3),
+            message(90_003, BASE + 12),
+            message(90_004, BASE + 400),
+        ];
+        inserts.sort_unstable_by_key(|item| item.sort_rank());
+
+        let (spliced, expected) = splice(&cache, &items, &[], &[], &inserts);
+        assert_equivalent(&spliced, &expected);
+    }
+
+    #[test]
+    fn splice_deletes_scattered_messages() {
+        let items = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = build(&items);
+        let deletes = (0..40u32).map(|n| n * 811).collect::<Vec<_>>();
+
+        let (spliced, expected) = splice(&cache, &items, &deletes, &[], &[]);
+        assert_equivalent(&spliced, &expected);
+    }
+
+    #[test]
+    fn splice_applies_a_mixed_window() {
+        let items = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = build(&items);
+        let deletes = (0..25u32).map(|n| 3 + n * 1_291).collect::<Vec<_>>();
+        let updates = (0..30u32).map(|n| 7 + n * 977).collect::<Vec<_>>();
+        let mut inserts = (0..10u32)
+            .map(|n| message(90_000 + n, BASE + (n % 13) as u64))
+            .collect::<Vec<_>>();
+        inserts.sort_unstable_by_key(|item| item.sort_rank());
+
+        let (spliced, expected) = splice(&cache, &items, &deletes, &updates, &inserts);
+        assert_equivalent(&spliced, &expected);
+    }
+
+    #[test]
+    fn splice_splits_an_oversized_block() {
+        let items = sample(100);
+        let cache = build(&items);
+        let mut inserts = (0..(CACHE_CHUNK as u32 * 2))
+            .map(|n| message(90_000 + n, BASE + 6))
+            .collect::<Vec<_>>();
+        inserts.sort_unstable_by_key(|item| item.sort_rank());
+
+        let (spliced, expected) = splice(&cache, &items, &[], &[], &inserts);
+        assert_equivalent(&spliced, &expected);
+        assert!(
+            spliced.blocks.len() > 1,
+            "a block past twice the chunk size must be split"
+        );
+    }
+
+    #[test]
+    fn splice_drops_an_emptied_block() {
+        let items = sample(CACHE_CHUNK as u32 + 10);
+        let cache = build(&items);
+        assert_eq!(cache.blocks.len(), 2);
+
+        let deletes = items[CACHE_CHUNK..]
+            .iter()
+            .map(|item| item.document_id)
+            .collect::<Vec<_>>();
+
+        let (spliced, expected) = splice(&cache, &items, &deletes, &[], &[]);
+        assert_equivalent(&spliced, &expected);
+        assert_eq!(spliced.blocks.len(), 1);
+    }
+
+    #[test]
+    fn splice_into_an_empty_cache() {
+        let cache = MessagesCache::new(1, Vec::new(), Vec::new());
+        let inserts = sample(20);
+
+        let (spliced, expected) = splice(&cache, &[], &[], &[], &inserts);
+        assert_equivalent(&spliced, &expected);
+        assert_eq!(spliced.len(), 20);
+    }
+
+    #[test]
+    fn splice_empties_the_cache() {
+        let items = sample(50);
+        let cache = build(&items);
+        let deletes = items
+            .iter()
+            .map(|item| item.document_id)
+            .collect::<Vec<_>>();
+
+        let (spliced, expected) = splice(&cache, &items, &deletes, &[], &[]);
+        assert_equivalent(&spliced, &expected);
+        assert!(spliced.is_empty());
+        assert!(spliced.blocks.is_empty());
     }
 }

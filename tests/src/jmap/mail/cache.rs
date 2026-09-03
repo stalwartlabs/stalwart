@@ -36,6 +36,7 @@ pub async fn test(test: &TestServer) {
     mailbox_membership_survives_an_unrelated_mutation(test).await;
     tie_order_is_stable_across_a_rebuild(test).await;
     received_at_query_is_a_total_order(test).await;
+    received_at_query_follows_the_updated_cache(test).await;
     merge_agrees_with_a_full_rebuild(test).await;
 
     test.destroy_all_mailboxes(test.account("jdoe@example.com"))
@@ -72,22 +73,39 @@ async fn ingest(
 
 async fn toggle_keyword(server: &Server, account_id: u32, document_id: u32, keyword: Keyword) {
     let cache = server.get_cached_messages(account_id).await.unwrap();
+    let (thread_id, keywords) = toggled_keywords(&cache, document_id, keyword);
+    write_keywords(server, account_id, document_id, thread_id, keywords).await;
+}
+
+fn toggled_keywords(
+    cache: &MessageStoreCache,
+    document_id: u32,
+    keyword: Keyword,
+) -> (u32, Vec<Keyword>) {
     let item = cache.email_by_id(&document_id).unwrap();
-    let thread_id = item.thread_id();
     let mut keywords = cache.expand_keywords(item).collect::<Vec<_>>();
     if let Some(pos) = keywords.iter().position(|k| *k == keyword) {
         keywords.remove(pos);
     } else {
         keywords.push(keyword);
     }
-    let diff = KeywordDiff::replace(keywords);
 
+    (item.thread_id(), keywords)
+}
+
+async fn write_keywords(
+    server: &Server,
+    account_id: u32,
+    document_id: u32,
+    thread_id: u32,
+    keywords: Vec<Keyword>,
+) {
     let mut batch = BatchBuilder::new();
     batch
         .with_account_id(account_id)
         .with_collection(Collection::Email)
         .with_document(document_id);
-    merge_keywords(&mut batch, thread_id, diff);
+    merge_keywords(&mut batch, thread_id, KeywordDiff::replace(keywords));
     server.commit_batch(batch).await.unwrap();
 }
 
@@ -429,33 +447,38 @@ async fn merge_agrees_with_a_full_rebuild(test: &TestServer) {
     let mut rng = rand::rng();
     for round in 0..12 {
         let updates_only = round % 2 == 0;
-        let mut alive = server
-            .get_cached_messages(account_id)
-            .await
-            .unwrap()
-            .email_document_ids()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let cache = server.get_cached_messages(account_id).await.unwrap();
+        let mut alive = cache.email_document_ids().into_iter().collect::<Vec<_>>();
 
+        let victims = (0..if updates_only {
+            0
+        } else {
+            rng.random_range(1..=3)
+        })
+            .filter_map(|_| {
+                (alive.len() >= 2).then(|| alive.remove(rng.random_range(0..alive.len())))
+            })
+            .collect::<RoaringBitmap>();
+
+        let mut toggles = Vec::new();
         for _ in 0..rng.random_range(1..=6) {
             if alive.is_empty() {
                 break;
             }
-            let idx = rng.random_range(0..alive.len());
-            toggle_keyword(server, account_id, alive[idx], Keyword::Seen).await;
-        }
-
-        for _ in 0..if updates_only {
-            0
-        } else {
-            rng.random_range(1..=3)
-        } {
-            if alive.len() < 2 {
-                break;
+            let document_id = alive[rng.random_range(0..alive.len())];
+            if toggles
+                .iter()
+                .any(|(toggled, _, _)| *toggled == document_id)
+            {
+                continue;
             }
-            let idx = rng.random_range(0..alive.len());
-            let victim = alive.remove(idx);
-            delete(server, account_id, RoaringBitmap::from_iter([victim])).await;
+            let (thread_id, keywords) = toggled_keywords(&cache, document_id, Keyword::Seen);
+            toggles.push((document_id, thread_id, keywords));
+        }
+        drop(cache);
+
+        if !victims.is_empty() {
+            delete(server, account_id, victims).await;
         }
 
         for i in 0..if updates_only {
@@ -476,6 +499,10 @@ async fn merge_agrees_with_a_full_rebuild(test: &TestServer) {
                 vec![INBOX_ID],
             )
             .await;
+        }
+
+        for (document_id, thread_id, keywords) in toggles {
+            write_keywords(server, account_id, document_id, thread_id, keywords).await;
         }
 
         let merged = server.get_cached_messages(account_id).await.unwrap();
@@ -584,6 +611,101 @@ async fn received_at_query_is_a_total_order(test: &TestServer) {
         sorted_by(true).await,
         "the order must be reproducible across a cache rebuild"
     );
+
+    delete(
+        server,
+        account_id,
+        server
+            .get_cached_messages(account_id)
+            .await
+            .unwrap()
+            .email_document_ids(),
+    )
+    .await;
+}
+
+async fn received_at_query_follows_the_updated_cache(test: &TestServer) {
+    let server = &test.server;
+    let account_id = account_for(test, server, "jdoe@example.com").await;
+
+    let base = 1_700_000_000u64;
+    let mut ids = Vec::new();
+    for i in 0..25u64 {
+        ids.push(
+            ingest(
+                server,
+                account_id,
+                &format!("q {i}"),
+                base + i * 60,
+                vec![INBOX_ID],
+            )
+            .await,
+        );
+    }
+
+    let cache_order = |cache: &MessageStoreCache| {
+        cache
+            .emails
+            .iter()
+            .map(|item| item.document_id())
+            .collect::<Vec<_>>()
+    };
+
+    let query = async || {
+        let cache = server.get_cached_messages(account_id).await.unwrap();
+        let sorted = server
+            .query_emails(
+                account_id,
+                &cache,
+                SearchQuery::new(SearchIndex::Email)
+                    .with_account_id(account_id)
+                    .with_mask(cache.email_document_ids()),
+                vec![MessageComparator::Cache {
+                    field: MessageCacheField::ReceivedAt,
+                    ascending: true,
+                }],
+            )
+            .await
+            .unwrap();
+        (sorted, cache)
+    };
+
+    let (sorted, cache) = query().await;
+    assert_eq!(
+        sorted,
+        cache_order(&cache),
+        "sort:receivedAt must follow the cache order, which IMAP SORT ARRIVAL shares"
+    );
+
+    let old_id = ingest(
+        server,
+        account_id,
+        "ancient",
+        base - 86_400 * 365,
+        vec![INBOX_ID],
+    )
+    .await;
+
+    let (sorted, cache) = query().await;
+    assert_eq!(
+        sorted.first().copied(),
+        Some(old_id),
+        "a message appended out of order must sort first on the next query"
+    );
+    assert_eq!(
+        sorted,
+        cache_order(&cache),
+        "sort:receivedAt must be re-derived after an out-of-order insert"
+    );
+
+    toggle_keyword(server, account_id, ids[ids.len() / 2], Keyword::Seen).await;
+
+    let (after_toggle, cache) = query().await;
+    assert_eq!(
+        after_toggle, sorted,
+        "a flag toggle must not reorder sort:receivedAt"
+    );
+    assert_eq!(after_toggle, cache_order(&cache));
 
     delete(
         server,

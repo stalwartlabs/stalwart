@@ -360,32 +360,65 @@ impl DavResources {
         self.resources.find(id, false)
     }
 
+    fn path_entries_by_id(&self, document_id: u32) -> Option<Vec<(&PathChunk, &DavPath)>> {
+        let mut entries = Vec::with_capacity(2);
+
+        let found = if self.resources.unified_id_space {
+            [self.resources.find_any(document_id), None]
+        } else {
+            [
+                self.resources.find(document_id, true),
+                self.resources.find(document_id, false),
+            ]
+        };
+
+        for resource in found.into_iter().flatten() {
+            for (path, _) in self.materialized_paths(&resource)? {
+                let entry = self.paths.get(&path)?;
+                if entry.1.document_id != document_id {
+                    return None;
+                }
+                entries.push(entry);
+            }
+        }
+
+        Some(entries)
+    }
+
     pub fn container_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
-        self.paths
-            .iter()
-            .find(|(_, path)| path.document_id == id && path.hierarchy_seq & CONTAINER_FLAG != 0)
-            .and_then(|entry| self.pair(entry))
+        self.resources.find(id, true)?;
+        match self.container_path_entry(id) {
+            Some(entry) => self.pair(entry),
+            None => self
+                .paths
+                .iter()
+                .find(|(_, path)| {
+                    path.document_id == id && path.hierarchy_seq & CONTAINER_FLAG != 0
+                })
+                .and_then(|entry| self.pair(entry)),
+        }
     }
 
     pub fn any_resource_path_by_id(&self, id: u32) -> Option<DavResourcePath<'_>> {
-        self.paths
-            .iter()
-            .find(|(_, path)| path.document_id == id)
-            .and_then(|entry| self.pair(entry))
+        match self.path_entries_by_id(id) {
+            Some(entries) => entries
+                .into_iter()
+                .next()
+                .and_then(|entry| self.pair(entry)),
+            None => self
+                .paths
+                .iter()
+                .find(|(_, path)| path.document_id == id)
+                .and_then(|entry| self.pair(entry)),
+        }
     }
 
     pub fn subtree(&self, search_path: &str) -> impl Iterator<Item = DavResourcePath<'_>> {
-        let prefix = format!("{search_path}/");
-        let search_path = search_path.to_string();
-        self.paths
-            .range(search_path.clone())
-            .filter_map(move |entry| {
-                let path =
-                    std::str::from_utf8(&entry.0.bytes[entry.1.path.range()]).unwrap_or_default();
-                (path.starts_with(&prefix) || path == search_path)
-                    .then(|| self.pair(entry))
-                    .flatten()
-            })
+        self.by_path(search_path).into_iter().chain(
+            self.paths
+                .range(format!("{search_path}/"))
+                .filter_map(move |entry| self.pair(entry)),
+        )
     }
 
     pub fn subtree_with_depth(
@@ -394,18 +427,18 @@ impl DavResources {
         depth: usize,
     ) -> impl Iterator<Item = DavResourcePath<'_>> {
         let prefix = format!("{search_path}/");
-        let search_path = search_path.to_string();
-        self.paths
-            .range(search_path.clone())
-            .filter_map(move |entry| {
-                let path =
-                    std::str::from_utf8(&entry.0.bytes[entry.1.path.range()]).unwrap_or_default();
-                (path.strip_prefix(&prefix).is_some_and(|name| {
-                    name.as_bytes().iter().filter(|&&c| c == b'/').count() < depth
-                }) || path == search_path)
+        let cut = prefix.len();
+        self.by_path(search_path)
+            .into_iter()
+            .chain(self.paths.range(prefix).filter_map(move |entry| {
+                (entry.0.path_str(entry.1).as_bytes()[cut..]
+                    .iter()
+                    .filter(|&&c| c == b'/')
+                    .count()
+                    < depth)
                     .then(|| self.pair(entry))
                     .flatten()
-            })
+            }))
     }
 
     pub fn tree_with_depth(&self, depth: usize) -> impl Iterator<Item = DavResourcePath<'_>> {
@@ -418,17 +451,23 @@ impl DavResources {
         })
     }
 
-    pub fn children(&self, parent_id: u32) -> impl Iterator<Item = DavResourcePath<'_>> {
+    fn child_entries(&self, parent_id: u32) -> impl Iterator<Item = (&PathChunk, &DavPath)> {
+        let prefix = match self.container_path_entry(parent_id) {
+            Some((chunk, path)) => format!("{}/", chunk.path_str(path)),
+            None => String::new(),
+        };
         self.paths
-            .iter()
+            .range(prefix)
             .filter(move |(_, path)| path.parent_id == parent_id)
+    }
+
+    pub fn children(&self, parent_id: u32) -> impl Iterator<Item = DavResourcePath<'_>> {
+        self.child_entries(parent_id)
             .filter_map(move |entry| self.pair(entry))
     }
 
     pub fn children_ids(&self, parent_id: u32) -> impl Iterator<Item = u32> {
-        self.paths
-            .iter()
-            .filter(move |(_, path)| path.parent_id == parent_id)
+        self.child_entries(parent_id)
             .map(|(_, path)| path.document_id)
     }
 
@@ -440,15 +479,22 @@ impl DavResources {
         }
     }
 
-    pub fn format_resource_paths_by_id(
-        &self,
-        document_id: u32,
-    ) -> impl Iterator<Item = String> + '_ {
-        self.paths
-            .iter()
-            .filter(move |(_, path)| path.document_id == document_id)
-            .filter_map(move |entry| self.pair(entry))
-            .map(move |resource| self.format_resource(resource))
+    pub fn format_resource_paths_by_id(&self, document_id: u32) -> std::vec::IntoIter<String> {
+        match self.path_entries_by_id(document_id) {
+            Some(entries) => entries
+                .into_iter()
+                .filter_map(|entry| self.pair(entry))
+                .map(|resource| self.format_resource(resource))
+                .collect::<Vec<_>>(),
+            None => self
+                .paths
+                .iter()
+                .filter(|(_, path)| path.document_id == document_id)
+                .filter_map(|entry| self.pair(entry))
+                .map(|resource| self.format_resource(resource))
+                .collect::<Vec<_>>(),
+        }
+        .into_iter()
     }
 
     pub fn format_resource_path_by_parent(
@@ -456,11 +502,17 @@ impl DavResources {
         document_id: u32,
         parent_id: u32,
     ) -> Option<String> {
-        self.paths
-            .iter()
-            .find(|(_, path)| path.document_id == document_id && path.parent_id == parent_id)
-            .and_then(|entry| self.pair(entry))
-            .map(|resource| self.format_resource(resource))
+        match self.path_entries_by_id(document_id) {
+            Some(entries) => entries
+                .into_iter()
+                .find(|(_, path)| path.parent_id == parent_id),
+            None => self
+                .paths
+                .iter()
+                .find(|(_, path)| path.document_id == document_id && path.parent_id == parent_id),
+        }
+        .and_then(|entry| self.pair(entry))
+        .map(|resource| self.format_resource(resource))
     }
 
     pub fn format_collection(&self, name: &str) -> String {
@@ -478,7 +530,7 @@ impl DavResources {
 
     #[inline(always)]
     pub fn resources_with_acls(&self) -> impl Iterator<Item = DavResourceRef<'_>> + '_ {
-        self.resources.iter().filter(|r| r.has_acls())
+        self.resources.iter_with_acls()
     }
 
     pub fn recompute_size(&mut self) {

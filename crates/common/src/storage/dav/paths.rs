@@ -11,7 +11,12 @@ use std::sync::Arc;
 impl PathChunk {
     #[inline(always)]
     pub fn path_at(&self, idx: usize) -> &str {
-        std::str::from_utf8(&self.bytes[self.paths[idx].path.range()]).unwrap_or_default()
+        self.path_str(&self.paths[idx])
+    }
+
+    #[inline(always)]
+    pub fn path_str(&self, path: &DavPath) -> &str {
+        std::str::from_utf8(&self.bytes[path.path.range()]).unwrap_or_default()
     }
 
     #[inline(always)]
@@ -33,7 +38,11 @@ impl PathChunk {
 
 impl PathIndex {
     pub fn pack(mut entries: Vec<(String, DavPath)>) -> Self {
-        entries.sort_unstable_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        entries.sort_unstable_by(|a, b| {
+            a.0.as_bytes()
+                .cmp(b.0.as_bytes())
+                .then_with(|| a.1.document_id.cmp(&b.1.document_id))
+        });
         entries.dedup_by(|a, b| a.0 == b.0);
 
         let total = entries.len();
@@ -109,15 +118,36 @@ impl PathIndex {
             .map(|idx| (chunk.as_ref(), &chunk.paths[idx]))
     }
 
-    pub fn range(&self, from: String) -> impl Iterator<Item = (&PathChunk, &DavPath)> + '_ {
-        let start = if self.chunks.is_empty() {
-            0
+    fn lower_bound(&self, key: &str) -> (usize, usize) {
+        if self.chunks.is_empty() {
+            return (0, 0);
+        }
+        let idx = self.chunk_for(key);
+        let chunk = &self.chunks[idx];
+        let slot = chunk
+            .paths
+            .partition_point(|probe| chunk.path_str(probe) < key);
+        if slot < chunk.paths.len() {
+            (idx, slot)
         } else {
-            self.chunk_for(&from)
-        };
-        self.chunks[start.min(self.chunks.len())..]
+            (idx + 1, 0)
+        }
+    }
+
+    pub fn range(&self, prefix: String) -> impl Iterator<Item = (&PathChunk, &DavPath)> + '_ {
+        let (start_chunk, start_slot) = self.lower_bound(&prefix);
+        self.chunks
             .iter()
-            .flat_map(|chunk| chunk.paths.iter().map(move |path| (chunk.as_ref(), path)))
+            .skip(start_chunk)
+            .enumerate()
+            .flat_map(move |(offset, chunk)| {
+                chunk
+                    .paths
+                    .iter()
+                    .skip(if offset == 0 { start_slot } else { 0 })
+                    .map(move |path| (chunk.as_ref(), path))
+            })
+            .take_while(move |(chunk, path)| chunk.path_str(path).starts_with(&prefix))
     }
 
     pub fn heap_size(&self) -> u64 {
@@ -129,32 +159,19 @@ impl PathIndex {
             return self.clone();
         }
 
+        if self.chunks.is_empty() {
+            return PathIndex::pack(adds);
+        }
+
         let mut touched: AHashSet<usize> = AHashSet::with_capacity(8);
         let mut per_chunk_adds: Vec<(usize, Vec<(String, DavPath)>)> = Vec::with_capacity(8);
 
         for key in removes {
-            for (idx, chunk) in self.chunks.iter().enumerate() {
-                if chunk.paths.is_empty() {
-                    continue;
-                }
-                if chunk.first_path() <= key.as_str() && key.as_str() <= chunk.last_path() {
-                    touched.insert(idx);
-                    break;
-                }
-            }
+            touched.insert(self.chunk_for(key));
         }
 
         for (key, path) in adds {
-            let mut target = 0usize;
-            for (idx, chunk) in self.chunks.iter().enumerate() {
-                if chunk.paths.is_empty() {
-                    continue;
-                }
-                target = idx;
-                if key.as_str() <= chunk.last_path() {
-                    break;
-                }
-            }
+            let target = self.chunk_for(&key);
             touched.insert(target);
             match per_chunk_adds.iter_mut().find(|(idx, _)| *idx == target) {
                 Some((_, entries)) => entries.push((key, path)),
@@ -171,13 +188,13 @@ impl PathIndex {
                 continue;
             }
 
-            let mut entries: Vec<(String, DavPath)> = Vec::with_capacity(chunk.paths.len() + 4);
-            for slot in 0..chunk.paths.len() {
-                let name = chunk.path_at(slot);
-                if !removes.contains(name) {
-                    entries.push((name.to_string(), chunk.paths[slot]));
-                }
-            }
+            let mut entries: Vec<(String, DavPath)> = chunk
+                .paths
+                .iter()
+                .map(|path| (chunk.path_str(path), path))
+                .filter(|(name, _)| !removes.contains(*name))
+                .map(|(name, path)| (name.to_string(), *path))
+                .collect();
             if let Some(pos) = per_chunk_adds.iter().position(|(target, _)| *target == idx) {
                 entries.extend(per_chunk_adds.swap_remove(pos).1);
             }

@@ -10,6 +10,7 @@ use common::{
     cache::email::MessageRef, sharing::EffectiveAcl,
 };
 use compact_str::CompactString;
+use std::sync::Arc;
 use store::{
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
@@ -73,77 +74,78 @@ pub(crate) async fn update_email_cache(
         fetched_keywords.sort_unstable_by_key(|k| k.document_id);
     }
 
+    Ok(merge_email_cache(
+        &store_cache.emails,
+        changed_ids,
+        &fetch_ids,
+        fetched,
+        fetched_keywords,
+    ))
+}
+
+fn merge_email_cache(
+    cache: &MessagesCache,
+    changed_ids: &AHashMap<u32, bool>,
+    fetch_ids: &[u32],
+    mut fetched: AHashMap<u32, MessageCache>,
+    fetched_keywords: Vec<CustomKeywords>,
+) -> MessagesCache {
     let mut inserts = Vec::new();
-    for document_id in &fetch_ids {
-        if !store_cache.emails.contains(*document_id)
-            && let Some(item) = fetched.remove(document_id)
-        {
-            inserts.push(item);
+    let mut deletes = changed_ids
+        .iter()
+        .filter(|(_, is_update)| !**is_update)
+        .map(|(document_id, _)| *document_id)
+        .collect::<Vec<_>>();
+    for document_id in fetch_ids {
+        if !cache.contains(*document_id) {
+            if let Some(item) = fetched.remove(document_id) {
+                inserts.push(item);
+            }
+        } else if !fetched.contains_key(document_id) {
+            deletes.push(*document_id);
         }
     }
     inserts.sort_unstable_by_key(sort_rank);
+    deletes.sort_unstable();
 
-    let has_deletes = changed_ids.values().any(|is_update| !*is_update);
+    let keywords = merge_custom_keywords(cache, changed_ids, fetched_keywords);
 
-    let keywords = merge_custom_keywords(store_cache, changed_ids, fetched_keywords);
-
-    if inserts.is_empty() && !has_deletes {
-        let mut patches = Vec::with_capacity(fetched.len());
-        for (document_id, record) in fetched {
-            if let Some(position) = store_cache.emails.position(document_id) {
-                patches.push((position, record));
-            }
-        }
-        return Ok(store_cache.emails.patch(0, &patches, keywords.into()));
-    }
-
-    let mut items = Vec::with_capacity(store_cache.emails.len() + inserts.len());
-    let mut inserts = inserts.into_iter().peekable();
-    for item in store_cache.emails.iter() {
-        let rank = item.sort_rank();
-        while inserts.peek().is_some_and(|new| sort_rank(new) <= rank) {
-            items.push(inserts.next().unwrap());
-        }
-
-        match changed_ids.get(&item.document_id()) {
-            Some(true) => {
-                if let Some(updated) = fetched.remove(&item.document_id()) {
-                    debug_assert_eq!(
-                        updated.received_at(),
-                        item.received_at(),
-                        "received_at mutated for document {}, the merge assumes it cannot",
-                        item.document_id()
-                    );
-                    items.push(updated);
-                }
-            }
-            Some(false) => {}
-            None => items.push(item.to_record()),
+    let mut patches = Vec::with_capacity(fetched.len());
+    for (document_id, record) in fetched {
+        if let Some(position) = cache.position(document_id) {
+            patches.push((position, record));
         }
     }
-    items.extend(inserts);
 
-    Ok(MessagesCacheBuilder {
-        change_id: 0,
-        items,
-        keywords,
+    if inserts.is_empty() && deletes.is_empty() {
+        cache.patch(0, &patches, keywords)
+    } else {
+        cache.splice(0, &deletes, &patches, &inserts, keywords)
     }
-    .finish())
 }
 
 fn merge_custom_keywords(
-    store_cache: &MessageStoreCache,
+    cache: &MessagesCache,
     changed_ids: &AHashMap<u32, bool>,
     fetched_keywords: Vec<CustomKeywords>,
-) -> Vec<CustomKeywords> {
-    let mut retained = store_cache
-        .emails
+) -> Arc<[CustomKeywords]> {
+    if fetched_keywords.is_empty()
+        && !changed_ids.keys().any(|document_id| {
+            cache
+                .keywords()
+                .binary_search_by_key(document_id, |entry| entry.document_id)
+                .is_ok()
+        })
+    {
+        return cache.shared_keywords();
+    }
+
+    let mut retained = cache
         .keywords()
         .iter()
         .filter(|k| !changed_ids.contains_key(&k.document_id))
         .peekable();
-    let mut keywords =
-        Vec::with_capacity(store_cache.emails.keywords().len() + fetched_keywords.len());
+    let mut keywords = Vec::with_capacity(cache.keywords().len() + fetched_keywords.len());
     let mut added = fetched_keywords.into_iter().peekable();
     loop {
         match (retained.peek(), added.peek()) {
@@ -159,7 +161,7 @@ fn merge_custom_keywords(
             (None, None) => break,
         }
     }
-    keywords
+    keywords.into()
 }
 
 #[inline(always)]
@@ -210,10 +212,6 @@ impl MessagesCacheBuilder {
     pub fn build(mut self) -> MessagesCache {
         self.items.sort_unstable_by_key(sort_rank);
         self.keywords.sort_unstable_by_key(|k| k.document_id);
-        self.finish()
-    }
-
-    pub fn finish(self) -> MessagesCache {
         MessagesCache::new(self.change_id, self.items, self.keywords)
     }
 }
@@ -488,5 +486,152 @@ impl MessageCacheAccess for MessageStoreCache {
                 .iter()
                 .any(|n| n.as_str() == name),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::{CACHE_CHUNK, MessageUid, MessagesCache};
+    use std::sync::Arc;
+
+    const BASE: u64 = 1_700_000_000;
+
+    fn message(document_id: u32) -> MessageCache {
+        let mailboxes = (0..((document_id % 3) + 1))
+            .map(|slot| MessageUid {
+                mailbox_id: (document_id + slot) % 7,
+                uid: document_id + slot,
+            })
+            .collect();
+
+        MessageCache::new(
+            document_id,
+            mailboxes,
+            if document_id % 11 == 0 {
+                HAS_CUSTOM_KEYWORDS
+            } else {
+                document_id % 17
+            },
+            document_id / 5,
+            (document_id as u64) * 3,
+            400 + document_id,
+            BASE + (document_id % 13) as u64,
+            -10 + (document_id as i32 % 300),
+        )
+    }
+
+    fn sample(count: u32) -> (Vec<MessageCache>, Vec<CustomKeywords>) {
+        let mut items = (0..count).map(message).collect::<Vec<_>>();
+        items.sort_unstable_by_key(sort_rank);
+
+        let mut keywords = items
+            .iter()
+            .filter(|item| item.keywords() & HAS_CUSTOM_KEYWORDS != 0)
+            .map(|item| CustomKeywords {
+                names: vec![CompactString::from(format!("label-{}", item.document_id()))]
+                    .into_boxed_slice(),
+                document_id: item.document_id(),
+            })
+            .collect::<Vec<_>>();
+        keywords.sort_unstable_by_key(|entry| entry.document_id);
+
+        (items, keywords)
+    }
+
+    fn assert_equals_a_rebuild(merged: &MessagesCache, expected: &MessagesCache) {
+        assert_eq!(merged.len(), expected.len(), "length");
+        for (left, right) in merged.iter().zip(expected.iter()) {
+            assert_eq!(left.position(), right.position(), "position");
+            assert_eq!(left.document_id(), right.document_id(), "document id");
+            assert_eq!(left.received_at(), right.received_at(), "received at");
+            assert_eq!(left.keywords(), right.keywords(), "keywords");
+            assert_eq!(left.mailboxes(), right.mailboxes(), "mailboxes");
+        }
+        for document_id in expected.document_ids() {
+            assert_eq!(
+                merged.position(document_id),
+                expected.position(document_id),
+                "position of document {document_id}"
+            );
+            assert_eq!(
+                merged.custom_keywords_of(document_id),
+                expected.custom_keywords_of(document_id),
+                "custom keywords of document {document_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_update_followed_by_a_delete_leaves_no_ghost() {
+        let (items, keywords) = sample(CACHE_CHUNK as u32 * 2 + 1);
+        let cache = MessagesCache::new(1, items.clone(), keywords.clone());
+
+        let ghost = items[items.len() / 2].document_id();
+        let changed_ids = AHashMap::from_iter([(ghost, true)]);
+        let merged = merge_email_cache(&cache, &changed_ids, &[ghost], AHashMap::new(), Vec::new());
+
+        assert!(
+            !merged.contains(ghost),
+            "a document that vanished from the store must not survive as a ghost"
+        );
+        assert_eq!(merged.len(), cache.len() - 1);
+
+        let expected = MessagesCache::new(
+            1,
+            items
+                .iter()
+                .filter(|item| item.document_id() != ghost)
+                .cloned()
+                .collect(),
+            keywords
+                .iter()
+                .filter(|entry| entry.document_id != ghost)
+                .cloned()
+                .collect(),
+        );
+        assert_equals_a_rebuild(&merged, &expected);
+    }
+
+    #[test]
+    fn a_flag_toggle_shares_the_custom_keywords() {
+        let (items, keywords) = sample(CACHE_CHUNK as u32 + 100);
+        let cache = MessagesCache::new(1, items.clone(), keywords);
+        assert!(
+            !cache.keywords().is_empty(),
+            "the fixture must carry custom keywords"
+        );
+
+        let toggled = items
+            .iter()
+            .find(|item| item.keywords() & HAS_CUSTOM_KEYWORDS == 0)
+            .expect("a message without custom keywords")
+            .document_id();
+        let item = cache.by_id(toggled).unwrap();
+        let record = MessageCache::new(
+            item.document_id(),
+            item.mailboxes().iter().copied().collect(),
+            item.keywords() ^ (1 << 3),
+            item.thread_id(),
+            item.change_id() + 1,
+            item.size(),
+            item.received_at(),
+            item.sent_at(),
+        );
+
+        let changed_ids = AHashMap::from_iter([(toggled, true)]);
+        let merged = merge_email_cache(
+            &cache,
+            &changed_ids,
+            &[toggled],
+            AHashMap::from_iter([(toggled, record)]),
+            Vec::new(),
+        );
+
+        assert_eq!(merged.len(), cache.len());
+        assert!(
+            Arc::ptr_eq(&cache.shared_keywords(), &merged.shared_keywords()),
+            "a flag toggle that touches no custom keyword must not rebuild the keyword array"
+        );
     }
 }

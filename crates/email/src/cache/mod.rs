@@ -391,13 +391,14 @@ async fn restore_cache_build(server: &Server, account_id: u32) -> Option<Arc<Mes
     }
 
     let snapshot_change_id = emails.change_id;
-    let mailboxes = full_mailbox_cache_build(server, account_id)
+    let mut mailboxes = full_mailbox_cache_build(server, account_id)
         .await
         .caused_by(trc::location!())
         .inspect_err(|err| {
             trc::error!(err.clone());
         })
         .ok()?;
+    mailboxes.change_id = snapshot_change_id;
 
     let update_lock = Arc::new(UpdateLock::new());
     update_lock.set_revision(snapshot_change_id);

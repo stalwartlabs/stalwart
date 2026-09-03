@@ -492,12 +492,14 @@ impl DavResources {
                 records.push(record);
             }
 
+            let (Some(min_id), Some(max_id)) = (
+                records.first().map(|r| r.document_id),
+                records.last().map(|r| r.document_id),
+            ) else {
+                return None;
+            };
+
             total += records.len();
-            let min_id = records
-                .first()
-                .map(|r| r.document_id)
-                .unwrap_or(crate::NO_ID);
-            let max_id = records.last().map(|r| r.document_id).unwrap_or(0);
             chunks.push(Arc::new(ResourceChunk {
                 records: records.into_boxed_slice(),
                 bytes,
@@ -513,9 +515,9 @@ impl DavResources {
             return None;
         }
 
-        for ids in [&mut container_ids, &mut item_ids] {
-            if !ids.is_sorted_by_key(|(document_id, _)| *document_id) {
-                ids.sort_unstable_by_key(|(document_id, _)| *document_id);
+        for ids in [&container_ids, &item_ids] {
+            if ids.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+                return None;
             }
         }
         let resolves = |document_id: u32, want_container: bool| {
@@ -560,8 +562,21 @@ impl DavResources {
                 }
             }
 
+            let chunk = PathChunk { paths, bytes };
+            if chunk.paths.is_empty()
+                || chunk
+                    .paths
+                    .windows(2)
+                    .any(|pair| chunk.path_str(&pair[0]) >= chunk.path_str(&pair[1]))
+                || path_chunks.last().is_some_and(|previous: &Arc<PathChunk>| {
+                    previous.last_path() >= chunk.first_path()
+                })
+            {
+                return None;
+            }
+
             path_total += paths_len;
-            path_chunks.push(Arc::new(PathChunk { paths, bytes }));
+            path_chunks.push(Arc::new(chunk));
         }
 
         if path_total != archived.path_total.to_native() as usize {

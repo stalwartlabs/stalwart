@@ -85,6 +85,7 @@ sequoia-openpgp = { version = "2.4", default-features = false, features = ["cryp
 zxcvbn = "3.1.1"
 pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
 quick-xml = "0.41"
+percent-encoding = "2.3.2"
 
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.6"

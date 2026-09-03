@@ -240,24 +240,18 @@ fn cache_comparator(
     ascending: bool,
 ) -> SearchComparator {
     match field {
-        MessageCacheField::ReceivedAt => {
-            let mut sorted = documents
+        MessageCacheField::ReceivedAt => SearchComparator::sorted_set(
+            documents
                 .iter()
                 .filter_map(|document_id| {
                     cache
-                        .email_by_id(&document_id)
-                        .map(|item| (item.received_at(), document_id))
+                        .emails
+                        .position(document_id)
+                        .map(|position| (document_id, position + 1))
                 })
-                .collect::<Vec<_>>();
-            sorted.sort_unstable();
-
-            let mut set = AHashMap::with_capacity(sorted.len());
-            for (rank, (_, document_id)) in sorted.into_iter().enumerate() {
-                set.insert(document_id, rank as u32 + 1);
-            }
-
-            SearchComparator::sorted_set(set, ascending)
-        }
+                .collect(),
+            ascending,
+        ),
         MessageCacheField::Size => SearchComparator::sorted_set(
             documents
                 .iter()

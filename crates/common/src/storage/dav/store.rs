@@ -5,10 +5,10 @@
  */
 
 use crate::{
-    ArenaRef, CachedName, DavName, DavResource, DavResourceMetadata, DavResourceRef, NO_ID,
-    ResourceChunk, ResourceStore, TinyCalendarPreferences,
+    ArenaRef, CachedName, DAV_CHUNK, DavName, DavResource, DavResourceMetadata, DavResourceRef,
+    NO_ID, ResourceChunk, ResourceStore, TinyCalendarPreferences,
 };
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 use types::acl::AclGrant;
 
 impl ResourceChunk {
@@ -222,6 +222,35 @@ impl ResourceChunkBuilder {
     }
 }
 
+struct SplitChunks<'x> {
+    target: &'x mut Vec<Arc<ResourceChunk>>,
+    current: ResourceChunkBuilder,
+}
+
+impl<'x> SplitChunks<'x> {
+    fn new(target: &'x mut Vec<Arc<ResourceChunk>>, capacity: usize) -> Self {
+        Self {
+            target,
+            current: ResourceChunkBuilder::with_capacity(capacity.min(DAV_CHUNK)),
+        }
+    }
+
+    fn push(&mut self, resource: &DavResourceRef<'_>) {
+        if self.current.len() == DAV_CHUNK {
+            let full =
+                std::mem::replace(&mut self.current, ResourceChunkBuilder::with_capacity(64));
+            self.target.push(Arc::new(full.finish()));
+        }
+        self.current.push_from(resource);
+    }
+
+    fn finish(self) {
+        if !self.current.is_empty() {
+            self.target.push(Arc::new(self.current.finish()));
+        }
+    }
+}
+
 impl ResourceStore {
     pub fn from_sorted(
         containers: Vec<ResourceChunkBuilder>,
@@ -230,7 +259,7 @@ impl ResourceStore {
     ) -> Self {
         let mut chunks = Vec::with_capacity(containers.len() + items.len());
         let mut total = 0;
-        for builder in containers {
+        for builder in containers.into_iter().filter(|builder| !builder.is_empty()) {
             debug_assert!(
                 builder.records.is_sorted_by_key(|r| r.document_id),
                 "chunk records must be ordered by document_id for binary search"
@@ -239,7 +268,7 @@ impl ResourceStore {
             chunks.push(Arc::new(builder.finish()));
         }
         let containers_end = chunks.len();
-        for builder in items {
+        for builder in items.into_iter().filter(|builder| !builder.is_empty()) {
             debug_assert!(
                 builder.records.is_sorted_by_key(|r| r.document_id),
                 "chunk records must be ordered by document_id for binary search"
@@ -274,41 +303,69 @@ impl ResourceStore {
         })
     }
 
+    pub fn iter_with_acls(&self) -> impl Iterator<Item = DavResourceRef<'_>> + '_ {
+        self.chunks
+            .iter()
+            .filter(|chunk| !chunk.acls.is_empty())
+            .flat_map(|chunk| {
+                chunk.records.iter().map(move |resource| DavResourceRef {
+                    chunk: chunk.as_ref(),
+                    resource,
+                })
+            })
+            .filter(|resource| resource.has_acls())
+    }
+
     pub fn heap_size(&self) -> u64 {
         self.chunks.iter().map(|chunk| chunk.heap_size()).sum()
     }
 
-    pub fn find(&self, document_id: u32, want_container: bool) -> Option<DavResourceRef<'_>> {
-        let run = if self.unified_id_space {
+    fn run(&self, is_container: bool) -> Range<usize> {
+        if self.unified_id_space {
             0..self.chunks.len()
-        } else if want_container {
+        } else if is_container {
             0..self.containers_end
         } else {
             self.containers_end..self.chunks.len()
-        };
-
-        for chunk in &self.chunks[run] {
-            if document_id < chunk.min_id || document_id > chunk.max_id {
-                continue;
-            }
-            if let Ok(idx) = chunk
-                .records
-                .binary_search_by_key(&document_id, |r| r.document_id)
-            {
-                let resource = &chunk.records[idx];
-                return (resource.is_container() == want_container).then_some(DavResourceRef {
-                    chunk: chunk.as_ref(),
-                    resource,
-                });
-            }
         }
-        None
+    }
+
+    fn chunk_for(&self, run: &Range<usize>, document_id: u32) -> Option<usize> {
+        let chunks = &self.chunks[run.clone()];
+        let slot = chunks
+            .partition_point(|chunk| chunk.min_id <= document_id)
+            .checked_sub(1)?;
+        Some(run.start + slot)
+    }
+
+    fn locate(&self, run: Range<usize>, document_id: u32) -> Option<DavResourceRef<'_>> {
+        let chunk = &self.chunks[self.chunk_for(&run, document_id)?];
+        if document_id > chunk.max_id {
+            return None;
+        }
+        chunk
+            .records
+            .binary_search_by_key(&document_id, |r| r.document_id)
+            .ok()
+            .map(|slot| DavResourceRef {
+                chunk: chunk.as_ref(),
+                resource: &chunk.records[slot],
+            })
+    }
+
+    pub fn find(&self, document_id: u32, want_container: bool) -> Option<DavResourceRef<'_>> {
+        self.locate(self.run(want_container), document_id)
+            .filter(|resource| resource.is_container() == want_container)
     }
 
     #[inline(always)]
     pub fn find_any(&self, document_id: u32) -> Option<DavResourceRef<'_>> {
-        self.find(document_id, true)
-            .or_else(|| self.find(document_id, false))
+        if self.unified_id_space {
+            self.locate(self.run(true), document_id)
+        } else {
+            self.locate(self.run(true), document_id)
+                .or_else(|| self.locate(self.run(false), document_id))
+        }
     }
 
     pub fn rebuild(
@@ -317,39 +374,22 @@ impl ResourceStore {
         changes: &ahash::AHashMap<(bool, u32), Option<u32>>,
     ) -> Self {
         let unified = self.unified_id_space;
-        let runs: [(bool, std::ops::Range<usize>); 2] = if unified {
-            [(true, 0..self.chunks.len()), (false, 0..0)]
-        } else {
-            [
-                (true, 0..self.containers_end),
-                (false, self.containers_end..self.chunks.len()),
-            ]
-        };
-
         let mut container_chunks: Vec<Arc<ResourceChunk>> = Vec::new();
         let mut item_chunks: Vec<Arc<ResourceChunk>> = Vec::new();
 
-        for (is_container, range) in runs {
+        for is_container in [true, false] {
             if unified && !is_container {
                 continue;
             }
             let key_flag = if unified { true } else { is_container };
 
-            let mut pending: Vec<(u32, u32)> = changes
+            let mut pending: Vec<(u32, Option<u32>)> = changes
                 .iter()
-                .filter_map(|((flag, id), slot)| slot.map(|slot| (*flag, *id, slot)))
-                .filter(|(flag, id, _)| {
-                    *flag == key_flag
-                        && if unified {
-                            self.find_any(*id).is_none()
-                        } else {
-                            self.find(*id, is_container).is_none()
-                        }
-                })
-                .map(|(_, id, slot)| (id, slot))
+                .filter(|((flag, _), _)| *flag == key_flag)
+                .map(|((_, document_id), slot)| (*document_id, *slot))
                 .collect();
-            pending.sort_unstable_by_key(|(id, _)| *id);
-            pending.reverse();
+            pending.sort_unstable_by_key(|(document_id, _)| *document_id);
+            let mut pending = pending.into_iter().peekable();
 
             let staged = |slot: u32| DavResourceRef {
                 chunk: staging,
@@ -362,61 +402,51 @@ impl ResourceStore {
                 &mut item_chunks
             };
 
-            for chunk_idx in range.clone() {
-                let chunk = &self.chunks[chunk_idx];
-                let is_last = chunk_idx + 1 == range.end;
-                let touched = chunk
-                    .records
-                    .iter()
-                    .any(|record| changes.contains_key(&(key_flag, record.document_id)))
-                    || pending.iter().any(|(id, _)| {
-                        (*id >= chunk.min_id && *id <= chunk.max_id)
-                            || (is_last && *id > chunk.max_id)
-                    });
+            let run = &self.chunks[self.run(is_container)];
+            for (position, chunk) in run.iter().enumerate() {
+                let is_last = position + 1 == run.len();
+                let owned =
+                    |(document_id, _): &(u32, Option<u32>)| is_last || *document_id <= chunk.max_id;
 
-                if !touched {
+                if !pending.peek().is_some_and(owned) {
                     target.push(Arc::clone(chunk));
                     continue;
                 }
 
-                let mut builder = ResourceChunkBuilder::with_capacity(chunk.records.len() + 4);
+                let mut builder = SplitChunks::new(target, chunk.records.len() + 4);
                 for record in chunk.records.iter() {
                     while pending
-                        .last()
-                        .is_some_and(|(id, _)| *id < record.document_id)
+                        .peek()
+                        .is_some_and(|(document_id, _)| *document_id < record.document_id)
                     {
-                        let (_, slot) = pending.pop().unwrap();
-                        builder.push_from(&staged(slot));
+                        if let (_, Some(slot)) = pending.next().unwrap() {
+                            builder.push(&staged(slot));
+                        }
                     }
-                    match changes.get(&(key_flag, record.document_id)) {
-                        Some(Some(slot)) => builder.push_from(&staged(*slot)),
-                        Some(None) => {}
-                        None => builder.push_from(&DavResourceRef {
+                    match pending.next_if(|(document_id, _)| *document_id == record.document_id) {
+                        Some((_, Some(slot))) => builder.push(&staged(slot)),
+                        Some((_, None)) => {}
+                        None => builder.push(&DavResourceRef {
                             chunk,
                             resource: record,
                         }),
                     }
                 }
-                if is_last {
-                    while let Some((_, slot)) = pending.pop() {
-                        builder.push_from(&staged(slot));
+                while let Some((_, slot)) = pending.next_if(owned) {
+                    if let Some(slot) = slot {
+                        builder.push(&staged(slot));
                     }
                 }
-
-                if !builder.is_empty() {
-                    target.push(Arc::new(builder.finish()));
-                }
+                builder.finish();
             }
 
-            if !pending.is_empty() {
-                let mut builder = ResourceChunkBuilder::with_capacity(pending.len());
-                while let Some((_, slot)) = pending.pop() {
-                    builder.push_from(&staged(slot));
-                }
-                if !builder.is_empty() {
-                    target.push(Arc::new(builder.finish()));
+            let mut builder = SplitChunks::new(target, 4);
+            for (_, slot) in pending {
+                if let Some(slot) = slot {
+                    builder.push(&staged(slot));
                 }
             }
+            builder.finish();
         }
 
         let containers_end = container_chunks.len();

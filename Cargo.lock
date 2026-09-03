@@ -1332,6 +1332,7 @@ dependencies = [
  "p384",
  "parking_lot",
  "pem 4.0.0",
+ "percent-encoding",
  "pkcs8",
  "privdrop",
  "prometheus",

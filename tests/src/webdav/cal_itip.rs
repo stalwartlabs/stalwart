@@ -18,7 +18,11 @@ use groupware::scheduling::{
     itip::itip_set_unreachable_status,
     snapshot::itip_snapshot,
 };
-use std::{collections::hash_map::Entry, path::PathBuf};
+use std::{
+    collections::hash_map::Entry,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 struct Test {
     test_name: String,
@@ -417,6 +421,22 @@ impl ItipMessageExt for ItipMessage<ICalendar> {
     }
 }
 
+const GENERATED_DTSTAMP_WINDOW: i64 = 900;
+
+fn canonical_dtstamp(dt: &PartialDateTime) -> PartialDateTime {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+
+    if (now - GENERATED_DTSTAMP_WINDOW..=now)
+        .any(|timestamp| PartialDateTime::from_utc_timestamp(timestamp) == *dt)
+    {
+        PartialDateTime::from_utc_timestamp(0)
+    } else {
+        dt.clone()
+    }
+}
+
 fn normalize_ical(mut ical: ICalendar, map: &mut AHashMap<PartialDateTime, usize>) -> String {
     let mut comps = ical
         .components
@@ -436,13 +456,16 @@ fn normalize_ical(mut ical: ICalendar, map: &mut AHashMap<PartialDateTime, usize
             if let (ICalendarProperty::Dtstamp, Some(ICalendarValue::PartialDateTime(dt))) =
                 (&entry.name, entry.values.first())
             {
-                if let Some(index) = map.get(dt) {
-                    entry.values = vec![ICalendarValue::Integer(*index as i64)];
-                } else {
-                    let index = map.len();
-                    map.insert(dt.as_ref().clone(), index);
-                    entry.values = vec![ICalendarValue::Integer(index as i64)];
-                }
+                let dt = canonical_dtstamp(dt);
+                let index = match map.get(&dt) {
+                    Some(index) => *index,
+                    None => {
+                        let index = map.len();
+                        map.insert(dt, index);
+                        index
+                    }
+                };
+                entry.values = vec![ICalendarValue::Integer(index as i64)];
             }
         }
         comp.entries.sort_unstable();

@@ -127,10 +127,12 @@ impl IndexableAndSerializableObject for CalendarEvent {
     }
 
     fn set_pending_id(&mut self, document_id: u32) {
+        let content_hash = self.etag ^ self.meta_hash();
         self.names
             .last_mut()
             .expect("a pending calendar id requires a name")
             .parent_id = document_id;
+        self.etag = content_hash ^ self.meta_hash();
     }
 
     fn size_hint(&self) -> usize {
@@ -321,7 +323,9 @@ impl IndexableAndSerializableObject for CalendarEventNotification {
     }
 
     fn set_pending_id(&mut self, document_id: u32) {
+        let content_hash = self.etag ^ self.meta_hash();
         self.event_id = Some(document_id);
+        self.etag = content_hash ^ self.meta_hash();
     }
 
     fn size_hint(&self) -> usize {

@@ -304,7 +304,7 @@ pub async fn test(test: &TestServer) {
             let response = mike_noquota
                 .request_with_headers("PUT", &format!("{path}file{i}"), [], &content)
                 .await;
-            if available > content.len() as u64 {
+            if available >= content.len() as u64 {
                 num_success += 1;
                 response.with_status(StatusCode::CREATED);
             } else {

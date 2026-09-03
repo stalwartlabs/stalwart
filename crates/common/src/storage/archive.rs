@@ -7,7 +7,7 @@
 use crate::Server;
 use store::{
     Deserialize, IterateParams, U32_LEN, ValueKey,
-    dispatch::DocumentSet,
+    dispatch::{DocumentSet, ScanShape},
     write::{Archive, ArchiveBytes, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
@@ -27,41 +27,81 @@ impl Server {
         CB: FnMut(u32, Archive<ArchiveBytes>) -> trc::Result<bool> + Send + Sync,
     {
         let collection: u8 = collection.into();
+        let field: u8 = field.into();
+        let key = |document_id| ValueKey {
+            account_id,
+            collection,
+            document_id,
+            class: ValueClass::Property(field),
+        };
 
-        self.core
-            .storage
-            .data
-            .iterate(
-                IterateParams::new(
-                    ValueKey {
-                        account_id,
-                        collection,
-                        document_id: documents.min(),
-                        class: ValueClass::Property(field.into()),
-                    },
-                    ValueKey {
-                        account_id,
-                        collection,
-                        document_id: documents.max(),
-                        class: ValueClass::Property(field.into()),
-                    },
-                ),
-                |key, value| {
-                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    if documents.contains(document_id) {
-                        <Archive<ArchiveBytes> as Deserialize>::deserialize(value)
-                            .and_then(|archive| cb(document_id, archive))
-                    } else {
-                        Ok(true)
+        let (range, ranges) = match documents.scan_shape() {
+            ScanShape::PointGets => {
+                for document_id in documents.iterate() {
+                    let archive = self
+                        .core
+                        .storage
+                        .data
+                        .get_value::<Archive<ArchiveBytes>>(key(document_id))
+                        .await
+                        .add_context(|err| {
+                            err.caused_by(trc::location!())
+                                .account_id(account_id)
+                                .collection(collection)
+                                .document_id(document_id)
+                        })?;
+
+                    if let Some(archive) = archive
+                        && !cb(document_id, archive)?
+                    {
+                        break;
                     }
-                },
-            )
-            .await
-            .add_context(|err| {
-                err.caused_by(trc::location!())
-                    .account_id(account_id)
-                    .collection(collection)
-            })
+                }
+
+                return Ok(());
+            }
+            ScanShape::Range(from_document_id, to_document_id) => (
+                Some(IterateParams::new(
+                    key(from_document_id),
+                    key(to_document_id),
+                )),
+                Vec::new(),
+            ),
+            ScanShape::Ranges(ranges) => (
+                None,
+                ranges
+                    .into_iter()
+                    .map(|(from_document_id, to_document_id)| {
+                        IterateParams::new(key(from_document_id), key(to_document_id))
+                    })
+                    .collect(),
+            ),
+        };
+
+        let mut collect = |key: &[u8], value: &[u8]| {
+            let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
+            if documents.contains(document_id) {
+                <Archive<ArchiveBytes> as Deserialize>::deserialize(value)
+                    .and_then(|archive| cb(document_id, archive))
+            } else {
+                Ok(true)
+            }
+        };
+
+        if let Some(range) = range {
+            self.core.storage.data.iterate(range, &mut collect).await
+        } else {
+            self.core
+                .storage
+                .data
+                .iterate_many(ranges, &mut collect)
+                .await
+        }
+        .add_context(|err| {
+            err.caused_by(trc::location!())
+                .account_id(account_id)
+                .collection(collection)
+        })
     }
 
     pub async fn all_archives<CB>(

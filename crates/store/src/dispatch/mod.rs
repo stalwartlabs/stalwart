@@ -12,6 +12,21 @@ pub mod lookup;
 pub mod search;
 pub mod store;
 
+#[cfg(feature = "test_mode")]
+pub use ops::StoreOps;
+
+pub const MAX_SCAN_RANGES: usize = 1024;
+pub const MAX_SCAN_GAP: u32 = 64;
+pub const MAX_POINT_GETS: usize = 64;
+pub const MIN_POINT_GET_SPARSITY: u64 = 1000;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ScanShape {
+    PointGets,
+    Range(u32, u32),
+    Ranges(Vec<(u32, u32)>),
+}
+
 impl Store {
     pub fn id(&self) -> &'static str {
         match self {
@@ -37,9 +52,6 @@ impl Store {
     }
 }
 
-pub const MAX_SCAN_RANGES: usize = 1024;
-pub const MAX_SCAN_GAP: u32 = 64;
-
 #[allow(clippy::len_without_is_empty)]
 pub trait DocumentSet: Sync + Send {
     fn min(&self) -> u32;
@@ -47,6 +59,30 @@ pub trait DocumentSet: Sync + Send {
     fn contains(&self, id: u32) -> bool;
     fn len(&self) -> usize;
     fn iterate(&self) -> impl Iterator<Item = u32>;
+
+    fn scan_shape(&self) -> ScanShape {
+        let len = self.len();
+        let min = self.min();
+        let max = self.max();
+        let span = (max - min) as u64;
+
+        if len > 0 && len <= MAX_POINT_GETS && len as u64 * MIN_POINT_GET_SPARSITY < span {
+            return ScanShape::PointGets;
+        }
+        if len as u64 * MAX_SCAN_GAP as u64 >= span {
+            return ScanShape::Range(min, max);
+        }
+
+        let mut ranges = self.scan_ranges();
+        match ranges.len() {
+            0 => ScanShape::Range(min, max),
+            1 => {
+                let (from, to) = ranges.pop().unwrap();
+                ScanShape::Range(from, to)
+            }
+            _ => ScanShape::Ranges(ranges),
+        }
+    }
 
     fn scan_ranges(&self) -> Vec<(u32, u32)> {
         let len = self.len();
@@ -153,6 +189,41 @@ impl DocumentSet for () {
     }
 }
 
+#[cfg(feature = "test_mode")]
+mod ops {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static GET_VALUE: AtomicUsize = AtomicUsize::new(0);
+    static ITERATE: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct StoreOps {
+        pub get_value: usize,
+        pub iterate: usize,
+    }
+
+    impl StoreOps {
+        pub(crate) fn count_get_value() {
+            GET_VALUE.fetch_add(1, Ordering::Relaxed);
+        }
+
+        pub(crate) fn count_iterate(ranges: usize) {
+            ITERATE.fetch_add(ranges, Ordering::Relaxed);
+        }
+
+        pub fn take() -> Self {
+            StoreOps {
+                get_value: GET_VALUE.swap(0, Ordering::Relaxed),
+                iterate: ITERATE.swap(0, Ordering::Relaxed),
+            }
+        }
+
+        pub fn total(&self) -> usize {
+            self.get_value + self.iterate
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,6 +258,34 @@ mod tests {
                 .scan_ranges(),
             vec![(0, MAX_SCAN_RANGES as u32 * 1_000)]
         );
+    }
+
+    #[test]
+    fn document_set_scan_shape() {
+        assert_eq!(RoaringBitmap::new().scan_shape(), ScanShape::Range(0, 0));
+        assert_eq!(().scan_shape(), ScanShape::Range(0, u32::MAX));
+        assert_eq!(
+            RoaringBitmap::from_iter(0..100u32).scan_shape(),
+            ScanShape::Range(0, 100)
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([5u32, 60]).scan_shape(),
+            ScanShape::Range(5, 61)
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([12u32, 150_000, 199_998]).scan_shape(),
+            ScanShape::PointGets
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter((0..MAX_POINT_GETS as u32).map(|id| id * 100_000))
+                .scan_shape(),
+            ScanShape::PointGets
+        );
+        assert!(matches!(
+            RoaringBitmap::from_iter((0..=MAX_POINT_GETS as u32).map(|id| id * 100_000))
+                .scan_shape(),
+            ScanShape::Ranges(ranges) if ranges.len() == MAX_POINT_GETS + 1
+        ));
     }
 
     #[test]

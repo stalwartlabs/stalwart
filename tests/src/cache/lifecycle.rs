@@ -106,6 +106,15 @@ async fn message_cache_survives_an_eviction(test: &TestServer, account_id: u32) 
         before.last_change_id, after.last_change_id,
         "the restored message cache is at a different change id"
     );
+    assert_eq!(
+        after.mailboxes.change_id, after.last_change_id,
+        "the restored mailbox cache publishes a change id of its own, which JMAP maps to the \
+         initial state"
+    );
+    assert_eq!(
+        before.mailboxes.change_id, after.mailboxes.change_id,
+        "the restored mailbox cache lost its change id"
+    );
     for (a, b) in before.emails.iter().zip(after.emails.iter()) {
         assert_eq!(a.document_id(), b.document_id());
         assert_eq!(a.received_at(), b.received_at());

@@ -133,15 +133,11 @@ impl DavResources {
     }
 
     pub fn has_container_id(&self, id: &u32) -> bool {
-        self.resources
-            .iter()
-            .any(|r| r.document_id() == *id && r.is_container())
+        self.resources.find(*id, true).is_some()
     }
 
     pub fn has_item_id(&self, id: &u32) -> bool {
-        self.resources
-            .iter()
-            .any(|r| r.document_id() == *id && !r.is_container())
+        self.resources.find(*id, false).is_some()
     }
 }
 

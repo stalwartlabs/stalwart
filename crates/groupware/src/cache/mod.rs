@@ -13,19 +13,18 @@ use crate::{
     contact::{AddressBook, AddressBookPreferences, ContactCard},
     file::FileNode,
 };
-use ahash::AHashSet;
 use calcard::{
     build_calcard_paths, build_calcard_resources, push_addressbook, push_calendar, push_card,
     push_event,
 };
 use common::{
-    DAV_CHUNK, DavResourceRef, DavResources, ResourceStore, Server, UpdateLock,
+    DAV_CHUNK, DavResources, ResourceChunk, Server, UpdateLock,
     auth::AccountCache,
     cache::{
         LockResult,
         swap::{BLOCKING_CODEC_THRESHOLD, SwapKey, SwapPart},
     },
-    storage::dav::ResourceChunkBuilder,
+    storage::dav::{ResourceChunkBuilder, hierarchy::PathUpdate},
 };
 use file::{build_file_resources, build_nested_hierarchy, push_file};
 use std::{sync::Arc, time::Instant};
@@ -57,8 +56,7 @@ impl ChunkAccumulator {
             .last()
             .is_none_or(|builder| builder.len() >= DAV_CHUNK)
         {
-            self.builders
-                .push(ResourceChunkBuilder::with_capacity(DAV_CHUNK.min(64)));
+            self.builders.push(ResourceChunkBuilder::with_capacity(64));
         }
         self.builders.last_mut().unwrap()
     }
@@ -266,151 +264,29 @@ impl GroupwareCache for Server {
         };
 
         let num_changes = changes.changes.len();
-        let cache = if !matches!(collection, SyncCollection::CalendarEventNotification) {
-            let mut updated_resources = AHashMap::with_capacity(8);
-            let has_no_children = collection == SyncCollection::FileNode;
-            let mut staging = ResourceChunkBuilder::with_capacity(8);
+        let mut updated_resources = AHashMap::with_capacity(8);
+        let has_no_children = collection == SyncCollection::FileNode;
+        let mut staging = ResourceChunkBuilder::with_capacity(8);
 
-            process_changes(
-                self,
-                account_id,
-                collection,
-                has_no_children,
-                &mut staging,
-                &mut updated_resources,
-                changes.changes,
-            )
-            .await?;
+        process_changes(
+            self,
+            account_id,
+            collection,
+            has_no_children,
+            &mut staging,
+            &mut updated_resources,
+            changes.changes,
+        )
+        .await?;
 
-            let staging = staging.finish();
-            let mut rebuild_hierarchy = false;
-            for ((is_container, document_id), slot) in &updated_resources {
-                match slot {
-                    Some(slot) => {
-                        let updated = DavResourceRef {
-                            chunk: &staging,
-                            resource: &staging.records[*slot as usize],
-                        };
-                        match cache.resources.find(*document_id, *is_container) {
-                            Some(previous) => {
-                                rebuild_hierarchy =
-                                    rebuild_hierarchy || updated.has_hierarchy_changes(&previous);
-                            }
-                            None => rebuild_hierarchy = true,
-                        }
-                    }
-                    None => rebuild_hierarchy = true,
-                }
-            }
-
-            let resources = cache.resources.rebuild(&staging, &updated_resources);
-            let paths = if rebuild_hierarchy {
-                Arc::new(if matches!(collection, SyncCollection::FileNode) {
-                    build_nested_hierarchy(&resources)
-                } else {
-                    build_calcard_paths(&resources)
-                })
-            } else {
-                cache.paths.clone()
-            };
-
-            let mut cache = DavResources {
-                base_path: cache.base_path.clone(),
-                paths,
-                resources,
-                item_change_id: changes.item_change_id.unwrap_or(cache.item_change_id),
-                container_change_id: changes
-                    .container_change_id
-                    .unwrap_or(cache.container_change_id),
-                highest_change_id: changes.to_change_id,
-                size: 0,
-                update_lock: lock.clone(),
-            };
-            cache.recompute_size();
-            cache
-        } else {
-            let mut delete_ids = AHashSet::with_capacity(changes.changes.len());
-            let mut inserted = Vec::new();
-
-            for change in changes.changes {
-                match change {
-                    Change::InsertItem(document_id) => {
-                        let document_id = document_id as u32;
-                        if let Some(archive) = self
-                            .store()
-                            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                                account_id,
-                                Collection::CalendarEventNotification,
-                                document_id,
-                            ))
-                            .await
-                            .caused_by(trc::location!())?
-                        {
-                            inserted.push((document_id, archive));
-                        }
-                    }
-                    Change::DeleteItem(document_id) => {
-                        delete_ids.insert(document_id as u32);
-                    }
-                    _ => {}
-                }
-            }
-            inserted.sort_unstable_by_key(|(document_id, _)| *document_id);
-
-            let mut containers = ChunkAccumulator::default();
-            let mut items = ChunkAccumulator::default();
-            let mut inserted = inserted.into_iter().peekable();
-
-            for resource in cache.resources.iter() {
-                if resource.is_container() {
-                    containers.current().push_from(&resource);
-                    continue;
-                }
-                if delete_ids.contains(&resource.document_id()) {
-                    continue;
-                }
-                while inserted
-                    .peek()
-                    .is_some_and(|(document_id, _)| *document_id < resource.document_id())
-                {
-                    let (document_id, archive) = inserted.next().unwrap();
-                    push_scheduling(
-                        items.current(),
-                        archive
-                            .unarchive::<CalendarEventNotification>()
-                            .caused_by(trc::location!())?,
-                        document_id,
-                    );
-                }
-                items.current().push_from(&resource);
-            }
-            for (document_id, archive) in inserted {
-                push_scheduling(
-                    items.current(),
-                    archive
-                        .unarchive::<CalendarEventNotification>()
-                        .caused_by(trc::location!())?,
-                    document_id,
-                );
-            }
-
-            let resources = ResourceStore::from_sorted(containers.finish(), items.finish(), false);
-            let paths = build_scheduling_paths(&resources);
-            let mut cache = DavResources {
-                base_path: cache.base_path.clone(),
-                paths: Arc::new(paths),
-                resources,
-                item_change_id: changes.item_change_id.unwrap_or(cache.item_change_id),
-                container_change_id: changes
-                    .container_change_id
-                    .unwrap_or(cache.container_change_id),
-                highest_change_id: changes.to_change_id,
-                size: 0,
-                update_lock: cache.update_lock.clone(),
-            };
-            cache.recompute_size();
-            cache
-        };
+        let staging = staging.finish();
+        let mut cache = rebuild_cache(&cache, collection, &staging, &updated_resources);
+        cache.item_change_id = changes.item_change_id.unwrap_or(cache.item_change_id);
+        cache.container_change_id = changes
+            .container_change_id
+            .unwrap_or(cache.container_change_id);
+        cache.highest_change_id = changes.to_change_id;
+        cache.update_lock = lock.clone();
 
         cache.update_lock.set_revision(cache.highest_change_id);
         let cache = Arc::new(cache);
@@ -582,6 +458,41 @@ impl GroupwareCache for Server {
         })
         .get(&account_id)
     }
+}
+
+fn rebuild_cache(
+    previous: &DavResources,
+    collection: SyncCollection,
+    staging: &ResourceChunk,
+    changes: &AHashMap<(bool, u32), Option<u32>>,
+) -> DavResources {
+    let mut updated = DavResources {
+        base_path: previous.base_path.clone(),
+        paths: previous.paths.clone(),
+        resources: previous.resources.rebuild(staging, changes),
+        item_change_id: previous.item_change_id,
+        container_change_id: previous.container_change_id,
+        highest_change_id: previous.highest_change_id,
+        size: 0,
+        update_lock: previous.update_lock.clone(),
+    };
+
+    match updated.patch_paths(&previous.resources, staging, changes) {
+        PathUpdate::Shared => {}
+        PathUpdate::Patched(paths) => updated.paths = Arc::new(paths),
+        PathUpdate::Rebuild => {
+            updated.paths = Arc::new(match collection {
+                SyncCollection::FileNode => build_nested_hierarchy(&updated.resources),
+                SyncCollection::CalendarEventNotification => {
+                    build_scheduling_paths(&updated.resources)
+                }
+                _ => build_calcard_paths(&updated.resources),
+            })
+        }
+    }
+
+    updated.recompute_size();
+    updated
 }
 
 async fn process_changes(
@@ -850,7 +761,666 @@ fn push_from_archive(
             document_id,
             etag,
         ),
+        SyncCollection::CalendarEventNotification => push_scheduling(
+            builder,
+            archive
+                .unarchive::<CalendarEventNotification>()
+                .caused_by(trc::location!())?,
+            document_id,
+        ),
         _ => unreachable!(),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calendar::{SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID};
+    use common::{
+        ArenaRef, DavName, DavResource, DavResourceMetadata, NO_ID, ResourceStore,
+        storage::dav::CONTAINER_FLAG,
+    };
+
+    #[derive(Clone)]
+    enum Spec {
+        Container {
+            document_id: u32,
+            name: String,
+        },
+        Event {
+            document_id: u32,
+            names: Vec<(u32, String)>,
+            etag: u32,
+        },
+        Node {
+            document_id: u32,
+            name: String,
+            parent_id: Option<u32>,
+            size: Option<u32>,
+            etag: u32,
+        },
+        Notification {
+            document_id: u32,
+        },
+    }
+
+    fn calendar(document_id: u32, name: &str) -> Spec {
+        Spec::Container {
+            document_id,
+            name: name.to_string(),
+        }
+    }
+
+    fn event(document_id: u32, parent_id: u32, name: &str) -> Spec {
+        Spec::Event {
+            document_id,
+            names: vec![(parent_id, name.to_string())],
+            etag: 0,
+        }
+    }
+
+    fn folder(document_id: u32, name: &str, parent_id: Option<u32>) -> Spec {
+        Spec::Node {
+            document_id,
+            name: name.to_string(),
+            parent_id,
+            size: None,
+            etag: 0,
+        }
+    }
+
+    fn file(document_id: u32, name: &str, parent_id: Option<u32>) -> Spec {
+        Spec::Node {
+            document_id,
+            name: name.to_string(),
+            parent_id,
+            size: Some(1024),
+            etag: 0,
+        }
+    }
+
+    impl Spec {
+        fn document_id(&self) -> u32 {
+            match self {
+                Spec::Container { document_id, .. }
+                | Spec::Event { document_id, .. }
+                | Spec::Node { document_id, .. }
+                | Spec::Notification { document_id } => *document_id,
+            }
+        }
+
+        fn is_container(&self) -> bool {
+            match self {
+                Spec::Container { .. } => true,
+                Spec::Node { size, .. } => size.is_none(),
+                Spec::Event { .. } => false,
+                Spec::Notification { document_id } => {
+                    *document_id == SCHEDULE_INBOX_ID || *document_id == SCHEDULE_OUTBOX_ID
+                }
+            }
+        }
+
+        fn with_etag(mut self, value: u32) -> Self {
+            match &mut self {
+                Spec::Event { etag, .. } | Spec::Node { etag, .. } => *etag = value,
+                _ => {}
+            }
+            self
+        }
+
+        fn push(&self, builder: &mut ResourceChunkBuilder) {
+            match self {
+                Spec::Container { document_id, name } => {
+                    let name = builder.push_str(name);
+                    let acls = builder.push_acls(&[]);
+                    let preferences = builder.push_prefs(&[]);
+                    builder.records.push(DavResource {
+                        document_id: *document_id,
+                        data: DavResourceMetadata::Calendar {
+                            name,
+                            acls,
+                            preferences,
+                            etag: 0,
+                        },
+                    });
+                }
+                Spec::Event {
+                    document_id,
+                    names,
+                    etag,
+                } => {
+                    let names = builder.push_names(
+                        &names
+                            .iter()
+                            .map(|(parent_id, name)| DavName::new(name.clone(), *parent_id))
+                            .collect::<Vec<_>>(),
+                    );
+                    let uid = builder.push_str("uid");
+                    builder.records.push(DavResource {
+                        document_id: *document_id,
+                        data: DavResourceMetadata::CalendarEvent {
+                            names,
+                            start: 0,
+                            duration: 0,
+                            created_at: 0,
+                            modified_at: 0,
+                            uid,
+                            etag: *etag,
+                        },
+                    });
+                }
+                Spec::Node {
+                    document_id,
+                    name,
+                    parent_id,
+                    size,
+                    etag,
+                } => {
+                    let name = builder.push_str(name);
+                    let acls = builder.push_acls(&[]);
+                    builder.records.push(DavResource {
+                        document_id: *document_id,
+                        data: DavResourceMetadata::File {
+                            name,
+                            size: size.unwrap_or(NO_ID),
+                            parent_id: parent_id.unwrap_or(NO_ID),
+                            acls,
+                            etag: *etag,
+                        },
+                    });
+                }
+                Spec::Notification { document_id } => {
+                    let names = if self.is_container() {
+                        ArenaRef::default()
+                    } else {
+                        builder.push_names(&[DavName::new(
+                            format!("{document_id}.ics"),
+                            SCHEDULE_INBOX_ID,
+                        )])
+                    };
+                    builder.records.push(DavResource {
+                        document_id: *document_id,
+                        data: DavResourceMetadata::CalendarEventNotification {
+                            names,
+                            created_at: 0,
+                            event_id: u32::MAX,
+                            etag: 0,
+                        },
+                    });
+                }
+            }
+        }
+    }
+
+    fn cold_build(specs: &[Spec], collection: SyncCollection) -> DavResources {
+        let unified = collection == SyncCollection::FileNode;
+        let mut containers = ChunkAccumulator::default();
+        let mut items = ChunkAccumulator::default();
+
+        let mut sorted = specs.to_vec();
+        sorted.sort_by_key(|spec| (!unified && !spec.is_container(), spec.document_id()));
+        for spec in &sorted {
+            if unified || spec.is_container() {
+                spec.push(containers.current());
+            } else {
+                spec.push(items.current());
+            }
+        }
+
+        let resources = ResourceStore::from_sorted(containers.finish(), items.finish(), unified);
+        let paths = match collection {
+            SyncCollection::FileNode => build_nested_hierarchy(&resources),
+            SyncCollection::CalendarEventNotification => build_scheduling_paths(&resources),
+            _ => build_calcard_paths(&resources),
+        };
+        let mut cache = DavResources {
+            base_path: "/dav/x/john/".to_string(),
+            paths: Arc::new(paths),
+            resources,
+            item_change_id: 0,
+            container_change_id: 0,
+            highest_change_id: 0,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+        };
+        cache.recompute_size();
+        cache
+    }
+
+    fn apply(
+        previous: &DavResources,
+        collection: SyncCollection,
+        changes: &[(bool, u32, Option<Spec>)],
+    ) -> DavResources {
+        let mut staging = ResourceChunkBuilder::with_capacity(changes.len());
+        let mut map: AHashMap<(bool, u32), Option<u32>> = AHashMap::with_capacity(changes.len());
+
+        for (is_container, document_id, spec) in changes {
+            let slot = spec.as_ref().map(|spec| {
+                let slot = staging.len() as u32;
+                spec.push(&mut staging);
+                slot
+            });
+            map.insert((*is_container, *document_id), slot);
+        }
+
+        rebuild_cache(previous, collection, &staging.finish(), &map)
+    }
+
+    fn entries(cache: &DavResources) -> Vec<(String, u32, u32, u32)> {
+        let mut entries = cache
+            .paths
+            .iter()
+            .map(|(chunk, path)| {
+                (
+                    chunk.path_str(path).to_string(),
+                    path.document_id,
+                    path.parent_id,
+                    path.hierarchy_seq,
+                )
+            })
+            .collect::<Vec<_>>();
+        entries.sort();
+        entries
+    }
+
+    fn records(cache: &DavResources) -> Vec<(u32, bool, Vec<String>, u32)> {
+        cache
+            .resources
+            .iter()
+            .map(|resource| {
+                (
+                    resource.document_id(),
+                    resource.is_container(),
+                    resource
+                        .container_name()
+                        .map(|name| vec![name.to_string()])
+                        .unwrap_or_else(|| {
+                            resource
+                                .child_names()
+                                .iter()
+                                .map(|name| {
+                                    format!("{}:{}", name.parent_id, resource.child_name_at(name))
+                                })
+                                .collect()
+                        }),
+                    resource.etag(),
+                )
+            })
+            .collect()
+    }
+
+    fn assert_well_formed(cache: &DavResources) {
+        assert!(
+            cache
+                .paths
+                .iter()
+                .map(|(chunk, path)| chunk.path_str(path))
+                .is_sorted_by(|a, b| a < b),
+            "the path index must be globally sorted across chunk boundaries"
+        );
+        assert!(
+            cache
+                .resources
+                .chunks
+                .iter()
+                .all(|chunk| !chunk.records.is_empty() && chunk.records.len() <= DAV_CHUNK),
+            "no resource chunk may be empty or exceed DAV_CHUNK"
+        );
+        for chunk in cache.paths.chunks.iter() {
+            assert!(!chunk.paths.is_empty(), "no path chunk may be empty");
+        }
+        for is_container in [true, false] {
+            let run = if cache.resources.unified_id_space {
+                &cache.resources.chunks[..]
+            } else if is_container {
+                &cache.resources.chunks[..cache.resources.containers_end]
+            } else {
+                &cache.resources.chunks[cache.resources.containers_end..]
+            };
+            assert!(
+                run.windows(2).all(|pair| pair[0].max_id < pair[1].min_id),
+                "chunks within a run must stay ordered and disjoint"
+            );
+            if cache.resources.unified_id_space {
+                break;
+            }
+        }
+    }
+
+    fn assert_matches_cold_build(
+        updated: &DavResources,
+        specs: &[Spec],
+        collection: SyncCollection,
+    ) {
+        let cold = cold_build(specs, collection);
+        assert_well_formed(updated);
+        assert_eq!(records(updated), records(&cold), "resource records differ");
+
+        if collection == SyncCollection::FileNode {
+            let strip = |entries: Vec<(String, u32, u32, u32)>| {
+                entries
+                    .into_iter()
+                    .map(|(path, document_id, parent_id, seq)| {
+                        (path, document_id, parent_id, seq & CONTAINER_FLAG)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                strip(entries(updated)),
+                strip(entries(&cold)),
+                "path entries differ"
+            );
+            for (_, path) in updated.paths.iter() {
+                if path.parent_id != NO_ID
+                    && let Some((_, parent)) = updated
+                        .paths
+                        .iter()
+                        .find(|(_, other)| other.document_id == path.parent_id)
+                {
+                    assert!(
+                        parent.hierarchy_seq & !CONTAINER_FLAG
+                            < path.hierarchy_seq & !CONTAINER_FLAG,
+                        "a node must sequence after its parent"
+                    );
+                }
+            }
+        } else {
+            assert_eq!(entries(updated), entries(&cold), "path entries differ");
+        }
+    }
+
+    #[test]
+    fn calcard_creates_deletes_and_renames_patch_the_index() {
+        let base = vec![
+            calendar(0, "work"),
+            calendar(1, "home"),
+            event(0, 0, "a.ics"),
+            event(1, 0, "b.ics"),
+            event(2, 1, "c.ics"),
+        ];
+        let cache = cold_build(&base, SyncCollection::Calendar);
+
+        let created = apply(
+            &cache,
+            SyncCollection::Calendar,
+            &[(false, 7, Some(event(7, 1, "new.ics")))],
+        );
+        let mut specs = base.clone();
+        specs.push(event(7, 1, "new.ics"));
+        assert_matches_cold_build(&created, &specs, SyncCollection::Calendar);
+
+        let deleted = apply(&created, SyncCollection::Calendar, &[(false, 1, None)]);
+        specs.retain(|spec| !matches!(spec, Spec::Event { document_id: 1, .. }));
+        assert_matches_cold_build(&deleted, &specs, SyncCollection::Calendar);
+
+        let renamed = apply(
+            &deleted,
+            SyncCollection::Calendar,
+            &[(false, 2, Some(event(2, 1, "renamed.ics")))],
+        );
+        for spec in specs.iter_mut() {
+            if let Spec::Event { document_id: 2, .. } = spec {
+                *spec = event(2, 1, "renamed.ics");
+            }
+        }
+        assert_matches_cold_build(&renamed, &specs, SyncCollection::Calendar);
+    }
+
+    #[test]
+    fn calcard_content_update_shares_the_path_index() {
+        let base = vec![calendar(0, "work"), event(0, 0, "a.ics")];
+        let cache = cold_build(&base, SyncCollection::Calendar);
+
+        let updated = apply(
+            &cache,
+            SyncCollection::Calendar,
+            &[(false, 0, Some(event(0, 0, "a.ics").with_etag(42)))],
+        );
+
+        assert!(
+            Arc::ptr_eq(&cache.paths, &updated.paths),
+            "a content-only update must keep the path index"
+        );
+        assert_eq!(updated.resources.find(0, false).unwrap().etag(), 42);
+    }
+
+    #[test]
+    fn file_content_put_shares_the_path_index() {
+        let base = vec![
+            folder(0, "docs", None),
+            file(1, "readme.txt", Some(0)),
+            file(2, "notes.txt", None),
+        ];
+        let cache = cold_build(&base, SyncCollection::FileNode);
+
+        let updated = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[(true, 1, Some(file(1, "readme.txt", Some(0)).with_etag(9)))],
+        );
+
+        assert!(
+            Arc::ptr_eq(&cache.paths, &updated.paths),
+            "a file content PUT must keep the path index"
+        );
+        assert_eq!(updated.resources.find_any(1).unwrap().etag(), 9);
+    }
+
+    #[test]
+    fn resources_are_reachable_by_document_id() {
+        let files = cold_build(
+            &[
+                folder(0, "docs", None),
+                folder(1, "reports", Some(0)),
+                file(2, "q1.txt", Some(1)),
+                file(3, "readme.txt", None),
+            ],
+            SyncCollection::FileNode,
+        );
+        for (document_id, path, is_container) in [
+            (0, "docs", true),
+            (1, "docs/reports", true),
+            (2, "docs/reports/q1.txt", false),
+            (3, "readme.txt", false),
+        ] {
+            let found = files
+                .any_resource_path_by_id(document_id)
+                .unwrap_or_else(|| panic!("{path} is unreachable by id"));
+            assert_eq!(found.path(), path);
+            assert_eq!(
+                files.container_resource_path_by_id(document_id).is_some(),
+                is_container,
+                "{path}"
+            );
+            assert_eq!(
+                files
+                    .format_resource_paths_by_id(document_id)
+                    .collect::<Vec<_>>(),
+                vec![files.format_resource(found)],
+                "{path}"
+            );
+        }
+        assert!(files.any_resource_path_by_id(9).is_none());
+        assert_eq!(
+            files.children_ids(0).collect::<Vec<_>>(),
+            vec![1],
+            "only direct children"
+        );
+
+        let calcard = cold_build(
+            &[
+                calendar(0, "work"),
+                calendar(1, "home"),
+                event(0, 0, "a.ics"),
+                event(1, 1, "b.ics"),
+            ],
+            SyncCollection::Calendar,
+        );
+        assert_eq!(
+            calcard.container_resource_path_by_id(1).unwrap().path(),
+            "home"
+        );
+        assert_eq!(
+            calcard.format_resource_path_by_parent(1, 1).as_deref(),
+            Some("/dav/x/john/home/b.ics")
+        );
+        let mut children = calcard.children_ids(0).collect::<Vec<_>>();
+        children.sort_unstable();
+        assert_eq!(children, vec![0]);
+    }
+
+    #[test]
+    fn file_creates_deletes_and_moves_patch_the_index() {
+        let mut specs = vec![
+            folder(0, "docs", None),
+            folder(1, "reports", Some(0)),
+            file(2, "q1.txt", Some(1)),
+            file(3, "readme.txt", None),
+        ];
+        let cache = cold_build(&specs, SyncCollection::FileNode);
+
+        let created = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[(true, 4, Some(file(4, "q2.txt", Some(1))))],
+        );
+        specs.push(file(4, "q2.txt", Some(1)));
+        assert_matches_cold_build(&created, &specs, SyncCollection::FileNode);
+
+        let moved = apply(
+            &created,
+            SyncCollection::FileNode,
+            &[(true, 2, Some(file(2, "q1.txt", Some(0))))],
+        );
+        for spec in specs.iter_mut() {
+            if spec.document_id() == 2 {
+                *spec = file(2, "q1.txt", Some(0));
+            }
+        }
+        assert_matches_cold_build(&moved, &specs, SyncCollection::FileNode);
+
+        let deleted = apply(&moved, SyncCollection::FileNode, &[(true, 3, None)]);
+        specs.retain(|spec| spec.document_id() != 3);
+        assert_matches_cold_build(&deleted, &specs, SyncCollection::FileNode);
+
+        let new_folder = apply(
+            &deleted,
+            SyncCollection::FileNode,
+            &[(true, 5, Some(folder(5, "archive", Some(0))))],
+        );
+        specs.push(folder(5, "archive", Some(0)));
+        assert_matches_cold_build(&new_folder, &specs, SyncCollection::FileNode);
+    }
+
+    #[test]
+    fn container_changes_fall_back_to_a_full_rebuild() {
+        let specs = vec![
+            calendar(0, "work"),
+            event(0, 0, "a.ics"),
+            event(1, 0, "b.ics"),
+        ];
+        let cache = cold_build(&specs, SyncCollection::Calendar);
+
+        let renamed = apply(
+            &cache,
+            SyncCollection::Calendar,
+            &[(true, 0, Some(calendar(0, "office")))],
+        );
+        let mut expected = specs.clone();
+        expected[0] = calendar(0, "office");
+        assert_matches_cold_build(&renamed, &expected, SyncCollection::Calendar);
+
+        let destroyed = apply(&cache, SyncCollection::Calendar, &[(true, 0, None)]);
+        assert_matches_cold_build(
+            &destroyed,
+            &[event(0, 0, "a.ics"), event(1, 0, "b.ics")],
+            SyncCollection::Calendar,
+        );
+    }
+
+    #[test]
+    fn the_first_create_lands_in_an_empty_index() {
+        let cache = cold_build(&[], SyncCollection::FileNode);
+        assert!(cache.paths.is_empty());
+
+        let created = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[(true, 0, Some(folder(0, "docs", None)))],
+        );
+        assert_matches_cold_build(
+            &created,
+            &[folder(0, "docs", None)],
+            SyncCollection::FileNode,
+        );
+
+        let child = apply(
+            &created,
+            SyncCollection::FileNode,
+            &[(true, 1, Some(file(1, "a.txt", Some(0))))],
+        );
+        assert_matches_cold_build(
+            &child,
+            &[folder(0, "docs", None), file(1, "a.txt", Some(0))],
+            SyncCollection::FileNode,
+        );
+    }
+
+    #[test]
+    fn scheduling_updates_patch_the_index() {
+        let mut specs = vec![
+            Spec::Notification {
+                document_id: SCHEDULE_OUTBOX_ID,
+            },
+            Spec::Notification {
+                document_id: SCHEDULE_INBOX_ID,
+            },
+            Spec::Notification { document_id: 1 },
+            Spec::Notification { document_id: 2 },
+        ];
+        let cache = cold_build(&specs, SyncCollection::CalendarEventNotification);
+
+        let created = apply(
+            &cache,
+            SyncCollection::CalendarEventNotification,
+            &[(false, 3, Some(Spec::Notification { document_id: 3 }))],
+        );
+        specs.push(Spec::Notification { document_id: 3 });
+        assert_matches_cold_build(&created, &specs, SyncCollection::CalendarEventNotification);
+
+        let purged = apply(
+            &created,
+            SyncCollection::CalendarEventNotification,
+            &[(false, 1, None), (false, 2, None)],
+        );
+        specs.retain(|spec| !matches!(spec, Spec::Notification { document_id: 1 | 2 }));
+        assert_matches_cold_build(&purged, &specs, SyncCollection::CalendarEventNotification);
+    }
+
+    #[test]
+    fn warm_creates_split_oversized_chunks() {
+        let mut specs = (0..DAV_CHUNK as u32)
+            .map(|document_id| file(document_id, &format!("f{document_id:07}.txt"), None))
+            .collect::<Vec<_>>();
+        let mut cache = cold_build(&specs, SyncCollection::FileNode);
+        assert_eq!(cache.resources.chunks.len(), 1);
+
+        for document_id in DAV_CHUNK as u32..DAV_CHUNK as u32 + 300 {
+            let spec = file(document_id, &format!("f{document_id:07}.txt"), None);
+            cache = apply(
+                &cache,
+                SyncCollection::FileNode,
+                &[(true, document_id, Some(spec.clone()))],
+            );
+            specs.push(spec);
+        }
+
+        assert!(
+            cache.resources.chunks.len() > 1,
+            "the tail chunk must have been split"
+        );
+        assert_matches_cold_build(&cache, &specs, SyncCollection::FileNode);
+    }
 }

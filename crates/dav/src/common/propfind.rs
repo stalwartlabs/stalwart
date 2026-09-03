@@ -479,26 +479,41 @@ impl PropFindRequestHandler for Server {
                 .insert(item.document_id);
         }
 
+        let content_field = content_field(collection_children);
+        let track_carriers = content_field.is_some() && needs_dead_properties && !needs_content;
+
         let mut metadata: AHashMap<(u32, u8, u32), Archive<ArchiveBytes>> =
             AHashMap::with_capacity(paths.len());
+        let mut carriers: AHashMap<(u32, Collection), RoaringBitmap> = AHashMap::new();
         for ((account_id, collection), documents) in &groups {
             let (account_id, collection) = (*account_id, *collection);
+            let mut group_carriers = RoaringBitmap::new();
             self.archives(
                 account_id,
                 collection,
                 Field::ARCHIVE,
                 documents,
                 |document_id, archive| {
+                    if track_carriers
+                        && collection == collection_children
+                        && has_dead_properties(&archive, collection)?
+                    {
+                        group_carriers.insert(document_id);
+                    }
                     metadata.insert((account_id, collection.into(), document_id), archive);
                     Ok(true)
                 },
             )
             .await
             .caused_by(trc::location!())?;
+
+            if !group_carriers.is_empty() {
+                carriers.insert((account_id, collection), group_carriers);
+            }
         }
 
         let mut contents: AHashMap<(u32, u8, u32), Archive<ArchiveBytes>> = AHashMap::new();
-        if let Some(content_field) = content_field(collection_children)
+        if let Some(content_field) = content_field
             && (needs_content || needs_dead_properties)
         {
             for ((account_id, collection), documents) in &groups {
@@ -508,19 +523,11 @@ impl PropFindRequestHandler for Server {
                 }
 
                 let documents = if needs_content {
-                    documents.clone()
-                } else {
-                    let mut carriers = RoaringBitmap::new();
-                    for document_id in documents.iter() {
-                        if let Some(archive) =
-                            metadata.get(&(account_id, collection.into(), document_id))
-                            && has_dead_properties(archive, collection)
-                                .caused_by(trc::location!())?
-                        {
-                            carriers.insert(document_id);
-                        }
-                    }
+                    documents
+                } else if let Some(carriers) = carriers.get(&(account_id, collection)) {
                     carriers
+                } else {
+                    continue;
                 };
 
                 if documents.is_empty() {
@@ -531,7 +538,7 @@ impl PropFindRequestHandler for Server {
                     account_id,
                     collection,
                     content_field,
-                    &documents,
+                    documents,
                     |document_id, archive| {
                         contents.insert((account_id, collection.into(), document_id), archive);
                         Ok(true)

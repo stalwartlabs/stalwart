@@ -5,13 +5,16 @@
  */
 
 use crate::utils::server::TestServer;
+use crate::utils::webdav::DummyWebDavClient;
 use crate::webdav::*;
+use common::auth::AccountTenantIds;
 use dav_proto::schema::property::{DavProperty, WebDavProperty};
 use groupware::calendar::{CalendarEvent, EVENT_HAS_DEAD_PROPERTIES};
 use groupware::contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard};
 use store::{
     SerializeInfallible, ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, ValueClass},
+    dispatch::StoreOps,
+    write::{Archive, ArchiveBytes, BatchBuilder, Operation, ValueClass, ValueOp},
 };
 use types::dead_property::DeadElementTag;
 use types::{
@@ -30,6 +33,8 @@ pub async fn test(test: &TestServer) {
     dead_property_bit_tracks_the_set(test).await;
     etag_changes_on_payload_and_metadata_writes(test).await;
     metadata_only_write_leaves_content_untouched(test).await;
+    metadata_only_write_emits_no_content_or_index_op(test).await;
+    allprop_propfind_read_count_does_not_scale(test).await;
     default_calendar_is_reset_on_destroy(test).await;
 }
 
@@ -374,6 +379,159 @@ async fn etag_changes_on_payload_and_metadata_writes(test: &TestServer) {
         .request("DELETE", moved_path, "")
         .await
         .with_status(StatusCode::NO_CONTENT);
+}
+
+// Test 2: a metadata-only write emits no CONTENT set and no index operation.
+async fn metadata_only_write_emits_no_content_or_index_op(test: &TestServer) {
+    let client = test.account("john@example.com").webdav_client();
+    let account_id = john_id(test);
+    let body = TEST_ICAL_1.replace('\n', "\r\n");
+
+    client
+        .request_with_headers(
+            "PUT",
+            EVENT_PATH,
+            [("content-type", "text/calendar; charset=utf-8")],
+            &body,
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+
+    let id = document_id(test, Collection::CalendarEvent, EVENT_PATH).await;
+    let (meta, _) = meta_and_content(test, Collection::CalendarEvent, id).await;
+    let meta = meta.expect("META missing");
+    let event = meta.to_unarchived::<CalendarEvent>().unwrap();
+    let mut new_event = event.deserialize::<CalendarEvent>().unwrap();
+    new_event.display_name = Some("metadata only".to_string());
+
+    let mut batch = BatchBuilder::new();
+    new_event
+        .update_meta(
+            AccountTenantIds {
+                account_id,
+                tenant_id: None,
+            },
+            event,
+            account_id,
+            id,
+            None,
+            &mut batch,
+        )
+        .unwrap();
+
+    let content_field: u8 = CalendarEventField::Content.field().into();
+    for op in batch.ops() {
+        match op {
+            Operation::Value {
+                class: ValueClass::Property(field),
+                op: ValueOp::Set(_),
+            } => {
+                assert_ne!(
+                    *field, content_field,
+                    "a metadata-only write emitted a CONTENT set"
+                );
+            }
+            Operation::Index { field, .. } => {
+                panic!("a metadata-only write emitted an index operation on field {field}");
+            }
+            _ => {}
+        }
+    }
+
+    client
+        .request("DELETE", EVENT_PATH, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+}
+
+// Test 9: an allprop PROPFIND reads META once and CONTENT once per carrier, so its
+// store read count does not grow with the number of items in the collection.
+async fn allprop_propfind_read_count_does_not_scale(test: &TestServer) {
+    const FEW: usize = 4;
+    const MANY: usize = 36;
+
+    let client = test.account("john@example.com").webdav_client();
+    let calendar_path = "/dav/cal/john%40example.com/split-reads/";
+
+    client
+        .request("MKCALENDAR", calendar_path, "")
+        .await
+        .with_status(StatusCode::CREATED);
+
+    for seq in 0..FEW {
+        put_read_count_event(&client, calendar_path, seq).await;
+    }
+
+    // A single carrier, so the CONTENT pass has exactly one item to fetch
+    client
+        .patch_and_check(
+            &format!("{calendar_path}split-read-0.ics"),
+            [(
+                DavProperty::DeadProperty(DeadElementTag::new(
+                    "split-marker".to_string(),
+                    Some("xmlns=\"http://example.com/ns/\"".to_string()),
+                )),
+                "hello",
+            )],
+        )
+        .await;
+
+    let ops_few = allprop_read_count(&client, calendar_path).await;
+
+    for seq in FEW..MANY {
+        put_read_count_event(&client, calendar_path, seq).await;
+    }
+
+    let ops_many = allprop_read_count(&client, calendar_path).await;
+
+    assert!(
+        ops_many <= ops_few + 8,
+        "allprop PROPFIND read count scales with the collection: {ops_few} reads for {FEW} items, {ops_many} for {MANY}"
+    );
+
+    client
+        .request("DELETE", calendar_path, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+}
+
+async fn put_read_count_event(client: &DummyWebDavClient, calendar_path: &str, seq: usize) {
+    client
+        .request_with_headers(
+            "PUT",
+            &format!("{calendar_path}split-read-{seq}.ics"),
+            [("content-type", "text/calendar; charset=utf-8")],
+            format!(
+                concat!(
+                    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Stalwart//Split//EN\r\n",
+                    "BEGIN:VEVENT\r\nUID:split-read-{}\r\nSUMMARY:Split read {}\r\n",
+                    "DTSTART:20240101T120000Z\r\nDTEND:20240101T130000Z\r\n",
+                    "END:VEVENT\r\nEND:VCALENDAR\r\n"
+                ),
+                seq, seq
+            ),
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+}
+
+async fn allprop_read_count(client: &DummyWebDavClient, calendar_path: &str) -> usize {
+    const ALLPROP: &str = concat!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<D:propfind xmlns:D=\"DAV:\"><D:allprop/></D:propfind>"
+    );
+
+    let mut lowest = usize::MAX;
+    for _ in 0..3 {
+        StoreOps::take();
+        client
+            .request_with_headers("PROPFIND", calendar_path, [("depth", "1")], ALLPROP)
+            .await
+            .with_status(StatusCode::MULTI_STATUS);
+        lowest = lowest.min(StoreOps::take().total());
+    }
+
+    lowest
 }
 
 // Test 10: destroying the default calendar clears the principal property, and
