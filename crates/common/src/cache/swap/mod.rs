@@ -22,7 +22,7 @@ use store::InMemoryStore;
 use store::{BlobStore, registry::bootstrap::Bootstrap};
 use tokio::sync::{mpsc, oneshot};
 use types::collection::SyncCollection;
-use writer::{QUEUE_DEPTH, Snapshot, SwapSignal, SwapTarget};
+use writer::{QUEUE_DEPTH, RefreshSlots, Snapshot, SwapSignal, SwapTarget};
 
 pub mod blob;
 pub mod file;
@@ -141,6 +141,7 @@ pub struct SwapTier {
     backend: SwapBackend,
     cadence: SwapCadence,
     writer: mpsc::Sender<SwapSignal>,
+    refresh: RefreshSlots,
     writes: AtomicU64,
 }
 
@@ -276,10 +277,13 @@ impl SwapTier {
 
     fn notify_refresh(&self, target: SwapTarget, changes: u32, snapshot: Snapshot) {
         if self.is_enabled() {
-            let _ = self
-                .writer
-                .try_send(SwapSignal::Refresh(target, changes, snapshot));
+            self.refresh.store(target, snapshot);
+            let _ = self.writer.try_send(SwapSignal::Changed(target, changes));
         }
+    }
+
+    pub fn pending_refresh_snapshots(&self) -> usize {
+        self.refresh.len()
     }
 
     pub fn forget(&self, account_id: u32) {
@@ -320,14 +324,14 @@ impl SwapTier {
             Ok(Ok(0)) | Ok(Err(_)) => (),
             Ok(Ok(unwritten)) => {
                 trc::event!(
-                    Store(trc::StoreEvent::SwapError),
+                    Cache(trc::CacheEvent::SwapError),
                     Total = unwritten,
-                    Details = "Shut down before every pending cache snapshot could be written",
+                    Details = "Shut down with pending cache snapshots whose write failed",
                 );
             }
             Err(_) => {
                 trc::event!(
-                    Store(trc::StoreEvent::SwapError),
+                    Cache(trc::CacheEvent::SwapError),
                     Elapsed = timeout,
                     Details = "Timed out flushing the pending cache snapshots on shutdown",
                 );
@@ -349,6 +353,7 @@ impl SwapTier {
                 backend,
                 cadence,
                 writer,
+                refresh: RefreshSlots::default(),
                 writes: AtomicU64::new(0),
             },
             receiver,

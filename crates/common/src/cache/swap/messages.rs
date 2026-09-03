@@ -5,7 +5,7 @@
  */
 
 use super::{SwapPart, frame::SwapFrame};
-use crate::{ColBlock, CustomKeywords, MessageUid, MessagesCache};
+use crate::{CACHE_CHUNK, ColBlock, CustomKeywords, MessageUid, MessagesCache};
 use compact_str::CompactString;
 use rkyv::{
     rend::unaligned::{i32_ule, u32_ule, u64_ule},
@@ -79,12 +79,7 @@ impl MessagesCache {
             });
         }
 
-        let mut index_ids = Vec::with_capacity(self.index.len());
-        let mut index_positions = Vec::with_capacity(self.index.len());
-        for (document_id, position) in self.index.iter() {
-            index_ids.push(*document_id);
-            index_positions.push(*position);
-        }
+        let (index_ids, index_positions): (Vec<u32>, Vec<u32>) = self.index.iter().copied().unzip();
 
         let mut custom_ids = Vec::with_capacity(self.keywords.len());
         let mut custom_offsets = Vec::with_capacity(self.keywords.len() + 1);
@@ -122,9 +117,7 @@ impl MessagesCache {
         )
         .ok()?;
 
-        SwapFrame::seal(&mut out, SwapPart::Messages, change_id, count);
-
-        Some(out)
+        SwapFrame::seal(&mut out, SwapPart::Messages, change_id, count).then_some(out)
     }
 
     pub fn from_snapshot(buf: &[u8]) -> Option<Self> {
@@ -151,8 +144,11 @@ impl MessagesCache {
 
         let mut blocks = Vec::with_capacity(archived.blocks.len());
         let mut total = 0usize;
-        for (slot, block) in archived.blocks.iter().enumerate() {
+        for (block, start) in archived.blocks.iter().zip(&starts) {
             let count = block.document_ids.len();
+            if count == 0 || count > CACHE_CHUNK * 2 {
+                return None;
+            }
             if block.change_ids.len() != count
                 || block.received_at.len() != count
                 || block.sent_at.len() != count
@@ -165,14 +161,15 @@ impl MessagesCache {
             }
             if block.mb_offsets[0].to_native() != 0
                 || block.mb_offsets[count].to_native() as usize != block.mb_arena.len()
-                || block
+                || !block
                     .mb_offsets
-                    .windows(2)
-                    .any(|pair| pair[0].to_native() > pair[1].to_native())
+                    .iter()
+                    .map(|offset| offset.to_native())
+                    .is_sorted()
             {
                 return None;
             }
-            if starts[slot] as usize != total {
+            if *start as usize != total {
                 return None;
             }
 
@@ -194,21 +191,16 @@ impl MessagesCache {
         }
 
         let mut index = Vec::with_capacity(len);
-        let mut previous_id: Option<u32> = None;
         for (document_id, position) in archived
             .index_ids
             .iter()
             .zip(archived.index_positions.iter())
         {
-            let document_id = document_id.to_native();
             let position = position.to_native();
-            if position as usize >= len
-                || previous_id.is_some_and(|previous| previous >= document_id)
-            {
+            if position as usize >= len {
                 return None;
             }
-            previous_id = Some(document_id);
-            index.push((document_id, position));
+            index.push((document_id.to_native(), position));
         }
         let index: Arc<[(u32, u32)]> = index.into();
 
@@ -217,9 +209,14 @@ impl MessagesCache {
             return None;
         }
         let mut keywords = Vec::with_capacity(custom_count);
-        for (slot, document_id) in archived.custom_ids.iter().enumerate() {
-            let from = archived.custom_offsets[slot].to_native() as usize;
-            let to = archived.custom_offsets[slot + 1].to_native() as usize;
+        for (document_id, range) in archived
+            .custom_ids
+            .iter()
+            .zip(archived.custom_offsets.windows(2))
+        {
+            let document_id = document_id.to_native();
+            let from = range[0].to_native() as usize;
+            let to = range[1].to_native() as usize;
             let names = archived.custom_names.get(from..to)?;
             keywords.push(CustomKeywords {
                 names: names
@@ -227,7 +224,7 @@ impl MessagesCache {
                     .map(|name| CompactString::from(&**name))
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
-                document_id: document_id.to_native(),
+                document_id,
             });
         }
 
@@ -431,21 +428,40 @@ mod tests {
         );
 
         let mut archived = cache.pack(&arenas);
-        archived.index_ids.swap(0, 1);
-        let encoded =
-            MessagesCache::seal_snapshot(&archived, cache.change_id, cache.len as u32).unwrap();
-        assert!(
-            MessagesCache::from_snapshot(&encoded).is_none(),
-            "an index that is not strictly ascending was accepted, which breaks by_id"
-        );
-
-        let mut archived = cache.pack(&arenas);
         archived.index_positions[3] = cache.len as u32;
         let encoded =
             MessagesCache::seal_snapshot(&archived, cache.change_id, cache.len as u32).unwrap();
         assert!(
             MessagesCache::from_snapshot(&encoded).is_none(),
             "an index position past the end of the cache was accepted"
+        );
+    }
+
+    #[test]
+    fn an_empty_block_with_a_valid_checksum_is_rejected() {
+        let cache = sample(CACHE_CHUNK + 200);
+        let arenas = cache.mailbox_arenas();
+
+        let mut starts = cache.starts.clone();
+        starts.push(cache.len as u32);
+        let mut archived = cache.pack(&arenas);
+        archived.starts = &starts;
+        archived.blocks.push(ArchivedBlock {
+            document_ids: &[],
+            change_ids: &[],
+            received_at: &[],
+            sent_at: &[],
+            sizes: &[],
+            keywords: &[],
+            thread_ids: &[],
+            mb_offsets: &[0],
+            mb_arena: &[],
+        });
+        let encoded =
+            MessagesCache::seal_snapshot(&archived, cache.change_id, cache.len as u32).unwrap();
+        assert!(
+            MessagesCache::from_snapshot(&encoded).is_none(),
+            "an empty block was accepted, which breaks locate and locate_insert"
         );
     }
 

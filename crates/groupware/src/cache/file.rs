@@ -6,7 +6,7 @@
 
 use super::ChunkAccumulator;
 use crate::{
-    DavResourceName, RFC_3986, encode_path_segment,
+    DavResourceName, encode_path_segment,
     file::{ArchivedFileNode, FileNode},
 };
 use common::{
@@ -63,11 +63,7 @@ pub(super) async fn build_file_resources(
     let resources = ResourceStore::from_sorted(nodes.finish(), Vec::new(), true);
     let paths = build_nested_hierarchy(&resources);
     let mut files = DavResources {
-        base_path: format!(
-            "{}/{}/",
-            DavResourceName::File.base_path(),
-            percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
-        ),
+        base_path: DavResourceName::File.account_base_path(account_info.name()),
         size: 0,
         paths: Arc::new(paths),
         resources,

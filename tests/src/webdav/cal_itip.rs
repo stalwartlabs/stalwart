@@ -428,8 +428,9 @@ fn canonical_dtstamp(dt: &PartialDateTime) -> PartialDateTime {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64);
 
-    if (now - GENERATED_DTSTAMP_WINDOW..=now)
-        .any(|timestamp| PartialDateTime::from_utc_timestamp(timestamp) == *dt)
+    if dt
+        .to_timestamp()
+        .is_some_and(|timestamp| (now - GENERATED_DTSTAMP_WINDOW..=now).contains(&timestamp))
     {
         PartialDateTime::from_utc_timestamp(0)
     } else {

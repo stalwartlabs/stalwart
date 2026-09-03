@@ -5,6 +5,7 @@
  */
 
 use crate::{
+    DavResourceName, RFC_3986,
     cache::calcard::{build_scheduling_paths, build_scheduling_resources, push_scheduling},
     calendar::{
         CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarEventNotification,
@@ -34,7 +35,7 @@ use store::{
     query::log::{Change, Query},
     write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
 };
-use trc::{AddContext, StoreEvent};
+use trc::{AddContext, CacheEvent};
 use types::{
     collection::{Collection, SyncCollection},
     field::PrincipalField,
@@ -43,6 +44,16 @@ use utils::cache::Cache;
 
 pub mod calcard;
 pub mod file;
+
+impl DavResourceName {
+    pub fn account_base_path(&self, account_name: &str) -> String {
+        format!(
+            "{}/{}/",
+            self.base_path(),
+            percent_encoding::utf8_percent_encode(account_name, RFC_3986)
+        )
+    }
+}
 
 #[derive(Default)]
 pub struct ChunkAccumulator {
@@ -162,7 +173,7 @@ impl GroupwareCache for Server {
                         }
 
                         trc::event!(
-                            Store(StoreEvent::CacheMiss),
+                            Cache(CacheEvent::Miss),
                             AccountId = account_id,
                             Collection = collection.as_str(),
                             Total = cache.resources.len(),
@@ -191,7 +202,7 @@ impl GroupwareCache for Server {
             .caused_by(trc::location!())?;
 
         // Regenerate cache if the change log has been truncated
-        if changes.is_truncated {
+        if changes.needs_full_rebuild(cache.highest_change_id) {
             let cache = full_cache_build(
                 self,
                 account_id,
@@ -218,7 +229,7 @@ impl GroupwareCache for Server {
             }
 
             trc::event!(
-                Store(StoreEvent::CacheStale),
+                Cache(CacheEvent::Stale),
                 AccountId = account_id,
                 Collection = collection.as_str(),
                 ChangeId = cache.highest_change_id,
@@ -232,7 +243,7 @@ impl GroupwareCache for Server {
         // Verify changes
         if changes.changes.is_empty() {
             trc::event!(
-                Store(StoreEvent::CacheHit),
+                Cache(CacheEvent::Hit),
                 AccountId = account_id,
                 Collection = collection.as_str(),
                 ChangeId = cache.highest_change_id,
@@ -250,7 +261,7 @@ impl GroupwareCache for Server {
                 cache = cache_store.peek(&account_id).unwrap_or(cache.clone());
                 if cache.highest_change_id >= changes.to_change_id {
                     trc::event!(
-                        Store(StoreEvent::CacheHit),
+                        Cache(CacheEvent::Hit),
                         AccountId = account_id,
                         Collection = collection.as_str(),
                         ChangeId = cache.highest_change_id,
@@ -307,7 +318,7 @@ impl GroupwareCache for Server {
         }
 
         trc::event!(
-            Store(StoreEvent::CacheUpdate),
+            Cache(CacheEvent::Update),
             AccountId = account_id,
             Collection = collection.as_str(),
             ChangeId = cache.highest_change_id,
@@ -573,7 +584,7 @@ fn admit(
     }
 
     trc::event!(
-        Store(StoreEvent::CacheEntryTooLarge),
+        Cache(CacheEvent::EntryTooLarge),
         AccountId = account_id,
         Collection = collection.as_str(),
         Size = cache.size,
@@ -617,7 +628,7 @@ async fn restore_cache_build(
     }
     .or_else(|| {
         trc::event!(
-            Store(StoreEvent::SwapMiss),
+            Cache(CacheEvent::SwapMiss),
             AccountId = account_id,
             Collection = collection.as_str(),
             Details = "Discarded an unreadable resource cache snapshot",
@@ -625,32 +636,20 @@ async fn restore_cache_build(
         None
     })?;
 
-    let last_change_id = server
-        .core
-        .storage
-        .data
-        .get_last_change_id(account_id, collection.into())
-        .await
-        .caused_by(trc::location!())
-        .inspect_err(|err| {
-            trc::error!(err.clone());
-        })
-        .ok()?
-        .unwrap_or_default();
-
-    if restored.highest_change_id > last_change_id {
+    let base_path = DavResourceName::from(collection)
+        .account_base_path(server.account(account_id).await.ok()?.name());
+    if restored.base_path != base_path {
         trc::event!(
-            Store(StoreEvent::SwapMiss),
+            Cache(CacheEvent::SwapMiss),
             AccountId = account_id,
             Collection = collection.as_str(),
-            ChangeId = restored.highest_change_id,
-            Details = "Discarded a resource cache snapshot newer than the change log",
+            Details = "Discarded a resource cache snapshot with a stale base path",
         );
         return None;
     }
 
     trc::event!(
-        Store(StoreEvent::SwapHit),
+        Cache(CacheEvent::SwapHit),
         AccountId = account_id,
         Collection = collection.as_str(),
         ChangeId = restored.highest_change_id,
@@ -1397,6 +1396,142 @@ mod tests {
         );
         specs.retain(|spec| !matches!(spec, Spec::Notification { document_id: 1 | 2 }));
         assert_matches_cold_build(&purged, &specs, SyncCollection::CalendarEventNotification);
+    }
+
+    #[test]
+    fn a_folder_and_its_child_created_in_one_window() {
+        let mut specs = vec![folder(0, "docs", None), file(1, "readme.txt", Some(0))];
+        let cache = cold_build(&specs, SyncCollection::FileNode);
+
+        let updated = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[
+                (true, 2, Some(folder(2, "reports", Some(0)))),
+                (true, 3, Some(file(3, "q1.txt", Some(2)))),
+            ],
+        );
+        specs.push(folder(2, "reports", Some(0)));
+        specs.push(file(3, "q1.txt", Some(2)));
+        assert_matches_cold_build(&updated, &specs, SyncCollection::FileNode);
+        assert_eq!(
+            updated.any_resource_path_by_id(3).unwrap().path(),
+            "docs/reports/q1.txt"
+        );
+    }
+
+    #[test]
+    fn a_file_moved_into_a_folder_created_in_one_window() {
+        let mut specs = vec![folder(0, "docs", None), file(1, "a.txt", None)];
+        let cache = cold_build(&specs, SyncCollection::FileNode);
+
+        let updated = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[
+                (true, 2, Some(folder(2, "inbox", Some(0)))),
+                (true, 1, Some(file(1, "a.txt", Some(2)))),
+            ],
+        );
+        specs.push(folder(2, "inbox", Some(0)));
+        specs[1] = file(1, "a.txt", Some(2));
+        assert_matches_cold_build(&updated, &specs, SyncCollection::FileNode);
+        assert_eq!(
+            updated.any_resource_path_by_id(1).unwrap().path(),
+            "docs/inbox/a.txt"
+        );
+        assert!(updated.by_path("a.txt").is_none());
+    }
+
+    #[test]
+    fn a_container_flip_rebuilds_the_index() {
+        let mut specs = vec![
+            folder(0, "docs", None),
+            file(1, "notes", Some(0)),
+            folder(2, "old", None),
+        ];
+        let cache = cold_build(&specs, SyncCollection::FileNode);
+
+        let to_folder = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[(true, 1, Some(folder(1, "notes", Some(0))))],
+        );
+        specs[1] = folder(1, "notes", Some(0));
+        assert_matches_cold_build(&to_folder, &specs, SyncCollection::FileNode);
+        assert!(to_folder.container_resource_path_by_id(1).is_some());
+
+        let to_file = apply(
+            &to_folder,
+            SyncCollection::FileNode,
+            &[(true, 2, Some(file(2, "old", None)))],
+        );
+        specs[2] = file(2, "old", None);
+        assert_matches_cold_build(&to_file, &specs, SyncCollection::FileNode);
+        assert!(to_file.container_resource_path_by_id(2).is_none());
+        assert_eq!(to_file.any_resource_path_by_id(2).unwrap().path(), "old");
+    }
+
+    #[test]
+    fn a_two_name_item_moved_between_calendars() {
+        let two_names = |names: &[(u32, &str)]| Spec::Event {
+            document_id: 5,
+            names: names
+                .iter()
+                .map(|(parent_id, name)| (*parent_id, name.to_string()))
+                .collect(),
+            etag: 0,
+        };
+        let mut specs = vec![
+            calendar(0, "work"),
+            calendar(1, "home"),
+            calendar(2, "shared"),
+            event(3, 0, "x.ics"),
+            two_names(&[(0, "a.ics"), (1, "a.ics")]),
+        ];
+        let cache = cold_build(&specs, SyncCollection::Calendar);
+
+        let moved = apply(
+            &cache,
+            SyncCollection::Calendar,
+            &[(false, 5, Some(two_names(&[(1, "a.ics"), (2, "b.ics")])))],
+        );
+        specs[4] = two_names(&[(1, "a.ics"), (2, "b.ics")]);
+        assert_matches_cold_build(&moved, &specs, SyncCollection::Calendar);
+        assert!(moved.by_path("work/a.ics").is_none());
+        assert_eq!(
+            moved.format_resource_path_by_parent(5, 2).as_deref(),
+            Some("/dav/x/john/shared/b.ics")
+        );
+        let mut paths = moved.format_resource_paths_by_id(5).collect::<Vec<_>>();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec!["/dav/x/john/home/a.ics", "/dav/x/john/shared/b.ics"]
+        );
+    }
+
+    #[test]
+    fn a_file_container_delete_with_children() {
+        let mut specs = vec![
+            folder(0, "docs", None),
+            folder(1, "reports", Some(0)),
+            file(2, "q1.txt", Some(1)),
+            folder(3, "drafts", Some(1)),
+            file(4, "readme.txt", Some(0)),
+        ];
+        let cache = cold_build(&specs, SyncCollection::FileNode);
+
+        let deleted = apply(
+            &cache,
+            SyncCollection::FileNode,
+            &[(true, 1, None), (true, 2, None), (true, 3, None)],
+        );
+        specs.retain(|spec| !matches!(spec.document_id(), 1..=3));
+        assert_matches_cold_build(&deleted, &specs, SyncCollection::FileNode);
+        assert!(deleted.by_path("docs/reports").is_none());
+        assert_eq!(deleted.children_ids(0).collect::<Vec<_>>(), vec![4]);
+        assert_eq!(deleted.subtree("docs").count(), 2);
     }
 
     #[test]

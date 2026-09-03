@@ -41,7 +41,7 @@ use store::{
     registry::{RegistryQuery, bootstrap::Bootstrap},
     write::{key::KeySerializer, now},
 };
-use trc::{AddContext, StoreEvent};
+use trc::{AddContext, CacheEvent};
 use types::id::Id;
 use utils::DomainPart;
 
@@ -55,7 +55,7 @@ impl Server {
 
         if let Some(domain_id) = domain_names.get(domain) {
             trc::event!(
-                Store(StoreEvent::CacheHit),
+                Cache(CacheEvent::Hit),
                 Key = domain.to_string(),
                 Collection = "domainName",
             );
@@ -110,7 +110,7 @@ impl Server {
                     );
 
                     trc::event!(
-                        Store(StoreEvent::CacheMiss),
+                        Cache(CacheEvent::Miss),
                         Key = domain.to_string(),
                         Collection = "domainName",
                     );
@@ -119,7 +119,7 @@ impl Server {
                 }
             } else {
                 trc::event!(
-                    Store(StoreEvent::CacheHit),
+                    Cache(CacheEvent::Hit),
                     Key = domain.to_string(),
                     Collection = "domainNameNegative",
                 );
@@ -139,7 +139,7 @@ impl Server {
         {
             Ok(domain) => {
                 trc::event!(
-                    Store(StoreEvent::CacheHit),
+                    Cache(CacheEvent::Hit),
                     Key = domain_id,
                     Collection = "domainId",
                 );
@@ -148,7 +148,7 @@ impl Server {
             }
             Err(guard) => {
                 trc::event!(
-                    Store(StoreEvent::CacheMiss),
+                    Cache(CacheEvent::Miss),
                     Key = domain_id,
                     Collection = "domainId",
                 );
@@ -223,7 +223,7 @@ impl Server {
 
         if let Some(email) = emails.get(&EmailAddressRef::new(local_part, domain_id)) {
             trc::event!(
-                Store(StoreEvent::CacheHit),
+                Cache(CacheEvent::Hit),
                 Key = local_part.to_string(),
                 Domain = domain_id,
                 Collection = "email",
@@ -237,7 +237,7 @@ impl Server {
                 .is_none()
             {
                 trc::event!(
-                    Store(StoreEvent::CacheMiss),
+                    Cache(CacheEvent::Miss),
                     Key = local_part.to_string(),
                     Domain = domain_id,
                     Collection = "email",
@@ -311,7 +311,7 @@ impl Server {
                 }
             } else {
                 trc::event!(
-                    Store(StoreEvent::CacheHit),
+                    Cache(CacheEvent::Hit),
                     Key = local_part.to_string(),
                     Domain = domain_id,
                     Collection = "emailNegative",
@@ -375,7 +375,7 @@ impl Server {
         {
             Ok(account) => {
                 trc::event!(
-                    Store(StoreEvent::CacheHit),
+                    Cache(CacheEvent::Hit),
                     Key = account_id,
                     Collection = "account",
                 );
@@ -384,7 +384,7 @@ impl Server {
             }
             Err(guard) => {
                 trc::event!(
-                    Store(StoreEvent::CacheMiss),
+                    Cache(CacheEvent::Miss),
                     Key = account_id,
                     Collection = "account",
                 );
@@ -740,12 +740,12 @@ impl Server {
         let cache = &self.inner.cache.roles;
         match cache.get_value_or_guard_async(&id).await {
             Ok(role) => {
-                trc::event!(Store(StoreEvent::CacheHit), Key = id, Collection = "role");
+                trc::event!(Cache(CacheEvent::Hit), Key = id, Collection = "role");
 
                 Ok(role)
             }
             Err(guard) => {
-                trc::event!(Store(StoreEvent::CacheMiss), Key = id, Collection = "role");
+                trc::event!(Cache(CacheEvent::Miss), Key = id, Collection = "role");
 
                 let Some(role) = self.registry().object::<Role>(id.into()).await? else {
                     return Err(trc::AuthEvent::Error
@@ -782,16 +782,12 @@ impl Server {
         let cache = &self.inner.cache.tenants;
         match cache.get_value_or_guard_async(&id).await {
             Ok(tenant) => {
-                trc::event!(Store(StoreEvent::CacheHit), Key = id, Collection = "tenant");
+                trc::event!(Cache(CacheEvent::Hit), Key = id, Collection = "tenant");
 
                 Ok(tenant)
             }
             Err(guard) => {
-                trc::event!(
-                    Store(StoreEvent::CacheMiss),
-                    Key = id,
-                    Collection = "tenant"
-                );
+                trc::event!(Cache(CacheEvent::Miss), Key = id, Collection = "tenant");
 
                 let Some(tenant) = self.registry().object::<Tenant>(id.into()).await? else {
                     return Err(trc::AuthEvent::Error
@@ -853,12 +849,12 @@ impl Server {
         let cache = &self.inner.cache.lists;
         match cache.get_value_or_guard_async(&id).await {
             Ok(list) => {
-                trc::event!(Store(StoreEvent::CacheHit), Key = id, Collection = "list");
+                trc::event!(Cache(CacheEvent::Hit), Key = id, Collection = "list");
 
                 Ok(Some(list))
             }
             Err(guard) => {
-                trc::event!(Store(StoreEvent::CacheMiss), Key = id, Collection = "list");
+                trc::event!(Cache(CacheEvent::Miss), Key = id, Collection = "list");
 
                 let Some(list) = self.registry().object::<MailingList>(id.into()).await? else {
                     return Ok(None);
@@ -893,7 +889,7 @@ impl Server {
         match cache.get_value_or_guard_async(&domain.id).await {
             Ok(signers) => {
                 trc::event!(
-                    Store(StoreEvent::CacheHit),
+                    Cache(CacheEvent::Hit),
                     Key = domain.id,
                     Collection = "dkimSigners",
                 );
@@ -902,7 +898,7 @@ impl Server {
             }
             Err(guard) => {
                 trc::event!(
-                    Store(StoreEvent::CacheMiss),
+                    Cache(CacheEvent::Miss),
                     Key = domain.id,
                     Collection = "dkimSigners",
                 );

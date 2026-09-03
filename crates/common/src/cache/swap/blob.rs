@@ -42,7 +42,7 @@ impl BlobSwapStore {
 
         if data.len() > self.max_size {
             trc::event!(
-                Store(trc::StoreEvent::SwapError),
+                Cache(trc::CacheEvent::SwapError),
                 AccountId = key.account_id,
                 Collection = key.collection.as_str(),
                 Size = data.len(),

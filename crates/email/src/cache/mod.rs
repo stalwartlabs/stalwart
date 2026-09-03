@@ -18,7 +18,7 @@ use store::{
     ahash::AHashMap,
     query::log::{Change, Changes, Query},
 };
-use trc::{AddContext, StoreEvent};
+use trc::{AddContext, CacheEvent};
 use types::collection::SyncCollection;
 
 pub mod email;
@@ -65,7 +65,7 @@ impl MessageCacheFetch for Server {
                         }
 
                         trc::event!(
-                            Store(StoreEvent::CacheMiss),
+                            Cache(CacheEvent::Miss),
                             AccountId = account_id,
                             Collection = SyncCollection::Email.as_str(),
                             Total = vec![cache.emails.len(), cache.mailboxes.items.len()],
@@ -94,7 +94,7 @@ impl MessageCacheFetch for Server {
             .caused_by(trc::location!())?;
 
         // Regenerate cache if the change log has been truncated
-        if changes.is_truncated {
+        if changes.needs_full_rebuild(cache.last_change_id) {
             let lock = cache.update_lock.clone();
             let _permit = match lock.acquire(cache.last_change_id).await? {
                 LockResult::Acquired(permit) => permit,
@@ -102,7 +102,7 @@ impl MessageCacheFetch for Server {
                     let rebuilt = cache_store.peek(&account_id).unwrap_or(cache.clone());
                     if rebuilt.last_change_id >= changes.to_change_id {
                         trc::event!(
-                            Store(StoreEvent::CacheHit),
+                            Cache(CacheEvent::Hit),
                             AccountId = account_id,
                             Collection = SyncCollection::Email.as_str(),
                             ChangeId = rebuilt.last_change_id,
@@ -133,7 +133,7 @@ impl MessageCacheFetch for Server {
             }
 
             trc::event!(
-                Store(StoreEvent::CacheStale),
+                Cache(CacheEvent::Stale),
                 AccountId = account_id,
                 Collection = SyncCollection::Email.as_str(),
                 ChangeId = cache.last_change_id,
@@ -147,7 +147,7 @@ impl MessageCacheFetch for Server {
         // Verify changes
         if changes.changes.is_empty() {
             trc::event!(
-                Store(StoreEvent::CacheHit),
+                Cache(CacheEvent::Hit),
                 AccountId = account_id,
                 Collection = SyncCollection::Email.as_str(),
                 ChangeId = cache.last_change_id,
@@ -165,7 +165,7 @@ impl MessageCacheFetch for Server {
                 cache = cache_store.peek(&account_id).unwrap_or(cache.clone());
                 if cache.last_change_id >= changes.to_change_id {
                     trc::event!(
-                        Store(StoreEvent::CacheHit),
+                        Cache(CacheEvent::Hit),
                         AccountId = account_id,
                         Collection = SyncCollection::Email.as_str(),
                         ChangeId = cache.last_change_id,
@@ -198,7 +198,7 @@ impl MessageCacheFetch for Server {
         }
 
         trc::event!(
-            Store(StoreEvent::CacheUpdate),
+            Cache(CacheEvent::Update),
             AccountId = account_id,
             Collection = SyncCollection::Email.as_str(),
             ChangeId = cache.last_change_id,
@@ -314,7 +314,7 @@ fn admit(server: &Server, account_id: u32, cache: &Arc<MessageStoreCache>) -> bo
     }
 
     trc::event!(
-        Store(StoreEvent::CacheEntryTooLarge),
+        Cache(CacheEvent::EntryTooLarge),
         AccountId = account_id,
         Collection = SyncCollection::Email.as_str(),
         Size = cache.size,
@@ -358,37 +358,13 @@ async fn restore_cache_build(server: &Server, account_id: u32) -> Option<Arc<Mes
     }
     .or_else(|| {
         trc::event!(
-            Store(StoreEvent::SwapMiss),
+            Cache(CacheEvent::SwapMiss),
             AccountId = account_id,
             Collection = SyncCollection::Email.as_str(),
             Details = "Discarded an unreadable message cache snapshot",
         );
         None
     })?;
-
-    let last_change_id = server
-        .core
-        .storage
-        .data
-        .get_last_change_id(account_id, SyncCollection::Email.into())
-        .await
-        .caused_by(trc::location!())
-        .inspect_err(|err| {
-            trc::error!(err.clone());
-        })
-        .ok()?
-        .unwrap_or_default();
-
-    if emails.change_id > last_change_id {
-        trc::event!(
-            Store(StoreEvent::SwapMiss),
-            AccountId = account_id,
-            Collection = SyncCollection::Email.as_str(),
-            ChangeId = emails.change_id,
-            Details = "Discarded a message cache snapshot newer than the change log",
-        );
-        return None;
-    }
 
     let snapshot_change_id = emails.change_id;
     let mut mailboxes = full_mailbox_cache_build(server, account_id)
@@ -412,7 +388,7 @@ async fn restore_cache_build(server: &Server, account_id: u32) -> Option<Arc<Mes
     };
 
     trc::event!(
-        Store(StoreEvent::SwapHit),
+        Cache(CacheEvent::SwapHit),
         AccountId = account_id,
         Collection = SyncCollection::Email.as_str(),
         ChangeId = snapshot_change_id,

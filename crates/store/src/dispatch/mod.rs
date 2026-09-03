@@ -17,12 +17,9 @@ pub use ops::StoreOps;
 
 pub const MAX_SCAN_RANGES: usize = 1024;
 pub const MAX_SCAN_GAP: u32 = 64;
-pub const MAX_POINT_GETS: usize = 64;
-pub const MIN_POINT_GET_SPARSITY: u64 = 1000;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ScanShape {
-    PointGets,
     Range(u32, u32),
     Ranges(Vec<(u32, u32)>),
 }
@@ -60,54 +57,61 @@ pub trait DocumentSet: Sync + Send {
     fn len(&self) -> usize;
     fn iterate(&self) -> impl Iterator<Item = u32>;
 
+    fn is_dense(&self) -> bool {
+        self.len() as u64 * MAX_SCAN_GAP as u64 >= (self.max() - self.min()) as u64
+    }
+
     fn scan_shape(&self) -> ScanShape {
         let len = self.len();
         let min = self.min();
         let max = self.max();
-        let span = (max - min) as u64;
-
-        if len > 0 && len <= MAX_POINT_GETS && len as u64 * MIN_POINT_GET_SPARSITY < span {
-            return ScanShape::PointGets;
+        if len == 0 {
+            return ScanShape::Range(min, max);
         }
-        if len as u64 * MAX_SCAN_GAP as u64 >= span {
+        if self.is_dense() {
             return ScanShape::Range(min, max);
         }
 
-        let mut ranges = self.scan_ranges();
-        match ranges.len() {
-            0 => ScanShape::Range(min, max),
-            1 => {
-                let (from, to) = ranges.pop().unwrap();
-                ScanShape::Range(from, to)
-            }
+        let ranges = self.scan_ranges();
+        match ranges.as_slice() {
+            [] => ScanShape::Range(min, max),
+            &[(from, to)] => ScanShape::Range(from, to),
             _ => ScanShape::Ranges(ranges),
         }
     }
 
     fn scan_ranges(&self) -> Vec<(u32, u32)> {
-        let len = self.len();
-        if len == 0 {
+        if self.len() == 0 {
             return Vec::new();
         }
-        let mut ids = self.iterate();
-        let Some(min) = ids.next() else {
-            return Vec::new();
-        };
-        let max = self.max().saturating_sub(1).max(min);
+        if self.is_dense() {
+            let min = self.min();
+            return vec![(min, self.max().saturating_sub(1).max(min))];
+        }
 
-        let full_range = vec![(min, max)];
-        if len as u64 * MAX_SCAN_GAP as u64 >= (max - min) as u64 {
-            return full_range;
+        let mut gap = MAX_SCAN_GAP;
+        loop {
+            if let Some(ranges) = self.cluster_ranges(gap) {
+                return ranges;
+            }
+            gap = gap.saturating_mul(2);
         }
+    }
+
+    fn cluster_ranges(&self, gap: u32) -> Option<Vec<(u32, u32)>> {
+        let mut ids = self.iterate();
+        let Some(first) = ids.next() else {
+            return Some(Vec::new());
+        };
 
         let mut ranges = Vec::new();
-        let mut range = (min, min);
+        let mut range = (first, first);
         for document_id in ids {
-            if document_id - range.1 <= MAX_SCAN_GAP {
+            if document_id - range.1 <= gap {
                 range.1 = document_id;
             } else {
                 if ranges.len() + 1 >= MAX_SCAN_RANGES {
-                    return full_range;
+                    return None;
                 }
                 ranges.push(range);
                 range = (document_id, document_id);
@@ -115,7 +119,7 @@ pub trait DocumentSet: Sync + Send {
         }
         ranges.push(range);
 
-        ranges
+        Some(ranges)
     }
 }
 
@@ -258,6 +262,46 @@ mod tests {
                 .scan_ranges(),
             vec![(0, MAX_SCAN_RANGES as u32 * 1_000)]
         );
+        assert_eq!(
+            RoaringBitmap::from_iter(
+                (0..=MAX_SCAN_RANGES as u32)
+                    .map(|id| id * 1_000 + if id >= 512 { 1_000_000 } else { 0 })
+            )
+            .scan_ranges(),
+            vec![
+                (0, 511_000),
+                (1_512_000, MAX_SCAN_RANGES as u32 * 1_000 + 1_000_000)
+            ]
+        );
+    }
+
+    #[test]
+    fn document_set_scan_ranges_coalesce() {
+        let ids = (0..1_000u32)
+            .flat_map(|pair| [pair * 200, pair * 200 + 67])
+            .collect::<Vec<_>>();
+        let set = RoaringBitmap::from_iter(ids.iter().copied());
+        assert!(!set.is_dense());
+        assert_eq!(set.cluster_ranges(MAX_SCAN_GAP), None);
+
+        let ranges = set.scan_ranges();
+        assert_eq!(ranges.len(), 1_000);
+        assert!(ranges.len() <= MAX_SCAN_RANGES);
+        assert!(ranges.windows(2).all(|pair| pair[0].1 < pair[1].0));
+        assert!(
+            ids.iter()
+                .all(|id| ranges.iter().any(|(from, to)| (from..=to).contains(&id)))
+        );
+
+        let span = (ids[ids.len() - 1] - ids[0] + 1) as u64;
+        let covered = ranges
+            .iter()
+            .map(|(from, to)| (to - from + 1) as u64)
+            .sum::<u64>();
+        assert!(covered * 2 < span, "{covered} of {span}");
+
+        assert_eq!(ids.scan_ranges(), ranges);
+        assert!(matches!(set.scan_shape(), ScanShape::Ranges(shape) if shape == ranges));
     }
 
     #[test]
@@ -273,18 +317,17 @@ mod tests {
             ScanShape::Range(5, 61)
         );
         assert_eq!(
-            RoaringBitmap::from_iter([12u32, 150_000, 199_998]).scan_shape(),
-            ScanShape::PointGets
+            RoaringBitmap::from_iter([7u32]).scan_shape(),
+            ScanShape::Range(7, 8)
         );
         assert_eq!(
-            RoaringBitmap::from_iter((0..MAX_POINT_GETS as u32).map(|id| id * 100_000))
-                .scan_shape(),
-            ScanShape::PointGets
+            RoaringBitmap::from_iter([12u32, 150_000, 199_998]).scan_shape(),
+            ScanShape::Ranges(vec![(12, 12), (150_000, 150_000), (199_998, 199_998)])
         );
         assert!(matches!(
-            RoaringBitmap::from_iter((0..=MAX_POINT_GETS as u32).map(|id| id * 100_000))
-                .scan_shape(),
-            ScanShape::Ranges(ranges) if ranges.len() == MAX_POINT_GETS + 1
+            RoaringBitmap::from_iter((0..64u32).map(|id| id * 100_000)).scan_shape(),
+            ScanShape::Ranges(ranges)
+                if ranges.len() == 64 && ranges.iter().all(|(from, to)| from == to)
         ));
     }
 

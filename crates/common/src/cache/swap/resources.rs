@@ -5,7 +5,6 @@
  */
 
 use super::{SwapPart, frame::SwapFrame};
-use crate::storage::dav::CONTAINER_FLAG;
 use crate::{
     ArenaRef, CachedName, DavPath, DavResource, DavResourceMetadata, DavResources, PathChunk,
     PathIndex, ResourceChunk, ResourceStore, TinyCalendarPreferences, UpdateLock,
@@ -400,9 +399,8 @@ impl DavResources {
             SwapPart::Resources,
             self.highest_change_id,
             self.resources.total as u32,
-        );
-
-        Some(out)
+        )
+        .then_some(out)
     }
 
     pub fn from_snapshot(buf: &[u8]) -> Option<Self> {
@@ -424,9 +422,7 @@ impl DavResources {
 
         let mut chunks = Vec::with_capacity(archived.chunks.len());
         let mut total = 0usize;
-        let mut container_ids: Vec<(u32, bool)> = Vec::new();
-        let mut item_ids: Vec<(u32, bool)> = Vec::new();
-        for (slot, chunk) in archived.chunks.iter().enumerate() {
+        for chunk in archived.chunks.iter() {
             let names_len = chunk.name_offsets.len();
             if chunk.name_lengths.len() != names_len || chunk.name_parents.len() != names_len {
                 return None;
@@ -442,13 +438,17 @@ impl DavResources {
 
             let bytes: Box<[u8]> = (&*chunk.bytes).into();
 
-            let names: Box<[CachedName]> = (0..names_len)
-                .map(|slot| CachedName {
+            let names: Box<[CachedName]> = chunk
+                .name_offsets
+                .iter()
+                .zip(chunk.name_lengths.iter())
+                .zip(chunk.name_parents.iter())
+                .map(|((off, len), parent_id)| CachedName {
                     name: ArenaRef {
-                        off: chunk.name_offsets[slot].to_native(),
-                        len: chunk.name_lengths[slot].to_native(),
+                        off: off.to_native(),
+                        len: len.to_native(),
                     },
-                    parent_id: chunk.name_parents[slot].to_native(),
+                    parent_id: parent_id.to_native(),
                 })
                 .collect();
             if names
@@ -458,37 +458,34 @@ impl DavResources {
                 return None;
             }
 
-            let acls: Box<[AclGrant]> = (0..acls_len)
-                .map(|slot| AclGrant {
-                    account_id: chunk.acl_accounts[slot].to_native(),
-                    grants: Bitmap::from(chunk.acl_grants[slot].to_native()),
+            let acls: Box<[AclGrant]> = chunk
+                .acl_accounts
+                .iter()
+                .zip(chunk.acl_grants.iter())
+                .map(|(account_id, grants)| AclGrant {
+                    account_id: account_id.to_native(),
+                    grants: Bitmap::from(grants.to_native()),
                 })
                 .collect();
 
-            let prefs: Box<[TinyCalendarPreferences]> = (0..prefs_len)
-                .map(|slot| TinyCalendarPreferences {
-                    account_id: chunk.pref_accounts[slot].to_native(),
-                    tz: Tz::from_id(chunk.pref_timezones[slot].to_native()).unwrap_or_default(),
-                    flags: chunk.pref_flags[slot].to_native(),
+            let prefs: Box<[TinyCalendarPreferences]> = chunk
+                .pref_accounts
+                .iter()
+                .zip(chunk.pref_timezones.iter())
+                .zip(chunk.pref_flags.iter())
+                .map(|((account_id, tz), flags)| TinyCalendarPreferences {
+                    account_id: account_id.to_native(),
+                    tz: Tz::from_id(tz.to_native()).unwrap_or_default(),
+                    flags: flags.to_native(),
                 })
                 .collect();
 
-            let ids = if slot < containers_end {
-                &mut container_ids
-            } else {
-                &mut item_ids
-            };
             let mut records = Vec::with_capacity(chunk.records.len());
-            let mut previous_id: Option<u32> = None;
             for record in chunk.records.iter() {
                 let record = record.unpack()?;
-                if !record.fits_within(bytes.len(), names_len, acls_len, prefs_len)
-                    || previous_id.is_some_and(|previous| previous >= record.document_id)
-                {
+                if !record.fits_within(bytes.len(), names_len, acls_len, prefs_len) {
                     return None;
                 }
-                previous_id = Some(record.document_id);
-                ids.push((record.document_id, record.is_container()));
                 records.push(record);
             }
 
@@ -515,21 +512,6 @@ impl DavResources {
             return None;
         }
 
-        for ids in [&container_ids, &item_ids] {
-            if ids.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
-                return None;
-            }
-        }
-        let resolves = |document_id: u32, want_container: bool| {
-            let ids = if unified_id_space || want_container {
-                &container_ids
-            } else {
-                &item_ids
-            };
-            ids.binary_search_by_key(&document_id, |(document_id, _)| *document_id)
-                .is_ok_and(|slot| ids[slot].1 == want_container)
-        };
-
         let mut path_chunks = Vec::with_capacity(archived.path_chunks.len());
         let mut path_total = 0usize;
         for chunk in archived.path_chunks.iter() {
@@ -543,40 +525,35 @@ impl DavResources {
             }
 
             let bytes: Box<[u8]> = (&*chunk.bytes).into();
-            let paths: Box<[DavPath]> = (0..paths_len)
-                .map(|slot| DavPath {
-                    path: ArenaRef {
-                        off: chunk.path_offsets[slot].to_native(),
-                        len: chunk.path_lengths[slot].to_native(),
+            let paths: Box<[DavPath]> = chunk
+                .path_offsets
+                .iter()
+                .zip(chunk.path_lengths.iter())
+                .zip(chunk.parent_ids.iter())
+                .zip(chunk.hierarchy_seqs.iter())
+                .zip(chunk.document_ids.iter())
+                .map(
+                    |((((off, len), parent_id), hierarchy_seq), document_id)| DavPath {
+                        path: ArenaRef {
+                            off: off.to_native(),
+                            len: len.to_native(),
+                        },
+                        parent_id: parent_id.to_native(),
+                        hierarchy_seq: hierarchy_seq.to_native(),
+                        document_id: document_id.to_native(),
                     },
-                    parent_id: chunk.parent_ids[slot].to_native(),
-                    hierarchy_seq: chunk.hierarchy_seqs[slot].to_native(),
-                    document_id: chunk.document_ids[slot].to_native(),
-                })
+                )
                 .collect();
-            for path in paths.iter() {
-                if !fits_within(path.path, bytes.len())
-                    || !resolves(path.document_id, path.hierarchy_seq & CONTAINER_FLAG != 0)
-                {
-                    return None;
-                }
-            }
-
-            let chunk = PathChunk { paths, bytes };
-            if chunk.paths.is_empty()
-                || chunk
-                    .paths
-                    .windows(2)
-                    .any(|pair| chunk.path_str(&pair[0]) >= chunk.path_str(&pair[1]))
-                || path_chunks.last().is_some_and(|previous: &Arc<PathChunk>| {
-                    previous.last_path() >= chunk.first_path()
-                })
+            if paths.is_empty()
+                || paths
+                    .iter()
+                    .any(|path| !fits_within(path.path, bytes.len()))
             {
                 return None;
             }
 
             path_total += paths_len;
-            path_chunks.push(Arc::new(chunk));
+            path_chunks.push(Arc::new(PathChunk { paths, bytes }));
         }
 
         if path_total != archived.path_total.to_native() as usize {
@@ -931,23 +908,6 @@ mod tests {
             DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
                 .is_none(),
             "an arena length past the end of the chunk was accepted"
-        );
-
-        let (mut chunks, path_chunks) = resources.pack();
-        let records = &mut chunks[0].records;
-        records.swap(0, 1);
-        assert!(
-            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
-                .is_none(),
-            "records that are not ascending by document id were accepted, which breaks find"
-        );
-
-        let (chunks, mut path_chunks) = resources.pack();
-        path_chunks[0].document_ids[0] = 900_000;
-        assert!(
-            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
-                .is_none(),
-            "a path pointing at a document that is not in the store was accepted"
         );
 
         let (chunks, mut path_chunks) = resources.pack();

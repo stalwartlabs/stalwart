@@ -378,7 +378,11 @@ impl Server {
                     cache.contacts.remove(id);
                     cache.events.remove(id);
                     cache.scheduling.remove(id);
-                    cache.swap.remove_resources(*id).await;
+                    let inner = self.inner.clone();
+                    let account_id = *id;
+                    tokio::spawn(async move {
+                        inner.cache.swap.remove_resources(account_id).await;
+                    });
                 }
                 CacheInvalidation::MessageCache(id) => {
                     cache.messages.remove(id);
@@ -451,6 +455,8 @@ impl Server {
                 !negative_emails.contains(&(key.domain_id, hash_local_part(&key.local_part)))
             });
         }
+
+        trc::event!(Cache(trc::CacheEvent::Invalidate), Total = changes.len());
     }
 }
 

@@ -14,7 +14,7 @@ use groupware::contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard};
 use store::{
     SerializeInfallible, ValueKey,
     dispatch::StoreOps,
-    write::{Archive, ArchiveBytes, BatchBuilder, Operation, ValueClass, ValueOp},
+    write::{Archive, ArchiveBytes, BatchBuilder, Operation, ValueClass},
 };
 use types::dead_property::DeadElementTag;
 use types::{
@@ -424,11 +424,11 @@ async fn metadata_only_write_emits_no_content_or_index_op(test: &TestServer) {
         match op {
             Operation::Value {
                 class: ValueClass::Property(field),
-                op: ValueOp::Set(_),
+                op,
             } => {
                 assert_ne!(
                     *field, content_field,
-                    "a metadata-only write emitted a CONTENT set"
+                    "a metadata-only write emitted a CONTENT operation: {op:?}"
                 );
             }
             Operation::Index { field, .. } => {

@@ -6,11 +6,11 @@
 
 use crate::utils::server::TestServer;
 use common::{
-    Server,
+    DavResources, Server,
     auth::AccessToken,
     cache::{
         invalidate::CacheInvalidationBuilder,
-        swap::{SwapKey, SwapPart},
+        swap::{SwapKey, SwapPart, frame::SwapFrame},
     },
     ipc::CacheInvalidation,
 };
@@ -29,9 +29,11 @@ pub async fn test(test: &TestServer, account_id: u32) {
 
     message_cache_survives_an_eviction(test, account_id).await;
     resource_cache_survives_an_eviction(test, account_id).await;
+    a_snapshot_with_a_stale_base_path_is_discarded(test, account_id).await;
     a_snapshot_from_the_future_is_discarded(test, account_id).await;
     an_update_is_persisted_once(test, account_id).await;
     an_uncacheable_account_is_persisted_on_a_cadence(test, account_id).await;
+    an_uncacheable_account_pins_at_most_one_snapshot(test, account_id).await;
     a_destroyed_account_leaves_no_snapshot(test, account_id).await;
 }
 
@@ -198,6 +200,10 @@ async fn an_update_is_persisted_once(test: &TestServer, account_id: u32) {
 
     let written = server.inner.cache.swap.snapshots_written() - before;
     assert!(
+        written >= 1,
+        "{changes} changes produced no snapshot write at all"
+    );
+    assert!(
         written <= changes,
         "{changes} changes produced {written} snapshot writes; a cache update is still \
          enqueuing the snapshot it displaced, which doubles every write"
@@ -210,25 +216,32 @@ async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, acc
     server.inner.cache.swap.remove(key).await.unwrap();
 
     let access_token = AccessToken::from_id_maybe_invalid(account_id);
-    let mut batch = BatchBuilder::new();
-    for i in 0..40u32 {
-        let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
-        FileNode {
-            name: format!("swap-folder-{i:04}-with-a-name-long-enough-to-weigh"),
-            ..Default::default()
+    let create_file_nodes = |names: Vec<String>| {
+        let mut batch = BatchBuilder::new();
+        for name in names {
+            let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
+            FileNode {
+                name,
+                ..Default::default()
+            }
+            .insert(
+                access_token.account_tenant_ids(),
+                account_id,
+                document_id,
+                true,
+                true,
+                &mut batch,
+            )
+            .expect("failed to stage a file node");
         }
-        .insert(
-            access_token.account_tenant_ids(),
-            account_id,
-            document_id,
-            true,
-            true,
-            &mut batch,
-        )
-        .expect("failed to stage a file node");
-    }
+        batch
+    };
     server
-        .commit_batch(batch)
+        .commit_batch(create_file_nodes(
+            (0..40u32)
+                .map(|i| format!("swap-folder-{i:04}-with-a-name-long-enough-to-weigh"))
+                .collect(),
+        ))
         .await
         .expect("failed to create the file nodes");
 
@@ -251,9 +264,11 @@ async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, acc
         .await
         .unwrap()
         .expect("an account that is too large to cache was never persisted");
+    let persisted_change_id = SwapFrame::parse(&snapshot)
+        .expect("the persisted snapshot has an invalid frame")
+        .change_id();
     assert_eq!(
-        u64::from_le_bytes(snapshot[8..16].try_into().unwrap()),
-        resources.highest_change_id,
+        persisted_change_id, resources.highest_change_id,
         "the persisted snapshot is not at the change id of the account"
     );
 
@@ -270,6 +285,48 @@ async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, acc
         server.inner.cache.swap.snapshots_written(),
         before,
         "an account that is too large to cache wrote a snapshot on every request"
+    );
+
+    let before = server.inner.cache.swap.snapshots_written();
+    server
+        .commit_batch(create_file_nodes(vec![
+            "swap-folder-added-after-the-first-write".to_string(),
+        ]))
+        .await
+        .expect("failed to create the extra file node");
+    let refreshed = server
+        .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+        .await
+        .unwrap();
+    assert!(
+        refreshed.highest_change_id > resources.highest_change_id,
+        "adding a file node did not advance the change id"
+    );
+    server.inner.cache.swap.flush().await;
+
+    let snapshot = server
+        .inner
+        .cache
+        .swap
+        .load(key)
+        .await
+        .unwrap()
+        .expect("the snapshot of an account that is too large to cache disappeared");
+    let refreshed_change_id = SwapFrame::parse(&snapshot)
+        .expect("the refreshed snapshot has an invalid frame")
+        .change_id();
+    assert!(
+        refreshed_change_id > persisted_change_id,
+        "a change after the first write did not refresh the persisted snapshot"
+    );
+    assert_eq!(
+        refreshed_change_id, refreshed.highest_change_id,
+        "the refreshed snapshot is not at the change id of the account"
+    );
+    assert_eq!(
+        server.inner.cache.swap.snapshots_written() - before,
+        1,
+        "a change after the first write did not produce exactly one snapshot write"
     );
 }
 
@@ -341,4 +398,136 @@ async fn a_snapshot_from_the_future_is_discarded(test: &TestServer, account_id: 
         "the fallback rebuild after discarding a future snapshot lost messages"
     );
     assert_eq!(rebuilt.last_change_id, expected.last_change_id);
+}
+
+async fn an_uncacheable_account_pins_at_most_one_snapshot(test: &TestServer, account_id: u32) {
+    let server = &test.server;
+    let key = SwapKey::new(account_id, SyncCollection::FileNode, SwapPart::Resources);
+    let access_token = AccessToken::from_id_maybe_invalid(account_id);
+
+    server.inner.cache.swap.flush().await;
+    assert!(
+        server.inner.cache.files.peek(&account_id).is_none(),
+        "the account under test is resident, so it cannot exercise the refresh slot"
+    );
+
+    let changes = 5u32;
+    let mut latest_change_id = 0u64;
+    for i in 0..changes {
+        let mut batch = BatchBuilder::new();
+        let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
+        FileNode {
+            name: format!("swap-folder-pinned-{i}"),
+            ..Default::default()
+        }
+        .insert(
+            access_token.account_tenant_ids(),
+            account_id,
+            document_id,
+            true,
+            true,
+            &mut batch,
+        )
+        .expect("failed to stage a file node");
+        server
+            .commit_batch(batch)
+            .await
+            .expect("failed to create the file node");
+
+        let resources = server
+            .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+            .await
+            .unwrap();
+        assert!(
+            resources.highest_change_id > latest_change_id,
+            "adding a file node did not advance the change id"
+        );
+        latest_change_id = resources.highest_change_id;
+        assert!(
+            server.inner.cache.files.peek(&account_id).is_none(),
+            "the account under test became resident after change {i}"
+        );
+
+        let pinned = server.inner.cache.swap.pending_refresh_snapshots();
+        assert!(
+            pinned <= 1,
+            "{pinned} snapshots are pinned after change {i}; a refresh of an account that is \
+             too large to cache must overwrite the previous snapshot, not queue behind it"
+        );
+    }
+
+    server.inner.cache.swap.flush().await;
+    assert_eq!(
+        server.inner.cache.swap.pending_refresh_snapshots(),
+        0,
+        "a flush left a refresh snapshot pinned"
+    );
+
+    let snapshot = server
+        .inner
+        .cache
+        .swap
+        .load(key)
+        .await
+        .unwrap()
+        .expect("the snapshot of an account that is too large to cache disappeared");
+    let persisted_change_id = SwapFrame::parse(&snapshot)
+        .expect("the persisted snapshot has an invalid frame")
+        .change_id();
+    assert_eq!(
+        persisted_change_id, latest_change_id,
+        "the persisted snapshot is not at the latest change id; an older refresh snapshot \
+         was written instead of the most recent one"
+    );
+}
+
+async fn a_snapshot_with_a_stale_base_path_is_discarded(test: &TestServer, account_id: u32) {
+    let server = &test.server;
+    let key = SwapKey::new(account_id, SyncCollection::Calendar, SwapPart::Resources);
+
+    let expected = server
+        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .await
+        .unwrap();
+    server.inner.cache.swap.flush().await;
+
+    let account_name = server.account(account_id).await.unwrap().name().to_string();
+    assert!(
+        expected.base_path.contains(&account_name),
+        "the base path {:?} does not carry the account name {account_name:?}",
+        expected.base_path
+    );
+
+    let mut renamed = DavResources::clone(&expected);
+    renamed.base_path = expected
+        .base_path
+        .replace(&account_name, "renamed-before-the-restore");
+    assert_ne!(renamed.base_path, expected.base_path);
+    let snapshot = renamed
+        .to_snapshot()
+        .expect("failed to encode the renamed snapshot");
+    server.inner.cache.swap.store(key, &snapshot).await.unwrap();
+
+    server.inner.cache.events.remove(&account_id);
+    assert!(server.inner.cache.events.peek(&account_id).is_none());
+
+    let rebuilt = server
+        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .await
+        .unwrap();
+    assert_eq!(
+        rebuilt.base_path, expected.base_path,
+        "a snapshot whose base path carries a stale account name was restored"
+    );
+    assert_eq!(
+        rebuilt.resources.len(),
+        expected.resources.len(),
+        "the rebuild after discarding a stale snapshot lost resources"
+    );
+    assert_eq!(rebuilt.paths.len(), expected.paths.len());
+    assert_eq!(rebuilt.highest_change_id, expected.highest_change_id);
+    for (a, b) in rebuilt.resources.iter().zip(expected.resources.iter()) {
+        assert_eq!(a.document_id(), b.document_id());
+        assert_eq!(a.is_container(), b.is_container());
+    }
 }

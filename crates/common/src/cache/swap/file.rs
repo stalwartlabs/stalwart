@@ -48,7 +48,7 @@ impl FileSwapStore {
         match fs::metadata(&path).await {
             Ok(metadata) if metadata.len() > self.max_size => {
                 trc::event!(
-                    Store(trc::StoreEvent::SwapError),
+                    Cache(trc::CacheEvent::SwapError),
                     AccountId = key.account_id,
                     Collection = key.collection.as_str(),
                     Size = metadata.len(),
@@ -151,7 +151,7 @@ async fn remove_stale_temporaries(root: &Path) {
 }
 
 fn into_error(err: std::io::Error) -> trc::Error {
-    trc::EventType::Store(trc::StoreEvent::SwapError)
+    trc::EventType::Cache(trc::CacheEvent::SwapError)
         .reason(err)
         .details("Cache swap file error")
 }

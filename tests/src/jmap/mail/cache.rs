@@ -450,15 +450,16 @@ async fn merge_agrees_with_a_full_rebuild(test: &TestServer) {
         let cache = server.get_cached_messages(account_id).await.unwrap();
         let mut alive = cache.email_document_ids().into_iter().collect::<Vec<_>>();
 
-        let victims = (0..if updates_only {
+        let deletions = if updates_only {
             0
         } else {
             rng.random_range(1..=3)
+        };
+        let victims = std::iter::from_fn(|| {
+            (alive.len() >= 2).then(|| alive.remove(rng.random_range(0..alive.len())))
         })
-            .filter_map(|_| {
-                (alive.len() >= 2).then(|| alive.remove(rng.random_range(0..alive.len())))
-            })
-            .collect::<RoaringBitmap>();
+        .take(deletions)
+        .collect::<RoaringBitmap>();
 
         let mut toggles = Vec::new();
         for _ in 0..rng.random_range(1..=6) {

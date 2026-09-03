@@ -6,7 +6,7 @@
 
 use super::{ChunkAccumulator, GroupwareCache};
 use crate::{
-    DavResourceName, RFC_3986,
+    DavResourceName,
     calendar::{
         ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarEventNotification, Calendar,
         CalendarEvent, CalendarEventNotification, SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID,
@@ -46,16 +46,8 @@ pub(super) async fn build_calcard_resources(
     } else {
         server.account(access_account_id).await?
     };
-    let base_path = format!(
-        "{}/{}/",
-        if is_calendar {
-            DavResourceName::Cal
-        } else {
-            DavResourceName::Card
-        }
-        .base_path(),
-        percent_encoding::utf8_percent_encode(owner_account_info.name(), RFC_3986),
-    );
+    let base_path =
+        DavResourceName::from(sync_collection).account_base_path(owner_account_info.name());
 
     let mut is_first_check = true;
     loop {
@@ -255,11 +247,7 @@ pub(super) async fn build_scheduling_resources(
     let resources = ResourceStore::from_sorted(containers.finish(), items.finish(), false);
     let paths = build_scheduling_paths(&resources);
     let mut cache = DavResources {
-        base_path: format!(
-            "{}/{}/",
-            DavResourceName::Scheduling.base_path(),
-            percent_encoding::utf8_percent_encode(account_info.name(), RFC_3986),
-        ),
+        base_path: DavResourceName::Scheduling.account_base_path(account_info.name()),
         paths: Arc::new(paths),
         resources,
         item_change_id: last_change_id,

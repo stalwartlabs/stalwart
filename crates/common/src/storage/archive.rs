@@ -35,49 +35,6 @@ impl Server {
             class: ValueClass::Property(field),
         };
 
-        let (range, ranges) = match documents.scan_shape() {
-            ScanShape::PointGets => {
-                for document_id in documents.iterate() {
-                    let archive = self
-                        .core
-                        .storage
-                        .data
-                        .get_value::<Archive<ArchiveBytes>>(key(document_id))
-                        .await
-                        .add_context(|err| {
-                            err.caused_by(trc::location!())
-                                .account_id(account_id)
-                                .collection(collection)
-                                .document_id(document_id)
-                        })?;
-
-                    if let Some(archive) = archive
-                        && !cb(document_id, archive)?
-                    {
-                        break;
-                    }
-                }
-
-                return Ok(());
-            }
-            ScanShape::Range(from_document_id, to_document_id) => (
-                Some(IterateParams::new(
-                    key(from_document_id),
-                    key(to_document_id),
-                )),
-                Vec::new(),
-            ),
-            ScanShape::Ranges(ranges) => (
-                None,
-                ranges
-                    .into_iter()
-                    .map(|(from_document_id, to_document_id)| {
-                        IterateParams::new(key(from_document_id), key(to_document_id))
-                    })
-                    .collect(),
-            ),
-        };
-
         let mut collect = |key: &[u8], value: &[u8]| {
             let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
             if documents.contains(document_id) {
@@ -88,14 +45,32 @@ impl Server {
             }
         };
 
-        if let Some(range) = range {
-            self.core.storage.data.iterate(range, &mut collect).await
-        } else {
-            self.core
-                .storage
-                .data
-                .iterate_many(ranges, &mut collect)
-                .await
+        match documents.scan_shape() {
+            ScanShape::Range(from_document_id, to_document_id) => {
+                self.core
+                    .storage
+                    .data
+                    .iterate(
+                        IterateParams::new(key(from_document_id), key(to_document_id)),
+                        &mut collect,
+                    )
+                    .await
+            }
+            ScanShape::Ranges(ranges) => {
+                self.core
+                    .storage
+                    .data
+                    .iterate_many(
+                        ranges
+                            .into_iter()
+                            .map(|(from_document_id, to_document_id)| {
+                                IterateParams::new(key(from_document_id), key(to_document_id))
+                            })
+                            .collect(),
+                        &mut collect,
+                    )
+                    .await
+            }
         }
         .add_context(|err| {
             err.caused_by(trc::location!())

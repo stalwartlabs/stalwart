@@ -7,6 +7,7 @@
 use super::{BLOCKING_CODEC_THRESHOLD, SwapCadence, SwapKey, SwapPart, SwapReceiver, SwapTier};
 use crate::{DavResources, Inner, MessageStoreCache};
 use ahash::AHashMap;
+use parking_lot::Mutex;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -19,7 +20,6 @@ const METRICS_INTERVAL: Duration = Duration::from_secs(300);
 
 pub enum SwapSignal {
     Changed(SwapTarget, u32),
-    Refresh(SwapTarget, u32, Snapshot),
     Forget(u32),
     Flush(oneshot::Sender<()>),
     Stop(oneshot::Sender<usize>),
@@ -104,6 +104,68 @@ impl Snapshot {
     }
 }
 
+struct RefreshSlot {
+    snapshot: Snapshot,
+    stored_at: Instant,
+}
+
+#[derive(Default)]
+pub struct RefreshSlots(Mutex<AHashMap<SwapTarget, RefreshSlot>>);
+
+impl RefreshSlots {
+    pub fn store(&self, target: SwapTarget, snapshot: Snapshot) {
+        let previous = self.0.lock().insert(
+            target,
+            RefreshSlot {
+                snapshot,
+                stored_at: Instant::now(),
+            },
+        );
+        drop(previous);
+    }
+
+    fn take(&self, target: SwapTarget) -> Option<Snapshot> {
+        self.0.lock().remove(&target).map(|slot| slot.snapshot)
+    }
+
+    fn forget(&self, account_id: u32) {
+        let removed = self
+            .0
+            .lock()
+            .extract_if(|target, _| target.account_id == account_id)
+            .collect::<Vec<_>>();
+        drop(removed);
+    }
+
+    fn drain(&self) -> Vec<(SwapTarget, Snapshot)> {
+        let mut slots = self.0.lock();
+        let drained = slots
+            .drain()
+            .map(|(target, slot)| (target, slot.snapshot))
+            .collect();
+        slots.shrink_to_fit();
+        drained
+    }
+
+    fn prune(&self, max_age: Duration) {
+        let mut slots = self.0.lock();
+        let removed = slots
+            .extract_if(|_, slot| slot.stored_at.elapsed() >= max_age)
+            .collect::<Vec<_>>();
+        slots.shrink_to_fit();
+        drop(slots);
+        drop(removed);
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.lock().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.lock().is_empty()
+    }
+}
+
 #[derive(Default)]
 struct PendingAccount {
     changes: u32,
@@ -160,6 +222,7 @@ impl SwapWriter {
     fn forget(&mut self, account_id: u32) {
         self.pending
             .retain(|target, _| target.account_id != account_id);
+        self.tier().refresh.forget(account_id);
     }
 
     fn unwritten(&self) -> usize {
@@ -196,6 +259,11 @@ impl SwapWriter {
         }
     }
 
+    fn take_snapshot(&self, target: SwapTarget) -> Option<Snapshot> {
+        let slot = self.tier().refresh.take(target);
+        self.peek(target).or(slot)
+    }
+
     fn mark_absent(&mut self, target: SwapTarget) {
         match self.pending.get_mut(&target) {
             Some(entry) if entry.last_write.is_some() => entry.changes = 0,
@@ -205,14 +273,16 @@ impl SwapWriter {
         }
     }
 
-    async fn flush_if_due(&mut self, target: SwapTarget) {
-        if !self.is_due(target) {
-            return;
-        }
-
-        match self.peek(target) {
+    async fn flush_now(&mut self, target: SwapTarget) {
+        match self.take_snapshot(target) {
             Some(snapshot) => self.write_if_changed(target, &snapshot).await,
             None => self.mark_absent(target),
+        }
+    }
+
+    async fn flush_if_due(&mut self, target: SwapTarget) {
+        if self.is_due(target) {
+            self.flush_now(target).await;
         }
     }
 
@@ -230,7 +300,8 @@ impl SwapWriter {
         }
     }
 
-    async fn flush_all(&mut self) {
+    async fn flush_all(&mut self) -> u64 {
+        let written_before = self.snapshots_written;
         let mut targets = self
             .pending
             .iter()
@@ -240,11 +311,23 @@ impl SwapWriter {
         targets.sort_unstable_by(|(_, left), (_, right)| right.cmp(left));
 
         for (target, _) in targets {
-            match self.peek(target) {
-                Some(snapshot) => self.write_if_changed(target, &snapshot).await,
-                None => self.mark_absent(target),
-            }
+            self.flush_now(target).await;
         }
+
+        for (target, snapshot) in self.tier().refresh.drain() {
+            let snapshot = self.peek(target).unwrap_or(snapshot);
+            self.write_if_changed(target, &snapshot).await;
+        }
+
+        self.snapshots_written - written_before
+    }
+
+    fn report_flush(&self, written: u64) {
+        trc::event!(
+            Cache(trc::CacheEvent::SwapFlush),
+            Total = written as usize,
+            Details = self.unwritten(),
+        );
     }
 
     async fn write_if_changed(&mut self, target: SwapTarget, snapshot: &Snapshot) {
@@ -263,7 +346,7 @@ impl SwapWriter {
         let size = snapshot.size();
         if size > cadence.max_account_size {
             trc::event!(
-                Store(trc::StoreEvent::SwapError),
+                Cache(trc::CacheEvent::SwapError),
                 AccountId = target.account_id,
                 Collection = target.collection.as_str(),
                 Size = size,
@@ -283,7 +366,7 @@ impl SwapWriter {
         let start_time = Instant::now();
         let Some(encoded) = snapshot.encode_off_runtime().await else {
             trc::event!(
-                Store(trc::StoreEvent::SwapError),
+                Cache(trc::CacheEvent::SwapError),
                 AccountId = target.account_id,
                 Collection = target.collection.as_str(),
                 Details = "Failed to encode the cache snapshot",
@@ -304,7 +387,7 @@ impl SwapWriter {
                 self.tier().record_write();
 
                 trc::event!(
-                    Store(trc::StoreEvent::SwapWrite),
+                    Cache(trc::CacheEvent::SwapWrite),
                     AccountId = target.account_id,
                     Collection = target.collection.as_str(),
                     ChangeId = snapshot.change_id(),
@@ -332,6 +415,7 @@ impl SwapWriter {
                     .is_some_and(|last| last.elapsed() < flush_interval)
         });
         self.pending.shrink_to_fit();
+        self.tier().refresh.prune(flush_interval);
     }
 
     fn pending_ages(&self) -> Vec<String> {
@@ -366,7 +450,7 @@ impl SwapWriter {
         }
 
         trc::event!(
-            Store(trc::StoreEvent::SwapWrite),
+            Cache(trc::CacheEvent::SwapMetrics),
             Total = vec![self.snapshots_written as usize, self.pending.len()],
             Size = (self.bytes_written as f64 * 3600.0 / elapsed.as_secs_f64()) as u64,
             Details = self.pending_ages(),
@@ -400,21 +484,17 @@ impl SwapTier {
                             writer.record_changes(target, changes);
                             writer.flush_if_due(target).await;
                         }
-                        Some(SwapSignal::Refresh(target, changes, snapshot)) => {
-                            writer.record_changes(target, changes);
-                            if writer.is_due(target) {
-                                writer.write_if_changed(target, &snapshot).await;
-                            }
-                        }
                         Some(SwapSignal::Forget(account_id)) => {
                             writer.forget(account_id);
                         }
                         Some(SwapSignal::Flush(ack)) => {
-                            writer.flush_all().await;
+                            let written = writer.flush_all().await;
+                            writer.report_flush(written);
                             let _ = ack.send(());
                         }
                         Some(SwapSignal::Stop(ack)) => {
-                            writer.flush_all().await;
+                            let written = writer.flush_all().await;
+                            writer.report_flush(written);
                             let _ = ack.send(writer.unwritten());
                             break;
                         }

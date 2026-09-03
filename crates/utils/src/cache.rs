@@ -134,7 +134,7 @@ impl<K: Eq + Hash + CacheItemWeight, V: Clone + CacheItemWeight> Cache<K, V> {
         }
 
         trc::event!(
-            Store(trc::StoreEvent::CacheEntryTooLarge),
+            Cache(trc::CacheEvent::EntryTooLarge),
             Type = self.name,
             Size = weight,
             Limit = self.admission_limit,

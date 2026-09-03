@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 641;
+pub const TOTAL_EVENT_COUNT: usize = 644;
 pub const TOTAL_METRIC_COUNT: usize = 369;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,6 +15,7 @@ pub enum EventType {
     Ai(AiEvent),
     Arc(ArcEvent),
     Auth(AuthEvent),
+    Cache(CacheEvent),
     Calendar(CalendarEvent),
     Cluster(ClusterEvent),
     Dane(DaneEvent),
@@ -111,6 +112,23 @@ pub enum AuthEvent {
     Error = 34,
     Warning = 595,
     CredentialExpired = 276,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum CacheEvent {
+    Miss = 50,
+    Hit = 51,
+    Stale = 52,
+    Update = 577,
+    EntryTooLarge = 633,
+    Invalidate = 643,
+    SwapHit = 637,
+    SwapMiss = 638,
+    SwapWrite = 639,
+    SwapError = 640,
+    SwapMetrics = 641,
+    SwapFlush = 642,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -813,15 +831,6 @@ pub enum StoreEvent {
     UnexpectedError = 533,
     CryptoError = 510,
     HttpStoreError = 493,
-    CacheMiss = 50,
-    CacheHit = 51,
-    CacheStale = 52,
-    CacheUpdate = 577,
-    CacheEntryTooLarge = 633,
-    SwapHit = 637,
-    SwapMiss = 638,
-    SwapWrite = 639,
-    SwapError = 640,
     BlobMissingMarker = 507,
     DataWrite = 513,
     DataIterate = 512,

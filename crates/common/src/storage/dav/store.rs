@@ -405,8 +405,9 @@ impl ResourceStore {
             let run = &self.chunks[self.run(is_container)];
             for (position, chunk) in run.iter().enumerate() {
                 let is_last = position + 1 == run.len();
-                let owned =
-                    |(document_id, _): &(u32, Option<u32>)| is_last || *document_id <= chunk.max_id;
+                let owned = |(document_id, slot): &(u32, Option<u32>)| {
+                    (is_last && slot.is_some()) || *document_id <= chunk.max_id
+                };
 
                 if !pending.peek().is_some_and(owned) {
                     target.push(Arc::clone(chunk));
@@ -415,11 +416,10 @@ impl ResourceStore {
 
                 let mut builder = SplitChunks::new(target, chunk.records.len() + 4);
                 for record in chunk.records.iter() {
-                    while pending
-                        .peek()
-                        .is_some_and(|(document_id, _)| *document_id < record.document_id)
+                    while let Some((_, slot)) =
+                        pending.next_if(|(document_id, _)| *document_id < record.document_id)
                     {
-                        if let (_, Some(slot)) = pending.next().unwrap() {
+                        if let Some(slot) = slot {
                             builder.push(&staged(slot));
                         }
                     }
@@ -450,13 +450,9 @@ impl ResourceStore {
         }
 
         let containers_end = container_chunks.len();
-        let total = container_chunks
-            .iter()
-            .chain(item_chunks.iter())
-            .map(|chunk| chunk.records.len())
-            .sum();
         let mut chunks = container_chunks;
         chunks.extend(item_chunks);
+        let total = chunks.iter().map(|chunk| chunk.records.len()).sum();
 
         Self {
             chunks,
@@ -602,6 +598,27 @@ mod tests {
         assert_eq!(rebuilt.len(), 2);
         assert!(rebuilt.find(1, false).is_none(), "deleted item is gone");
         assert!(rebuilt.find(2, false).is_some(), "sibling survives");
+    }
+
+    #[test]
+    fn rebuild_shares_the_tail_chunk_on_a_deleted_new_id() {
+        let mut containers = ResourceChunkBuilder::with_capacity(1);
+        calendar(&mut containers, 0, "default");
+        let mut items = ResourceChunkBuilder::with_capacity(1);
+        event(&mut items, 1, 0, "a.ics");
+        let store = ResourceStore::from_sorted(vec![containers], vec![items], false);
+
+        let staging = ResourceChunkBuilder::with_capacity(0).finish();
+        let mut changes = ahash::AHashMap::new();
+        changes.insert((false, 9u32), None);
+
+        let rebuilt = store.rebuild(&staging, &changes);
+        assert_eq!(rebuilt.len(), 2);
+        assert_eq!(rebuilt.chunks.len(), 2);
+        assert!(
+            Arc::ptr_eq(&store.chunks[1], &rebuilt.chunks[1]),
+            "a delete of an id the tail chunk never held must not rebuild it"
+        );
     }
 
     #[test]

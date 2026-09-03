@@ -181,7 +181,7 @@ fn framed_len(head: &[u8]) -> Option<usize> {
 }
 
 fn unsupported() -> trc::Error {
-    trc::EventType::Store(trc::StoreEvent::SwapError)
+    trc::EventType::Cache(trc::CacheEvent::SwapError)
         .into_err()
         .details("The cache swap tier requires a Redis in-memory store")
 }

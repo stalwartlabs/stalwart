@@ -74,7 +74,7 @@ impl MessageCache {
     pub fn received_at_secs(&self) -> u32 {
         debug_assert!(
             self.received_at <= MAX_RECEIVED_AT,
-            "received_at {} exceeds the representable range, protocol input must reject it",
+            "received_at {} exceeds the representable range and should have been clamped by the caller",
             self.received_at
         );
         self.received_at.min(MAX_RECEIVED_AT) as u32
@@ -146,6 +146,57 @@ impl ColBlock {
     #[inline(always)]
     fn rank(&self, slot: usize) -> (u64, u32) {
         (self.received_at[slot] as u64, self.document_ids[slot])
+    }
+
+    fn patch_slots(&mut self, slots: &[(u32, u32, &MessageCache)]) {
+        Self::patch_column(&mut self.change_ids, slots, |record| record.change_id);
+        Self::patch_column(&mut self.keywords, slots, |record| record.keywords);
+        Self::patch_column(&mut self.thread_ids, slots, |record| record.thread_id);
+        Self::patch_column(&mut self.sizes, slots, |record| record.size);
+        self.patch_mailboxes(slots);
+    }
+
+    fn patch_column<T: Copy + PartialEq>(
+        column: &mut Arc<[T]>,
+        slots: &[(u32, u32, &MessageCache)],
+        pick: impl Fn(&MessageCache) -> T,
+    ) {
+        if slots
+            .iter()
+            .all(|(_, slot, record)| column[*slot as usize] == pick(record))
+        {
+            return;
+        }
+        let mut patched = column.to_vec();
+        for (_, slot, record) in slots {
+            patched[*slot as usize] = pick(record);
+        }
+        *column = patched.into();
+    }
+
+    fn patch_mailboxes(&mut self, slots: &[(u32, u32, &MessageCache)]) {
+        if slots
+            .iter()
+            .all(|(_, slot, record)| self.mailboxes(*slot) == record.mailboxes.as_slice())
+        {
+            return;
+        }
+        let mut mb_offsets = Vec::with_capacity(self.len() + 1);
+        let mut mb_arena = Vec::with_capacity(self.mb_arena.len());
+        let mut offset = 0u32;
+        let mut updated = slots.iter().peekable();
+        for slot in 0..self.len() as u32 {
+            mb_offsets.push(offset);
+            let mailboxes = match updated.next_if(|(_, at, _)| *at == slot) {
+                Some((_, _, record)) => record.mailboxes.as_slice(),
+                None => self.mailboxes(slot),
+            };
+            mb_arena.extend_from_slice(mailboxes);
+            offset += mailboxes.len() as u32;
+        }
+        mb_offsets.push(offset);
+        self.mb_offsets = mb_offsets.into();
+        self.mb_arena = mb_arena.into();
     }
 
     fn weight(&self) -> u64 {
@@ -280,8 +331,7 @@ impl ColBuilder {
 const SHIFT_BUCKET: usize = 1024;
 
 struct PositionShift {
-    keys: Vec<u32>,
-    deltas: Vec<i32>,
+    steps: Vec<(u32, i32)>,
     bucket_first: Vec<u32>,
     bucket_delta: Vec<i32>,
     first_key: u32,
@@ -293,8 +343,7 @@ impl PositionShift {
         delete_positions: impl Iterator<Item = u32>,
         old_len: usize,
     ) -> Self {
-        let mut keys = Vec::new();
-        let mut deltas = Vec::new();
+        let mut steps: Vec<(u32, i32)> = Vec::new();
         let mut inserted = insert_positions.peekable();
         let mut deleted = delete_positions.map(|position| position + 1).peekable();
         let mut total = 0i32;
@@ -307,35 +356,32 @@ impl PositionShift {
             };
 
             total += delta;
-            if keys.last() == Some(&key) {
-                *deltas.last_mut().unwrap() = total;
+            if let Some(last) = steps.last_mut()
+                && last.0 == key
+            {
+                last.1 = total;
             } else {
-                keys.push(key);
-                deltas.push(total);
+                steps.push((key, total));
             }
         }
 
         let buckets = old_len / SHIFT_BUCKET + 2;
-        let (bucket_first, bucket_delta) = {
-            let mut bucket_first = Vec::with_capacity(buckets);
-            let mut bucket_delta = Vec::with_capacity(buckets);
-            let mut cursor = keys.iter().zip(deltas.iter()).enumerate().peekable();
-            let mut carried = 0i32;
-            for bucket in 0..buckets {
-                let start = (bucket * SHIFT_BUCKET) as u32;
-                while let Some((_, (_, delta))) = cursor.next_if(|(_, (key, _))| **key < start) {
-                    carried = *delta;
-                }
-                bucket_first.push(cursor.peek().map_or(keys.len(), |(at, _)| *at) as u32);
-                bucket_delta.push(carried);
+        let mut bucket_first = Vec::with_capacity(buckets);
+        let mut bucket_delta = Vec::with_capacity(buckets);
+        let mut cursor = steps.iter().enumerate().peekable();
+        let mut carried = 0i32;
+        for bucket in 0..buckets {
+            let start = (bucket * SHIFT_BUCKET) as u32;
+            while let Some((_, (_, delta))) = cursor.next_if(|(_, (key, _))| *key < start) {
+                carried = *delta;
             }
-            (bucket_first, bucket_delta)
-        };
+            bucket_first.push(cursor.peek().map_or(steps.len(), |(at, _)| *at) as u32);
+            bucket_delta.push(carried);
+        }
 
         PositionShift {
-            first_key: keys.first().copied().unwrap_or(u32::MAX),
-            keys,
-            deltas,
+            first_key: steps.first().map_or(u32::MAX, |(key, _)| *key),
+            steps,
             bucket_first,
             bucket_delta,
         }
@@ -349,13 +395,11 @@ impl PositionShift {
         let bucket = (position as usize / SHIFT_BUCKET).min(self.bucket_first.len() - 1);
         let from = self.bucket_first[bucket] as usize;
 
-        self.keys[from..]
+        self.steps[from..]
             .iter()
-            .zip(self.deltas[from..].iter())
-            .take_while(|(key, _)| **key <= position)
-            .map(|(_, delta)| *delta)
+            .take_while(|(key, _)| *key <= position)
             .last()
-            .unwrap_or(self.bucket_delta[bucket])
+            .map_or(self.bucket_delta[bucket], |(_, delta)| *delta)
     }
 }
 
@@ -378,16 +422,23 @@ impl MessagesCache {
         items: &[MessageCache],
         keywords: Arc<[CustomKeywords]>,
     ) -> Self {
-        let mut blocks = Vec::with_capacity(items.len().div_ceil(CACHE_CHUNK).max(1));
-        let mut starts = Vec::with_capacity(blocks.capacity());
-        let mut start = 0u32;
-        for chunk in items.chunks(CACHE_CHUNK) {
-            starts.push(start);
-            start += chunk.len() as u32;
-            blocks.push(ColBlock::from_records(chunk));
-        }
+        let blocks = items
+            .chunks(CACHE_CHUNK)
+            .map(ColBlock::from_records)
+            .collect::<Vec<_>>();
+        let (starts, len) = Self::starts_of(&blocks);
 
-        Self::assemble(change_id, blocks, starts, items.len(), keywords)
+        Self::assemble(change_id, blocks, starts, len, keywords)
+    }
+
+    fn starts_of(blocks: &[ColBlock]) -> (Vec<u32>, usize) {
+        let mut starts = Vec::with_capacity(blocks.len());
+        let mut start = 0u32;
+        for block in blocks {
+            starts.push(start);
+            start += block.len() as u32;
+        }
+        (starts, start as usize)
     }
 
     fn assemble(
@@ -524,108 +575,31 @@ impl MessagesCache {
         keywords: Arc<[CustomKeywords]>,
     ) -> Self {
         let mut blocks = self.blocks.clone();
-        let mut touched: Vec<(usize, Vec<(u32, &MessageCache)>)> = Vec::new();
-        for (position, record) in updates {
-            let Some((block, slot)) = self.locate(*position) else {
-                continue;
-            };
-            debug_assert_eq!(
-                blocks[block as usize].document_ids[slot as usize], record.document_id,
-                "a patch must not move a message to a different position"
-            );
-            match touched.iter_mut().find(|(idx, _)| *idx == block as usize) {
-                Some((_, slots)) => slots.push((slot, record)),
-                None => touched.push((block as usize, vec![(slot, record)])),
-            }
-        }
-
-        for (block_idx, mut slots) in touched {
-            let block = &mut blocks[block_idx];
-            slots.sort_unstable_by_key(|(slot, _)| *slot);
-
-            if slots
-                .iter()
-                .any(|(slot, record)| block.change_ids[*slot as usize] != record.change_id)
-            {
-                let mut column = block.change_ids.to_vec();
-                for (slot, record) in &slots {
-                    column[*slot as usize] = record.change_id;
-                }
-                block.change_ids = column.into();
-            }
-            if slots
-                .iter()
-                .any(|(slot, record)| block.keywords[*slot as usize] != record.keywords)
-            {
-                let mut column = block.keywords.to_vec();
-                for (slot, record) in &slots {
-                    column[*slot as usize] = record.keywords;
-                }
-                block.keywords = column.into();
-            }
-            if slots
-                .iter()
-                .any(|(slot, record)| block.thread_ids[*slot as usize] != record.thread_id)
-            {
-                let mut column = block.thread_ids.to_vec();
-                for (slot, record) in &slots {
-                    column[*slot as usize] = record.thread_id;
-                }
-                block.thread_ids = column.into();
-            }
-            if slots
-                .iter()
-                .any(|(slot, record)| block.sizes[*slot as usize] != record.size)
-            {
-                let mut column = block.sizes.to_vec();
-                for (slot, record) in &slots {
-                    column[*slot as usize] = record.size;
-                }
-                block.sizes = column.into();
-            }
-
-            if slots
-                .iter()
-                .any(|(slot, record)| block.mailboxes(*slot) != record.mailboxes.as_slice())
-            {
-                let mut mb_offsets = Vec::with_capacity(block.len() + 1);
-                let mut mb_arena = Vec::with_capacity(block.mb_arena.len());
-                let mut offset = 0u32;
-                let mut updated = slots.iter().peekable();
-                for slot in 0..block.len() as u32 {
-                    mb_offsets.push(offset);
-                    let mailboxes = match updated.next_if(|(s, _)| *s == slot) {
-                        Some((_, record)) => record.mailboxes.as_slice(),
-                        None => block.mailboxes(slot),
-                    };
-                    mb_arena.extend_from_slice(mailboxes);
-                    offset += mailboxes.len() as u32;
-                }
-                mb_offsets.push(offset);
-                block.mb_offsets = mb_offsets.into();
-                block.mb_arena = mb_arena.into();
-            }
-        }
-
-        let size = keywords
+        let mut touched = updates
             .iter()
-            .map(|entry| {
-                std::mem::size_of::<CustomKeywords>()
-                    + (entry.names.len() * std::mem::size_of::<String>())
+            .filter_map(|(position, record)| {
+                let (block, slot) = self.locate(*position)?;
+                debug_assert_eq!(
+                    self.blocks[block as usize].document_ids[slot as usize], record.document_id,
+                    "a patch must not move a message to a different position"
+                );
+                Some((block, slot, record))
             })
-            .sum::<usize>() as u64
-            + blocks.iter().map(ColBlock::weight).sum::<u64>()
-            + (self.index.len() * std::mem::size_of::<(u32, u32)>()) as u64;
+            .collect::<Vec<_>>();
+        touched.sort_unstable_by_key(|(block, slot, _)| (*block, *slot));
 
-        MessagesCache {
+        for slots in touched.chunk_by(|(left, _, _), (right, _, _)| left == right) {
+            blocks[slots[0].0 as usize].patch_slots(slots);
+        }
+
+        Self::from_parts(
             change_id,
             blocks,
-            starts: self.starts.clone(),
-            index: self.index.clone(),
+            self.starts.clone(),
+            self.index.clone(),
             keywords,
-            len: self.len,
-            size,
-        }
+            self.len,
+        )
     }
 
     fn locate_insert(&self, rank: (u64, u32)) -> (u32, u32) {
@@ -782,13 +756,7 @@ impl MessagesCache {
             builder.finish_into(&mut blocks);
         }
 
-        let mut starts = Vec::with_capacity(blocks.len());
-        let mut start = 0u32;
-        for block in &blocks {
-            starts.push(start);
-            start += block.len() as u32;
-        }
-        let len = start as usize;
+        let (starts, len) = Self::starts_of(&blocks);
 
         let shift = PositionShift::build(
             insertions
@@ -1116,7 +1084,7 @@ mod tests {
         let touched = [
             CACHE_CHUNK as u32 + 5,
             CACHE_CHUNK as u32 + 6,
-            CACHE_CHUNK as u32 * 2 + 0,
+            (CACHE_CHUNK as u32 * 2),
         ];
         let (patched, expected) = {
             let updates = touched

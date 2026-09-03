@@ -74,6 +74,12 @@ impl Default for Changes {
     }
 }
 
+impl Changes {
+    pub fn needs_full_rebuild(&self, since: u64) -> bool {
+        self.is_truncated || (since != 0 && self.to_change_id == 0)
+    }
+}
+
 impl Store {
     pub async fn changes(
         &self,
@@ -583,5 +589,31 @@ impl DeserializeVanished for String {
         }
 
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Changes;
+
+    #[test]
+    fn a_change_log_without_the_cache_revision_needs_a_rebuild() {
+        let empty = Changes::default();
+        assert!(!empty.needs_full_rebuild(0));
+        assert!(empty.needs_full_rebuild(7));
+
+        let current = Changes {
+            from_change_id: 7,
+            to_change_id: 7,
+            ..Default::default()
+        };
+        assert!(!current.needs_full_rebuild(7));
+
+        let truncated = Changes {
+            is_truncated: true,
+            to_change_id: 12,
+            ..Default::default()
+        };
+        assert!(truncated.needs_full_rebuild(7));
     }
 }

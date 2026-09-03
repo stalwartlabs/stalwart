@@ -496,7 +496,7 @@ impl PropFindRequestHandler for Server {
                 |document_id, archive| {
                     if track_carriers
                         && collection == collection_children
-                        && has_dead_properties(&archive, collection)?
+                        && has_dead_properties(&archive, collection).caused_by(trc::location!())?
                     {
                         group_carriers.insert(document_id);
                     }

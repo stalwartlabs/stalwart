@@ -28,7 +28,7 @@ use std::{
 };
 use store::{query::acl::AclQuery, rand, write::now};
 use tinyvec::TinyVec;
-use trc::{AddContext, StoreEvent};
+use trc::{AddContext, CacheEvent};
 use types::{acl::Acl, collection::Collection};
 use utils::map::bitmap::{Bitmap, BitmapItem};
 use xxhash_rust::xxh3;
@@ -267,7 +267,7 @@ impl Server {
         {
             Ok(token) => {
                 trc::event!(
-                    Store(StoreEvent::CacheHit),
+                    Cache(CacheEvent::Hit),
                     Key = account_id,
                     Collection = "accessToken",
                 );
@@ -276,7 +276,7 @@ impl Server {
             }
             Err(guard) => {
                 trc::event!(
-                    Store(StoreEvent::CacheMiss),
+                    Cache(CacheEvent::Miss),
                     Key = account_id,
                     Collection = "accessToken",
                 );
@@ -321,7 +321,7 @@ impl Server {
             Ok(token) => {
                 if token.revision_account == revision_account {
                     trc::event!(
-                        Store(StoreEvent::CacheHit),
+                        Cache(CacheEvent::Hit),
                         Key = account_id,
                         Collection = "accessToken",
                     );
@@ -330,7 +330,7 @@ impl Server {
                 } else {
                     // Token is stale, rebuild it
                     trc::event!(
-                        Store(StoreEvent::CacheStale),
+                        Cache(CacheEvent::Stale),
                         Key = account_id,
                         Collection = "accessToken",
                     );
@@ -353,7 +353,7 @@ impl Server {
             }
             Err(guard) => {
                 trc::event!(
-                    Store(StoreEvent::CacheMiss),
+                    Cache(CacheEvent::Miss),
                     Key = account_id,
                     Collection = "accessToken",
                 );

@@ -77,7 +77,6 @@ pub(crate) async fn update_email_cache(
     Ok(merge_email_cache(
         &store_cache.emails,
         changed_ids,
-        &fetch_ids,
         fetched,
         fetched_keywords,
     ))
@@ -86,18 +85,15 @@ pub(crate) async fn update_email_cache(
 fn merge_email_cache(
     cache: &MessagesCache,
     changed_ids: &AHashMap<u32, bool>,
-    fetch_ids: &[u32],
     mut fetched: AHashMap<u32, MessageCache>,
     fetched_keywords: Vec<CustomKeywords>,
 ) -> MessagesCache {
     let mut inserts = Vec::new();
-    let mut deletes = changed_ids
-        .iter()
-        .filter(|(_, is_update)| !**is_update)
-        .map(|(document_id, _)| *document_id)
-        .collect::<Vec<_>>();
-    for document_id in fetch_ids {
-        if !cache.contains(*document_id) {
+    let mut deletes = Vec::new();
+    for (document_id, is_update) in changed_ids {
+        if !*is_update {
+            deletes.push(*document_id);
+        } else if !cache.contains(*document_id) {
             if let Some(item) = fetched.remove(document_id) {
                 inserts.push(item);
             }
@@ -105,17 +101,19 @@ fn merge_email_cache(
             deletes.push(*document_id);
         }
     }
-    inserts.sort_unstable_by_key(sort_rank);
+    inserts.sort_unstable_by_key(MessageCache::sort_rank);
     deletes.sort_unstable();
 
     let keywords = merge_custom_keywords(cache, changed_ids, fetched_keywords);
 
-    let mut patches = Vec::with_capacity(fetched.len());
-    for (document_id, record) in fetched {
-        if let Some(position) = cache.position(document_id) {
-            patches.push((position, record));
-        }
-    }
+    let patches = fetched
+        .into_iter()
+        .filter_map(|(document_id, record)| {
+            cache
+                .position(document_id)
+                .map(|position| (position, record))
+        })
+        .collect::<Vec<_>>();
 
     if inserts.is_empty() && deletes.is_empty() {
         cache.patch(0, &patches, keywords)
@@ -164,11 +162,6 @@ fn merge_custom_keywords(
     keywords.into()
 }
 
-#[inline(always)]
-fn sort_rank(item: &MessageCache) -> (u64, u32) {
-    (item.received_at(), item.document_id())
-}
-
 pub(crate) async fn full_email_cache_build(
     server: &Server,
     account_id: u32,
@@ -210,7 +203,7 @@ pub(crate) async fn full_email_cache_build(
 
 impl MessagesCacheBuilder {
     pub fn build(mut self) -> MessagesCache {
-        self.items.sort_unstable_by_key(sort_rank);
+        self.items.sort_unstable_by_key(MessageCache::sort_rank);
         self.keywords.sort_unstable_by_key(|k| k.document_id);
         MessagesCache::new(self.change_id, self.items, self.keywords)
     }
@@ -508,7 +501,7 @@ mod tests {
         MessageCache::new(
             document_id,
             mailboxes,
-            if document_id % 11 == 0 {
+            if document_id.is_multiple_of(11) {
                 HAS_CUSTOM_KEYWORDS
             } else {
                 document_id % 17
@@ -523,7 +516,7 @@ mod tests {
 
     fn sample(count: u32) -> (Vec<MessageCache>, Vec<CustomKeywords>) {
         let mut items = (0..count).map(message).collect::<Vec<_>>();
-        items.sort_unstable_by_key(sort_rank);
+        items.sort_unstable_by_key(MessageCache::sort_rank);
 
         let mut keywords = items
             .iter()
@@ -569,7 +562,7 @@ mod tests {
 
         let ghost = items[items.len() / 2].document_id();
         let changed_ids = AHashMap::from_iter([(ghost, true)]);
-        let merged = merge_email_cache(&cache, &changed_ids, &[ghost], AHashMap::new(), Vec::new());
+        let merged = merge_email_cache(&cache, &changed_ids, AHashMap::new(), Vec::new());
 
         assert!(
             !merged.contains(ghost),
@@ -623,7 +616,6 @@ mod tests {
         let merged = merge_email_cache(
             &cache,
             &changed_ids,
-            &[toggled],
             AHashMap::from_iter([(toggled, record)]),
             Vec::new(),
         );
