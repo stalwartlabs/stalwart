@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::ToCompactString;
-
 use crate::{
     Command,
     protocol::rename,
@@ -24,7 +22,7 @@ impl Request<Command> {
                             .next()
                             .unwrap()
                             .unwrap_string()
-                            .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                            .map_err(|v| bad(self.tag.clone(), v))?,
                         is_utf8,
                     ),
                     new_mailbox_name: utf7_maybe_decode(
@@ -32,7 +30,7 @@ impl Request<Command> {
                             .next()
                             .unwrap()
                             .unwrap_string()
-                            .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                            .map_err(|v| bad(self.tag.clone(), v))?,
                         is_utf8,
                     ),
                     tag: self.tag,

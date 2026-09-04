@@ -4,40 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-/*
-
-   l - lookup (mailbox is visible to LIST/LSUB commands, SUBSCRIBE
-       mailbox)
-   r - read (SELECT the mailbox, perform STATUS)
-   s - keep seen/unseen information across sessions (set or clear
-       \SEEN flag via STORE, also set \SEEN during APPEND/COPY/
-       FETCH BODY[...])
-   w - write (set or clear flags other than \SEEN and \DELETED via
-       STORE, also set them during APPEND/COPY)
-   i - insert (perform APPEND, COPY into mailbox)
-   p - post (send mail to submission address for mailbox,
-       not enforced by IMAP4 itself)
-   k - create mailboxes (CREATE new sub-mailboxes in any
-       implementation-defined hierarchy, parent mailbox for the new
-       mailbox name in RENAME)
-   x - delete mailbox (DELETE mailbox, old mailbox name in RENAME)
-   t - delete messages (set or clear \DELETED flag via STORE, set
-       \DELETED flag during APPEND/COPY)
-   e - perform EXPUNGE and expunge as a part of CLOSE
-   a - administer (perform SETACL/DELETEACL/GETACL/LISTRIGHTS)
-
-   // RFC2086
-   c - create (CREATE new sub-mailboxes in any implementation-defined
-       hierarchy)
-   d - delete (STORE DELETED flag, perform EXPUNGE)
-
-*/
-
-use types::acl::Acl;
+use compact_str::CompactString;
 
 use super::quoted_string;
 use crate::utf7::utf7_encode;
 use std::fmt::Display;
+use types::acl::Acl;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Rights {
@@ -69,28 +41,28 @@ pub enum ModRightsOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
-    pub mailbox_name: String,
-    pub identifier: Option<String>,
+    pub tag: CompactString,
+    pub mailbox_name: CompactString,
+    pub identifier: Option<CompactString>,
     pub mod_rights: Option<ModRights>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetAclResponse {
-    pub mailbox_name: String,
+    pub mailbox_name: CompactString,
     pub permissions: Vec<(String, Vec<Rights>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListRightsResponse {
-    pub mailbox_name: String,
-    pub identifier: String,
+    pub mailbox_name: CompactString,
+    pub identifier: CompactString,
     pub permissions: Vec<Vec<Rights>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MyRightsResponse {
-    pub mailbox_name: String,
+    pub mailbox_name: CompactString,
     pub rights: Vec<Rights>,
 }
 

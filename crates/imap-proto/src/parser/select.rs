@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::{CompactString, ToCompactString, format_compact};
+use compact_str::format_compact;
 use std::str::FromStr;
 use types::id::Id;
 
@@ -31,7 +31,7 @@ impl Request<Command> {
                     .next()
                     .unwrap()
                     .unwrap_string()
-                    .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                    .map_err(|v| bad(self.tag.clone(), v))?,
                 is_utf8,
             );
 
@@ -51,10 +51,7 @@ impl Request<Command> {
                                     .next()
                                     .is_none_or(|token| !token.is_parenthesis_open())
                                 {
-                                    return Err(bad(
-                                        CompactString::from_string_buffer(self.tag),
-                                        "Expected '(' after 'QRESYNC'.",
-                                    ));
+                                    return Err(bad(self.tag, "Expected '(' after 'QRESYNC'."));
                                 }
 
                                 let uid_validity = parse_number::<u32>(
@@ -62,32 +59,32 @@ impl Request<Command> {
                                         .next()
                                         .ok_or_else(|| {
                                             bad(
-                                                self.tag.to_compact_string(),
+                                                self.tag.clone(),
                                                 "Missing uidvalidity parameter for QRESYNC.",
                                             )
                                         })?
                                         .unwrap_bytes(),
                                 )
-                                .map_err(|v| bad(self.tag.to_compact_string(), v))?;
+                                .map_err(|v| bad(self.tag.clone(), v))?;
                                 let modseq = parse_number::<u64>(
                                     &tokens
                                         .next()
                                         .ok_or_else(|| {
                                             bad(
-                                                self.tag.to_compact_string(),
+                                                self.tag.clone(),
                                                 "Missing modseq parameter for QRESYNC.",
                                             )
                                         })?
                                         .unwrap_bytes(),
                                 )
-                                .map_err(|v| bad(self.tag.to_compact_string(), v))?;
+                                .map_err(|v| bad(self.tag.clone(), v))?;
 
                                 let mut known_uids = None;
                                 let mut seq_match = None;
                                 let has_seq_match = match tokens.peek() {
                                     Some(Token::Argument(value)) => {
                                         known_uids = parse_sequence_set(value)
-                                            .map_err(|v| bad(self.tag.to_compact_string(), v))?
+                                            .map_err(|v| bad(self.tag.clone(), v))?
                                             .into();
                                         tokens.next();
                                         if matches!(tokens.peek(), Some(Token::ParenthesisOpen)) {
@@ -111,34 +108,31 @@ impl Request<Command> {
                                                 .next()
                                                 .ok_or_else(|| {
                                                     bad(
-                                            self.tag.to_compact_string(),
+                                            self.tag.clone(),
                                             "Missing known-sequence-set parameter for QRESYNC.",
                                         )
                                                 })?
                                                 .unwrap_bytes(),
                                         )
-                                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                        .map_err(|v| bad(self.tag.clone(), v))?,
                                         parse_sequence_set(
                                             &tokens
                                                 .next()
                                                 .ok_or_else(|| {
                                                     bad(
-                                                self.tag.to_compact_string(),
+                                                self.tag.clone(),
                                                 "Missing known-uid-set parameter for QRESYNC.",
                                             )
                                                 })?
                                                 .unwrap_bytes(),
                                         )
-                                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                        .map_err(|v| bad(self.tag.clone(), v))?,
                                     ));
                                     if tokens
                                         .next()
                                         .is_none_or(|token| !token.is_parenthesis_close())
                                     {
-                                        return Err(bad(
-                                            CompactString::from_string_buffer(self.tag),
-                                            "Missing ')' for 'QRESYNC'.",
-                                        ));
+                                        return Err(bad(self.tag, "Missing ')' for 'QRESYNC'."));
                                     }
                                 }
 
@@ -146,10 +140,7 @@ impl Request<Command> {
                                     .next()
                                     .is_none_or(|token| !token.is_parenthesis_close())
                                 {
-                                    return Err(bad(
-                                        CompactString::from_string_buffer(self.tag),
-                                        "Missing ')' for 'QRESYNC'.",
-                                    ));
+                                    return Err(bad(self.tag, "Missing ')' for 'QRESYNC'."));
                                 }
 
                                 qresync = QResync {
@@ -172,7 +163,7 @@ impl Request<Command> {
                                                     .next()
                                                     .ok_or_else(|| {
                                                         bad(
-                                                            self.tag.to_compact_string(),
+                                                            self.tag.clone(),
                                                             "Expected value after OBJECTID key.",
                                                         )
                                                     })?
@@ -190,7 +181,7 @@ impl Request<Command> {
                                             }
                                             _ => {
                                                 return Err(bad(
-                                                    CompactString::from_string_buffer(self.tag),
+                                                    self.tag,
                                                     format_compact!(
                                                         "Unexpected value '{}'.",
                                                         token
@@ -207,7 +198,7 @@ impl Request<Command> {
                             }
                             _ => {
                                 return Err(bad(
-                                    CompactString::from_string_buffer(self.tag),
+                                    self.tag,
                                     format_compact!("Unexpected value '{}'.", token),
                                 ));
                             }
@@ -216,7 +207,7 @@ impl Request<Command> {
                 }
                 Some(token) => {
                     return Err(bad(
-                        CompactString::from_string_buffer(self.tag),
+                        self.tag,
                         format_compact!("Unexpected value '{}'.", token),
                     ));
                 }

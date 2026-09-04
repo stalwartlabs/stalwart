@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 // Ported from https://github.com/jstedfast/MailKit/blob/master/MailKit/Net/Imap/ImapEncoding.cs
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
@@ -118,11 +119,13 @@ pub fn utf7_encode(text: &str) -> String {
 }
 
 #[inline(always)]
-pub fn utf7_maybe_decode(text: String, is_utf8: bool) -> String {
+pub fn utf7_maybe_decode(text: CompactString, is_utf8: bool) -> CompactString {
     if is_utf8 {
         text
     } else {
-        utf7_decode(&text).unwrap_or(text)
+        utf7_decode(&text)
+            .map(CompactString::from_string_buffer)
+            .unwrap_or(text)
     }
 }
 

@@ -133,7 +133,7 @@ pub enum ResponseCode {
     Active,
     NonExistent,
     AlreadyExists,
-    Tag(String),
+    Tag(CompactString),
     Warnings,
 }
 

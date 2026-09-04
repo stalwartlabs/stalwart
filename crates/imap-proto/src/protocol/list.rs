@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 use crate::utf7::utf7_encode;
 
@@ -14,14 +15,14 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Arguments {
     Basic {
-        tag: String,
-        reference_name: String,
-        mailbox_name: String,
+        tag: CompactString,
+        reference_name: CompactString,
+        mailbox_name: CompactString,
     },
     Extended {
-        tag: String,
-        reference_name: String,
-        mailbox_name: Vec<String>,
+        tag: CompactString,
+        reference_name: CompactString,
+        mailbox_name: Vec<CompactString>,
         selection_options: Vec<SelectionOption>,
         return_options: Vec<ReturnOption>,
     },
@@ -89,7 +90,7 @@ pub enum Tag {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListItem {
-    pub mailbox_name: String,
+    pub mailbox_name: CompactString,
     pub attributes: Vec<Attribute>,
     pub tags: Vec<Tag>,
 }
@@ -110,7 +111,7 @@ impl Arguments {
         }
     }
 
-    pub fn unwrap_tag(self) -> String {
+    pub fn unwrap_tag(self) -> CompactString {
         match self {
             Arguments::Basic { tag, .. } => tag,
             Arguments::Extended { tag, .. } => tag,
@@ -204,7 +205,7 @@ impl Tag {
 }
 
 impl ListItem {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<CompactString>) -> Self {
         ListItem {
             mailbox_name: name.into(),
             attributes: Vec::new(),
@@ -252,31 +253,27 @@ impl ListItem {
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(100);
-
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         match (self.list_items.is_empty(), self.status_items.is_empty()) {
             (false, false) => {
                 for (list_item, status_item) in self.list_items.iter().zip(self.status_items.iter())
                 {
-                    list_item.serialize(&mut buf, self.is_rev2, self.is_utf8, self.is_lsub);
-                    status_item.serialize(&mut buf, self.is_rev2);
+                    list_item.serialize(buf, self.is_rev2, self.is_utf8, self.is_lsub);
+                    status_item.serialize(buf, self.is_rev2);
                 }
             }
             (false, true) => {
                 for list_item in &self.list_items {
-                    list_item.serialize(&mut buf, self.is_rev2, self.is_utf8, self.is_lsub);
+                    list_item.serialize(buf, self.is_rev2, self.is_utf8, self.is_lsub);
                 }
             }
             (true, false) => {
                 for status_item in &self.status_items {
-                    status_item.serialize(&mut buf, self.is_rev2);
+                    status_item.serialize(buf, self.is_rev2);
                 }
             }
             _ => (),
         }
-
-        buf
     }
 }
 

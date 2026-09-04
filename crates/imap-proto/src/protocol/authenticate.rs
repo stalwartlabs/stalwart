@@ -3,12 +3,13 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
+    pub tag: CompactString,
     pub mechanism: Mechanism,
-    pub params: Vec<String>,
+    pub params: Vec<CompactString>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +29,8 @@ pub enum Mechanism {
 }
 
 impl Mechanism {
-    pub fn serialize(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(match self {
+    pub fn as_bytes(&self) -> &'static [u8] {
+        match self {
             Mechanism::Plain => b"PLAIN",
             Mechanism::CramMd5 => b"CRAM-MD5",
             Mechanism::DigestMd5 => b"DIGEST-MD5",
@@ -42,7 +43,11 @@ impl Mechanism {
             Mechanism::External => b"EXTERNAL",
             Mechanism::OAuthBearer => b"OAUTHBEARER",
             Mechanism::XOauth2 => b"XOAUTH2",
-        });
+        }
+    }
+
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(self.as_bytes());
     }
 
     pub fn into_bytes(self) -> Vec<u8> {

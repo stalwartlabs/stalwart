@@ -5,11 +5,9 @@
  */
 
 use crate::{Command, ResponseCode, ResponseType, StatusResponse};
-use ahash::AHashSet;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use chrono::{DateTime, Utc};
 use compact_str::CompactString;
-use std::{cmp::Ordering, fmt::Display};
+use std::fmt::Display;
 use types::id::Id;
 use types::keyword::Keyword;
 use utils::chained_bytes::SliceRange;
@@ -141,71 +139,33 @@ impl Sequence {
             _ => false,
         }
     }
-
-    pub fn expand(&self, max_value: u32) -> AHashSet<u32> {
-        match self {
-            Sequence::Number { value } => AHashSet::from_iter([*value]),
-            Sequence::List { items } => {
-                let mut result = AHashSet::with_capacity(items.len());
-                for item in items {
-                    match item {
-                        Sequence::Number { value } => {
-                            result.insert(*value);
-                        }
-                        Sequence::Range { start, end } => {
-                            let start = start.unwrap_or(max_value);
-                            let end = end.unwrap_or(max_value);
-                            match start.cmp(&end) {
-                                Ordering::Equal => {
-                                    result.insert(start);
-                                }
-                                Ordering::Less => {
-                                    result.extend(start..=end);
-                                }
-                                Ordering::Greater => {
-                                    result.extend(end..=start);
-                                }
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-                result
-            }
-            Sequence::Range { start, end } => {
-                let mut result = AHashSet::new();
-                let start = start.unwrap_or(max_value);
-                let end = end.unwrap_or(max_value);
-                match start.cmp(&end) {
-                    Ordering::Equal => {
-                        result.insert(start);
-                    }
-                    Ordering::Less => {
-                        result.extend(start..=end);
-                    }
-                    Ordering::Greater => {
-                        result.extend(end..=start);
-                    }
-                }
-                result
-            }
-            _ => AHashSet::new(),
-        }
-    }
 }
 
 pub trait ImapResponse {
-    fn serialize(self) -> Vec<u8>;
+    fn serialize_into(&self, buf: &mut Vec<u8>);
+
+    fn serialize(self) -> Vec<u8>
+    where
+        Self: Sized,
+    {
+        let mut buf = Vec::with_capacity(128);
+        self.serialize_into(&mut buf);
+        buf
+    }
 }
 
 pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
+    let text = text.as_bytes();
     buf.push(b'"');
-    for &c in text.as_bytes() {
-        if c == b'\\' || c == b'"' {
+    let mut copied = 0;
+    for (pos, &ch) in text.iter().enumerate() {
+        if ch == b'\\' || ch == b'"' {
+            buf.extend_from_slice(&text[copied..pos]);
             buf.push(b'\\');
+            copied = pos;
         }
-        buf.push(c);
     }
+    buf.extend_from_slice(&text[copied..]);
     buf.push(b'"');
 }
 
@@ -258,28 +218,73 @@ pub fn quoted_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
 
 pub fn literal_string(buf: &mut Vec<u8>, text: &[u8]) {
     buf.push(b'{');
-    buf.extend_from_slice(text.len().to_string().as_bytes());
+    push_int(buf, text.len());
     buf.extend_from_slice(b"}\r\n");
     buf.extend_from_slice(text);
 }
 
 pub fn literal_string_slice(buf: &mut Vec<u8>, text: &SliceRange<'_>) {
     buf.push(b'{');
-    buf.extend_from_slice(text.len().to_string().as_bytes());
+    push_int(buf, text.len());
     buf.extend_from_slice(b"}\r\n");
     buf.extend(*text);
 }
 
+pub fn push_int(buf: &mut Vec<u8>, value: impl itoa::Integer) {
+    let mut int_buf = itoa::Buffer::new();
+    buf.extend_from_slice(int_buf.format(value).as_bytes());
+}
+
+const MONTHS_ABBREVIATED: [&[u8; 3]; 12] = [
+    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
+];
+
+fn push_zero_padded(buf: &mut Vec<u8>, value: u32) {
+    buf.push(b'0' + (value / 10) as u8);
+    buf.push(b'0' + (value % 10) as u8);
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let shifted = days + 719_468;
+    let era = if shifted >= 0 {
+        shifted
+    } else {
+        shifted - 146_096
+    } / 146_097;
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    } as u32;
+    let year = year_of_era + era * 400;
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
 pub fn quoted_timestamp(buf: &mut Vec<u8>, timestamp: i64) {
+    let (year, month, day) = civil_from_days(timestamp.div_euclid(86_400));
+    let seconds_of_day = timestamp.rem_euclid(86_400) as u32;
+    let year = year.clamp(0, 9999) as u32;
+
     buf.push(b'"');
-    buf.extend_from_slice(
-        DateTime::<Utc>::from_timestamp(timestamp, 0)
-            .unwrap_or_default()
-            .format("%d-%b-%Y %H:%M:%S %z")
-            .to_string()
-            .as_bytes(),
-    );
-    buf.push(b'"');
+    push_zero_padded(buf, day);
+    buf.push(b'-');
+    buf.extend_from_slice(MONTHS_ABBREVIATED[(month - 1) as usize]);
+    buf.push(b'-');
+    push_zero_padded(buf, year / 100);
+    push_zero_padded(buf, year % 100);
+    buf.push(b' ');
+    push_zero_padded(buf, seconds_of_day / 3600);
+    buf.push(b':');
+    push_zero_padded(buf, (seconds_of_day / 60) % 60);
+    buf.push(b':');
+    push_zero_padded(buf, seconds_of_day % 60);
+    buf.extend_from_slice(b" +0000\"");
 }
 
 pub fn quoted_rfc2822(buf: &mut Vec<u8>, timestamp: &mail_parser::DateTime) {
@@ -448,7 +453,7 @@ impl ResponseCode {
             ResponseCode::AlreadyExists => b"ALREADYEXISTS",
             ResponseCode::AppendUid { uid_validity, uids } => {
                 buf.extend_from_slice(b"APPENDUID ");
-                buf.extend_from_slice(uid_validity.to_string().as_bytes());
+                push_int(buf, *uid_validity);
                 buf.push(b' ');
                 serialize_sequence(buf, uids);
                 return;
@@ -474,7 +479,7 @@ impl ResponseCode {
                 dest_uids,
             } => {
                 buf.extend_from_slice(b"COPYUID ");
-                buf.extend_from_slice(uid_validity.to_string().as_bytes());
+                push_int(buf, *uid_validity);
                 buf.push(b' ');
                 serialize_sequence(buf, src_uids);
                 buf.push(b' ');
@@ -513,7 +518,7 @@ impl ResponseCode {
             }
             ResponseCode::HighestModseq { modseq } => {
                 buf.extend_from_slice(b"HIGHESTMODSEQ ");
-                buf.extend_from_slice(modseq.to_string().as_bytes());
+                push_int(buf, *modseq);
                 return;
             }
             ResponseCode::UseAttr => b"USEATTR",
@@ -522,10 +527,10 @@ impl ResponseCode {
             ResponseCode::TooMany => b"TOOMANY",
             ResponseCode::MessageLimit { limit, uid } => {
                 buf.extend_from_slice(b"MESSAGELIMIT ");
-                buf.extend_from_slice(limit.to_string().as_bytes());
+                push_int(buf, *limit);
                 if let Some(uid) = uid {
                     buf.push(b' ');
-                    buf.extend_from_slice(uid.to_string().as_bytes());
+                    push_int(buf, *uid);
                 }
                 return;
             }
@@ -609,22 +614,26 @@ impl From<ResponseType> for trc::Value {
 }
 
 impl StatusResponse {
-    pub fn serialize(self, mut buf: Vec<u8>) -> Vec<u8> {
+    pub fn serialize_into(&self, buf: &mut Vec<u8>) {
         if let Some(tag) = &self.tag {
             buf.extend_from_slice(tag.as_bytes());
         } else {
             buf.push(b'*');
         }
         buf.push(b' ');
-        self.rtype.serialize(&mut buf);
+        self.rtype.serialize(buf);
         buf.push(b' ');
         if let Some(code) = &self.code {
             buf.push(b'[');
-            code.serialize(&mut buf);
+            code.serialize(buf);
             buf.extend_from_slice(b"] ");
         }
         buf.extend_from_slice(self.message.as_bytes());
         buf.extend_from_slice(b"\r\n");
+    }
+
+    pub fn serialize(self, mut buf: Vec<u8>) -> Vec<u8> {
+        self.serialize_into(&mut buf);
         buf
     }
 
@@ -693,7 +702,7 @@ impl ProtocolVersion {
 pub fn serialize_sequence(buf: &mut Vec<u8>, list: &[u32]) {
     let mut ids = list.iter().peekable();
     while let Some(&id) = ids.next() {
-        buf.extend_from_slice(id.to_string().as_bytes());
+        push_int(buf, id);
         let mut range_id = id;
         loop {
             match ids.peek() {
@@ -704,7 +713,7 @@ pub fn serialize_sequence(buf: &mut Vec<u8>, list: &[u32]) {
                 next => {
                     if range_id != id {
                         buf.push(b':');
-                        buf.extend_from_slice(range_id.to_string().as_bytes());
+                        push_int(buf, range_id);
                     }
                     if next.is_some() {
                         buf.push(b',');
@@ -721,10 +730,10 @@ pub fn serialize_sequence_ranges(buf: &mut Vec<u8>, ranges: &[(u32, u32)]) {
         if pos > 0 {
             buf.push(b',');
         }
-        buf.extend_from_slice(from.to_string().as_bytes());
+        push_int(buf, *from);
         if to != from {
             buf.push(b':');
-            buf.extend_from_slice(to.to_string().as_bytes());
+            push_int(buf, *to);
         }
     }
 }
@@ -791,6 +800,31 @@ mod tests {
     use crate::parser::parse_sequence_set;
     use crate::protocol::ObjectId;
     use types::id::Id;
+
+    #[test]
+    fn quoted_timestamp_matches_chrono() {
+        use chrono::{DateTime, Utc};
+
+        let mut timestamp = -2_208_988_800i64;
+        while timestamp < 4_102_444_800 {
+            let mut buf = Vec::new();
+            super::quoted_timestamp(&mut buf, timestamp);
+
+            let expected = format!(
+                "\"{}\"",
+                DateTime::<Utc>::from_timestamp(timestamp, 0)
+                    .unwrap_or_default()
+                    .format("%d-%b-%Y %H:%M:%S %z")
+            );
+            assert_eq!(
+                String::from_utf8(buf).unwrap(),
+                expected,
+                "mismatch at timestamp {timestamp}"
+            );
+
+            timestamp += 86_400 * 13 + 3_607;
+        }
+    }
 
     #[test]
     fn serialize_objectid_compound() {

@@ -3,12 +3,14 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use crate::protocol::push_int;
+use compact_str::CompactString;
 
 use super::{Flag, Sequence, quoted_string, serialize_sequence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
+    pub tag: CompactString,
     pub is_esearch: bool,
     pub sort: Option<Vec<Comparator>>,
     pub result_options: Vec<ResultOption>,
@@ -108,8 +110,8 @@ pub enum Filter {
     ModSeq((u64, ModSeqEntry)),
 
     // RFC 8474 - ObjectID
-    EmailId(String),
-    ThreadId(String),
+    EmailId(CompactString),
+    ThreadId(CompactString),
 
     // RFC 9738 - MESSAGELIMIT
     UidAfter(u32),
@@ -146,15 +148,15 @@ impl Response {
             }
             if let Some(count) = &self.count {
                 buf.extend_from_slice(b" COUNT ");
-                buf.extend_from_slice(count.to_string().as_bytes());
+                push_int(&mut buf, *count);
             }
             if let Some(min) = &self.min {
                 buf.extend_from_slice(b" MIN ");
-                buf.extend_from_slice(min.to_string().as_bytes());
+                push_int(&mut buf, *min);
             }
             if let Some(max) = &self.max {
                 buf.extend_from_slice(b" MAX ");
-                buf.extend_from_slice(max.to_string().as_bytes());
+                push_int(&mut buf, *max);
             }
             if !self.ids.is_empty() {
                 buf.extend_from_slice(b" ALL ");
@@ -162,7 +164,7 @@ impl Response {
             }
             if let Some(highest_modseq) = self.highest_modseq {
                 buf.extend_from_slice(b" MODSEQ ");
-                buf.extend_from_slice(highest_modseq.to_string().as_bytes());
+                push_int(&mut buf, highest_modseq);
             }
         } else {
             if !self.is_sort {
@@ -173,12 +175,12 @@ impl Response {
             if !self.ids.is_empty() {
                 for id in &self.ids {
                     buf.push(b' ');
-                    buf.extend_from_slice(id.to_string().as_bytes());
+                    push_int(&mut buf, *id);
                 }
             }
             if let Some(highest_modseq) = self.highest_modseq {
                 buf.extend_from_slice(b" (MODSEQ ");
-                buf.extend_from_slice(highest_modseq.to_string().as_bytes());
+                push_int(&mut buf, highest_modseq);
                 buf.push(b')');
             }
         }

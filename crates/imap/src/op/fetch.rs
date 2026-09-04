@@ -506,7 +506,7 @@ impl<T: SessionStream> SessionData<T> {
                     match attribute {
                         Attribute::Envelope => {
                             items.push(DataItem::Envelope {
-                                envelope: message.envelope(),
+                                envelope: message.envelope().into(),
                             });
                         }
                         Attribute::Flags => {
@@ -567,12 +567,12 @@ impl<T: SessionStream> SessionData<T> {
                         }
                         Attribute::Body => {
                             items.push(DataItem::Body {
-                                part: metadata.body_structure(&decoded, false),
+                                part: metadata.body_structure(&decoded, false).into(),
                             });
                         }
                         Attribute::BodyStructure => {
                             items.push(DataItem::BodyStructure {
-                                part: metadata.body_structure(&decoded, true),
+                                part: metadata.body_structure(&decoded, true).into(),
                             });
                         }
                         Attribute::BodySection {

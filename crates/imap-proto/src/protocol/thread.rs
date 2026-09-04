@@ -3,12 +3,14 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use crate::protocol::push_int;
+use compact_str::CompactString;
 
 use super::{ImapResponse, search::Filter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
+    pub tag: CompactString,
     pub filter: Vec<Filter>,
     pub algorithm: Algorithm,
 }
@@ -26,8 +28,7 @@ pub struct Response {
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64);
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(b"* THREAD ");
         for thread in &self.threads {
             buf.push(b'(');
@@ -35,12 +36,11 @@ impl ImapResponse for Response {
                 if pos > 0 {
                     buf.push(b' ');
                 }
-                buf.extend_from_slice(id.to_string().as_bytes());
+                push_int(buf, *id);
             }
             buf.push(b')');
         }
         buf.extend_from_slice(b"\r\n");
-        buf
     }
 }
 

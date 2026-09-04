@@ -3,6 +3,8 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use crate::protocol::push_int;
+use compact_str::CompactString;
 
 use crate::{ResponseCode, StatusResponse};
 
@@ -10,8 +12,8 @@ use super::{ImapResponse, ObjectId, Sequence, list::ListItem};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
-    pub mailbox_name: String,
+    pub tag: CompactString,
+    pub mailbox_name: CompactString,
     pub condstore: bool,
     pub qresync: Option<QResync>,
     pub objectid: Option<ObjectId>,
@@ -49,15 +51,14 @@ pub struct Exists {
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(100);
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         if self.closed_previous {
-            buf = StatusResponse::ok("Closed previous mailbox")
+            StatusResponse::ok("Closed previous mailbox")
                 .with_code(ResponseCode::Closed)
-                .serialize(buf);
+                .serialize_into(buf);
         }
         buf.extend_from_slice(b"* ");
-        buf.extend_from_slice(self.total_messages.to_string().as_bytes());
+        push_int(buf, self.total_messages);
         if !self.is_rev2 && self.recent_messages > 0 {
             buf.extend_from_slice(
                 b" EXISTS\r\n* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\Recent)\r\n",
@@ -69,14 +70,14 @@ impl ImapResponse for Response {
         }
         if self.is_rev2 {
             self.mailbox
-                .serialize(&mut buf, self.is_rev2, self.is_utf8, false);
+                .serialize(buf, self.is_rev2, self.is_utf8, false);
         } else {
             buf.extend_from_slice(b"* ");
-            buf.extend_from_slice(self.recent_messages.to_string().as_bytes());
+            push_int(buf, self.recent_messages);
             buf.extend_from_slice(b" RECENT\r\n");
             if self.unseen_seq > 0 {
                 buf.extend_from_slice(b"* OK [UNSEEN ");
-                buf.extend_from_slice(self.unseen_seq.to_string().as_bytes());
+                push_int(buf, self.unseen_seq);
                 buf.extend_from_slice(b"] Unseen messages\r\n");
             }
         }
@@ -84,19 +85,18 @@ impl ImapResponse for Response {
             b"* OK [PERMANENTFLAGS (\\Deleted \\Seen \\Answered \\Flagged \\Draft \\*)] All allowed\r\n",
         );
         buf.extend_from_slice(b"* OK [UIDVALIDITY ");
-        buf.extend_from_slice(self.uid_validity.to_string().as_bytes());
+        push_int(buf, self.uid_validity);
         buf.extend_from_slice(b"] UIDs valid\r\n* OK [UIDNEXT ");
-        buf.extend_from_slice(self.uid_next.to_string().as_bytes());
+        push_int(buf, self.uid_next);
         buf.extend_from_slice(b"] Next predicted UID\r\n");
-        if let Some(highest_modseq) = self.highest_modseq {
-            highest_modseq.serialize(&mut buf);
+        if let Some(highest_modseq) = &self.highest_modseq {
+            highest_modseq.serialize(buf);
         }
         if let Some(objectid) = &self.objectid {
             buf.extend_from_slice(b"* OK [");
-            objectid.serialize(&mut buf);
+            objectid.serialize(buf);
             buf.extend_from_slice(b"] Object identifiers\r\n");
         }
-        buf
     }
 }
 
@@ -107,7 +107,7 @@ impl HighestModSeq {
 
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(b"* OK [HIGHESTMODSEQ ");
-        buf.extend_from_slice(self.0.to_string().as_bytes());
+        push_int(buf, self.0);
         buf.extend_from_slice(b"] Highest Modseq\r\n");
     }
 
@@ -121,7 +121,7 @@ impl HighestModSeq {
 impl Exists {
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(b"* ");
-        buf.extend_from_slice(self.total_messages.to_string().as_bytes());
+        push_int(buf, self.total_messages);
         buf.extend_from_slice(b" EXISTS\r\n");
     }
 

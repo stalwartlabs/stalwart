@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::ToCompactString;
-
 use crate::{
     Command,
     protocol::list::{self, SelectionOption},
@@ -21,15 +19,15 @@ impl Request<Command> {
             Ok(list::Arguments::Extended {
                 reference_name: tokens
                     .next()
-                    .ok_or_else(|| bad(self.tag.to_compact_string(), "Missing reference name."))?
+                    .ok_or_else(|| bad(self.tag.clone(), "Missing reference name."))?
                     .unwrap_string()
-                    .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                    .map_err(|v| bad(self.tag.clone(), v))?,
                 mailbox_name: vec![utf7_maybe_decode(
                     tokens
                         .next()
-                        .ok_or_else(|| bad(self.tag.to_compact_string(), "Missing mailbox name."))?
+                        .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     is_utf8,
                 )],
                 selection_options: vec![SelectionOption::Subscribed],

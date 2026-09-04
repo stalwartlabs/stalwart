@@ -188,7 +188,7 @@ impl<T: SessionStream> SessionData<T> {
             // List deleted mailboxes
             for mailbox_name in changes.deleted {
                 ListItem {
-                    mailbox_name,
+                    mailbox_name: mailbox_name.into(),
                     attributes: vec![Attribute::NonExistent],
                     tags: vec![],
                 }
@@ -198,7 +198,7 @@ impl<T: SessionStream> SessionData<T> {
             // List added mailboxes
             for mailbox_name in changes.added {
                 ListItem {
-                    mailbox_name,
+                    mailbox_name: mailbox_name.into(),
                     attributes: vec![],
                     tags: vec![],
                 }
@@ -209,7 +209,7 @@ impl<T: SessionStream> SessionData<T> {
                 if let Ok(status) = self
                     .status(
                         &mut caches,
-                        mailbox_name,
+                        mailbox_name.into(),
                         &[
                             Status::Messages,
                             Status::Unseen,

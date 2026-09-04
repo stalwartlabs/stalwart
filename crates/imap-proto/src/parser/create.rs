@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::{CompactString, ToCompactString, format_compact};
+use compact_str::format_compact;
 
 use crate::{
     Command,
@@ -22,27 +22,21 @@ impl Request<Command> {
                     .next()
                     .unwrap()
                     .unwrap_string()
-                    .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                    .map_err(|v| bad(self.tag.clone(), v))?,
                 is_utf8,
             );
             let mailbox_role = if let Some(Token::ParenthesisOpen) = tokens.next() {
                 match tokens.next() {
                     Some(Token::Argument(param)) if param.eq_ignore_ascii_case(b"USE") => (),
                     _ => {
-                        return Err(bad(
-                            CompactString::from_string_buffer(self.tag),
-                            "Failed to parse, expected 'USE'.",
-                        ));
+                        return Err(bad(self.tag, "Failed to parse, expected 'USE'."));
                     }
                 }
                 if tokens
                     .next()
                     .is_none_or(|token| !token.is_parenthesis_open())
                 {
-                    return Err(bad(
-                        CompactString::from_string_buffer(self.tag),
-                        "Expected '(' after 'USE'.",
-                    ));
+                    return Err(bad(self.tag, "Expected '(' after 'USE'."));
                 }
                 match tokens.next() {
                     Some(Token::Argument(value)) => {
@@ -63,13 +57,13 @@ impl Request<Command> {
                             Some(Some(tag)) => Some(tag),
                             Some(None) => {
                                 return Err(bad(
-                                    CompactString::from_string_buffer(self.tag),
+                                    self.tag,
                                     "A mailbox with the \"\\All\" attribute already exists.",
                                 ));
                             }
                             None => {
                                 return Err(bad(
-                                    CompactString::from_string_buffer(self.tag),
+                                    self.tag,
                                     format_compact!(
                                         "Special use attribute {:?} is not supported.",
                                         String::from_utf8_lossy(&value)
@@ -79,10 +73,7 @@ impl Request<Command> {
                         }
                     }
                     _ => {
-                        return Err(bad(
-                            CompactString::from_string_buffer(self.tag),
-                            "Invalid SPECIAL-USE attribute.",
-                        ));
+                        return Err(bad(self.tag, "Invalid SPECIAL-USE attribute."));
                     }
                 }
             } else {

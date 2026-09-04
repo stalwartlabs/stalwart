@@ -13,6 +13,8 @@ chrono = { version = "0.4"}
 trc = { path = "../trc" }
 hashify = { version = "0.2" }
 compact_str = "0.10.0"
+smallvec = { version = "1", features = ["union"] }
+itoa = "1"
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }

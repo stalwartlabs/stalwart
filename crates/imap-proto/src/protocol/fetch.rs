@@ -3,6 +3,8 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use crate::protocol::push_int;
+use compact_str::CompactString;
 
 use super::{
     Flag, ImapResponse, ObjectId, Sequence, literal_string, quoted_or_literal_encoded_string,
@@ -16,7 +18,7 @@ use utils::chained_bytes::SliceRange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
+    pub tag: CompactString,
     pub sequence_set: Sequence,
     pub attributes: Vec<Attribute>,
     pub changed_since: Option<u64>,
@@ -103,10 +105,10 @@ pub enum DataItem<'x> {
         size: usize,
     },
     Body {
-        part: BodyPart<'x>,
+        part: Box<BodyPart<'x>>,
     },
     BodyStructure {
-        part: BodyPart<'x>,
+        part: Box<BodyPart<'x>>,
     },
     BodySection {
         sections: Vec<Section>,
@@ -114,7 +116,7 @@ pub enum DataItem<'x> {
         contents: Cow<'x, [u8]>,
     },
     Envelope {
-        envelope: Envelope<'x>,
+        envelope: Box<Envelope<'x>>,
     },
     Flags {
         flags: Vec<Flag>,
@@ -377,7 +379,7 @@ impl<'x> BodyPart<'x> {
                 buf.extend_from_slice(b"\"text\" ");
                 fields.serialize(buf, is_utf8);
                 buf.push(b' ');
-                buf.extend_from_slice(body_size_lines.to_string().as_bytes());
+                push_int(buf, *body_size_lines);
                 if is_extended {
                     buf.push(b' ');
                     quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
@@ -408,7 +410,7 @@ impl<'x> BodyPart<'x> {
                     buf.extend_from_slice(b"NIL");
                 }
                 buf.push(b' ');
-                buf.extend_from_slice(body_size_lines.to_string().as_bytes());
+                push_int(buf, *body_size_lines);
                 if is_extended {
                     buf.push(b' ');
                     quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
@@ -515,7 +517,7 @@ impl BodyPartFields<'_> {
             quoted_or_literal_encoded_string_or_nil(buf, item.as_deref(), is_utf8);
         }
         buf.push(b' ');
-        buf.extend_from_slice(self.body_size_octets.to_string().as_bytes());
+        push_int(buf, self.body_size_octets);
     }
 
     pub fn into_owned<'y>(self) -> BodyPartFields<'y> {
@@ -612,7 +614,7 @@ impl Section {
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         match self {
             Section::Part { num } => {
-                buf.extend_from_slice(num.to_string().as_bytes());
+                push_int(buf, *num);
             }
             Section::Header => {
                 buf.extend_from_slice(b"HEADER");
@@ -628,7 +630,7 @@ impl Section {
                     if pos > 0 {
                         buf.push(b' ');
                     }
-                    buf.extend_from_slice(field.as_str().to_ascii_uppercase().as_bytes());
+                    buf.extend(field.bytes().map(|ch| ch.to_ascii_uppercase()));
                 }
                 buf.push(b')');
             }
@@ -735,11 +737,11 @@ impl DataItem<'_> {
                     if pos > 0 {
                         buf.push(b'.');
                     }
-                    buf.extend_from_slice(section.to_string().as_bytes());
+                    push_int(buf, *section);
                 }
                 if let Some(offset) = offset {
                     buf.extend_from_slice(b"]<");
-                    buf.extend_from_slice(offset.to_string().as_bytes());
+                    push_int(buf, *offset);
                     buf.extend_from_slice(b"> ");
                 } else {
                     buf.extend_from_slice(b"] ");
@@ -750,7 +752,7 @@ impl DataItem<'_> {
                     }
                     BodyContents::Bytes(bytes) => {
                         buf.extend_from_slice(b"~{");
-                        buf.extend_from_slice(bytes.len().to_string().as_bytes());
+                        push_int(buf, bytes.len());
                         buf.extend_from_slice(b"}\r\n");
                         buf.extend_from_slice(bytes);
                     }
@@ -762,10 +764,10 @@ impl DataItem<'_> {
                     if pos > 0 {
                         buf.push(b'.');
                     }
-                    buf.extend_from_slice(section.to_string().as_bytes());
+                    push_int(buf, *section);
                 }
                 buf.extend_from_slice(b"] ");
-                buf.extend_from_slice(size.to_string().as_bytes());
+                push_int(buf, *size);
             }
             DataItem::Body { part } => {
                 buf.extend_from_slice(b"BODY ");
@@ -789,7 +791,7 @@ impl DataItem<'_> {
                 }
                 if let Some(origin_octet) = origin_octet {
                     buf.extend_from_slice(b"]<");
-                    buf.extend_from_slice(origin_octet.to_string().as_bytes());
+                    push_int(buf, *origin_octet);
                     buf.extend_from_slice(b"> ");
                 } else {
                     buf.extend_from_slice(b"] ");
@@ -816,7 +818,7 @@ impl DataItem<'_> {
             }
             DataItem::Uid { uid } => {
                 buf.extend_from_slice(b"UID ");
-                buf.extend_from_slice(uid.to_string().as_bytes());
+                push_int(buf, *uid);
             }
             DataItem::Rfc822 { contents } => {
                 buf.extend_from_slice(b"RFC822 ");
@@ -828,7 +830,7 @@ impl DataItem<'_> {
             }
             DataItem::Rfc822Size { size } => {
                 buf.extend_from_slice(b"RFC822.SIZE ");
-                buf.extend_from_slice(size.to_string().as_bytes());
+                push_int(buf, *size);
             }
             DataItem::Rfc822Text { contents } => {
                 buf.extend_from_slice(b"RFC822.TEXT ");
@@ -844,7 +846,7 @@ impl DataItem<'_> {
             }
             DataItem::ModSeq { modseq } => {
                 buf.extend_from_slice(b"MODSEQ (");
-                buf.extend_from_slice(modseq.to_string().as_bytes());
+                push_int(buf, *modseq);
                 buf.push(b')');
             }
             DataItem::ObjectId(object_id) => {
@@ -857,7 +859,7 @@ impl DataItem<'_> {
 impl FetchItem<'_> {
     pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         buf.extend_from_slice(b"* ");
-        buf.extend_from_slice(self.id.to_string().as_bytes());
+        push_int(buf, self.id);
         buf.extend_from_slice(if self.is_uidonly {
             b" UIDFETCH (".as_slice()
         } else {
@@ -874,12 +876,10 @@ impl FetchItem<'_> {
 }
 
 impl ImapResponse for Response<'_> {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(128);
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         for item in &self.items {
-            item.serialize(&mut buf, self.is_utf8);
+            item.serialize(buf, self.is_utf8);
         }
-        buf
     }
 }
 
@@ -941,7 +941,7 @@ mod tests {
         for (item, expected_response) in [
             (
                 super::DataItem::Envelope {
-                    envelope: Envelope {
+                    envelope: Box::new(Envelope {
                         date: DateTime::from_timestamp(837570205).into(),
                         subject: Some("IMAP4rev2 WG mtg summary and minutes".into()),
                         from: vec![Address::Single(EmailAddress {
@@ -973,7 +973,7 @@ mod tests {
                         bcc: vec![],
                         in_reply_to: None,
                         message_id: Some("<B27397-0100000@cac.washington.ed>".into()),
-                    },
+                    }),
                 },
                 concat!(
                     "ENVELOPE (\"Wed, 17 Jul 1996 02:23:25 +0000\" ",
@@ -989,7 +989,7 @@ mod tests {
             ),
             (
                 super::DataItem::Envelope {
-                    envelope: Envelope {
+                    envelope: Box::new(Envelope {
                         date: DateTime::from_timestamp(837570205).into(),
                         subject: Some("Group test".into()),
                         from: vec![Address::Single(EmailAddress {
@@ -1015,7 +1015,7 @@ mod tests {
                         bcc: vec![],
                         in_reply_to: None,
                         message_id: Some("<B27397-0100000@cac.washington.ed>".into()),
-                    },
+                    }),
                 },
                 concat!(
                     "ENVELOPE (\"Wed, 17 Jul 1996 02:23:25 +0000\" ",
@@ -1032,7 +1032,7 @@ mod tests {
             ),
             (
                 super::DataItem::Body {
-                    part: BodyPart::Text {
+                    part: Box::new(BodyPart::Text {
                         fields: BodyPartFields {
                             body_subtype: Some("PLAIN".into()),
                             body_parameters: vec![("CHARSET".into(), "US-ASCII".into())].into(),
@@ -1048,13 +1048,13 @@ mod tests {
                             body_language: None,
                             body_location: None,
                         },
-                    },
+                    }),
                 },
                 "BODY (\"text\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\") NIL NIL \"7BIT\" 2279 48)",
             ),
             (
                 super::DataItem::Body {
-                    part: BodyPart::Message {
+                    part: Box::new(BodyPart::Message {
                         fields: BodyPartFields {
                             body_subtype: Some("RFC822".into()),
                             body_parameters: None,
@@ -1113,7 +1113,7 @@ mod tests {
                             body_language: None,
                             body_location: None,
                         },
-                    },
+                    }),
                 },
                 concat!(
                     "BODY (\"message\" \"RFC822\" NIL \"<abc@123>\" \"An attached email\" ",
@@ -1129,7 +1129,7 @@ mod tests {
             ),
             (
                 super::DataItem::Body {
-                    part: BodyPart::Multipart {
+                    part: Box::new(BodyPart::Multipart {
                         body_parts: vec![
                             BodyPart::Text {
                                 fields: BodyPartFields {
@@ -1180,7 +1180,7 @@ mod tests {
                             body_language: None,
                             body_location: None,
                         },
-                    },
+                    }),
                 },
                 concat!(
                     "BODY ((\"text\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\") ",
@@ -1192,7 +1192,7 @@ mod tests {
             ),
             (
                 DataItem::BodyStructure {
-                    part: BodyPart::Multipart {
+                    part: Box::new(BodyPart::Multipart {
                         body_parts: vec![
                             BodyPart::Multipart {
                                 body_parts: vec![
@@ -1289,7 +1289,7 @@ mod tests {
                             body_language: None,
                             body_location: None,
                         },
-                    },
+                    }),
                 },
                 concat!(
                     "BODYSTRUCTURE (((\"text\" \"PLAIN\" (\"CHARSET\" \"UTF-8\") ",

@@ -9,7 +9,6 @@ use crate::{
     protocol::{capability::Capability, enable},
     receiver::{Request, bad},
 };
-use compact_str::ToCompactString;
 
 impl Request<Command> {
     pub fn parse_enable(self) -> trc::Result<enable::Arguments> {
@@ -19,7 +18,7 @@ impl Request<Command> {
             for capability in self.tokens {
                 capabilities.push(
                     Capability::parse(&capability.unwrap_bytes())
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                 );
             }
             Ok(enable::Arguments {

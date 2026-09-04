@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-
+use super::ImapContext;
 use crate::{
     core::{AccountView, Session, SessionData},
     spawn_op,
 };
 use common::network::SessionStream;
-
+use compact_str::{CompactString, format_compact};
 use imap_proto::{
     Command, ResponseType, StatusResponse,
     protocol::{
@@ -23,10 +22,9 @@ use imap_proto::{
     receiver::Request,
 };
 use registry::schema::enums::Permission;
+use std::time::Instant;
 use tokio::sync::OwnedSemaphorePermit;
 use trc::StoreEvent;
-
-use super::ImapContext;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_list(
@@ -179,7 +177,7 @@ impl<T: SessionStream> SessionData<T> {
         // Append reference name
         if !patterns.is_empty() && !reference_name.is_empty() {
             patterns.iter_mut().for_each(|item| {
-                *item = format!("{}{}", reference_name, item);
+                *item = format_compact!("{}{}", reference_name, item);
             })
         }
 
@@ -208,7 +206,7 @@ impl<T: SessionStream> SessionData<T> {
                 }
                 if !filter_subscribed && matches_pattern(&patterns, prefix) {
                     list_items.push(ListItem {
-                        mailbox_name: prefix.clone(),
+                        mailbox_name: prefix.as_str().into(),
                         attributes: if include_children {
                             vec![Attribute::HasChildren, Attribute::NoSelect]
                         } else {
@@ -261,7 +259,7 @@ impl<T: SessionStream> SessionData<T> {
                             }
                         }
                         list_items.push(ListItem {
-                            mailbox_name: mailbox_name.clone(),
+                            mailbox_name: mailbox_name.as_str().into(),
                             attributes,
                             tags: if !has_recursive_match {
                                 vec![]
@@ -387,7 +385,7 @@ impl<T: SessionStream> SessionData<T> {
 }
 
 #[allow(clippy::while_let_on_iterator)]
-pub fn matches_pattern(patterns: &[String], mailbox_name: &str) -> bool {
+pub fn matches_pattern(patterns: &[CompactString], mailbox_name: &str) -> bool {
     if patterns.is_empty() {
         return true;
     }

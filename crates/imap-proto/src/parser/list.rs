@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::{CompactString, ToCompactString};
-
 use crate::{
     Command,
     protocol::{
@@ -28,13 +26,13 @@ impl Request<Command> {
                         .next()
                         .unwrap()
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     mailbox_name: utf7_maybe_decode(
                         tokens
                             .next()
                             .unwrap()
                             .unwrap_string()
-                            .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                            .map_err(|v| bad(self.tag.clone(), v))?,
                         is_utf8,
                     ),
                     tag: self.tag,
@@ -54,12 +52,12 @@ impl Request<Command> {
                                 Token::Argument(value) => {
                                     selection_options.push(
                                         SelectionOption::parse(&value)
-                                            .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                            .map_err(|v| bad(self.tag.clone(), v))?,
                                     );
                                 }
                                 _ => {
                                     return Err(bad(
-                                        self.tag.to_compact_string(),
+                                        self.tag.clone(),
                                         "Invalid selection option argument.",
                                     ));
                                 }
@@ -67,20 +65,18 @@ impl Request<Command> {
                         }
                         tokens
                             .next()
-                            .ok_or_else(|| {
-                                bad(self.tag.to_compact_string(), "Missing reference name.")
-                            })?
+                            .ok_or_else(|| bad(self.tag.clone(), "Missing reference name."))?
                             .unwrap_string()
-                            .map_err(|v| bad(self.tag.to_compact_string(), v))?
+                            .map_err(|v| bad(self.tag.clone(), v))?
                     }
                     token => token
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                 };
 
                 match tokens
                     .next()
-                    .ok_or_else(|| bad(self.tag.to_compact_string(), "Missing mailbox name."))?
+                    .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
                 {
                     Token::ParenthesisOpen => {
                         while let Some(token) = tokens.next() {
@@ -90,7 +86,7 @@ impl Request<Command> {
                                     mailbox_name.push(
                                         token
                                             .unwrap_string()
-                                            .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                            .map_err(|v| bad(self.tag.clone(), v))?,
                                     );
                                 }
                             }
@@ -100,7 +96,7 @@ impl Request<Command> {
                         mailbox_name.push(utf7_maybe_decode(
                             token
                                 .unwrap_string()
-                                .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                .map_err(|v| bad(self.tag.clone(), v))?,
                             is_utf8,
                         ));
                     }
@@ -115,7 +111,7 @@ impl Request<Command> {
                         .is_none_or(|token| !token.is_parenthesis_open())
                     {
                         return Err(bad(
-                            self.tag.to_compact_string(),
+                            self.tag.clone(),
                             "Invalid return option, expected parenthesis.",
                         ));
                     }
@@ -125,14 +121,14 @@ impl Request<Command> {
                             Token::ParenthesisClose => break,
                             Token::Argument(value) => {
                                 let mut return_option = ReturnOption::parse(&value)
-                                    .map_err(|v| bad(self.tag.to_compact_string(), v))?;
+                                    .map_err(|v| bad(self.tag.clone(), v))?;
                                 if let ReturnOption::Status(status) = &mut return_option {
                                     if tokens
                                         .next()
                                         .is_none_or(|token| !token.is_parenthesis_open())
                                     {
                                         return Err(bad(
-                                            CompactString::from_string_buffer(self.tag),
+                                            self.tag,
                                             "Invalid return option, expected parenthesis after STATUS.",
                                         ));
                                     }
@@ -140,13 +136,14 @@ impl Request<Command> {
                                         match token {
                                             Token::ParenthesisClose => break,
                                             Token::Argument(value) => {
-                                                status.push(Status::parse(&value).map_err(
-                                                    |v| bad(self.tag.to_compact_string(), v),
-                                                )?);
+                                                status.push(
+                                                    Status::parse(&value)
+                                                        .map_err(|v| bad(self.tag.clone(), v))?,
+                                                );
                                             }
                                             _ => {
                                                 return Err(bad(
-                                                    CompactString::from_string_buffer(self.tag),
+                                                    self.tag,
                                                     "Invalid status return option argument.",
                                                 ));
                                             }
@@ -157,7 +154,7 @@ impl Request<Command> {
                             }
                             _ => {
                                 return Err(bad(
-                                    self.tag.to_compact_string(),
+                                    self.tag.clone(),
                                     "Invalid return option argument.",
                                 ));
                             }

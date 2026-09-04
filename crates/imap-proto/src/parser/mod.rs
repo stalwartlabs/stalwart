@@ -29,9 +29,10 @@ pub mod uidbatches;
 use crate::{
     Command,
     protocol::{Flag, Sequence},
-    receiver::CommandParser,
+    receiver::{ArgumentBytes, CommandParser},
 };
 use chrono::{DateTime, NaiveDate};
+use compact_str::CompactString;
 use std::{borrow::Cow, str::FromStr};
 
 pub type Result<T> = std::result::Result<T, Cow<'static, str>>;
@@ -91,7 +92,7 @@ impl CommandParser for Command {
 }
 
 impl Flag {
-    pub fn parse_imap(value: Vec<u8>) -> Result<Self> {
+    pub fn parse_imap(value: ArgumentBytes) -> Result<Self> {
         if !value.is_empty() {
             let flag = hashify::tiny_map_ignore_case!(value.as_slice(),
                 "\\Seen" => Flag::Seen,
@@ -128,10 +129,14 @@ impl Flag {
 
             if let Some(flag) = flag {
                 Ok(flag)
-            } else {
-                String::from_utf8(value)
+            } else if value.spilled() {
+                String::from_utf8(value.into_vec())
                     .map_err(|_| Cow::from("Invalid UTF-8."))
-                    .map(|v| Flag::Keyword(v.into()))
+                    .map(|keyword| Flag::Keyword(CompactString::from_string_buffer(keyword)))
+            } else {
+                CompactString::from_utf8(value.as_slice())
+                    .map_err(|_| Cow::from("Invalid UTF-8."))
+                    .map(Flag::Keyword)
             }
         } else {
             Err(Cow::from("Null flags are not allowed."))
@@ -222,7 +227,7 @@ pub fn parse_number<T: FromStr>(value: &[u8]) -> Result<T> {
 }
 
 pub fn parse_sequence_set(value: &[u8]) -> Result<Sequence> {
-    let mut sequence_set = Vec::new();
+    let mut sequence_set = Vec::with_capacity(value.iter().filter(|&&ch| ch == b',').count() + 1);
 
     let mut range_start = None;
     let mut token_start = None;

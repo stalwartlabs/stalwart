@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::ToCompactString;
-
 use crate::{
     Command,
     protocol::login,
@@ -22,12 +20,12 @@ impl Request<Command> {
                         .next()
                         .unwrap()
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     password: tokens
                         .next()
                         .unwrap()
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     tag: self.tag,
                 })
             }

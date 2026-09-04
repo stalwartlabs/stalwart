@@ -3,12 +3,13 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 use super::{Flag, ImapResponse, Sequence, fetch::FetchItem};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
+    pub tag: CompactString,
     pub sequence_set: Sequence,
     pub operation: Operation,
     pub is_silent: bool,
@@ -30,11 +31,9 @@ pub struct Response<'x> {
 }
 
 impl ImapResponse for Response<'_> {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64);
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         for item in &self.items {
-            item.serialize(&mut buf, self.is_utf8);
+            item.serialize(buf, self.is_utf8);
         }
-        buf
     }
 }

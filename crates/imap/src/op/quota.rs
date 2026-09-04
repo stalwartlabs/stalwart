@@ -4,18 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-/*
- * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
- *
- * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
- */
-
 use crate::{
     core::{Session, SessionData},
     op::ImapContext,
     spawn_op,
 };
 use common::network::SessionStream;
+use compact_str::format_compact;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{
@@ -197,9 +192,9 @@ impl<T: SessionStream> SessionData<T> {
 
         // Build response
         let response = Response {
-            quota_root_items: vec![arguments.name, format!("#{account_id}")],
+            quota_root_items: vec![arguments.name, format_compact!("#{account_id}")],
             quota_items: vec![QuotaItem {
-                name: format!("#{account_id}"),
+                name: format_compact!("#{account_id}"),
                 resources: if account.disk_quota() > 0 {
                     vec![QuotaResource {
                         resource: QuotaResourceName::Storage,

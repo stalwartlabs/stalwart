@@ -11,6 +11,7 @@ use crate::{
     spawn_op,
 };
 use common::{MessageStoreCache, network::SessionStream};
+use compact_str::CompactString;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{
@@ -112,7 +113,7 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn status(
         &self,
         caches: &mut AccountCaches,
-        mailbox_name: String,
+        mailbox_name: CompactString,
         items: &[Status],
     ) -> trc::Result<StatusItem> {
         // Get mailbox id
@@ -170,7 +171,7 @@ impl<T: SessionStream> SessionData<T> {
         &self,
         cache: &MessageStoreCache,
         mailbox: MailboxId,
-        mailbox_name: String,
+        mailbox_name: CompactString,
         items: &[Status],
     ) -> trc::Result<StatusItem> {
         let uid_next = if items.contains(&Status::UidNext) {

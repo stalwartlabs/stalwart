@@ -3,6 +3,8 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use crate::protocol::push_int;
+use compact_str::CompactString;
 
 use crate::utf7::utf7_encode;
 
@@ -10,8 +12,8 @@ use super::{ObjectId, quoted_string};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
-    pub mailbox_name: String,
+    pub tag: CompactString,
+    pub mailbox_name: CompactString,
     pub items: Vec<Status>,
 }
 
@@ -31,7 +33,7 @@ pub enum Status {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusItem {
-    pub mailbox_name: String,
+    pub mailbox_name: CompactString,
     pub items: Vec<(Status, StatusItemType)>,
 }
 
@@ -71,7 +73,7 @@ impl StatusItem {
 
             match value {
                 StatusItemType::Number(num) => {
-                    buf.extend_from_slice(num.to_string().as_bytes());
+                    push_int(buf, *num);
                 }
                 StatusItemType::String(str) => {
                     buf.push(b'(');

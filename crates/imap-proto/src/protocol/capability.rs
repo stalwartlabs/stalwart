@@ -5,6 +5,7 @@
  */
 
 use super::{ImapResponse, authenticate::Mechanism};
+use crate::protocol::push_int;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
@@ -129,12 +130,12 @@ impl Capability {
             Capability::UidBatches => b"UIDBATCHES",
             Capability::MessageLimit(limit) => {
                 buf.extend_from_slice(b"MESSAGELIMIT=");
-                buf.extend_from_slice(limit.to_string().as_bytes());
+                push_int(buf, *limit);
                 return;
             }
             Capability::SaveLimit(limit) => {
                 buf.extend_from_slice(b"SAVELIMIT=");
-                buf.extend_from_slice(limit.to_string().as_bytes());
+                push_int(buf, *limit);
                 return;
             }
         });
@@ -209,15 +210,13 @@ impl Capability {
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64);
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(b"* CAPABILITY");
         for capability in self.capabilities.iter() {
             buf.push(b' ');
-            capability.serialize(&mut buf);
+            capability.serialize(buf);
         }
         buf.extend_from_slice(b"\r\n");
-        buf
     }
 }
 

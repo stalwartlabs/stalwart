@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::ToCompactString;
-
+use super::parse_datetime;
 use crate::{
     Command,
     protocol::{
@@ -15,8 +14,6 @@ use crate::{
     receiver::{Request, Token, bad},
     utf7::utf7_maybe_decode,
 };
-
-use super::parse_datetime;
 
 enum State {
     None,
@@ -37,7 +34,7 @@ impl Request<Command> {
                         .next()
                         .unwrap()
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     is_utf8,
                 );
                 let mut messages = Vec::new();
@@ -63,7 +60,7 @@ impl Request<Command> {
                                     State::UTF8 => State::UTF8Data,
                                     _ => {
                                         return Err(bad(
-                                            self.tag.to_compact_string(),
+                                            self.tag.clone(),
                                             "Invalid opening parenthesis found.",
                                         ));
                                     }
@@ -72,7 +69,7 @@ impl Request<Command> {
                             Token::ParenthesisClose => match state {
                                 State::None | State::UTF8 => {
                                     return Err(bad(
-                                        self.tag.to_compact_string(),
+                                        self.tag.clone(),
                                         "Invalid closing parenthesis found.",
                                     ));
                                 }
@@ -95,43 +92,40 @@ impl Request<Command> {
                                             message.received_at = Some(date_time);
                                         } else {
                                             return Err(bad(
-                                                self.tag.to_compact_string(),
+                                                self.tag.clone(),
                                                 "Failed to parse received time.",
                                             ));
                                         }
                                     } else {
-                                        message.message = value;
+                                        message.message = value.into_vec();
                                         break;
                                     }
                                 }
                                 State::Flags => {
                                     message.flags.push(
                                         Flag::parse_imap(value)
-                                            .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                            .map_err(|v| bad(self.tag.clone(), v))?,
                                     );
                                 }
                                 State::UTF8 => {
                                     return Err(bad(
-                                        self.tag.to_compact_string(),
+                                        self.tag.clone(),
                                         "Expected parenthesis after UTF8.",
                                     ));
                                 }
                                 State::UTF8Data => {
                                     if message.message.is_empty() {
-                                        message.message = value;
+                                        message.message = value.into_vec();
                                     } else {
                                         return Err(bad(
-                                            self.tag.to_compact_string(),
+                                            self.tag.clone(),
                                             "Invalid parameter after message literal.",
                                         ));
                                     }
                                 }
                             },
                             _ => {
-                                return Err(bad(
-                                    self.tag.to_compact_string(),
-                                    "Invalid arguments.",
-                                ));
+                                return Err(bad(self.tag.clone(), "Invalid arguments."));
                             }
                         }
                     }

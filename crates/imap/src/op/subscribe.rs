@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 use super::ImapContext;
 use crate::core::{Session, SessionData};
@@ -48,8 +49,8 @@ impl<T: SessionStream> Session<T> {
 impl<T: SessionStream> SessionData<T> {
     pub async fn subscribe_folder(
         &self,
-        tag: String,
-        mailbox_name: String,
+        tag: CompactString,
+        mailbox_name: CompactString,
         subscribe: bool,
         op_start: Instant,
     ) -> trc::Result<StatusResponse> {

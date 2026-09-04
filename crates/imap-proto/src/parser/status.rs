@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::{CompactString, ToCompactString};
-
 use crate::Command;
 use crate::protocol::status;
 use crate::protocol::status::Status;
@@ -23,7 +21,7 @@ impl Request<Command> {
                         .next()
                         .unwrap()
                         .unwrap_string()
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     is_utf8,
                 );
                 let mut items = Vec::with_capacity(len - 2);
@@ -33,7 +31,7 @@ impl Request<Command> {
                     .is_none_or(|token| !token.is_parenthesis_open())
                 {
                     return Err(bad(
-                        self.tag.to_compact_string(),
+                        self.tag.clone(),
                         "Expected parenthesis after mailbox name.",
                     ));
                 }
@@ -43,14 +41,12 @@ impl Request<Command> {
                     match token {
                         Token::ParenthesisClose => break,
                         Token::Argument(value) => {
-                            items.push(
-                                Status::parse(&value)
-                                    .map_err(|v| bad(self.tag.to_compact_string(), v))?,
-                            );
+                            items
+                                .push(Status::parse(&value).map_err(|v| bad(self.tag.clone(), v))?);
                         }
                         _ => {
                             return Err(bad(
-                                self.tag.to_compact_string(),
+                                self.tag.clone(),
                                 "Invalid status return option argument.",
                             ));
                         }
@@ -64,10 +60,7 @@ impl Request<Command> {
                         items,
                     })
                 } else {
-                    Err(bad(
-                        CompactString::from_string_buffer(self.tag),
-                        "At least one status item is required.",
-                    ))
+                    Err(bad(self.tag, "At least one status item is required."))
                 }
             }
         }

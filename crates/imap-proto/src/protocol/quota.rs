@@ -3,17 +3,18 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 use super::{ImapResponse, capability::QuotaResourceName, quoted_string};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
-    pub name: String,
+    pub tag: CompactString,
+    pub name: CompactString,
 }
 
 pub struct QuotaItem {
-    pub name: String,
+    pub name: CompactString,
     pub resources: Vec<QuotaResource>,
 }
 
@@ -24,18 +25,17 @@ pub struct QuotaResource {
 }
 
 pub struct Response {
-    pub quota_root_items: Vec<String>,
+    pub quota_root_items: Vec<CompactString>,
     pub quota_items: Vec<QuotaItem>,
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64);
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         if !self.quota_root_items.is_empty() {
             buf.extend_from_slice(b"* QUOTAROOT");
             for item in &self.quota_root_items {
                 buf.push(b' ');
-                quoted_string(&mut buf, item);
+                quoted_string(buf, item);
             }
             buf.extend_from_slice(b"\r\n");
         }
@@ -43,7 +43,7 @@ impl ImapResponse for Response {
         if !self.quota_items.is_empty() {
             for item in &self.quota_items {
                 buf.extend_from_slice(b"* QUOTA ");
-                quoted_string(&mut buf, &item.name);
+                quoted_string(buf, &item.name);
                 buf.extend_from_slice(b" (");
                 for (pos, resource) in item.resources.iter().enumerate() {
                     if pos > 0 {
@@ -72,8 +72,6 @@ impl ImapResponse for Response {
                 buf.extend_from_slice(b")\r\n");
             }
         }
-
-        buf
     }
 }
 

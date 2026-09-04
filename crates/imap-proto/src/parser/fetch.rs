@@ -10,7 +10,7 @@ use crate::{
     protocol::fetch::{self, Attribute, Section},
     receiver::{Request, Token, bad},
 };
-use compact_str::{CompactString, ToCompactString, format_compact};
+use compact_str::format_compact;
 use std::borrow::Cow;
 use std::iter::Peekable;
 use std::vec::IntoIter;
@@ -27,10 +27,10 @@ impl Request<Command> {
         let sequence_set = parse_sequence_set(
             &tokens
                 .next()
-                .ok_or_else(|| bad(self.tag.to_compact_string(), "Missing sequence set."))?
+                .ok_or_else(|| bad(self.tag.clone(), "Missing sequence set."))?
                 .unwrap_bytes(),
         )
-        .map_err(|v| bad(self.tag.to_compact_string(), v))?;
+        .map_err(|v| bad(self.tag.clone(), v))?;
 
         let mut in_parentheses = false;
 
@@ -87,7 +87,7 @@ impl Request<Command> {
                                     let rfc822 = tokens
                                         .next()
                                         .ok_or_else(|| {
-                                            bad(self.tag.to_compact_string(), "Missing RFC822 parameter.")
+                                            bad(self.tag.clone(), "Missing RFC822 parameter.")
                                         })?
                                         .unwrap_bytes();
                                     if rfc822.eq_ignore_ascii_case(b"HEADER") {
@@ -98,7 +98,7 @@ impl Request<Command> {
                                         Attribute::Rfc822Text
                                     } else {
                                         return Err(bad(
-                                            CompactString::from_string_buffer(self.tag),
+                                            self.tag,
                                             format_compact!(
                                                 "Invalid RFC822 parameter {:?}.",
                                                 String::from_utf8_lossy(&rfc822)
@@ -123,13 +123,13 @@ impl Request<Command> {
                                         .is_none_or( |token| !token.eq_ignore_ascii_case(b"PEEK"))
                                     {
                                         return Err(bad(
-                                            self.tag.to_compact_string(),
+                                            self.tag.clone(),
                                             "Expected 'PEEK' after '.'.",
                                         ));
                                     }
                                     if tokens.next().is_none_or( |token| !token.is_bracket_open()) {
                                         return Err(bad(
-                                            self.tag.to_compact_string(),
+                                            self.tag.clone(),
                                             "Expected '[' after 'BODY.PEEK'",
                                         ));
                                     }
@@ -159,7 +159,7 @@ impl Request<Command> {
                                                     !token.eq_ignore_ascii_case(b"FIELDS")
                                                 }) {
                                                     return Err(bad(
-                                                        CompactString::from_string_buffer(self.tag),
+                                                        self.tag,
                                                         "Expected 'FIELDS' after 'HEADER.'.",
                                                     ));
                                                 }
@@ -169,7 +169,7 @@ impl Request<Command> {
                                                         !token.eq_ignore_ascii_case(b"NOT")
                                                     }) {
                                                         return Err(bad(
-                                                            CompactString::from_string_buffer(self.tag),
+                                                            self.tag,
                                                             "Expected 'NOT' after 'HEADER.FIELDS.'.",
                                                         ));
                                                     }
@@ -182,7 +182,7 @@ impl Request<Command> {
                                                     .is_none_or( |token| !token.is_parenthesis_open())
                                                 {
                                                     return Err(bad(
-                                                        CompactString::from_string_buffer(self.tag),
+                                                        self.tag,
                                                         "Expected '(' after 'HEADER.FIELDS'.",
                                                     ));
                                                 }
@@ -191,13 +191,13 @@ impl Request<Command> {
                                                     match token {
                                                         Token::ParenthesisClose => break,
                                                         Token::Argument(value) => {
-                                                            fields.push(String::from_utf8(value).map_err(
-                                                            |_| bad(self.tag.to_compact_string(),"Invalid UTF-8 in header field name."),
+                                                            fields.push(String::from_utf8(value.into_vec()).map_err(
+                                                            |_| bad(self.tag.clone(),"Invalid UTF-8 in header field name."),
                                                         )?);
                                                         }
                                                         _ => {
                                                             return Err(bad(
-                                                                CompactString::from_string_buffer(self.tag),
+                                                                self.tag,
                                                                 "Expected field name.",
                                                             ))
                                                         }
@@ -217,7 +217,7 @@ impl Request<Command> {
                                         } else {
                                             Section::Part {
                                                 num: parse_number::<u32>(&value)
-                                                    .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                                    .map_err(|v| bad(self.tag.clone(), v))?,
                                             }
                                         };
                                         sections.push(section);
@@ -225,7 +225,7 @@ impl Request<Command> {
                                     Token::Dot => (),
                                     _ => {
                                         return Err(bad(
-                                            CompactString::from_string_buffer(self.tag),
+                                            self.tag,
                                             format_compact!(
                                                 "Invalid token {:?} found in section-spect.",
                                                 token
@@ -239,7 +239,7 @@ impl Request<Command> {
                                 peek: is_peek,
                                 sections,
                                 partial: parse_partial(&mut tokens)
-                                    .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                    .map_err(|v| bad(self.tag.clone(), v))?,
                             });
                         },
                         "BINARY" => {
@@ -248,7 +248,7 @@ impl Request<Command> {
                                 let param = tokens
                                     .next()
                                     .ok_or({
-                                        bad(self.tag.to_compact_string(),"Missing parameter after 'BINARY.'.")
+                                        bad(self.tag.clone(),"Missing parameter after 'BINARY.'.")
                                     })?
                                     .unwrap_bytes();
                                 if param.eq_ignore_ascii_case(b"PEEK") {
@@ -257,7 +257,7 @@ impl Request<Command> {
                                     (false, true)
                                 } else {
                                     return Err(bad(
-                                        CompactString::from_string_buffer(self.tag),
+                                        self.tag,
                                         "Expected 'PEEK' or 'SIZE' after 'BINARY.'.",
                                     ));
                                 }
@@ -267,7 +267,7 @@ impl Request<Command> {
 
                             // Parse section-part
                             if tokens.next().is_none_or( |token| !token.is_bracket_open()) {
-                                return Err(bad(self.tag.to_compact_string(), "Expected '[' after 'BINARY'."));
+                                return Err(bad(self.tag.clone(), "Expected '[' after 'BINARY'."));
                             }
                             let mut sections = Vec::new();
                             while let Some(token) = tokens.next() {
@@ -275,14 +275,14 @@ impl Request<Command> {
                                     Token::Argument(value) => {
                                         sections.push(
                                             parse_number::<u32>(&value)
-                                                .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                                .map_err(|v| bad(self.tag.clone(), v))?,
                                         );
                                     }
                                     Token::Dot => (),
                                     Token::BracketClose => break,
                                     _ => {
                                         return Err(bad(
-                                            CompactString::from_string_buffer(self.tag),
+                                            self.tag,
                                             format_compact!(
                                                 "Expected part section integer, got {:?}.",
                                                 token.to_string()
@@ -296,7 +296,7 @@ impl Request<Command> {
                                     peek: is_peek,
                                     sections,
                                     partial: parse_partial(&mut tokens)
-                                        .map_err(|v| bad(self.tag.to_compact_string(), v))?,
+                                        .map_err(|v| bad(self.tag.clone(), v))?,
                                 }
                             } else {
                                 Attribute::BinarySize { sections }
@@ -330,7 +330,7 @@ impl Request<Command> {
                         },
                         _ => {
                             return Err(bad(
-                                CompactString::from_string_buffer(self.tag),
+                                self.tag,
                                 format_compact!("Invalid attribute {:?}", String::from_utf8_lossy(&value)),
                             ));
                         }
@@ -344,25 +344,19 @@ impl Request<Command> {
                     if !in_parentheses {
                         in_parentheses = true;
                     } else {
-                        return Err(bad(
-                            self.tag.to_compact_string(),
-                            "Unexpected parenthesis open.",
-                        ));
+                        return Err(bad(self.tag.clone(), "Unexpected parenthesis open."));
                     }
                 }
                 Token::ParenthesisClose => {
                     if in_parentheses {
                         break;
                     } else {
-                        return Err(bad(
-                            self.tag.to_compact_string(),
-                            "Unexpected parenthesis close.",
-                        ));
+                        return Err(bad(self.tag.clone(), "Unexpected parenthesis close."));
                     }
                 }
                 _ => {
                     return Err(bad(
-                        CompactString::from_string_buffer(self.tag),
+                        self.tag,
                         format_compact!("Invalid fetch argument {:?}.", token.to_string()),
                     ));
                 }
@@ -381,14 +375,11 @@ impl Request<Command> {
                             &tokens
                                 .next()
                                 .ok_or_else(|| {
-                                    bad(
-                                        self.tag.to_compact_string(),
-                                        "Missing CHANGEDSINCE parameter.",
-                                    )
+                                    bad(self.tag.clone(), "Missing CHANGEDSINCE parameter.")
                                 })?
                                 .unwrap_bytes(),
                         )
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?
+                        .map_err(|v| bad(self.tag.clone(), v))?
                         .into();
                     }
                     Token::Argument(param) if param.eq_ignore_ascii_case(b"VANISHED") => {
@@ -399,7 +390,7 @@ impl Request<Command> {
                     }
                     _ => {
                         return Err(bad(
-                            self.tag.to_compact_string(),
+                            self.tag.clone(),
                             format_compact!("Unsupported parameter '{}'.", token),
                         ));
                     }
@@ -416,10 +407,7 @@ impl Request<Command> {
                 include_vanished,
             })
         } else {
-            Err(bad(
-                CompactString::from_string_buffer(self.tag),
-                "No data items to fetch specified.",
-            ))
+            Err(bad(self.tag, "No data items to fetch specified."))
         }
     }
 }

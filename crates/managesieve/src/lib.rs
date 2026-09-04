@@ -13,7 +13,7 @@ static SERVER_GREETING: &str = "Stalwart ManageSieve at your service.";
 
 #[cfg(test)]
 mod tests {
-    use imap_proto::receiver::{Error, Receiver, Request, State, Token};
+    use imap_proto::receiver::{ArgumentBytes, Error, Receiver, Request, State, Token};
 
     use crate::core::Command;
 
@@ -27,7 +27,7 @@ mod tests {
                 vec![Request {
                     tag: "".into(),
                     command: Command::Authenticate,
-                    tokens: vec![Token::Argument(b"DIGEST-MD5".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(b"DIGEST-MD5"))],
                 }],
             ),
             (
@@ -39,10 +39,10 @@ mod tests {
                     tag: "".into(),
                     command: Command::Authenticate,
                     tokens: vec![
-                        Token::Argument(b"GSSAPI".to_vec()),
-                        Token::Argument(
-                            b"cnNwYXV0aD1lYTQwZjYwMzM1YzQyN2I1NTI3Yjg0ZGJhYmNkZmZmZA==".to_vec(),
-                        ),
+                        Token::Argument(ArgumentBytes::from_slice(b"GSSAPI")),
+                        Token::Argument(ArgumentBytes::from_slice(
+                            b"cnNwYXV0aD1lYTQwZjYwMzM1YzQyN2I1NTI3Yjg0ZGJhYmNkZmZmZA==",
+                        )),
                     ],
                 }],
             ),
@@ -52,8 +52,8 @@ mod tests {
                     tag: "".into(),
                     command: Command::Authenticate,
                     tokens: vec![
-                        Token::Argument(b"PLAIN".to_vec()),
-                        Token::Argument(b"QJIrweAPyo6Q1T9xu".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"PLAIN")),
+                        Token::Argument(ArgumentBytes::from_slice(b"QJIrweAPyo6Q1T9xu")),
                     ],
                 }],
             ),
@@ -71,8 +71,8 @@ mod tests {
                     tag: "".into(),
                     command: Command::HaveSpace,
                     tokens: vec![
-                        Token::Argument(b"myscript".to_vec()),
-                        Token::Argument(b"999999".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"myscript")),
+                        Token::Argument(ArgumentBytes::from_slice(b"999999")),
                     ],
                 }],
             ),
@@ -86,8 +86,10 @@ mod tests {
                     tag: "".into(),
                     command: Command::PutScript,
                     tokens: vec![
-                        Token::Argument(b"foo".to_vec()),
-                        Token::Argument(b"#comment\r\nInvalidSieveCommand\r\n".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"foo")),
+                        Token::Argument(ArgumentBytes::from_slice(
+                            b"#comment\r\nInvalidSieveCommand\r\n",
+                        )),
                     ],
                 }],
             ),
@@ -104,7 +106,7 @@ mod tests {
                 vec![Request {
                     tag: "".into(),
                     command: Command::SetActive,
-                    tokens: vec![Token::Argument(b"baz".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(b"baz"))],
                 }],
             ),
             (
@@ -113,8 +115,8 @@ mod tests {
                     tag: "".into(),
                     command: Command::RenameScript,
                     tokens: vec![
-                        Token::Argument(b"foo".to_vec()),
-                        Token::Argument(b"bar".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"foo")),
+                        Token::Argument(ArgumentBytes::from_slice(b"bar")),
                     ],
                 }],
             ),
@@ -123,7 +125,9 @@ mod tests {
                 vec![Request {
                     tag: "".into(),
                     command: Command::Noop,
-                    tokens: vec![Token::Argument(b"STARTTLS-SYNC-42".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(
+                        b"STARTTLS-SYNC-42",
+                    ))],
                 }],
             ),
         ] {

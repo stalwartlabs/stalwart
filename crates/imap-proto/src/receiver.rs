@@ -6,7 +6,12 @@
 
 use super::{ResponseCode, ResponseType};
 use compact_str::{CompactString, format_compact};
+use smallvec::SmallVec;
 use std::fmt::Display;
+
+pub type ArgumentBytes = SmallVec<[u8; TOKEN_INLINE_LEN]>;
+
+const TOKEN_INLINE_LEN: usize = 22;
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -17,7 +22,7 @@ pub enum Error {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request<T: CommandParser> {
-    pub tag: String,
+    pub tag: CompactString,
     pub command: T,
     pub tokens: Vec<Token>,
 }
@@ -29,7 +34,7 @@ pub trait CommandParser: Sized + Default {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
-    Argument(Vec<u8>),
+    Argument(ArgumentBytes),
     ParenthesisOpen,  // (
     ParenthesisClose, // )
     BracketOpen,      // [
@@ -43,7 +48,7 @@ pub enum Token {
 impl<T: CommandParser> Default for Request<T> {
     fn default() -> Self {
         Self {
-            tag: String::new(),
+            tag: CompactString::const_new(""),
             command: T::default(),
             tokens: Vec::new(),
         }
@@ -73,6 +78,7 @@ pub struct Receiver<T: CommandParser> {
 }
 
 const ARG_MAX_LEN: usize = 8000;
+const ARG_INIT_LEN: usize = 64;
 
 struct ArgumentBuffer {
     buf: Vec<u8>,
@@ -124,9 +130,32 @@ impl<T: CommandParser> Receiver<T> {
                     self.max_request_size
                 )));
             }
-            self.request.tokens.push(Token::Argument(self.buf.take()));
+            self.request
+                .tokens
+                .push(Token::Argument(ArgumentBytes::from_slice(
+                    self.buf.as_ref(),
+                )));
+            self.buf.clear();
         } else if in_quote {
             self.request.tokens.push(Token::Nil);
+        }
+        Ok(())
+    }
+
+    fn push_literal(&mut self) -> Result<(), Error> {
+        if !self.buf.is_empty() {
+            self.current_request_size += self.buf.len();
+            if self.current_request_size > self.max_request_size {
+                return Err(self.error_reset(format_compact!(
+                    "Request exceeds maximum limit of {} bytes.",
+                    self.max_request_size
+                )));
+            }
+            self.request
+                .tokens
+                .push(Token::Argument(ArgumentBytes::from_vec(
+                    self.buf.take_moved(),
+                )));
         }
         Ok(())
     }
@@ -157,10 +186,17 @@ impl<T: CommandParser> Receiver<T> {
                 State::Tag => match ch {
                     b' ' => {
                         if !self.buf.is_empty() {
-                            self.request.tag =
-                                String::from_utf8(self.buf.take()).map_err(|_| {
-                                    self.error_reset("Tag is not a valid UTF-8 string.")
-                                })?;
+                            match CompactString::from_utf8(self.buf.as_ref()) {
+                                Ok(tag) => {
+                                    self.request.tag = tag;
+                                    self.buf.clear();
+                                }
+                                Err(_) => {
+                                    return Err(
+                                        self.error_reset("Tag is not a valid UTF-8 string.")
+                                    );
+                                }
+                            }
                             self.state = State::Command { is_uid: false };
                         }
                     }
@@ -384,26 +420,42 @@ impl<T: CommandParser> Receiver<T> {
                 }
                 State::LiteralDiscard { remaining } => {
                     if remaining > 1 {
-                        self.state = State::LiteralDiscard {
-                            remaining: remaining - 1,
-                        };
-                    } else {
-                        return Err(self.error_reset(format_compact!(
-                            "Literal exceeds the maximum request size of {} bytes.",
-                            self.max_request_size
-                        )));
+                        let mut remaining = remaining - 1;
+                        let available = bytes.as_slice();
+                        let taken = (remaining as usize).min(available.len());
+                        if taken > 0 {
+                            bytes.nth(taken - 1);
+                            remaining -= taken as u32;
+                        }
+                        if remaining > 0 {
+                            self.state = State::LiteralDiscard { remaining };
+                            continue;
+                        }
                     }
+                    return Err(self.error_reset(format_compact!(
+                        "Literal exceeds the maximum request size of {} bytes.",
+                        self.max_request_size
+                    )));
                 }
                 State::LiteralData { remaining } => {
                     // SAFETY: We checked the size before entering this state
                     self.buf.push_unchecked(ch);
+                    let mut remaining = remaining - 1;
 
-                    if remaining > 1 {
-                        self.state = State::LiteralData {
-                            remaining: remaining - 1,
-                        };
+                    if remaining > 0 {
+                        let available = bytes.as_slice();
+                        let taken = (remaining as usize).min(available.len());
+                        if taken > 0 {
+                            self.buf.extend_from_slice(&available[..taken]);
+                            bytes.nth(taken - 1);
+                            remaining -= taken as u32;
+                        }
+                    }
+
+                    if remaining > 0 {
+                        self.state = State::LiteralData { remaining };
                     } else {
-                        self.push_argument(false)?;
+                        self.push_literal()?;
                         self.state = State::Argument { last_ch: b' ' };
                     }
                 }
@@ -417,14 +469,17 @@ impl<T: CommandParser> Receiver<T> {
 impl ArgumentBuffer {
     pub fn new() -> Self {
         ArgumentBuffer {
-            buf: Vec::with_capacity(10),
+            buf: Vec::with_capacity(ARG_INIT_LEN),
         }
     }
 
     pub fn resize_buffer(&mut self, size: usize) {
-        if self.buf.capacity() < size {
-            self.buf.reserve(size - self.buf.capacity());
-        }
+        self.buf.reserve(size.saturating_sub(self.buf.len()));
+    }
+
+    #[inline(always)]
+    pub fn extend_from_slice(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
     }
 
     #[inline(always)]
@@ -442,10 +497,8 @@ impl ArgumentBuffer {
         self.buf.push(byte);
     }
 
-    pub fn take(&mut self) -> Vec<u8> {
-        let buf = self.buf.clone();
-        self.buf.clear();
-        buf
+    pub fn take_moved(&mut self) -> Vec<u8> {
+        std::mem::replace(&mut self.buf, Vec::with_capacity(ARG_INIT_LEN))
     }
 
     #[inline(always)]
@@ -470,19 +523,21 @@ impl ArgumentBuffer {
 }
 
 impl Token {
-    pub fn unwrap_string(self) -> crate::parser::Result<String> {
+    pub fn unwrap_string(self) -> crate::parser::Result<CompactString> {
         match self {
-            Token::Argument(value) => {
-                String::from_utf8(value).map_err(|_| "Invalid UTF-8 in argument.".into())
-            }
-            other => Ok(other.to_string()),
+            Token::Argument(value) if value.spilled() => String::from_utf8(value.into_vec())
+                .map(CompactString::from_string_buffer)
+                .map_err(|_| "Invalid UTF-8 in argument.".into()),
+            Token::Argument(value) => CompactString::from_utf8(value.as_slice())
+                .map_err(|_| "Invalid UTF-8 in argument.".into()),
+            other => Ok(CompactString::from(other.to_string())),
         }
     }
 
-    pub fn unwrap_bytes(self) -> Vec<u8> {
+    pub fn unwrap_bytes(self) -> ArgumentBytes {
         match self {
             Token::Argument(value) => value,
-            other => other.as_bytes().to_vec(),
+            other => ArgumentBytes::from_slice(other.as_bytes()),
         }
     }
 
@@ -550,7 +605,7 @@ impl Display for Token {
 impl Token {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            Token::Argument(value) => value,
+            Token::Argument(value) => value.as_slice(),
             Token::ParenthesisOpen => b"(",
             Token::ParenthesisClose => b")",
             Token::BracketOpen => b"[",
@@ -592,13 +647,13 @@ impl<T: CommandParser> Request<T> {
     pub fn into_error(self, message: impl Into<trc::Value>) -> trc::Error {
         trc::ImapEvent::Error
             .ctx(trc::Key::Details, message)
-            .ctx(trc::Key::Id, CompactString::from_string_buffer(self.tag))
+            .ctx(trc::Key::Id, self.tag)
     }
 
     pub fn into_parse_error(self, message: impl Into<trc::Value>) -> trc::Error {
         trc::ImapEvent::Error
             .ctx(trc::Key::Details, message)
-            .ctx(trc::Key::Id, CompactString::from_string_buffer(self.tag))
+            .ctx(trc::Key::Id, self.tag)
             .ctx(trc::Key::Code, ResponseCode::Parse)
             .ctx(trc::Key::Type, ResponseType::Bad)
     }
@@ -645,7 +700,7 @@ mod tests {
 
     use crate::Command;
 
-    use super::{Error, Receiver, Request, Token};
+    use super::{ArgumentBytes, Error, Receiver, Request, Token};
 
     #[test]
     fn receiver_parse_ok() {
@@ -673,7 +728,7 @@ mod tests {
                 vec![Request {
                     tag: "A001".into(),
                     command: Command::Authenticate,
-                    tokens: vec![Token::Argument(b"GSSAPI".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(b"GSSAPI"))],
                 }],
             ),
             (
@@ -682,8 +737,8 @@ mod tests {
                     tag: "A03".into(),
                     command: Command::Authenticate,
                     tokens: vec![
-                        Token::Argument(b"PLAIN".to_vec()),
-                        Token::Argument(b"dGVzdAB0ZXN0AHRlc3Q=".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"PLAIN")),
+                        Token::Argument(ArgumentBytes::from_slice(b"dGVzdAB0ZXN0AHRlc3Q=")),
                     ],
                 }],
             ),
@@ -692,7 +747,7 @@ mod tests {
                 vec![Request {
                     tag: "A003".into(),
                     command: Command::Create,
-                    tokens: vec![Token::Argument(b"owatagusiam/".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(b"owatagusiam/"))],
                 }],
             ),
             (
@@ -700,7 +755,7 @@ mod tests {
                 vec![Request {
                     tag: "A682".into(),
                     command: Command::List,
-                    tokens: vec![Token::Nil, Token::Argument(b"*".to_vec())],
+                    tokens: vec![Token::Nil, Token::Argument(ArgumentBytes::from_slice(b"*"))],
                 }],
             ),
             (
@@ -712,10 +767,10 @@ mod tests {
                         Token::ParenthesisOpen,
                         Token::ParenthesisClose,
                         Token::Nil,
-                        Token::Argument(b"%".to_vec()),
-                        Token::Argument(b"RETURN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"%")),
+                        Token::Argument(ArgumentBytes::from_slice(b"RETURN")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"CHILDREN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"CHILDREN")),
                         Token::ParenthesisClose,
                     ],
                 }],
@@ -727,11 +782,11 @@ mod tests {
                     command: Command::List,
                     tokens: vec![
                         Token::ParenthesisOpen,
-                        Token::Argument(b"REMOTE".to_vec()),
-                        Token::Argument(b"SUBSCRIBED".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"REMOTE")),
+                        Token::Argument(ArgumentBytes::from_slice(b"SUBSCRIBED")),
                         Token::ParenthesisClose,
                         Token::Nil,
-                        Token::Argument(b"*".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"*")),
                     ],
                 }],
             ),
@@ -743,7 +798,7 @@ mod tests {
                     tokens: vec![
                         Token::Nil,
                         Token::ParenthesisOpen,
-                        Token::Argument(b"foo".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"foo")),
                         Token::ParenthesisClose,
                     ],
                 }],
@@ -756,8 +811,8 @@ mod tests {
                     tokens: vec![
                         Token::Nil,
                         Token::ParenthesisOpen,
-                        Token::Argument(b"%".to_vec()),
-                        Token::Argument(b"music/rock".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"%")),
+                        Token::Argument(ArgumentBytes::from_slice(b"music/rock")),
                         Token::ParenthesisClose,
                     ],
                 }],
@@ -769,13 +824,13 @@ mod tests {
                     command: Command::List,
                     tokens: vec![
                         Token::Nil,
-                        Token::Argument(b"%".to_vec()),
-                        Token::Argument(b"RETURN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"%")),
+                        Token::Argument(ArgumentBytes::from_slice(b"RETURN")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"STATUS".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"STATUS")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"MESSAGES".to_vec()),
-                        Token::Argument(b"UNSEEN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"MESSAGES")),
+                        Token::Argument(ArgumentBytes::from_slice(b"UNSEEN")),
                         Token::ParenthesisClose,
                         Token::ParenthesisClose,
                     ],
@@ -788,13 +843,13 @@ mod tests {
                     command: Command::List,
                     tokens: vec![
                         Token::Nil,
-                        Token::Argument(b"%".to_vec()),
-                        Token::Argument(b"RETURN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"%")),
+                        Token::Argument(ArgumentBytes::from_slice(b"RETURN")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"STATUS".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"STATUS")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"MESSAGES".to_vec()),
-                        Token::Argument(b"UNSEEN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"MESSAGES")),
+                        Token::Argument(ArgumentBytes::from_slice(b"UNSEEN")),
                         Token::ParenthesisClose,
                         Token::ParenthesisClose,
                     ],
@@ -807,16 +862,16 @@ mod tests {
                     command: Command::List,
                     tokens: vec![
                         Token::ParenthesisOpen,
-                        Token::Argument(b"SUBSCRIBED".to_vec()),
-                        Token::Argument(b"RECURSIVEMATCH".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"SUBSCRIBED")),
+                        Token::Argument(ArgumentBytes::from_slice(b"RECURSIVEMATCH")),
                         Token::ParenthesisClose,
                         Token::Nil,
-                        Token::Argument(b"%".to_vec()),
-                        Token::Argument(b"RETURN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"%")),
+                        Token::Argument(ArgumentBytes::from_slice(b"RETURN")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"STATUS".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"STATUS")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"MESSAGES".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"MESSAGES")),
                         Token::ParenthesisClose,
                         Token::ParenthesisClose,
                     ],
@@ -827,7 +882,9 @@ mod tests {
                 vec![Request {
                     tag: "A002".into(),
                     command: Command::Create,
-                    tokens: vec![Token::Argument(b"INBOX.Sent Mail".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(
+                        b"INBOX.Sent Mail",
+                    ))],
                 }],
             ),
             (
@@ -835,7 +892,9 @@ mod tests {
                 vec![Request {
                     tag: "A002".into(),
                     command: Command::Create,
-                    tokens: vec![Token::Argument(b"Maibox \"quo\\ted\" ".to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(
+                        b"Maibox \"quo\\ted\" ",
+                    ))],
                 }],
             ),
             (
@@ -844,8 +903,8 @@ mod tests {
                     tag: "A004".into(),
                     command: Command::Copy(false),
                     tokens: vec![
-                        Token::Argument(b"2:4".to_vec()),
-                        Token::Argument(b"meeting".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"2:4")),
+                        Token::Argument(ArgumentBytes::from_slice(b"meeting")),
                     ],
                 }],
             ),
@@ -859,17 +918,17 @@ mod tests {
                     tag: "A282".into(),
                     command: Command::Search(false),
                     tokens: vec![
-                        Token::Argument(b"RETURN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"RETURN")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"MIN".to_vec()),
-                        Token::Argument(b"COUNT".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"MIN")),
+                        Token::Argument(ArgumentBytes::from_slice(b"COUNT")),
                         Token::ParenthesisClose,
-                        Token::Argument(b"FLAGGED".to_vec()),
-                        Token::Argument(b"SINCE".to_vec()),
-                        Token::Argument(b"1-Feb-1994".to_vec()),
-                        Token::Argument(b"NOT".to_vec()),
-                        Token::Argument(b"FROM".to_vec()),
-                        Token::Argument(b"Smith".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"FLAGGED")),
+                        Token::Argument(ArgumentBytes::from_slice(b"SINCE")),
+                        Token::Argument(ArgumentBytes::from_slice(b"1-Feb-1994")),
+                        Token::Argument(ArgumentBytes::from_slice(b"NOT")),
+                        Token::Argument(ArgumentBytes::from_slice(b"FROM")),
+                        Token::Argument(ArgumentBytes::from_slice(b"Smith")),
                     ],
                 }],
             ),
@@ -879,10 +938,10 @@ mod tests {
                     tag: "F284".into(),
                     command: Command::Store(true),
                     tokens: vec![
-                        Token::Argument(b"$".to_vec()),
-                        Token::Argument(b"+FLAGS.Silent".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"$")),
+                        Token::Argument(ArgumentBytes::from_slice(b"+FLAGS.Silent")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"\\Deleted".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"\\Deleted")),
                         Token::ParenthesisClose,
                     ],
                 }],
@@ -893,17 +952,17 @@ mod tests {
                     tag: "A654".into(),
                     command: Command::Fetch(false),
                     tokens: vec![
-                        Token::Argument(b"2:4".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"2:4")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"FLAGS".to_vec()),
-                        Token::Argument(b"BODY".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"FLAGS")),
+                        Token::Argument(ArgumentBytes::from_slice(b"BODY")),
                         Token::BracketOpen,
-                        Token::Argument(b"HEADER".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"HEADER")),
                         Token::Dot,
-                        Token::Argument(b"FIELDS".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"FIELDS")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"DATE".to_vec()),
-                        Token::Argument(b"FROM".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"DATE")),
+                        Token::Argument(ArgumentBytes::from_slice(b"FROM")),
                         Token::ParenthesisClose,
                         Token::BracketClose,
                         Token::ParenthesisClose,
@@ -919,19 +978,19 @@ mod tests {
                     tag: "B283".into(),
                     command: Command::Search(true),
                     tokens: vec![
-                        Token::Argument(b"RETURN".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"RETURN")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"SAVE".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"SAVE")),
                         Token::ParenthesisClose,
-                        Token::Argument(b"CHARSET".to_vec()),
-                        Token::Argument(b"KOI8-R".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"CHARSET")),
+                        Token::Argument(ArgumentBytes::from_slice(b"KOI8-R")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"OR".to_vec()),
-                        Token::Argument(b"$".to_vec()),
-                        Token::Argument(b"1,3000:3021".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"OR")),
+                        Token::Argument(ArgumentBytes::from_slice(b"$")),
+                        Token::Argument(ArgumentBytes::from_slice(b"1,3000:3021")),
                         Token::ParenthesisClose,
-                        Token::Argument(b"TEXT".to_vec()),
-                        Token::Argument(b"hello world".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"TEXT")),
+                        Token::Argument(ArgumentBytes::from_slice(b"hello world")),
                     ],
                 }],
             ),
@@ -944,15 +1003,15 @@ mod tests {
                     tag: "P283".into(),
                     command: Command::Search(false),
                     tokens: vec![
-                        Token::Argument(b"CHARSET".to_vec()),
-                        Token::Argument(b"UTF-8".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"CHARSET")),
+                        Token::Argument(ArgumentBytes::from_slice(b"UTF-8")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"OR".to_vec()),
-                        Token::Argument(b"$".to_vec()),
-                        Token::Argument(b"1,3000:3021".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"OR")),
+                        Token::Argument(ArgumentBytes::from_slice(b"$")),
+                        Token::Argument(ArgumentBytes::from_slice(b"1,3000:3021")),
                         Token::ParenthesisClose,
-                        Token::Argument(b"TEXT".to_vec()),
-                        Token::Argument("мать".to_string().into_bytes()),
+                        Token::Argument(ArgumentBytes::from_slice(b"TEXT")),
+                        Token::Argument(ArgumentBytes::from_slice("мать".to_string().as_bytes())),
                     ],
                 }],
             ),
@@ -962,8 +1021,8 @@ mod tests {
                     tag: "A001".into(),
                     command: Command::Login,
                     tokens: vec![
-                        Token::Argument(b"FRED FOOBAR".to_vec()),
-                        Token::Argument(b"fat man".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"FRED FOOBAR")),
+                        Token::Argument(ArgumentBytes::from_slice(b"fat man")),
                     ],
                 }],
             ),
@@ -972,7 +1031,9 @@ mod tests {
                 vec![Request {
                     tag: "TAG3".into(),
                     command: Command::Create,
-                    tokens: vec![Token::Argument("Test-ąęć-Test".as_bytes().to_vec())],
+                    tokens: vec![Token::Argument(ArgumentBytes::from_slice(
+                        "Test-ąęć-Test".as_bytes(),
+                    ))],
                 }],
             ),
             (
@@ -1008,11 +1069,11 @@ mod tests {
                     tag: "A003".into(),
                     command: Command::Append,
                     tokens: vec![
-                        Token::Argument(b"saved-messages".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"saved-messages")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"\\Seen".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"\\Seen")),
                         Token::ParenthesisClose,
-                        Token::Argument(
+                        Token::Argument(ArgumentBytes::from_slice(
                             concat!(
                                 "Date: Mon, 7 Feb 1994 21:52:25 -0800 (PST)\r\n",
                                 "From: Fred Foobar <foobar@example.com>\r\n",
@@ -1024,9 +1085,8 @@ mod tests {
                                 "\r\n",
                                 "Hello Joe, do you think we can meet at 3:30 tomorrow?\r\n"
                             )
-                            .as_bytes()
-                            .to_vec(),
-                        ),
+                            .as_bytes(),
+                        )),
                     ],
                 }],
             ),
@@ -1047,11 +1107,11 @@ mod tests {
                     tag: "A003".into(),
                     command: Command::Append,
                     tokens: vec![
-                        Token::Argument(b"saved-messages".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"saved-messages")),
                         Token::ParenthesisOpen,
-                        Token::Argument(b"\\Seen".to_vec()),
+                        Token::Argument(ArgumentBytes::from_slice(b"\\Seen")),
                         Token::ParenthesisClose,
-                        Token::Argument(
+                        Token::Argument(ArgumentBytes::from_slice(
                             concat!(
                                 "Date: Mon, 7 Feb 1994 21:52:25 -0800 (PST)\r\n",
                                 "From: Fred Foobar <foobar@Blurdybloop.example>\r\n",
@@ -1063,9 +1123,8 @@ mod tests {
                                 "\r\n",
                                 "Hello Joe, do you think we can meet at 3:30 tomorrow?\r\n",
                             )
-                            .as_bytes()
-                            .to_vec(),
-                        ),
+                            .as_bytes(),
+                        )),
                     ],
                 }],
             ),
@@ -1086,8 +1145,8 @@ mod tests {
                         tag: "abc".into(),
                         command: Command::Login,
                         tokens: vec![
-                            Token::Argument(b"hello".to_vec()),
-                            Token::Argument(b"world".to_vec()),
+                            Token::Argument(ArgumentBytes::from_slice(b"hello")),
+                            Token::Argument(ArgumentBytes::from_slice(b"world")),
                         ],
                     },
                 ],

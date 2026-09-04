@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use compact_str::CompactString;
 use protocol::ObjectId;
 use protocol::capability::Capability;
 use std::borrow::Cow;
@@ -187,7 +188,7 @@ pub enum ResponseCode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusResponse {
-    pub tag: Option<String>,
+    pub tag: Option<CompactString>,
     pub code: Option<ResponseCode>,
     pub message: Cow<'static, str>,
     pub rtype: ResponseType,
@@ -242,7 +243,7 @@ impl StatusResponse {
         self
     }
 
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+    pub fn with_tag(mut self, tag: impl Into<CompactString>) -> Self {
         self.tag = Some(tag.into());
         self
     }

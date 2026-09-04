@@ -3,12 +3,13 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 use super::{ImapResponse, capability::Capability};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
-    pub tag: String,
+    pub tag: CompactString,
     pub capabilities: Vec<Capability>,
 }
 
@@ -17,19 +18,15 @@ pub struct Response {
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
         if !self.enabled.is_empty() {
-            let mut buf = Vec::with_capacity(64);
             buf.extend(b"* ENABLED");
-            for capability in self.enabled {
+            for capability in &self.enabled {
                 buf.push(b' ');
-                capability.serialize(&mut buf);
+                capability.serialize(buf);
             }
             buf.push(b'\r');
             buf.push(b'\n');
-            buf
-        } else {
-            Vec::new()
         }
     }
 }

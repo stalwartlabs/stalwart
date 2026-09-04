@@ -9,6 +9,7 @@ use common::{
     auth::AuthRequest,
     network::{SessionStream, limiter::LimiterResult},
 };
+use compact_str::CompactString;
 use directory::Credentials;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -53,7 +54,9 @@ impl<T: SessionStream> Session<T> {
                     self.receiver.request = receiver::Request {
                         tag: args.tag,
                         command: Command::Authenticate,
-                        tokens: vec![receiver::Token::Argument(args.mechanism.into_bytes())],
+                        tokens: vec![receiver::Token::Argument(
+                            receiver::ArgumentBytes::from_slice(args.mechanism.as_bytes()),
+                        )],
                     };
                     self.receiver.state = receiver::State::Argument { last_ch: b' ' };
                     self.write_bytes(b"+ \r\n".to_vec()).await
@@ -67,7 +70,11 @@ impl<T: SessionStream> Session<T> {
         }
     }
 
-    pub async fn authenticate(&mut self, credentials: Credentials, tag: String) -> trc::Result<()> {
+    pub async fn authenticate(
+        &mut self,
+        credentials: Credentials,
+        tag: CompactString,
+    ) -> trc::Result<()> {
         // Authenticate
         let access_token = self
             .server

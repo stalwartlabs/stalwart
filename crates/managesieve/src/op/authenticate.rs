@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use compact_str::CompactString;
 
 use crate::core::{Command, Session, State, StatusResponse};
 use common::{
@@ -28,7 +29,7 @@ impl<T: SessionStream> Session<T> {
         let mut tokens = request.tokens.into_iter();
         let mechanism = Mechanism::parse(&tokens.next().unwrap().unwrap_bytes())
             .map_err(|err| trc::AuthEvent::Error.into_err().details(err))?;
-        let mut params: Vec<String> = tokens
+        let mut params: Vec<CompactString> = tokens
             .filter_map(|token| token.unwrap_string().ok())
             .collect();
 
@@ -52,7 +53,9 @@ impl<T: SessionStream> Session<T> {
                     self.receiver.request = receiver::Request {
                         tag: "".into(),
                         command: Command::Authenticate,
-                        tokens: vec![receiver::Token::Argument(mechanism.into_bytes())],
+                        tokens: vec![receiver::Token::Argument(
+                            receiver::ArgumentBytes::from_slice(mechanism.as_bytes()),
+                        )],
                     };
                     self.receiver.state = receiver::State::Argument { last_ch: b' ' };
                     return Ok(b"{0}\r\n".to_vec());

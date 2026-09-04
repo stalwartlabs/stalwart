@@ -8,7 +8,6 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
-use compact_str::ToCompactString;
 use mail_parser::decoders::charsets::DecoderFnc;
 use mail_parser::decoders::charsets::map::charset_decoder;
 
@@ -16,7 +15,7 @@ use crate::Command;
 use crate::protocol::search::{self, Filter};
 use crate::protocol::search::{ModSeqEntry, ResultOption};
 use crate::protocol::{Flag, ProtocolVersion};
-use crate::receiver::{Request, Token, bad};
+use crate::receiver::{ArgumentBytes, Request, Token, bad};
 
 use super::{parse_date, parse_number, parse_sequence_set};
 
@@ -37,15 +36,15 @@ impl Request<Command> {
                 Some(Token::Argument(value)) if value.eq_ignore_ascii_case(b"return") => {
                     tokens.next();
                     is_esearch = true;
-                    result_options = parse_result_options(&mut tokens)
-                        .map_err(|v| bad(self.tag.to_compact_string(), v))?;
+                    result_options =
+                        parse_result_options(&mut tokens).map_err(|v| bad(self.tag.clone(), v))?;
                 }
                 Some(Token::Argument(value)) if value.eq_ignore_ascii_case(b"charset") => {
                     tokens.next();
                     decoder = charset_decoder(
                         &tokens
                             .next()
-                            .ok_or_else(|| bad(self.tag.to_compact_string(), "Missing charset."))?
+                            .ok_or_else(|| bad(self.tag.clone(), "Missing charset."))?
                             .unwrap_bytes(),
                     );
                 }
@@ -53,14 +52,10 @@ impl Request<Command> {
             }
         }
 
-        let filter = parse_filters(&mut tokens, decoder)
-            .map_err(|v| bad(self.tag.to_compact_string(), v))?;
+        let filter = parse_filters(&mut tokens, decoder).map_err(|v| bad(self.tag.clone(), v))?;
 
         match filter.len() {
-            0 => Err(bad(
-                self.tag.to_compact_string(),
-                "No filters found in command.",
-            )),
+            0 => Err(bad(self.tag.clone(), "No filters found in command.")),
             _ => Ok(search::Arguments {
                 tag: self.tag,
                 result_options,
@@ -382,7 +377,7 @@ pub fn parse_filters(
                                 )
                                 .into());
                             }
-                            let flag = Flag::parse_imap((param[7..]).to_vec())?;
+                            let flag = Flag::parse_imap(ArgumentBytes::from_slice(&param[7..]))?;
                             let mod_seq_entry = match tokens.next() {
                                 Some(Token::Argument(value)) if value.eq_ignore_ascii_case(b"all") => {
                                     ModSeqEntry::All(flag)
@@ -532,7 +527,8 @@ pub fn decode_argument(
     if let Some(decoder) = decoder {
         Ok(decoder(&argument))
     } else {
-        Ok(String::from_utf8(argument).map_err(|_| Cow::from("Invalid UTF-8 argument."))?)
+        Ok(String::from_utf8(argument.into_vec())
+            .map_err(|_| Cow::from("Invalid UTF-8 argument."))?)
     }
 }
 

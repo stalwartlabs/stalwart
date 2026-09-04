@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ImapResponse, serialize_sequence};
+use super::{ImapResponse, push_int, serialize_sequence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
@@ -13,33 +13,33 @@ pub struct Response {
 }
 
 impl ImapResponse for Response {
-    fn serialize(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64);
-        self.serialize_to(&mut buf);
-        buf
+    fn serialize_into(&self, buf: &mut Vec<u8>) {
+        self.serialize_to(buf);
     }
 }
 
 impl Response {
-    pub fn serialize_to(self, buf: &mut Vec<u8>) {
+    pub fn serialize_to(&self, buf: &mut Vec<u8>) {
         if !self.use_vanished {
-            for (num_deletions, id) in self.ids.into_iter().enumerate() {
+            for (num_deletions, id) in self.ids.iter().enumerate() {
                 buf.extend_from_slice(b"* ");
-                buf.extend_from_slice(
-                    id.saturating_sub(num_deletions as u32)
-                        .to_string()
-                        .as_bytes(),
-                );
+                push_int(buf, id.saturating_sub(num_deletions as u32));
                 buf.extend_from_slice(b" EXPUNGE\r\n");
             }
         } else {
-            Vanished {
-                earlier: false,
-                ids: self.ids,
-            }
-            .serialize(buf);
+            serialize_vanished(buf, false, &self.ids);
         }
     }
+}
+
+fn serialize_vanished(buf: &mut Vec<u8>, earlier: bool, ids: &[u32]) {
+    if earlier {
+        buf.extend_from_slice(b"* VANISHED (EARLIER) ");
+    } else {
+        buf.extend_from_slice(b"* VANISHED ");
+    }
+    serialize_sequence(buf, ids);
+    buf.extend_from_slice(b"\r\n");
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,13 +50,7 @@ pub struct Vanished {
 
 impl Vanished {
     pub fn serialize(&self, buf: &mut Vec<u8>) {
-        if self.earlier {
-            buf.extend_from_slice(b"* VANISHED (EARLIER) ");
-        } else {
-            buf.extend_from_slice(b"* VANISHED ");
-        }
-        serialize_sequence(buf, &self.ids);
-        buf.extend_from_slice(b"\r\n");
+        serialize_vanished(buf, self.earlier, &self.ids);
     }
 }
 
