@@ -20,10 +20,7 @@ impl PostgresStore {
     {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn
-            .prepare_cached(&format!(
-                "SELECT v FROM {} WHERE k = $1",
-                key.subspace().name()
-            ))
+            .prepare_cached(&self.sql.get(key.subspace()).get_value)
             .await
             .map_err(into_error)?;
         let key = key.serialize(0);
@@ -42,10 +39,7 @@ impl PostgresStore {
     pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn
-            .prepare_cached(&format!(
-                "SELECT 1 FROM {} WHERE k = $1",
-                key.subspace().name()
-            ))
+            .prepare_cached(&self.sql.get(key.subspace()).key_exists)
             .await
             .map_err(into_error)?;
         let key = key.serialize(0);
@@ -61,9 +55,7 @@ impl PostgresStore {
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
-        let table = params.begin.subspace().name();
-        let keys = if params.values { "k, v" } else { "k" };
-        let order = if params.ascending { "ASC" } else { "DESC" };
+        let stmts = self.sql.get(params.begin.subspace());
         let mut from = params.begin.serialize(0);
         let mut to = params.end.serialize(0);
         let mut last_key = Vec::new();
@@ -72,22 +64,24 @@ impl PostgresStore {
         let mut retry = ChunkedRetry::unbounded(ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE);
 
         loop {
-            let limit = if params.first {
-                Some(1)
+            let chunk_size = if params.first {
+                None
             } else {
                 retry.chunk_size()
             };
-            let s = conn
-                .prepare_cached(&match limit {
-                    Some(limit) => format!(
-                        "SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k {order} LIMIT {limit}"
-                    ),
-                    None => format!(
-                        "SELECT {keys} FROM {table} WHERE k >= $1 AND k <= $2 ORDER BY k {order}"
-                    ),
-                })
-                .await
-                .map_err(into_error)?;
+            let s = match chunk_size {
+                Some(chunk_size) => conn
+                    .prepare_cached(&format!(
+                        "{} LIMIT {chunk_size}",
+                        stmts.iterate(false, params.ascending, params.values)
+                    ))
+                    .await
+                    .map_err(into_error)?,
+                None => conn
+                    .prepare_cached(stmts.iterate(params.first, params.ascending, params.values))
+                    .await
+                    .map_err(into_error)?,
+            };
             let mut has_last_key = false;
             let mut fetched = 0;
             let mut timed_out = None;
@@ -319,12 +313,12 @@ impl PostgresStore {
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,
     ) -> trc::Result<i64> {
         let key = key.into();
-        let table = key.subspace().name();
+        let subspace = key.subspace();
         let key = key.serialize(0);
 
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
         let s = conn
-            .prepare_cached(&format!("SELECT v FROM {table} WHERE k = $1"))
+            .prepare_cached(&self.sql.get(subspace).get_value)
             .await
             .map_err(into_error)?;
         match conn.query_opt(&s, &[&key]).await {

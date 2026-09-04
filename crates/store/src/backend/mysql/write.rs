@@ -6,7 +6,7 @@
 
 use super::{
     DELETE_CHUNK_SIZE, ER_DUP_ENTRY, ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT, MIN_DELETE_CHUNK_SIZE,
-    MysqlStore, into_error, is_timeout_error,
+    MysqlStore, into_error, is_timeout_error, sql::SubspaceSql,
 };
 use crate::{
     Key, Shape, Subspace,
@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use ahash::AHashMap;
-use mysql_async::{Conn, Error, IsolationLevel, TxOpts, params, prelude::Queryable};
+use mysql_async::{Conn, Error, IsolationLevel, TxOpts, prelude::Queryable};
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -77,6 +77,7 @@ impl MysqlStore {
     ) -> Result<(), CommitError> {
         let mut cursor = BatchCursor::new(batch);
         let mut asserted_values = AHashMap::new();
+        let sql = &*self.sql;
         let mut tx_opts = TxOpts::default();
         tx_opts
             .with_consistent_snapshot(false)
@@ -87,26 +88,23 @@ impl MysqlStore {
 
         if batch.has_allocations() {
             let incr = trx
-                .prep(concat!(
-                    "INSERT INTO n (k, v) VALUES (:k, LAST_INSERT_ID(:v)) ",
-                    "ON DUPLICATE KEY UPDATE v = LAST_INSERT_ID(v + :v)"
-                ))
+                .prep(&*sql.get(Subspace::Counter).increment_returning)
                 .await?;
             let mut key_buf = Vec::with_capacity(16);
 
             for allocation in batch.allocations() {
                 key_buf.clear();
                 allocation.serialize_key_into(&mut key_buf, 0);
-                trx.exec_drop(
-                    &incr,
-                    params! {"k" => &key_buf, "v" => allocation.increment_by()},
-                )
-                .await?;
+                let increment_by = allocation.increment_by();
+                trx.exec_drop(&incr, (&key_buf, increment_by, increment_by))
+                    .await?;
                 let counter = trx.last_insert_id().ok_or_else(missing_last_insert_id)? as i64;
                 result.apply(allocation, counter);
             }
         }
 
+        let index_stmts = sql.get(Subspace::Indexes);
+        let log_stmts = sql.get(Subspace::Logs);
         let mut key_buf = Vec::with_capacity(64);
         for op in batch.ops.iter_mut() {
             match cursor.advance(op, result) {
@@ -115,37 +113,29 @@ impl MysqlStore {
                     cursor.value_key(class, &mut key_buf, 0);
                     let key = &key_buf;
                     let subspace = cursor.subspace(class);
-                    let table = subspace.name();
+                    let stmts = sql.get(subspace);
 
                     match op {
                         ValueOp::Set(set_value) => {
                             let value = set_value.resolve(result)?;
                             let value = &*value;
                             if !matches!(subspace.shape(), Shape::Presence) {
-                                let exists = asserted_values.get(key);
-                                let s = if let Some(exists) = exists {
-                                    if *exists {
-                                        trx.prep(format!(
-                                            "UPDATE {} SET v = :v WHERE k = :k",
-                                            table
-                                        ))
-                                        .await?
-                                    } else {
-                                        trx.prep(format!(
-                                            "INSERT INTO {} (k, v) VALUES (:k, :v)",
-                                            table
-                                        ))
-                                        .await?
+                                let updated = match asserted_values.get(key) {
+                                    Some(true) => {
+                                        let s = trx.prep(&*stmts.update_value).await?;
+                                        trx.exec_drop(&s, (value, key)).await
                                     }
-                                } else {
-                                    trx
-                            .prep(
-                                format!("INSERT INTO {} (k, v) VALUES (:k, :v) ON DUPLICATE KEY UPDATE v = VALUES(v)", table),
-                            )
-                            .await?
+                                    Some(false) => {
+                                        let s = trx.prep(&*stmts.insert_value).await?;
+                                        trx.exec_drop(&s, (key, value)).await
+                                    }
+                                    None => {
+                                        let s = trx.prep(&*stmts.upsert_value).await?;
+                                        trx.exec_drop(&s, (key, value)).await
+                                    }
                                 };
 
-                                match trx.exec_drop(&s, params! {"k" => key, "v" => value}).await {
+                                match updated {
                                     Ok(_) => {
                                         if trx.affected_rows() == 0 {
                                             trx.rollback().await?;
@@ -161,18 +151,12 @@ impl MysqlStore {
                                     }
                                 }
                             } else {
-                                let s = trx
-                                    .prep(format!(
-                                        "INSERT INTO {table} (k) VALUES (?) ON DUPLICATE KEY UPDATE k = k"
-                                    ))
-                                    .await?;
+                                let s = trx.prep(&*stmts.insert_presence).await?;
                                 trx.exec_drop(&s, (key,)).await?;
                             }
                         }
                         ValueOp::MergeFnc(merge_op) => {
-                            let s = trx
-                                .prep(format!("SELECT v FROM {} WHERE k = ? FOR UPDATE", table))
-                                .await?;
+                            let s = trx.prep(&*stmts.get_value_for_update).await?;
                             let (exists, merge_result) = trx
                                 .exec_first::<Vec<u8>, _, _>(&s, (&key,))
                                 .await?
@@ -187,19 +171,17 @@ impl MysqlStore {
                                         .map_err(CommitError::from)
                                 })?;
 
-                            let s = if exists {
-                                trx.prep(format!("UPDATE {} SET v = :v WHERE k = :k", table))
-                                    .await?
-                            } else {
-                                trx.prep(format!("INSERT INTO {} (k, v) VALUES (:k, :v)", table))
-                                    .await?
-                            };
-
                             match merge_result {
                                 MergeResult::Update(value) => {
-                                    if let Err(err) =
-                                        trx.exec_drop(&s, params! {"k" => key, "v" => &value}).await
-                                    {
+                                    let updated = if exists {
+                                        let s = trx.prep(&*stmts.update_value).await?;
+                                        trx.exec_drop(&s, (&value, key)).await
+                                    } else {
+                                        let s = trx.prep(&*stmts.insert_value).await?;
+                                        trx.exec_drop(&s, (key, &value)).await
+                                    };
+
+                                    if let Err(err) = updated {
                                         trx.rollback().await?;
                                         return Err(err.into());
                                     }
@@ -210,9 +192,7 @@ impl MysqlStore {
                                         *exists = false;
                                     }
 
-                                    let s = trx
-                                        .prep(format!("DELETE FROM {} WHERE k = ?", table))
-                                        .await?;
+                                    let s = trx.prep(&*stmts.delete_key).await?;
                                     trx.exec_drop(&s, (key,)).await?;
                                 }
                                 _ => (),
@@ -220,34 +200,16 @@ impl MysqlStore {
                         }
                         ValueOp::AtomicAdd(by) => {
                             if *by >= 0 {
-                                let s = trx
-                                    .prep(format!(
-                                        concat!(
-                                            "INSERT INTO {} (k, v) VALUES (?, ?) ",
-                                            "ON DUPLICATE KEY UPDATE v = v + VALUES(v)"
-                                        ),
-                                        table
-                                    ))
-                                    .await?;
+                                let s = trx.prep(&*stmts.increment).await?;
                                 trx.exec_drop(&s, (key, &*by)).await?;
                             } else {
-                                let s = trx
-                                    .prep(format!("UPDATE {table} SET v = v + ? WHERE k = ?"))
-                                    .await?;
+                                let s = trx.prep(&*stmts.decrement).await?;
                                 trx.exec_drop(&s, (&*by, key)).await?;
                             }
                         }
                         ValueOp::AddAndGet(by) => {
-                            let s = trx
-                                .prep(format!(
-                                    concat!(
-                                        "INSERT INTO {} (k, v) VALUES (:k, LAST_INSERT_ID(:v)) ",
-                                        "ON DUPLICATE KEY UPDATE v = LAST_INSERT_ID(v + :v)"
-                                    ),
-                                    table
-                                ))
-                                .await?;
-                            trx.exec_drop(&s, params! {"k" => key, "v" => &*by}).await?;
+                            let s = trx.prep(&*stmts.increment_returning).await?;
+                            trx.exec_drop(&s, (key, *by, *by)).await?;
                             result.push_counter_id(
                                 trx.last_insert_id().ok_or_else(missing_last_insert_id)? as i64,
                             );
@@ -258,9 +220,7 @@ impl MysqlStore {
                                 *exists = false;
                             }
 
-                            let s = trx
-                                .prep(format!("DELETE FROM {} WHERE k = ?", table))
-                                .await?;
+                            let s = trx.prep(&*stmts.delete_key).await?;
                             trx.exec_drop(&s, (key,)).await?;
                         }
                     }
@@ -270,10 +230,9 @@ impl MysqlStore {
                     let key = &key_buf;
 
                     let s = if set {
-                        trx.prep("INSERT INTO i (k) VALUES (?) ON DUPLICATE KEY UPDATE k = k")
-                            .await?
+                        trx.prep(&*index_stmts.insert_presence).await?
                     } else {
-                        trx.prep("DELETE FROM i WHERE k = ?").await?
+                        trx.prep(&*index_stmts.delete_key).await?
                     };
                     trx.exec_drop(&s, (key,)).await?;
                 }
@@ -293,9 +252,7 @@ impl MysqlStore {
                         }
                     };
 
-                    let s = trx
-                        .prep("INSERT INTO l (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)")
-                        .await?;
+                    let s = trx.prep(&*log_stmts.upsert_value).await?;
 
                     trx.exec_drop(&s, (key, value)).await?;
                 }
@@ -304,10 +261,9 @@ impl MysqlStore {
                     assert_value,
                 } => {
                     let key = cursor.value_key_owned(class, 0);
-                    let table = cursor.subspace(class).name();
 
                     let s = trx
-                        .prep(format!("SELECT v FROM {} WHERE k = ? FOR UPDATE", table))
+                        .prep(&*sql.get(cursor.subspace(class)).get_value_for_update)
                         .await?;
                     let (exists, matches) = trx
                         .exec_first::<Vec<u8>, _, _>(&s, (&key,))
@@ -336,7 +292,7 @@ impl MysqlStore {
             .copied()
             .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
         {
-            purge_table(&mut conn, subspace.name()).await?;
+            purge_table(&mut conn, self.sql.get(subspace)).await?;
         }
 
         Ok(())
@@ -344,14 +300,11 @@ impl MysqlStore {
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        let table = from.subspace().name();
+        let stmts = self.sql.get(from.subspace());
         let mut from = from.serialize(0);
         let to = to.serialize(0);
 
-        let delete = conn
-            .prep(format!("DELETE FROM {table} WHERE k >= ? AND k < ?"))
-            .await
-            .map_err(into_error)?;
+        let delete = conn.prep(&*stmts.delete_range).await.map_err(into_error)?;
 
         match conn.exec_drop(&delete, (&from, &to)).await {
             Ok(_) => return Ok(()),
@@ -361,18 +314,17 @@ impl MysqlStore {
 
         let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
 
+        let boundary = conn
+            .prep(&*stmts.range_boundary)
+            .await
+            .map_err(into_error)?;
+
         loop {
-            let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
-            let boundary = conn
-                .prep(format!(
-                    "SELECT k FROM {table} WHERE k >= ? AND k < ? ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
-                ))
-                .await
-                .map_err(into_error)?;
+            let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE) as u64;
 
             loop {
                 let next = match conn
-                    .exec_first::<Vec<u8>, _, _>(&boundary, (&from, &to))
+                    .exec_first::<Vec<u8>, _, _>(&boundary, (&from, &to, chunk_size))
                     .await
                 {
                     Ok(next) => next,
@@ -408,11 +360,8 @@ impl MysqlStore {
     }
 }
 
-async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
-    let s = conn
-        .prep(format!("DELETE FROM {table} WHERE v = 0"))
-        .await
-        .map_err(into_error)?;
+async fn purge_table(conn: &mut Conn, stmts: &SubspaceSql) -> trc::Result<()> {
+    let s = conn.prep(&*stmts.purge_zero).await.map_err(into_error)?;
 
     match conn.exec_drop(&s, ()).await {
         Ok(_) => return Ok(()),
@@ -421,29 +370,28 @@ async fn purge_table(conn: &mut Conn, table: &str) -> trc::Result<()> {
     }
 
     let purge = conn
-        .prep(format!(
-            "DELETE FROM {table} WHERE v = 0 AND k >= ? AND k < ?"
-        ))
+        .prep(&*stmts.purge_zero_range)
         .await
         .map_err(into_error)?;
     let purge_last = conn
-        .prep(format!("DELETE FROM {table} WHERE v = 0 AND k >= ?"))
+        .prep(&*stmts.purge_zero_from)
+        .await
+        .map_err(into_error)?;
+    let boundary = conn
+        .prep(&*stmts.purge_boundary)
         .await
         .map_err(into_error)?;
     let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
     let mut from = Vec::new();
 
     loop {
-        let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
-        let boundary = conn
-            .prep(format!(
-                "SELECT k FROM {table} WHERE k >= ? ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
-            ))
-            .await
-            .map_err(into_error)?;
+        let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE) as u64;
 
         loop {
-            let next = match conn.exec_first::<Vec<u8>, _, _>(&boundary, (&from,)).await {
+            let next = match conn
+                .exec_first::<Vec<u8>, _, _>(&boundary, (&from, chunk_size))
+                .await
+            {
                 Ok(next) => next,
                 Err(err) if is_timeout_error(&err) => {
                     if !retry.degrade().await {

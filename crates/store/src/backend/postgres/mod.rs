@@ -13,19 +13,24 @@ use crate::{
 };
 use ahash::AHashSet;
 use deadpool_postgres::Pool;
+use std::sync::Arc;
 use tokio_postgres::error::SqlState;
+
+use self::sql::SqlStatements;
 
 pub mod blob;
 pub mod lookup;
 pub mod main;
 pub mod read;
 pub mod search;
+pub mod sql;
 pub mod tls;
 pub mod write;
 
 pub struct PostgresStore {
     pub(crate) conn_pool: Pool,
     pub(crate) ts_configs: AHashSet<&'static str>,
+    pub(crate) sql: Arc<SqlStatements>,
 }
 
 #[inline(always)]

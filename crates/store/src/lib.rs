@@ -109,6 +109,14 @@ pub const U64_LEN: usize = std::mem::size_of::<u64>();
 pub const U32_LEN: usize = std::mem::size_of::<u32>();
 pub const U16_LEN: usize = std::mem::size_of::<u16>();
 
+const _: () = {
+    let mut index = 0;
+    while index < Subspace::ALL.len() {
+        assert!(Subspace::ALL[index].index() == index);
+        index += 1;
+    }
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Subspace {
@@ -188,6 +196,42 @@ impl Subspace {
     #[inline(always)]
     pub const fn byte(self) -> u8 {
         self as u8
+    }
+
+    #[inline(always)]
+    pub const fn index(self) -> usize {
+        match self {
+            Subspace::Acl => 0,
+            Subspace::RegistryIndex => 1,
+            Subspace::Immutable => 2,
+            Subspace::Directory => 3,
+            Subspace::QueueMessage => 4,
+            Subspace::TaskQueue => 5,
+            Subspace::RegistryPrimaryKey => 6,
+            Subspace::ReportOut => 7,
+            Subspace::Indexes => 8,
+            Subspace::DeletedItems => 9,
+            Subspace::BlobLink => 10,
+            Subspace::Logs => 11,
+            Subspace::InMemoryValue => 12,
+            Subspace::Counter => 13,
+            Subspace::TelemetrySpan => 14,
+            Subspace::Property => 15,
+            Subspace::QueueEvent => 16,
+            Subspace::ReportIn => 17,
+            Subspace::Registry => 18,
+            Subspace::Blobs => 19,
+            Subspace::Quota => 20,
+            Subspace::IndexProperty => 21,
+            Subspace::SpamSamples => 22,
+            Subspace::TelemetryMetric => 23,
+            Subspace::InMemoryCounter => 24,
+            Subspace::SearchTerm => 25,
+            Subspace::GlobalCounter => 26,
+            Subspace::SearchDocument => 27,
+            Subspace::SearchQueue => 28,
+            Subspace::System => 29,
+        }
     }
 
     pub const fn try_from_byte(byte: u8) -> Option<Self> {
@@ -973,5 +1017,17 @@ impl From<Value<'_>> for trc::Value {
 impl From<Value<'static>> for () {
     fn from(_: Value<'static>) -> Self {
         unreachable!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Subspace;
+
+    #[test]
+    fn subspace_byte_roundtrip() {
+        for subspace in Subspace::ALL.iter().copied() {
+            assert_eq!(Subspace::try_from_byte(subspace.byte()), Some(subspace));
+        }
     }
 }

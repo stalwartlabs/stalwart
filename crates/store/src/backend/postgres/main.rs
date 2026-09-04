@@ -9,6 +9,7 @@ use crate::{
     backend::postgres::{
         PsqlSearchField, into_pool_error,
         search::{PG_FALLBACK_LANG, PG_LANGS, PG_UNSTEMMED_LANG},
+        sql::SqlStatements,
         tls::MakeRustlsConnect,
     },
     search::{
@@ -56,6 +57,7 @@ impl PostgresStore {
         }
         .map_err(|e| format!("Failed to create connection pool: {e}"))?;
         let ts_configs = discover_ts_configs(&primary_pool).await;
+        let sql = Arc::new(SqlStatements::new());
 
         let mut replicas = vec![];
         for replica in config.read_replicas {
@@ -77,12 +79,14 @@ impl PostgresStore {
                 }
                 .map_err(|e| format!("Failed to create connection pool: {e}"))?,
                 ts_configs: ts_configs.clone(),
+                sql: sql.clone(),
             })));
         }
 
         let primary = Store::PostgreSQL(Arc::new(PostgresStore {
             conn_pool: primary_pool,
             ts_configs,
+            sql,
         }));
 
         // SPDX-SnippetBegin

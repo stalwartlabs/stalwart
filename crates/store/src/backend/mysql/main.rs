@@ -6,7 +6,7 @@
 
 use super::{MysqlStore, into_error};
 use crate::{
-    backend::mysql::MysqlSearchField,
+    backend::mysql::{MysqlSearchField, sql::SqlStatements},
     search::{
         CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
         TracingSearchField,
@@ -54,6 +54,7 @@ impl MysqlStore {
             PoolOpts::default().with_constraints(PoolConstraints::new(pool_min, pool_max).unwrap()),
         );
 
+        let sql = Arc::new(SqlStatements::new());
         let mut replicas = vec![];
         for replica in config.read_replicas {
             replicas.push(Store::MySQL(Arc::new(MysqlStore {
@@ -65,11 +66,13 @@ impl MysqlStore {
                         .db_name(Some(replica.database))
                         .tcp_port(replica.port as u16),
                 ),
+                sql: sql.clone(),
             })))
         }
 
         let primary = Store::MySQL(Arc::new(MysqlStore {
             conn_pool: Pool::new(opts),
+            sql,
         }));
 
         // SPDX-SnippetBegin

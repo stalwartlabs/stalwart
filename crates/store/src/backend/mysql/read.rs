@@ -20,10 +20,7 @@ impl MysqlStore {
     {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let s = conn
-            .prep(format!(
-                "SELECT v FROM {} WHERE k = ?",
-                key.subspace().name()
-            ))
+            .prep(&*self.sql.get(key.subspace()).get_value)
             .await
             .map_err(into_error)?;
         let key = key.serialize(0);
@@ -42,10 +39,7 @@ impl MysqlStore {
     pub(crate) async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let s = conn
-            .prep(format!(
-                "SELECT 1 FROM {} WHERE k = ?",
-                key.subspace().name()
-            ))
+            .prep(&*self.sql.get(key.subspace()).key_exists)
             .await
             .map_err(into_error)?;
         let key = key.serialize(0);
@@ -61,31 +55,31 @@ impl MysqlStore {
         mut cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
-        let table = params.begin.subspace().name();
-        let keys = if params.values { "k, v" } else { "k" };
-        let order = if params.ascending { "ASC" } else { "DESC" };
+        let stmts = self.sql.get(params.begin.subspace());
         let mut from = params.begin.serialize(0);
         let mut to = params.end.serialize(0);
         let mut resume_key: Option<Vec<u8>> = None;
         let mut retry = ChunkedRetry::unbounded(ITERATE_CHUNK_SIZE, MIN_ITERATE_CHUNK_SIZE);
 
         loop {
-            let limit = if params.first {
-                Some(1)
+            let chunk_size = if params.first {
+                None
             } else {
                 retry.chunk_size()
             };
-            let s = conn
-                .prep(&match limit {
-                    Some(limit) => format!(
-                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k {order} LIMIT {limit}"
-                    ),
-                    None => format!(
-                        "SELECT {keys} FROM {table} WHERE k >= ? AND k <= ? ORDER BY k {order}"
-                    ),
-                })
-                .await
-                .map_err(into_error)?;
+            let s = match chunk_size {
+                Some(chunk_size) => conn
+                    .prep(format!(
+                        "{} LIMIT {chunk_size}",
+                        stmts.iterate(false, params.ascending, params.values)
+                    ))
+                    .await
+                    .map_err(into_error)?,
+                None => conn
+                    .prep(stmts.iterate(params.first, params.ascending, params.values))
+                    .await
+                    .map_err(into_error)?,
+            };
             let mut last_key = None;
             let mut fetched = 0;
             let mut timed_out = None;
@@ -327,11 +321,11 @@ impl MysqlStore {
         key: impl Into<ValueKey<ValueClass>> + Sync + Send,
     ) -> trc::Result<i64> {
         let key = key.into();
-        let table = key.subspace().name();
+        let subspace = key.subspace();
         let key = key.serialize(0);
         let mut conn = self.conn_pool.get_conn().await.map_err(into_error)?;
         let s = conn
-            .prep(format!("SELECT v FROM {table} WHERE k = ?"))
+            .prep(&*self.sql.get(subspace).get_value)
             .await
             .map_err(into_error)?;
         match conn.exec_first::<i64, _, _>(&s, (key,)).await {

@@ -7,7 +7,9 @@
 use super::{PostgresStore, into_error, is_timeout_error};
 use crate::{
     Key, Shape, Subspace,
-    backend::postgres::{DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, into_pool_error},
+    backend::postgres::{
+        DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE, into_pool_error, sql::SubspaceSql,
+    },
     write::{
         Advance, AssignedIds, Batch, BatchCursor, ChunkedRetry, LogSet, MAX_COMMIT_ATTEMPTS,
         MAX_COMMIT_TIME, MergeResult, ValueOp, commit_backoff,
@@ -79,6 +81,7 @@ impl PostgresStore {
     ) -> Result<(), CommitError> {
         let mut cursor = BatchCursor::new(batch);
         let mut asserted_values = AHashMap::new();
+        let sql = &*self.sql;
         let trx = conn
             .build_transaction()
             .isolation_level(IsolationLevel::ReadCommitted)
@@ -89,10 +92,7 @@ impl PostgresStore {
 
         if batch.has_allocations() {
             let s = trx
-                .prepare_cached(concat!(
-                    "INSERT INTO n (k, v) VALUES ($1, $2) ",
-                    "ON CONFLICT(k) DO UPDATE SET v = n.v + excluded.v RETURNING v"
-                ))
+                .prepare_cached(&sql.get(Subspace::Counter).increment_returning)
                 .await?;
             let mut key_buf = Vec::with_capacity(16);
 
@@ -107,6 +107,8 @@ impl PostgresStore {
             }
         }
 
+        let index_stmts = sql.get(Subspace::Indexes);
+        let log_stmts = sql.get(Subspace::Logs);
         let mut key_buf = Vec::with_capacity(64);
         for op in batch.ops.iter_mut() {
             match cursor.advance(op, result) {
@@ -115,36 +117,17 @@ impl PostgresStore {
                     cursor.value_key(class, &mut key_buf, 0);
                     let key = &key_buf;
                     let subspace = cursor.subspace(class);
-                    let table = subspace.name();
+                    let stmts = sql.get(subspace);
 
                     match op {
                         ValueOp::Set(set_value) => {
                             let value = set_value.resolve(result)?;
                             let value = &*value;
                             if !matches!(subspace.shape(), Shape::Presence) {
-                                let s = if let Some(exists) = asserted_values.get(key) {
-                                    if *exists {
-                                        trx.prepare_cached(&format!(
-                                            "UPDATE {} SET v = $2 WHERE k = $1",
-                                            table
-                                        ))
-                                        .await?
-                                    } else {
-                                        trx.prepare_cached(&format!(
-                                            "INSERT INTO {} (k, v) VALUES ($1, $2)",
-                                            table
-                                        ))
-                                        .await?
-                                    }
-                                } else {
-                                    trx.prepare_cached(&format!(
-                                        concat!(
-                                            "INSERT INTO {} (k, v) VALUES ($1, $2) ",
-                                            "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v"
-                                        ),
-                                        table
-                                    ))
-                                    .await?
+                                let s = match asserted_values.get(key) {
+                                    Some(true) => trx.prepare_cached(&stmts.update_value).await?,
+                                    Some(false) => trx.prepare_cached(&stmts.insert_value).await?,
+                                    None => trx.prepare_cached(&stmts.upsert_value).await?,
                                 };
 
                                 if trx.execute(&s, &[&key, &value]).await? == 0 {
@@ -154,21 +137,12 @@ impl PostgresStore {
                                         .into());
                                 }
                             } else {
-                                let s = trx
-                                    .prepare_cached(&format!(
-                                        "INSERT INTO {table} (k) VALUES ($1) ON CONFLICT (k) DO NOTHING"
-                                    ))
-                                    .await?;
+                                let s = trx.prepare_cached(&stmts.insert_presence).await?;
                                 trx.execute(&s, &[&key]).await?;
                             }
                         }
                         ValueOp::MergeFnc(merge_op) => {
-                            let s = trx
-                                .prepare_cached(&format!(
-                                    "SELECT v FROM {} WHERE k = $1 FOR UPDATE",
-                                    table
-                                ))
-                                .await?;
+                            let s = trx.prepare_cached(&stmts.get_value_for_update).await?;
                             let (exists, merge_result) = trx
                                 .query_opt(&s, &[&key])
                                 .await?
@@ -190,28 +164,15 @@ impl PostgresStore {
                             match merge_result {
                                 MergeResult::Update(value) => {
                                     let s = if exists {
-                                        trx.prepare_cached(&format!(
-                                            "UPDATE {} SET v = $2 WHERE k = $1",
-                                            table
-                                        ))
-                                        .await?
+                                        trx.prepare_cached(&stmts.update_value).await?
                                     } else {
-                                        trx.prepare_cached(&format!(
-                                            "INSERT INTO {} (k, v) VALUES ($1, $2)",
-                                            table
-                                        ))
-                                        .await?
+                                        trx.prepare_cached(&stmts.insert_value).await?
                                     };
 
                                     trx.execute(&s, &[&key, &value]).await?;
                                 }
                                 MergeResult::Delete if exists => {
-                                    let s = trx
-                                        .prepare_cached(&format!(
-                                            "DELETE FROM {} WHERE k = $1",
-                                            table
-                                        ))
-                                        .await?;
+                                    let s = trx.prepare_cached(&stmts.delete_key).await?;
                                     trx.execute(&s, &[&key]).await?;
 
                                     // Update asserted value
@@ -224,35 +185,15 @@ impl PostgresStore {
                         }
                         ValueOp::AtomicAdd(by) => {
                             if *by >= 0 {
-                                let s = trx
-                                    .prepare_cached(&format!(
-                                        concat!(
-                                            "INSERT INTO {} (k, v) VALUES ($1, $2) ",
-                                            "ON CONFLICT(k) DO UPDATE SET v = {}.v + EXCLUDED.v"
-                                        ),
-                                        table, table
-                                    ))
-                                    .await?;
+                                let s = trx.prepare_cached(&stmts.increment).await?;
                                 trx.execute(&s, &[&key, &*by]).await?;
                             } else {
-                                let s = trx
-                                    .prepare_cached(&format!(
-                                        "UPDATE {table} SET v = v + $1 WHERE k = $2"
-                                    ))
-                                    .await?;
+                                let s = trx.prepare_cached(&stmts.decrement).await?;
                                 trx.execute(&s, &[&*by, &key]).await?;
                             }
                         }
                         ValueOp::AddAndGet(by) => {
-                            let s = trx
-                                .prepare_cached(&format!(
-                                    concat!(
-                                    "INSERT INTO {} (k, v) VALUES ($1, $2) ",
-                                    "ON CONFLICT(k) DO UPDATE SET v = {}.v + EXCLUDED.v RETURNING v"
-                                ),
-                                    table, table
-                                ))
-                                .await?;
+                            let s = trx.prepare_cached(&stmts.increment_returning).await?;
                             result.push_counter_id(
                                 trx.query_one(&s, &[&key, &*by])
                                     .await
@@ -260,9 +201,7 @@ impl PostgresStore {
                             );
                         }
                         ValueOp::Clear => {
-                            let s = trx
-                                .prepare_cached(&format!("DELETE FROM {} WHERE k = $1", table))
-                                .await?;
+                            let s = trx.prepare_cached(&stmts.delete_key).await?;
                             trx.execute(&s, &[&key]).await?;
 
                             // Update asserted value
@@ -277,12 +216,9 @@ impl PostgresStore {
                     let key = &key_buf;
 
                     let s = if set {
-                        trx.prepare_cached(
-                            "INSERT INTO i (k) VALUES ($1) ON CONFLICT (k) DO NOTHING",
-                        )
-                        .await?
+                        trx.prepare_cached(&index_stmts.insert_presence).await?
                     } else {
-                        trx.prepare_cached("DELETE FROM i WHERE k = $1").await?
+                        trx.prepare_cached(&index_stmts.delete_key).await?
                     };
                     trx.execute(&s, &[&key]).await?;
                 }
@@ -302,12 +238,7 @@ impl PostgresStore {
                         }
                     };
 
-                    let s = trx
-                        .prepare_cached(concat!(
-                            "INSERT INTO l (k, v) VALUES ($1, $2) ",
-                            "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v"
-                        ))
-                        .await?;
+                    let s = trx.prepare_cached(&log_stmts.upsert_value).await?;
 
                     trx.execute(&s, &[&key, &value]).await?;
                 }
@@ -316,10 +247,9 @@ impl PostgresStore {
                     assert_value,
                 } => {
                     let key = cursor.value_key_owned(class, 0);
-                    let table = cursor.subspace(class).name();
 
                     let s = trx
-                        .prepare_cached(&format!("SELECT v FROM {} WHERE k = $1 FOR UPDATE", table))
+                        .prepare_cached(&sql.get(cursor.subspace(class)).get_value_for_update)
                         .await?;
                     let (exists, matches) = trx
                         .query_opt(&s, &[&key])
@@ -351,7 +281,7 @@ impl PostgresStore {
             .copied()
             .filter(|subspace| matches!(subspace.shape(), Shape::Counter))
         {
-            purge_table(&conn, subspace.name()).await?;
+            purge_table(&conn, self.sql.get(subspace)).await?;
         }
 
         Ok(())
@@ -359,12 +289,12 @@ impl PostgresStore {
 
     pub(crate) async fn delete_range(&self, from: impl Key, to: impl Key) -> trc::Result<()> {
         let conn = self.conn_pool.get().await.map_err(into_pool_error)?;
-        let table = from.subspace().name();
+        let stmts = self.sql.get(from.subspace());
         let mut from = from.serialize(0);
         let to = to.serialize(0);
 
         let delete = conn
-            .prepare_cached(&format!("DELETE FROM {table} WHERE k >= $1 AND k < $2"))
+            .prepare_cached(&stmts.delete_range)
             .await
             .map_err(into_error)?;
 
@@ -376,17 +306,16 @@ impl PostgresStore {
 
         let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
 
+        let boundary = conn
+            .prepare_cached(&stmts.range_boundary)
+            .await
+            .map_err(into_error)?;
+
         loop {
-            let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
-            let boundary = conn
-                .prepare_cached(&format!(
-                    "SELECT k FROM {table} WHERE k >= $1 AND k < $2 ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
-                ))
-                .await
-                .map_err(into_error)?;
+            let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE) as i64;
 
             loop {
-                let next = match conn.query_opt(&boundary, &[&from, &to]).await {
+                let next = match conn.query_opt(&boundary, &[&from, &to, &chunk_size]).await {
                     Ok(next) => match next {
                         Some(row) => Some(row.try_get::<_, Vec<u8>>(0).map_err(into_error)?),
                         None => None,
@@ -423,9 +352,9 @@ impl PostgresStore {
     }
 }
 
-async fn purge_table(conn: &Object, table: &str) -> trc::Result<()> {
+async fn purge_table(conn: &Object, stmts: &SubspaceSql) -> trc::Result<()> {
     let s = conn
-        .prepare_cached(&format!("DELETE FROM {table} WHERE v = 0"))
+        .prepare_cached(&stmts.purge_zero)
         .await
         .map_err(into_error)?;
 
@@ -436,29 +365,25 @@ async fn purge_table(conn: &Object, table: &str) -> trc::Result<()> {
     }
 
     let purge = conn
-        .prepare_cached(&format!(
-            "DELETE FROM {table} WHERE v = 0 AND k >= $1 AND k < $2"
-        ))
+        .prepare_cached(&stmts.purge_zero_range)
         .await
         .map_err(into_error)?;
     let purge_last = conn
-        .prepare_cached(&format!("DELETE FROM {table} WHERE v = 0 AND k >= $1"))
+        .prepare_cached(&stmts.purge_zero_from)
+        .await
+        .map_err(into_error)?;
+    let boundary = conn
+        .prepare_cached(&stmts.purge_boundary)
         .await
         .map_err(into_error)?;
     let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
     let mut from = Vec::new();
 
     loop {
-        let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE);
-        let boundary = conn
-            .prepare_cached(&format!(
-                "SELECT k FROM {table} WHERE k >= $1 ORDER BY k ASC LIMIT 1 OFFSET {chunk_size}"
-            ))
-            .await
-            .map_err(into_error)?;
+        let chunk_size = retry.chunk_size().unwrap_or(DELETE_CHUNK_SIZE) as i64;
 
         loop {
-            let next = match conn.query_opt(&boundary, &[&from]).await {
+            let next = match conn.query_opt(&boundary, &[&from, &chunk_size]).await {
                 Ok(next) => match next {
                     Some(row) => Some(row.try_get::<_, Vec<u8>>(0).map_err(into_error)?),
                     None => None,

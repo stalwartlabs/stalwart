@@ -12,17 +12,21 @@ use crate::{
     write::SearchIndex,
 };
 use mysql_async::Pool;
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
+
+use self::sql::SqlStatements;
 
 pub mod blob;
 pub mod lookup;
 pub mod main;
 pub mod read;
 pub mod search;
+pub mod sql;
 pub mod write;
 
 pub struct MysqlStore {
     pub(crate) conn_pool: Pool,
+    pub(crate) sql: Arc<SqlStatements>,
 }
 
 #[inline(always)]
