@@ -338,6 +338,7 @@ fn sample_resources(items: usize) -> DavResources {
         highest_change_id: 555,
         size: 0,
         update_lock: Arc::new(UpdateLock::new()),
+        verification: Default::default(),
     };
     resources.recompute_size();
     resources

@@ -127,6 +127,9 @@ pub async fn test(test: &TestServer) {
                     Some(PendingId::Assigned(id.prefix_id())),
                 );
                 server.store().write_batch(&mut batch).await.unwrap();
+                server
+                    .inner
+                    .mark_cache_stale(account.id().document_id(), SyncCollection::Email);
                 updated_ids.insert(id);
             }
             LogAction::Delete(id) => {
@@ -171,6 +174,9 @@ pub async fn test(test: &TestServer) {
                     )
                     .await
                     .unwrap();
+                server
+                    .inner
+                    .mark_cache_stale(account.id().document_id(), SyncCollection::Email);
 
                 id_map.insert(*to, new_id);
                 if type1_ids.contains(&id) {

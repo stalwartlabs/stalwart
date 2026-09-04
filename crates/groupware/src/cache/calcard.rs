@@ -110,6 +110,7 @@ pub(super) async fn build_calcard_resources(
                     highest_change_id: last_change_id,
                     size: 0,
                     update_lock,
+                    verification: Default::default(),
                 };
                 cache.recompute_size();
                 return Ok(cache);
@@ -147,6 +148,7 @@ pub(super) async fn build_calcard_resources(
             highest_change_id: last_change_id,
             size: 0,
             update_lock,
+            verification: Default::default(),
         };
         cache.recompute_size();
         return Ok(cache);
@@ -255,6 +257,7 @@ pub(super) async fn build_scheduling_resources(
         highest_change_id: last_change_id,
         size: 0,
         update_lock,
+        verification: Default::default(),
     };
     cache.recompute_size();
     Ok(cache)

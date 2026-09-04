@@ -5,7 +5,7 @@
  */
 
 use common::{
-    MessageStoreCache, MessagesCache, Server, UpdateLock,
+    MessageStoreCache, MessagesCache, Server, UpdateLock, Verification,
     cache::{
         LockResult,
         swap::{BLOCKING_CODEC_THRESHOLD, SwapKey},
@@ -46,8 +46,13 @@ impl MessageCacheFetch for Server {
                         cache
                     }
                     None => {
-                        let cache =
-                            full_cache_build(self, account_id, Arc::new(UpdateLock::new())).await?;
+                        let cache = full_cache_build(
+                            self,
+                            account_id,
+                            Arc::new(UpdateLock::new()),
+                            Default::default(),
+                        )
+                        .await?;
 
                         if admit(self, account_id, &cache) {
                             let _ = guard.insert(cache.clone());
@@ -79,8 +84,23 @@ impl MessageCacheFetch for Server {
             }
         };
 
-        // Obtain current state
+        // Serve the snapshot without revalidating while it is within the freshness window
         let start_time = Instant::now();
+        let revalidate = &self.inner.cache.revalidate;
+        if cache.is_fresh(revalidate) {
+            trc::event!(
+                Cache(CacheEvent::Hit),
+                AccountId = account_id,
+                Collection = SyncCollection::Email.as_str(),
+                ChangeId = cache.last_change_id,
+                Elapsed = start_time.elapsed(),
+            );
+
+            return Ok(cache);
+        }
+
+        // Obtain current state
+        let verification = Verification::capture(revalidate, &cache.update_lock);
         let changes = self
             .core
             .storage
@@ -115,7 +135,7 @@ impl MessageCacheFetch for Server {
                 }
             };
 
-            let cache = full_cache_build(self, account_id, lock.clone()).await?;
+            let cache = full_cache_build(self, account_id, lock.clone(), verification).await?;
             if admit(self, account_id, &cache) {
                 cache_store.update(account_id, cache.clone());
                 self.inner.cache.swap.notify_changed(
@@ -146,6 +166,16 @@ impl MessageCacheFetch for Server {
 
         // Verify changes
         if changes.changes.is_empty() {
+            let cache = if verification.is_current(&cache.update_lock) {
+                let mut verified = cache.as_ref().clone();
+                verified.verification = verification;
+                let verified = Arc::new(verified);
+                cache_store.update(account_id, verified.clone());
+                verified
+            } else {
+                cache
+            };
+
             trc::event!(
                 Cache(CacheEvent::Hit),
                 AccountId = account_id,
@@ -178,7 +208,8 @@ impl MessageCacheFetch for Server {
             }
         };
         let change_set = ChangeSet::classify(changes);
-        let cache = change_set.apply(self, account_id, cache.as_ref()).await?;
+        let mut cache = change_set.apply(self, account_id, cache.as_ref()).await?;
+        cache.verification = verification;
 
         let cache = Arc::new(cache);
         if admit(self, account_id, &cache) {
@@ -385,6 +416,7 @@ async fn restore_cache_build(server: &Server, account_id: u32) -> Option<Arc<Mes
         mailboxes: Arc::new(mailboxes),
         last_change_id: snapshot_change_id,
         size,
+        verification: Default::default(),
     };
 
     trc::event!(
@@ -404,6 +436,7 @@ async fn full_cache_build(
     server: &Server,
     account_id: u32,
     update_lock: Arc<UpdateLock>,
+    verification: Verification,
 ) -> trc::Result<Arc<MessageStoreCache>> {
     let last_change_id = server
         .core
@@ -426,5 +459,6 @@ async fn full_cache_build(
         mailboxes: Arc::new(mailboxes),
         last_change_id,
         size,
+        verification,
     }))
 }

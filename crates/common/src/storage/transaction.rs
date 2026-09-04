@@ -22,6 +22,7 @@ use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
 impl Server {
     pub async fn commit_batch(&self, mut builder: BatchBuilder) -> trc::Result<AssignedIds> {
         let mut assigned_ids = self.store().write_batch(&mut builder).await?;
+        self.inner.mark_caches_stale_from(&assigned_ids);
 
         if let Some(hash) = builder.last_archive_hash() {
             assigned_ids.push_archive_hash(hash);

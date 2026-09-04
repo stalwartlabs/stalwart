@@ -9,7 +9,7 @@ use crate::{
     Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUid,
     TlsConnectors,
     auth::{AccessTokenInner, AccountCache, DomainCache, MailingListCache, RoleCache, TenantCache},
-    cache::swap::SwapReceiver,
+    cache::{RevalidateInterval, swap::SwapReceiver},
     config::{
         mailstore::spamfilter::SpamClassifier,
         server::tls::parse_certificates,
@@ -111,6 +111,7 @@ impl Caches {
 
         let caches = Caches {
             swap,
+            revalidate: RevalidateInterval::new(RevalidateInterval::DEFAULT),
             access_tokens: Cache::new_single_shard(
                 cache.access_tokens,
                 (std::mem::size_of::<AccessTokenInner>() + 255) as u64,

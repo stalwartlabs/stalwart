@@ -709,6 +709,7 @@ impl EmailIngest for Server {
             .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
+        self.inner.mark_caches_stale_from(&assigned_ids);
         let change_id = assigned_ids.last_change_id(account_id, SyncCollection::Email);
         let document_id = assigned_ids.slot(document_slot);
         let thread_id = thread_result.thread_id.unwrap_or(document_id);

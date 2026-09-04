@@ -71,6 +71,7 @@ pub(super) async fn build_file_resources(
         container_change_id: last_change_id,
         highest_change_id: last_change_id,
         update_lock,
+        verification: Default::default(),
     };
     files.recompute_size();
 
@@ -234,6 +235,7 @@ mod tests {
             highest_change_id: 0,
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
         };
         files.recompute_size();
         files

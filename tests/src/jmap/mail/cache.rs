@@ -580,11 +580,10 @@ async fn received_at_query_is_a_total_order(test: &TestServer) {
         ids.len(),
         "every message must appear in the result"
     );
-    let mut reversed = descending.clone();
-    reversed.reverse();
     assert_eq!(
-        ascending, reversed,
-        "descending must be the exact reverse of ascending, which only holds for a total order"
+        descending.len(),
+        ids.len(),
+        "every message must appear in the reversed result"
     );
 
     let cache = server.get_cached_messages(account_id).await.unwrap();
@@ -605,6 +604,16 @@ async fn received_at_query_is_a_total_order(test: &TestServer) {
         keys.windows(2).any(|p| p[0].0 == p[1].0),
         "the fixture must contain a received_at tie"
     );
+
+    let descending_keys = descending.iter().map(key).collect::<Vec<_>>();
+    for pair in descending_keys.windows(2) {
+        assert!(
+            pair[0].0 > pair[1].0 || (pair[0].0 == pair[1].0 && pair[0].1 < pair[1].1),
+            "descending sort:receivedAt must order ties by ascending document id, per RFC 5256: {:?} then {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
 
     server.inner.cache.messages.remove(&account_id);
     assert_eq!(

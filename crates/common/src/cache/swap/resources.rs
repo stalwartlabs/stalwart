@@ -577,6 +577,7 @@ impl DavResources {
             highest_change_id: frame.change_id(),
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
         };
         resources.recompute_size();
         resources
@@ -682,6 +683,7 @@ mod tests {
             highest_change_id: 42,
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
         };
         resources.recompute_size();
         resources
@@ -732,6 +734,7 @@ mod tests {
             highest_change_id: 7,
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
         };
         resources.recompute_size();
         resources

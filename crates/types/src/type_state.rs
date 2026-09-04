@@ -161,6 +161,9 @@ impl DataType {
             (SyncCollection::Identity, _) => DataType::Identity.into(),
             (SyncCollection::EmailSubmission, _) => DataType::EmailSubmission.into(),
             (SyncCollection::SieveScript, _) => DataType::SieveScript.into(),
+            (SyncCollection::CalendarEventNotification, _) => {
+                DataType::CalendarEventNotification.into()
+            }
             _ => None,
         }
     }

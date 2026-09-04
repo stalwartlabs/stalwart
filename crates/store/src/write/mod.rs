@@ -1235,6 +1235,10 @@ impl AssignedIds {
             .copied()
     }
 
+    pub fn change_counters(&self) -> impl Iterator<Item = ChangeCounter> + '_ {
+        self.change_ids.iter().map(|id| id.counter)
+    }
+
     pub fn change_id(&self, account_id: u32, group: impl Into<ChangeGroup>) -> Option<u64> {
         let counter = ChangeCounter {
             account_id,

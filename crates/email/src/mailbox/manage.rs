@@ -71,12 +71,7 @@ impl MailboxFnc for Server {
 
         batch.reserve_document_ids(account_id, Collection::Mailbox, last_document_id + 1);
 
-        self.core
-            .storage
-            .data
-            .write_batch(&mut batch)
-            .await
-            .caused_by(trc::location!())?;
+        self.commit_batch(batch).await.caused_by(trc::location!())?;
 
         Ok(())
     }

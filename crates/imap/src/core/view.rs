@@ -790,6 +790,7 @@ mod tests {
             update_lock: Arc::new(UpdateLock::new()),
             last_change_id: change_id,
             size: 0,
+            verification: Default::default(),
         }
     }
 

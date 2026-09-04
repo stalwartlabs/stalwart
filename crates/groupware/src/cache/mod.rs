@@ -19,7 +19,7 @@ use calcard::{
     push_event,
 };
 use common::{
-    DAV_CHUNK, DavResources, ResourceChunk, Server, UpdateLock,
+    DAV_CHUNK, DavResources, ResourceChunk, Server, UpdateLock, Verification,
     auth::AccountCache,
     cache::{
         LockResult,
@@ -153,6 +153,7 @@ impl GroupwareCache for Server {
                             collection,
                             Arc::new(UpdateLock::new()),
                             access_account_id,
+                            Default::default(),
                         )
                         .await?;
 
@@ -187,8 +188,23 @@ impl GroupwareCache for Server {
             }
         };
 
-        // Obtain current state
+        // Serve the snapshot without revalidating while it is within the freshness window
         let start_time = Instant::now();
+        let revalidate = &self.inner.cache.revalidate;
+        if cache.is_fresh(revalidate) {
+            trc::event!(
+                Cache(CacheEvent::Hit),
+                AccountId = account_id,
+                Collection = collection.as_str(),
+                ChangeId = cache.highest_change_id,
+                Elapsed = start_time.elapsed(),
+            );
+
+            return Ok(cache);
+        }
+
+        // Obtain current state
+        let verification = Verification::capture(revalidate, &cache.update_lock);
         let changes = self
             .core
             .storage
@@ -209,6 +225,7 @@ impl GroupwareCache for Server {
                 collection,
                 cache.update_lock.clone(),
                 access_account_id,
+                verification,
             )
             .await?;
             if admit(cache_store, account_id, collection, &cache) {
@@ -242,6 +259,16 @@ impl GroupwareCache for Server {
 
         // Verify changes
         if changes.changes.is_empty() {
+            let cache = if verification.is_current(&cache.update_lock) {
+                let mut verified = cache.as_ref().clone();
+                verified.verification = verification;
+                let verified = Arc::new(verified);
+                cache_store.update(account_id, verified.clone());
+                verified
+            } else {
+                cache
+            };
+
             trc::event!(
                 Cache(CacheEvent::Hit),
                 AccountId = account_id,
@@ -298,6 +325,7 @@ impl GroupwareCache for Server {
             .unwrap_or(cache.container_change_id);
         cache.highest_change_id = changes.to_change_id;
         cache.update_lock = lock.clone();
+        cache.verification = verification;
 
         cache.update_lock.set_revision(cache.highest_change_id);
         let cache = Arc::new(cache);
@@ -486,6 +514,7 @@ fn rebuild_cache(
         highest_change_id: previous.highest_change_id,
         size: 0,
         update_lock: previous.update_lock.clone(),
+        verification: Default::default(),
     };
 
     match updated.patch_paths(&previous.resources, staging, changes) {
@@ -667,6 +696,7 @@ async fn full_cache_build(
     collection: SyncCollection,
     update_lock: Arc<UpdateLock>,
     access_account_id: u32,
+    verification: Verification,
 ) -> trc::Result<Arc<DavResources>> {
     match collection {
         SyncCollection::Calendar => {
@@ -699,7 +729,10 @@ async fn full_cache_build(
         }
         _ => unreachable!(),
     }
-    .map(Arc::new)
+    .map(|mut cache| {
+        cache.verification = verification;
+        Arc::new(cache)
+    })
 }
 
 fn push_from_archive(
@@ -982,6 +1015,7 @@ mod tests {
             highest_change_id: 0,
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
         };
         cache.recompute_size();
         cache

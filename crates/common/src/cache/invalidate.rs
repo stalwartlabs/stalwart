@@ -5,9 +5,9 @@
  */
 
 use crate::{
-    Server,
+    Inner, Server,
     auth::{EmailAddressRef, EmailCache},
-    ipc::{BroadcastEvent, CacheInvalidation},
+    ipc::{BroadcastEvent, CacheInvalidation, PushNotification},
 };
 use ahash::AHashSet;
 use registry::{
@@ -17,8 +17,62 @@ use registry::{
     },
     types::id::ObjectId,
 };
-use store::{registry::RegistryQuery, roaring::RoaringBitmap};
-use types::id::Id;
+use store::{registry::RegistryQuery, roaring::RoaringBitmap, write::AssignedIds};
+use types::{
+    collection::{Collection, SyncCollection},
+    id::Id,
+    type_state::DataType,
+};
+use utils::map::bitmap::Bitmap;
+
+impl Inner {
+    pub fn mark_cache_stale(&self, account_id: u32, collection: SyncCollection) {
+        let caches = &self.cache;
+        let resources = match collection {
+            SyncCollection::Email | SyncCollection::Thread => {
+                if let Some(cache) = caches.messages.peek(&account_id) {
+                    cache.update_lock.mark_stale();
+                }
+                return;
+            }
+            SyncCollection::Calendar => &caches.events,
+            SyncCollection::AddressBook => &caches.contacts,
+            SyncCollection::FileNode => &caches.files,
+            SyncCollection::CalendarEventNotification => &caches.scheduling,
+            _ => return,
+        };
+
+        if let Some(cache) = resources.peek(&account_id) {
+            cache.update_lock.mark_stale();
+        }
+    }
+
+    pub fn mark_caches_stale_from(&self, assigned_ids: &AssignedIds) {
+        for counter in assigned_ids.change_counters() {
+            self.mark_cache_stale(counter.account_id, counter.group.to_u8().into());
+        }
+    }
+
+    pub fn mark_caches_stale(&self, account_id: u32, types: Bitmap<DataType>) {
+        for data_type in types {
+            if let Ok(collection) = Collection::try_from(data_type) {
+                self.mark_cache_stale(account_id, collection.into());
+            }
+        }
+    }
+
+    pub fn mark_caches_stale_for(&self, notification: &PushNotification) {
+        match notification {
+            PushNotification::StateChange(state_change) => {
+                self.mark_caches_stale(state_change.account_id, state_change.types);
+            }
+            PushNotification::EmailPush(email_push) => {
+                self.mark_cache_stale(email_push.account_id, SyncCollection::Email);
+            }
+            PushNotification::CalendarAlert(_) => {}
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct CacheInvalidationBuilder {

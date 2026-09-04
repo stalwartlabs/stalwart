@@ -181,6 +181,9 @@ pub async fn test(test: &TestServer) {
             .write_batch(&mut batch)
             .await
             .unwrap();
+        server
+            .inner
+            .mark_cache_stale(account.id().document_id(), SyncCollection::Email);
 
         let mut new_state = State::Initial;
         for (test_num, state) in (states).iter().enumerate() {

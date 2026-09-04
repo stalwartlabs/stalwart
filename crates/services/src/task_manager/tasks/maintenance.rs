@@ -584,8 +584,7 @@ async fn reset_imap_uids(server: &Server, account_id: u32) -> trc::Result<(u32, 
             .caused_by(trc::location!())?
             .clear(MailboxField::UidCounter);
         server
-            .store()
-            .write_batch(&mut batch)
+            .commit_batch(batch)
             .await
             .caused_by(trc::location!())?;
         mailbox_count += 1;

@@ -275,6 +275,7 @@ impl EmailCopy for Server {
             .write_batch(&mut batch)
             .await
             .caused_by(trc::location!())?;
+        self.inner.mark_caches_stale_from(&assigned_ids);
         let document_id = assigned_ids.slot(document_slot);
 
         // Request indexing

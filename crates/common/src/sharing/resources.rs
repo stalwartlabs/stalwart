@@ -234,6 +234,7 @@ mod tests {
             highest_change_id: 0,
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
         };
 
         let access_token = AccessToken::from_id_maybe_invalid(ACCESSOR);

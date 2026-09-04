@@ -176,6 +176,7 @@ pub struct LogoCache {
 
 pub struct Caches {
     pub swap: crate::cache::swap::SwapTier,
+    pub revalidate: crate::cache::RevalidateInterval,
 
     pub access_tokens: Cache<u32, Arc<AccessTokenInner>>,
     pub http_auth: Cache<Box<str>, HttpAuthCache>,
@@ -221,6 +222,7 @@ pub struct MessageStoreCache {
     pub update_lock: Arc<UpdateLock>,
     pub last_change_id: u64,
     pub size: u64,
+    pub verification: Verification,
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +334,13 @@ pub struct NameWrapper(pub String);
 pub struct UpdateLock {
     pub semaphore: Semaphore,
     pub revision: AtomicU64,
+    pub epoch: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Verification {
+    verified_at: u64,
+    epoch: u64,
 }
 
 pub const DAV_CHUNK: usize = 4096;
@@ -365,6 +374,7 @@ pub struct DavResources {
     pub highest_change_id: u64,
     pub size: u64,
     pub update_lock: Arc<UpdateLock>,
+    pub verification: Verification,
 }
 
 #[derive(Debug, Clone, Default)]

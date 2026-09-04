@@ -105,6 +105,8 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                             );
                                             match event {
                                                 BroadcastEvent::PushNotification(notification) => {
+                                                    inner.mark_caches_stale_for(&notification);
+
                                                     if inner
                                                         .ipc
                                                         .push_tx
