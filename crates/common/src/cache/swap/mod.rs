@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{DavResources, Inner, MessageStoreCache};
+use crate::{GroupwareResources, Inner, MessageStoreCache};
 use blob::BlobSwapStore;
 use file::FileSwapStore;
 #[cfg(feature = "redis")]
@@ -266,7 +266,7 @@ impl SwapTier {
         account_id: u32,
         collection: SyncCollection,
         changes: u32,
-        cache: &Arc<DavResources>,
+        cache: &Arc<GroupwareResources>,
     ) {
         self.notify_refresh(
             SwapTarget::new(account_id, collection),

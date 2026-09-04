@@ -15,7 +15,7 @@ pub mod scheduling;
 pub mod update;
 
 use crate::{DavError, DavErrorCondition};
-use common::DavResources;
+use common::GroupwareResources;
 use dav_proto::schema::{
     property::{CalDavProperty, CalendarData, DavProperty, WebDavProperty},
     response::CalCondition,
@@ -86,7 +86,7 @@ pub(crate) static CALENDAR_ITEM_PROPS: [DavProperty; 20] = [
 ];
 
 pub(crate) fn assert_is_unique_uid(
-    resources: &DavResources,
+    resources: &GroupwareResources,
     calendar_id: u32,
     uid: Option<&str>,
 ) -> crate::Result<()> {

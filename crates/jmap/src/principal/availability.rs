@@ -109,7 +109,7 @@ impl PrincipalGetAvailability for Server {
 
         for account_id in principal.all_ids_by_collection(Collection::Calendar) {
             let resources = self
-                .fetch_dav_resources(
+                .fetch_groupware_resources(
                     access_token.account_id(),
                     account_id,
                     SyncCollection::Calendar,

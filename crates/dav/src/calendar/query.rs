@@ -22,7 +22,7 @@ use calcard::{
         ICalendarValue,
     },
 };
-use common::{DavResource, Server, auth::AccessToken};
+use common::{GroupwareResource, Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders,
     schema::{
@@ -68,7 +68,7 @@ impl CalendarQueryRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::Calendar,
@@ -128,7 +128,7 @@ impl CalendarQueryRequestHandler for Server {
     }
 }
 
-pub(crate) fn is_resource_in_time_range(resource: &DavResource, filter: &TimeRange) -> bool {
+pub(crate) fn is_resource_in_time_range(resource: &GroupwareResource, filter: &TimeRange) -> bool {
     // Check whether the resource has a time range and if it overlaps with the filter
     if let Some((start, end)) = resource.event_time_range() {
         ((filter.start < end) || (filter.start <= start))

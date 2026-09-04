@@ -109,7 +109,7 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                     for item in items {
                         let (marker, id) = match item {
                             CacheInvalidation::AccessToken(id) => (0u8, *id),
-                            CacheInvalidation::DavResources(id) => (1u8, *id),
+                            CacheInvalidation::GroupwareResources(id) => (1u8, *id),
                             CacheInvalidation::Domain(id) => (2u8, *id),
                             CacheInvalidation::Account(id) => (3u8, *id),
                             CacheInvalidation::DkimSignature(id) => (4u8, *id),
@@ -262,7 +262,7 @@ where
                         let id = self.messages.next_leb128::<u32>().ok_or(())?;
                         items.push(match marker {
                             0 => CacheInvalidation::AccessToken(id),
-                            1 => CacheInvalidation::DavResources(id),
+                            1 => CacheInvalidation::GroupwareResources(id),
                             2 => CacheInvalidation::Domain(id),
                             3 => CacheInvalidation::Account(id),
                             4 => CacheInvalidation::DkimSignature(id),

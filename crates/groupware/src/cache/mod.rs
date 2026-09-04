@@ -19,7 +19,7 @@ use calcard::{
     push_event,
 };
 use common::{
-    DAV_CHUNK, DavResources, ResourceChunk, Server, UpdateLock, Verification,
+    DAV_CHUNK, GroupwareResources, ResourceChunk, Server, UpdateLock, Verification,
     auth::AccountCache,
     cache::{
         LockResult,
@@ -89,12 +89,12 @@ impl ChunkAccumulator {
 }
 
 pub trait GroupwareCache: Sync + Send {
-    fn fetch_dav_resources(
+    fn fetch_groupware_resources(
         &self,
         access_account_id: u32,
         account_id: u32,
         collection: SyncCollection,
-    ) -> impl Future<Output = trc::Result<Arc<DavResources>>> + Send;
+    ) -> impl Future<Output = trc::Result<Arc<GroupwareResources>>> + Send;
 
     fn create_default_addressbook(
         &self,
@@ -114,20 +114,20 @@ pub trait GroupwareCache: Sync + Send {
         account_id: u32,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
-    fn cached_dav_resources(
+    fn cached_groupware_resources(
         &self,
         account_id: u32,
         collection: SyncCollection,
-    ) -> Option<Arc<DavResources>>;
+    ) -> Option<Arc<GroupwareResources>>;
 }
 
 impl GroupwareCache for Server {
-    async fn fetch_dav_resources(
+    async fn fetch_groupware_resources(
         &self,
         access_account_id: u32,
         account_id: u32,
         collection: SyncCollection,
-    ) -> trc::Result<Arc<DavResources>> {
+    ) -> trc::Result<Arc<GroupwareResources>> {
         let cache_store = match collection {
             SyncCollection::Calendar => &self.inner.cache.events,
             SyncCollection::AddressBook => &self.inner.cache.contacts,
@@ -477,18 +477,18 @@ impl GroupwareCache for Server {
         if default_calendar_id.is_some() {
             Ok(default_calendar_id)
         } else {
-            self.fetch_dav_resources(access_account_id, account_id, SyncCollection::Calendar)
+            self.fetch_groupware_resources(access_account_id, account_id, SyncCollection::Calendar)
                 .await
                 .map(|c| c.document_ids(true).next())
         }
     }
 
     #[inline(always)]
-    fn cached_dav_resources(
+    fn cached_groupware_resources(
         &self,
         account_id: u32,
         collection: SyncCollection,
-    ) -> Option<Arc<DavResources>> {
+    ) -> Option<Arc<GroupwareResources>> {
         (match collection {
             SyncCollection::Calendar => &self.inner.cache.events,
             SyncCollection::AddressBook => &self.inner.cache.contacts,
@@ -500,12 +500,12 @@ impl GroupwareCache for Server {
 }
 
 fn rebuild_cache(
-    previous: &DavResources,
+    previous: &GroupwareResources,
     collection: SyncCollection,
     staging: &ResourceChunk,
     changes: &AHashMap<(bool, u32), Option<u32>>,
-) -> DavResources {
-    let mut updated = DavResources {
+) -> GroupwareResources {
+    let mut updated = GroupwareResources {
         base_path: previous.base_path.clone(),
         paths: previous.paths.clone(),
         resources: previous.resources.rebuild(staging, changes),
@@ -603,10 +603,10 @@ async fn process_changes(
 
 #[inline(always)]
 fn admit(
-    cache_store: &Cache<u32, Arc<DavResources>>,
+    cache_store: &Cache<u32, Arc<GroupwareResources>>,
     account_id: u32,
     collection: SyncCollection,
-    cache: &Arc<DavResources>,
+    cache: &Arc<GroupwareResources>,
 ) -> bool {
     if !cache_store.is_oversized(&account_id, cache) {
         return true;
@@ -626,7 +626,7 @@ async fn restore_cache_build(
     server: &Server,
     account_id: u32,
     collection: SyncCollection,
-) -> Option<Arc<DavResources>> {
+) -> Option<Arc<GroupwareResources>> {
     if !server.inner.cache.swap.is_enabled() {
         return None;
     }
@@ -648,12 +648,12 @@ async fn restore_cache_build(
 
     let snapshot_len = snapshot.len();
     let restored = if snapshot_len >= BLOCKING_CODEC_THRESHOLD {
-        tokio::task::spawn_blocking(move || DavResources::from_snapshot(&snapshot))
+        tokio::task::spawn_blocking(move || GroupwareResources::from_snapshot(&snapshot))
             .await
             .ok()
             .flatten()
     } else {
-        DavResources::from_snapshot(&snapshot)
+        GroupwareResources::from_snapshot(&snapshot)
     }
     .or_else(|| {
         trc::event!(
@@ -697,7 +697,7 @@ async fn full_cache_build(
     update_lock: Arc<UpdateLock>,
     access_account_id: u32,
     verification: Verification,
-) -> trc::Result<Arc<DavResources>> {
+) -> trc::Result<Arc<GroupwareResources>> {
     match collection {
         SyncCollection::Calendar => {
             build_calcard_resources(
@@ -810,7 +810,7 @@ mod tests {
     use super::*;
     use crate::calendar::{SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID};
     use common::{
-        ArenaRef, DavName, DavResource, DavResourceMetadata, NO_ID, ResourceStore,
+        ArenaRef, DavName, GroupwareResource, GroupwareResourceMetadata, NO_ID, ResourceStore,
         storage::dav::CONTAINER_FLAG,
     };
 
@@ -907,9 +907,9 @@ mod tests {
                     let name = builder.push_str(name);
                     let acls = builder.push_acls(&[]);
                     let preferences = builder.push_prefs(&[]);
-                    builder.records.push(DavResource {
+                    builder.records.push(GroupwareResource {
                         document_id: *document_id,
-                        data: DavResourceMetadata::Calendar {
+                        data: GroupwareResourceMetadata::Calendar {
                             name,
                             acls,
                             preferences,
@@ -929,9 +929,9 @@ mod tests {
                             .collect::<Vec<_>>(),
                     );
                     let uid = builder.push_str("uid");
-                    builder.records.push(DavResource {
+                    builder.records.push(GroupwareResource {
                         document_id: *document_id,
-                        data: DavResourceMetadata::CalendarEvent {
+                        data: GroupwareResourceMetadata::CalendarEvent {
                             names,
                             start: 0,
                             duration: 0,
@@ -951,9 +951,9 @@ mod tests {
                 } => {
                     let name = builder.push_str(name);
                     let acls = builder.push_acls(&[]);
-                    builder.records.push(DavResource {
+                    builder.records.push(GroupwareResource {
                         document_id: *document_id,
-                        data: DavResourceMetadata::File {
+                        data: GroupwareResourceMetadata::File {
                             name,
                             size: size.unwrap_or(NO_ID),
                             parent_id: parent_id.unwrap_or(NO_ID),
@@ -971,9 +971,9 @@ mod tests {
                             SCHEDULE_INBOX_ID,
                         )])
                     };
-                    builder.records.push(DavResource {
+                    builder.records.push(GroupwareResource {
                         document_id: *document_id,
-                        data: DavResourceMetadata::CalendarEventNotification {
+                        data: GroupwareResourceMetadata::CalendarEventNotification {
                             names,
                             created_at: 0,
                             event_id: u32::MAX,
@@ -985,7 +985,7 @@ mod tests {
         }
     }
 
-    fn cold_build(specs: &[Spec], collection: SyncCollection) -> DavResources {
+    fn cold_build(specs: &[Spec], collection: SyncCollection) -> GroupwareResources {
         let unified = collection == SyncCollection::FileNode;
         let mut containers = ChunkAccumulator::default();
         let mut items = ChunkAccumulator::default();
@@ -1006,7 +1006,7 @@ mod tests {
             SyncCollection::CalendarEventNotification => build_scheduling_paths(&resources),
             _ => build_calcard_paths(&resources),
         };
-        let mut cache = DavResources {
+        let mut cache = GroupwareResources {
             base_path: "/dav/x/john/".to_string(),
             paths: Arc::new(paths),
             resources,
@@ -1022,10 +1022,10 @@ mod tests {
     }
 
     fn apply(
-        previous: &DavResources,
+        previous: &GroupwareResources,
         collection: SyncCollection,
         changes: &[(bool, u32, Option<Spec>)],
-    ) -> DavResources {
+    ) -> GroupwareResources {
         let mut staging = ResourceChunkBuilder::with_capacity(changes.len());
         let mut map: AHashMap<(bool, u32), Option<u32>> = AHashMap::with_capacity(changes.len());
 
@@ -1041,7 +1041,7 @@ mod tests {
         rebuild_cache(previous, collection, &staging.finish(), &map)
     }
 
-    fn entries(cache: &DavResources) -> Vec<(String, u32, u32, u32)> {
+    fn entries(cache: &GroupwareResources) -> Vec<(String, u32, u32, u32)> {
         let mut entries = cache
             .paths
             .iter()
@@ -1058,7 +1058,7 @@ mod tests {
         entries
     }
 
-    fn records(cache: &DavResources) -> Vec<(u32, bool, Vec<String>, u32)> {
+    fn records(cache: &GroupwareResources) -> Vec<(u32, bool, Vec<String>, u32)> {
         cache
             .resources
             .iter()
@@ -1084,7 +1084,7 @@ mod tests {
             .collect()
     }
 
-    fn assert_well_formed(cache: &DavResources) {
+    fn assert_well_formed(cache: &GroupwareResources) {
         assert!(
             cache
                 .paths
@@ -1123,7 +1123,7 @@ mod tests {
     }
 
     fn assert_matches_cold_build(
-        updated: &DavResources,
+        updated: &GroupwareResources,
         specs: &[Spec],
         collection: SyncCollection,
     ) {

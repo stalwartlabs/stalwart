@@ -67,7 +67,7 @@ impl JmapCalendarEventCopy for Server {
                 .details("From accountId is equal to fromAccountId"));
         }
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::Calendar,
@@ -85,7 +85,7 @@ impl JmapCalendarEventCopy for Server {
         };
 
         let from_cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 from_account_id,
                 SyncCollection::Calendar,

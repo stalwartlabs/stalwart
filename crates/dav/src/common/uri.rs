@@ -119,7 +119,7 @@ impl DavUriResource for Server {
     ) -> trc::Result<Option<DocumentUri>> {
         if let Some(resource) = uri.resource {
             if let Some(resource) = self
-                .fetch_dav_resources(
+                .fetch_groupware_resources(
                     access_token.account_id(),
                     uri.account_id,
                     uri.collection.into(),

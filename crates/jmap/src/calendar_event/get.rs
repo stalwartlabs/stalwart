@@ -70,7 +70,7 @@ impl CalendarEventGet for Server {
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Calendar);
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::Calendar,

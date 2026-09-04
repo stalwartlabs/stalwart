@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    ArenaRef, CachedName, DAV_CHUNK, DavName, DavResource, DavResourceMetadata, DavResourceRef,
+    ArenaRef, CachedName, DAV_CHUNK, DavName, GroupwareResource, GroupwareResourceMetadata, GroupwareResourceRef,
     NO_ID, ResourceChunk, ResourceStore, TinyCalendarPreferences,
 };
 use std::{ops::Range, sync::Arc};
@@ -33,7 +33,7 @@ impl ResourceChunk {
     }
 
     pub fn heap_size(&self) -> u64 {
-        (self.records.len() * std::mem::size_of::<DavResource>()
+        (self.records.len() * std::mem::size_of::<GroupwareResource>()
             + self.bytes.len()
             + self.names.len() * std::mem::size_of::<CachedName>()
             + self.acls.len() * std::mem::size_of::<AclGrant>()
@@ -44,7 +44,7 @@ impl ResourceChunk {
 
 #[derive(Default)]
 pub struct ResourceChunkBuilder {
-    pub records: Vec<DavResource>,
+    pub records: Vec<GroupwareResource>,
     pub bytes: Vec<u8>,
     pub names: Vec<CachedName>,
     pub acls: Vec<AclGrant>,
@@ -104,40 +104,40 @@ impl ResourceChunkBuilder {
         }
     }
 
-    pub fn push_from(&mut self, src: &DavResourceRef<'_>) {
+    pub fn push_from(&mut self, src: &GroupwareResourceRef<'_>) {
         let data = match &src.resource.data {
-            DavResourceMetadata::File {
+            GroupwareResourceMetadata::File {
                 name,
                 size,
                 parent_id,
                 acls,
                 etag,
-            } => DavResourceMetadata::File {
+            } => GroupwareResourceMetadata::File {
                 name: self.push_str(src.chunk.str_at(*name)),
                 size: *size,
                 parent_id: *parent_id,
                 acls: self.push_acls(src.chunk.acls_at(*acls)),
                 etag: *etag,
             },
-            DavResourceMetadata::Calendar {
+            GroupwareResourceMetadata::Calendar {
                 name,
                 acls,
                 preferences,
                 etag,
-            } => DavResourceMetadata::Calendar {
+            } => GroupwareResourceMetadata::Calendar {
                 name: self.push_str(src.chunk.str_at(*name)),
                 acls: self.push_acls(src.chunk.acls_at(*acls)),
                 preferences: self.push_prefs(src.chunk.prefs_at(*preferences)),
                 etag: *etag,
             },
-            DavResourceMetadata::AddressBook { name, acls, etag } => {
-                DavResourceMetadata::AddressBook {
+            GroupwareResourceMetadata::AddressBook { name, acls, etag } => {
+                GroupwareResourceMetadata::AddressBook {
                     name: self.push_str(src.chunk.str_at(*name)),
                     acls: self.push_acls(src.chunk.acls_at(*acls)),
                     etag: *etag,
                 }
             }
-            DavResourceMetadata::CalendarEvent {
+            GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start,
                 duration,
@@ -145,7 +145,7 @@ impl ResourceChunkBuilder {
                 modified_at,
                 uid,
                 etag,
-            } => DavResourceMetadata::CalendarEvent {
+            } => GroupwareResourceMetadata::CalendarEvent {
                 names: self.push_cached_names(src.chunk, *names),
                 start: *start,
                 duration: *duration,
@@ -154,32 +154,32 @@ impl ResourceChunkBuilder {
                 uid: self.push_str(src.chunk.str_at(*uid)),
                 etag: *etag,
             },
-            DavResourceMetadata::ContactCard {
+            GroupwareResourceMetadata::ContactCard {
                 names,
                 created_at,
                 modified_at,
                 uid,
                 etag,
-            } => DavResourceMetadata::ContactCard {
+            } => GroupwareResourceMetadata::ContactCard {
                 names: self.push_cached_names(src.chunk, *names),
                 created_at: *created_at,
                 modified_at: *modified_at,
                 uid: self.push_str(src.chunk.str_at(*uid)),
                 etag: *etag,
             },
-            DavResourceMetadata::CalendarEventNotification {
+            GroupwareResourceMetadata::CalendarEventNotification {
                 names,
                 created_at,
                 event_id,
                 etag,
-            } => DavResourceMetadata::CalendarEventNotification {
+            } => GroupwareResourceMetadata::CalendarEventNotification {
                 names: self.push_cached_names(src.chunk, *names),
                 created_at: *created_at,
                 event_id: *event_id,
                 etag: *etag,
             },
         };
-        self.records.push(DavResource {
+        self.records.push(GroupwareResource {
             document_id: src.resource.document_id,
             data,
         });
@@ -235,7 +235,7 @@ impl<'x> SplitChunks<'x> {
         }
     }
 
-    fn push(&mut self, resource: &DavResourceRef<'_>) {
+    fn push(&mut self, resource: &GroupwareResourceRef<'_>) {
         if self.current.len() == DAV_CHUNK {
             let full =
                 std::mem::replace(&mut self.current, ResourceChunkBuilder::with_capacity(64));
@@ -294,21 +294,21 @@ impl ResourceStore {
         self.total == 0
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = DavResourceRef<'_>> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
         self.chunks.iter().flat_map(|chunk| {
-            chunk.records.iter().map(move |resource| DavResourceRef {
+            chunk.records.iter().map(move |resource| GroupwareResourceRef {
                 chunk: chunk.as_ref(),
                 resource,
             })
         })
     }
 
-    pub fn iter_with_acls(&self) -> impl Iterator<Item = DavResourceRef<'_>> + '_ {
+    pub fn iter_with_acls(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
         self.chunks
             .iter()
             .filter(|chunk| !chunk.acls.is_empty())
             .flat_map(|chunk| {
-                chunk.records.iter().map(move |resource| DavResourceRef {
+                chunk.records.iter().map(move |resource| GroupwareResourceRef {
                     chunk: chunk.as_ref(),
                     resource,
                 })
@@ -338,7 +338,7 @@ impl ResourceStore {
         Some(run.start + slot)
     }
 
-    fn locate(&self, run: Range<usize>, document_id: u32) -> Option<DavResourceRef<'_>> {
+    fn locate(&self, run: Range<usize>, document_id: u32) -> Option<GroupwareResourceRef<'_>> {
         let chunk = &self.chunks[self.chunk_for(&run, document_id)?];
         if document_id > chunk.max_id {
             return None;
@@ -347,19 +347,19 @@ impl ResourceStore {
             .records
             .binary_search_by_key(&document_id, |r| r.document_id)
             .ok()
-            .map(|slot| DavResourceRef {
+            .map(|slot| GroupwareResourceRef {
                 chunk: chunk.as_ref(),
                 resource: &chunk.records[slot],
             })
     }
 
-    pub fn find(&self, document_id: u32, want_container: bool) -> Option<DavResourceRef<'_>> {
+    pub fn find(&self, document_id: u32, want_container: bool) -> Option<GroupwareResourceRef<'_>> {
         self.locate(self.run(want_container), document_id)
             .filter(|resource| resource.is_container() == want_container)
     }
 
     #[inline(always)]
-    pub fn find_any(&self, document_id: u32) -> Option<DavResourceRef<'_>> {
+    pub fn find_any(&self, document_id: u32) -> Option<GroupwareResourceRef<'_>> {
         if self.unified_id_space {
             self.locate(self.run(true), document_id)
         } else {
@@ -391,7 +391,7 @@ impl ResourceStore {
             pending.sort_unstable_by_key(|(document_id, _)| *document_id);
             let mut pending = pending.into_iter().peekable();
 
-            let staged = |slot: u32| DavResourceRef {
+            let staged = |slot: u32| GroupwareResourceRef {
                 chunk: staging,
                 resource: &staging.records[slot as usize],
             };
@@ -426,7 +426,7 @@ impl ResourceStore {
                     match pending.next_if(|(document_id, _)| *document_id == record.document_id) {
                         Some((_, Some(slot))) => builder.push(&staged(slot)),
                         Some((_, None)) => {}
-                        None => builder.push(&DavResourceRef {
+                        None => builder.push(&GroupwareResourceRef {
                             chunk,
                             resource: record,
                         }),
@@ -466,15 +466,15 @@ impl ResourceStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DavResourceMetadata;
+    use crate::GroupwareResourceMetadata;
 
     fn calendar(builder: &mut ResourceChunkBuilder, document_id: u32, name: &str) {
         let name = builder.push_str(name);
         let acls = builder.push_acls(&[]);
         let preferences = builder.push_prefs(&[]);
-        builder.records.push(DavResource {
+        builder.records.push(GroupwareResource {
             document_id,
-            data: DavResourceMetadata::Calendar {
+            data: GroupwareResourceMetadata::Calendar {
                 name,
                 acls,
                 preferences,
@@ -489,9 +489,9 @@ mod tests {
             parent_id,
         }]);
         let uid = builder.push_str("uid");
-        builder.records.push(DavResource {
+        builder.records.push(GroupwareResource {
             document_id,
-            data: DavResourceMetadata::CalendarEvent {
+            data: GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start: 0,
                 duration: 0,

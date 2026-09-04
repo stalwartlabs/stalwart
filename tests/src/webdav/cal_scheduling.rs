@@ -244,7 +244,7 @@ pub async fn test(test: &TestServer) {
         assert_eq!(messages.emails.len(), 1);
         let events = test
             .server
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 client.account_id,
                 client.account_id,
                 SyncCollection::Calendar,
@@ -254,7 +254,7 @@ pub async fn test(test: &TestServer) {
         assert_eq!(events.resources.len(), 2);
         let events = test
             .server
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 client.account_id,
                 client.account_id,
                 SyncCollection::CalendarEventNotification,
@@ -479,7 +479,7 @@ pub async fn test(test: &TestServer) {
         .with_status(StatusCode::CREATED);
     let external_document_id = test
         .server
-        .fetch_dav_resources(
+        .fetch_groupware_resources(
             john_client.account_id,
             john_client.account_id,
             SyncCollection::Calendar,
@@ -622,7 +622,7 @@ pub async fn test(test: &TestServer) {
         .with_status(StatusCode::CREATED);
     let recurring_document_id = test
         .server
-        .fetch_dav_resources(
+        .fetch_groupware_resources(
             john_client.account_id,
             john_client.account_id,
             SyncCollection::Calendar,
@@ -707,7 +707,7 @@ pub async fn test(test: &TestServer) {
         .with_status(StatusCode::CREATED);
     let hidden_document_id = test
         .server
-        .fetch_dav_resources(
+        .fetch_groupware_resources(
             john_client.account_id,
             john_client.account_id,
             SyncCollection::Calendar,

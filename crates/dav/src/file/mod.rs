@@ -8,7 +8,7 @@ use crate::{
     DavError,
     common::uri::{OwnedUri, UriResource},
 };
-use common::{DavResourcePath, DavResources};
+use common::{DavResourcePath, GroupwareResources};
 use dav_proto::schema::property::{DavProperty, WebDavProperty};
 use hyper::StatusCode;
 
@@ -88,7 +88,7 @@ pub(crate) trait DavFileResource {
     ) -> crate::Result<UriResource<u32, (Option<T>, &'x str)>>;
 }
 
-impl DavFileResource for DavResources {
+impl DavFileResource for GroupwareResources {
     fn map_resource<T: FromDavResource>(
         &self,
         resource: &OwnedUri<'_>,

@@ -5,7 +5,7 @@
  */
 
 use calcard::jscalendar::JSCalendarProperty;
-use common::DavResources;
+use common::GroupwareResources;
 use jmap_proto::error::set::SetError;
 use types::id::Id;
 
@@ -54,7 +54,7 @@ impl CalendarSyntheticId for Id {
 }
 
 pub(super) fn assert_is_unique_uid(
-    resources: &DavResources,
+    resources: &GroupwareResources,
     uid: Option<&str>,
 ) -> trc::Result<Result<(), SetError<JSCalendarProperty<Id>>>> {
     if let Some(uid) = uid

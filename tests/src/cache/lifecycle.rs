@@ -6,7 +6,7 @@
 
 use crate::utils::server::TestServer;
 use common::{
-    DavResources, Server,
+    GroupwareResources, Server,
     auth::AccessToken,
     cache::{
         invalidate::CacheInvalidationBuilder,
@@ -151,7 +151,7 @@ async fn resource_cache_survives_an_eviction(test: &TestServer, account_id: u32)
     let server = &test.server;
 
     let before = server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
 
@@ -161,7 +161,7 @@ async fn resource_cache_survives_an_eviction(test: &TestServer, account_id: u32)
     assert!(server.inner.cache.events.peek(&account_id).is_none());
 
     let after = server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
 
@@ -246,7 +246,7 @@ async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, acc
         .expect("failed to create the file nodes");
 
     let resources = server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::FileNode)
         .await
         .unwrap();
     assert!(
@@ -275,7 +275,7 @@ async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, acc
     let before = server.inner.cache.swap.snapshots_written();
     for _ in 0..5 {
         server
-            .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+            .fetch_groupware_resources(account_id, account_id, SyncCollection::FileNode)
             .await
             .unwrap();
     }
@@ -295,7 +295,7 @@ async fn an_uncacheable_account_is_persisted_on_a_cadence(test: &TestServer, acc
         .await
         .expect("failed to create the extra file node");
     let refreshed = server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::FileNode)
         .await
         .unwrap();
     assert!(
@@ -435,7 +435,7 @@ async fn an_uncacheable_account_pins_at_most_one_snapshot(test: &TestServer, acc
             .expect("failed to create the file node");
 
         let resources = server
-            .fetch_dav_resources(account_id, account_id, SyncCollection::FileNode)
+            .fetch_groupware_resources(account_id, account_id, SyncCollection::FileNode)
             .await
             .unwrap();
         assert!(
@@ -486,7 +486,7 @@ async fn a_snapshot_with_a_stale_base_path_is_discarded(test: &TestServer, accou
     let key = SwapKey::new(account_id, SyncCollection::Calendar, SwapPart::Resources);
 
     let expected = server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
     server.inner.cache.swap.flush().await;
@@ -498,7 +498,7 @@ async fn a_snapshot_with_a_stale_base_path_is_discarded(test: &TestServer, accou
         expected.base_path
     );
 
-    let mut renamed = DavResources::clone(&expected);
+    let mut renamed = GroupwareResources::clone(&expected);
     renamed.base_path = expected
         .base_path
         .replace(&account_name, "renamed-before-the-restore");
@@ -512,7 +512,7 @@ async fn a_snapshot_with_a_stale_base_path_is_discarded(test: &TestServer, accou
     assert!(server.inner.cache.events.peek(&account_id).is_none());
 
     let rebuilt = server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
     assert_eq!(

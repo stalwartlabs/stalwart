@@ -7,7 +7,7 @@
 use super::uri::{DavUriResource, OwnedUri, UriResource, Urn};
 use crate::{DavError, DavErrorCondition, DavMethod};
 use common::KV_LOCK_DAV;
-use common::{DavResources, Server, auth::AccessToken};
+use common::{GroupwareResources, Server, auth::AccessToken};
 use dav_proto::schema::property::{ActiveLock, LockScope, WebDavProperty};
 use dav_proto::schema::request::DavPropertyValue;
 use dav_proto::schema::response::{BaseCondition, List, PropResponse};
@@ -432,7 +432,7 @@ impl LockRequestHandler for Server {
             path: "",
             ..Default::default()
         };
-        let mut cached_resources: Option<(u32, SyncCollection, Arc<DavResources>)> = None;
+        let mut cached_resources: Option<(u32, SyncCollection, Arc<GroupwareResources>)> = None;
 
         'outer: for if_ in &headers.if_ {
             if if_.list.is_empty() {
@@ -525,7 +525,7 @@ impl LockRequestHandler for Server {
                     if let Some(document_id) =
                         resource_state.document_id.filter(|&id| id != u32::MAX)
                     {
-                        let resources = dav_resources_cached(
+                        let resources = groupware_resources_cached(
                             self,
                             access_token,
                             resource_state.account_id,
@@ -567,7 +567,7 @@ impl LockRequestHandler for Server {
 
                 // Fetch sync token
                 if needs_sync_token && resource_state.sync_token.is_none() {
-                    let id = dav_resources_cached(
+                    let id = groupware_resources_cached(
                         self,
                         access_token,
                         resource_state.account_id,
@@ -898,13 +898,13 @@ impl ResourceState<'_> {
     }
 }
 
-async fn dav_resources_cached(
+async fn groupware_resources_cached(
     server: &Server,
     access_token: &AccessToken,
     account_id: u32,
     collection: Collection,
-    cache: &mut Option<(u32, SyncCollection, Arc<DavResources>)>,
-) -> trc::Result<Arc<DavResources>> {
+    cache: &mut Option<(u32, SyncCollection, Arc<GroupwareResources>)>,
+) -> trc::Result<Arc<GroupwareResources>> {
     let sync_collection = SyncCollection::from(collection);
 
     if let Some((cached_account_id, cached_collection, resources)) = cache.as_ref()
@@ -915,7 +915,7 @@ async fn dav_resources_cached(
     }
 
     let resources = server
-        .fetch_dav_resources(access_token.account_id(), account_id, sync_collection)
+        .fetch_groupware_resources(access_token.account_id(), account_id, sync_collection)
         .await
         .caused_by(trc::location!())?;
     *cache = Some((account_id, sync_collection, resources.clone()));

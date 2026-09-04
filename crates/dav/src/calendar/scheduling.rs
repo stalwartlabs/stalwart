@@ -84,7 +84,7 @@ impl CalendarEventNotificationHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
@@ -183,7 +183,7 @@ impl CalendarEventNotificationHandler for Server {
             .filter(|r| !r.is_empty())
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         let resources = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::CalendarEventNotification,
@@ -390,7 +390,7 @@ impl CalendarEventNotificationHandler for Server {
                 .caused_by(trc::location!())?
             {
                 let resources = self
-                    .fetch_dav_resources(
+                    .fetch_groupware_resources(
                         access_token.account_id(),
                         account_id,
                         SyncCollection::Calendar,

@@ -5,15 +5,15 @@
  */
 
 use crate::{
-    ArenaRef, CachedName, DavName, DavPath, DavResource, DavResourceMetadata, DavResourcePath,
-    DavResourceRef, DavResources, NO_ID, PathChunk, TinyCalendarPreferences,
+    ArenaRef, CachedName, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, DavResourcePath,
+    GroupwareResourceRef, GroupwareResources, NO_ID, PathChunk, TinyCalendarPreferences,
 };
 use store::rand::{RngExt, distr::Alphanumeric};
 use types::acl::AclGrant;
 
 use super::{CONTAINER_FLAG, SCHEDULE_INBOX_ID};
 
-impl DavResourceRef<'_> {
+impl GroupwareResourceRef<'_> {
     #[inline(always)]
     pub fn document_id(&self) -> u32 {
         self.resource.document_id
@@ -67,8 +67,8 @@ impl DavResourceRef<'_> {
     #[inline(always)]
     pub fn uid(&self) -> Option<&str> {
         match &self.resource.data {
-            DavResourceMetadata::CalendarEvent { uid, .. }
-            | DavResourceMetadata::ContactCard { uid, .. } => Some(self.chunk.str_at(*uid)),
+            GroupwareResourceMetadata::CalendarEvent { uid, .. }
+            | GroupwareResourceMetadata::ContactCard { uid, .. } => Some(self.chunk.str_at(*uid)),
             _ => None,
         }
     }
@@ -76,10 +76,10 @@ impl DavResourceRef<'_> {
     #[inline(always)]
     pub fn container_name(&self) -> Option<&str> {
         match &self.resource.data {
-            DavResourceMetadata::File { name, .. }
-            | DavResourceMetadata::Calendar { name, .. }
-            | DavResourceMetadata::AddressBook { name, .. } => Some(self.chunk.str_at(*name)),
-            DavResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
+            GroupwareResourceMetadata::File { name, .. }
+            | GroupwareResourceMetadata::Calendar { name, .. }
+            | GroupwareResourceMetadata::AddressBook { name, .. } => Some(self.chunk.str_at(*name)),
+            GroupwareResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
                 Some(if self.resource.document_id == SCHEDULE_INBOX_ID {
                     "inbox"
                 } else {
@@ -120,7 +120,7 @@ impl DavResourceRef<'_> {
 
     pub fn calendar_preferences(&self, account_id: u32) -> Option<&TinyCalendarPreferences> {
         match &self.resource.data {
-            DavResourceMetadata::Calendar { preferences, .. } => {
+            GroupwareResourceMetadata::Calendar { preferences, .. } => {
                 let prefs = self.chunk.prefs_at(*preferences);
                 prefs
                     .iter()
@@ -131,27 +131,27 @@ impl DavResourceRef<'_> {
         }
     }
 
-    pub fn has_hierarchy_changes(&self, other: &DavResourceRef<'_>) -> bool {
+    pub fn has_hierarchy_changes(&self, other: &GroupwareResourceRef<'_>) -> bool {
         match (&self.resource.data, &other.resource.data) {
             (
-                DavResourceMetadata::File {
+                GroupwareResourceMetadata::File {
                     name: a,
                     parent_id: c,
                     ..
                 },
-                DavResourceMetadata::File {
+                GroupwareResourceMetadata::File {
                     name: b,
                     parent_id: d,
                     ..
                 },
             ) => c != d || self.chunk.str_at(*a) != other.chunk.str_at(*b),
             (
-                DavResourceMetadata::Calendar { name: a, .. },
-                DavResourceMetadata::Calendar { name: b, .. },
+                GroupwareResourceMetadata::Calendar { name: a, .. },
+                GroupwareResourceMetadata::Calendar { name: b, .. },
             )
             | (
-                DavResourceMetadata::AddressBook { name: a, .. },
-                DavResourceMetadata::AddressBook { name: b, .. },
+                GroupwareResourceMetadata::AddressBook { name: a, .. },
+                GroupwareResourceMetadata::AddressBook { name: b, .. },
             ) => self.chunk.str_at(*a) != other.chunk.str_at(*b),
             _ => {
                 let a = self.child_names();
@@ -166,13 +166,13 @@ impl DavResourceRef<'_> {
     }
 }
 
-impl DavResource {
+impl GroupwareResource {
     #[inline(always)]
     pub fn names_ref(&self) -> Option<ArenaRef> {
         match &self.data {
-            DavResourceMetadata::CalendarEvent { names, .. }
-            | DavResourceMetadata::ContactCard { names, .. }
-            | DavResourceMetadata::CalendarEventNotification { names, .. } => Some(*names),
+            GroupwareResourceMetadata::CalendarEvent { names, .. }
+            | GroupwareResourceMetadata::ContactCard { names, .. }
+            | GroupwareResourceMetadata::CalendarEventNotification { names, .. } => Some(*names),
             _ => None,
         }
     }
@@ -180,9 +180,9 @@ impl DavResource {
     #[inline(always)]
     pub fn acls_ref(&self) -> Option<ArenaRef> {
         match &self.data {
-            DavResourceMetadata::File { acls, .. }
-            | DavResourceMetadata::Calendar { acls, .. }
-            | DavResourceMetadata::AddressBook { acls, .. } => Some(*acls),
+            GroupwareResourceMetadata::File { acls, .. }
+            | GroupwareResourceMetadata::Calendar { acls, .. }
+            | GroupwareResourceMetadata::AddressBook { acls, .. } => Some(*acls),
             _ => None,
         }
     }
@@ -190,9 +190,9 @@ impl DavResource {
     #[inline(always)]
     pub fn is_container(&self) -> bool {
         match &self.data {
-            DavResourceMetadata::File { size, .. } => *size == NO_ID,
-            DavResourceMetadata::Calendar { .. } | DavResourceMetadata::AddressBook { .. } => true,
-            DavResourceMetadata::CalendarEventNotification { names, .. } => names.is_empty(),
+            GroupwareResourceMetadata::File { size, .. } => *size == NO_ID,
+            GroupwareResourceMetadata::Calendar { .. } | GroupwareResourceMetadata::AddressBook { .. } => true,
+            GroupwareResourceMetadata::CalendarEventNotification { names, .. } => names.is_empty(),
             _ => false,
         }
     }
@@ -200,7 +200,7 @@ impl DavResource {
     #[inline(always)]
     pub fn size(&self) -> Option<u32> {
         match &self.data {
-            DavResourceMetadata::File { size, .. } if *size != NO_ID => Some(*size),
+            GroupwareResourceMetadata::File { size, .. } if *size != NO_ID => Some(*size),
             _ => None,
         }
     }
@@ -208,8 +208,8 @@ impl DavResource {
     #[inline(always)]
     pub fn parent_id(&self) -> Option<u32> {
         match &self.data {
-            DavResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => Some(*parent_id),
-            DavResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
+            GroupwareResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => Some(*parent_id),
+            GroupwareResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
                 Some(SCHEDULE_INBOX_ID)
             }
             _ => None,
@@ -219,7 +219,7 @@ impl DavResource {
     #[inline(always)]
     pub fn event_time_range(&self) -> Option<(i64, i64)> {
         match &self.data {
-            DavResourceMetadata::CalendarEvent {
+            GroupwareResourceMetadata::CalendarEvent {
                 start, duration, ..
             } => Some((*start, *start + *duration as i64)),
             _ => None,
@@ -229,9 +229,9 @@ impl DavResource {
     #[inline(always)]
     pub fn created_at(&self) -> Option<i64> {
         match &self.data {
-            DavResourceMetadata::CalendarEvent { created_at, .. }
-            | DavResourceMetadata::ContactCard { created_at, .. }
-            | DavResourceMetadata::CalendarEventNotification { created_at, .. } => {
+            GroupwareResourceMetadata::CalendarEvent { created_at, .. }
+            | GroupwareResourceMetadata::ContactCard { created_at, .. }
+            | GroupwareResourceMetadata::CalendarEventNotification { created_at, .. } => {
                 Some(*created_at)
             }
             _ => None,
@@ -241,12 +241,12 @@ impl DavResource {
     #[inline(always)]
     pub fn modified_at(&self) -> Option<i64> {
         match &self.data {
-            DavResourceMetadata::CalendarEvent {
+            GroupwareResourceMetadata::CalendarEvent {
                 created_at,
                 modified_at,
                 ..
             }
-            | DavResourceMetadata::ContactCard {
+            | GroupwareResourceMetadata::ContactCard {
                 created_at,
                 modified_at,
                 ..
@@ -258,7 +258,7 @@ impl DavResource {
     #[inline(always)]
     pub fn event_id(&self) -> Option<u32> {
         match &self.data {
-            DavResourceMetadata::CalendarEventNotification { event_id, .. } => Some(*event_id),
+            GroupwareResourceMetadata::CalendarEventNotification { event_id, .. } => Some(*event_id),
             _ => None,
         }
     }
@@ -266,19 +266,19 @@ impl DavResource {
     #[inline(always)]
     pub fn etag(&self) -> u32 {
         match &self.data {
-            DavResourceMetadata::File { etag, .. }
-            | DavResourceMetadata::Calendar { etag, .. }
-            | DavResourceMetadata::CalendarEvent { etag, .. }
-            | DavResourceMetadata::CalendarEventNotification { etag, .. }
-            | DavResourceMetadata::AddressBook { etag, .. }
-            | DavResourceMetadata::ContactCard { etag, .. } => *etag,
+            GroupwareResourceMetadata::File { etag, .. }
+            | GroupwareResourceMetadata::Calendar { etag, .. }
+            | GroupwareResourceMetadata::CalendarEvent { etag, .. }
+            | GroupwareResourceMetadata::CalendarEventNotification { etag, .. }
+            | GroupwareResourceMetadata::AddressBook { etag, .. }
+            | GroupwareResourceMetadata::ContactCard { etag, .. } => *etag,
         }
     }
 
     pub fn is_child_of(&self, parent_id: u32) -> bool {
         match &self.data {
-            DavResourceMetadata::File { parent_id: id, .. } => *id == parent_id,
-            DavResourceMetadata::CalendarEventNotification { names, .. } => {
+            GroupwareResourceMetadata::File { parent_id: id, .. } => *id == parent_id,
+            GroupwareResourceMetadata::CalendarEventNotification { names, .. } => {
                 names.is_empty() && parent_id == SCHEDULE_INBOX_ID
             }
             _ => false,
@@ -335,7 +335,7 @@ impl DavName {
     }
 }
 
-impl DavResources {
+impl GroupwareResources {
     fn pair<'x>(&'x self, entry: (&'x PathChunk, &'x DavPath)) -> Option<DavResourcePath<'x>> {
         let (path_chunk, path) = entry;
         let want_container = path.hierarchy_seq & CONTAINER_FLAG != 0;
@@ -352,11 +352,11 @@ impl DavResources {
         self.paths.get(name).and_then(|entry| self.pair(entry))
     }
 
-    pub fn container_resource_by_id(&self, id: u32) -> Option<DavResourceRef<'_>> {
+    pub fn container_resource_by_id(&self, id: u32) -> Option<GroupwareResourceRef<'_>> {
         self.resources.find(id, true)
     }
 
-    pub fn item_by_id(&self, id: u32) -> Option<DavResourceRef<'_>> {
+    pub fn item_by_id(&self, id: u32) -> Option<GroupwareResourceRef<'_>> {
         self.resources.find(id, false)
     }
 
@@ -511,17 +511,17 @@ impl DavResources {
     }
 
     #[inline(always)]
-    pub fn containers(&self) -> impl Iterator<Item = DavResourceRef<'_>> + '_ {
+    pub fn containers(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
         self.resources.iter().filter(|r| r.is_container())
     }
 
     #[inline(always)]
-    pub fn resources_with_acls(&self) -> impl Iterator<Item = DavResourceRef<'_>> + '_ {
+    pub fn resources_with_acls(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
         self.resources.iter_with_acls()
     }
 
     pub fn recompute_size(&mut self) {
-        self.size = std::mem::size_of::<DavResources>() as u64
+        self.size = std::mem::size_of::<GroupwareResources>() as u64
             + self.base_path.len() as u64
             + self.resources.heap_size()
             + self.paths.heap_size();

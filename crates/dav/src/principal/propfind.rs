@@ -169,7 +169,7 @@ impl PrincipalPropFind for Server {
                         }
                         WebDavProperty::SyncToken if !is_principal => {
                             let sync_token = self
-                                .fetch_dav_resources(
+                                .fetch_groupware_resources(
                                     access_token.account_id(),
                                     account_id,
                                     collection.into(),
@@ -182,7 +182,7 @@ impl PrincipalPropFind for Server {
                         }
                         WebDavProperty::GetCTag if !is_principal => {
                             let ctag = self
-                                .fetch_dav_resources(
+                                .fetch_groupware_resources(
                                     access_token.account_id(),
                                     account_id,
                                     collection.into(),

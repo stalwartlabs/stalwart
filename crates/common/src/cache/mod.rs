@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    DavResources, HttpAuthCache, MailboxCache, MessageStoreCache, UpdateLock, Verification,
+    GroupwareResources, HttpAuthCache, MailboxCache, MessageStoreCache, UpdateLock, Verification,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -110,7 +110,7 @@ impl MessageStoreCache {
     }
 }
 
-impl DavResources {
+impl GroupwareResources {
     pub fn is_fresh(&self, revalidate: &RevalidateInterval) -> bool {
         self.verification.is_fresh(&self.update_lock, revalidate)
     }
@@ -171,7 +171,7 @@ impl CacheItemWeight for HttpAuthCache {
     }
 }
 
-impl CacheItemWeight for DavResources {
+impl CacheItemWeight for GroupwareResources {
     fn weight(&self) -> u64 {
         self.size
     }

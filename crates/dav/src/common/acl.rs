@@ -9,7 +9,7 @@ use crate::{
     DavError, DavErrorCondition, DavResourceName, common::uri::DavUriResource,
     principal::propfind::PrincipalPropFind,
 };
-use common::{DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{GroupwareResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use dav_proto::{
     RequestHeaders,
     schema::{
@@ -98,7 +98,7 @@ impl DavAclHandler for Server {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
         let resources = self
-            .fetch_dav_resources(access_token.account_id(), account_id, collection.into())
+            .fetch_groupware_resources(access_token.account_id(), account_id, collection.into())
             .await
             .caused_by(trc::location!())?;
         let resource = resource_
@@ -500,7 +500,7 @@ impl DavAclHandler for Server {
     }
 }
 
-impl ResourceAcl for DavResources {
+impl ResourceAcl for GroupwareResources {
     fn validate_and_map_parent_acl(
         &self,
         access_token: &AccessToken,

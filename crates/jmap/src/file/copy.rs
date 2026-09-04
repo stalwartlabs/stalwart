@@ -73,7 +73,7 @@ impl FileNodeCopy for Server {
         }
 
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::FileNode,
@@ -91,7 +91,7 @@ impl FileNodeCopy for Server {
         };
 
         let from_cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 from_account_id,
                 SyncCollection::FileNode,

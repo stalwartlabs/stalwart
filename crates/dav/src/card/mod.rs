@@ -5,7 +5,7 @@
  */
 
 use crate::{DavError, DavErrorCondition};
-use common::DavResources;
+use common::GroupwareResources;
 use dav_proto::schema::{
     property::{CardDavProperty, DavProperty, WebDavProperty},
     response::CardCondition,
@@ -73,7 +73,7 @@ pub(crate) static CARD_ITEM_PROPS: [DavProperty; 20] = [
 ];
 
 pub(crate) fn assert_is_unique_uid(
-    resources: &DavResources,
+    resources: &GroupwareResources,
     addressbook_id: u32,
     uid: Option<&str>,
 ) -> crate::Result<()> {

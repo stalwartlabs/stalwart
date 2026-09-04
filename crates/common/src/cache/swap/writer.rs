@@ -5,7 +5,7 @@
  */
 
 use super::{BLOCKING_CODEC_THRESHOLD, SwapCadence, SwapKey, SwapPart, SwapReceiver, SwapTier};
-use crate::{DavResources, Inner, MessageStoreCache};
+use crate::{GroupwareResources, Inner, MessageStoreCache};
 use ahash::AHashMap;
 use parking_lot::Mutex;
 use std::{
@@ -59,7 +59,7 @@ impl SwapTarget {
 #[derive(Clone)]
 pub enum Snapshot {
     Messages(Arc<MessageStoreCache>),
-    Resources(Arc<DavResources>),
+    Resources(Arc<GroupwareResources>),
 }
 
 impl Snapshot {

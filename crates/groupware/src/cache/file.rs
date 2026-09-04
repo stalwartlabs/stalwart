@@ -10,7 +10,7 @@ use crate::{
     file::{ArchivedFileNode, FileNode},
 };
 use common::{
-    ArenaRef, DavPath, DavResource, DavResourceMetadata, DavResources, NO_ID, PathIndex,
+    ArenaRef, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID, PathIndex,
     ResourceStore, Server, UpdateLock,
     storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
 };
@@ -28,7 +28,7 @@ pub(super) async fn build_file_resources(
     server: &Server,
     account_id: u32,
     update_lock: Arc<UpdateLock>,
-) -> trc::Result<DavResources> {
+) -> trc::Result<GroupwareResources> {
     let last_change_id = server
         .core
         .storage
@@ -62,7 +62,7 @@ pub(super) async fn build_file_resources(
     update_lock.set_revision(last_change_id);
     let resources = ResourceStore::from_sorted(nodes.finish(), Vec::new(), true);
     let paths = build_nested_hierarchy(&resources);
-    let mut files = DavResources {
+    let mut files = GroupwareResources {
         base_path: DavResourceName::File.account_base_path(account_info.name()),
         size: 0,
         paths: Arc::new(paths),
@@ -84,7 +84,7 @@ pub(super) fn build_nested_hierarchy(resources: &ResourceStore) -> PathIndex {
         AHashMap::with_capacity(resources.len());
 
     for resource in resources.iter() {
-        if let DavResourceMetadata::File { parent_id, .. } = resource.resource.data {
+        if let GroupwareResourceMetadata::File { parent_id, .. } = resource.resource.data {
             topological_sort.insert(
                 if parent_id != NO_ID { parent_id + 1 } else { 0 },
                 resource.document_id() + 1,
@@ -161,9 +161,9 @@ pub(super) fn push_file(
             })
             .collect::<Vec<_>>(),
     );
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::File {
+        data: GroupwareResourceMetadata::File {
             name,
             size: node
                 .file
@@ -208,14 +208,14 @@ mod tests {
         }
     }
 
-    fn build(nodes: Vec<Node>) -> DavResources {
+    fn build(nodes: Vec<Node>) -> GroupwareResources {
         let mut builder = ResourceChunkBuilder::with_capacity(nodes.len());
         for node in &nodes {
             let name = builder.push_str(node.name);
             let acls = builder.push_acls(&[]);
-            builder.records.push(DavResource {
+            builder.records.push(GroupwareResource {
                 document_id: node.document_id,
-                data: DavResourceMetadata::File {
+                data: GroupwareResourceMetadata::File {
                     name,
                     size: node.size.unwrap_or(NO_ID),
                     parent_id: node.parent_id.unwrap_or(NO_ID),
@@ -226,7 +226,7 @@ mod tests {
         }
         let resources = ResourceStore::from_sorted(vec![builder], Vec::new(), true);
         let paths = build_nested_hierarchy(&resources);
-        let mut files = DavResources {
+        let mut files = GroupwareResources {
             base_path: "/dav/file/john/".to_string(),
             paths: Arc::new(paths),
             resources,
@@ -241,7 +241,7 @@ mod tests {
         files
     }
 
-    fn sorted_paths(files: &DavResources) -> Vec<String> {
+    fn sorted_paths(files: &GroupwareResources) -> Vec<String> {
         let mut paths = files
             .paths
             .iter()
@@ -255,7 +255,7 @@ mod tests {
         paths
     }
 
-    fn hierarchy_seq(files: &DavResources, path: &str) -> u32 {
+    fn hierarchy_seq(files: &GroupwareResources, path: &str) -> u32 {
         files.paths.get(path).expect(path).1.hierarchy_seq & !CONTAINER_FLAG
     }
 

@@ -59,7 +59,7 @@ impl CalendarSet for Server {
     ) -> trc::Result<SetResponse<calendar::Calendar>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::Calendar,

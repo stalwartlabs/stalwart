@@ -113,7 +113,7 @@ pub enum RegistryChange {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum CacheInvalidation {
     AccessToken(u32),
-    DavResources(u32),
+    GroupwareResources(u32),
     MessageCache(u32),
     Domain(u32),
     Account(u32),

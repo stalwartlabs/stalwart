@@ -6,7 +6,7 @@
 
 use super::{SwapPart, frame::SwapFrame};
 use crate::{
-    ArenaRef, CachedName, DavPath, DavResource, DavResourceMetadata, DavResources, PathChunk,
+    ArenaRef, CachedName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, PathChunk,
     PathIndex, ResourceChunk, ResourceStore, TinyCalendarPreferences, UpdateLock,
 };
 use calcard::common::timezone::Tz;
@@ -38,7 +38,7 @@ pub struct FlatResource {
 }
 
 impl FlatResource {
-    fn pack(resource: &DavResource) -> Self {
+    fn pack(resource: &GroupwareResource) -> Self {
         let mut flat = FlatResource {
             start: 0,
             created_at: 0,
@@ -54,7 +54,7 @@ impl FlatResource {
         };
 
         match &resource.data {
-            DavResourceMetadata::File {
+            GroupwareResourceMetadata::File {
                 name,
                 size,
                 parent_id,
@@ -67,7 +67,7 @@ impl FlatResource {
                 flat.num_a = *size;
                 flat.num_b = *parent_id;
             }
-            DavResourceMetadata::Calendar {
+            GroupwareResourceMetadata::Calendar {
                 name,
                 acls,
                 preferences,
@@ -79,7 +79,7 @@ impl FlatResource {
                 flat.num_a = preferences.off;
                 flat.num_b = preferences.len;
             }
-            DavResourceMetadata::CalendarEvent {
+            GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start,
                 duration,
@@ -96,7 +96,7 @@ impl FlatResource {
                 flat.num_a = *duration;
                 flat.num_b = *modified_at as u32;
             }
-            DavResourceMetadata::CalendarEventNotification {
+            GroupwareResourceMetadata::CalendarEventNotification {
                 names,
                 created_at,
                 event_id,
@@ -107,12 +107,12 @@ impl FlatResource {
                 flat.created_at = *created_at;
                 flat.num_a = *event_id;
             }
-            DavResourceMetadata::AddressBook { name, acls, .. } => {
+            GroupwareResourceMetadata::AddressBook { name, acls, .. } => {
                 flat.kind = KIND_ADDRESS_BOOK;
                 flat.set_ref_a(name);
                 flat.set_ref_b(acls);
             }
-            DavResourceMetadata::ContactCard {
+            GroupwareResourceMetadata::ContactCard {
                 names,
                 created_at,
                 modified_at,
@@ -156,16 +156,16 @@ impl ArchivedFlatResource {
         }
     }
 
-    fn unpack(&self) -> Option<DavResource> {
+    fn unpack(&self) -> Option<GroupwareResource> {
         let data = match self.kind.to_native() {
-            KIND_FILE => DavResourceMetadata::File {
+            KIND_FILE => GroupwareResourceMetadata::File {
                 name: self.ref_a(),
                 size: self.num_a.to_native(),
                 parent_id: self.num_b.to_native(),
                 acls: self.ref_b(),
                 etag: self.etag.to_native(),
             },
-            KIND_CALENDAR => DavResourceMetadata::Calendar {
+            KIND_CALENDAR => GroupwareResourceMetadata::Calendar {
                 name: self.ref_a(),
                 acls: self.ref_b(),
                 preferences: ArenaRef {
@@ -174,7 +174,7 @@ impl ArchivedFlatResource {
                 },
                 etag: self.etag.to_native(),
             },
-            KIND_CALENDAR_EVENT => DavResourceMetadata::CalendarEvent {
+            KIND_CALENDAR_EVENT => GroupwareResourceMetadata::CalendarEvent {
                 names: self.ref_a(),
                 start: self.start.to_native(),
                 duration: self.num_a.to_native(),
@@ -183,18 +183,18 @@ impl ArchivedFlatResource {
                 uid: self.ref_b(),
                 etag: self.etag.to_native(),
             },
-            KIND_CALENDAR_EVENT_NOTIFICATION => DavResourceMetadata::CalendarEventNotification {
+            KIND_CALENDAR_EVENT_NOTIFICATION => GroupwareResourceMetadata::CalendarEventNotification {
                 names: self.ref_a(),
                 created_at: self.created_at.to_native(),
                 event_id: self.num_a.to_native(),
                 etag: self.etag.to_native(),
             },
-            KIND_ADDRESS_BOOK => DavResourceMetadata::AddressBook {
+            KIND_ADDRESS_BOOK => GroupwareResourceMetadata::AddressBook {
                 name: self.ref_a(),
                 acls: self.ref_b(),
                 etag: self.etag.to_native(),
             },
-            KIND_CONTACT_CARD => DavResourceMetadata::ContactCard {
+            KIND_CONTACT_CARD => GroupwareResourceMetadata::ContactCard {
                 names: self.ref_a(),
                 created_at: self.created_at.to_native(),
                 modified_at: self.num_b.to_native() as i32,
@@ -204,7 +204,7 @@ impl ArchivedFlatResource {
             _ => return None,
         };
 
-        Some(DavResource {
+        Some(GroupwareResource {
             document_id: self.document_id.to_native(),
             data,
         })
@@ -256,20 +256,20 @@ fn fits_within(arena: ArenaRef, limit: usize) -> bool {
         .is_some_and(|end| end <= limit)
 }
 
-impl DavResource {
+impl GroupwareResource {
     fn fits_within(&self, bytes: usize, names: usize, acls: usize, prefs: usize) -> bool {
         match &self.data {
-            DavResourceMetadata::File {
+            GroupwareResourceMetadata::File {
                 name,
                 acls: acl_ref,
                 ..
             }
-            | DavResourceMetadata::AddressBook {
+            | GroupwareResourceMetadata::AddressBook {
                 name,
                 acls: acl_ref,
                 ..
             } => fits_within(*name, bytes) && fits_within(*acl_ref, acls),
-            DavResourceMetadata::Calendar {
+            GroupwareResourceMetadata::Calendar {
                 name,
                 acls: acl_ref,
                 preferences,
@@ -279,24 +279,24 @@ impl DavResource {
                     && fits_within(*acl_ref, acls)
                     && fits_within(*preferences, prefs)
             }
-            DavResourceMetadata::CalendarEvent {
+            GroupwareResourceMetadata::CalendarEvent {
                 names: name_refs,
                 uid,
                 ..
             }
-            | DavResourceMetadata::ContactCard {
+            | GroupwareResourceMetadata::ContactCard {
                 names: name_refs,
                 uid,
                 ..
             } => fits_within(*name_refs, names) && fits_within(*uid, bytes),
-            DavResourceMetadata::CalendarEventNotification {
+            GroupwareResourceMetadata::CalendarEventNotification {
                 names: name_refs, ..
             } => fits_within(*name_refs, names),
         }
     }
 }
 
-impl DavResources {
+impl GroupwareResources {
     pub fn to_snapshot(&self) -> Option<Vec<u8>> {
         let (chunks, path_chunks) = self.pack();
         self.seal_snapshot(chunks, path_chunks)
@@ -560,7 +560,7 @@ impl DavResources {
             return None;
         }
 
-        let mut resources = DavResources {
+        let mut resources = GroupwareResources {
             base_path: archived.base_path.to_string(),
             paths: Arc::new(PathIndex {
                 chunks: path_chunks,
@@ -601,7 +601,7 @@ mod tests {
         }
     }
 
-    fn calcard(items: usize) -> DavResources {
+    fn calcard(items: usize) -> GroupwareResources {
         let mut containers = Vec::new();
         let mut chunk = ResourceChunkBuilder::with_capacity(4);
         let mut entries = Vec::new();
@@ -614,9 +614,9 @@ mod tests {
                 tz: Tz::UTC,
                 flags: 0b101,
             }]);
-            chunk.records.push(DavResource {
+            chunk.records.push(GroupwareResource {
                 document_id,
-                data: DavResourceMetadata::Calendar {
+                data: GroupwareResourceMetadata::Calendar {
                     name,
                     acls,
                     preferences,
@@ -650,9 +650,9 @@ mod tests {
                 parent_id,
             }]);
             let uid = chunk.push_str(&format!("uid-{document_id}@example.org"));
-            chunk.records.push(DavResource {
+            chunk.records.push(GroupwareResource {
                 document_id,
-                data: DavResourceMetadata::CalendarEvent {
+                data: GroupwareResourceMetadata::CalendarEvent {
                     names,
                     start: 1_700_000_000 + document_id as i64,
                     duration: 3600 + document_id,
@@ -674,7 +674,7 @@ mod tests {
         }
         items_chunks.push(chunk);
 
-        let mut resources = DavResources {
+        let mut resources = GroupwareResources {
             base_path: "/dav/cal/jane".to_string(),
             paths: Arc::new(PathIndex::pack(entries)),
             resources: ResourceStore::from_sorted(containers, items_chunks, false),
@@ -689,7 +689,7 @@ mod tests {
         resources
     }
 
-    fn files(count: usize) -> DavResources {
+    fn files(count: usize) -> GroupwareResources {
         let mut chunk = ResourceChunkBuilder::with_capacity(count);
         let mut entries = Vec::new();
 
@@ -700,9 +700,9 @@ mod tests {
             } else {
                 chunk.push_acls(&[])
             };
-            chunk.records.push(DavResource {
+            chunk.records.push(GroupwareResource {
                 document_id,
-                data: DavResourceMetadata::File {
+                data: GroupwareResourceMetadata::File {
                     etag: document_id + 900,
                     name,
                     size: 1024 + document_id,
@@ -725,7 +725,7 @@ mod tests {
             ));
         }
 
-        let mut resources = DavResources {
+        let mut resources = GroupwareResources {
             base_path: "/dav/file/jane".to_string(),
             paths: Arc::new(PathIndex::pack(entries)),
             resources: ResourceStore::from_sorted(vec![chunk], Vec::new(), true),
@@ -740,7 +740,7 @@ mod tests {
         resources
     }
 
-    fn assert_same(left: &DavResources, right: &DavResources) {
+    fn assert_same(left: &GroupwareResources, right: &GroupwareResources) {
         assert_eq!(left.base_path, right.base_path);
         assert_eq!(left.item_change_id, right.item_change_id);
         assert_eq!(left.container_change_id, right.container_change_id);
@@ -837,13 +837,13 @@ mod tests {
             );
 
             for _ in 0..2 {
-                std::hint::black_box(DavResources::from_snapshot(&encoded));
+                std::hint::black_box(GroupwareResources::from_snapshot(&encoded));
             }
 
             let mut decode = Vec::new();
             for _ in 0..15 {
                 let t = Instant::now();
-                let out = DavResources::from_snapshot(&encoded).expect("decode");
+                let out = GroupwareResources::from_snapshot(&encoded).expect("decode");
                 decode.push(t.elapsed().as_secs_f64() * 1000.0);
                 std::hint::black_box(out.resources.len());
             }
@@ -864,7 +864,7 @@ mod tests {
     fn calcard_snapshot_round_trips() {
         let resources = calcard(500);
         let encoded = resources.to_snapshot().expect("encode");
-        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
     }
 
@@ -873,7 +873,7 @@ mod tests {
         let resources = calcard(DAV_CHUNK + 100);
         assert!(resources.resources.chunks.len() > 2);
         let encoded = resources.to_snapshot().expect("encode");
-        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
     }
 
@@ -881,7 +881,7 @@ mod tests {
     fn files_snapshot_round_trips() {
         let resources = files(300);
         let encoded = resources.to_snapshot().expect("encode");
-        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
     }
 
@@ -889,7 +889,7 @@ mod tests {
     fn empty_snapshot_round_trips() {
         let resources = files(0);
         let encoded = resources.to_snapshot().expect("encode");
-        let decoded = DavResources::from_snapshot(&encoded).expect("decode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
     }
 
@@ -900,7 +900,7 @@ mod tests {
         let (mut chunks, path_chunks) = resources.pack();
         chunks[0].records[0].ref_a_off = u32::MAX - 1;
         assert!(
-            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+            GroupwareResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
                 .is_none(),
             "an arena offset past the end of the chunk was accepted"
         );
@@ -908,7 +908,7 @@ mod tests {
         let (mut chunks, path_chunks) = resources.pack();
         chunks[0].records[0].ref_b_len = u32::MAX;
         assert!(
-            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+            GroupwareResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
                 .is_none(),
             "an arena length past the end of the chunk was accepted"
         );
@@ -916,7 +916,7 @@ mod tests {
         let (chunks, mut path_chunks) = resources.pack();
         path_chunks[0].path_lengths[0] = u32::MAX;
         assert!(
-            DavResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
+            GroupwareResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
                 .is_none(),
             "a path reaching past the end of its byte arena was accepted"
         );
@@ -927,19 +927,19 @@ mod tests {
         let resources = calcard(200);
         let encoded = resources.to_snapshot().expect("encode");
 
-        assert!(DavResources::from_snapshot(&[]).is_none());
-        assert!(DavResources::from_snapshot(&encoded[..encoded.len() - 1]).is_none());
+        assert!(GroupwareResources::from_snapshot(&[]).is_none());
+        assert!(GroupwareResources::from_snapshot(&encoded[..encoded.len() - 1]).is_none());
 
         let mut bad_part = encoded.clone();
         bad_part[6] = SwapPart::Messages.code();
-        assert!(DavResources::from_snapshot(&bad_part).is_none());
+        assert!(GroupwareResources::from_snapshot(&bad_part).is_none());
 
         for offset in [40usize, 600, 2048] {
             let mut flipped = encoded.clone();
             if offset < flipped.len() {
                 flipped[offset] ^= 0x01;
                 assert!(
-                    DavResources::from_snapshot(&flipped).is_none(),
+                    GroupwareResources::from_snapshot(&flipped).is_none(),
                     "a payload byte flip at {offset} was not rejected"
                 );
             }

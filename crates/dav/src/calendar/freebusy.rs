@@ -16,7 +16,7 @@ use calcard::{
         ICalendarProperty, ICalendarTransparency, ICalendarValue,
     },
 };
-use common::{DavResourcePath, DavResources, PROD_ID, Server, auth::AccessToken};
+use common::{DavResourcePath, GroupwareResources, PROD_ID, Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::request::FreeBusyQuery};
 use groupware::{cache::GroupwareCache, calendar::CalendarEventContent};
 use http_proto::HttpResponse;
@@ -50,7 +50,7 @@ pub(crate) trait CalendarFreebusyRequestHandler: Sync + Send {
         &self,
         access_token: &AccessToken,
         request: FreeBusyQuery,
-        resources: &DavResources,
+        resources: &GroupwareResources,
         account_id: u32,
         resource: DavResourcePath<'_>,
     ) -> impl Future<Output = crate::Result<ICalendar>> + Send;
@@ -70,7 +70,7 @@ impl CalendarFreebusyRequestHandler for Server {
             .into_owned_uri()?;
         let account_id = resource_.account_id;
         let resources = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::Calendar,
@@ -101,7 +101,7 @@ impl CalendarFreebusyRequestHandler for Server {
         &self,
         access_token: &AccessToken,
         request: FreeBusyQuery,
-        resources: &DavResources,
+        resources: &GroupwareResources,
         account_id: u32,
         resource: DavResourcePath<'_>,
     ) -> crate::Result<ICalendar> {

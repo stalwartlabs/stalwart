@@ -16,7 +16,7 @@ use crate::{
 };
 use calcard::common::timezone::Tz;
 use common::{
-    ArenaRef, DavName, DavPath, DavResource, DavResourceMetadata, DavResources, NO_ID, PathIndex,
+    ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID, PathIndex,
     ResourceStore, Server, TinyCalendarPreferences, UpdateLock,
     storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
 };
@@ -38,7 +38,7 @@ pub(super) async fn build_calcard_resources(
     container_collection: Collection,
     item_collection: Collection,
     update_lock: Arc<UpdateLock>,
-) -> trc::Result<DavResources> {
+) -> trc::Result<GroupwareResources> {
     let is_calendar = matches!(sync_collection, SyncCollection::Calendar);
     let owner_account_info = server.account(account_id).await?;
     let access_account_info = if account_id == access_account_id {
@@ -101,7 +101,7 @@ pub(super) async fn build_calcard_resources(
                 is_first_check = false;
                 continue;
             } else {
-                let mut cache = DavResources {
+                let mut cache = GroupwareResources {
                     base_path,
                     paths: Default::default(),
                     resources: ResourceStore::from_sorted(containers.finish(), Vec::new(), false),
@@ -139,7 +139,7 @@ pub(super) async fn build_calcard_resources(
 
         let resources = ResourceStore::from_sorted(containers.finish(), items.finish(), false);
         let paths = build_calcard_paths(&resources);
-        let mut cache = DavResources {
+        let mut cache = GroupwareResources {
             base_path,
             paths: Arc::new(paths),
             resources,
@@ -209,7 +209,7 @@ pub(super) async fn build_scheduling_resources(
     server: &Server,
     account_id: u32,
     update_lock: Arc<UpdateLock>,
-) -> trc::Result<DavResources> {
+) -> trc::Result<GroupwareResources> {
     let last_change_id = server
         .core
         .storage
@@ -248,7 +248,7 @@ pub(super) async fn build_scheduling_resources(
 
     let resources = ResourceStore::from_sorted(containers.finish(), items.finish(), false);
     let paths = build_scheduling_paths(&resources);
-    let mut cache = DavResources {
+    let mut cache = GroupwareResources {
         base_path: DavResourceName::Scheduling.account_base_path(account_info.name()),
         paths: Arc::new(paths),
         resources,
@@ -323,9 +323,9 @@ pub(super) fn push_calendar(
             })
             .collect::<Vec<_>>(),
     );
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::Calendar {
+        data: GroupwareResourceMetadata::Calendar {
             name,
             acls,
             preferences,
@@ -351,9 +351,9 @@ pub(super) fn push_addressbook(
             })
             .collect::<Vec<_>>(),
     );
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::AddressBook { name, acls, etag },
+        data: GroupwareResourceMetadata::AddressBook { name, acls, etag },
     });
 }
 
@@ -374,9 +374,9 @@ pub(super) fn push_event(
             .collect::<Vec<_>>(),
     );
     let uid = builder.push_str(truncate_uid(event.uid.as_str()));
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::CalendarEvent {
+        data: GroupwareResourceMetadata::CalendarEvent {
             names,
             start: event.start.to_native(),
             duration: event.duration.to_native(),
@@ -409,9 +409,9 @@ pub(super) fn push_card(
             .collect::<Vec<_>>(),
     );
     let uid = builder.push_str(truncate_uid(card.uid.as_str()));
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::ContactCard {
+        data: GroupwareResourceMetadata::ContactCard {
             names,
             created_at,
             modified_at: card
@@ -442,9 +442,9 @@ pub(super) fn push_scheduling(
         name: format!("{document_id}.ics"),
         parent_id: SCHEDULE_INBOX_ID,
     }]);
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::CalendarEventNotification {
+        data: GroupwareResourceMetadata::CalendarEventNotification {
             names,
             created_at: event.created.to_native(),
             event_id: event
@@ -458,9 +458,9 @@ pub(super) fn push_scheduling(
 }
 
 pub(super) fn push_scheduling_container(builder: &mut ResourceChunkBuilder, document_id: u32) {
-    builder.records.push(DavResource {
+    builder.records.push(GroupwareResource {
         document_id,
-        data: DavResourceMetadata::CalendarEventNotification {
+        data: GroupwareResourceMetadata::CalendarEventNotification {
             names: ArenaRef::default(),
             created_at: 0,
             event_id: u32::MAX,

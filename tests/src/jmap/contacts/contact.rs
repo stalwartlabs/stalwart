@@ -465,7 +465,7 @@ END:VCARD"#
     let dav_client = account.webdav_client();
     let resources = test
         .server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::AddressBook)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::AddressBook)
         .await
         .unwrap();
     let path = format!(

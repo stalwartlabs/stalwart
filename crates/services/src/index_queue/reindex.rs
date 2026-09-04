@@ -97,7 +97,7 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
 
     for document_type in [SearchIndex::Calendar, SearchIndex::Contacts] {
         let cache = server
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 account_id,
                 account_id,
                 if document_type == SearchIndex::Calendar {

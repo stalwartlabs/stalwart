@@ -6,7 +6,7 @@
 
 use super::server::tls::build_self_signed_cert;
 use crate::{
-    Caches, Data, DavResource, DavResources, MailboxCache, MessageStoreCache, MessageUid,
+    Caches, Data, GroupwareResource, GroupwareResources, MailboxCache, MessageStoreCache, MessageUid,
     TlsConnectors,
     auth::{AccessTokenInner, AccountCache, DomainCache, MailingListCache, RoleCache, TenantCache},
     cache::{RevalidateInterval, swap::SwapReceiver},
@@ -105,8 +105,8 @@ impl Caches {
         storage: &crate::config::storage::Storage,
     ) -> (Self, SwapReceiver) {
         let cache = bp.setting_infallible::<structs::Cache>().await;
-        let dav_estimate = (std::mem::size_of::<DavResources>()
-            + (500 * std::mem::size_of::<DavResource>())) as u64;
+        let dav_estimate = (std::mem::size_of::<GroupwareResources>()
+            + (500 * std::mem::size_of::<GroupwareResource>())) as u64;
         let (swap, swap_rx) = crate::cache::swap::SwapTier::build(bp, cache.swap, storage).await;
 
         let caches = Caches {

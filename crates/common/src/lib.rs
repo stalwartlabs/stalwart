@@ -182,10 +182,10 @@ pub struct Caches {
     pub http_auth: Cache<Box<str>, HttpAuthCache>,
 
     pub messages: Cache<u32, Arc<MessageStoreCache>>,
-    pub files: Cache<u32, Arc<DavResources>>,
-    pub contacts: Cache<u32, Arc<DavResources>>,
-    pub events: Cache<u32, Arc<DavResources>>,
-    pub scheduling: Cache<u32, Arc<DavResources>>,
+    pub files: Cache<u32, Arc<GroupwareResources>>,
+    pub contacts: Cache<u32, Arc<GroupwareResources>>,
+    pub events: Cache<u32, Arc<GroupwareResources>>,
+    pub scheduling: Cache<u32, Arc<GroupwareResources>>,
 
     pub emails: Cache<EmailAddress, EmailCache>,
     pub emails_negative: CacheWithTtl<EmailAddress, ()>,
@@ -365,7 +365,7 @@ impl ArenaRef {
 }
 
 #[derive(Debug, Clone)]
-pub struct DavResources {
+pub struct GroupwareResources {
     pub base_path: String,
     pub paths: Arc<PathIndex>,
     pub resources: ResourceStore,
@@ -387,7 +387,7 @@ pub struct ResourceStore {
 
 #[derive(Debug, Default)]
 pub struct ResourceChunk {
-    pub records: Box<[DavResource]>,
+    pub records: Box<[GroupwareResource]>,
     pub bytes: Box<[u8]>,
     pub names: Box<[CachedName]>,
     pub acls: Box<[AclGrant]>,
@@ -423,26 +423,26 @@ pub struct DavPath {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DavResource {
+pub struct GroupwareResource {
     pub document_id: u32,
-    pub data: DavResourceMetadata,
+    pub data: GroupwareResourceMetadata,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DavResourceRef<'x> {
+pub struct GroupwareResourceRef<'x> {
     pub chunk: &'x ResourceChunk,
-    pub resource: &'x DavResource,
+    pub resource: &'x GroupwareResource,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct DavResourcePath<'x> {
     pub path: &'x DavPath,
     pub path_chunk: &'x PathChunk,
-    pub resource: DavResourceRef<'x>,
+    pub resource: GroupwareResourceRef<'x>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum DavResourceMetadata {
+pub enum GroupwareResourceMetadata {
     File {
         name: ArenaRef,
         size: u32,

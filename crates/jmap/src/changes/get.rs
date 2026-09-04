@@ -156,7 +156,7 @@ impl ChangesLookup for Server {
                     threads
                 }
                 MethodObject::AddressBook => self
-                    .fetch_dav_resources(
+                    .fetch_groupware_resources(
                         access_token.account_id(),
                         account_id,
                         SyncCollection::AddressBook,
@@ -164,7 +164,7 @@ impl ChangesLookup for Server {
                     .await?
                     .shared_containers(access_token, [Acl::Read, Acl::ReadItems], true),
                 MethodObject::ContactCard => self
-                    .fetch_dav_resources(
+                    .fetch_groupware_resources(
                         access_token.account_id(),
                         account_id,
                         SyncCollection::AddressBook,
@@ -172,7 +172,7 @@ impl ChangesLookup for Server {
                     .await?
                     .shared_items(access_token, [Acl::ReadItems], true),
                 MethodObject::Calendar => self
-                    .fetch_dav_resources(
+                    .fetch_groupware_resources(
                         access_token.account_id(),
                         account_id,
                         SyncCollection::Calendar,
@@ -180,7 +180,7 @@ impl ChangesLookup for Server {
                     .await?
                     .shared_containers(access_token, [Acl::Read, Acl::ReadItems], true),
                 MethodObject::CalendarEvent => self
-                    .fetch_dav_resources(
+                    .fetch_groupware_resources(
                         access_token.account_id(),
                         account_id,
                         SyncCollection::Calendar,
@@ -188,7 +188,7 @@ impl ChangesLookup for Server {
                     .await?
                     .shared_items(access_token, [Acl::ReadItems], true),
                 MethodObject::FileNode => self
-                    .fetch_dav_resources(
+                    .fetch_groupware_resources(
                         access_token.account_id(),
                         account_id,
                         SyncCollection::FileNode,
@@ -218,7 +218,7 @@ impl ChangesLookup for Server {
             State::Exact(change_id) => {
                 let last_state = match collection {
                     SyncCollection::Calendar | SyncCollection::AddressBook => self
-                        .fetch_dav_resources(access_token.account_id(), account_id, collection)
+                        .fetch_groupware_resources(access_token.account_id(), account_id, collection)
                         .await
                         .caused_by(trc::location!())?
                         .get_state(is_container)

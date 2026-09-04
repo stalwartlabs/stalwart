@@ -125,7 +125,7 @@ impl CacheInvalidationBuilder {
                 }
 
                 if was_renamed {
-                    self.invalidate(CacheInvalidation::DavResources(id));
+                    self.invalidate(CacheInvalidation::GroupwareResources(id));
                 }
             }
 
@@ -161,7 +161,7 @@ impl CacheInvalidationBuilder {
                 }
 
                 if was_renamed {
-                    self.invalidate(CacheInvalidation::DavResources(id));
+                    self.invalidate(CacheInvalidation::GroupwareResources(id));
                 }
             }
 
@@ -242,7 +242,7 @@ impl CacheInvalidationBuilder {
             ObjectInner::Account(_) => {
                 self.invalidate(CacheInvalidation::AccessToken(id));
                 self.invalidate(CacheInvalidation::Account(id));
-                self.invalidate(CacheInvalidation::DavResources(id));
+                self.invalidate(CacheInvalidation::GroupwareResources(id));
                 self.invalidate(CacheInvalidation::MessageCache(id));
             }
             ObjectInner::Domain(_) => {
@@ -427,7 +427,7 @@ impl Server {
                     cache.access_tokens.remove(id);
                     cache.http_auth.inner().retain(|_, v| v.account_id != *id);
                 }
-                CacheInvalidation::DavResources(id) => {
+                CacheInvalidation::GroupwareResources(id) => {
                     cache.files.remove(id);
                     cache.contacts.remove(id);
                     cache.events.remove(id);

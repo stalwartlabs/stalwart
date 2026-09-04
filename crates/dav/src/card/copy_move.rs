@@ -57,7 +57,7 @@ impl CardCopyMoveRequestHandler for Server {
             .into_owned_uri()?;
         let from_account_id = from_resource_.account_id;
         let from_resources = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 from_account_id,
                 SyncCollection::AddressBook,
@@ -105,7 +105,7 @@ impl CardCopyMoveRequestHandler for Server {
         let to_resources = if to_account_id == from_account_id {
             from_resources.clone()
         } else {
-            self.fetch_dav_resources(
+            self.fetch_groupware_resources(
                 access_token.account_id(),
                 to_account_id,
                 SyncCollection::AddressBook,
@@ -467,7 +467,7 @@ async fn copy_card(
     // Validate UID
     assert_is_unique_uid(
         server
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 to_account_id,
                 SyncCollection::AddressBook,
@@ -612,7 +612,7 @@ async fn move_card(
     {
         assert_is_unique_uid(
             server
-                .fetch_dav_resources(
+                .fetch_groupware_resources(
                     access_token.account_id(),
                     to_account_id,
                     SyncCollection::AddressBook,

@@ -12,7 +12,7 @@ use crate::{
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
 };
-use common::{DavResources, Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{GroupwareResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -65,7 +65,7 @@ impl FileNodeSet for Server {
     ) -> trc::Result<SetResponse<file_node::FileNode>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::FileNode,
@@ -894,7 +894,7 @@ pub(super) fn validate_file_node_hierarchy(
     document_id: Option<u32>,
     parent: ParentRef,
     is_shared: bool,
-    cache: &DavResources,
+    cache: &GroupwareResources,
     created_folders: &AHashMap<ParentRef, Vec<AclGrant>>,
 ) -> Result<(), SetError<FileNodeProperty>> {
     if parent.is_root() {
@@ -994,7 +994,7 @@ pub(super) fn find_sibling_collision(
     document_id: Option<u32>,
     parent: ParentRef,
     node: &FileNode,
-    cache: &DavResources,
+    cache: &GroupwareResources,
     pending: &AHashMap<(ParentRef, String), Option<u32>>,
     case_insensitive: bool,
 ) -> Collision {
@@ -1020,7 +1020,7 @@ pub(super) fn pick_unique_rename(
     base: &str,
     document_id: Option<u32>,
     parent: ParentRef,
-    cache: &DavResources,
+    cache: &GroupwareResources,
     pending: &AHashMap<(ParentRef, String), Option<u32>>,
     case_insensitive: bool,
 ) -> String {

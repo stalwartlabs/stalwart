@@ -6,7 +6,7 @@
 
 use crate::utils::server::TestServerBuilder;
 use ahash::AHashMap;
-use common::DavResources;
+use common::GroupwareResources;
 use groupware::DavResourceName;
 use hyper::StatusCode;
 use registry::{
@@ -213,11 +213,11 @@ pub async fn webdav_tests() {
     }
 }
 
-pub trait DavResourcesTest {
+pub trait GroupwareResourcesTest {
     fn items(&self) -> Vec<u32>;
 }
 
-impl DavResourcesTest for DavResources {
+impl GroupwareResourcesTest for GroupwareResources {
     fn items(&self) -> Vec<u32> {
         self.resources.iter().map(|r| r.document_id()).collect()
     }

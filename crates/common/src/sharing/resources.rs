@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{DavResources, NO_ID, auth::AccessToken};
+use crate::{GroupwareResources, NO_ID, auth::AccessToken};
 use store::roaring::RoaringBitmap;
 use types::acl::Acl;
 use utils::map::bitmap::Bitmap;
 
-impl DavResources {
+impl GroupwareResources {
     pub fn shared_containers(
         &self,
         access_token: &AccessToken,
@@ -144,7 +144,7 @@ impl DavResources {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ArenaRef, DavName, DavPath, DavResource, DavResourceMetadata, DavResources, NO_ID,
+        ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID,
         PathIndex, ResourceStore, UpdateLock,
         auth::AccessToken,
         storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
@@ -175,9 +175,9 @@ mod tests {
             };
             let acls = containers.push_acls(&grants);
             let preferences = containers.push_prefs(&[]);
-            containers.records.push(DavResource {
+            containers.records.push(GroupwareResource {
                 document_id,
-                data: DavResourceMetadata::Calendar {
+                data: GroupwareResourceMetadata::Calendar {
                     name: name_ref,
                     acls,
                     preferences,
@@ -203,9 +203,9 @@ mod tests {
             parent_id: 1,
         }]);
         let uid = items.push_str("uid-1");
-        items.records.push(DavResource {
+        items.records.push(GroupwareResource {
             document_id: 0,
-            data: DavResourceMetadata::CalendarEvent {
+            data: GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start: 0,
                 duration: 0,
@@ -225,7 +225,7 @@ mod tests {
             },
         ));
 
-        let resources = DavResources {
+        let resources = GroupwareResources {
             base_path: "/dav/cal/sharer/".to_string(),
             paths: Arc::new(PathIndex::pack(entries)),
             resources: ResourceStore::from_sorted(vec![containers], vec![items], false),

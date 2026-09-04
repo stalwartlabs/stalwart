@@ -9,7 +9,7 @@ use crate::changes::state::JmapCacheState;
 use crate::contact::assert_is_unique_uid;
 use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
 use common::{
-    DavName, DavResources, Server,
+    DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountCache},
 };
 use groupware::{
@@ -52,7 +52,7 @@ pub trait ContactCardSet: Sync + Send {
     #[allow(clippy::too_many_arguments)]
     fn create_contact_card(
         &self,
-        cache: &DavResources,
+        cache: &GroupwareResources,
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account: &AccountCache,
@@ -73,7 +73,7 @@ impl ContactCardSet for Server {
         let account_id = request.account_id.document_id();
         let account = self.account(account_id).await.caused_by(trc::location!())?;
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::AddressBook,
@@ -414,7 +414,7 @@ impl ContactCardSet for Server {
 
     async fn create_contact_card(
         &self,
-        cache: &DavResources,
+        cache: &GroupwareResources,
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account: &AccountCache,

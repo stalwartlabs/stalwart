@@ -591,7 +591,7 @@ pub async fn test(test: &TestServer) {
     let account_id = account.id().document_id();
     let resources = test
         .server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
     let calendar_document_id = Id::from_str(&calendar_id).unwrap().document_id();

@@ -15,7 +15,7 @@ use crate::{
     file::{DavFileResource, FileItemId},
 };
 use common::{
-    DavResourcePath, DavResources, Server, auth::AccessToken, storage::index::ObjectIndexBuilder,
+    DavResourcePath, GroupwareResources, Server, auth::AccessToken, storage::index::ObjectIndexBuilder,
 };
 use dav_proto::{Depth, RequestHeaders};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
@@ -59,7 +59,7 @@ impl FileCopyMoveRequestHandler for Server {
             .into_owned_uri()?;
         let from_account_id = from_resource_.account_id;
         let from_resources = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 from_account_id,
                 SyncCollection::FileNode,
@@ -107,7 +107,7 @@ impl FileCopyMoveRequestHandler for Server {
         let to_resources = if to_account_id == from_account_id {
             from_resources.clone()
         } else {
-            self.fetch_dav_resources(
+            self.fetch_groupware_resources(
                 access_token.account_id(),
                 to_account_id,
                 SyncCollection::FileNode,
@@ -359,7 +359,7 @@ impl Default for Destination {
 async fn move_container(
     server: &Server,
     access_token: &AccessToken,
-    from_resources: Arc<DavResources>,
+    from_resources: Arc<GroupwareResources>,
     from_resource: UriResource<u32, FileItemId>,
     from_resource_name: &str,
     destination: Destination,
@@ -430,7 +430,7 @@ async fn move_container(
 async fn copy_container(
     server: &Server,
     access_token: &AccessToken,
-    from_resources: Arc<DavResources>,
+    from_resources: Arc<GroupwareResources>,
     from_resource: UriResource<u32, FileItemId>,
     from_resource_name: &str,
     mut destination: Destination,

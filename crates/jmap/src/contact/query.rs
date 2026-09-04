@@ -47,7 +47,7 @@ impl ContactCardQuery for Server {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::AddressBook,
@@ -303,7 +303,7 @@ impl ContactCardQuery for Server {
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::AddressBook,

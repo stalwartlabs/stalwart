@@ -68,7 +68,7 @@ impl FilePropPatchRequestHandler for Server {
         let uri = headers.uri;
         let account_id = resource_.account_id;
         let files = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::FileNode,

@@ -6,7 +6,7 @@
 
 use super::{CONTAINER_FLAG, encode_path_segment};
 use crate::{
-    ArenaRef, DavPath, DavResourceMetadata, DavResourceRef, DavResources, NO_ID, PathChunk,
+    ArenaRef, DavPath, GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID, PathChunk,
     PathIndex, ResourceChunk, ResourceStore,
 };
 use ahash::{AHashMap, AHashSet};
@@ -20,7 +20,7 @@ pub enum PathUpdate {
     Rebuild,
 }
 
-impl DavResources {
+impl GroupwareResources {
     pub fn patch_paths(
         &self,
         previous: &ResourceStore,
@@ -36,7 +36,7 @@ impl DavResources {
             } else {
                 previous.find(*document_id, *is_container)
             };
-            let new = slot.map(|slot| DavResourceRef {
+            let new = slot.map(|slot| GroupwareResourceRef {
                 chunk: staging,
                 resource: &staging.records[slot as usize],
             });
@@ -88,7 +88,7 @@ impl DavResources {
 
     fn collect_owned_removes(
         &self,
-        owner: &DavResourceRef<'_>,
+        owner: &GroupwareResourceRef<'_>,
         before: Vec<(String, DavPath)>,
         removes: &mut AHashSet<String>,
     ) {
@@ -101,7 +101,7 @@ impl DavResources {
         }));
     }
 
-    fn has_child_paths(&self, container: &DavResourceRef<'_>) -> bool {
+    fn has_child_paths(&self, container: &GroupwareResourceRef<'_>) -> bool {
         match self.container_path_of(container) {
             Some(path) => self.paths.range(format!("{path}/")).next().is_some(),
             None => true,
@@ -115,7 +115,7 @@ impl DavResources {
 
     pub(super) fn container_path_entry_of(
         &self,
-        container: &DavResourceRef<'_>,
+        container: &GroupwareResourceRef<'_>,
     ) -> Option<(&PathChunk, &DavPath)> {
         let candidate = self.container_path_of(container)?;
         let entry = self.paths.get(&candidate)?;
@@ -126,10 +126,10 @@ impl DavResources {
 
     pub(crate) fn materialized_paths(
         &self,
-        resource: &DavResourceRef<'_>,
+        resource: &GroupwareResourceRef<'_>,
     ) -> Option<Vec<(String, DavPath)>> {
         match &resource.resource.data {
-            DavResourceMetadata::File { .. } => {
+            GroupwareResourceMetadata::File { .. } => {
                 let (path, parent_id, parent_seq) = match Self::nesting_parent(resource) {
                     Some(parent_id) => match self.container_path_entry(parent_id) {
                         Some((parent_chunk, parent)) => (
@@ -202,15 +202,15 @@ impl DavResources {
         }
     }
 
-    fn container_path_of<'x>(&'x self, container: &'x DavResourceRef<'x>) -> Option<Cow<'x, str>> {
+    fn container_path_of<'x>(&'x self, container: &'x GroupwareResourceRef<'x>) -> Option<Cow<'x, str>> {
         match &container.resource.data {
-            DavResourceMetadata::File { .. } => self.nested_path_of(container).map(Cow::Owned),
+            GroupwareResourceMetadata::File { .. } => self.nested_path_of(container).map(Cow::Owned),
             _ => container.container_name().map(encode_path_segment),
         }
     }
 
-    fn nested_path_of(&self, resource: &DavResourceRef<'_>) -> Option<String> {
-        let mut chain = vec![DavResourceRef {
+    fn nested_path_of(&self, resource: &GroupwareResourceRef<'_>) -> Option<String> {
+        let mut chain = vec![GroupwareResourceRef {
             chunk: resource.chunk,
             resource: resource.resource,
         }];
@@ -235,9 +235,9 @@ impl DavResources {
             .map(|segments| segments.join("/"))
     }
 
-    fn nesting_parent(resource: &DavResourceRef<'_>) -> Option<u32> {
+    fn nesting_parent(resource: &GroupwareResourceRef<'_>) -> Option<u32> {
         match &resource.resource.data {
-            DavResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => Some(*parent_id),
+            GroupwareResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => Some(*parent_id),
             _ => None,
         }
     }
@@ -246,16 +246,16 @@ impl DavResources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DavName, DavResource, UpdateLock, storage::dav::ResourceChunkBuilder};
+    use crate::{DavName, GroupwareResource, UpdateLock, storage::dav::ResourceChunkBuilder};
     use std::sync::Arc;
 
     fn calendar(builder: &mut ResourceChunkBuilder, document_id: u32, name: &str) {
         let name = builder.push_str(name);
         let acls = builder.push_acls(&[]);
         let preferences = builder.push_prefs(&[]);
-        builder.records.push(DavResource {
+        builder.records.push(GroupwareResource {
             document_id,
-            data: DavResourceMetadata::Calendar {
+            data: GroupwareResourceMetadata::Calendar {
                 name,
                 acls,
                 preferences,
@@ -267,9 +267,9 @@ mod tests {
     fn event(builder: &mut ResourceChunkBuilder, document_id: u32, parent_id: u32, name: &str) {
         let names = builder.push_names(&[DavName::new(name.to_string(), parent_id)]);
         let uid = builder.push_str("uid");
-        builder.records.push(DavResource {
+        builder.records.push(GroupwareResource {
             document_id,
-            data: DavResourceMetadata::CalendarEvent {
+            data: GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start: 0,
                 duration: 0,
@@ -281,8 +281,8 @@ mod tests {
         });
     }
 
-    fn resources(store: ResourceStore, paths: Arc<PathIndex>) -> DavResources {
-        DavResources {
+    fn resources(store: ResourceStore, paths: Arc<PathIndex>) -> GroupwareResources {
+        GroupwareResources {
             base_path: String::new(),
             paths,
             resources: store,

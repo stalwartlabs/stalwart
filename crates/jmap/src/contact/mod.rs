@@ -5,7 +5,7 @@
  */
 
 use calcard::jscontact::JSContactProperty;
-use common::{DavName, DavResources, NO_ID};
+use common::{DavName, GroupwareResources, NO_ID};
 use jmap_proto::error::set::SetError;
 use types::id::Id;
 
@@ -16,7 +16,7 @@ pub mod query;
 pub mod set;
 
 pub(super) fn assert_is_unique_uid(
-    resources: &DavResources,
+    resources: &GroupwareResources,
     addressbook_ids: &[DavName],
     uid: Option<&str>,
 ) -> trc::Result<Result<(), SetError<JSContactProperty<Id>>>> {

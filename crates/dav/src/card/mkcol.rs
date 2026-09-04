@@ -57,7 +57,7 @@ impl CardMkColRequestHandler for Server {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         } else if name.contains('/')
             || self
-                .fetch_dav_resources(
+                .fetch_groupware_resources(
                     access_token.account_id(),
                     account_id,
                     SyncCollection::AddressBook,

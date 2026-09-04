@@ -6,7 +6,7 @@
 
 use crate::utils::server::TestServer;
 use common::{
-    CustomKeywords, DavName, DavPath, DavResource, DavResourceMetadata, DavResources, MessageCache,
+    CustomKeywords, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, MessageCache,
     MessageUid, MessagesCache, PathIndex, ResourceStore, UpdateLock,
     cache::swap::{
         SwapBackend, SwapCadence, SwapKey, SwapPart, SwapTier, blob::BlobSwapStore,
@@ -141,7 +141,7 @@ async fn run_suite(backend: &str, tier: &SwapTier) {
     );
 
     let decoded_resources =
-        DavResources::from_snapshot(&loaded_resources).expect("decode resources");
+        GroupwareResources::from_snapshot(&loaded_resources).expect("decode resources");
     assert_resources_match(backend, &resources, &decoded_resources);
 
     assert_eq!(
@@ -262,7 +262,7 @@ fn sample_messages(count: usize) -> MessagesCache {
     MessagesCache::new(9_876_543, items, keywords)
 }
 
-fn sample_resources(items: usize) -> DavResources {
+fn sample_resources(items: usize) -> GroupwareResources {
     let mut containers = ResourceChunkBuilder::with_capacity(4);
     let mut entries = Vec::new();
 
@@ -270,9 +270,9 @@ fn sample_resources(items: usize) -> DavResources {
         let name = containers.push_str(&format!("calendar-{document_id}"));
         let acls = containers.push_acls(&[]);
         let preferences = containers.push_prefs(&[]);
-        containers.records.push(DavResource {
+        containers.records.push(GroupwareResource {
             document_id,
-            data: DavResourceMetadata::Calendar {
+            data: GroupwareResourceMetadata::Calendar {
                 name,
                 acls,
                 preferences,
@@ -305,9 +305,9 @@ fn sample_resources(items: usize) -> DavResources {
             parent_id,
         }]);
         let uid = chunk.push_str(&format!("uid-{document_id}@example.org"));
-        chunk.records.push(DavResource {
+        chunk.records.push(GroupwareResource {
             document_id,
-            data: DavResourceMetadata::CalendarEvent {
+            data: GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start: 1_700_000_000 + document_id as i64,
                 duration: 1800 + document_id,
@@ -329,7 +329,7 @@ fn sample_resources(items: usize) -> DavResources {
     }
     chunks.push(chunk);
 
-    let mut resources = DavResources {
+    let mut resources = GroupwareResources {
         base_path: "/dav/cal/tester".to_string(),
         paths: Arc::new(PathIndex::pack(entries)),
         resources: ResourceStore::from_sorted(vec![containers], chunks, false),
@@ -378,7 +378,7 @@ fn assert_messages_match(backend: &str, left: &MessagesCache, right: &MessagesCa
     }
 }
 
-fn assert_resources_match(backend: &str, left: &DavResources, right: &DavResources) {
+fn assert_resources_match(backend: &str, left: &GroupwareResources, right: &GroupwareResources) {
     assert_eq!(left.base_path, right.base_path, "{backend}: base path");
     assert_eq!(left.size, right.size, "{backend}: cache size");
     assert_eq!(

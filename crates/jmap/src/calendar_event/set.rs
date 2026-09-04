@@ -18,7 +18,7 @@ use calcard::{
 };
 use chrono::DateTime;
 use common::{
-    DavName, DavResources, Server,
+    DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountInfo},
 };
 use groupware::{
@@ -74,7 +74,7 @@ pub trait CalendarEventSet: Sync + Send {
     #[allow(clippy::too_many_arguments)]
     fn create_calendar_event(
         &self,
-        cache: &DavResources,
+        cache: &GroupwareResources,
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,
@@ -95,7 +95,7 @@ impl CalendarEventSet for Server {
     ) -> trc::Result<SetResponse<calendar_event::CalendarEvent>> {
         let account_id = request.account_id.document_id();
         let cache = self
-            .fetch_dav_resources(
+            .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
                 SyncCollection::Calendar,
@@ -669,7 +669,7 @@ impl CalendarEventSet for Server {
 
     async fn create_calendar_event(
         &self,
-        cache: &DavResources,
+        cache: &GroupwareResources,
         batch: &mut BatchBuilder,
         access_token: &AccessToken,
         account_id: u32,

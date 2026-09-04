@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{DavResources, MessageStoreCache, Server};
+use common::{GroupwareResources, MessageStoreCache, Server};
 use jmap_proto::types::state::State;
 use std::future::Future;
 use trc::AddContext;
@@ -82,7 +82,7 @@ impl JmapCacheState for MessageStoreCache {
     }
 }
 
-impl JmapCacheState for DavResources {
+impl JmapCacheState for GroupwareResources {
     fn get_state(&self, is_container: bool) -> State {
         cache_state(if is_container {
             self.container_change_id

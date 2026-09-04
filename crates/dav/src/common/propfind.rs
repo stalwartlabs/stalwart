@@ -29,7 +29,7 @@ use crate::{
 };
 use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
 use common::{
-    DavResourcePath, DavResources, Server,
+    DavResourcePath, GroupwareResources, Server,
     auth::{AccessToken, AccountCache},
 };
 use dav_proto::{
@@ -129,7 +129,7 @@ fn has_dead_properties(
 
 #[derive(Default)]
 pub(crate) struct PropFindAccountData {
-    pub resources: Option<Arc<DavResources>>,
+    pub resources: Option<Arc<GroupwareResources>>,
     pub quota: Option<PropFindAccountQuota>,
     pub owner: Option<Href>,
     pub locks: Option<Archive<ArchiveBytes>>,
@@ -1758,12 +1758,12 @@ impl PropFindData {
         access_token: &AccessToken,
         account_id: u32,
         sync_collection: SyncCollection,
-    ) -> trc::Result<Arc<DavResources>> {
+    ) -> trc::Result<Arc<GroupwareResources>> {
         let data = self.accounts.entry(account_id).or_default();
 
         if data.resources.is_none() {
             let resources = server
-                .fetch_dav_resources(access_token.account_id(), account_id, sync_collection)
+                .fetch_groupware_resources(access_token.account_id(), account_id, sync_collection)
                 .await
                 .caused_by(trc::location!())?;
             data.resources = resources.into();
@@ -1814,7 +1814,7 @@ pub(crate) trait SyncTokenUrn {
     fn sync_token(&self) -> String;
 }
 
-impl SyncTokenUrn for DavResources {
+impl SyncTokenUrn for GroupwareResources {
     fn sync_token(&self) -> String {
         Urn::Sync {
             id: self.highest_change_id,

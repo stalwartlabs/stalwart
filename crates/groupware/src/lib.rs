@@ -7,7 +7,7 @@
 #![warn(clippy::large_futures)]
 
 use calcard::common::timezone::Tz;
-use common::DavResources;
+use common::GroupwareResources;
 pub use common::storage::dav::{RFC_3986, encode_path_segment, is_uri_segment};
 use percent_encoding::percent_decode_str;
 use std::borrow::Cow;
@@ -200,7 +200,7 @@ pub trait DavCalendarResource {
     fn calendar_default_tz(&self, calendar_id: u32, account_id: u32) -> Option<Tz>;
 }
 
-impl DavCalendarResource for DavResources {
+impl DavCalendarResource for GroupwareResources {
     fn calendar_default_tz(&self, calendar_id: u32, account_id: u32) -> Option<Tz> {
         self.container_resource_by_id(calendar_id)
             .and_then(|c| c.calendar_preferences(account_id).map(|p| p.tz))

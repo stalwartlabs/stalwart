@@ -17,7 +17,7 @@ use crate::{
 };
 use ahash::AHashMap;
 use common::{
-    BuildServer, Caches, Core, Data, DavResources, Inner, Server,
+    BuildServer, Caches, Core, Data, GroupwareResources, Inner, Server,
     auth::RECOVERY_ADMIN_ID,
     cache::swap::SwapTier,
     config::{
@@ -537,10 +537,10 @@ impl TestServer {
         (Session::test_with_shutdown(self.server.clone(), rx), tx)
     }
 
-    pub async fn resources(&self, name: &'static str, collection: Collection) -> Arc<DavResources> {
+    pub async fn resources(&self, name: &'static str, collection: Collection) -> Arc<GroupwareResources> {
         let account_id = self.account(name).id().document_id();
         self.server
-            .fetch_dav_resources(account_id, account_id, collection.into())
+            .fetch_groupware_resources(account_id, account_id, collection.into())
             .await
             .unwrap()
     }

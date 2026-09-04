@@ -700,7 +700,7 @@ END:VCALENDAR
     let dav_client = account.webdav_client();
     let resources = test
         .server
-        .fetch_dav_resources(account_id, account_id, SyncCollection::Calendar)
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
         .await
         .unwrap();
     let path = format!(

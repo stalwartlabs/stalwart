@@ -162,7 +162,7 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
     server
         .invalidate_caches(
             CacheInvalidationBuilder::from(CacheInvalidation::MessageCache(account_id))
-                .with_invalidation(CacheInvalidation::DavResources(account_id)),
+                .with_invalidation(CacheInvalidation::GroupwareResources(account_id)),
         )
         .await?;
     server.inner.cache.swap.forget(account_id);
