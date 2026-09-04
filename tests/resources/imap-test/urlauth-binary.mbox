@@ -25,7 +25,7 @@ bG8gd29y
 bGQ=
 
 --sub1
-Content-Type: text/x-myown; charset=us-ascii
+Content-Type: text/x-myother; charset=us-ascii
 Content-Transfer-Encoding: base64
 
   aGVs    
@@ -33,6 +33,22 @@ Content-Transfer-Encoding: base64
    d29y  	 
     bGQ= 
 
+
+--sub1
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: x-unprintable
+
+nothing to see here
+
+--sub1
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: quoted-printable
+
+definitely nothing to see here
+
+--=
+sub=
+=31--
 
 --sub1--
 Sub MIME epilogue

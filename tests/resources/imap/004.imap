@@ -298,7 +298,7 @@ BODY[1.TEXT] {45}
 ...Introductory text or table of contents...
 
 ----------------------------------
-BODY[1.MIME] {2}
+BODY[1.MIME] {1}
 
 
 ----------------------------------
@@ -379,7 +379,7 @@ Subject: my different opinion
 ------ next message ------
 
 ----------------------------------
-BODY[2.MIME] {80}
+BODY[2.MIME] {79}
 Content-Type: multipart/digest;
             boundary="---- next message ----"
 
@@ -412,7 +412,7 @@ BODY[2.1.TEXT] {22}
 ...body goes here ...
 
 ----------------------------------
-BODY[2.1.MIME] {2}
+BODY[2.1.MIME] {1}
 
 
 ----------------------------------
@@ -451,7 +451,7 @@ BODY[2.2.TEXT] {31}
 ... another body goes here ...
 
 ----------------------------------
-BODY[2.2.MIME] {2}
+BODY[2.2.MIME] {1}
 
 
 ----------------------------------

@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{
-    core::{Session, SessionData},
-    spawn_op,
-};
+use crate::core::{Session, SessionData};
 use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -20,13 +17,18 @@ use store::{
     ValueKey,
     write::{Archive, ArchiveBytes, BatchBuilder},
 };
+use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, id::Id};
 
 use super::ImapContext;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_rename(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_rename(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapRename)?;
 
@@ -35,10 +37,8 @@ impl<T: SessionStream> Session<T> {
         let data = self.state.session_data();
         let is_objectid = self.is_objectid;
 
-        spawn_op!(data, {
-            let response = data.rename_folder(arguments, is_objectid, op_start).await?;
-            data.write_bytes(response.into_bytes()).await
-        })
+        let response = data.rename_folder(arguments, is_objectid, op_start).await?;
+        data.write_bytes(response.into_bytes()).await
     }
 }
 

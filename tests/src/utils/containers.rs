@@ -4,16 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::{Duration, Instant};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use testcontainers::{
     ContainerAsync, GenericBuildableImage, GenericImage, ImageExt, ReuseDirective,
-    core::{CmdWaitFor, ExecCommand, Host, IntoContainerPort, WaitFor},
+    core::{AccessMode, CmdWaitFor, ExecCommand, Host, IntoContainerPort, Mount, WaitFor},
     runners::{AsyncBuilder, AsyncRunner},
 };
 use tokio::{net::TcpStream, sync::OnceCell};
 
 const ACME_NETWORK: &str = "stalwart-test-acme";
+
+pub const IMAPTEST_TESTS_DIR: &str = "/tests";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -323,6 +328,100 @@ pub async fn scim_tester_exec(args: &[&str]) -> (String, String) {
         String::from_utf8_lossy(&stdout).into_owned(),
         String::from_utf8_lossy(&stderr).into_owned(),
     )
+}
+
+pub struct ImapTest {
+    container: ContainerAsync<GenericImage>,
+}
+
+pub struct ImapTestRun {
+    pub exit_code: i64,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl ImapTest {
+    pub async fn start(tests_dir: &Path) -> Self {
+        let tests_dir = tests_dir
+            .to_str()
+            .expect("The imaptest fixture path is not valid UTF-8");
+
+        let image = GenericBuildableImage::new("stalwart-test-imaptest", "local")
+            .with_dockerfile_string(include_str!("../../docker/imaptest/Dockerfile"))
+            .with_data(
+                include_bytes!(
+                    "../../docker/imaptest/patches/0001-clamp-seq-ranges-to-the-current-view.patch"
+                )
+                .to_vec(),
+                "patches/0001-clamp-seq-ranges-to-the-current-view.patch",
+            )
+            .with_data(
+                include_bytes!(
+                    "../../docker/imaptest/patches/0002-do-not-deref-a-null-last_cmd.patch"
+                )
+                .to_vec(),
+                "patches/0002-do-not-deref-a-null-last_cmd.patch",
+            )
+            .with_data(
+                include_bytes!(
+                    "../../docker/imaptest/patches/0003-allow-server-owned-attachment-keywords.patch"
+                )
+                .to_vec(),
+                "patches/0003-allow-server-owned-attachment-keywords.patch",
+            )
+            .with_data(
+                include_bytes!(
+                    "../../docker/imaptest/patches/0004-abort-a-test-whose-initialization-fails.patch"
+                )
+                .to_vec(),
+                "patches/0004-abort-a-test-whose-initialization-fails.patch",
+            )
+            .build_image()
+            .await
+            .expect("Failed to build the imaptest image");
+
+        let container = image
+            .with_mount(
+                Mount::bind_mount(tests_dir, IMAPTEST_TESTS_DIR)
+                    .with_access_mode(AccessMode::ReadOnly),
+            )
+            .with_host("host.docker.internal", Host::HostGateway)
+            .with_startup_timeout(READY_TIMEOUT)
+            .start()
+            .await
+            .expect("Failed to start the imaptest container");
+
+        ImapTest { container }
+    }
+
+    pub async fn run(&self, args: &[String], env: &[(&str, &str)]) -> ImapTestRun {
+        let mut command = vec!["imaptest".to_string()];
+        command.extend(args.iter().cloned());
+
+        let mut result = self
+            .container
+            .exec(
+                ExecCommand::new(command)
+                    .with_cmd_ready_condition(CmdWaitFor::exit())
+                    .with_env_vars(env.iter().copied()),
+            )
+            .await
+            .expect("Failed to exec imaptest");
+
+        let stdout = result.stdout_to_vec().await.unwrap_or_default();
+        let stderr = result.stderr_to_vec().await.unwrap_or_default();
+        let exit_code = result
+            .exit_code()
+            .await
+            .expect("Failed to read the imaptest exit code")
+            .expect("imaptest did not report an exit code");
+
+        ImapTestRun {
+            exit_code,
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        }
+    }
 }
 
 pub async fn ensure_acme() {

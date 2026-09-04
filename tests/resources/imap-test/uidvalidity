@@ -9,5 +9,5 @@ state: created
 2 ok create $mailbox
 2 ok append $mailbox
 
-#1 ok status $mailbox (uidvalidity uidnext)
-#! status $mailbox (uidvalidity $uidvalidity uidnext $uidnext)
+1 ok status $mailbox (uidvalidity uidnext)
+! status $mailbox (uidvalidity $uidvalidity uidnext $uidnext)

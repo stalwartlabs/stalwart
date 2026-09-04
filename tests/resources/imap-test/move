@@ -41,7 +41,7 @@ ok uid move $uid2 ${mailbox}2
 * 1 expunge
 
 # MOVE to same mailbox:
-#ok move 1 $mailbox
-#* ok [copyuid $uidvalidity $uid3 $uidnext1]
-#* 1 expunge
-#* 1 exists
+ok move 1 $mailbox
+* ok [copyuid $uidvalidity $uid3 $uidnext1]
+* 1 expunge
+* 1 exists

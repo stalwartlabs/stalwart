@@ -1,5 +1,14 @@
 messages: 1
 
+# Stalwart writes the full-text index from an asynchronous queue
+# (crates/services/src/index_queue), so a search issued straight after the
+# messages are appended can match nothing at all. Let the queue drain first.
+# Servers that index synchronously can set IMAP_FTS_SYNC to skip the pause.
+!ifnenv IMAP_FTS_SYNC
+ok noop
+!sleep 2s
+!endif
+
 ok search subject NIL
 * search 1
 

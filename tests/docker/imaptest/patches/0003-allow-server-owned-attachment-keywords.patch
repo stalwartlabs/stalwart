@@ -1,0 +1,46 @@
+diff --git a/src/mailbox-state.c b/src/mailbox-state.c
+index f1a40f0..b3790f3 100644
+--- a/src/mailbox-state.c
++++ b/src/mailbox-state.c
+@@ -131,6 +131,26 @@ check_unexpected_flag_changes(struct imap_client *client,
+ 	}
+ }
+ 
++static bool mailbox_keyword_is_server_owned(const char *keyword)
++{
++	/* Keywords that a server assigns on its own, so they can show up in a
++	   FETCH FLAGS reply without ever having been advertised in an untagged
++	   FLAGS reply. test-parser.c ignores the same two in scripted FETCH
++	   FLAGS matches. */
++	static const char *const server_owned[] = {
++		"$hasattachment",
++		"$hasnoattachment",
++		NULL
++	};
++	unsigned int i;
++
++	for (i = 0; server_owned[i] != NULL; i++) {
++		if (strcasecmp(keyword, server_owned[i]) == 0)
++			return TRUE;
++	}
++	return FALSE;
++}
++
+ static void
+ message_metadata_set_flags(struct imap_client *client, const struct imap_arg *args,
+ 			   struct message_metadata_dynamic *metadata)
+@@ -174,9 +194,11 @@ message_metadata_set_flags(struct imap_client *client, const struct imap_arg *ar
+ 			}
+ 		} else {
+ 			if (!mailbox_view_keyword_find(view, atom, &idx)) {
+-				imap_client_state_error(client,
+-					"Keyword used without being in FLAGS: "
+-					"%s", atom);
++				if (!mailbox_keyword_is_server_owned(atom)) {
++					imap_client_state_error(client,
++						"Keyword used without being in "
++						"FLAGS: %s", atom);
++				}
+ 				mailbox_view_keyword_add(view, atom);
+ 				if (!mailbox_view_keyword_find(view, atom,
+ 							       &idx))

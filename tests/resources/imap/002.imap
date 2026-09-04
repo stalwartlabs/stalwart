@@ -399,7 +399,7 @@ Fire up Air Force One!  We're going South!
 Thanks,
 Al
 ----------------------------------
-BODY[1.MIME] {77}
+BODY[1.MIME] {76}
 Content-Type: text/plain; charset=us-ascii
 Content-Transfer-Encoding: 7bit
 
@@ -574,7 +574,7 @@ U6ZGxseyk8SasGw3J9GRzdTQky1iHNvcPNNI4TLeKdfMvy0vMqLrItvuxfDW8ubjueDtJufz
 --DC8------------DC8638F443D87A7F0726DEF7--
 
 ----------------------------------
-BODY[2.MIME] {91}
+BODY[2.MIME] {90}
 Content-Type: message/rfc822
 Content-Transfer-Encoding: 7bit
 Content-Disposition: inline
@@ -632,7 +632,7 @@ Then again, shouldn't the CIA have something like that?
 
 Bill
 ----------------------------------
-BODY[2.1.MIME] {77}
+BODY[2.1.MIME] {76}
 Content-Type: text/plain; charset=us-ascii
 Content-Transfer-Encoding: 7bit
 
@@ -694,7 +694,7 @@ BEN2dkGQGWJtSzqGTICJgnQuTJN/WJsojad9qXMuhIWdjXKjY4tenjo6tjVssk2gaWq3uGNX
 U6ZGxseyk8SasGw3J9GRzdTQky1iHNvcPNNI4TLeKdfMvy0vMqLrItvuxfDW8ubjueDtJufz
 7itICBxISKDBgwgTKjyYAAA7
 ----------------------------------
-BODY[2.2.MIME] {150}
+BODY[2.2.MIME] {149}
 Content-Type: image/gif; name="map_of_Argentina.gif"
 Content-Transfer-Encoding: base64
 Content-Disposition: inline; fi1ename="map_of_Argentina.gif"

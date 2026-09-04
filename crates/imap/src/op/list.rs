@@ -13,7 +13,7 @@ use crate::{
 use common::network::SessionStream;
 
 use imap_proto::{
-    Command, StatusResponse,
+    Command, ResponseType, StatusResponse,
     protocol::{
         ImapResponse, ProtocolVersion,
         list::{
@@ -23,12 +23,17 @@ use imap_proto::{
     receiver::Request,
 };
 use registry::schema::enums::Permission;
+use tokio::sync::OwnedSemaphorePermit;
 use trc::StoreEvent;
 
 use super::ImapContext;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_list(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_list(
+        &mut self,
+        request: Request<Command>,
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         let op_start = Instant::now();
         let command = request.command;
         let is_lsub = command == Command::Lsub;
@@ -50,6 +55,7 @@ impl<T: SessionStream> Session<T> {
             let is_utf8 = self.is_utf8;
 
             spawn_op!(
+                permit,
                 data,
                 data.list(arguments, is_lsub, version, is_utf8, op_start)
                     .await
@@ -166,6 +172,7 @@ impl<T: SessionStream> SessionData<T> {
             return Err(trc::ImapEvent::Error
                 .into_err()
                 .details("RECURSIVEMATCH requires the SUBSCRIBED selection option.")
+                .ctx(trc::Key::Type, ResponseType::Bad)
                 .id(tag));
         }
 
@@ -177,6 +184,7 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         let mut list_items = Vec::with_capacity(10);
+        let mut lsub_unmatched = Vec::new();
 
         // Add mailboxes
         let mut added_shared_folder = false;
@@ -262,8 +270,52 @@ impl<T: SessionStream> SessionData<T> {
                             },
                         });
                     }
+                } else if is_lsub && account.is_subscribed(mailbox_id, self.account_id) {
+                    lsub_unmatched.push(mailbox_name.clone());
                 }
             }
+        }
+
+        // RFC 3501 6.3.9 requires LSUB with % to report the unsubscribed parents
+        // of a subscribed mailbox, flagged \Noselect
+        for mailbox_name in lsub_unmatched {
+            for (pos, _) in mailbox_name.match_indices('/') {
+                let parent = &mailbox_name[..pos];
+                if matches_pattern(&patterns, parent)
+                    && !list_items.iter().any(|item| item.mailbox_name == parent)
+                {
+                    list_items.push(ListItem {
+                        mailbox_name: parent.into(),
+                        attributes: vec![Attribute::NoSelect],
+                        tags: vec![],
+                    });
+                }
+            }
+        }
+
+        // RFC 5258 3.5 requires redundant CHILDINFO responses to be suppressed
+        if recursive_match {
+            let redundant = list_items
+                .iter()
+                .map(|item| {
+                    item.tags.iter().any(|tag| matches!(tag, Tag::ChildInfo(_)))
+                        && list_items.iter().any(|other| {
+                            other
+                                .mailbox_name
+                                .strip_prefix(item.mailbox_name.as_str())
+                                .is_some_and(|rest| rest.starts_with('/'))
+                        })
+                })
+                .collect::<Vec<_>>();
+
+            let mut redundant = redundant.into_iter();
+            list_items.retain_mut(|item| match redundant.next() {
+                Some(true) => {
+                    item.tags.clear();
+                    item.attributes.contains(&Attribute::Subscribed)
+                }
+                _ => true,
+            });
         }
 
         // Add status response

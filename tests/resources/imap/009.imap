@@ -267,7 +267,7 @@ HBvcnRpbmcmcmRxdW87IHRvIGZvY3VzIGp1c3Qgb24gdGhlICZsZHF1bztpbXBvcnRpbm
 cmcmRxdW87LDwvcD48cD5idXQgdGhlbiBJIHRob3VnaHQsIHdoeSBub3QgZG8gYm90aD8
 gJiN4MjYzQTs8L3A+PC9odG1sPg==
 ----------------------------------
-BODY[1.MIME] {80}
+BODY[1.MIME] {79}
 Content-Type: text/html; charset="us-ascii"
 Content-Transfer-Encoding: base64
 
@@ -351,7 +351,7 @@ Content-Disposition: attachment
 R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
 --giddyup--
 ----------------------------------
-BODY[2.MIME] {31}
+BODY[2.MIME] {30}
 Content-Type: message/rfc822
 
 
@@ -377,7 +377,7 @@ BODY[2.1.TEXT] {228}
 =005=D8=1F=DD5=D8,=DD5=D8,=DD5=D8(=DD =005=D8-=DD5=D8)=DD5=D8"=
 =DD5=D8=1E=DD5=D80=DD5=D8"=DD!=00
 ----------------------------------
-BODY[2.1.MIME] {89}
+BODY[2.1.MIME] {88}
 Content-Type: text/plain; charset="utf-16"
 Content-Transfer-Encoding: quoted-printable
 
@@ -409,7 +409,7 @@ Content-Disposition: attachment
 BODY[2.2.TEXT] {56}
 R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
 ----------------------------------
-BODY[2.2.MIME] {176}
+BODY[2.2.MIME] {175}
 Content-Type: image/gif; name*1="about "; name*0="Book ";
               name*2*=utf-8''%e2%98%95 tables.gif
 Content-Transfer-Encoding: Base64

@@ -5,10 +5,7 @@
  */
 
 use super::ImapContext;
-use crate::{
-    core::{Session, SessionData},
-    spawn_op,
-};
+use crate::core::{Session, SessionData};
 use common::network::SessionStream;
 use email::mailbox::merge_subscription;
 use imap_proto::{Command, ResponseCode, StatusResponse, receiver::Request};
@@ -18,6 +15,7 @@ use store::{
     ValueKey,
     write::{Archive, ArchiveBytes, BatchBuilder},
 };
+use tokio::sync::OwnedSemaphorePermit;
 use types::collection::Collection;
 
 impl<T: SessionStream> Session<T> {
@@ -25,6 +23,7 @@ impl<T: SessionStream> Session<T> {
         &mut self,
         request: Request<Command>,
         is_subscribe: bool,
+        _permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapSubscribe)?;
@@ -33,18 +32,16 @@ impl<T: SessionStream> Session<T> {
         let arguments = request.parse_subscribe(self.is_utf8)?;
         let data = self.state.session_data();
 
-        spawn_op!(data, {
-            let response = data
-                .subscribe_folder(
-                    arguments.tag,
-                    arguments.mailbox_name,
-                    is_subscribe,
-                    op_start,
-                )
-                .await?;
+        let response = data
+            .subscribe_folder(
+                arguments.tag,
+                arguments.mailbox_name,
+                is_subscribe,
+                op_start,
+            )
+            .await?;
 
-            data.write_bytes(response.into_bytes()).await
-        })
+        data.write_bytes(response.into_bytes()).await
     }
 }
 

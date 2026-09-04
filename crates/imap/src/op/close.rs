@@ -5,6 +5,7 @@
  */
 
 use std::time::Instant;
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::core::{Session, State};
 use common::network::SessionStream;
@@ -13,7 +14,11 @@ use imap_proto::{Command, StatusResponse, receiver::Request};
 use trc::AddContext;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_close(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_close(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         let op_start = Instant::now();
         let (data, mailbox) = self.state.select_data();
 

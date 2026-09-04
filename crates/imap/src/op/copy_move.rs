@@ -5,10 +5,7 @@
  */
 
 use super::ImapContext;
-use crate::{
-    core::{AccountCaches, MailboxId, SelectedMailbox, Session, SessionData},
-    spawn_op,
-};
+use crate::core::{AccountCaches, MailboxId, SelectedMailbox, Session, SessionData};
 use common::{
     MessageUid, ipc::PushNotification, network::SessionStream, storage::index::ObjectIndexBuilder,
 };
@@ -31,6 +28,7 @@ use store::{
     roaring::RoaringBitmap,
     write::{BatchBuilder, Slot, now},
 };
+use tokio::sync::OwnedSemaphorePermit;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
@@ -43,6 +41,7 @@ impl<T: SessionStream> Session<T> {
         request: Request<Command>,
         is_move: bool,
         is_uid: bool,
+        _permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(if is_move {
@@ -62,50 +61,48 @@ impl<T: SessionStream> Session<T> {
             self.server.core.imap.max_messages_per_save
         };
 
-        spawn_op!(data, {
-            // Refresh mailboxes
-            let caches = data
-                .synchronize_mailboxes(false)
-                .await
-                .imap_ctx(&arguments.tag, trc::location!())?
-                .caches;
-
-            // Make sure the mailbox exists.
-            let dest_mailbox =
-                if let Some(mailbox) = data.get_mailbox_by_name(&arguments.mailbox_name) {
-                    mailbox
-                } else {
-                    return Err(trc::ImapEvent::Error
-                        .into_err()
-                        .details("Destination mailbox does not exist.")
-                        .code(ResponseCode::TryCreate)
-                        .id(arguments.tag));
-                };
-
-            // Check that the destination mailbox is not the same as the source mailbox.
-            if src_mailbox.id.account_id == dest_mailbox.account_id
-                && src_mailbox.id.mailbox_id == dest_mailbox.mailbox_id
-            {
-                return Err(trc::ImapEvent::Error
-                    .into_err()
-                    .details("Source and destination mailboxes are the same.")
-                    .code(ResponseCode::Cannot)
-                    .id(arguments.tag));
-            }
-
-            data.copy_move(
-                arguments,
-                caches,
-                src_mailbox,
-                dest_mailbox,
-                is_move,
-                is_uid,
-                use_vanished,
-                message_limit,
-                op_start,
-            )
+        // Refresh mailboxes
+        let caches = data
+            .synchronize_mailboxes(false)
             .await
-        })
+            .imap_ctx(&arguments.tag, trc::location!())?
+            .caches;
+
+        // Make sure the mailbox exists.
+        let dest_mailbox = if let Some(mailbox) = data.get_mailbox_by_name(&arguments.mailbox_name)
+        {
+            mailbox
+        } else {
+            return Err(trc::ImapEvent::Error
+                .into_err()
+                .details("Destination mailbox does not exist.")
+                .code(ResponseCode::TryCreate)
+                .id(arguments.tag));
+        };
+
+        // Check that the destination mailbox is not the same as the source mailbox.
+        if src_mailbox.id.account_id == dest_mailbox.account_id
+            && src_mailbox.id.mailbox_id == dest_mailbox.mailbox_id
+        {
+            return Err(trc::ImapEvent::Error
+                .into_err()
+                .details("Source and destination mailboxes are the same.")
+                .code(ResponseCode::Cannot)
+                .id(arguments.tag));
+        }
+
+        data.copy_move(
+            arguments,
+            caches,
+            src_mailbox,
+            dest_mailbox,
+            is_move,
+            is_uid,
+            use_vanished,
+            message_limit,
+            op_start,
+        )
+        .await
     }
 }
 

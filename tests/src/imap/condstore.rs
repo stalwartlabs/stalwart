@@ -234,7 +234,7 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
     imap_check
         .assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains("SEARCH 2 3 (MODSEQ");
+        .assert_contains("SEARCH 1 2 3 (MODSEQ");
 
     // Store unchanged since
     imap.send(&format!(

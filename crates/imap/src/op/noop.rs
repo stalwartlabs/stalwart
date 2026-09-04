@@ -5,13 +5,18 @@
  */
 
 use std::time::Instant;
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::core::{Session, State};
 use common::network::SessionStream;
 use imap_proto::{Command, StatusResponse, receiver::Request};
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_noop(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_noop(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         let op_start = Instant::now();
 
         if let State::Selected { data, mailbox, .. } = &self.state {

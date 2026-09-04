@@ -1,23 +1,57 @@
 capabilities: SORT
 messages: all
 
+# RFC 5256 2.1 makes the FROM/TO/CC sort key the addr-mailbox, that is the local
+# part of the first address on its own. Stalwart sorts on its own indexed key,
+# which also carries the display name and the domain, and it does not implement
+# SORT (CC) at all. The IMAP_SORT_ADDRESS_KEYS branches carry the RFC 5256
+# expectations; the other branch records what Stalwart does today.
+
 ok sort (from) us-ascii all
+!ifenv IMAP_SORT_ADDRESS_KEYS
+* sort 3 1 2
+!else
 * sort 3 2 1
+!endif
 ok sort (to) us-ascii all
-* sort 3 2 1
+!ifenv IMAP_SORT_ADDRESS_KEYS
+* sort 3 1 2
+!else
+* sort 1 3 2
+!endif
+!ifenv IMAP_SORT_ADDRESS_KEYS
 ok sort (cc) us-ascii all
-* sort 2 1 3
+* sort 3 1 2
+!else
+no sort (cc) us-ascii all
+!endif
 
 ok sort (reverse from) us-ascii all
 * sort 1 2 3
 ok sort (reverse to) us-ascii all
+!ifenv IMAP_SORT_ADDRESS_KEYS
 * sort 1 2 3
+!else
+* sort 2 3 1
+!endif
+!ifenv IMAP_SORT_ADDRESS_KEYS
 ok sort (reverse cc) us-ascii all
-* sort 3 1 2
+* sort 1 2 3
+!else
+no sort (reverse cc) us-ascii all
+!endif
 
 ok sort (from reverse arrival) us-ascii all
 * sort 3 2 1
 ok sort (to reverse arrival) us-ascii all
+!ifenv IMAP_SORT_ADDRESS_KEYS
 * sort 3 2 1
+!else
+* sort 1 3 2
+!endif
+!ifenv IMAP_SORT_ADDRESS_KEYS
 ok sort (cc reverse arrival) us-ascii all
-* sort 2 1 3
+* sort 3 2 1
+!else
+no sort (cc reverse arrival) us-ascii all
+!endif

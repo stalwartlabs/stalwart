@@ -191,7 +191,7 @@ bar=
 foo_bar
 
 ----------------------------------
-BODY[1.MIME] {91}
+BODY[1.MIME] {90}
 Content-Type: text/x-myown; charset=us-ascii
 Content-Transfer-Encoding: quoted-printable
 

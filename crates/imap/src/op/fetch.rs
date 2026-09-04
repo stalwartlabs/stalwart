@@ -98,7 +98,21 @@ impl<T: SessionStream> Session<T> {
             self.write_bytes(enabled).await?;
         }
 
-        spawn_op!(data, {
+        // A non-peek fetch sets \Seen, which makes it a write for the purposes of
+        // RFC 9051 5.5 ordering. Draining the readers keeps it behind them.
+        let sets_seen = ops.iter().any(|op| {
+            op.as_ref()
+                .is_ok_and(|(_, _, arguments)| arguments.sets_seen())
+        });
+        let _write_permit;
+        let permit = if sets_seen {
+            _write_permit = self.acquire_write_permit().await;
+            None
+        } else {
+            self.acquire_read_permit().await
+        };
+
+        spawn_op!(permit, data, {
             for op in ops {
                 match op {
                     Ok((is_uid, enabled_condstore, arguments)) => {
@@ -261,11 +275,14 @@ impl<T: SessionStream> SessionData<T> {
 
         for attribute in &arguments.attributes {
             match attribute {
-                Attribute::BodySection { sections, .. }
+                Attribute::BodySection { sections, peek, .. }
                     if sections.first().is_some_and(|s| {
                         matches!(s, Section::Header | Section::HeaderFields { .. })
                     }) =>
                 {
+                    if mailbox.is_select && !*peek {
+                        set_seen_flags = true;
+                    }
                     needs_metadata = true;
                 }
                 Attribute::Body | Attribute::BodyStructure | Attribute::BinarySize { .. } => {
@@ -539,9 +556,14 @@ impl<T: SessionStream> SessionData<T> {
                             }
                         }
                         Attribute::Rfc822Text => {
-                            items.push(DataItem::Rfc822Text {
-                                contents: raw_message.get_full_range(),
-                            });
+                            let contents = raw_message.get_slice_range(
+                                u32::from(metadata.root_part().offset_body) as usize
+                                    ..raw_message.len(),
+                            );
+
+                            if contents != SliceRange::None {
+                                items.push(DataItem::Rfc822Text { contents });
+                            }
                         }
                         Attribute::Body => {
                             items.push(DataItem::Body {
@@ -1019,6 +1041,7 @@ impl AsImapDataItem for ArchivedMessageMetadata {
 
         let mut message = &self.contents[0];
         let mut message_id = 0;
+        let mut message_end = None;
         let mut sections_iter = sections.iter().enumerate().peekable();
 
         while let Some((section_num, section)) = sections_iter.next() {
@@ -1045,9 +1068,12 @@ impl AsImapDataItem for ArchivedMessageMetadata {
                             | Section::Text,
                         )) = sections_iter.peek()
                     {
+                        message_id = u16::from(nested_message_id) as usize;
+                        message_end = Some(
+                            decoded.message_end(message_id, u32::from(part.offset_end) as usize),
+                        );
                         message = self.message_id(*nested_message_id);
                         part = message.root_part();
-                        message_id = u16::from(nested_message_id) as usize;
                     }
                 }
                 Section::Header => {
@@ -1083,12 +1109,27 @@ impl AsImapDataItem for ArchivedMessageMetadata {
                     });
                 }
                 Section::Text => {
+                    let mut range = part.body_to_end();
+                    if let Some(end) = message_end
+                        && end > range.end
+                        && std::ptr::eq(part, message.root_part())
+                    {
+                        range.end = end;
+                    }
+
                     return Some(get_cow_partial_bytes(
-                        decoded.raw_message_section(message_id, part.body_to_end())?,
+                        decoded.raw_message_section(message_id, range)?,
                         partial,
                     ));
                 }
                 Section::Mime => {
+                    if !std::ptr::eq(part, message.root_part()) {
+                        return Some(get_cow_partial_bytes(
+                            decoded.raw_message_section(message_id, part.header_to_body())?,
+                            partial,
+                        ));
+                    }
+
                     let mut headers = Vec::with_capacity(
                         u32::from(part.offset_body).saturating_sub(u32::from(part.offset_header))
                             as usize,
@@ -1107,6 +1148,7 @@ impl AsImapDataItem for ArchivedMessageMetadata {
                         }
                     }
                     headers.extend_from_slice(b"\r\n");
+
                     return Some(if partial.is_none() {
                         headers.into()
                     } else {

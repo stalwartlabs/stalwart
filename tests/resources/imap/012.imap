@@ -254,7 +254,7 @@ BODY[1.TEXT] {6}
 hello
 
 ----------------------------------
-BODY[1.MIME] {47}
+BODY[1.MIME] {46}
 Content-Type: text/x-myown; charset=us-ascii
 
 
@@ -333,7 +333,7 @@ Hello another world
 Sub MIME epilogue
 
 ----------------------------------
-BODY[2.MIME] {31}
+BODY[2.MIME] {30}
 Content-Type: message/rfc822
 
 
@@ -355,7 +355,7 @@ BODY[2.1.TEXT] {19}
 <p>Hello world</p>
 
 ----------------------------------
-BODY[2.1.MIME] {26}
+BODY[2.1.MIME] {25}
 Content-Type: text/html
 
 
@@ -385,7 +385,7 @@ BODY[2.2.TEXT] {20}
 Hello another world
 
 ----------------------------------
-BODY[2.2.MIME] {27}
+BODY[2.2.MIME] {26}
 Content-Type: text/plain
 
 

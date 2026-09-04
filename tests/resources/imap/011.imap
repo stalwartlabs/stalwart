@@ -342,7 +342,7 @@ Content-Type: multipart/digest; boundary="foo"
 
 
 ----------------------------------
-BODY[1.TEXT] {137}
+BODY[1.TEXT] {148}
 prologue
 
 --foo 
@@ -361,6 +361,9 @@ Subject: m2
 m2 body
 
 --foo--
+
+epilogue
+
 ----------------------------------
 BODY[1.MIME] {31}
 Content-Type: message/rfc822
@@ -391,7 +394,7 @@ BODY[1.1.TEXT] {8}
 m1 body
 
 ----------------------------------
-BODY[1.1.MIME] {2}
+BODY[1.1.MIME] {1}
 
 
 ----------------------------------
@@ -427,7 +430,8 @@ BODY[1.2.TEXT] {8}
 m2 body
 
 ----------------------------------
-BODY[1.2.MIME] {2}
+BODY[1.2.MIME] {19}
+X-Mime: m2 header
 
 
 ----------------------------------

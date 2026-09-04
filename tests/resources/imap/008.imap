@@ -251,7 +251,7 @@ Content-Transfer-Encoding: 7bit
 BODY[1.TEXT] {54}
 This is a message with a base64 encoded attached email
 ----------------------------------
-BODY[1.MIME] {74}
+BODY[1.MIME] {73}
 Content-Type: text/plain; charset=utf-8
 Content-Transfer-Encoding: 7bit
 
@@ -338,7 +338,7 @@ Content-Transfer-Encoding: 7bit
 --aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--
 
 ----------------------------------
-BODY[2.MIME] {128}
+BODY[2.MIME] {127}
 Content-Disposition: attachment; filename="attached_email.eml"
 Content-Type: message/rfc822
 Content-Transfer-Encoding: base64

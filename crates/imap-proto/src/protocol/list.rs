@@ -226,24 +226,19 @@ impl ListItem {
             attr.serialize(buf);
         }
         buf.extend_from_slice(b") \"/\" ");
-        let mut extra_tags = Vec::new();
 
-        if normalized_mailbox_name != self.mailbox_name {
-            if is_rev2 || is_utf8 {
-                quoted_string(buf, &self.mailbox_name);
-                if is_rev2 {
-                    extra_tags.push(Tag::OldName(normalized_mailbox_name));
-                }
-            } else {
-                quoted_string(buf, &normalized_mailbox_name);
-            }
-        } else {
+        // RFC 9051 5.1 drops modified UTF-7, so a rev2 or UTF8=ACCEPT client is sent
+        // the name as stored. OLDNAME is reserved for RENAME and for Net-Unicode
+        // normalization (RFC 9051 6.3.9.7), neither of which a re-encoding is.
+        if is_rev2 || is_utf8 {
             quoted_string(buf, &self.mailbox_name);
+        } else {
+            quoted_string(buf, &normalized_mailbox_name);
         }
 
-        if !extra_tags.is_empty() || !self.tags.is_empty() {
+        if !self.tags.is_empty() {
             buf.extend_from_slice(b" (");
-            for (pos, tag) in extra_tags.iter().chain(self.tags.iter()).enumerate() {
+            for (pos, tag) in self.tags.iter().enumerate() {
                 if pos > 0 {
                     buf.push(b' ');
                 }
@@ -313,10 +308,7 @@ mod tests {
                     attributes: vec![Attribute::NoInferiors, Attribute::Drafts],
                     tags: vec![],
                 },
-                concat!(
-                    "* LIST (\\NoInferiors \\Drafts) \"/\" \"中國書店\" ",
-                    "(\"OLDNAME\" (\"&Ti1XC2b4Xpc-\"))\r\n"
-                ),
+                "* LIST (\\NoInferiors \\Drafts) \"/\" \"中國書店\"\r\n",
                 "* LIST (\\NoInferiors \\Drafts) \"/\" \"&Ti1XC2b4Xpc-\"\r\n",
             ),
             (
@@ -327,7 +319,7 @@ mod tests {
                 },
                 concat!(
                     "* LIST (\\Subscribed \\Remote) \"/\" \"☺\" ",
-                    "(\"OLDNAME\" (\"&Jjo-\") \"CHILDINFO\" (\"SUBSCRIBED\"))\r\n"
+                    "(\"CHILDINFO\" (\"SUBSCRIBED\"))\r\n"
                 ),
                 concat!(
                     "* LIST (\\Subscribed \\Remote) \"/\" \"&Jjo-\" ",

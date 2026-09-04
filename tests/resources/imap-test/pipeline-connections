@@ -1,0 +1,15 @@
+# Test pipelining for a single connection
+state: auth
+connections: 2
+
+1 tag1 create ${mailbox}
+1 tag2 create ${mailbox}2
+1 tag1 ok
+1 tag2 ok
+
+2 tag1 status ${mailbox} (messages)
+2 tag2 status ${mailbox}2 (messages)
+* status ${mailbox} (messages 0)
+* status ${mailbox}2 (messages 0)
+2 tag1 ok
+2 tag2 ok

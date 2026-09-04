@@ -473,7 +473,7 @@ Content-Disposition: inline
 BODY[1.TEXT] {1}
 A
 ----------------------------------
-BODY[1.MIME] {55}
+BODY[1.MIME] {54}
 Content-Type: text/plain
 Content-Disposition: inline
 
@@ -663,7 +663,7 @@ J
 --2--
 
 ----------------------------------
-BODY[2.MIME] {46}
+BODY[2.MIME] {45}
 Content-Type: multipart/mixed; boundary="2"
 
 
@@ -786,7 +786,7 @@ F
 --3-- 
 
 ----------------------------------
-BODY[2.1.MIME] {52}
+BODY[2.1.MIME] {51}
 Content-Type: multipart/alternative; boundary="3"
 
 
@@ -855,7 +855,7 @@ D
 --4--
 
 ----------------------------------
-BODY[2.1.1.MIME] {46}
+BODY[2.1.1.MIME] {45}
 Content-Type: multipart/mixed; boundary="4"
 
 
@@ -875,7 +875,7 @@ Content-Disposition: inline
 BODY[2.1.1.1.TEXT] {1}
 B
 ----------------------------------
-BODY[2.1.1.1.MIME] {55}
+BODY[2.1.1.1.MIME] {54}
 Content-Type: text/plain
 Content-Disposition: inline
 
@@ -902,7 +902,7 @@ Content-Disposition: inline
 BODY[2.1.1.2.TEXT] {1}
 C
 ----------------------------------
-BODY[2.1.1.2.MIME] {55}
+BODY[2.1.1.2.MIME] {54}
 Content-Type: image/jpeg
 Content-Disposition: inline
 
@@ -929,7 +929,7 @@ Content-Disposition: inline
 BODY[2.1.1.3.TEXT] {1}
 D
 ----------------------------------
-BODY[2.1.1.3.MIME] {55}
+BODY[2.1.1.3.MIME] {54}
 Content-Type: text/plain
 Content-Disposition: inline
 
@@ -984,7 +984,7 @@ F
 --5--  
 
 ----------------------------------
-BODY[2.1.2.MIME] {48}
+BODY[2.1.2.MIME] {47}
 Content-Type: multipart/related; boundary="5"
 
 
@@ -1003,7 +1003,7 @@ Content-Type: text/html
 BODY[2.1.2.1.TEXT] {14}
 <html>E</html>
 ----------------------------------
-BODY[2.1.2.1.MIME] {26}
+BODY[2.1.2.1.MIME] {25}
 Content-Type: text/html
 
 
@@ -1028,7 +1028,7 @@ Content-Type: image/jpeg
 BODY[2.1.2.2.TEXT] {1}
 F
 ----------------------------------
-BODY[2.1.2.2.MIME] {27}
+BODY[2.1.2.2.MIME] {26}
 Content-Type: image/jpeg
 
 
@@ -1054,7 +1054,7 @@ Content-Disposition: attachment
 BODY[2.2.TEXT] {1}
 G
 ----------------------------------
-BODY[2.2.MIME] {59}
+BODY[2.2.MIME] {58}
 Content-Type: image/jpeg
 Content-Disposition: attachment
 
@@ -1080,7 +1080,7 @@ Content-Type: application/x-excel
 BODY[2.3.TEXT] {1}
 H
 ----------------------------------
-BODY[2.3.MIME] {36}
+BODY[2.3.MIME] {35}
 Content-Type: application/x-excel
 
 
@@ -1109,7 +1109,7 @@ Subject: J
 BODY[2.4.TEXT] {1}
 J
 ----------------------------------
-BODY[2.4.MIME] {31}
+BODY[2.4.MIME] {30}
 Content-Type: message/rfc822
 
 
@@ -1135,7 +1135,7 @@ Content-Disposition: inline
 BODY[3.TEXT] {1}
 K
 ----------------------------------
-BODY[3.MIME] {55}
+BODY[3.MIME] {54}
 Content-Type: text/plain
 Content-Disposition: inline
 

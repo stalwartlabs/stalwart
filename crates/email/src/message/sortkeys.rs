@@ -245,9 +245,8 @@ fn cache_comparator(
                 .iter()
                 .filter_map(|document_id| {
                     cache
-                        .emails
-                        .position(document_id)
-                        .map(|position| (document_id, position + 1))
+                        .email_by_id(&document_id)
+                        .map(|item| (document_id, item.received_at() as u32))
                 })
                 .collect(),
             ascending,

@@ -27,15 +27,20 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::time::Instant;
+use tokio::sync::OwnedSemaphorePermit;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_get_quota(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_get_quota(
+        &mut self,
+        request: Request<Command>,
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapStatus)?;
 
         let data = self.state.session_data();
 
-        spawn_op!(data, {
+        spawn_op!(permit, data, {
             match request.parse_get_quota() {
                 Ok(argument) => match data.get_quota(argument).await {
                     Ok(response) => {
@@ -52,14 +57,18 @@ impl<T: SessionStream> Session<T> {
         })
     }
 
-    pub async fn handle_get_quota_root(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_get_quota_root(
+        &mut self,
+        request: Request<Command>,
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapStatus)?;
 
         let data = self.state.session_data();
         let is_utf8 = self.is_utf8;
 
-        spawn_op!(data, {
+        spawn_op!(permit, data, {
             match request.parse_get_quota_root(is_utf8) {
                 Ok(argument) => match data.get_quota_root(argument).await {
                     Ok(response) => {

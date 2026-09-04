@@ -7,11 +7,20 @@ ok append ${mailbox}2
 # Check that initial STATUS notifications are sent when needed
 #
 
-ok notify set status (mailboxes ${mailbox}2 (MessageExpunge))
-* status ${mailbox}2 (messages 1)
+ok notify set status (mailboxes ${mailbox}2 (MessageNew MessageExpunge))
+* status ${mailbox}2 (messages 1 uidnext $uidnext uidvalidity $uidvalidity)
 
+ok notify set status (mailboxes ${mailbox}2 (MessageNew MessageExpunge FlagChange))
+* status ${mailbox}2 (messages 1 uidnext $uidnext uidvalidity $uidvalidity highestmodseq $hmodseq)
+
+# RFC 5465 section 4 ties the STATUS items to the individual events: MessageNew
+# requires MESSAGES, UIDNEXT and UIDVALIDITY, MessageExpunge requires MESSAGES,
+# and FlagChange requires UIDVALIDITY and HIGHESTMODSEQ on a CONDSTORE server.
 ok notify set status (mailboxes ${mailbox}2 (MessageNew))
 * status ${mailbox}2 (messages 1 uidnext $uidnext uidvalidity $uidvalidity)
+
+ok notify set status (mailboxes ${mailbox}2 (MessageExpunge))
+* status ${mailbox}2 (messages 1)
 
 ok notify set status (mailboxes ${mailbox}2 (FlagChange))
 * status ${mailbox}2 (uidvalidity $uidvalidity highestmodseq $hmodseq)

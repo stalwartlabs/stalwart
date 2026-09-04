@@ -6,8 +6,12 @@ ok append
 # first open read-only so recent flags don't get lost
 examine $mailbox
 * 2 exists
-#* 2 recent
-#* ok [unseen 1]
+!ifenv IMAP_RECENT
+* 2 recent
+!endif
+!ifenv IMAP_UNSEEN_RESPONSE
+* ok [unseen 1]
+!endif
 * ok [uidvalidity $uidvalidity]
 * ok [uidnext $uidnext]
 ok [read-only]
@@ -15,19 +19,30 @@ ok [read-only]
 ok close
 
 # check that STATUS replies with the same values
+!ifenv IMAP_RECENT
+ok status $mailbox (messages recent uidnext uidvalidity unseen)
+* status $mailbox (messages 2 recent 2 uidnext $uidnext uidvalidity $uidvalidity unseen 2)
+!else
 ok status $mailbox (messages uidnext uidvalidity unseen)
 * status $mailbox (messages 2 uidnext $uidnext uidvalidity $uidvalidity unseen 2)
+!endif
 
 # then try read-write
 select $mailbox
 * 2 exists
-#* 2 recent
-#* ok [unseen 1]
+!ifenv IMAP_RECENT
+* 2 recent
+!endif
+!ifenv IMAP_UNSEEN_RESPONSE
+* ok [unseen 1]
+!endif
 * ok [uidvalidity $uidvalidity]
 * ok [uidnext $uidnext]
 ok [read-write]
 
 ok close
 
-#ok status $mailbox (recent)
-#* status $mailbox (recent 0)
+!ifenv IMAP_RECENT
+ok status $mailbox (recent)
+* status $mailbox (recent 0)
+!endif

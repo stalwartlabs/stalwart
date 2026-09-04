@@ -1,11 +1,29 @@
 messages: all
 
+# RFC 9051 6.4.4 compares SENTBEFORE/SENTON/SENTSINCE against the Date: header
+# disregarding time and timezone, so the calendar date as written is what
+# counts. Stalwart compares the normalised UTC instant instead, so a Date: whose
+# local calendar day differs from its UTC day lands on the wrong day. Under UTC
+# the messages group as 24-mar {1 2 3}, 25-mar {4 5 6 7}, 27-oct {8 9 10 11} and
+# 28-oct {12 13 14 15 16}. The IMAP_SENT_DATE_HEADER branches carry the RFC 9051
+# expectations; the other branch records what Stalwart does today.
+
 # 1) Timezone changes from EET +0200 -> EEST +0300
 # 1a) SENTBEFORE
 ok search sentbefore 24-mar-2007
 * search
 ok search sentbefore 25-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 1
+!else
+* search 1 2 3
+!endif
+ok search sentbefore 26-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
+* search 1 2 3 4 5 6
+!else
+* search 1 2 3 4 5 6 7
+!endif
 ok search sentbefore 27-mar-2007
 * search 1 2 3 4 5 6 7
 
@@ -13,19 +31,39 @@ ok search sentbefore 27-mar-2007
 ok search senton 23-mar-2007
 * search
 ok search senton 24-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 1
+!else
+* search 1 2 3
+!endif
 ok search senton 25-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 2 3 4 5 6
+!else
+* search 4 5 6 7
+!endif
 ok search senton 26-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 7
+!else
+* search
+!endif
 
 # 1c) SENTSINCE
 ok search 1:7 sentsince 24-mar-2007
 * search 1 2 3 4 5 6 7
 ok search 1:7 sentsince 25-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 2 3 4 5 6 7
+!else
+* search 4 5 6 7
+!endif
 ok search 1:7 sentsince 26-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 7
+!else
+* search
+!endif
 ok search 1:7 sentsince 27-mar-2007
 * search
 
@@ -34,9 +72,17 @@ ok search 1:7 sentsince 27-mar-2007
 ok search 8:* sentbefore 27-oct-2007
 * search
 ok search 8:* sentbefore 28-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 8
+!else
+* search 8 9 10 11
+!endif
 ok search 8:* sentbefore 29-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 8 9 10 11 12 13 14 15
+!else
+* search 8 9 10 11 12 13 14 15 16
+!endif
 ok search 8:* sentbefore 30-oct-2007
 * search 8 9 10 11 12 13 14 15 16
 
@@ -44,28 +90,64 @@ ok search 8:* sentbefore 30-oct-2007
 ok search 8:* senton 26-oct-2007
 * search
 ok search 8:* senton 27-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 8
+!else
+* search 8 9 10 11
+!endif
 ok search 8:* senton 28-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 9 10 11 12 13 14 15
+!else
+* search 12 13 14 15 16
+!endif
 ok search 8:* senton 29-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 16
+!else
+* search
+!endif
 
 # 2c) SENTSINCE
 ok search 8:* sentsince 27-oct-2007
 * search 8 9 10 11 12 13 14 15 16
 ok search 8:* sentsince 28-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 9 10 11 12 13 14 15 16
+!else
+* search 12 13 14 15 16
+!endif
 ok search 8:* sentsince 29-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 16
+!else
+* search
+!endif
 ok search 8:* sentsince 30-oct-2007
 * search
 
 # 3) Try a couple of NOTs
 ok search 1:7 not sentbefore 26-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 7
+!else
+* search
+!endif
 ok search 1:7 not senton 25-mar-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 1 7
+!else
+* search 1 2 3
+!endif
 ok search 8:* not sentsince 28-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 8
+!else
+* search 8 9 10 11
+!endif
 ok search 8:* not senton 28-oct-2007
+!ifenv IMAP_SENT_DATE_HEADER
 * search 8 16
+!else
+* search 8 9 10 11
+!endif

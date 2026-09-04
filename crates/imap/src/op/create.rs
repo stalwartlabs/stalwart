@@ -7,7 +7,6 @@
 use crate::{
     core::{Session, SessionData},
     op::ImapContext,
-    spawn_op,
 };
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
@@ -19,11 +18,16 @@ use imap_proto::{
 use registry::schema::enums::{Permission, StorageQuota};
 use std::time::Instant;
 use store::write::BatchBuilder;
+use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, id::Id, special_use::SpecialUse};
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_create(&mut self, requests: Vec<Request<Command>>) -> trc::Result<()> {
+    pub async fn handle_create(
+        &mut self,
+        requests: Vec<Request<Command>>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapCreate)?;
 
@@ -31,23 +35,21 @@ impl<T: SessionStream> Session<T> {
         let is_utf8 = self.is_utf8;
         let is_objectid = self.is_objectid;
 
-        spawn_op!(data, {
-            for request in requests {
-                match request.parse_create(is_utf8) {
-                    Ok(argument) => match data.create_folder(argument, is_objectid).await {
-                        Ok(response) => {
-                            data.write_bytes(response.into_bytes()).await?;
-                        }
-                        Err(error) => {
-                            data.write_error(error).await?;
-                        }
-                    },
-                    Err(err) => data.write_error(err).await?,
-                }
+        for request in requests {
+            match request.parse_create(is_utf8) {
+                Ok(argument) => match data.create_folder(argument, is_objectid).await {
+                    Ok(response) => {
+                        data.write_bytes(response.into_bytes()).await?;
+                    }
+                    Err(error) => {
+                        data.write_error(error).await?;
+                    }
+                },
+                Err(err) => data.write_error(err).await?,
             }
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 

@@ -129,18 +129,14 @@ impl Request<Command> {
             }
         }
 
-        if !keywords.is_empty() || operation == Operation::Set {
-            Ok(store::Arguments {
-                tag: self.tag,
-                sequence_set,
-                operation,
-                is_silent,
-                keywords,
-                unchanged_since,
-            })
-        } else {
-            Err(bad(self.tag.to_compact_string(), "Missing flags to set."))
-        }
+        Ok(store::Arguments {
+            tag: self.tag,
+            sequence_set,
+            operation,
+            is_silent,
+            keywords,
+            unchanged_since,
+        })
     }
 }
 

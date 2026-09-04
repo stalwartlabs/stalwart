@@ -18,10 +18,15 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
+use tokio::sync::OwnedSemaphorePermit;
 use types::id::Id;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_select(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_select(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(if request.command == Command::Select {
             Permission::ImapSelect
@@ -203,7 +208,11 @@ impl<T: SessionStream> Session<T> {
         }
     }
 
-    pub async fn handle_unselect(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_unselect(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         self.state.close_mailbox();
         self.state = State::Authenticated {
             data: self.state.session_data(),

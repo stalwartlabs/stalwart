@@ -5,10 +5,7 @@
  */
 
 use super::ImapContext;
-use crate::{
-    core::{Session, SessionData},
-    spawn_op,
-};
+use crate::core::{Session, SessionData};
 use common::network::SessionStream;
 use email::mailbox::destroy::{MailboxDestroy, MailboxDestroyError};
 use imap_proto::{
@@ -16,32 +13,35 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::time::Instant;
+use tokio::sync::OwnedSemaphorePermit;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_delete(&mut self, requests: Vec<Request<Command>>) -> trc::Result<()> {
+    pub async fn handle_delete(
+        &mut self,
+        requests: Vec<Request<Command>>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapDelete)?;
 
         let data = self.state.session_data();
         let is_utf8 = self.is_utf8;
 
-        spawn_op!(data, {
-            for request in requests {
-                match request.parse_delete(is_utf8) {
-                    Ok(argument) => match data.delete_folder(argument).await {
-                        Ok(response) => {
-                            data.write_bytes(response.into_bytes()).await?;
-                        }
-                        Err(error) => {
-                            data.write_error(error).await?;
-                        }
-                    },
-                    Err(response) => data.write_error(response).await?,
-                }
+        for request in requests {
+            match request.parse_delete(is_utf8) {
+                Ok(argument) => match data.delete_folder(argument).await {
+                    Ok(response) => {
+                        data.write_bytes(response.into_bytes()).await?;
+                    }
+                    Err(error) => {
+                        data.write_error(error).await?;
+                    }
+                },
+                Err(response) => data.write_error(response).await?,
             }
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 

@@ -1,8 +1,21 @@
 capabilities: SORT=DISPLAY
 messages: all
 
+# See the note in sort-addresses: RFC 5957 3 derives the DISPLAYTO key from the
+# addr-name, falling back to addr-mailbox@addr-host and then to addr-mailbox.
+# Stalwart sorts on its own indexed key instead, so the RFC 5957 orderings only
+# run under IMAP_SORT_ADDRESS_KEYS.
+
 ok sort (displayto) us-ascii all
-* sort 8 7 2 3 4 1 5 6
+!ifenv IMAP_SORT_ADDRESS_KEYS
+* sort 6 2 3 8 4 1 5 7
+!else
+* sort 7 2 3 4 1 5 6 8
+!endif
 
 ok sort (reverse displayto) us-ascii all
+!ifenv IMAP_SORT_ADDRESS_KEYS
+* sort 7 5 1 4 8 3 2 6
+!else
 * sort 6 5 1 4 3 2 7 8
+!endif

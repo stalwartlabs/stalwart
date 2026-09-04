@@ -1,0 +1,12 @@
+diff --git a/src/imap-client.c b/src/imap-client.c
+index 020c428..d6dab85 100644
+--- a/src/imap-client.c
++++ b/src/imap-client.c
+@@ -405,6 +405,7 @@ int imap_client_handle_untagged(struct imap_client *client,
+ 			imap_client_exists(client, num);
+ 
+ 		if (num > array_count(&view->uidmap) &&
++		    client->last_cmd != NULL &&
+ 		    client->last_cmd->state > STATE_SELECT) {
+ 			imap_client_input_warn(client,
+ 				"seq too high (%u > %u, state=%s)",

@@ -1,0 +1,39 @@
+diff --git a/src/client-state.c b/src/client-state.c
+index 1cabeab..750579b 100644
+--- a/src/client-state.c
++++ b/src/client-state.c
+@@ -555,15 +555,22 @@ seq_range_flags_ref(struct imap_client *client,
+ {
+ 	struct message_metadata_dynamic *metadata;
+ 	const struct seq_range *range;
+-	unsigned int i, count;
++	unsigned int i, count, msg_count;
+ 	uint32_t seq;
+ 
+ 	if (!array_is_created(seq_range))
+ 		return;
+ 
++	msg_count = array_count(&client->view->messages);
+ 	range = array_get(seq_range, &count);
+ 	for (i = 0; i < count; i++) {
+ 		for (seq = range[i].seq1; seq <= range[i].seq2; seq++) {
++			if (seq > msg_count) {
++				/* The messages were expunged while the command
++				   was running. The view has already shrunk, so
++				   there is no metadata left to unreference. */
++				break;
++			}
+ 			metadata = array_idx_modifiable(&client->view->messages,
+ 							seq - 1);
+ 			if (update_dirty)
+@@ -634,6 +641,10 @@ store_verify_seq(struct store_verify_context *ctx, uint32_t seq)
+ 	unsigned int i;
+ 	bool ret, set, fail, mask;
+ 
++	if (seq > array_count(&ctx->client->view->messages)) {
++		/* Expunged while the STORE was running. */
++		return TRUE;
++	}
+ 	metadata = array_idx_modifiable(&ctx->client->view->messages, seq - 1);
+ 	expunge_state = metadata->ms == NULL ? "?" :
+ 		metadata->ms->expunged ? "yes" : "no";

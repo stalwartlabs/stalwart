@@ -1,0 +1,16 @@
+diff --git a/src/test-exec.c b/src/test-exec.c
+index b7475f7..1c36d81 100644
+--- a/src/test-exec.c
++++ b/src/test-exec.c
+@@ -1142,6 +1142,11 @@ static void init_callback(struct imap_client *client, struct command *command,
+ 		test_fail(ctx, "%s (tag %u.%u) failed: %s", command->cmdline,
+ 			  client->client.global_id, command->tag,
+ 			  imap_args_to_str(args));
++		/* The startup state machine only advances once a command has
++		   succeeded, so simply returning here makes the client resend
++		   the failed command forever. Abort the test instead. */
++		if (!ctx->finished)
++			test_execute_finish(ctx);
+ 		return;
+ 	}
+ 	if (ctx->listing) {

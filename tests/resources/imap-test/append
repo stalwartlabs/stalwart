@@ -10,7 +10,7 @@ state: created
 # \recent flags (which is why there are two FETCH FLAGS commands).
 
 1 ok append $mailbox (\seen \flagged)
-* 1 exists 
+* 1 exists
 2 ok noop
 * 1 exists
 3 ok status $mailbox (messages unseen recent)
@@ -40,4 +40,4 @@ state: created
 2 ok fetch 3 (uid flags)
 
 1 append ${mailbox}nonexistent
-no [trycreate]
+1 no [trycreate]

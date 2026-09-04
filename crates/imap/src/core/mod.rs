@@ -23,7 +23,7 @@ use std::{
 use store::roaring::RoaringBitmap;
 use tokio::{
     io::{ReadHalf, WriteHalf},
-    sync::watch,
+    sync::{Semaphore, watch},
 };
 use trc::AddContext;
 use types::{keyword::Keyword, special_use::SpecialUse};
@@ -46,8 +46,11 @@ impl ImapSessionManager {
     }
 }
 
+pub const MAX_CONCURRENT_OPS: u32 = 5;
+
 pub struct Session<T: SessionStream> {
     pub server: Server,
+    pub op_semaphore: Arc<Semaphore>,
     pub instance: Arc<ServerInstance>,
     pub receiver: Receiver<Command>,
     pub version: ProtocolVersion,

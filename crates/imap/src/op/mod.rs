@@ -60,10 +60,11 @@ impl ToModSeq for u64 {
 
 #[macro_export]
 macro_rules! spawn_op {
-    ($data:expr, $($code:tt)*) => {
+    ($permit:expr, $data:expr, $($code:tt)*) => {
         {
 
-        tokio::spawn(async move {
+        let permit = $permit;
+        let op = async move {
             let data = &($data);
 
             if let Err(err) = (async {
@@ -73,7 +74,17 @@ macro_rules! spawn_op {
             {
                 let _ = data.write_error(err).await;
             }
-        });
+        };
+
+        match permit {
+            Some(permit) => {
+                tokio::spawn(async move {
+                    let _permit: tokio::sync::OwnedSemaphorePermit = permit;
+                    op.await;
+                });
+            }
+            None => op.await,
+        }
 
         Ok(())}
     };

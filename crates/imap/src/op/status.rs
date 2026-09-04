@@ -21,10 +21,15 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::time::Instant;
+use tokio::sync::OwnedSemaphorePermit;
 use types::id::Id;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_status(&mut self, requests: Vec<Request<Command>>) -> trc::Result<()> {
+    pub async fn handle_status(
+        &mut self,
+        requests: Vec<Request<Command>>,
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapStatus)?;
 
@@ -50,7 +55,7 @@ impl<T: SessionStream> Session<T> {
 
         let data = self.state.session_data();
 
-        spawn_op!(data, {
+        spawn_op!(permit, data, {
             let mut caches = None;
 
             for request in parsed {

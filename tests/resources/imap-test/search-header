@@ -1,5 +1,14 @@
 messages: all
 
+# Stalwart writes the full-text index from an asynchronous queue
+# (crates/services/src/index_queue), so a search issued straight after the
+# messages are appended can match nothing at all. Let the queue drain first.
+# Servers that index synchronously can set IMAP_FTS_SYNC to skip the pause.
+!ifnenv IMAP_FTS_SYNC
+ok noop
+!sleep 2s
+!endif
+
 # just check that this returns ok. it's not really specified in RFC, so
 # don't verify the result.
 ok search subject ""
@@ -15,23 +24,23 @@ ok search subject "hello beautiful"
 * search 1
 ok search subject "hello beautiful world"
 * search 1
-#ok search subject "eautiful worl"
-#* search 1
+ok search subject "eautiful worl"
+* search 1
 
 # header
 ok search header subject ""
 * search 1
 ok search not header subject ""
 * search 2
-#ok search header x-extra ""
-#* search 2
-#ok search not header x-extra ""
-#* search 1
-#ok search header x-extra hello
-#* search 2
-#ok search header x-extra "hello beautiful"
-#* search 2
-#ok search header x-extra "eautiful head"
-#* search 2
-#ok search header x-extra "another"
-#* search 2
+ok search header x-extra ""
+* search 2
+ok search not header x-extra ""
+* search 1
+ok search header x-extra hello
+* search 2
+ok search header x-extra "hello beautiful"
+* search 2
+ok search header x-extra "eautiful head"
+* search 2
+ok search header x-extra "another"
+* search 2

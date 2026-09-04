@@ -146,7 +146,7 @@ BODY[1.TEXT] {79}
 This is implicitly typed plain US-ASCII text.
 It does NOT end with a linebreak.
 ----------------------------------
-BODY[1.MIME] {2}
+BODY[1.MIME] {1}
 
 
 ----------------------------------
@@ -178,8 +178,8 @@ This is explicitly typed plain US-ASCII text.
 It DOES end with a linebreak.
 
 ----------------------------------
-BODY[2.MIME] {45}
-Content-Type: text/plain; charset=us-ascii
+BODY[2.MIME] {44}
+Content-type: text/plain; charset=us-ascii
 
 
 ----------------------------------

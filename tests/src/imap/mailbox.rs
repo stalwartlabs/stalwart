@@ -236,7 +236,24 @@ pub async fn test(
             true,
         );
 
-    // Recursive match including children
+    // RFC 9051 6.3.9.6: a mailbox that does not itself match the selection
+    // criteria but has a descendant that does is returned with CHILDINFO.
+    imap.send("LIST (SUBSCRIBED RECURSIVEMATCH) \"\" \"%\" RETURN (CHILDREN)")
+        .await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_folders(
+            [
+                ("INBOX", ["Subscribed", "HasNoChildren"]),
+                (
+                    "Vehicles",
+                    ["\"CHILDINFO\" (\"SUBSCRIBED\")", "HasChildren"],
+                ),
+            ],
+            true,
+        );
+
+    // Recursive match including children. RFC 9051 6.3.9.6 requires redundant CHILDINFO to be suppressed.
     imap.send("LIST (SUBSCRIBED RECURSIVEMATCH) \"\" \"*\" RETURN (CHILDREN)")
         .await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
@@ -247,18 +264,6 @@ pub async fn test(
                 (
                     "Vehicles/Electric/4 doors/Red",
                     ["Subscribed", "HasNoChildren"],
-                ),
-                (
-                    "Vehicles/Electric/4 doors",
-                    ["\"CHILDINFO\" (\"SUBSCRIBED\")", "HasChildren"],
-                ),
-                (
-                    "Vehicles/Electric",
-                    ["\"CHILDINFO\" (\"SUBSCRIBED\")", "HasChildren"],
-                ),
-                (
-                    "Vehicles",
-                    ["\"CHILDINFO\" (\"SUBSCRIBED\")", "HasChildren"],
                 ),
             ],
             true,

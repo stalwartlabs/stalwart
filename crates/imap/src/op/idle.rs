@@ -22,12 +22,17 @@ use imap_proto::{
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use tokio::io::AsyncReadExt;
+use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 use types::type_state::DataType;
 use utils::map::bitmap::Bitmap;
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_idle(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_idle(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapIdle)?;
 

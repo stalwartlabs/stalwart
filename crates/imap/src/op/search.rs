@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ToModSeq;
 use crate::{
     core::{Resolved, Row, SavedSearch, SelectedMailbox, Session, SessionData},
     spawn_op,
@@ -34,6 +33,7 @@ use store::{
     search::{EmailSearchField, KeyValueMatch, SearchFilter, SearchQuery},
     write::{SearchIndex, now},
 };
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::watch;
 use trc::AddContext;
 use types::{id::Id, keyword::Keyword};
@@ -44,6 +44,7 @@ impl<T: SessionStream> Session<T> {
         request: Request<Command>,
         is_sort: bool,
         is_uid: bool,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
         let op_start = Instant::now();
         let mut arguments = if !is_sort {
@@ -86,7 +87,7 @@ impl<T: SessionStream> Session<T> {
                 (None, None)
             };
 
-        spawn_op!(data, {
+        spawn_op!(permit, data, {
             let tag = std::mem::take(&mut arguments.tag);
             let bytes = match data
                 .search(
@@ -148,8 +149,7 @@ impl<T: SessionStream> SessionData<T> {
             .get_cached_messages(mailbox.id.account_id)
             .await
             .caused_by(trc::location!())?;
-        let modseq = self
-            .sync_view(&mailbox, &cache, None)
+        self.sync_view(&mailbox, &cache, None)
             .await
             .caused_by(trc::location!())?;
 
@@ -164,8 +164,6 @@ impl<T: SessionStream> SessionData<T> {
                 &prev_saved_search,
             )
             .await?;
-        let highest_modseq = include_highest_modseq.then(|| modseq.to_modseq());
-
         // Sort and map ids
         let find_min = arguments.result_options.contains(&ResultOption::Min);
         let find_max = arguments.result_options.contains(&ResultOption::Max);
@@ -177,6 +175,8 @@ impl<T: SessionStream> SessionData<T> {
             max: None,
             total: 0,
             imap_ids: Vec::with_capacity(result_set.len()),
+            modseq_cache: include_highest_modseq.then_some(&cache),
+            highest_modseq: None,
             saved_results: results_tx
                 .is_some()
                 .then(|| Vec::with_capacity(result_set.len())),
@@ -201,6 +201,7 @@ impl<T: SessionStream> SessionData<T> {
             total,
             mut imap_ids,
             mut saved_results,
+            highest_modseq,
             ..
         } = results;
 
@@ -524,7 +525,7 @@ impl<T: SessionStream> SessionData<T> {
                         cache
                             .emails
                             .iter()
-                            .filter(|m| m.change_id() >= modseq && m.has_mailbox_id(mailbox_id))
+                            .filter(|m| m.change_id() + 1 >= modseq && m.has_mailbox_id(mailbox_id))
                             .map(|m| m.document_id()),
                     )));
                     include_highest_modseq = true;
@@ -753,7 +754,7 @@ impl<T: SessionStream> SessionData<T> {
     }
 }
 
-struct SearchResults {
+struct SearchResults<'x> {
     is_uid: bool,
     find_min: bool,
     find_max: bool,
@@ -762,9 +763,11 @@ struct SearchResults {
     total: u32,
     imap_ids: Vec<u32>,
     saved_results: Option<Vec<Row>>,
+    modseq_cache: Option<&'x MessageStoreCache>,
+    highest_modseq: Option<u64>,
 }
 
-impl SearchResults {
+impl SearchResults<'_> {
     fn push(&mut self, resolved: Resolved) {
         let id = resolved.imap_id(self.is_uid);
         if self.find_min || self.find_max {
@@ -776,6 +779,7 @@ impl SearchResults {
             }
         } else {
             self.imap_ids.push(id);
+            self.track_modseq(&resolved);
             if let Some(saved) = self.saved_results.as_mut() {
                 saved.push(resolved.row());
             }
@@ -787,9 +791,21 @@ impl SearchResults {
         if self.find_min || self.find_max {
             for resolved in [self.min, self.max].into_iter().flatten() {
                 self.imap_ids.push(resolved.imap_id(self.is_uid));
+                self.track_modseq(&resolved);
                 if let Some(saved) = self.saved_results.as_mut() {
                     saved.push(resolved.row());
                 }
+            }
+        }
+    }
+
+    fn track_modseq(&mut self, resolved: &Resolved) {
+        if let Some(cache) = self.modseq_cache
+            && let Some(item) = cache.email_by_id(&resolved.id)
+        {
+            let modseq = item.change_id() + 1;
+            if self.highest_modseq.is_none_or(|highest| modseq > highest) {
+                self.highest_modseq = Some(modseq);
             }
         }
     }

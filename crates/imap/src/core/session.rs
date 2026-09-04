@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ImapSessionManager, Session, State};
+use super::{ImapSessionManager, MAX_CONCURRENT_OPS, Session, State};
 use crate::{GREETING_WITH_TLS, GREETING_WITHOUT_TLS};
 use common::{
     BuildServer,
@@ -16,6 +16,7 @@ use imap_proto::{
 };
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Semaphore;
 use tokio_rustls::server::TlsStream;
 
 impl SessionManager for ImapSessionManager {
@@ -141,6 +142,7 @@ impl<T: SessionStream> Session<T> {
 
         Ok(Session {
             receiver: Receiver::with_max_request_size(server.core.imap.max_request_size),
+            op_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_OPS as usize)),
             version: ProtocolVersion::Rev1,
             state: State::NotAuthenticated { auth_failures: 0 },
             is_tls,
@@ -198,6 +200,7 @@ impl<T: SessionStream> Session<T> {
 
         Ok(Session {
             server: self.server,
+            op_semaphore: self.op_semaphore,
             instance: self.instance,
             receiver: self.receiver,
             version: self.version,

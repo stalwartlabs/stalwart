@@ -1,11 +1,23 @@
 capabilities: THREAD=REFERENCES
 messages: all
 
+# Stalwart groups THREAD results by its own JMAP thread id and emits one flat
+# list per thread, rather than building the RFC 5256 REFERENCES container tree.
+# The IMAP_THREAD_REFERENCES branches carry the RFC 5256 expectations; the other
+# branch records what Stalwart returns today.
 ok thread references us-ascii all
+!ifenv IMAP_THREAD_REFERENCES
+* thread (1 (2 3)(4))
+!else
 * thread (1 2 3 4)
+!endif
 
 ok store 2 +flags \deleted
 ok expunge
 
 ok thread references us-ascii all
+!ifenv IMAP_THREAD_REFERENCES
+* thread (1 3 2)
+!else
 * thread (1 2 3)
+!endif

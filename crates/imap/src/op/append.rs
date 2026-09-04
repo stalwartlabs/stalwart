@@ -5,10 +5,7 @@
  */
 
 use super::{ImapContext, ToModSeq};
-use crate::{
-    core::{MailboxId, Row, SelectedMailbox, Session, SessionData},
-    spawn_op,
-};
+use crate::core::{MailboxId, Row, SelectedMailbox, Session, SessionData};
 use common::{
     MAX_RECEIVED_AT, auth::BuildAccessToken, ipc::PushNotification, network::SessionStream,
 };
@@ -21,6 +18,7 @@ use imap_proto::{
 use mail_parser::MessageParser;
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
+use tokio::sync::OwnedSemaphorePermit;
 use types::{
     acl::Acl,
     keyword::Keyword,
@@ -28,7 +26,11 @@ use types::{
 };
 
 impl<T: SessionStream> Session<T> {
-    pub async fn handle_append(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_append(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapAppend)?;
 
@@ -68,15 +70,21 @@ impl<T: SessionStream> Session<T> {
                 .id(arguments.tag));
         };
         let is_qresync = self.is_qresync;
+        let use_vanished = self.is_qresync || self.is_uidonly;
 
-        spawn_op!(data, {
-            let response = data
-                .append_messages(arguments, selected_mailbox, mailbox, is_qresync, op_start)
-                .await?
-                .into_bytes();
+        let response = data
+            .append_messages(
+                arguments,
+                selected_mailbox,
+                mailbox,
+                is_qresync,
+                use_vanished,
+                op_start,
+            )
+            .await?
+            .into_bytes();
 
-            data.write_bytes(response).await
-        })
+        data.write_bytes(response).await
     }
 }
 
@@ -87,6 +95,7 @@ impl<T: SessionStream> SessionData<T> {
         selected_mailbox: Option<Arc<SelectedMailbox>>,
         mailbox: MailboxId,
         is_qresync: bool,
+        use_vanished: bool,
         op_start: Instant,
     ) -> trc::Result<StatusResponse> {
         // Verify ACLs
@@ -213,6 +222,12 @@ impl<T: SessionStream> SessionData<T> {
                 }
 
                 selected_mailbox.view.lock().append_local(created);
+
+                // RFC 9051 6.3.12 requires an untagged EXISTS when the mailbox
+                // being appended to is the one this connection has selected
+                self.flush_view(&selected_mailbox, use_vanished)
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?;
             }
             let uid_validity = self.uid_validity(&mailbox);
 

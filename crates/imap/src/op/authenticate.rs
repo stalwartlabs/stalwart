@@ -18,6 +18,7 @@ use imap_proto::{
 use mail_parser::decoders::base64::base64_decode;
 use registry::schema::enums::Permission;
 use std::sync::Arc;
+use tokio::sync::OwnedSemaphorePermit;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_authenticate(&mut self, request: Request<Command>) -> trc::Result<()> {
@@ -127,7 +128,11 @@ impl<T: SessionStream> Session<T> {
         .await
     }
 
-    pub async fn handle_unauthenticate(&mut self, request: Request<Command>) -> trc::Result<()> {
+    pub async fn handle_unauthenticate(
+        &mut self,
+        request: Request<Command>,
+        _permit: Option<OwnedSemaphorePermit>,
+    ) -> trc::Result<()> {
         self.state = State::NotAuthenticated { auth_failures: 0 };
         self.is_condstore = false;
         self.is_qresync = false;

@@ -93,14 +93,14 @@ pub async fn test(test: &TestServer) {
     }
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     imap.send_ok("SELECT INBOX").await;
-    imap.send("FETCH 11 (FLAGS RFC822.TEXT)").await;
+    imap.send("FETCH 11 (FLAGS RFC822)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
         .assert_not_contains("$Junk")
         .assert_contains("Subject: can someone explain")
         .assert_contains("X-Spam-Status: No")
         .assert_contains("PROB_HAM_HIGH");
-    imap.send("FETCH 12 (FLAGS RFC822.TEXT)").await;
+    imap.send("FETCH 12 (FLAGS RFC822)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
         .assert_not_contains("$Junk")
@@ -108,7 +108,7 @@ pub async fn test(test: &TestServer) {
         .assert_contains("X-Spam-Status: No")
         .assert_contains_any(&["PROB_SPAM_UNCERTAIN", "PROB_HAM_LOW"]);
     imap.send_ok("SELECT \"Junk Mail\"").await;
-    imap.send("FETCH 10 (FLAGS RFC822.TEXT)").await;
+    imap.send("FETCH 10 (FLAGS RFC822)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
         .assert_contains("$Junk")

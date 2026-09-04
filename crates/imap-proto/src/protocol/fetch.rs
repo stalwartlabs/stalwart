@@ -22,6 +22,20 @@ pub struct Arguments {
     pub changed_since: Option<u64>,
     pub include_vanished: bool,
 }
+
+impl Arguments {
+    pub fn sets_seen(&self) -> bool {
+        self.attributes.iter().any(|attribute| {
+            matches!(
+                attribute,
+                Attribute::BodySection { peek: false, .. }
+                    | Attribute::Binary { peek: false, .. }
+                    | Attribute::Rfc822
+                    | Attribute::Rfc822Text
+            )
+        })
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response<'x> {
     pub is_uid: bool,

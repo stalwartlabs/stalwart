@@ -443,6 +443,15 @@ impl<'x> DecodedRawMessage<'x> {
     }
 }
 
+impl DecodedParts<'_> {
+    pub fn message_end(&self, message_id: usize, enclosing_end: usize) -> usize {
+        match self.raw_messages.get(message_id) {
+            Some(DecodedRawMessage::Owned(vec)) => vec.len(),
+            _ => enclosing_end,
+        }
+    }
+}
+
 impl ArchivedMessageMetadata {
     #[inline(always)]
     pub fn message_id(&self, message_id: ArchivedU16) -> &ArchivedMessageMetadataContents {

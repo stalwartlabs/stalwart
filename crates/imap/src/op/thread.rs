@@ -21,6 +21,7 @@ use imap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
+use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 
 impl<T: SessionStream> Session<T> {
@@ -28,6 +29,7 @@ impl<T: SessionStream> Session<T> {
         &mut self,
         request: Request<Command>,
         is_uid: bool,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapThread)?;
@@ -37,7 +39,7 @@ impl<T: SessionStream> Session<T> {
         let mut arguments = request.parse_thread()?;
         let (data, mailbox) = self.state.mailbox_state();
 
-        spawn_op!(data, {
+        spawn_op!(permit, data, {
             let tag = std::mem::take(&mut arguments.tag);
 
             match data.thread(arguments, mailbox, is_uid, op_start).await {

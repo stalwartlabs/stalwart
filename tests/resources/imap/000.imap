@@ -415,7 +415,7 @@ It could have been done with explicit typing as in the
 next part.]
 
 ----------------------------------
-BODY[1.MIME] {2}
+BODY[1.MIME] {1}
 
 
 ----------------------------------
@@ -462,8 +462,8 @@ illustrates explicit versus implicit typing of body
 parts.
 
 ----------------------------------
-BODY[2.MIME] {45}
-Content-Type: text/plain; charset=US-ASCII
+BODY[2.MIME] {44}
+Content-type: text/plain; charset=US-ASCII
 
 
 ----------------------------------
@@ -537,7 +537,7 @@ Content-Transfer-Encoding: base64
 --unique-boundary-2--
 
 ----------------------------------
-BODY[3.MIME] {63}
+BODY[3.MIME] {62}
 Content-Type: multipart/parallel; boundary=unique-boundary-2
 
 
@@ -561,7 +561,7 @@ BODY[3.1.TEXT] {85}
     mu-law-format audio data goes here ...
 
 ----------------------------------
-BODY[3.1.MIME] {62}
+BODY[3.1.MIME] {61}
 Content-Type: audio/basic
 Content-Transfer-Encoding: base64
 
@@ -592,7 +592,7 @@ BODY[3.2.TEXT] {44}
 ... base64-encoded image data goes here ...
 
 ----------------------------------
-BODY[3.2.MIME] {61}
+BODY[3.2.MIME] {60}
 Content-Type: image/jpeg
 Content-Transfer-Encoding: base64
 
@@ -634,8 +634,8 @@ Isn't it
 <bigger><bigger>cool?</bigger></bigger>
 
 ----------------------------------
-BODY[4.MIME] {30}
-Content-Type: text/enriched
+BODY[4.MIME] {29}
+Content-type: text/enriched
 
 
 ----------------------------------
@@ -688,7 +688,7 @@ BODY[5.TEXT] {48}
 ... Additional text in ISO-8859-1 goes here ...
 
 ----------------------------------
-BODY[5.MIME] {31}
+BODY[5.MIME] {30}
 Content-Type: message/rfc822
 
 

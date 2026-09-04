@@ -27,12 +27,20 @@ state: created
 
 2 ok noop
 * 3 exists
-#* 3 recent
+!ifenv IMAP_RECENT
+* 3 recent
+!endif
 
 2 ok fetch 1:3 (flags internaldate)
-? 1 fetch (flags (\seen) internaldate $date1)
-? 2 fetch (flags (\answered \flagged) internaldate $date2)
-? 3 fetch (flags () internaldate $date4)
+!ifenv IMAP_RECENT
+* 1 fetch (flags (\recent \seen) internaldate $date1)
+* 2 fetch (flags (\recent \answered \flagged) internaldate $date2)
+* 3 fetch (flags (\recent) internaldate $date4)
+!else
+* 1 fetch (flags (\seen) internaldate $date1)
+* 2 fetch (flags (\answered \flagged) internaldate $date2)
+* 3 fetch (flags () internaldate $date4)
+!endif
 
 # keywords aren't required to be created on COPY, so help the server here
 2 ok store 3 +flags ($$keyword1 $$keyword2)
@@ -40,9 +48,16 @@ state: created
 1 ok copy 5 ${mailbox}2
 2 ok noop
 * 4 exists
+!ifenv IMAP_RECENT
+* 4 recent
+!endif
 
 2 ok fetch 4 (flags internaldate)
+!ifenv IMAP_RECENT
+* 4 fetch (flags (\recent \flagged $$keyword1 $$keyword2) internaldate $date5)
+!else
 * 4 fetch (flags (\flagged $$keyword1 $$keyword2) internaldate $date5)
+!endif
 
 2 ok close
 2 "" delete ${mailbox}2

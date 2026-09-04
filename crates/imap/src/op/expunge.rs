@@ -22,6 +22,7 @@ use store::{
     roaring::RoaringBitmap,
     write::{BatchBuilder, SearchIndex},
 };
+use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -34,6 +35,7 @@ impl<T: SessionStream> Session<T> {
         &mut self,
         request: Request<Command>,
         is_uid: bool,
+        _permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapExpunge)?;

@@ -5,10 +5,7 @@
  */
 
 use super::ImapContext;
-use crate::{
-    core::{SelectedMailbox, Session, SessionData},
-    spawn_op,
-};
+use crate::core::{SelectedMailbox, Session, SessionData};
 use common::{MessageStoreCache, cache::email::MessageRef, network::SessionStream};
 use compact_str::CompactString;
 use email::{
@@ -31,6 +28,7 @@ use imap_proto::{
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use store::write::{BatchBuilder, PendingId};
+use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -43,7 +41,7 @@ impl<T: SessionStream> Session<T> {
         &mut self,
         request: Request<Command>,
         is_uid: bool,
-        spawn: bool,
+        _permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
         // Validate access
         self.assert_has_permission(Permission::ImapStore)?;
@@ -56,39 +54,20 @@ impl<T: SessionStream> Session<T> {
         let is_uidonly = self.is_uidonly;
         let message_limit = self.server.core.imap.max_messages_per_command;
 
-        if spawn {
-            spawn_op!(data, {
-                let response = data
-                    .store(
-                        arguments,
-                        mailbox,
-                        is_uid,
-                        is_condstore,
-                        is_utf8,
-                        is_uidonly,
-                        message_limit,
-                        op_start,
-                    )
-                    .await?;
+        let response = data
+            .store(
+                arguments,
+                mailbox,
+                is_uid,
+                is_condstore,
+                is_utf8,
+                is_uidonly,
+                message_limit,
+                op_start,
+            )
+            .await?;
 
-                data.write_bytes(response).await
-            })
-        } else {
-            let response = data
-                .store(
-                    arguments,
-                    mailbox,
-                    is_uid,
-                    is_condstore,
-                    is_utf8,
-                    is_uidonly,
-                    message_limit,
-                    op_start,
-                )
-                .await?;
-
-            data.write_bytes(response).await
-        }
+        data.write_bytes(response).await
     }
 }
 

@@ -154,7 +154,7 @@ Plain text email goes here!
 This is the fallback if email client does not support HTML
 
 ----------------------------------
-BODY[1.MIME] {116}
+BODY[1.MIME] {115}
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 Content-Disposition: inline
@@ -193,7 +193,7 @@ BODY[2.TEXT] {93}
 <p>This is what displays in most modern email clients</p>
 
 ----------------------------------
-BODY[2.MIME] {115}
+BODY[2.MIME] {114}
 Content-Type: text/html; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 Content-Disposition: inline

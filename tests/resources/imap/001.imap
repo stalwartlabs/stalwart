@@ -214,7 +214,7 @@ Content-type: application/postscript
 Content-ID: <id42@guppylake.bellcore.com>
 
 ----------------------------------
-BODY[1.MIME] {231}
+BODY[1.MIME] {230}
 Content-Type: message/external-body; name="BodyFormats.ps";
             site="thumper.bellcore.com"; mode="image";
             access-type=ANON-FTP; directory="pub";
@@ -255,7 +255,7 @@ Content-type: application/postscript
 Content-ID: <id42@guppylake.bellcore.com>
 
 ----------------------------------
-BODY[2.MIME] {219}
+BODY[2.MIME] {218}
 Content-Type: message/external-body; access-type=local-file;
             name="/u/nsb/writing/rfcs/RFC-MIME.ps";
             site="thumper.bellcore.com";
@@ -302,7 +302,7 @@ Content-ID: <id42@guppylake.bellcore.com>
 get RFC-MIME.DOC
 
 ----------------------------------
-BODY[3.MIME] {182}
+BODY[3.MIME] {181}
 Content-Type: message/external-body;
             access-type=mail-server
             server="listserv@bogus.bitnet";
