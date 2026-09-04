@@ -44,7 +44,6 @@ impl BatchBuilder {
             next_slot: 0,
             batch_size: 0,
             batch_ops: 0,
-            has_assertions: false,
             commit_points: Vec::new(),
             last_archive_hash: None,
             last_index_partition: None,
@@ -84,7 +83,6 @@ impl BatchBuilder {
     pub fn with_pending_document(&mut self, document_id: PendingId) -> &mut Self {
         self.ops.push(Operation::DocumentId { document_id });
         self.current_document_id = Some(document_id);
-        self.has_assertions = false;
         self
     }
 
@@ -178,7 +176,6 @@ impl BatchBuilder {
             assert_value: value.to_assert_value(),
         });
         self.batch_ops += 1;
-        self.has_assertions = true;
         self
     }
 
@@ -851,28 +848,6 @@ impl CommitPointIterator {
                 self.offset_start = end;
                 point
             })
-    }
-}
-
-impl Batch<'_> {
-    pub fn is_atomic(&self) -> bool {
-        !self.ops.iter().any(|op| {
-            matches!(
-                op,
-                Operation::AssertValue { .. }
-                    | Operation::Value {
-                        op: ValueOp::AddAndGet(_),
-                        ..
-                    }
-            )
-        })
-    }
-
-    pub fn first_account_id(&self) -> Option<u32> {
-        self.ops.iter().find_map(|op| match op {
-            Operation::AccountId { account_id } => Some(*account_id),
-            _ => None,
-        })
     }
 }
 

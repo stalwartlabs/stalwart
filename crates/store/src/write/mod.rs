@@ -288,7 +288,6 @@ pub struct BatchBuilder {
     change_accounts: Vec<ChangeCounter>,
     reservations: Vec<Reservation>,
     next_slot: u32,
-    has_assertions: bool,
     batch_size: usize,
     batch_ops: usize,
     commit_points: Vec<CommitPointOffsets>,

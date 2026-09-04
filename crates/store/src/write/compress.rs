@@ -165,9 +165,9 @@ pub fn compress(
     let slot = dictionary.map_or(0, |dictionary| dictionary.index() + 1);
     let mut output = Vec::with_capacity(compress_bound(input.len()));
 
-    let len = COMPRESSORS
+    COMPRESSORS
         .with_borrow_mut(|compressors| compressors[slot].compress_to_buffer(input, &mut output))?;
-    output.shrink_to(len + trailer_len);
+    output.reserve(trailer_len);
 
     Ok(output)
 }
