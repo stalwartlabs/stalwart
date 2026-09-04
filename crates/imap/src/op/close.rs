@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::time::Instant;
-use tokio::sync::OwnedSemaphorePermit;
-
+use super::ImapContext;
 use crate::core::{Session, State};
 use common::network::SessionStream;
 use email::cache::MessageCacheFetch;
 use imap_proto::{Command, StatusResponse, receiver::Request};
-use trc::AddContext;
+use std::time::Instant;
+use tokio::sync::OwnedSemaphorePermit;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_close(
@@ -27,10 +26,10 @@ impl<T: SessionStream> Session<T> {
                 .server
                 .get_cached_messages(mailbox.id.account_id)
                 .await
-                .caused_by(trc::location!())?;
-            data.expunge(mailbox.clone(), &cache, None, u32::MAX, op_start)
+                .imap_ctx(&request.tag, trc::location!())?;
+            data.expunge(mailbox.clone(), cache, None, u32::MAX, op_start)
                 .await
-                .caused_by(trc::location!())?;
+                .imap_ctx(&request.tag, trc::location!())?;
         }
 
         trc::event!(

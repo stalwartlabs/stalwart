@@ -43,10 +43,6 @@ const KNOWN_ERRORS: &[(&str, &str)] = &[
         "RFC 9051 7.5.1 forbids an EXPUNGE while a FETCH on that message is in progress",
     ),
     (
-        "EXPUNGE failed",
-        "EXPUNGE returns NO [CONTACTADMIN] Internal Server Error under concurrent access",
-    ),
-    (
         "Missing flags to set",
         "RFC 9051 flag-list allows an empty list, so STORE -FLAGS () is a valid no-op and must not be rejected with BAD",
     ),

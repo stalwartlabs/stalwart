@@ -16,8 +16,13 @@ use imap_proto::{
     parser::parse_sequence_set,
     receiver::{Request, Token},
 };
+use rand::RngExt;
 use registry::schema::enums::Permission;
-use std::{sync::Arc, time::Instant};
+use std::{
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use store::{
     roaring::RoaringBitmap,
     write::{BatchBuilder, SearchIndex},
@@ -29,6 +34,9 @@ use types::{
     collection::{Collection, VanishedCollection},
     keyword::Keyword,
 };
+
+const MAX_EXPUNGE_RETRIES: u32 = 3;
+const EXPUNGE_RETRY_BACKOFF_MS: RangeInclusive<u64> = 1..=15;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_expunge(
@@ -103,7 +111,7 @@ impl<T: SessionStream> Session<T> {
 
         // Expunge
         let limited_uid = data
-            .expunge(mailbox.clone(), &cache, sequence, message_limit, op_start)
+            .expunge(mailbox.clone(), cache, sequence, message_limit, op_start)
             .await
             .imap_ctx(&request.tag, trc::location!())?;
 
@@ -151,74 +159,96 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn expunge(
         &self,
         mailbox: Arc<SelectedMailbox>,
-        cache: &MessageStoreCache,
+        mut cache: Arc<MessageStoreCache>,
         sequence: Option<Vec<Resolved>>,
         message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<Option<u32>> {
-        // Obtain message ids
         let account_id = mailbox.id.account_id;
-        let mut deleted_ids = RoaringBitmap::from_iter(
-            cache
-                .in_mailbox_with_keyword(mailbox.id.mailbox_id, &Keyword::Deleted)
-                .map(|m| m.document_id()),
-        );
+        let sequence = sequence.map(|sequence| {
+            RoaringBitmap::from_iter(sequence.into_iter().map(|resolved| resolved.id))
+        });
+        let mut retries = 0;
 
-        // Filter by sequence
-        if let Some(sequence) = &sequence {
-            deleted_ids &= RoaringBitmap::from_iter(sequence.iter().map(|resolved| resolved.id));
-        }
+        loop {
+            // Obtain message ids
+            let mut deleted_ids = RoaringBitmap::from_iter(
+                cache
+                    .in_mailbox_with_keyword(mailbox.id.mailbox_id, &Keyword::Deleted)
+                    .map(|m| m.document_id()),
+            );
 
-        // RFC 9738 requires the highest UIDs to be processed first when truncating.
-        let mut limited_uid = None;
-        if deleted_ids.len() > message_limit as u64 {
-            let mut uids = {
-                let view = mailbox.view.lock();
-                deleted_ids
-                    .iter()
-                    .filter_map(|id| view.map_result(id).map(|resolved| (resolved.uid, id)))
-                    .collect::<Vec<_>>()
-            };
+            // Filter by sequence
+            if let Some(sequence) = &sequence {
+                deleted_ids &= sequence;
+            }
 
-            if uids.len() > message_limit as usize {
-                let cutoff = uids.len() - message_limit as usize;
-                let (below, lowest, _) = uids.select_nth_unstable(cutoff);
-                limited_uid = Some(lowest.0);
-                for (_, id) in below {
-                    deleted_ids.remove(*id);
+            // RFC 9738 requires the highest UIDs to be processed first when truncating.
+            let mut limited_uid = None;
+            if deleted_ids.len() > message_limit as u64 {
+                let mut uids = {
+                    let view = mailbox.view.lock();
+                    deleted_ids
+                        .iter()
+                        .filter_map(|id| view.map_result(id).map(|resolved| (resolved.uid, id)))
+                        .collect::<Vec<_>>()
+                };
+
+                if uids.len() > message_limit as usize {
+                    let cutoff = uids.len() - message_limit as usize;
+                    let (below, lowest, _) = uids.select_nth_unstable(cutoff);
+                    limited_uid = Some(lowest.0);
+                    for (_, id) in below {
+                        deleted_ids.remove(*id);
+                    }
                 }
             }
-        }
 
-        // Delete ids
-        let mut batch = BatchBuilder::new();
-        let (fully_deleted, thread_ids) = self
-            .email_untag_or_delete(account_id, mailbox.id.mailbox_id, &deleted_ids, &mut batch)
-            .await
-            .caused_by(trc::location!())?;
-        self.server
-            .log_emptied_threads(account_id, &mut batch, thread_ids, &fully_deleted)
-            .await
-            .caused_by(trc::location!())?;
-
-        trc::event!(
-            Imap(trc::ImapEvent::Expunge),
-            SpanId = self.session_id,
-            AccountId = account_id,
-            MailboxId = mailbox.id.mailbox_id,
-            DocumentId = deleted_ids.iter().map(trc::Value::from).collect::<Vec<_>>(),
-            Elapsed = op_start.elapsed()
-        );
-
-        // Write changes on source account
-        if !batch.is_empty() {
-            self.server
-                .commit_batch(batch)
+            // Delete ids
+            let mut batch = BatchBuilder::new();
+            let (fully_deleted, thread_ids) = self
+                .email_untag_or_delete(account_id, mailbox.id.mailbox_id, &deleted_ids, &mut batch)
                 .await
                 .caused_by(trc::location!())?;
-        }
+            self.server
+                .log_emptied_threads(account_id, &mut batch, thread_ids, &fully_deleted)
+                .await
+                .caused_by(trc::location!())?;
 
-        Ok(limited_uid)
+            // Write changes on source account
+            if !batch.is_empty()
+                && let Err(err) = self.server.commit_batch(batch).await
+            {
+                if !err.is_assertion_failure() {
+                    return Err(err.caused_by(trc::location!()));
+                } else if retries == MAX_EXPUNGE_RETRIES {
+                    return Err(trc::ImapEvent::Error
+                        .into_err()
+                        .details("Some messages were modified by another process."));
+                }
+
+                retries += 1;
+                let backoff = rand::rng().random_range(EXPUNGE_RETRY_BACKOFF_MS);
+                tokio::time::sleep(Duration::from_millis(backoff)).await;
+                cache = self
+                    .server
+                    .get_cached_messages(account_id)
+                    .await
+                    .caused_by(trc::location!())?;
+                continue;
+            }
+
+            trc::event!(
+                Imap(trc::ImapEvent::Expunge),
+                SpanId = self.session_id,
+                AccountId = account_id,
+                MailboxId = mailbox.id.mailbox_id,
+                DocumentId = deleted_ids.iter().map(trc::Value::from).collect::<Vec<_>>(),
+                Elapsed = op_start.elapsed()
+            );
+
+            return Ok(limited_uid);
+        }
     }
 
     pub async fn email_untag_or_delete(
