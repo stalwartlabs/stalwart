@@ -11,6 +11,7 @@ use std::fmt::Display;
 use types::id::Id;
 use types::keyword::Keyword;
 use utils::chained_bytes::SliceRange;
+use utils::codec::base32_custom::BASE32_ALPHABET;
 
 pub mod acl;
 pub mod append;
@@ -72,7 +73,7 @@ impl ObjectId {
                 }
                 first = false;
                 buf.extend_from_slice(key);
-                buf.extend_from_slice(value.to_string().as_bytes());
+                push_id(buf, *value);
             }
         }
         buf.push(b')');
@@ -141,40 +142,67 @@ impl Sequence {
     }
 }
 
+const DEFAULT_RESPONSE_CAPACITY: usize = 128;
+
 pub trait ImapResponse {
     fn serialize_into(&self, buf: &mut Vec<u8>);
+
+    fn size_hint(&self) -> usize {
+        DEFAULT_RESPONSE_CAPACITY
+    }
 
     fn serialize(self) -> Vec<u8>
     where
         Self: Sized,
     {
-        let mut buf = Vec::with_capacity(128);
+        let mut buf = Vec::with_capacity(self.size_hint());
         self.serialize_into(&mut buf);
         buf
     }
 }
 
-pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
-    let text = text.as_bytes();
-    buf.push(b'"');
-    let mut copied = 0;
-    for (pos, &ch) in text.iter().enumerate() {
-        if ch == b'\\' || ch == b'"' {
-            buf.extend_from_slice(&text[copied..pos]);
-            buf.push(b'\\');
-            copied = pos;
-        }
+const fn byte_class_table(needles: &[u8]) -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut pos = 0;
+    while pos < needles.len() {
+        table[needles[pos] as usize] = true;
+        pos += 1;
     }
-    buf.extend_from_slice(&text[copied..]);
+    table
+}
+
+static NEEDS_ESCAPE: [bool; 256] = byte_class_table(b"\\\"");
+static NEEDS_LITERAL: [bool; 256] = byte_class_table(b"\\\"\r\n");
+
+#[inline(always)]
+fn find_escape(text: &[u8]) -> Option<usize> {
+    text.iter().position(|&ch| NEEDS_ESCAPE[ch as usize])
+}
+
+pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
+    let mut rest = text.as_bytes();
+    buf.push(b'"');
+    while let Some(pos) = find_escape(rest) {
+        let (head, tail) = rest.split_at(pos);
+        buf.extend_from_slice(head);
+        buf.push(b'\\');
+        let mut tail = tail.iter();
+        if let Some(&ch) = tail.next() {
+            buf.push(ch);
+        }
+        rest = tail.as_slice();
+    }
+    buf.extend_from_slice(rest);
     buf.push(b'"');
 }
 
 pub fn quoted_or_literal_string(buf: &mut Vec<u8>, text: &str) {
-    if text.as_bytes().iter().any(|ch| b"\\\"\r\n".contains(ch)) {
-        literal_string(buf, text.as_bytes())
+    let text = text.as_bytes();
+    if text.iter().any(|&ch| NEEDS_LITERAL[ch as usize]) {
+        literal_string(buf, text)
     } else {
         buf.push(b'"');
-        buf.extend_from_slice(text.as_bytes());
+        buf.extend_from_slice(text);
         buf.push(b'"');
     }
 }
@@ -186,13 +214,65 @@ pub fn quoted_or_literal_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
     }
 }
 
+const CLASS_LITERAL: u8 = 1;
+const CLASS_NON_ASCII: u8 = 2;
+
+const fn text_class_table() -> [u8; 256] {
+    let mut table = [0u8; 256];
+    table[b'\\' as usize] = CLASS_LITERAL;
+    table[b'"' as usize] = CLASS_LITERAL;
+    table[b'\r' as usize] = CLASS_LITERAL;
+    table[b'\n' as usize] = CLASS_LITERAL;
+    let mut ch = 0x80;
+    while ch < 256 {
+        table[ch] |= CLASS_NON_ASCII;
+        ch += 1;
+    }
+    table
+}
+
+static TEXT_CLASS: [u8; 256] = text_class_table();
+
+#[inline(always)]
+fn base64_encoded_len(len: usize) -> usize {
+    len.div_ceil(3) * 4
+}
+
+fn push_base64_encoded(buf: &mut Vec<u8>, text: &[u8]) {
+    buf.extend_from_slice(b"\"=?utf-8?B?");
+    let start = buf.len();
+    buf.resize(start + base64_encoded_len(text.len()), 0);
+    match buf
+        .get_mut(start..)
+        .ok_or(())
+        .and_then(|target| STANDARD.encode_slice(text, target).map_err(|_| ()))
+    {
+        Ok(written) => buf.truncate(start + written),
+        Err(()) => {
+            buf.truncate(start);
+            buf.extend_from_slice(STANDARD.encode(text).as_bytes());
+        }
+    }
+    buf.extend_from_slice(b"?=\"");
+}
+
 pub fn quoted_or_literal_encoded_string(buf: &mut Vec<u8>, text: &str, is_utf8: bool) {
-    if is_utf8 || text.is_ascii() {
+    if is_utf8 {
         quoted_or_literal_string(buf, text);
+        return;
+    }
+    let text = text.as_bytes();
+    let class = text
+        .iter()
+        .fold(0u8, |class, &ch| class | TEXT_CLASS[ch as usize]);
+    if class & CLASS_NON_ASCII != 0 {
+        push_base64_encoded(buf, text);
+    } else if class & CLASS_LITERAL != 0 {
+        literal_string(buf, text);
     } else {
-        buf.extend_from_slice(b"\"=?utf-8?B?");
-        buf.extend_from_slice(STANDARD.encode(text.as_bytes()).as_bytes());
-        buf.extend_from_slice(b"?=\"");
+        buf.push(b'"');
+        buf.extend_from_slice(text);
+        buf.push(b'"');
     }
 }
 
@@ -227,7 +307,14 @@ pub fn literal_string_slice(buf: &mut Vec<u8>, text: &SliceRange<'_>) {
     buf.push(b'{');
     push_int(buf, text.len());
     buf.extend_from_slice(b"}\r\n");
-    buf.extend(*text);
+    match text {
+        SliceRange::Single(bytes) => buf.extend_from_slice(bytes),
+        SliceRange::Split(first, last) => {
+            buf.extend_from_slice(first);
+            buf.extend_from_slice(last);
+        }
+        SliceRange::None => (),
+    }
 }
 
 pub fn push_int(buf: &mut Vec<u8>, value: impl itoa::Integer) {
@@ -235,12 +322,80 @@ pub fn push_int(buf: &mut Vec<u8>, value: impl itoa::Integer) {
     buf.extend_from_slice(int_buf.format(value).as_bytes());
 }
 
+const ID_MAX_LEN: usize = 13;
+
+fn push_id(buf: &mut Vec<u8>, id: Id) {
+    const QUAD_SHIFT: usize = 60;
+    const QUAD_RESET: usize = 4;
+    const FIVE_SHIFT: usize = 59;
+    const FIVE_RESET: usize = 5;
+    const STOP_BIT: u64 = 1 << QUAD_SHIFT;
+
+    let mut n = id.id();
+    if n == 0 {
+        buf.push(b'a');
+        return;
+    }
+
+    buf.reserve(ID_MAX_LEN);
+    match (n >> QUAD_SHIFT) as usize {
+        0 => {
+            n <<= QUAD_RESET;
+            n |= 1;
+            n <<= n.leading_zeros() / 5 * 5;
+        }
+        i => {
+            n <<= QUAD_RESET;
+            n |= 1;
+            buf.push(BASE32_ALPHABET[i]);
+        }
+    }
+
+    while n != STOP_BIT {
+        buf.push(BASE32_ALPHABET[(n >> FIVE_SHIFT) as usize]);
+        n <<= FIVE_RESET;
+    }
+}
+
 const MONTHS_ABBREVIATED: [&[u8; 3]; 12] = [
     b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
-fn push_zero_padded(buf: &mut Vec<u8>, value: u32) {
-    buf.push(b'0' + (value / 10) as u8);
+const DAYS_ABBREVIATED: [&[u8; 3]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+
+#[inline(always)]
+fn two_digits(value: u32) -> [u8; 2] {
+    [b'0' + (value / 10) as u8, b'0' + (value % 10) as u8]
+}
+
+#[inline(always)]
+fn push_padded_u8(buf: &mut Vec<u8>, value: u8) {
+    if value >= 100 {
+        buf.push(b'0' + value / 100);
+    }
+    buf.push(b'0' + (value / 10) % 10);
+    buf.push(b'0' + value % 10);
+}
+
+#[inline(always)]
+fn push_plain_u8(buf: &mut Vec<u8>, value: u8) {
+    if value >= 100 {
+        buf.push(b'0' + value / 100);
+    }
+    if value >= 10 {
+        buf.push(b'0' + (value / 10) % 10);
+    }
+    buf.push(b'0' + value % 10);
+}
+
+#[inline(always)]
+fn push_padded_u16(buf: &mut Vec<u8>, value: u16) {
+    if value >= 10_000 {
+        buf.push(b'0' + (value / 10_000) as u8);
+    }
+    buf.push(b'0' + ((value / 1_000) % 10) as u8);
+    buf.push(b'0' + ((value / 100) % 10) as u8);
+    buf.push(b'0' + ((value / 10) % 10) as u8);
     buf.push(b'0' + (value % 10) as u8);
 }
 
@@ -270,26 +425,50 @@ pub fn quoted_timestamp(buf: &mut Vec<u8>, timestamp: i64) {
     let (year, month, day) = civil_from_days(timestamp.div_euclid(86_400));
     let seconds_of_day = timestamp.rem_euclid(86_400) as u32;
     let year = year.clamp(0, 9999) as u32;
+    let month = MONTHS_ABBREVIATED[(month - 1) as usize];
+    let [day_hi, day_lo] = two_digits(day);
+    let [year_a, year_b] = two_digits(year / 100);
+    let [year_c, year_d] = two_digits(year % 100);
+    let [hour_hi, hour_lo] = two_digits(seconds_of_day / 3600);
+    let [minute_hi, minute_lo] = two_digits((seconds_of_day / 60) % 60);
+    let [second_hi, second_lo] = two_digits(seconds_of_day % 60);
 
-    buf.push(b'"');
-    push_zero_padded(buf, day);
-    buf.push(b'-');
-    buf.extend_from_slice(MONTHS_ABBREVIATED[(month - 1) as usize]);
-    buf.push(b'-');
-    push_zero_padded(buf, year / 100);
-    push_zero_padded(buf, year % 100);
-    buf.push(b' ');
-    push_zero_padded(buf, seconds_of_day / 3600);
-    buf.push(b':');
-    push_zero_padded(buf, (seconds_of_day / 60) % 60);
-    buf.push(b':');
-    push_zero_padded(buf, seconds_of_day % 60);
-    buf.extend_from_slice(b" +0000\"");
+    buf.extend_from_slice(&[
+        b'"', day_hi, day_lo, b'-', month[0], month[1], month[2], b'-', year_a, year_b, year_c,
+        year_d, b' ', hour_hi, hour_lo, b':', minute_hi, minute_lo, b':', second_hi, second_lo,
+        b' ', b'+', b'0', b'0', b'0', b'0', b'"',
+    ]);
 }
 
 pub fn quoted_rfc2822(buf: &mut Vec<u8>, timestamp: &mail_parser::DateTime) {
+    const MAX_LEN: usize = 40;
+    buf.reserve(MAX_LEN);
     buf.push(b'"');
-    buf.extend_from_slice(timestamp.to_rfc822().as_bytes());
+    buf.extend_from_slice(DAYS_ABBREVIATED[usize::from(timestamp.day_of_week()) % 7]);
+    buf.extend_from_slice(b", ");
+    push_plain_u8(buf, timestamp.day);
+    buf.push(b' ');
+    if let Some(month) = MONTHS_ABBREVIATED.get(usize::from(timestamp.month.saturating_sub(1))) {
+        buf.extend_from_slice(*month);
+    }
+    buf.push(b' ');
+    push_padded_u16(buf, timestamp.year);
+    buf.push(b' ');
+    push_padded_u8(buf, timestamp.hour);
+    buf.push(b':');
+    push_padded_u8(buf, timestamp.minute);
+    buf.push(b':');
+    push_padded_u8(buf, timestamp.second);
+    buf.push(b' ');
+    buf.push(
+        if timestamp.tz_before_gmt && (timestamp.tz_hour > 0 || timestamp.tz_minute > 0) {
+            b'-'
+        } else {
+            b'+'
+        },
+    );
+    push_padded_u8(buf, timestamp.tz_hour);
+    push_padded_u8(buf, timestamp.tz_minute);
     buf.push(b'"');
 }
 
@@ -583,6 +762,30 @@ impl ResponseCode {
             ResponseCode::MessageLimit { .. } => "MESSAGELIMIT",
         }
     }
+
+    fn size_hint(&self) -> usize {
+        const BRACKETS_LEN: usize = 3;
+        const INT_LEN: usize = 11;
+        const CAPABILITY_LEN: usize = 20;
+        const OBJECT_ID_LEN: usize = 92;
+
+        self.as_str().len()
+            + BRACKETS_LEN
+            + match self {
+                ResponseCode::AppendUid { uids, .. } => INT_LEN * (uids.len() + 1),
+                ResponseCode::Capability { capabilities } => capabilities.len() * CAPABILITY_LEN,
+                ResponseCode::CopyUid {
+                    src_uids,
+                    dest_uids,
+                    ..
+                } => INT_LEN * (src_uids.len() + dest_uids.len() + 1) + 2,
+                ResponseCode::Modified { ranges } => ranges.len() * (INT_LEN * 2 + 1) + 1,
+                ResponseCode::ObjectId(_) => OBJECT_ID_LEN,
+                ResponseCode::HighestModseq { .. } => 21,
+                ResponseCode::MessageLimit { .. } => INT_LEN * 2 + 1,
+                _ => 0,
+            }
+    }
 }
 
 impl ResponseType {
@@ -638,7 +841,25 @@ impl StatusResponse {
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
-        self.serialize(Vec::with_capacity(16))
+        let capacity = self.size_hint();
+        self.serialize(Vec::with_capacity(capacity))
+    }
+
+    pub fn serialize_after(self, response: &impl ImapResponse) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(response.size_hint() + self.size_hint());
+        response.serialize_into(&mut buf);
+        self.serialize_into(&mut buf);
+        buf
+    }
+
+    fn size_hint(&self) -> usize {
+        const FRAMING_LEN: usize = 4;
+
+        self.tag.as_ref().map_or(1, |tag| tag.len())
+            + self.rtype.as_str().len()
+            + self.message.len()
+            + self.code.as_ref().map_or(0, ResponseCode::size_hint)
+            + FRAMING_LEN
     }
 }
 
@@ -700,28 +921,27 @@ impl ProtocolVersion {
 }
 
 pub fn serialize_sequence(buf: &mut Vec<u8>, list: &[u32]) {
-    let mut ids = list.iter().peekable();
-    while let Some(&id) = ids.next() {
+    let mut rest = list;
+    while let Some((&id, mut tail)) = rest.split_first() {
         push_int(buf, id);
+
         let mut range_id = id;
-        loop {
-            match ids.peek() {
-                Some(&&next_id) if next_id == range_id + 1 => {
-                    range_id += 1;
-                    ids.next();
-                }
-                next => {
-                    if range_id != id {
-                        buf.push(b':');
-                        push_int(buf, range_id);
-                    }
-                    if next.is_some() {
-                        buf.push(b',');
-                    }
-                    break;
-                }
+        while let Some((&next_id, next_tail)) = tail.split_first() {
+            if next_id != range_id + 1 {
+                break;
             }
+            range_id += 1;
+            tail = next_tail;
         }
+
+        if range_id != id {
+            buf.push(b':');
+            push_int(buf, range_id);
+        }
+        if !tail.is_empty() {
+            buf.push(b',');
+        }
+        rest = tail;
     }
 }
 
@@ -740,58 +960,7 @@ pub fn serialize_sequence_ranges(buf: &mut Vec<u8>, ranges: &[(u32, u32)]) {
 
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Command::UidBatches => write!(f, "UIDBATCHES"),
-            Command::Capability => write!(f, "CAPABILITY"),
-            Command::Noop => write!(f, "NOOP"),
-            Command::Logout => write!(f, "LOGOUT"),
-            Command::StartTls => write!(f, "STARTTLS"),
-            Command::Authenticate => write!(f, "AUTHENTICATE"),
-            Command::Login => write!(f, "LOGIN"),
-            Command::Enable => write!(f, "ENABLE"),
-            Command::Select => write!(f, "SELECT"),
-            Command::Examine => write!(f, "EXAMINE"),
-            Command::Create => write!(f, "CREATE"),
-            Command::Delete => write!(f, "DELETE"),
-            Command::Rename => write!(f, "RENAME"),
-            Command::Subscribe => write!(f, "SUBSCRIBE"),
-            Command::Unsubscribe => write!(f, "UNSUBSCRIBE"),
-            Command::List => write!(f, "LIST"),
-            Command::Namespace => write!(f, "NAMESPACE"),
-            Command::Status => write!(f, "STATUS"),
-            Command::Append => write!(f, "APPEND"),
-            Command::Idle => write!(f, "IDLE"),
-            Command::Close => write!(f, "CLOSE"),
-            Command::Unselect => write!(f, "UNSELECT"),
-            Command::Expunge(false) => write!(f, "EXPUNGE"),
-            Command::Search(false) => write!(f, "SEARCH"),
-            Command::Fetch(false) => write!(f, "FETCH"),
-            Command::Store(false) => write!(f, "STORE"),
-            Command::Copy(false) => write!(f, "COPY"),
-            Command::Move(false) => write!(f, "MOVE"),
-            Command::Sort(false) => write!(f, "SORT"),
-            Command::Thread(false) => write!(f, "THREAD"),
-            Command::Expunge(true) => write!(f, "UID EXPUNGE"),
-            Command::Search(true) => write!(f, "UID SEARCH"),
-            Command::Fetch(true) => write!(f, "UID FETCH"),
-            Command::Store(true) => write!(f, "UID STORE"),
-            Command::Copy(true) => write!(f, "UID COPY"),
-            Command::Move(true) => write!(f, "UID MOVE"),
-            Command::Sort(true) => write!(f, "UID SORT"),
-            Command::Thread(true) => write!(f, "UID THREAD"),
-            Command::Lsub => write!(f, "LSUB"),
-            Command::Check => write!(f, "CHECK"),
-            Command::SetAcl => write!(f, "SETACL"),
-            Command::DeleteAcl => write!(f, "DELETEACL"),
-            Command::GetAcl => write!(f, "GETACL"),
-            Command::ListRights => write!(f, "LISTRIGHTS"),
-            Command::MyRights => write!(f, "MYRIGHTS"),
-            Command::Unauthenticate => write!(f, "UNAUTHENTICATE"),
-            Command::Id => write!(f, "ID"),
-            Command::GetQuota => write!(f, "GETQUOTA"),
-            Command::GetQuotaRoot => write!(f, "GETQUOTAROOT"),
-            Command::GetJmapAccess => write!(f, "GETJMAPACCESS"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -799,7 +968,11 @@ impl Display for Command {
 mod tests {
     use crate::parser::parse_sequence_set;
     use crate::protocol::ObjectId;
+    use crate::{Command, StatusResponse};
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use mail_parser::DateTime;
     use types::id::Id;
+    use utils::chained_bytes::SliceRange;
 
     #[test]
     fn quoted_timestamp_matches_chrono() {
@@ -884,6 +1057,377 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_result
             );
+        }
+    }
+
+    const ALL_COMMANDS: [Command; 50] = [
+        Command::Capability,
+        Command::Noop,
+        Command::Logout,
+        Command::StartTls,
+        Command::Authenticate,
+        Command::Login,
+        Command::Enable,
+        Command::Select,
+        Command::Examine,
+        Command::Create,
+        Command::Delete,
+        Command::Rename,
+        Command::Subscribe,
+        Command::Unsubscribe,
+        Command::List,
+        Command::Namespace,
+        Command::Status,
+        Command::Append,
+        Command::Idle,
+        Command::Close,
+        Command::Unselect,
+        Command::Expunge(false),
+        Command::Expunge(true),
+        Command::Search(false),
+        Command::Search(true),
+        Command::Fetch(false),
+        Command::Fetch(true),
+        Command::Store(false),
+        Command::Store(true),
+        Command::Copy(false),
+        Command::Copy(true),
+        Command::Move(false),
+        Command::Move(true),
+        Command::Lsub,
+        Command::Check,
+        Command::Sort(false),
+        Command::Sort(true),
+        Command::Thread(false),
+        Command::Thread(true),
+        Command::SetAcl,
+        Command::DeleteAcl,
+        Command::GetAcl,
+        Command::ListRights,
+        Command::MyRights,
+        Command::Unauthenticate,
+        Command::Id,
+        Command::GetQuota,
+        Command::GetQuotaRoot,
+        Command::GetJmapAccess,
+        Command::UidBatches,
+    ];
+    #[test]
+    fn command_names_and_completed_messages() {
+        let expected: [(Command, &str); 50] = [
+            (Command::Capability, "CAPABILITY"),
+            (Command::Noop, "NOOP"),
+            (Command::Logout, "LOGOUT"),
+            (Command::StartTls, "STARTTLS"),
+            (Command::Authenticate, "AUTHENTICATE"),
+            (Command::Login, "LOGIN"),
+            (Command::Enable, "ENABLE"),
+            (Command::Select, "SELECT"),
+            (Command::Examine, "EXAMINE"),
+            (Command::Create, "CREATE"),
+            (Command::Delete, "DELETE"),
+            (Command::Rename, "RENAME"),
+            (Command::Subscribe, "SUBSCRIBE"),
+            (Command::Unsubscribe, "UNSUBSCRIBE"),
+            (Command::List, "LIST"),
+            (Command::Namespace, "NAMESPACE"),
+            (Command::Status, "STATUS"),
+            (Command::Append, "APPEND"),
+            (Command::Idle, "IDLE"),
+            (Command::Close, "CLOSE"),
+            (Command::Unselect, "UNSELECT"),
+            (Command::Expunge(false), "EXPUNGE"),
+            (Command::Expunge(true), "UID EXPUNGE"),
+            (Command::Search(false), "SEARCH"),
+            (Command::Search(true), "UID SEARCH"),
+            (Command::Fetch(false), "FETCH"),
+            (Command::Fetch(true), "UID FETCH"),
+            (Command::Store(false), "STORE"),
+            (Command::Store(true), "UID STORE"),
+            (Command::Copy(false), "COPY"),
+            (Command::Copy(true), "UID COPY"),
+            (Command::Move(false), "MOVE"),
+            (Command::Move(true), "UID MOVE"),
+            (Command::Lsub, "LSUB"),
+            (Command::Check, "CHECK"),
+            (Command::Sort(false), "SORT"),
+            (Command::Sort(true), "UID SORT"),
+            (Command::Thread(false), "THREAD"),
+            (Command::Thread(true), "UID THREAD"),
+            (Command::SetAcl, "SETACL"),
+            (Command::DeleteAcl, "DELETEACL"),
+            (Command::GetAcl, "GETACL"),
+            (Command::ListRights, "LISTRIGHTS"),
+            (Command::MyRights, "MYRIGHTS"),
+            (Command::Unauthenticate, "UNAUTHENTICATE"),
+            (Command::Id, "ID"),
+            (Command::GetQuota, "GETQUOTA"),
+            (Command::GetQuotaRoot, "GETQUOTAROOT"),
+            (Command::GetJmapAccess, "GETJMAPACCESS"),
+            (Command::UidBatches, "UIDBATCHES"),
+        ];
+        assert_eq!(expected.len(), ALL_COMMANDS.len());
+        for (command, name) in expected {
+            assert!(ALL_COMMANDS.contains(&command));
+            assert_eq!(command.as_str(), name);
+            assert_eq!(format!("{command}"), name);
+            assert_eq!(command.completed_message(), format!("{name} completed"));
+            assert_eq!(
+                StatusResponse::completed(command).message,
+                format!("{name} completed")
+            );
+        }
+    }
+
+    #[test]
+    fn quoted_rfc2822_matches_mail_parser() {
+        let mut buf = Vec::new();
+        for year in [0u16, 1, 99, 999, 1000, 1970, 2024, 9999, 10000, 65535] {
+            for month in [0u8, 1, 2, 6, 11, 12, 13, 255] {
+                for day in [0u8, 1, 9, 10, 28, 31, 32, 99, 100, 255] {
+                    for (hour, minute, second) in [
+                        (0u8, 0u8, 0u8),
+                        (9, 5, 7),
+                        (23, 59, 59),
+                        (24, 60, 60),
+                        (99, 100, 255),
+                    ] {
+                        for (tz_before_gmt, tz_hour, tz_minute) in [
+                            (false, 0u8, 0u8),
+                            (true, 0, 0),
+                            (true, 0, 30),
+                            (true, 8, 0),
+                            (false, 14, 45),
+                            (true, 99, 99),
+                        ] {
+                            let timestamp = DateTime {
+                                year,
+                                month,
+                                day,
+                                hour,
+                                minute,
+                                second,
+                                tz_before_gmt,
+                                tz_hour,
+                                tz_minute,
+                            };
+                            buf.clear();
+                            super::quoted_rfc2822(&mut buf, &timestamp);
+                            assert_eq!(
+                                buf,
+                                format!("\"{}\"", timestamp.to_rfc822()).as_bytes(),
+                                "{timestamp:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn object_id_matches_id_display() {
+        let ids = [
+            0u64,
+            1,
+            31,
+            32,
+            33,
+            1023,
+            1024,
+            u32::MAX as u64,
+            1 << 59,
+            (1 << 60) - 1,
+            1 << 60,
+            (1 << 60) + 1,
+            u64::MAX - 1,
+            u64::MAX,
+        ];
+        for &raw in &ids {
+            for &other in &ids {
+                let object_id = ObjectId {
+                    mailbox_id: Some(Id::new(raw)),
+                    account_id: None,
+                    email_id: Some(Id::new(other)),
+                    thread_id: Some(Id::from_parts(raw as u32, other as u32)),
+                };
+                let mut buf = Vec::new();
+                object_id.serialize(&mut buf);
+                assert_eq!(
+                    String::from_utf8(buf).unwrap(),
+                    format!(
+                        "OBJECTID (MAILBOXID {} EMAILID {} THREADID {})",
+                        Id::new(raw),
+                        Id::new(other),
+                        Id::from_parts(raw as u32, other as u32)
+                    )
+                );
+            }
+        }
+    }
+
+    fn naive_quoted(text: &str) -> Vec<u8> {
+        let mut out = vec![b'"'];
+        for &ch in text.as_bytes() {
+            if ch == b'\\' || ch == b'"' {
+                out.push(b'\\');
+            }
+            out.push(ch);
+        }
+        out.push(b'"');
+        out
+    }
+
+    fn naive_literal(text: &[u8]) -> Vec<u8> {
+        let mut out = format!("{{{}}}\r\n", text.len()).into_bytes();
+        out.extend_from_slice(text);
+        out
+    }
+
+    const STRING_SAMPLES: &[&str] = &[
+        "",
+        "a",
+        "INBOX",
+        "Sent Items",
+        "\\",
+        "\"",
+        "\\\"",
+        "a\\b\"c",
+        "ends with backslash\\",
+        "\"starts with quote",
+        "line\r\nbreak",
+        "carriage\rreturn",
+        "line\nfeed",
+        "tab\tinside",
+        "\u{7f}",
+        "J\u{fc}rgen M\u{fc}ller",
+        "\u{53f0}\u{5317}",
+        "\u{1f604}",
+        "mixed \u{fc} and \"quotes\"",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    ];
+
+    #[test]
+    fn quoted_strings_match_naive_encoders() {
+        for repeat in [1usize, 5, 40] {
+            for sample in STRING_SAMPLES {
+                let text = sample.repeat(repeat);
+                let bytes = text.as_bytes();
+                let needs_literal = bytes
+                    .iter()
+                    .any(|ch| matches!(ch, b'\\' | b'"' | b'\r' | b'\n'));
+
+                let mut buf = b"prefix ".to_vec();
+                super::quoted_string(&mut buf, &text);
+                let mut expected = b"prefix ".to_vec();
+                expected.extend(naive_quoted(&text));
+                assert_eq!(buf, expected, "quoted_string {text:?}");
+
+                let mut buf = Vec::new();
+                super::quoted_or_literal_string(&mut buf, &text);
+                let expected = if needs_literal {
+                    naive_literal(bytes)
+                } else {
+                    naive_quoted(&text)
+                };
+                assert_eq!(buf, expected, "quoted_or_literal_string {text:?}");
+
+                for is_utf8 in [false, true] {
+                    let mut buf = Vec::new();
+                    super::quoted_or_literal_encoded_string(&mut buf, &text, is_utf8);
+                    let expected = if is_utf8 || text.is_ascii() {
+                        if needs_literal {
+                            naive_literal(bytes)
+                        } else {
+                            naive_quoted(&text)
+                        }
+                    } else {
+                        format!("\"=?utf-8?B?{}?=\"", STANDARD.encode(bytes)).into_bytes()
+                    };
+                    assert_eq!(
+                        buf, expected,
+                        "quoted_or_literal_encoded_string {text:?} is_utf8={is_utf8}"
+                    );
+                }
+            }
+        }
+    }
+
+    fn naive_sequence(list: &[u32]) -> String {
+        let mut out = String::new();
+        let mut index = 0;
+        while index < list.len() {
+            let start = list[index];
+            let mut end = start;
+            while index + 1 < list.len() && list[index + 1] == end + 1 {
+                end += 1;
+                index += 1;
+            }
+            if !out.is_empty() {
+                out.push(',');
+            }
+            out.push_str(&start.to_string());
+            if end != start {
+                out.push(':');
+                out.push_str(&end.to_string());
+            }
+            index += 1;
+        }
+        out
+    }
+
+    #[test]
+    fn serialize_sequence_matches_naive_ranges() {
+        let cases: &[&[u32]] = &[
+            &[],
+            &[1],
+            &[1, 2],
+            &[1, 3],
+            &[
+                1, 2, 3, 5, 10, 11, 12, 13, 90, 92, 93, 94, 95, 96, 97, 98, 99,
+            ],
+            &[5, 5, 5],
+            &[3, 2, 1],
+            &[u32::MAX - 1, u32::MAX],
+            &[0, 1, 2],
+            &[7, 9, 11, 13],
+        ];
+        for case in cases {
+            let mut buf = Vec::new();
+            super::serialize_sequence(&mut buf, case);
+            assert_eq!(
+                String::from_utf8(buf).unwrap(),
+                naive_sequence(case),
+                "{case:?}"
+            );
+        }
+        let long: Vec<u32> = (1..=5000)
+            .filter(|id| id % 7 != 0 && id % 11 != 3)
+            .collect();
+        let mut buf = Vec::new();
+        super::serialize_sequence(&mut buf, &long);
+        assert_eq!(String::from_utf8(buf).unwrap(), naive_sequence(&long));
+    }
+
+    #[test]
+    fn literal_string_slice_matches_concatenation() {
+        let payload: Vec<u8> = (0..300u32).map(|i| (i % 251) as u8).collect();
+        for split in [0usize, 1, 7, 150, 299, 300] {
+            let (first, last) = payload.split_at(split);
+            for range in [
+                SliceRange::Single(first),
+                SliceRange::Split(first, last),
+                SliceRange::None,
+            ] {
+                let mut buf = Vec::new();
+                super::literal_string_slice(&mut buf, &range);
+                let expected_payload: Vec<u8> = match range {
+                    SliceRange::Single(bytes) => bytes.to_vec(),
+                    SliceRange::Split(first, last) => [first, last].concat(),
+                    SliceRange::None => Vec::new(),
+                };
+                assert_eq!(buf, naive_literal(&expected_payload));
+            }
         }
     }
 }

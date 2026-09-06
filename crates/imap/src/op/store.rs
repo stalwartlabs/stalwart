@@ -491,12 +491,11 @@ impl<T: SessionStream> SessionData<T> {
         );
 
         // Send response
-        let items = items.serialize();
-        Ok(response.serialize(if untagged.is_empty() {
-            items
+        Ok(if untagged.is_empty() {
+            response.serialize_after(&items)
         } else {
-            untagged.extend_from_slice(&items);
-            untagged
-        }))
+            items.serialize_into(&mut untagged);
+            response.serialize(untagged)
+        })
     }
 }

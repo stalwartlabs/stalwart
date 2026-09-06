@@ -19,6 +19,8 @@ use crate::receiver::{ArgumentBytes, Request, Token, bad};
 
 use super::{parse_date, parse_number, parse_sequence_set};
 
+const FILTERS_INIT_LEN: usize = 16;
+
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse_search(self, version: ProtocolVersion) -> trc::Result<search::Arguments> {
@@ -95,7 +97,7 @@ pub fn parse_filters(
     tokens: &mut Peekable<IntoIter<Token>>,
     decoder: Option<DecoderFnc>,
 ) -> super::Result<Vec<Filter>> {
-    let mut filters = Vec::new();
+    let mut filters = Vec::with_capacity(tokens.len().min(FILTERS_INIT_LEN));
     let mut filters_len = 0;
     let mut filters_stack = Vec::new();
     let mut operator = Filter::And;

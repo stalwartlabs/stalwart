@@ -20,4 +20,14 @@ impl ImapResponse for Response {
             buf.extend_from_slice(b"* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n");
         }
     }
+
+    fn size_hint(&self) -> usize {
+        const FRAMING_LEN: usize = 48;
+
+        FRAMING_LEN
+            + self
+                .shared_prefix
+                .as_ref()
+                .map_or(0, |prefix| prefix.len() * 2 + 2)
+    }
 }

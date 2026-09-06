@@ -16,6 +16,18 @@ impl ImapResponse for Response {
     fn serialize_into(&self, buf: &mut Vec<u8>) {
         self.serialize_to(buf);
     }
+
+    fn size_hint(&self) -> usize {
+        const EXPUNGE_LINE_LEN: usize = 21;
+        const VANISHED_FRAMING_LEN: usize = 24;
+        const RANGE_LEN: usize = 8;
+
+        if !self.use_vanished {
+            self.ids.len() * EXPUNGE_LINE_LEN
+        } else {
+            VANISHED_FRAMING_LEN + self.ids.len() * RANGE_LEN
+        }
+    }
 }
 
 impl Response {

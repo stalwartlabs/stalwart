@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
+use crate::protocol::quoted_string;
 use compact_str::CompactString;
 
 // Ported from https://github.com/jstedfast/MailKit/blob/master/MailKit/Net/Imap/ImapEncoding.cs
@@ -19,7 +20,16 @@ static UTF_7_RANK: &[u8] = &[
 
 static UTF_7_MAP: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
 
+#[inline(always)]
+pub(crate) fn is_utf7_identity(text: &str) -> bool {
+    text.is_ascii() && !text.as_bytes().contains(&b'&')
+}
+
 pub fn utf7_decode(text: &str) -> Option<String> {
+    if is_utf7_identity(text) {
+        return Some(text.to_string());
+    }
+
     let mut bytes: Vec<u16> = Vec::with_capacity(text.len());
     let mut bits = 0;
     let mut v: u32 = 0;
@@ -70,13 +80,47 @@ pub fn utf7_decode(text: &str) -> Option<String> {
     String::from_utf16(&bytes).ok()
 }
 
+#[inline(always)]
+const fn is_utf7_encode_identity_byte(ch: u8) -> bool {
+    ch.wrapping_sub(0x20) < 0x5f && ch != b'&'
+}
+
+#[inline(always)]
+pub(crate) fn is_utf7_encode_identity(text: &str) -> bool {
+    text.as_bytes()
+        .iter()
+        .all(|&ch| is_utf7_encode_identity_byte(ch))
+}
+
+#[inline(always)]
+fn utf7_encode_identity_prefix(text: &str) -> usize {
+    text.as_bytes()
+        .iter()
+        .position(|&ch| !is_utf7_encode_identity_byte(ch))
+        .unwrap_or(text.len())
+}
+
+pub(crate) fn quoted_mailbox_name(buf: &mut Vec<u8>, name: &str, is_utf8: bool) {
+    if is_utf8 || is_utf7_encode_identity(name) {
+        quoted_string(buf, name);
+    } else {
+        quoted_string(buf, &utf7_encode(name));
+    }
+}
+
 pub fn utf7_encode(text: &str) -> String {
+    let (identity, encoded) = text.split_at(utf7_encode_identity_prefix(text));
+    if encoded.is_empty() {
+        return identity.to_string();
+    }
+
     let mut result = String::with_capacity(text.len());
+    result.push_str(identity);
     let mut shifted = false;
     let mut bits = 0;
     let mut u: u32 = 0;
 
-    for ch in text.encode_utf16() {
+    for ch in encoded.encode_utf16() {
         if (0x20..0x7f).contains(&ch) {
             if shifted {
                 if bits > 0 {
@@ -120,7 +164,7 @@ pub fn utf7_encode(text: &str) -> String {
 
 #[inline(always)]
 pub fn utf7_maybe_decode(text: CompactString, is_utf8: bool) -> CompactString {
-    if is_utf8 {
+    if is_utf8 || is_utf7_identity(&text) {
         text
     } else {
         utf7_decode(&text)
@@ -186,6 +230,73 @@ mod tests {
                 expected_result,
                 "while encoding {:?}",
                 expected_result
+            );
+        }
+    }
+
+    #[test]
+    fn identity_fast_paths_agree_with_the_codec() {
+        for len in 0..=64usize {
+            for tail in [
+                "",
+                "&",
+                "&-",
+                "\u{7f}",
+                "\u{1f}",
+                "\t",
+                "\u{80}",
+                "\u{263a}",
+                "\u{1f604}",
+                " ",
+                "~",
+            ] {
+                let text = format!("{}{}", "x".repeat(len), tail);
+                let encoded = super::utf7_encode(&text);
+                let identity = text
+                    .bytes()
+                    .all(|ch| (0x20..0x7f).contains(&ch) && ch != b'&');
+                assert_eq!(super::is_utf7_encode_identity(&text), identity, "{text:?}");
+                assert_eq!(encoded == text, identity, "{text:?} -> {encoded:?}");
+                let ascii_no_amp = text.is_ascii() && !text.contains('&');
+                assert_eq!(super::is_utf7_identity(&text), ascii_no_amp, "{text:?}");
+                if ascii_no_amp {
+                    assert_eq!(super::utf7_decode(&text).as_deref(), Some(text.as_str()));
+                    assert_eq!(
+                        super::utf7_maybe_decode(text.as_str().into(), false),
+                        text.as_str()
+                    );
+                }
+                let mut buf = Vec::new();
+                super::quoted_mailbox_name(&mut buf, &text, false);
+                let mut expected = Vec::new();
+                crate::protocol::quoted_string(&mut expected, &encoded);
+                assert_eq!(buf, expected, "{text:?}");
+                buf.clear();
+                super::quoted_mailbox_name(&mut buf, &text, true);
+                expected.clear();
+                crate::protocol::quoted_string(&mut expected, &text);
+                assert_eq!(buf, expected, "{text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn decode_keeps_non_bmp_truncation() {
+        for text in [
+            "\u{1f604}",
+            "a\u{1f604}b",
+            "\u{10000}",
+            "\u{fffd}",
+            "\u{d7ff}\u{e000}",
+        ] {
+            let mut bytes: Vec<u16> = Vec::new();
+            for ch in text.chars() {
+                bytes.push(ch as u16);
+            }
+            assert_eq!(
+                super::utf7_decode(text),
+                String::from_utf16(&bytes).ok(),
+                "{text:?}"
             );
         }
     }

@@ -36,4 +36,8 @@ impl ImapResponse for Response<'_> {
             item.serialize(buf, self.is_utf8);
         }
     }
+
+    fn size_hint(&self) -> usize {
+        self.items.iter().map(FetchItem::size_hint).sum()
+    }
 }

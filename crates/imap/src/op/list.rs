@@ -14,7 +14,7 @@ use compact_str::{CompactString, format_compact};
 use imap_proto::{
     Command, ResponseType, StatusResponse,
     protocol::{
-        ImapResponse, ProtocolVersion,
+        ProtocolVersion,
         list::{
             self, Arguments, Attribute, ChildInfo, ListItem, ReturnOption, SelectionOption, Tag,
         },
@@ -62,20 +62,17 @@ impl<T: SessionStream> Session<T> {
             self.write_bytes(
                 StatusResponse::completed(command)
                     .with_tag(arguments.unwrap_tag())
-                    .serialize(
-                        list::Response {
-                            is_rev2: self.version.is_rev2(),
-                            is_utf8: self.is_utf8,
-                            is_lsub,
-                            list_items: vec![ListItem {
-                                mailbox_name: "".into(),
-                                attributes: vec![Attribute::NoSelect],
-                                tags: vec![],
-                            }],
-                            status_items: Vec::new(),
-                        }
-                        .serialize(),
-                    ),
+                    .serialize_after(&list::Response {
+                        is_rev2: self.version.is_rev2(),
+                        is_utf8: self.is_utf8,
+                        is_lsub,
+                        list_items: vec![ListItem {
+                            mailbox_name: "".into(),
+                            attributes: vec![Attribute::NoSelect],
+                            tags: vec![],
+                        }],
+                        status_items: Vec::new(),
+                    }),
             )
             .await
         }
@@ -369,16 +366,13 @@ impl<T: SessionStream> SessionData<T> {
                 Command::Lsub
             })
             .with_tag(tag)
-            .serialize(
-                list::Response {
-                    is_rev2: version.is_rev2(),
-                    is_utf8,
-                    is_lsub,
-                    list_items,
-                    status_items,
-                }
-                .serialize(),
-            ),
+            .serialize_after(&list::Response {
+                is_rev2: version.is_rev2(),
+                is_utf8,
+                is_lsub,
+                list_items,
+                status_items,
+            }),
         )
         .await
     }

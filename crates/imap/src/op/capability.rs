@@ -11,7 +11,6 @@ use common::network::SessionStream;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{
-        ImapResponse,
         capability::{Capability, Response},
         quoted_string,
     },
@@ -36,17 +35,14 @@ impl<T: SessionStream> Session<T> {
         self.write_bytes(
             StatusResponse::completed(Command::Capability)
                 .with_tag(request.tag)
-                .serialize(
-                    Response {
-                        capabilities: Capability::all_capabilities(
-                            self.state.is_authenticated(),
-                            !self.is_tls && self.instance.acceptor.is_tls(),
-                            self.server.core.imap.max_messages_per_command,
-                            self.server.core.imap.max_messages_per_save,
-                        ),
-                    }
-                    .serialize(),
-                ),
+                .serialize_after(&Response {
+                    capabilities: Capability::all_capabilities(
+                        self.state.is_authenticated(),
+                        !self.is_tls && self.instance.acceptor.is_tls(),
+                        self.server.core.imap.max_messages_per_command,
+                        self.server.core.imap.max_messages_per_save,
+                    ),
+                }),
         )
         .await
     }

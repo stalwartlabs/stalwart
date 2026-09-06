@@ -559,19 +559,19 @@ impl BodyPartExtension<'_> {
             buf.extend_from_slice(b"NIL");
         }
         if let Some(body_language) = &self.body_language {
-            match body_language.len() {
-                0 => buf.extend_from_slice(b" NIL"),
-                1 => {
+            match body_language.as_slice() {
+                [] => buf.extend_from_slice(b" NIL"),
+                [language] => {
                     buf.push(b' ');
-                    quoted_or_literal_string(buf, body_language.last().unwrap());
+                    quoted_or_literal_string(buf, language);
                 }
-                _ => {
+                languages => {
                     buf.extend_from_slice(b" (");
-                    for (pos, lang) in body_language.iter().enumerate() {
+                    for (pos, language) in languages.iter().enumerate() {
                         if pos > 0 {
                             buf.push(b' ');
                         }
-                        quoted_or_literal_string(buf, lang);
+                        quoted_or_literal_string(buf, language);
                     }
                     buf.push(b')');
                 }
@@ -621,16 +621,19 @@ impl Section {
             }
             Section::HeaderFields { not, fields } => {
                 if !not {
-                    buf.extend_from_slice(b"HEADER.FIELDS ");
+                    buf.extend_from_slice(b"HEADER.FIELDS (");
                 } else {
-                    buf.extend_from_slice(b"HEADER.FIELDS.NOT ");
+                    buf.extend_from_slice(b"HEADER.FIELDS.NOT (");
                 }
-                buf.push(b'(');
                 for (pos, field) in fields.iter().enumerate() {
                     if pos > 0 {
                         buf.push(b' ');
                     }
-                    buf.extend(field.bytes().map(|ch| ch.to_ascii_uppercase()));
+                    let start = buf.len();
+                    buf.extend_from_slice(field.as_bytes());
+                    if let Some(field) = buf.get_mut(start..) {
+                        field.make_ascii_uppercase();
+                    }
                 }
                 buf.push(b')');
             }
@@ -880,6 +883,90 @@ impl ImapResponse for Response<'_> {
         for item in &self.items {
             item.serialize(buf, self.is_utf8);
         }
+    }
+
+    fn size_hint(&self) -> usize {
+        self.items.iter().map(FetchItem::size_hint).sum()
+    }
+}
+
+const SECTION_FRAMING_LEN: usize = 20;
+const ITEM_FRAMING_LEN: usize = 16;
+const INT_LEN: usize = 11;
+const SIZE_LEN: usize = 20;
+const STRUCTURED_ITEM_LEN: usize = 512;
+const OBJECT_ID_LEN: usize = 96;
+
+impl Section {
+    fn size_hint(&self) -> usize {
+        match self {
+            Section::Part { .. } => INT_LEN,
+            Section::Header => 6,
+            Section::HeaderFields { fields, .. } => {
+                SECTION_FRAMING_LEN + fields.iter().map(|field| field.len() + 1).sum::<usize>()
+            }
+            Section::Text | Section::Mime => 4,
+        }
+    }
+}
+
+impl DataItem<'_> {
+    fn size_hint(&self) -> usize {
+        match self {
+            DataItem::Binary {
+                sections, contents, ..
+            } => {
+                ITEM_FRAMING_LEN
+                    + sections.len() * INT_LEN
+                    + INT_LEN
+                    + match contents {
+                        BodyContents::Text(text) => text.len(),
+                        BodyContents::Bytes(bytes) => bytes.len(),
+                    }
+            }
+            DataItem::BinarySize { sections, .. } => {
+                ITEM_FRAMING_LEN + sections.len() * INT_LEN + SIZE_LEN
+            }
+            DataItem::Body { .. } | DataItem::BodyStructure { .. } => STRUCTURED_ITEM_LEN,
+            DataItem::BodySection {
+                sections, contents, ..
+            } => {
+                ITEM_FRAMING_LEN
+                    + sections
+                        .iter()
+                        .map(|section| section.size_hint() + 1)
+                        .sum::<usize>()
+                    + INT_LEN
+                    + contents.len()
+            }
+            DataItem::Envelope { .. } => STRUCTURED_ITEM_LEN,
+            DataItem::Flags { flags } => ITEM_FRAMING_LEN + flags.len() * 16,
+            DataItem::InternalDate { .. } => ITEM_FRAMING_LEN + 28,
+            DataItem::Uid { .. } => ITEM_FRAMING_LEN,
+            DataItem::Rfc822 { contents }
+            | DataItem::Rfc822Header { contents }
+            | DataItem::Rfc822Text { contents } => ITEM_FRAMING_LEN + INT_LEN + contents.len(),
+            DataItem::Rfc822Size { .. } => ITEM_FRAMING_LEN + SIZE_LEN,
+            DataItem::Preview { contents } => {
+                ITEM_FRAMING_LEN
+                    + contents
+                        .as_ref()
+                        .map_or(0, |contents| contents.len() + INT_LEN)
+            }
+            DataItem::ModSeq { .. } => ITEM_FRAMING_LEN + SIZE_LEN,
+            DataItem::ObjectId(_) => OBJECT_ID_LEN,
+        }
+    }
+}
+
+impl FetchItem<'_> {
+    pub(crate) fn size_hint(&self) -> usize {
+        ITEM_FRAMING_LEN
+            + self
+                .items
+                .iter()
+                .map(|item| item.size_hint() + 1)
+                .sum::<usize>()
     }
 }
 

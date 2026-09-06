@@ -5,7 +5,7 @@
  */
 use compact_str::CompactString;
 
-use crate::utf7::utf7_encode;
+use crate::utf7::quoted_mailbox_name;
 
 use super::{
     ImapResponse, quoted_string,
@@ -214,7 +214,6 @@ impl ListItem {
     }
 
     pub fn serialize(&self, buf: &mut Vec<u8>, is_rev2: bool, is_utf8: bool, is_lsub: bool) {
-        let normalized_mailbox_name = utf7_encode(&self.mailbox_name);
         if !is_lsub {
             buf.extend_from_slice(b"* LIST (");
         } else {
@@ -231,11 +230,7 @@ impl ListItem {
         // RFC 9051 5.1 drops modified UTF-7, so a rev2 or UTF8=ACCEPT client is sent
         // the name as stored. OLDNAME is reserved for RENAME and for Net-Unicode
         // normalization (RFC 9051 6.3.9.7), neither of which a re-encoding is.
-        if is_rev2 || is_utf8 {
-            quoted_string(buf, &self.mailbox_name);
-        } else {
-            quoted_string(buf, &normalized_mailbox_name);
-        }
+        quoted_mailbox_name(buf, &self.mailbox_name, is_rev2 || is_utf8);
 
         if !self.tags.is_empty() {
             buf.extend_from_slice(b" (");
@@ -274,6 +269,33 @@ impl ImapResponse for Response {
             }
             _ => (),
         }
+    }
+
+    fn size_hint(&self) -> usize {
+        const LIST_FRAMING_LEN: usize = 24;
+        const ATTRIBUTE_LEN: usize = 16;
+        const TAG_LEN: usize = 24;
+        const STATUS_FRAMING_LEN: usize = 24;
+        const STATUS_ITEM_LEN: usize = 24;
+
+        self.list_items
+            .iter()
+            .map(|item| {
+                LIST_FRAMING_LEN
+                    + item.mailbox_name.len() * 2
+                    + item.attributes.len() * ATTRIBUTE_LEN
+                    + item.tags.len() * TAG_LEN
+            })
+            .sum::<usize>()
+            + self
+                .status_items
+                .iter()
+                .map(|item| {
+                    STATUS_FRAMING_LEN
+                        + item.mailbox_name.len() * 2
+                        + item.items.len() * STATUS_ITEM_LEN
+                })
+                .sum::<usize>()
     }
 }
 

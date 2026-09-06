@@ -31,6 +31,7 @@ members = [
     "crates/migration",
     "tests",
 ]
+exclude = ["fuzz"]
 
 [workspace.dependencies]
 rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }

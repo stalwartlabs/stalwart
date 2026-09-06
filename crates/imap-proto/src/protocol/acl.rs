@@ -7,7 +7,7 @@
 use compact_str::CompactString;
 
 use super::quoted_string;
-use crate::utf7::utf7_encode;
+use crate::utf7::quoted_mailbox_name;
 use std::fmt::Display;
 use types::acl::Acl;
 
@@ -70,15 +70,11 @@ impl GetAclResponse {
     pub fn into_bytes(self, is_utf8: bool) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.mailbox_name.len() + 10 * self.permissions.len() * 5);
         buf.extend_from_slice(b"* ACL ");
-        if is_utf8 {
-            quoted_string(&mut buf, &self.mailbox_name);
-        } else {
-            quoted_string(&mut buf, &utf7_encode(&self.mailbox_name));
-        }
+        quoted_mailbox_name(&mut buf, &self.mailbox_name, is_utf8);
         for (identifier, rights) in self.permissions {
-            buf.extend_from_slice(b" ");
+            buf.push(b' ');
             quoted_string(&mut buf, &identifier);
-            buf.extend_from_slice(b" ");
+            buf.push(b' ');
 
             for right in rights {
                 buf.push(right.to_char());
@@ -95,15 +91,11 @@ impl ListRightsResponse {
             self.mailbox_name.len() + self.identifier.len() + 10 * self.permissions.len() * 5,
         );
         buf.extend_from_slice(b"* LISTRIGHTS ");
-        if is_utf8 {
-            quoted_string(&mut buf, &self.mailbox_name);
-        } else {
-            quoted_string(&mut buf, &utf7_encode(&self.mailbox_name));
-        }
-        buf.extend_from_slice(b" ");
+        quoted_mailbox_name(&mut buf, &self.mailbox_name, is_utf8);
+        buf.push(b' ');
         quoted_string(&mut buf, &self.identifier);
         for rights in self.permissions {
-            buf.extend_from_slice(b" ");
+            buf.push(b' ');
             for right in rights {
                 buf.push(right.to_char());
             }
@@ -117,12 +109,8 @@ impl MyRightsResponse {
     pub fn into_bytes(self, is_utf8: bool) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.mailbox_name.len() + 10 + self.rights.len());
         buf.extend_from_slice(b"* MYRIGHTS ");
-        if is_utf8 {
-            quoted_string(&mut buf, &self.mailbox_name);
-        } else {
-            quoted_string(&mut buf, &utf7_encode(&self.mailbox_name));
-        }
-        buf.extend_from_slice(b" ");
+        quoted_mailbox_name(&mut buf, &self.mailbox_name, is_utf8);
+        buf.push(b' ');
         for right in self.rights {
             buf.push(right.to_char());
         }

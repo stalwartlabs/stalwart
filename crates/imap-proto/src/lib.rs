@@ -111,7 +111,69 @@ impl Command {
                 | Command::Thread(false)
         )
     }
+
+    pub fn as_str(&self) -> &'static str {
+        let message = self.completed_message();
+        &message[..message.len() - COMPLETED_SUFFIX.len()]
+    }
+
+    pub fn completed_message(&self) -> &'static str {
+        match self {
+            Command::UidBatches => "UIDBATCHES completed",
+            Command::Capability => "CAPABILITY completed",
+            Command::Noop => "NOOP completed",
+            Command::Logout => "LOGOUT completed",
+            Command::StartTls => "STARTTLS completed",
+            Command::Authenticate => "AUTHENTICATE completed",
+            Command::Login => "LOGIN completed",
+            Command::Enable => "ENABLE completed",
+            Command::Select => "SELECT completed",
+            Command::Examine => "EXAMINE completed",
+            Command::Create => "CREATE completed",
+            Command::Delete => "DELETE completed",
+            Command::Rename => "RENAME completed",
+            Command::Subscribe => "SUBSCRIBE completed",
+            Command::Unsubscribe => "UNSUBSCRIBE completed",
+            Command::List => "LIST completed",
+            Command::Namespace => "NAMESPACE completed",
+            Command::Status => "STATUS completed",
+            Command::Append => "APPEND completed",
+            Command::Idle => "IDLE completed",
+            Command::Close => "CLOSE completed",
+            Command::Unselect => "UNSELECT completed",
+            Command::Expunge(false) => "EXPUNGE completed",
+            Command::Search(false) => "SEARCH completed",
+            Command::Fetch(false) => "FETCH completed",
+            Command::Store(false) => "STORE completed",
+            Command::Copy(false) => "COPY completed",
+            Command::Move(false) => "MOVE completed",
+            Command::Sort(false) => "SORT completed",
+            Command::Thread(false) => "THREAD completed",
+            Command::Expunge(true) => "UID EXPUNGE completed",
+            Command::Search(true) => "UID SEARCH completed",
+            Command::Fetch(true) => "UID FETCH completed",
+            Command::Store(true) => "UID STORE completed",
+            Command::Copy(true) => "UID COPY completed",
+            Command::Move(true) => "UID MOVE completed",
+            Command::Sort(true) => "UID SORT completed",
+            Command::Thread(true) => "UID THREAD completed",
+            Command::Lsub => "LSUB completed",
+            Command::Check => "CHECK completed",
+            Command::SetAcl => "SETACL completed",
+            Command::DeleteAcl => "DELETEACL completed",
+            Command::GetAcl => "GETACL completed",
+            Command::ListRights => "LISTRIGHTS completed",
+            Command::MyRights => "MYRIGHTS completed",
+            Command::Unauthenticate => "UNAUTHENTICATE completed",
+            Command::Id => "ID completed",
+            Command::GetQuota => "GETQUOTA completed",
+            Command::GetQuotaRoot => "GETQUOTAROOT completed",
+            Command::GetJmapAccess => "GETJMAPACCESS completed",
+        }
+    }
 }
+
+const COMPLETED_SUFFIX: &str = " completed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseCode {
@@ -235,7 +297,7 @@ impl StatusResponse {
     }
 
     pub fn completed(command: Command) -> Self {
-        StatusResponse::ok(format!("{} completed", command))
+        StatusResponse::ok(command.completed_message())
     }
 
     pub fn with_code(mut self, code: ResponseCode) -> Self {

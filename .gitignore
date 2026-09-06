@@ -7,3 +7,7 @@ run.sh
 !.gitattributes
 !.github
 resources/zstd-builder/Cargo.lock
+fuzz/Cargo.lock
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/coverage/

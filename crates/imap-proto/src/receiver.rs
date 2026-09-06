@@ -79,9 +79,61 @@ pub struct Receiver<T: CommandParser> {
 
 const ARG_MAX_LEN: usize = 8000;
 const ARG_INIT_LEN: usize = 64;
+const TAG_MAX_LEN: usize = 128;
+const COMMAND_MAX_LEN: usize = 15;
+const LITERAL_MAX_DIGITS: usize = 15;
+const TOKENS_INIT_LEN: usize = 32;
 
 struct ArgumentBuffer {
     buf: Vec<u8>,
+}
+
+const CLASS_ARGUMENT: u8 = 0b0000_0001;
+const CLASS_BRACKET: u8 = 0b0000_0010;
+const CLASS_QUOTED: u8 = 0b0000_0100;
+const CLASS_TAG: u8 = 0b0000_1000;
+const CLASS_COMMAND: u8 = 0b0001_0000;
+const CLASS_START: u8 = 0b0010_0000;
+
+const BYTE_CLASS: [u8; 256] = byte_class_table();
+
+const fn byte_class_table() -> [u8; 256] {
+    let mut table = [0u8; 256];
+    let mut index = 0;
+    while index < 256 {
+        let ch = index as u8;
+        let is_whitespace = matches!(ch, b' ' | b'\t' | b'\n' | b'\x0c' | b'\r');
+        let mut class = 0;
+        if is_whitespace || matches!(ch, b'"' | b'{' | b'(' | b')') {
+            class |= CLASS_ARGUMENT;
+        }
+        if matches!(ch, b'[' | b']' | b'<' | b'>' | b'.') {
+            class |= CLASS_BRACKET;
+        }
+        if matches!(ch, b'"' | b'\\' | b'\n') {
+            class |= CLASS_QUOTED;
+        }
+        if matches!(ch, b' ' | b'\t' | b'\r' | b'\n') {
+            class |= CLASS_TAG;
+        }
+        if !matches!(ch, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z') {
+            class |= CLASS_COMMAND;
+        }
+        if !is_whitespace {
+            class |= CLASS_START;
+        }
+        table[index] = class;
+        index += 1;
+    }
+    table
+}
+
+#[inline(always)]
+fn run_len(bytes: &[u8], class: u8) -> usize {
+    bytes
+        .iter()
+        .position(|&ch| BYTE_CLASS[ch as usize] & class != 0)
+        .unwrap_or(bytes.len())
 }
 
 impl<T: CommandParser> Receiver<T> {
@@ -121,23 +173,33 @@ impl<T: CommandParser> Receiver<T> {
         err
     }
 
+    #[inline(never)]
+    fn request_size_error(&mut self) -> Error {
+        self.error_reset(format_compact!(
+            "Request exceeds maximum limit of {} bytes.",
+            self.max_request_size
+        ))
+    }
+
+    #[inline(always)]
+    fn push_request_token(&mut self, token: Token) {
+        if self.request.tokens.is_empty() {
+            self.request.tokens.reserve(TOKENS_INIT_LEN);
+        }
+        self.request.tokens.push(token);
+    }
+
     fn push_argument(&mut self, in_quote: bool) -> Result<(), Error> {
         if !self.buf.is_empty() {
             self.current_request_size += self.buf.len();
             if self.current_request_size > self.max_request_size {
-                return Err(self.error_reset(format_compact!(
-                    "Request exceeds maximum limit of {} bytes.",
-                    self.max_request_size
-                )));
+                return Err(self.request_size_error());
             }
-            self.request
-                .tokens
-                .push(Token::Argument(ArgumentBytes::from_slice(
-                    self.buf.as_ref(),
-                )));
+            let token = Token::Argument(ArgumentBytes::from_slice(self.buf.as_ref()));
+            self.push_request_token(token);
             self.buf.clear();
         } else if in_quote {
-            self.request.tokens.push(Token::Nil);
+            self.push_request_token(Token::Nil);
         }
         Ok(())
     }
@@ -146,16 +208,10 @@ impl<T: CommandParser> Receiver<T> {
         if !self.buf.is_empty() {
             self.current_request_size += self.buf.len();
             if self.current_request_size > self.max_request_size {
-                return Err(self.error_reset(format_compact!(
-                    "Request exceeds maximum limit of {} bytes.",
-                    self.max_request_size
-                )));
+                return Err(self.request_size_error());
             }
-            self.request
-                .tokens
-                .push(Token::Argument(ArgumentBytes::from_vec(
-                    self.buf.take_moved(),
-                )));
+            let token = Token::Argument(ArgumentBytes::from_vec(self.buf.take_moved()));
+            self.push_request_token(token);
         }
         Ok(())
     }
@@ -163,189 +219,249 @@ impl<T: CommandParser> Receiver<T> {
     fn push_token(&mut self, token: Token) -> Result<(), Error> {
         self.current_request_size += 1;
         if self.current_request_size > self.max_request_size {
-            return Err(self.error_reset(format_compact!(
-                "Request exceeds maximum limit of {} bytes.",
-                self.max_request_size
-            )));
+            return Err(self.request_size_error());
         }
-        self.request.tokens.push(token);
+        self.push_request_token(token);
         Ok(())
     }
 
     pub fn parse(&mut self, bytes: &mut std::slice::Iter<'_, u8>) -> Result<Request<T>, Error> {
-        #[allow(clippy::while_let_on_iterator)]
-        while let Some(&ch) = bytes.next() {
-            match self.state {
+        let mut state = self.state;
+
+        'outer: loop {
+            match state {
                 State::Start => {
-                    if !ch.is_ascii_whitespace() {
-                        // SAFETY: This called just once
-                        self.buf.push_unchecked(ch);
-                        self.state = State::Tag;
+                    match bytes.find(|&&ch| BYTE_CLASS[ch as usize] & CLASS_START != 0) {
+                        Some(&ch) => {
+                            self.buf.push_unchecked(ch);
+                            state = State::Tag;
+                        }
+                        None => break,
                     }
                 }
-                State::Tag => match ch {
-                    b' ' => {
-                        if !self.buf.is_empty() {
-                            match CompactString::from_utf8(self.buf.as_ref()) {
-                                Ok(tag) => {
-                                    self.request.tag = tag;
-                                    self.buf.clear();
-                                }
-                                Err(_) => {
-                                    return Err(
-                                        self.error_reset("Tag is not a valid UTF-8 string.")
-                                    );
-                                }
-                            }
-                            self.state = State::Command { is_uid: false };
-                        }
-                    }
-                    b'\t' | b'\r' => {}
-                    b'\n' => {
-                        return Err(self.error_reset(format_compact!(
-                            "Missing command after tag {:?}, found CRLF instead.",
-                            self.buf.as_str()
-                        )));
-                    }
-                    _ => {
-                        self.buf.push_checked(ch, 128).map_err(|_| {
+                State::Tag => {
+                    let slice = bytes.as_slice();
+                    let (run, tail) = slice.split_at(run_len(slice, CLASS_TAG));
+                    if let Err(allowed) = self.buf.extend_checked(run, TAG_MAX_LEN) {
+                        *bytes = slice.split_at(allowed + 1).1.iter();
+                        return Err(
                             self.error_reset("Tag exceeds maximum length of 128 characters.")
-                        })?;
+                        );
                     }
-                },
-                State::Command { is_uid } => {
-                    if ch.is_ascii_alphanumeric() {
-                        self.buf
-                            .push_checked(ch.to_ascii_uppercase(), 15)
-                            .map_err(|_| {
-                                self.error_reset("Command exceeds maximum length of 15 characters.")
-                            })?;
-                    } else if ch.is_ascii_whitespace() {
-                        if !self.buf.is_empty() {
-                            if !self.buf.as_ref().eq_ignore_ascii_case(b"UID") {
-                                self.request.command = T::parse(self.buf.as_ref(), is_uid)
-                                    .ok_or_else(|| {
-                                        let err = format_compact!(
-                                            "Unrecognized command '{}'.",
-                                            String::from_utf8_lossy(self.buf.as_ref())
+                    let Some((&ch, rest)) = tail.split_first() else {
+                        *bytes = tail.iter();
+                        break;
+                    };
+                    *bytes = rest.iter();
+                    match ch {
+                        b' ' => {
+                            if !self.buf.is_empty() {
+                                match CompactString::from_utf8(self.buf.as_ref()) {
+                                    Ok(tag) => {
+                                        self.request.tag = tag;
+                                        self.buf.clear();
+                                    }
+                                    Err(_) => {
+                                        return Err(
+                                            self.error_reset("Tag is not a valid UTF-8 string.")
                                         );
-                                        self.error_reset(err)
-                                    })?;
-                                self.buf.clear();
-                                if ch != b'\n' {
-                                    self.state = State::Argument { last_ch: b' ' };
-                                } else {
-                                    self.state = self.start_state;
-                                    self.current_request_size = 0;
-                                    return Ok(std::mem::take(&mut self.request));
+                                    }
                                 }
-                            } else {
-                                self.buf.clear();
-                                self.state = State::Command { is_uid: true };
+                                state = State::Command { is_uid: false };
                             }
                         }
-                    } else {
+                        b'\n' => {
+                            return Err(self.error_reset(format_compact!(
+                                "Missing command after tag {:?}, found CRLF instead.",
+                                self.buf.as_str()
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
+                State::Command { is_uid } => {
+                    let slice = bytes.as_slice();
+                    let (run, tail) = slice.split_at(run_len(slice, CLASS_COMMAND));
+                    if let Err(allowed) = self.buf.extend_checked_uppercase(run, COMMAND_MAX_LEN) {
+                        *bytes = slice.split_at(allowed + 1).1.iter();
+                        return Err(
+                            self.error_reset("Command exceeds maximum length of 15 characters.")
+                        );
+                    }
+                    let Some((&ch, rest)) = tail.split_first() else {
+                        *bytes = tail.iter();
+                        break;
+                    };
+                    *bytes = rest.iter();
+                    if !ch.is_ascii_whitespace() {
                         return Err(self.error_reset(format_compact!(
                             "Invalid character {:?} in command name.",
                             ch as char
                         )));
                     }
-                }
-                State::Argument { last_ch } => match ch {
-                    b'\"' if last_ch.is_ascii_whitespace() => {
-                        self.push_argument(false)?;
-                        self.state = State::ArgumentQuoted { escaped: false };
-                    }
-                    b'{' if last_ch.is_ascii_whitespace()
-                        || (last_ch == b'~' && self.buf.len() == 1) =>
-                    {
-                        if last_ch != b'~' {
-                            self.push_argument(false)?;
+                    if !self.buf.is_empty() {
+                        if !self.buf.as_ref().eq_ignore_ascii_case(b"UID") {
+                            self.request.command =
+                                T::parse(self.buf.as_ref(), is_uid).ok_or_else(|| {
+                                    let err = format_compact!(
+                                        "Unrecognized command '{}'.",
+                                        String::from_utf8_lossy(self.buf.as_ref())
+                                    );
+                                    self.error_reset(err)
+                                })?;
+                            self.buf.clear();
+                            if ch != b'\n' {
+                                state = State::Argument { last_ch: b' ' };
+                            } else {
+                                self.state = self.start_state;
+                                self.current_request_size = 0;
+                                return Ok(std::mem::take(&mut self.request));
+                            }
                         } else {
                             self.buf.clear();
+                            state = State::Command { is_uid: true };
                         }
-                        self.state = State::Literal { non_sync: false };
                     }
-                    b'(' => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::ParenthesisOpen)?;
+                }
+                State::Argument { last_ch } => {
+                    let mut last_ch = last_ch;
+                    let class = if self.request.command.tokenize_brackets() {
+                        CLASS_ARGUMENT | CLASS_BRACKET
+                    } else {
+                        CLASS_ARGUMENT
+                    };
+                    loop {
+                        let slice = bytes.as_slice();
+                        let (run, tail) = slice.split_at(run_len(slice, class));
+                        if let Some(&last) = run.last() {
+                            if let Err(allowed) = self.buf.extend_checked(run, ARG_MAX_LEN) {
+                                *bytes = slice.split_at(allowed + 1).1.iter();
+                                return Err(self.error_reset(
+                                    "Argument exceeds maximum length of 8000 bytes.",
+                                ));
+                            }
+                            last_ch = last;
+                        }
+                        let Some((&ch, rest)) = tail.split_first() else {
+                            *bytes = tail.iter();
+                            state = State::Argument { last_ch };
+                            break 'outer;
+                        };
+                        *bytes = rest.iter();
+                        match ch {
+                            b'\"' if last_ch.is_ascii_whitespace() => {
+                                self.push_argument(false)?;
+                                state = State::ArgumentQuoted { escaped: false };
+                                continue 'outer;
+                            }
+                            b'{' if last_ch.is_ascii_whitespace()
+                                || (last_ch == b'~' && self.buf.len() == 1) =>
+                            {
+                                if last_ch != b'~' {
+                                    self.push_argument(false)?;
+                                } else {
+                                    self.buf.clear();
+                                }
+                                state = State::Literal { non_sync: false };
+                                continue 'outer;
+                            }
+                            b'(' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::ParenthesisOpen)?;
+                            }
+                            b')' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::ParenthesisClose)?;
+                            }
+                            b'[' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::BracketOpen)?;
+                            }
+                            b']' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::BracketClose)?;
+                            }
+                            b'<' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::Lt)?;
+                            }
+                            b'>' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::Gt)?;
+                            }
+                            b'.' => {
+                                self.push_argument(false)?;
+                                self.push_token(Token::Dot)?;
+                            }
+                            b'\n' => {
+                                self.push_argument(false)?;
+                                self.state = self.start_state;
+                                self.current_request_size = 0;
+                                return Ok(std::mem::take(&mut self.request));
+                            }
+                            _ if ch.is_ascii_whitespace() => {
+                                self.push_argument(false)?;
+                                last_ch = ch;
+                            }
+                            _ => {
+                                self.buf.push_checked(ch, ARG_MAX_LEN).map_err(|_| {
+                                    self.error_reset(
+                                        "Argument exceeds maximum length of 8000 bytes.",
+                                    )
+                                })?;
+                                last_ch = ch;
+                            }
+                        }
                     }
-                    b')' => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::ParenthesisClose)?;
+                }
+                State::ArgumentQuoted { escaped } => {
+                    if escaped {
+                        let Some(&ch) = bytes.next() else { break };
+                        match ch {
+                            b'\n' => {
+                                return Err(self.error_reset("Unterminated quoted argument."));
+                            }
+                            b'\"' | b'\\' => {
+                                self.buf
+                                    .push_checked(ch, ARG_MAX_LEN)
+                                    .map_err(|_| self.error_reset("Quoted argument too long."))?;
+                            }
+                            _ => {
+                                self.buf.push_unchecked(b'\\');
+                                self.buf
+                                    .push_checked(ch, ARG_MAX_LEN)
+                                    .map_err(|_| self.error_reset("Quoted argument too long."))?;
+                            }
+                        }
+                        state = State::ArgumentQuoted { escaped: false };
+                        continue;
                     }
-                    b'[' if self.request.command.tokenize_brackets() => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::BracketOpen)?;
+                    let slice = bytes.as_slice();
+                    let (run, tail) = slice.split_at(run_len(slice, CLASS_QUOTED));
+                    if let Err(allowed) = self.buf.extend_checked(run, ARG_MAX_LEN) {
+                        *bytes = slice.split_at(allowed + 1).1.iter();
+                        return Err(self.error_reset("Quoted argument too long."));
                     }
-                    b']' if self.request.command.tokenize_brackets() => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::BracketClose)?;
-                    }
-                    b'<' if self.request.command.tokenize_brackets() => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::Lt)?;
-                    }
-                    b'>' if self.request.command.tokenize_brackets() => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::Gt)?;
-                    }
-                    b'.' if self.request.command.tokenize_brackets() => {
-                        self.push_argument(false)?;
-                        self.push_token(Token::Dot)?;
-                    }
-                    b'\n' => {
-                        self.push_argument(false)?;
-                        self.state = self.start_state;
-                        self.current_request_size = 0;
-                        return Ok(std::mem::take(&mut self.request));
-                    }
-                    _ if ch.is_ascii_whitespace() => {
-                        self.push_argument(false)?;
-                        self.state = State::Argument { last_ch: ch };
-                    }
-                    _ => {
-                        self.buf.push_checked(ch, ARG_MAX_LEN).map_err(|_| {
-                            self.error_reset("Argument exceeds maximum length of 8000 bytes.")
-                        })?;
-                        self.state = State::Argument { last_ch: ch };
-                    }
-                },
-                State::ArgumentQuoted { escaped } => match ch {
-                    b'\"' => {
-                        if !escaped {
+                    let Some((&ch, rest)) = tail.split_first() else {
+                        *bytes = tail.iter();
+                        break;
+                    };
+                    *bytes = rest.iter();
+                    match ch {
+                        b'\"' => {
                             self.push_argument(true)?;
-                            self.state = State::Argument { last_ch: b' ' };
-                        } else {
-                            self.buf
-                                .push_checked(ch, ARG_MAX_LEN)
-                                .map_err(|_| self.error_reset("Quoted argument too long."))?;
-                            self.state = State::ArgumentQuoted { escaped: false };
+                            state = State::Argument { last_ch: b' ' };
+                        }
+                        b'\\' => {
+                            state = State::ArgumentQuoted { escaped: true };
+                        }
+                        _ => {
+                            return Err(self.error_reset("Unterminated quoted argument."));
                         }
                     }
-                    b'\\' => {
-                        if escaped {
-                            self.buf
-                                .push_checked(ch, ARG_MAX_LEN)
-                                .map_err(|_| self.error_reset("Quoted argument too long."))?;
-                        }
-                        self.state = State::ArgumentQuoted { escaped: !escaped };
-                    }
-                    b'\n' => {
-                        return Err(self.error_reset("Unterminated quoted argument."));
-                    }
-                    _ => {
-                        if escaped {
-                            // SAFETY: We check the size below
-                            self.buf.push_unchecked(b'\\');
-                        }
-                        self.buf
-                            .push_checked(ch, ARG_MAX_LEN)
-                            .map_err(|_| self.error_reset("Quoted argument too long."))?;
-                        self.state = State::ArgumentQuoted { escaped: false };
-                    }
-                },
+                }
                 State::Literal { non_sync } => {
+                    let Some(&ch) = bytes.next() else { break };
                     match ch {
                         b'}' => {
                             if !self.buf.is_empty() {
@@ -360,7 +476,7 @@ impl<T: CommandParser> Receiver<T> {
                                         self.max_request_size
                                     )));
                                 }
-                                self.state = State::LiteralSeek { size, non_sync };
+                                state = State::LiteralSeek { size, non_sync };
                                 if !oversize {
                                     self.buf.resize_buffer(size as usize);
                                 }
@@ -371,18 +487,17 @@ impl<T: CommandParser> Receiver<T> {
                         }
                         b'+' => {
                             if !self.buf.is_empty() {
-                                self.state = State::Literal { non_sync: true };
+                                state = State::Literal { non_sync: true };
                             } else {
                                 return Err(self.error_reset("Invalid non-sync literal."));
                             }
                         }
                         _ if ch.is_ascii_digit() => {
                             if !non_sync {
-                                self.buf.push_checked(ch, 15).map_err(|_| {
+                                self.buf.push_checked(ch, LITERAL_MAX_DIGITS).map_err(|_| {
                                     self.error_reset("Literal size exceeds maximum of 15 digits.")
                                 })?;
                             } else {
-                                // Digit found after non-sync '+' flag
                                 return Err(self.error_reset("Invalid literal."));
                             }
                         }
@@ -395,20 +510,23 @@ impl<T: CommandParser> Receiver<T> {
                     }
                 }
                 State::LiteralSeek { size, non_sync } => {
+                    let Some(&ch) = bytes.next() else { break };
                     if ch == b'\n' {
                         if non_sync
                             && self.current_request_size + size as usize > self.max_request_size
                         {
-                            self.state = State::LiteralDiscard { remaining: size };
+                            state = State::LiteralDiscard { remaining: size };
                         } else if size > 0 {
-                            self.state = State::LiteralData { remaining: size };
+                            state = State::LiteralData { remaining: size };
                             if !non_sync {
+                                self.state = state;
                                 return Err(Error::NeedsLiteral { size });
                             }
                         } else {
-                            self.state = State::Argument { last_ch: b' ' };
+                            state = State::Argument { last_ch: b' ' };
                             self.push_token(Token::Nil)?;
                             if !non_sync {
+                                self.state = state;
                                 return Err(Error::NeedsLiteral { size });
                             }
                         }
@@ -419,16 +537,19 @@ impl<T: CommandParser> Receiver<T> {
                     }
                 }
                 State::LiteralDiscard { remaining } => {
+                    if bytes.next().is_none() {
+                        break;
+                    }
                     if remaining > 1 {
                         let mut remaining = remaining - 1;
                         let available = bytes.as_slice();
                         let taken = (remaining as usize).min(available.len());
                         if taken > 0 {
-                            bytes.nth(taken - 1);
+                            *bytes = available.split_at(taken).1.iter();
                             remaining -= taken as u32;
                         }
                         if remaining > 0 {
-                            self.state = State::LiteralDiscard { remaining };
+                            state = State::LiteralDiscard { remaining };
                             continue;
                         }
                     }
@@ -438,7 +559,7 @@ impl<T: CommandParser> Receiver<T> {
                     )));
                 }
                 State::LiteralData { remaining } => {
-                    // SAFETY: We checked the size before entering this state
+                    let Some(&ch) = bytes.next() else { break };
                     self.buf.push_unchecked(ch);
                     let mut remaining = remaining - 1;
 
@@ -446,22 +567,24 @@ impl<T: CommandParser> Receiver<T> {
                         let available = bytes.as_slice();
                         let taken = (remaining as usize).min(available.len());
                         if taken > 0 {
-                            self.buf.extend_from_slice(&available[..taken]);
-                            bytes.nth(taken - 1);
+                            let (run, tail) = available.split_at(taken);
+                            self.buf.extend_from_slice(run);
+                            *bytes = tail.iter();
                             remaining -= taken as u32;
                         }
                     }
 
                     if remaining > 0 {
-                        self.state = State::LiteralData { remaining };
+                        state = State::LiteralData { remaining };
                     } else {
                         self.push_literal()?;
-                        self.state = State::Argument { last_ch: b' ' };
+                        state = State::Argument { last_ch: b' ' };
                     }
                 }
             }
         }
 
+        self.state = state;
         Err(Error::NeedsMoreData)
     }
 }
@@ -480,6 +603,32 @@ impl ArgumentBuffer {
     #[inline(always)]
     pub fn extend_from_slice(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
+    }
+
+    #[inline(always)]
+    pub fn extend_checked(&mut self, bytes: &[u8], limit: usize) -> Result<(), usize> {
+        let allowed = limit.saturating_sub(self.buf.len());
+        if bytes.len() <= allowed {
+            self.buf.extend_from_slice(bytes);
+            Ok(())
+        } else {
+            Err(allowed)
+        }
+    }
+
+    #[inline(always)]
+    pub fn extend_checked_uppercase(&mut self, bytes: &[u8], limit: usize) -> Result<(), usize> {
+        let allowed = limit.saturating_sub(self.buf.len());
+        if bytes.len() <= allowed {
+            let appended_from = self.buf.len();
+            self.buf.extend_from_slice(bytes);
+            if let Some(appended) = self.buf.get_mut(appended_from..) {
+                appended.make_ascii_uppercase();
+            }
+            Ok(())
+        } else {
+            Err(allowed)
+        }
     }
 
     #[inline(always)]
@@ -1227,6 +1376,176 @@ mod tests {
                 "connection did not resync for {:#?}",
                 frames
             );
+        }
+    }
+
+    fn parse_all(
+        receiver: &mut Receiver<Command>,
+        input: &[u8],
+    ) -> (Vec<Request<Command>>, Vec<String>, usize) {
+        let mut bytes = input.iter();
+        let mut requests = Vec::new();
+        let mut errors = Vec::new();
+        loop {
+            match receiver.parse(&mut bytes) {
+                Ok(request) => requests.push(request),
+                Err(Error::NeedsMoreData) => break,
+                Err(Error::NeedsLiteral { .. }) => continue,
+                Err(Error::Error { response }) => errors.push(format!("{response:?}")),
+            }
+        }
+        (requests, errors, bytes.len())
+    }
+
+    fn chunked(input: &[u8], chunk: usize) -> (Vec<Request<Command>>, Vec<String>) {
+        let mut receiver = Receiver::<Command>::new();
+        let mut requests = Vec::new();
+        let mut errors = Vec::new();
+        for piece in input.chunks(chunk) {
+            let (mut r, mut e, _) = parse_all(&mut receiver, piece);
+            requests.append(&mut r);
+            errors.append(&mut e);
+        }
+        (requests, errors)
+    }
+
+    #[test]
+    fn receiver_limits_fire_on_the_same_byte() {
+        for (name, line, fits) in [
+            ("tag 128", format!("{} NOOP\r\n", "T".repeat(128)), true),
+            ("tag 129", format!("{} NOOP\r\n", "T".repeat(129)), false),
+            ("command 15", "a1 ABCDEFGHIJKLMNO\r\n".to_string(), false),
+            ("command 16", "a1 ABCDEFGHIJKLMNOP\r\n".to_string(), false),
+            (
+                "argument 8000",
+                format!("a1 CREATE {}\r\n", "x".repeat(8000)),
+                true,
+            ),
+            (
+                "argument 8001",
+                format!("a1 CREATE {}\r\n", "x".repeat(8001)),
+                false,
+            ),
+            (
+                "quoted 8000",
+                format!("a1 CREATE \"{}\"\r\n", "x".repeat(8000)),
+                true,
+            ),
+            (
+                "quoted 8001",
+                format!("a1 CREATE \"{}\"\r\n", "x".repeat(8001)),
+                false,
+            ),
+            (
+                "quoted escapes 8000",
+                format!("a1 CREATE \"{}\"\r\n", "\\\"".repeat(8000)),
+                true,
+            ),
+            (
+                "quoted escapes 8001",
+                format!("a1 CREATE \"{}\"\r\n", "\\\"".repeat(8001)),
+                false,
+            ),
+            (
+                "literal digits 15",
+                format!("a1 LOGIN {{{}}}\r\n", "1".repeat(15)),
+                false,
+            ),
+            (
+                "literal digits 16",
+                format!("a1 LOGIN {{{}}}\r\n", "1".repeat(16)),
+                false,
+            ),
+        ] {
+            let mut receiver = Receiver::<Command>::new();
+            let (requests, errors, remaining) = parse_all(&mut receiver, line.as_bytes());
+            let whole = (requests.len(), errors.len(), remaining);
+            if fits {
+                assert_eq!(errors.len(), 0, "{name}: {errors:?}");
+            } else {
+                assert!(!errors.is_empty(), "{name}: expected an error");
+            }
+            for chunk in [1usize, 2, 3, 7, 16, 64, 4096] {
+                let (requests, errors) = chunked(line.as_bytes(), chunk);
+                assert_eq!(
+                    (requests.len(), errors.len(), 0),
+                    whole,
+                    "{name} chunk {chunk}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn receiver_quirks_are_preserved() {
+        let cases: &[(&str, &[Token])] = &[
+            (
+                "a1 LIST (\"a\" \"b\") \"\"\r\n",
+                &[
+                    Token::ParenthesisOpen,
+                    Token::Argument(ArgumentBytes::from_slice(b"a")),
+                    Token::Argument(ArgumentBytes::from_slice(b"b")),
+                    Token::ParenthesisClose,
+                    Token::Nil,
+                ],
+            ),
+            (
+                "a1 CREATE a\"b\r\n",
+                &[Token::Argument(ArgumentBytes::from_slice(b"a\"b"))],
+            ),
+            (
+                "a1 CREATE \"\\x\\y\"\r\n",
+                &[Token::Argument(ArgumentBytes::from_slice(b"\\x\\y"))],
+            ),
+            (
+                "a1 CREATE a{3}\r\n",
+                &[Token::Argument(ArgumentBytes::from_slice(b"a{3}"))],
+            ),
+            (
+                "a1 CREATE ~{3+}\r\nabc\r\n",
+                &[Token::Argument(ArgumentBytes::from_slice(b"abc"))],
+            ),
+            (
+                "a1 CREATE x~{3+}\r\n",
+                &[Token::Argument(ArgumentBytes::from_slice(b"x~{3+}"))],
+            ),
+            (
+                "a1 FETCH 1 BODY[1.2]<0.10>\r\n",
+                &[
+                    Token::Argument(ArgumentBytes::from_slice(b"1")),
+                    Token::Argument(ArgumentBytes::from_slice(b"BODY")),
+                    Token::BracketOpen,
+                    Token::Argument(ArgumentBytes::from_slice(b"1")),
+                    Token::Dot,
+                    Token::Argument(ArgumentBytes::from_slice(b"2")),
+                    Token::BracketClose,
+                    Token::Lt,
+                    Token::Argument(ArgumentBytes::from_slice(b"0")),
+                    Token::Dot,
+                    Token::Argument(ArgumentBytes::from_slice(b"10")),
+                    Token::Gt,
+                ],
+            ),
+            (
+                "a1 SEARCH BODY[1.2]<0.10>\r\n",
+                &[Token::Argument(ArgumentBytes::from_slice(
+                    b"BODY[1.2]<0.10>",
+                ))],
+            ),
+            ("a1 NOOP \t\r\n", &[]),
+            ("  \r\n a1 NOOP\r\n", &[]),
+        ];
+        for (line, tokens) in cases {
+            for chunk in [1usize, 3, 8, 4096] {
+                let (requests, errors) = chunked(line.as_bytes(), chunk);
+                assert!(errors.is_empty(), "{line:?} chunk {chunk}: {errors:?}");
+                assert_eq!(requests.len(), 1, "{line:?} chunk {chunk}");
+                assert_eq!(
+                    requests[0].tokens.as_slice(),
+                    *tokens,
+                    "{line:?} chunk {chunk}"
+                );
+            }
         }
     }
 }

@@ -218,6 +218,13 @@ impl ImapResponse for Response {
         }
         buf.extend_from_slice(b"\r\n");
     }
+
+    fn size_hint(&self) -> usize {
+        const FRAMING_LEN: usize = 16;
+        const CAPABILITY_LEN: usize = 20;
+
+        FRAMING_LEN + self.capabilities.len() * CAPABILITY_LEN
+    }
 }
 
 #[cfg(test)]

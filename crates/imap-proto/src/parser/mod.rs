@@ -191,7 +191,135 @@ impl Flag {
     }
 }
 
+const SECONDS_PER_DAY: i64 = 86_400;
+
+#[inline(always)]
+fn short_month(m0: u8, m1: u8, m2: u8) -> Option<u32> {
+    Some(match (m0 | 32, m1 | 32, m2 | 32) {
+        (b'j', b'a', b'n') => 1,
+        (b'f', b'e', b'b') => 2,
+        (b'm', b'a', b'r') => 3,
+        (b'a', b'p', b'r') => 4,
+        (b'm', b'a', b'y') => 5,
+        (b'j', b'u', b'n') => 6,
+        (b'j', b'u', b'l') => 7,
+        (b'a', b'u', b'g') => 8,
+        (b's', b'e', b'p') => 9,
+        (b'o', b'c', b't') => 10,
+        (b'n', b'o', b'v') => 11,
+        (b'd', b'e', b'c') => 12,
+        _ => return None,
+    })
+}
+
+#[inline(always)]
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        _ if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        _ => 28,
+    }
+}
+
+#[inline(always)]
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let year = year - (month <= 2) as i32;
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = (year - era * 400) as i64;
+    let month_of_year = (if month > 2 { month - 3 } else { month + 9 }) as i64;
+    let day_of_year = (153 * month_of_year + 2) / 5 + day as i64 - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era as i64 * 146_097 + day_of_era - 719_468
+}
+
+#[inline(always)]
+fn two_digits(d0: u8, d1: u8) -> Option<u32> {
+    (d0.is_ascii_digit() && d1.is_ascii_digit()).then(|| ((d0 - b'0') * 10 + (d1 - b'0')) as u32)
+}
+
+#[inline(always)]
+fn parse_civil_date(value: &[u8]) -> Option<(i64, &[u8])> {
+    let (day, rest) = match value {
+        [d0, d1, b'-', rest @ ..] if d0.is_ascii_digit() && d1.is_ascii_digit() => {
+            (two_digits(*d0, *d1)?, rest)
+        }
+        [d0, b'-', rest @ ..] if d0.is_ascii_digit() => ((*d0 - b'0') as u32, rest),
+        _ => return None,
+    };
+    let [m0, m1, m2, b'-', rest @ ..] = rest else {
+        return None;
+    };
+    let month = short_month(*m0, *m1, *m2)?;
+    let [y0, y1, y2, y3, rest @ ..] = rest else {
+        return None;
+    };
+    let year = (two_digits(*y0, *y1)? * 100 + two_digits(*y2, *y3)?) as i32;
+
+    if day == 0 || day > days_in_month(year, month) {
+        return None;
+    }
+
+    Some((days_from_civil(year, month, day), rest))
+}
+
+fn parse_datetime_fast(value: &[u8]) -> Option<i64> {
+    let (days, rest) = parse_civil_date(value)?;
+    let [
+        b' ',
+        h0,
+        h1,
+        b':',
+        m0,
+        m1,
+        b':',
+        s0,
+        s1,
+        b' ',
+        sign,
+        z0,
+        z1,
+        z2,
+        z3,
+    ] = rest
+    else {
+        return None;
+    };
+    let hour = two_digits(*h0, *h1)?;
+    let minute = two_digits(*m0, *m1)?;
+    let second = two_digits(*s0, *s1)?;
+    let zone_hour = two_digits(*z0, *z1)?;
+    let zone_minute = two_digits(*z2, *z3)?;
+
+    if hour > 23 || minute > 59 || second > 59 || zone_hour > 23 || zone_minute > 59 {
+        return None;
+    }
+
+    let zone = (zone_hour * 3600 + zone_minute * 60) as i64;
+    let zone = match sign {
+        b'+' => -zone,
+        b'-' => zone,
+        _ => return None,
+    };
+
+    Some(days * SECONDS_PER_DAY + (hour * 3600 + minute * 60 + second) as i64 + zone)
+}
+
+fn parse_date_fast(value: &[u8]) -> Option<i64> {
+    let (days, rest) = parse_civil_date(value)?;
+    rest.is_empty().then(|| days * SECONDS_PER_DAY)
+}
+
 pub fn parse_datetime(value: &[u8]) -> Result<i64> {
+    if let Some(timestamp) = parse_datetime_fast(value.trim_ascii()) {
+        return Ok(timestamp);
+    }
+
+    parse_datetime_chrono(value)
+}
+
+#[inline(never)]
+fn parse_datetime_chrono(value: &[u8]) -> Result<i64> {
     std::str::from_utf8(value)
         .map_err(|_| Cow::from("Expected date/time, found an invalid UTF-8 string."))
         .and_then(|datetime| {
@@ -202,6 +330,15 @@ pub fn parse_datetime(value: &[u8]) -> Result<i64> {
 }
 
 pub fn parse_date(value: &[u8]) -> Result<i64> {
+    if let Some(timestamp) = parse_date_fast(value.trim_ascii()) {
+        return Ok(timestamp);
+    }
+
+    parse_date_chrono(value)
+}
+
+#[inline(never)]
+fn parse_date_chrono(value: &[u8]) -> Result<i64> {
     std::str::from_utf8(value)
         .map_err(|_| Cow::from("Expected date, found an invalid UTF-8 string."))
         .and_then(|date| {
@@ -226,7 +363,108 @@ pub fn parse_number<T: FromStr>(value: &[u8]) -> Result<T> {
         })
 }
 
+#[inline(always)]
+fn sequence_number(value: &[u8]) -> Option<(u32, &[u8])> {
+    let digits = value
+        .iter()
+        .position(|ch| !ch.is_ascii_digit())
+        .unwrap_or(value.len());
+    let (number, tail) = value.split_at(digits);
+    if number.is_empty() || number.len() > 10 {
+        return None;
+    }
+    let number = number
+        .iter()
+        .fold(0u64, |acc, ch| acc * 10 + (ch - b'0') as u64);
+    (number <= u32::MAX as u64).then_some((number as u32, tail))
+}
+
+#[inline(always)]
+fn sequence_item(value: &[u8]) -> Option<(Sequence, &[u8])> {
+    match value {
+        [b'$', tail @ ..] => Some((Sequence::SavedSearch, tail)),
+        [b'*', b':', b'*', tail @ ..] => Some((
+            Sequence::Range {
+                start: None,
+                end: None,
+            },
+            tail,
+        )),
+        [b'*', b':', tail @ ..] => {
+            let (end, tail) = sequence_number(tail)?;
+            Some((
+                Sequence::Range {
+                    start: None,
+                    end: Some(end),
+                },
+                tail,
+            ))
+        }
+        [b'*', tail @ ..] => Some((
+            Sequence::Range {
+                start: None,
+                end: None,
+            },
+            tail,
+        )),
+        _ => {
+            let (start, tail) = sequence_number(value)?;
+            match tail {
+                [b':', b'*', tail @ ..] => Some((
+                    Sequence::Range {
+                        start: Some(start),
+                        end: None,
+                    },
+                    tail,
+                )),
+                [b':', tail @ ..] => {
+                    let (end, tail) = sequence_number(tail)?;
+                    Some((
+                        Sequence::Range {
+                            start: Some(start),
+                            end: Some(end),
+                        },
+                        tail,
+                    ))
+                }
+                _ => Some((Sequence::Number { value: start }, tail)),
+            }
+        }
+    }
+}
+
+fn parse_sequence_set_fast(value: &[u8]) -> Option<Sequence> {
+    let (first, tail) = sequence_item(value)?;
+    let mut rest = match tail {
+        [] => return Some(first),
+        [b',', rest @ ..] => rest,
+        _ => return None,
+    };
+
+    let commas = rest.iter().filter(|&&ch| ch == b',').count();
+    let mut items = Vec::with_capacity(commas + 2);
+    items.push(first);
+    loop {
+        let (item, tail) = sequence_item(rest)?;
+        items.push(item);
+        match tail {
+            [b',', tail @ ..] => rest = tail,
+            [] => return Some(Sequence::List { items }),
+            _ => return None,
+        }
+    }
+}
+
 pub fn parse_sequence_set(value: &[u8]) -> Result<Sequence> {
+    if let Some(sequence_set) = parse_sequence_set_fast(value) {
+        return Ok(sequence_set);
+    }
+
+    parse_sequence_set_slow(value)
+}
+
+#[inline(never)]
+fn parse_sequence_set_slow(value: &[u8]) -> Result<Sequence> {
     let mut sequence_set = Vec::with_capacity(value.iter().filter(|&&ch| ch == b',').count() + 1);
 
     let mut range_start = None;
@@ -499,6 +737,204 @@ mod tests {
             assert_eq!(
                 super::parse_sequence_set(sequence.as_bytes()).unwrap(),
                 expected_result
+            );
+        }
+    }
+
+    #[test]
+    fn sequence_set_fast_path_matches_slow_path() {
+        let cases = [
+            "",
+            "1",
+            "*",
+            "$",
+            "1:*",
+            "*:1",
+            "*:*",
+            "1:2",
+            "2:1",
+            "1,2",
+            "1,2,3",
+            "1:3,5,7:9",
+            "$,1",
+            "1,$",
+            "*,1",
+            "1,*",
+            "1:2:3",
+            "1::2",
+            "1,",
+            ",1",
+            ",",
+            ":",
+            "1:",
+            ":1",
+            "1*",
+            "*1",
+            "**",
+            "$$",
+            "$:",
+            "1,,2",
+            "0",
+            "0:0",
+            "00000000001",
+            "4294967295",
+            "4294967296",
+            "99999999999",
+            "1:4294967295",
+            "1:4294967296",
+            "12:*,*:13",
+            "a",
+            "1a",
+            "1:a",
+            "-1",
+            "+1",
+            " 1",
+            "1 ",
+            "1: 2",
+            "1;2",
+            "1.2",
+            "18446744073709551616",
+        ];
+        for case in cases {
+            assert_eq!(
+                format!("{:?}", super::parse_sequence_set(case.as_bytes())),
+                format!("{:?}", super::parse_sequence_set_slow(case.as_bytes())),
+                "{case:?}"
+            );
+        }
+        let mut long = String::new();
+        for i in 0..2000u32 {
+            if i > 0 {
+                long.push(',');
+            }
+            long.push_str(&(i * 3 + 1).to_string());
+            if i % 5 == 0 {
+                long.push(':');
+                long.push_str(&(i * 3 + 2).to_string());
+            }
+        }
+        assert_eq!(
+            format!("{:?}", super::parse_sequence_set(long.as_bytes())),
+            format!("{:?}", super::parse_sequence_set_slow(long.as_bytes()))
+        );
+    }
+
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+
+    #[test]
+    fn date_fast_path_matches_chrono() {
+        for year in (0..=9999)
+            .step_by(7)
+            .chain([1, 4, 100, 400, 1900, 2000, 2024, 9999])
+        {
+            for (index, month) in MONTHS.iter().enumerate() {
+                for day in [0u32, 1, 9, 10, 28, 29, 30, 31, 32] {
+                    for text in [
+                        format!("{day}-{month}-{year:04}"),
+                        format!("{day:02}-{month}-{year:04}"),
+                        format!(" {day}-{}-{year:04} ", month.to_ascii_uppercase()),
+                        format!("{day}-{}-{year}", month.to_ascii_lowercase()),
+                        format!("{day}-{month}-{year:05}"),
+                    ] {
+                        assert_eq!(
+                            format!("{:?}", super::parse_date(text.as_bytes())),
+                            format!("{:?}", super::parse_date_chrono(text.as_bytes())),
+                            "{text:?} month index {index}"
+                        );
+                    }
+                }
+            }
+        }
+        for text in [
+            "",
+            "1-Feb",
+            "1-Feb-",
+            "1-Feb-1994 ",
+            "1-Feb-1994x",
+            "1-Foo-1994",
+            "32-Jan-2000",
+            "1-Jan-+2000",
+            "1-Jan--200",
+            "1-Jan-200",
+            "01-01-2000",
+            "1 Feb 1994",
+            "1-Feb-1994\t",
+            "\x0b1-Feb-1994",
+            "1-Feb-1994\x0b",
+            "\u{a0}1-Feb-1994",
+            "1-Feb-1994\u{2000}",
+            "1-Fe\u{fc}-1994",
+            "\u{ff}",
+        ] {
+            assert_eq!(
+                format!("{:?}", super::parse_date(text.as_bytes())),
+                format!("{:?}", super::parse_date_chrono(text.as_bytes())),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn datetime_fast_path_matches_chrono() {
+        for (day, month, year) in [
+            (7u32, "Feb", 1994u32),
+            (17, "Jul", 1996),
+            (29, "Feb", 2000),
+            (29, "Feb", 1900),
+            (31, "Dec", 9999),
+            (1, "Jan", 0),
+        ] {
+            for hour in [0u32, 1, 9, 12, 23, 24, 99] {
+                for minute in [0u32, 1, 59, 60] {
+                    for second in [0u32, 1, 59, 60, 61] {
+                        for (sign, tz_hour, tz_minute) in [
+                            ('+', 0u32, 0u32),
+                            ('-', 0, 0),
+                            ('+', 8, 0),
+                            ('-', 8, 0),
+                            ('+', 23, 59),
+                            ('-', 23, 59),
+                            ('+', 24, 0),
+                            ('+', 12, 60),
+                        ] {
+                            let text = format!(
+                                "{day}-{month}-{year:04} {hour:02}:{minute:02}:{second:02} {sign}{tz_hour:02}{tz_minute:02}"
+                            );
+                            assert_eq!(
+                                format!("{:?}", super::parse_datetime(text.as_bytes())),
+                                format!("{:?}", super::parse_datetime_chrono(text.as_bytes())),
+                                "{text:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for text in [
+            "7-Feb-1994 22:43:04 -0800",
+            "07-Feb-1994 22:43:04 -0800",
+            " 7-Feb-1994 22:43:04 -0800 ",
+            "7-Feb-1994  22:43:04 -0800",
+            "7-Feb-1994 22:43:04  -0800",
+            "7-Feb-1994 22:43:04 -08:00",
+            "7-Feb-1994 22:43:04 -08",
+            "7-Feb-1994 22:43:04 Z",
+            "7-Feb-1994 22:43:04",
+            "7-Feb-1994 2:43:04 -0800",
+            "7-Feb-1994 22:3:04 -0800",
+            "7-Feb-1994 22:43:4 -0800",
+            "7-Feb-1994T22:43:04 -0800",
+            "7-Feb-199422:43:04-0800",
+            "7-Feb-1994 22:43:04 -0800x",
+            "",
+            "\u{ff}",
+        ] {
+            assert_eq!(
+                format!("{:?}", super::parse_datetime(text.as_bytes())),
+                format!("{:?}", super::parse_datetime_chrono(text.as_bytes())),
+                "{text:?}"
             );
         }
     }

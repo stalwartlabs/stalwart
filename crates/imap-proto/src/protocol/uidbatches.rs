@@ -5,7 +5,7 @@
  */
 use compact_str::CompactString;
 
-use std::fmt::Write;
+use super::push_int;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -21,13 +21,18 @@ pub struct Response {
 
 impl Response {
     pub fn serialize(self, tag: &str) -> Vec<u8> {
-        let mut buf = String::with_capacity(32 + (self.ranges.len() * 16));
-        let _ = write!(&mut buf, "* UIDBATCHES (TAG \"{tag}\")");
+        let mut buf = Vec::with_capacity(32 + tag.len() + (self.ranges.len() * 22));
+        buf.extend_from_slice(b"* UIDBATCHES (TAG \"");
+        buf.extend_from_slice(tag.as_bytes());
+        buf.extend_from_slice(b"\")");
         for (pos, (high, low)) in self.ranges.iter().enumerate() {
-            let _ = write!(&mut buf, "{}{high}:{low}", if pos == 0 { ' ' } else { ',' });
+            buf.push(if pos == 0 { b' ' } else { b',' });
+            push_int(&mut buf, *high);
+            buf.push(b':');
+            push_int(&mut buf, *low);
         }
-        buf.push_str("\r\n");
-        buf.into_bytes()
+        buf.extend_from_slice(b"\r\n");
+        buf
     }
 }
 

@@ -10,7 +10,7 @@ use common::network::SessionStream;
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse,
     protocol::{
-        ImapResponse, ObjectId, Sequence, fetch,
+        ObjectId, Sequence, fetch,
         list::ListItem,
         select::{HighestModSeq, Response},
     },
@@ -196,7 +196,7 @@ impl<T: SessionStream> Session<T> {
                     } else {
                         ResponseCode::ReadOnly
                     })
-                    .serialize(response.serialize()),
+                    .serialize_after(&response),
             )
             .await
         } else {

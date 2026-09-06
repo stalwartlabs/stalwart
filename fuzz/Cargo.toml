@@ -1,0 +1,28 @@
+[package]
+name = "stalwart-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+imap_proto = { path = "../crates/imap-proto" }
+
+[workspace]
+
+[[bin]]
+name = "imap_receiver"
+path = "fuzz_targets/imap_receiver.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "imap_utf7"
+path = "fuzz_targets/imap_utf7.rs"
+test = false
+doc = false
+bench = false

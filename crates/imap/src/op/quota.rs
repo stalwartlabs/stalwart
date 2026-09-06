@@ -14,7 +14,6 @@ use compact_str::format_compact;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{
-        ImapResponse,
         capability::QuotaResourceName,
         quota::{Arguments, QuotaItem, QuotaResource, Response},
     },
@@ -145,7 +144,7 @@ impl<T: SessionStream> SessionData<T> {
 
         Ok(StatusResponse::ok("GETQUOTA successful.")
             .with_tag(arguments.tag)
-            .serialize(response.serialize()))
+            .serialize_after(&response))
     }
 
     pub async fn get_quota_root(&self, arguments: Arguments) -> trc::Result<Vec<u8>> {
@@ -209,6 +208,6 @@ impl<T: SessionStream> SessionData<T> {
 
         Ok(StatusResponse::ok("GETQUOTAROOT successful.")
             .with_tag(arguments.tag)
-            .serialize(response.serialize()))
+            .serialize_after(&response))
     }
 }

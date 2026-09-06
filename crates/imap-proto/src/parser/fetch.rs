@@ -15,6 +15,9 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+const ATTRIBUTES_INIT_LEN: usize = 8;
+const FIELDS_INIT_LEN: usize = 32;
+
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse_fetch(self) -> trc::Result<fetch::Arguments> {
@@ -23,7 +26,7 @@ impl Request<Command> {
         }
 
         let mut tokens = self.tokens.into_iter().peekable();
-        let mut attributes = Vec::new();
+        let mut attributes = Vec::with_capacity(tokens.len().min(ATTRIBUTES_INIT_LEN));
         let sequence_set = parse_sequence_set(
             &tokens
                 .next()
@@ -186,7 +189,8 @@ impl Request<Command> {
                                                         "Expected '(' after 'HEADER.FIELDS'.",
                                                     ));
                                                 }
-                                                let mut fields = Vec::new();
+                                                let mut fields =
+                                                    Vec::with_capacity(tokens.len().min(FIELDS_INIT_LEN));
                                                 while let Some(token) = tokens.next() {
                                                     match token {
                                                         Token::ParenthesisClose => break,

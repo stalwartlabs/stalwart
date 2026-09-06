@@ -5,7 +5,7 @@
  */
 use compact_str::CompactString;
 
-use super::{ImapResponse, capability::QuotaResourceName, quoted_string};
+use super::{ImapResponse, capability::QuotaResourceName, push_int, quoted_string};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -67,11 +67,38 @@ impl ImapResponse for Response {
                         }
                     }
 
-                    buf.extend_from_slice(format!("{used} {total}").as_bytes());
+                    push_int(buf, used);
+                    buf.push(b' ');
+                    push_int(buf, total);
                 }
                 buf.extend_from_slice(b")\r\n");
             }
         }
+    }
+
+    fn size_hint(&self) -> usize {
+        const QUOTA_ROOT_FRAMING_LEN: usize = 16;
+        const QUOTA_FRAMING_LEN: usize = 16;
+        const RESOURCE_LEN: usize = 64;
+
+        let quota_roots = if self.quota_root_items.is_empty() {
+            0
+        } else {
+            QUOTA_ROOT_FRAMING_LEN
+                + self
+                    .quota_root_items
+                    .iter()
+                    .map(|item| item.len() + 4)
+                    .sum::<usize>()
+        };
+        quota_roots
+            + self
+                .quota_items
+                .iter()
+                .map(|item| {
+                    QUOTA_FRAMING_LEN + item.name.len() + 4 + item.resources.len() * RESOURCE_LEN
+                })
+                .sum::<usize>()
     }
 }
 

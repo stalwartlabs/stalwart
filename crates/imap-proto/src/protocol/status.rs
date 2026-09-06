@@ -6,9 +6,9 @@
 use crate::protocol::push_int;
 use compact_str::CompactString;
 
-use crate::utf7::utf7_encode;
+use crate::utf7::quoted_mailbox_name;
 
-use super::{ObjectId, quoted_string};
+use super::ObjectId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -47,11 +47,7 @@ pub enum StatusItemType {
 impl StatusItem {
     pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
         buf.extend_from_slice(b"* STATUS ");
-        if is_utf8 {
-            quoted_string(buf, &self.mailbox_name);
-        } else {
-            quoted_string(buf, &utf7_encode(&self.mailbox_name));
-        }
+        quoted_mailbox_name(buf, &self.mailbox_name, is_utf8);
         buf.extend_from_slice(b" (");
         for (pos, (status_item, value)) in self.items.iter().enumerate() {
             if pos > 0 {

@@ -13,10 +13,7 @@ use common::network::SessionStream;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, StatusResponse,
-    protocol::{
-        ImapResponse,
-        thread::{Arguments, Response},
-    },
+    protocol::thread::{Arguments, Response},
     receiver::Request,
 };
 use registry::schema::enums::Permission;
@@ -47,7 +44,7 @@ impl<T: SessionStream> Session<T> {
                     data.write_bytes(
                         StatusResponse::completed(command)
                             .with_tag(tag)
-                            .serialize(response.serialize()),
+                            .serialize_after(&response),
                     )
                     .await
                 }

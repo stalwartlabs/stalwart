@@ -98,6 +98,28 @@ impl ImapResponse for Response {
             buf.extend_from_slice(b"] Object identifiers\r\n");
         }
     }
+
+    fn size_hint(&self) -> usize {
+        const FRAMING_LEN: usize = 320;
+        const OBJECT_ID_LEN: usize = 96;
+        const CLOSED_LEN: usize = 40;
+        const MODSEQ_LEN: usize = 64;
+
+        FRAMING_LEN
+            + self.mailbox.mailbox_name.len() * 2
+            + self.mailbox.attributes.len() * 16
+            + if self.closed_previous { CLOSED_LEN } else { 0 }
+            + if self.highest_modseq.is_some() {
+                MODSEQ_LEN
+            } else {
+                0
+            }
+            + if self.objectid.is_some() {
+                OBJECT_ID_LEN
+            } else {
+                0
+            }
+    }
 }
 
 impl HighestModSeq {
@@ -112,7 +134,7 @@ impl HighestModSeq {
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(40);
+        let mut buf = Vec::with_capacity(64);
         self.serialize(&mut buf);
         buf
     }
@@ -126,7 +148,7 @@ impl Exists {
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(15);
+        let mut buf = Vec::with_capacity(32);
         self.serialize(&mut buf);
         buf
     }

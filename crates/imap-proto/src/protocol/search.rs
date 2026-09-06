@@ -138,7 +138,20 @@ impl Filter {
 
 impl Response {
     pub fn serialize(self, tag: &str) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(64);
+        const FRAMING_LEN: usize = 64;
+        const SEQUENCE_ID_LEN: usize = 6;
+        const PLAIN_ID_LEN: usize = 8;
+
+        let mut buf = Vec::with_capacity(
+            FRAMING_LEN
+                + tag.len()
+                + self.ids.len()
+                    * if self.is_esearch {
+                        SEQUENCE_ID_LEN
+                    } else {
+                        PLAIN_ID_LEN
+                    },
+        );
         if self.is_esearch {
             buf.extend_from_slice(b"* ESEARCH (TAG ");
             quoted_string(&mut buf, tag);

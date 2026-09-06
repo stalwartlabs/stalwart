@@ -29,4 +29,15 @@ impl ImapResponse for Response {
             buf.push(b'\n');
         }
     }
+
+    fn size_hint(&self) -> usize {
+        const FRAMING_LEN: usize = 12;
+        const CAPABILITY_LEN: usize = 20;
+
+        if self.enabled.is_empty() {
+            0
+        } else {
+            FRAMING_LEN + self.enabled.len() * CAPABILITY_LEN
+        }
+    }
 }

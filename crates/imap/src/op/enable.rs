@@ -8,7 +8,7 @@ use crate::core::Session;
 use common::network::SessionStream;
 use imap_proto::{
     Command, StatusResponse,
-    protocol::{ImapResponse, ProtocolVersion, capability::Capability, enable},
+    protocol::{ProtocolVersion, capability::Capability, enable},
     receiver::Request,
 };
 use registry::schema::enums::Permission;
@@ -72,7 +72,7 @@ impl<T: SessionStream> Session<T> {
         self.write_bytes(
             StatusResponse::ok("ENABLE successful.")
                 .with_tag(arguments.tag)
-                .serialize(response.serialize()),
+                .serialize_after(&response),
         )
         .await
     }

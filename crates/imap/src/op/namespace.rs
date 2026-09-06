@@ -6,11 +6,7 @@
 
 use crate::core::Session;
 use common::network::SessionStream;
-use imap_proto::{
-    Command, StatusResponse,
-    protocol::{ImapResponse, namespace::Response},
-    receiver::Request,
-};
+use imap_proto::{Command, StatusResponse, protocol::namespace::Response, receiver::Request};
 use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {
@@ -27,16 +23,13 @@ impl<T: SessionStream> Session<T> {
         self.write_bytes(
             StatusResponse::completed(Command::Namespace)
                 .with_tag(request.tag)
-                .serialize(
-                    Response {
-                        shared_prefix: if self.state.session_data().mailboxes.lock().len() > 1 {
-                            Some(self.server.core.email.shared_folder.as_str().into())
-                        } else {
-                            None
-                        },
-                    }
-                    .serialize(),
-                ),
+                .serialize_after(&Response {
+                    shared_prefix: if self.state.session_data().mailboxes.lock().len() > 1 {
+                        Some(self.server.core.email.shared_folder.as_str().into())
+                    } else {
+                        None
+                    },
+                }),
         )
         .await
     }
