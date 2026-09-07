@@ -6,6 +6,7 @@
 
 use crate::USER_AGENT;
 use hyper::HeaderMap;
+use hyper::header::{IF_MODIFIED_SINCE, LAST_MODIFIED};
 use mail_auth::flate2;
 use std::{
     io::{BufReader, Read},
@@ -22,6 +23,90 @@ pub mod restore;
 
 pub const SPAM_TRAINER_KEY: &[u8] = "STALWART_SPAM_TRAIN_DATA.lz4".as_bytes();
 pub const SPAM_CLASSIFIER_KEY: &[u8] = "STALWART_SPAM_CLASSIFIER_MODEL.lz4".as_bytes();
+
+/// Outcome of a conditional fetch: unchanged, or a new body and its validator.
+pub enum ConditionalResource {
+    NotModified,
+    Modified {
+        body: Vec<u8>,
+        last_modified: Option<String>,
+    },
+}
+
+/// Fetches `url`, sending `If-Modified-Since` when a validator is known.
+/// `file://` URLs have no validator and are always read in full.
+pub async fn fetch_resource_if_modified(
+    url: &str,
+    last_modified: Option<&str>,
+    timeout: Duration,
+    max_size: usize,
+) -> Result<ConditionalResource, String> {
+    if url.starts_with("file://") {
+        return fetch_resource(url, None, timeout, max_size)
+            .await
+            .map(|body| ConditionalResource::Modified {
+                body,
+                last_modified: None,
+            });
+    }
+
+    let mut headers = HeaderMap::new();
+    if let Some(last_modified) = last_modified
+        && let Ok(value) = last_modified.parse()
+    {
+        headers.insert(IF_MODIFIED_SINCE, value);
+    }
+
+    let response = utils::http::http_client_builder(is_localhost_url(url))
+        .timeout(timeout)
+        .user_agent(USER_AGENT)
+        .build()
+        .unwrap_or_default()
+        .get(url)
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|err| format!("Failed to fetch {url}: {err}"))?;
+
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(ConditionalResource::NotModified);
+    } else if !response.status().is_success() {
+        let code = response.status().canonical_reason().unwrap_or_default();
+        let reason = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "Failed to fetch {url}: Code: {code}, Details: {reason}"
+        ));
+    }
+
+    let last_modified = response
+        .headers()
+        .get(LAST_MODIFIED)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+
+    response
+        .bytes_with_limit(max_size)
+        .await
+        .map_err(|err| format!("Failed to fetch {url}: {err}"))
+        .and_then(|bytes| bytes.ok_or_else(|| format!("Resource too large: {url}")))
+        .and_then(|bytes| maybe_decompress(url, bytes))
+        .map(|body| ConditionalResource::Modified {
+            body,
+            last_modified,
+        })
+}
+
+// Bundles served with a `.gz` extension are stored compressed at the origin.
+fn maybe_decompress(url: &str, bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    if url.ends_with(".gz") || url.ends_with(".gzip") {
+        BufReader::new(flate2::read::GzDecoder::new(&bytes[..]))
+            .bytes()
+            .collect::<Result<Vec<u8>, _>>()
+            .map_err(|err| format!("Failed to decompress {url}: {err}"))
+    } else {
+        Ok(bytes)
+    }
+}
 
 pub async fn fetch_resource(
     url: &str,
@@ -60,16 +145,7 @@ pub async fn fetch_resource(
             ))
         }
     }
-    .and_then(|bytes| {
-        if url.ends_with(".gz") || url.ends_with(".gzip") {
-            BufReader::new(flate2::read::GzDecoder::new(&bytes[..]))
-                .bytes()
-                .collect::<Result<Vec<u8>, _>>()
-                .map_err(|err| format!("Failed to decompress {url}: {err}"))
-        } else {
-            Ok(bytes)
-        }
-    })
+    .and_then(|bytes| maybe_decompress(url, bytes))
 }
 
 pub fn is_localhost_url(url: &str) -> bool {

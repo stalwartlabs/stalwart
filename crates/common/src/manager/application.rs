@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Server, manager::fetch_resource};
+use crate::{
+    Server,
+    manager::{ConditionalResource, fetch_resource_if_modified},
+};
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use registry::schema::{enums::CompressionAlgo, structs::Application};
@@ -19,10 +22,14 @@ use store::{
     registry::{RegistryObject, bootstrap::Bootstrap},
     write::{BatchBuilder, BlobLink, BlobOp, now},
 };
-use trc::{AddContext, Key};
+use trc::Key;
 use types::blob_hash::BlobHash;
 
 const APP_BLOB_PREFIX: &str = "STALWART_APP_";
+const APP_META_PREFIX: &str = "STALWART_APP_META_";
+// Retention grace so a cached bundle outlives the interval between checks.
+const BUNDLE_GRACE: u64 = 7 * 24 * 60 * 60;
+const U64_LEN: usize = std::mem::size_of::<u64>();
 const MAX_APP_SIZE: usize = 100 * 1024 * 1024;
 const BASE_HREF: &str = "<base href=\"/\"";
 const OAUTH_CLIENT_ID: &str = "<meta name=\"oauth-client-id\" content=\"\"";
@@ -51,6 +58,7 @@ pub struct WebApplicationManager {
     url: String,
     expiry: u64,
     blob_key: BlobHash,
+    meta_key: BlobHash,
     oauth_client_id: Option<String>,
 }
 
@@ -186,6 +194,9 @@ impl WebApplicationManager {
             blob_key: BlobHash::generate(
                 format!("{}{}{}", APP_BLOB_PREFIX, app.id.id(), app.object.resource_url).as_bytes(),
             ),
+            meta_key: BlobHash::generate(
+                format!("{}{}{}", APP_META_PREFIX, app.id.id(), app.object.resource_url).as_bytes(),
+            ),
             url: app.object.resource_url,
             description: app.object.description,
             expiry: app.object.auto_update_frequency.as_secs(),
@@ -208,64 +219,90 @@ impl WebApplicationManager {
         // Delete any existing bundles
         self.bundle_path.clean().await.map_err(unpack_error)?;
 
-        // Obtain application bundle
-        let bundle = if let Some(bundle) = server
+        // Revalidate the cached bundle once the check interval has elapsed.
+        let now = now();
+        let (mut next_check, mut last_modified) = self.read_meta(server).await;
+        let mut bundle = server
             .blob_store()
             .get_blob(self.blob_key.as_slice(), 0..usize::MAX)
-            .await?
-        {
-            bundle
-        } else {
-            // Fetch app bundle
-            let resource = fetch_resource(&self.url, None, Duration::from_secs(60), MAX_APP_SIZE)
-                .await
-                .map_err(|err| {
-                    trc::ResourceEvent::Error
+            .await?;
+
+        if bundle.is_none() || now >= next_check {
+            match fetch_resource_if_modified(
+                &self.url,
+                last_modified.as_deref().filter(|_| bundle.is_some()),
+                Duration::from_secs(60),
+                MAX_APP_SIZE,
+            )
+            .await
+            {
+                Ok(ConditionalResource::NotModified) => {
+                    trc::event!(
+                        Resource(trc::ResourceEvent::ApplicationUpdated),
+                        Url = self.url.clone(),
+                        Details = "Application bundle is up to date",
+                    );
+                }
+                Ok(ConditionalResource::Modified {
+                    body,
+                    last_modified: modified_at,
+                }) => {
+                    // A bundle that cannot be cached is still served, but its
+                    // validator is not recorded so the next check downloads again.
+                    match self.store_blob(server, &self.blob_key, &body).await {
+                        Ok(_) => last_modified = modified_at,
+                        Err(err) => {
+                            trc::error!(err.details("Failed to store application bundle"));
+                        }
+                    }
+                    bundle = Some(body);
+
+                    trc::event!(
+                        Resource(trc::ResourceEvent::ApplicationUpdated),
+                        Url = self.url.clone(),
+                        Details = self.description.clone(),
+                    );
+                }
+                Err(err) if bundle.is_none() => {
+                    return Err(trc::ResourceEvent::Error
                         .caused_by(trc::location!())
                         .ctx(Key::Url, self.url.clone())
                         .reason(err)
-                        .details("Failed to fetch application bundle")
-                })?;
+                        .details("Failed to fetch application bundle"));
+                }
+                Err(err) => {
+                    // The origin is unreachable, so keep serving the cached bundle.
+                    trc::event!(
+                        Resource(trc::ResourceEvent::Error),
+                        Url = self.url.clone(),
+                        Reason = err,
+                        Details = "Keeping the cached application bundle",
+                    );
+                }
+            }
 
-            // Store in blob store for future use
-            server
-                .blob_store()
-                .put_blob(self.blob_key.as_slice(), &resource, CompressionAlgo::None)
-                .await
-                .caused_by(trc::location!())?;
+            next_check = now.saturating_add(self.expiry);
+        }
 
-            // Schedule expiration
-            let mut batch = BatchBuilder::new();
-            batch
-                .set(
-                    BlobOp::Link {
-                        hash: self.blob_key.clone(),
-                        to: BlobLink::Temporary {
-                            until: now() + self.expiry,
-                        },
-                    },
-                    vec![],
-                )
-                .set(
-                    BlobOp::Commit {
-                        hash: self.blob_key.clone(),
-                    },
-                    Vec::new(),
-                );
-            server
-                .store()
-                .write(batch.build_all())
-                .await
-                .caused_by(trc::location!())?;
+        let bundle = bundle.ok_or_else(|| {
+            trc::ResourceEvent::Error
+                .caused_by(trc::location!())
+                .ctx(Key::Url, self.url.clone())
+                .details("No application bundle available")
+        })?;
 
+        // A cached bundle is already usable, so retention failures must not hide it.
+        if let Err(err) = self
+            .persist(server, next_check, last_modified.as_deref())
+            .await
+        {
             trc::event!(
-                Resource(trc::ResourceEvent::ApplicationUpdated),
+                Resource(trc::ResourceEvent::Error),
                 Url = self.url.clone(),
-                Details = self.description.clone(),
+                Reason = err,
+                Details = "Failed to store application metadata",
             );
-
-            resource
-        };
+        }
 
         let url = self.url.clone();
         let bundle_path = self.bundle_path.path.clone();
@@ -327,7 +364,15 @@ impl WebApplicationManager {
                 .caused_by(trc::location!())
                 .reason(err)
                 .details("Bundle unpack task panicked")
-        })??;
+        })?;
+        let routes = match routes {
+            Ok(routes) => routes,
+            Err(err) => {
+                // Drop the cache so an unusable bundle is not revalidated later.
+                let _ = self.delete(server).await;
+                return Err(err);
+            }
+        };
 
         trc::event!(
             Resource(trc::ResourceEvent::ApplicationUnpacked),
@@ -336,6 +381,66 @@ impl WebApplicationManager {
         );
 
         Ok(routes)
+    }
+
+    // Metadata: next check time followed by the bundle's `Last-Modified`, if any.
+    async fn read_meta(&self, server: &Server) -> (u64, Option<String>) {
+        let Ok(Some(meta)) = server
+            .blob_store()
+            .get_blob(self.meta_key.as_slice(), 0..usize::MAX)
+            .await
+        else {
+            return (0, None);
+        };
+        let Some((next_check, last_modified)) = meta.split_at_checked(U64_LEN) else {
+            return (0, None);
+        };
+
+        (
+            u64::from_le_bytes(next_check.try_into().unwrap()),
+            std::str::from_utf8(last_modified)
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        )
+    }
+
+    // Stores the metadata and extends retention for both the bundle and metadata.
+    async fn persist(
+        &self,
+        server: &Server,
+        next_check: u64,
+        last_modified: Option<&str>,
+    ) -> trc::Result<()> {
+        let mut meta = Vec::with_capacity(U64_LEN + last_modified.map_or(0, str::len));
+        meta.extend_from_slice(&next_check.to_le_bytes());
+        meta.extend_from_slice(last_modified.unwrap_or_default().as_bytes());
+        self.store_blob(server, &self.meta_key, &meta).await?;
+
+        let until = next_check.saturating_add(BUNDLE_GRACE);
+        let mut batch = BatchBuilder::new();
+        for hash in [&self.blob_key, &self.meta_key] {
+            batch
+                .set(
+                    BlobOp::Link {
+                        hash: hash.clone(),
+                        to: BlobLink::Temporary { until },
+                    },
+                    vec![],
+                )
+                .set(BlobOp::Commit { hash: hash.clone() }, Vec::new());
+        }
+        server.store().write(batch.build_all()).await.map(|_| ())
+    }
+
+    // These keys are not content addressed, so the previous value has to be
+    // removed: some backends skip same-sized writes or keep trailing chunks.
+    async fn store_blob(&self, server: &Server, hash: &BlobHash, data: &[u8]) -> trc::Result<()> {
+        server.blob_store().delete_blob(hash.as_slice()).await?;
+        server
+            .blob_store()
+            .put_blob(hash.as_slice(), data, CompressionAlgo::None)
+            .await
     }
 
     async fn delete(&self, server: &Server) -> trc::Result<()> {
