@@ -183,7 +183,9 @@ impl WebApplicationManager {
 
         Self {
             bundle_path: TempDir::new(base_path),
-            blob_key: BlobHash::generate(format!("{}{}", APP_BLOB_PREFIX, app.id.id()).as_bytes()),
+            blob_key: BlobHash::generate(
+                format!("{}{}{}", APP_BLOB_PREFIX, app.id.id(), app.object.resource_url).as_bytes(),
+            ),
             url: app.object.resource_url,
             description: app.object.description,
             expiry: app.object.auto_update_frequency.as_secs(),
