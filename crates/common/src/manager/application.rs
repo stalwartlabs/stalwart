@@ -27,8 +27,11 @@ use types::blob_hash::BlobHash;
 
 const APP_BLOB_PREFIX: &str = "STALWART_APP_";
 const APP_META_PREFIX: &str = "STALWART_APP_META_";
+const AUTO_UPDATE_ENV: &str = "STALWART_APP_AUTO_UPDATE";
 // Retention grace so a cached bundle outlives the interval between checks.
 const BUNDLE_GRACE: u64 = 7 * 24 * 60 * 60;
+// Retention applied instead when automatic updates are disabled.
+const PINNED_RETENTION: u64 = 365 * 24 * 60 * 60;
 const U64_LEN: usize = std::mem::size_of::<u64>();
 const MAX_APP_SIZE: usize = 100 * 1024 * 1024;
 const BASE_HREF: &str = "<base href=\"/\"";
@@ -227,7 +230,7 @@ impl WebApplicationManager {
             .get_blob(self.blob_key.as_slice(), 0..usize::MAX)
             .await?;
 
-        if bundle.is_none() || now >= next_check {
+        if bundle.is_none() || (now >= next_check && !auto_update_disabled()) {
             match fetch_resource_if_modified(
                 &self.url,
                 last_modified.as_deref().filter(|_| bundle.is_some()),
@@ -417,7 +420,12 @@ impl WebApplicationManager {
         meta.extend_from_slice(last_modified.unwrap_or_default().as_bytes());
         self.store_blob(server, &self.meta_key, &meta).await?;
 
-        let until = next_check.saturating_add(BUNDLE_GRACE);
+        // Link keys include the expiry, so quantise it to avoid adding a row per unpack.
+        let until = if auto_update_disabled() {
+            now() / BUNDLE_GRACE * BUNDLE_GRACE + PINNED_RETENTION
+        } else {
+            next_check.saturating_add(BUNDLE_GRACE)
+        };
         let mut batch = BatchBuilder::new();
         for hash in [&self.blob_key, &self.meta_key] {
             batch
@@ -474,6 +482,16 @@ impl TempDir {
         }
         tokio::fs::create_dir(&self.path).await
     }
+}
+
+// Whether STALWART_APP_AUTO_UPDATE disables the periodic revalidation.
+fn auto_update_disabled() -> bool {
+    std::env::var(AUTO_UPDATE_ENV).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "false" | "0" | "no" | "off"
+        )
+    })
 }
 
 fn unpack_error(err: std::io::Error) -> trc::Error {
