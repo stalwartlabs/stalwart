@@ -121,7 +121,9 @@ impl Listeners {
             } {
                 Ok(socket) => socket,
                 Err(err)
-                    if is_eafnosupport(&err) && addr.is_ipv6() && addr.ip().is_unspecified() =>
+                    if is_ipv6_unsupported(&err)
+                        && addr.is_ipv6()
+                        && addr.ip().is_unspecified() =>
                 {
                     let v4_addr =
                         StdSocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), addr.port());
@@ -327,15 +329,15 @@ impl Listeners {
     }
 }
 
-fn is_eafnosupport(err: &std::io::Error) -> bool {
+fn is_ipv6_unsupported(err: &std::io::Error) -> bool {
     let code = err.raw_os_error();
     #[cfg(unix)]
     {
-        code == Some(libc::EAFNOSUPPORT)
+        matches!(code, Some(libc::EAFNOSUPPORT) | Some(libc::EPROTONOSUPPORT))
     }
     #[cfg(windows)]
     {
-        code == Some(10047)
+        matches!(code, Some(10047) | Some(10043))
     }
     #[cfg(not(any(unix, windows)))]
     {

@@ -22,6 +22,9 @@ use trc::AuthEvent;
 impl OpenIdDirectory {
     pub async fn authenticate(&self, credentials: &Credentials) -> trc::Result<Account> {
         match credentials {
+            Credentials::Bearer { token, .. } if token.is_empty() => {
+                Err(AuthEvent::Failed.into_err().reason("Empty token rejected"))
+            }
             Credentials::Bearer { token, .. } => if let Ok(header) = decode_header(token) {
                 self.authenticate_jwt(token, header).await
             } else {

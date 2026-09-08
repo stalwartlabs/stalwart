@@ -18,6 +18,18 @@ if specialuse_exists "archive" {
     error "A non-existent special-use exists.";
 }
 
+if not specialuse_exists ["\\Inbox", "\\Trash"] {
+    error "Special-use mailboxes INBOX or TRASH do not exist (RFC 8579 attribute form).";
+}
+
+if not specialuse_exists "Deleted Items" "\\Trash" {
+    error "Deleted Items has no Trash special-use (RFC 8579 attribute form).";
+}
+
+if specialuse_exists "\\Archive" {
+    error "A non-existent special-use exists (RFC 8579 attribute form).";
+}
+
 # MailboxId tests
 if not mailboxidexists "a" {
     error "Inbox not found by mailboxid.";
@@ -35,6 +47,9 @@ if not mailboxexists "Inbox" {
 if not mailboxexists ["Drafts", "Sent Items"] {
     error "Drafts and Sent Items not found by name.";
 }
+
+# File into a special-use mailbox using the RFC 8579 attribute form
+fileinto :specialuse "\\Drafts" "specialuse-fallback";
 
 # File into new mailboxes using flags
 fileinto :create "INBOX /  Folder  ";

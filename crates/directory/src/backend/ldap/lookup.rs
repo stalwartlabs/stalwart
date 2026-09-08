@@ -18,6 +18,11 @@ impl LdapDirectory {
             } => (username, secret),
             Credentials::Bearer { token, .. } => (token, token),
         };
+        if secret.is_empty() {
+            return Err(trc::AuthEvent::Failed
+                .into_err()
+                .details("Empty secret rejected"));
+        }
         let mut conn = self.pool.get().await.map_err(|err| err.into_error())?;
 
         let mut result = if self.auth_bind {

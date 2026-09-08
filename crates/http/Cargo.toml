@@ -1,6 +1,6 @@
 [package]
 name = "http"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -14,37 +14,29 @@ jmap = { path = "../jmap" }
 dav = { path = "../dav" }
 scim = { path = "../scim" }
 groupware = { path = "../groupware" }
-spam-filter = { path = "../spam-filter" }
 http_proto = { path = "../http-proto" }
 jmap_proto = { path = "../jmap-proto" }
 types = { path = "../types" }
 directory = { path =  "../directory" }
 services = { path =  "../services" }
 registry = { path =  "../registry" }
-smtp-proto = { version = "0.2" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 mail-builder = { version = "0.5" }
 mail-auth = { version = "0.12", features = ["generate", "arc"] }
 tokio = { version = "1.53", features = ["rt"] }
-hyper = { version = "1.11.0", features = ["server", "http1", "http2"] }
+hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
-http-body-util = "0.1.4"
+http-body-util = "0.1.5"
 async-stream = "0.3.6"
-quick-xml = "0.41"
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-x509-parser = "0.18"
 chrono = "0.4"
 base64 = "0.23"
-pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
-rsa = "0.9.10"
-sha1 = "0.11"
 sha2 = "0.11"
 rkyv.workspace = true
 form-data = { version = "0.6.0", features = ["sync"], default-features = false }
 mime = "0.3.17"
 percent-encoding = "2.3.2"
-compact_str = "0.10.0"
 hashify = { version = "0.2" }
 
 [dev-dependencies]

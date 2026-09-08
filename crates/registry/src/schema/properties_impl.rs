@@ -5332,6 +5332,7 @@ impl ObjectInner {
             ObjectInner::ReportSettings(obj) => Some(obj.expression_ctxs()),
             ObjectInner::SenderAuth(obj) => Some(obj.expression_ctxs()),
             ObjectInner::SieveSystemInterpreter(obj) => Some(obj.expression_ctxs()),
+            ObjectInner::SieveUserInterpreter(obj) => Some(obj.expression_ctxs()),
             ObjectInner::SpamDnsblServer(obj) => Some(obj.expression_ctxs()),
             ObjectInner::SpamRule(obj) => Some(obj.expression_ctxs()),
             ObjectInner::SpfReportSettings(obj) => Some(obj.expression_ctxs()),

@@ -6,6 +6,7 @@
 
 use calcard::jscalendar::JSCalendarProperty;
 use common::GroupwareResources;
+use groupware::calendar::expand::RecurrenceKey;
 use jmap_proto::error::set::SetError;
 use types::id::Id;
 
@@ -31,25 +32,24 @@ TODO: Not yet implemented:
 */
 
 pub trait CalendarSyntheticId {
-    fn new(expansion_id: u32, document_id: u32) -> Self;
+    fn new(key: RecurrenceKey, document_id: u32) -> Self;
 
     fn is_synthetic(&self) -> bool;
 
-    fn expansion_id(&self) -> Option<u32>;
+    fn recurrence_key(&self) -> Option<RecurrenceKey>;
 }
 
 impl CalendarSyntheticId for Id {
-    fn new(expansion_id: u32, document_id: u32) -> Id {
-        Id::from_parts(expansion_id + 1, document_id)
+    fn new(key: RecurrenceKey, document_id: u32) -> Id {
+        Id::from_parts(key.prefix(), document_id)
     }
 
-    fn expansion_id(&self) -> Option<u32> {
-        let prefix = self.prefix_id();
-        if prefix > 0 { Some(prefix - 1) } else { None }
+    fn recurrence_key(&self) -> Option<RecurrenceKey> {
+        RecurrenceKey::from_prefix(self.prefix_id())
     }
 
     fn is_synthetic(&self) -> bool {
-        self.prefix_id() > 0
+        self.prefix_id() != 0
     }
 }
 

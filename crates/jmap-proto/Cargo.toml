@@ -1,6 +1,6 @@
 [package]
 name = "jmap_proto"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -19,7 +19,6 @@ rkyv.workspace = true
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["full"] }
 
 [lints]
 workspace = true

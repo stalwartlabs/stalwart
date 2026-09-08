@@ -52,6 +52,11 @@ impl SpecialUse {
         )
     }
 
+    #[inline(always)]
+    pub fn parse_use_attr(s: &str) -> Option<Self> {
+        Self::parse(s.strip_prefix('\\').unwrap_or(s))
+    }
+
     pub fn as_str(&self) -> Option<&'static str> {
         match self {
             SpecialUse::Inbox => Some("inbox"),

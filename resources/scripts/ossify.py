@@ -72,6 +72,23 @@ def should_remove_file(file_path: str) -> bool:
 
     return False
 
+CRATE_ROOT_STUB = """/*
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+"""
+
+def is_crate_root(file_path: str) -> bool:
+
+    path = Path(file_path)
+
+    return (
+        path.name == 'lib.rs'
+        and path.parent.name == 'src'
+        and (path.parent.parent / 'Cargo.toml').is_file()
+    )
+
 def remove_proprietary_snippets(content: str) -> Tuple[str, int]:
 
     snippets_removed = 0
@@ -123,9 +140,15 @@ def process_rust_file(file_path: str, dry_run: bool = False) -> dict:
     try:
 
         if should_remove_file(file_path):
-            result['action'] = 'file_removed'
-            if not dry_run:
-                os.remove(file_path)
+            if is_crate_root(file_path):
+                result['action'] = 'file_emptied'
+                if not dry_run:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(CRATE_ROOT_STUB)
+            else:
+                result['action'] = 'file_removed'
+                if not dry_run:
+                    os.remove(file_path)
             return result
 
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -197,6 +220,7 @@ def main():
     print()
 
     files_removed = 0
+    files_emptied = 0
     files_with_snippets_removed = 0
     total_snippets_removed = 0
     errors = []
@@ -214,6 +238,12 @@ def main():
                 action_text = "Would remove" if args.dry_run else "Removed"
                 print(f"{action_text} file: {file_path}")
 
+        elif result['action'] == 'file_emptied':
+            files_emptied += 1
+            if args.verbose or args.dry_run:
+                action_text = "Would empty" if args.dry_run else "Emptied"
+                print(f"{action_text} crate root: {file_path}")
+
         elif result['action'] == 'snippets_removed':
             files_with_snippets_removed += 1
             total_snippets_removed += result['snippets_removed']
@@ -224,6 +254,7 @@ def main():
     print("\nSummary:")
     action_text = "Would be" if args.dry_run else "Were"
     print(f"- {files_removed} files {action_text.lower()} completely removed")
+    print(f"- {files_emptied} crate roots {action_text.lower()} emptied")
     print(f"- {total_snippets_removed} proprietary snippets {action_text.lower()} removed from {files_with_snippets_removed} files")
 
     if errors:

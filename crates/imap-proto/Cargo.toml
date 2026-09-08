@@ -1,6 +1,6 @@
 [package]
 name = "imap_proto"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -17,7 +17,6 @@ smallvec = { version = "1", features = ["union"] }
 itoa = "1"
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["full"] }
 
 [lints]
 workspace = true

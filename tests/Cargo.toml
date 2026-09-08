@@ -1,6 +1,6 @@
 [package]
 name = "tests"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [features]
@@ -43,7 +43,6 @@ common = { path = "../crates/common", features = ["test_mode", "enterprise"] }
 registry = { path = "../crates/registry" }
 email = { path = "../crates/email", features = ["test_mode", "enterprise"] }
 spam-filter = { path = "../crates/spam-filter", features = ["test_mode", "enterprise"] }
-migration = { path = "../crates/migration", features = ["test_mode", "enterprise"] }
 trc = { path = "../crates/trc", features = ["enterprise"] }
 managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterprise"] }
 smtp-proto = { version = "0.2" }
@@ -56,25 +55,21 @@ jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] }
 tokio = { version = "1.53", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
-rustls-pemfile = "2.2"
 rustls-pki-types = { version = "1" }
 csv = "1.4"
 rayon = { version = "1.12.0" }
-flate2 = { version = "1.1.9", features = ["zlib"], default-features = false }
+flate2 = { version = "1.1.10", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "multipart", "http2", "form"]}
 bytes = "1.12.1"
 futures = "0.3"
 ece = "2.3"
-hyper = { version = "1.11.0", features = ["server", "http1", "http2"] }
+hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
-http-body-util = "0.1.4"
 base64 = "0.23"
 ahash = { version = "0.8" }
 serial_test = "4.0.1"
-num_cpus = "1.17.0"
-async-trait = "0.1.91"
 chrono = "0.4"
 aws-lc-rs = { version = "1" }
 biscuit = "0.8.0"

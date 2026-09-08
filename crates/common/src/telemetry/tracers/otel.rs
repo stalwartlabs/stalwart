@@ -5,7 +5,7 @@
  */
 
 use crate::{LONG_1Y_SLUMBER, config::telemetry::OtelTracer};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use mail_parser::DateTime;
 use opentelemetry::{
     InstrumentationScope, Key, KeyValue, Value,
@@ -202,9 +202,24 @@ impl OtelTracer {
         record.set_body(AnyValue::String(event.inner.typ.description().into()));
         record.set_timestamp(UNIX_EPOCH + Duration::from_secs(event.inner.timestamp));
         record.set_observed_timestamp(SystemTime::now());
-        for (k, v) in &event.keys {
-            record.add_attribute(k.as_str(), build_any_value(v));
+
+        if let Some(span_id) = event.span_id().filter(|span_id| *span_id != 0) {
+            record.set_trace_context((span_id as u128).into(), span_id.into(), None);
         }
+
+        let mut seen_keys = AHashSet::new();
+        for (k, v) in event.keys.iter().chain(
+            event
+                .inner
+                .span
+                .as_ref()
+                .map_or(([]).iter(), |span| span.keys.iter()),
+        ) {
+            if *k != trc::Key::SpanId && seen_keys.insert(*k) {
+                record.add_attribute(k.as_str(), build_any_value(v));
+            }
+        }
+
         record
     }
 }

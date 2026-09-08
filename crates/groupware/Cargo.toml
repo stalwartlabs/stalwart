@@ -1,6 +1,6 @@
 [package]
 name = "groupware"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -10,7 +10,6 @@ common = { path =  "../common" }
 types = { path = "../types" }
 trc = { path = "../trc" }
 nlp = { path = "../nlp" }
-directory = { path =  "../directory" }
 registry = { path = "../registry" }
 calcard = { version = "0.3", features = ["rkyv"] }
 hashify = "0.2"
@@ -19,11 +18,11 @@ rkyv.workspace = true
 percent-encoding = "2.3.2"
 compact_str = "0.10.0"
 ahash = { version = "0.8" }
-indexmap = "2.14.0"
+indexmap = "2.14.1"
 chrono = "0.4.45"
 icu_locale_core = "2"
-icu_plurals = "2"
 icu_provider = { version = "2", features = ["sync"] }
+icu_plurals = "2"
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 icu_datetime = { version = "~2.3", features = ["unstable_chrono_0_4"] }
@@ -33,7 +32,6 @@ test_mode = []
 enterprise = []
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["full"] }
 
 [lints]
 workspace = true

@@ -51,10 +51,15 @@ impl CalendarGet for Server {
             CalendarProperty::Name,
             CalendarProperty::Description,
             CalendarProperty::Color,
-            CalendarProperty::TimeZone,
             CalendarProperty::SortOrder,
-            CalendarProperty::IsDefault,
             CalendarProperty::IsSubscribed,
+            CalendarProperty::IsVisible,
+            CalendarProperty::IsDefault,
+            CalendarProperty::IncludeInAvailability,
+            CalendarProperty::DefaultAlertsWithTime,
+            CalendarProperty::DefaultAlertsWithoutTime,
+            CalendarProperty::TimeZone,
+            CalendarProperty::ShareWith,
             CalendarProperty::MyRights,
         ]);
         let account_id = request.account_id.document_id();

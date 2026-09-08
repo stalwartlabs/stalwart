@@ -22,6 +22,12 @@ impl SqlDirectory {
                     .details("Unsupported credentials type for SQL authentication"));
             }
         };
+        if secret.is_empty() {
+            return Err(trc::AuthEvent::Failed
+                .into_err()
+                .details("Empty secret rejected")
+                .ctx(trc::Key::AccountName, username.to_string()));
+        }
 
         let Recipient::Account(mut account) = self.mappings.row_to_account(
             self.sql_store

@@ -267,13 +267,10 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                     .value()
                     .parse()
                     .unwrap();
-                let available_bytes: u64 = properties
-                    .get(DavProperty::WebDav(WebDavProperty::QuotaAvailableBytes))
-                    .value()
-                    .parse()
-                    .unwrap();
                 assert!(used_bytes > 0);
-                assert!(available_bytes > 0);
+                properties
+                    .get(DavProperty::WebDav(WebDavProperty::QuotaAvailableBytes))
+                    .with_status(StatusCode::NOT_FOUND);
                 properties
                     .get(DavProperty::WebDav(WebDavProperty::SupportedReportSet))
                     .with_values(match resource_type {

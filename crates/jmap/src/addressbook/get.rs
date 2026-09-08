@@ -46,6 +46,7 @@ impl AddressBookGet for Server {
             AddressBookProperty::SortOrder,
             AddressBookProperty::IsDefault,
             AddressBookProperty::IsSubscribed,
+            AddressBookProperty::ShareWith,
             AddressBookProperty::MyRights,
         ]);
         let account_id = request.account_id.document_id();

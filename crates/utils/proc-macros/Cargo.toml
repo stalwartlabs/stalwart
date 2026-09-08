@@ -1,6 +1,6 @@
 [package]
 name = "proc_macros"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [lib]
@@ -9,4 +9,3 @@ proc-macro = true
 [dependencies]
 syn = { version = "3.0", features = ["full"] }
 quote = "1.0"
-proc-macro2 = "1.0"

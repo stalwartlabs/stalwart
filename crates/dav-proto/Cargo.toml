@@ -1,6 +1,6 @@
 [package]
 name = "dav-proto"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -10,8 +10,7 @@ hashify = "0.2.9"
 quick-xml = "0.41"
 calcard = { version = "0.3", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
-hyper = "1.11.0"
-rkyv.workspace = true
+hyper = "1.11.1"
 chrono = { version = "0.4.45", features = ["serde"], optional = true }
 compact_str = "0.10.0"
 

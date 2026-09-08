@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 build = "build.rs"
 
@@ -14,7 +14,6 @@ coordinator = { path = "../coordinator" }
 types = { path = "../types" }
 registry = { path = "../registry" }
 jmap_proto = { path = "../jmap-proto" }
-imap_proto = { path = "../imap-proto" }
 sieve-rs = { version = "0.8", features = ["rkyv", "serde"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-builder = { version = "0.5" }
@@ -42,7 +41,7 @@ base64 = "0.23"
 x509-parser = "0.18"
 pem = "4.0"
 chrono = { version = "0.4", features = ["serde"] }
-hyper = { version = "1.11.0", features = ["server", "http1", "http2"] }
+hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 opentelemetry = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
 opentelemetry_sdk = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
 opentelemetry-otlp = { git = "https://github.com/stalwartlabs/opentelemetry-rust", default-features = false, features = ["reqwest-client", "http-proto", "trace", "metrics", "logs", "internal-logs", "grpc-tonic", "tls-aws-lc", "tls-roots", "reqwest-rustls"] }
@@ -60,26 +59,22 @@ infer = "0.22"
 bincode = { version = "2.0.1", features = ["serde"] }
 hostname = "0.4.2"
 zip = "8.6"
-pwhash = "1.0.0"
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 psl = "2"
-aes-gcm-siv = "0.11.1"
+aes-gcm-siv = "0.12.1"
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 rsa = "0.9.10"
 p256 = { version = "0.13", features = ["ecdh", "ecdsa", "pkcs8", "pem"] }
 p384 = { version = "0.13", features = ["ecdh"] }
-num_cpus = "1.17.0"
 hashify = "0.2"
 rkyv.workspace = true
-indexmap = "2.14.0"
 tinyvec = { version = "1.12.0", features = ["alloc"] }
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
 lz4_flex = { version = "0.14", features = ["frame"], default-features = false }
-hickory-proto = "0.26"
+hickory-proto = "0.26.2"
 nohash-hasher = "0.2.0"
 quick_cache = "0.7"
 rasn = "0.28"
-rasn-cms = "0.28"
 rasn-pkix = "0.28"
 sequoia-openpgp = { version = "2.4", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 zxcvbn = "3.1.1"

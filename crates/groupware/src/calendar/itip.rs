@@ -57,6 +57,16 @@ pub enum ItipIngestError {
 #[derive(Default)]
 pub struct ItipRsvpUrl(String);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItipSendStatus {
+    Send,
+    NotRequested,
+    SchedulingDisabled,
+    NoCalendarAddress,
+    NoPermission,
+    EventInPast,
+}
+
 pub trait ItipIngest: Sync + Send {
     fn itip_ingest(
         &self,
@@ -1093,6 +1103,56 @@ fn build_rsvp_invitation(
     invitation.attendees = attendees;
 
     RsvpResponse::Invitation(Box::new(invitation))
+}
+
+impl ItipSendStatus {
+    pub fn resolve(
+        server: &Server,
+        access_token: &AccessToken,
+        account_info: &AccountInfo,
+        event_range_end: i64,
+    ) -> Self {
+        if !server.core.groupware.itip_enabled {
+            Self::SchedulingDisabled
+        } else if account_info.addresses().is_empty() {
+            Self::NoCalendarAddress
+        } else if !access_token.has_permission(Permission::CalendarSchedulingSend) {
+            Self::NoPermission
+        } else if event_range_end <= now() as i64 {
+            Self::EventInPast
+        } else {
+            Self::Send
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_send(&self) -> bool {
+        matches!(self, Self::Send)
+    }
+
+    #[inline(always)]
+    pub fn is_denied(&self) -> bool {
+        matches!(
+            self,
+            Self::SchedulingDisabled | Self::NoCalendarAddress | Self::NoPermission
+        )
+    }
+
+    pub fn reason(&self) -> Option<&'static str> {
+        match self {
+            Self::Send | Self::NotRequested => None,
+            Self::SchedulingDisabled => Some("Calendar scheduling is disabled on this server."),
+            Self::NoCalendarAddress => {
+                Some("This account has no calendar address to send scheduling messages from.")
+            }
+            Self::NoPermission => {
+                Some("This account is not allowed to send calendar scheduling messages.")
+            }
+            Self::EventInPast => {
+                Some("No scheduling messages were sent because the event lies in the past.")
+            }
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]

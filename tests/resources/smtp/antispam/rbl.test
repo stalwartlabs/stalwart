@@ -39,6 +39,17 @@ And my website is https://sem-fresh15.com/offers.html
 Try cheating with a trusted domain user@dkimtrusted.org
 
 <!-- NEXT TEST -->
+expect DBL_MALWARE
+
+From: user@example.net
+Subject: test
+
+Write to us at P.O.Box 25050, or call us during office hours.
+The attached report.zip and clip.mov cover the rest, and surbl-abuse.com
+is only named in passing rather than linked.
+Our actual website is https://sh-malware.com/login.php
+
+<!-- NEXT TEST -->
 dkim.result pass
 dkim.domains dkimtrusted.org
 expect DWL_DNSWL_HI

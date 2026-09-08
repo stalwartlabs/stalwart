@@ -169,4 +169,15 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
         .assert_contains("Some text appears here")
         .assert_contains("plain text version of message goes here")
         .assert_contains("This is implicitly typed plain US-ASCII text.");
+
+    // A failing command in a pipelined batch does not swallow the tagged completion of the commands queued behind it
+    imap.send_raw(concat!(
+        "_p UID FETCH 1:* (UID) (CHANGEDSINCE 1 VANISHED)\r\n",
+        "_x FETCH 1 (UID)\r\n"
+    ))
+    .await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_contains("_p BAD")
+        .assert_contains("* 1 FETCH (UID 1");
 }

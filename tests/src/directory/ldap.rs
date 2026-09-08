@@ -61,6 +61,16 @@ pub async fn test() {
         .await
         .is_err()
     );
+    assert!(
+        ldap.authenticate(&Credentials::Basic {
+            username: "jane.smith@example.org".into(),
+            secret: "".into(),
+            mfa_token: None,
+        })
+        .await
+        .is_err(),
+        "Empty password accepted during bind authentication"
+    );
 
     // Test direct authentication (without bind)
     config.attr_secret = Map::new(vec!["userPassword".to_string()]);
@@ -91,6 +101,16 @@ pub async fn test() {
         })
         .await
         .is_err()
+    );
+    assert!(
+        ldap.authenticate(&Credentials::Basic {
+            username: "john.doe@example.org".into(),
+            secret: "".into(),
+            mfa_token: None,
+        })
+        .await
+        .is_err(),
+        "Empty password accepted during direct authentication"
     );
 
     // Test recipient lookup

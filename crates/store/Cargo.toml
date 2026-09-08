@@ -1,6 +1,6 @@
 [package]
 name = "store"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -27,7 +27,6 @@ rayon = { version = "1.12", optional = true }
 serde = { version = "1.0", features = ["derive"]}
 ahash = { version = "0.8.12", features = ["serde"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
-farmhash = "1.1.5"
 parking_lot = "0.12"
 lru-cache = { version = "0.1.2", optional = true }
 num_cpus = { version = "1.17", optional = true }
@@ -44,13 +43,11 @@ x509-parser = { version = "0.18", optional = true }
 bytes = { version = "1.12", optional = true }
 mysql_async = { version = "0.37", default-features = false, features = ["default-rustls", "minimal"], optional = true }
 serde_json = { version = "1.0.151" }
-regex = "1.13"
 flate2 = "1.1"
-redis = { version = "1.5", features = [ "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls", "cluster-async", "sentinel"], optional = true }
+redis = { version = "1.6", features = [ "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls", "cluster-async", "sentinel"], optional = true }
 deadpool = { version = "0.13", features = ["managed"], optional = true }
 arc-swap = "1.9.2"
 bitpacking = "0.9.3"
-memchr = { version = "2.8" }
 rkyv.workspace = true
 compact_str = "0.10.0"
 gethostname = "1.1.0"

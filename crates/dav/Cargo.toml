@@ -1,6 +1,6 @@
 [package]
 name = "dav"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
@@ -16,7 +16,7 @@ types = { path = "../types" }
 trc = { path = "../trc" }
 calcard = { version = "0.3", features = ["rkyv"] }
 hashify = { version = "0.2" }
-hyper = { version = "1.11.0", features = ["server", "http1", "http2"] }
+hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 percent-encoding = "2.3.2"
 rkyv.workspace = true
 compact_str = "0.10.0"

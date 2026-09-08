@@ -216,8 +216,24 @@ pub async fn test(test: &TestServer) {
     }
     assert_eq!(
         email.mailbox_ids().len(),
-        2,
-        "Expected 2 mailbox ids, found {:?}.",
+        3,
+        "Expected 3 mailbox ids, found {:?}.",
+        email.mailbox_ids()
+    );
+    let drafts_id = client
+        .mailbox_query(
+            mailbox::query::Filter::name("Drafts").into(),
+            None::<Vec<_>>,
+        )
+        .await
+        .unwrap()
+        .take_ids()
+        .pop()
+        .expect("Drafts mailbox not found.");
+    assert!(
+        email.mailbox_ids().contains(&drafts_id.as_str()),
+        "Drafts mailbox {} not found in {:?}.",
+        drafts_id,
         email.mailbox_ids()
     );
     for mailbox_pos in [mailbox_ids.len() - 1, mailbox_ids.len() - 2] {

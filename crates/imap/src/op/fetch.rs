@@ -116,7 +116,7 @@ impl<T: SessionStream> Session<T> {
             for op in ops {
                 match op {
                     Ok((is_uid, enabled_condstore, arguments)) => {
-                        let response = data
+                        match data
                             .fetch(
                                 arguments,
                                 mailbox.clone(),
@@ -129,9 +129,13 @@ impl<T: SessionStream> Session<T> {
                                 message_limit,
                                 Instant::now(),
                             )
-                            .await?;
-
-                        data.write_bytes(response.into_bytes()).await?;
+                            .await
+                        {
+                            Ok(response) => {
+                                data.write_bytes(response.into_bytes()).await?;
+                            }
+                            Err(err) => data.write_error(err).await?,
+                        }
                     }
                     Err(err) => data.write_error(err).await?,
                 }

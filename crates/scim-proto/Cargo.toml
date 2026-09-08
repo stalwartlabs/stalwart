@@ -1,6 +1,6 @@
 [package]
 name = "scim-proto"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]

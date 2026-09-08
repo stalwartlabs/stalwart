@@ -37,6 +37,7 @@ pub struct Scripting {
     pub from_name: IfBlock,
     pub return_path: IfBlock,
     pub sign: IfBlock,
+    pub untrusted_sign: IfBlock,
     pub trusted_scripts: AHashMap<String, Arc<Sieve>>,
     pub untrusted_scripts: AHashMap<String, Arc<Sieve>>,
     pub http_client: reqwest::Client,
@@ -46,6 +47,10 @@ impl Scripting {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
         // Parse untrusted compiler
         let untrusted = bp.setting_infallible::<SieveUserInterpreter>().await;
+        let untrusted_sign = bp.compile_expr(
+            ObjectType::SieveUserInterpreter.singleton(),
+            &untrusted.ctx_dkim_sign_domain(),
+        );
         let mut fnc_map_untrusted = register_functions_untrusted().register_plugins_untrusted();
         let untrusted_compiler = Compiler::new()
             .with_max_script_size(untrusted.max_script_size as usize)
@@ -130,7 +135,6 @@ impl Scripting {
             .with_max_variable_size(trusted.max_var_size as usize)
             .with_max_header_size(10240)
             .with_valid_notification_uri("mailto")
-            //.with_valid_ext_lists(stores.in_memory_stores.keys().map(|k| k.to_string()))
             .with_functions(&mut fnc_map_trusted)
             .with_max_redirects(trusted.max_redirects as usize)
             .with_max_out_messages(trusted.max_out_messages as usize)
@@ -217,21 +221,22 @@ impl Scripting {
                 .unwrap_or_default(),
             max_received_headers: untrusted.max_received_headers as usize,
             from_addr: bp.compile_expr(
-                ObjectType::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemInterpreter.singleton(),
                 &trusted.ctx_default_from_address(),
             ),
             from_name: bp.compile_expr(
-                ObjectType::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemInterpreter.singleton(),
                 &trusted.ctx_default_from_name(),
             ),
             return_path: bp.compile_expr(
-                ObjectType::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemInterpreter.singleton(),
                 &trusted.ctx_default_return_path(),
             ),
             sign: bp.compile_expr(
-                ObjectType::SieveSystemScript.singleton(),
+                ObjectType::SieveSystemInterpreter.singleton(),
                 &trusted.ctx_dkim_sign_domain(),
             ),
+            untrusted_sign,
         }
     }
 
@@ -264,6 +269,7 @@ impl Clone for Scripting {
             return_path: self.return_path.clone(),
             max_received_headers: self.max_received_headers,
             sign: self.sign.clone(),
+            untrusted_sign: self.untrusted_sign.clone(),
             trusted_scripts: self.trusted_scripts.clone(),
             untrusted_scripts: self.untrusted_scripts.clone(),
             trusted_compiler: self.trusted_compiler.clone(),

@@ -252,8 +252,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
     let mut events = expanded
         .events
         .into_iter()
-        .enumerate()
-        .map(|(i, e)| {
+        .map(|e| {
             let e = e.try_into_date_time().unwrap();
             let start = e.start.timestamp();
             let end = e.end.timestamp();
@@ -283,7 +282,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             }
             CalendarEventExpansion {
                 comp_id: e.comp_id,
-                expansion_id: i as u32,
+                own_recurrence_id: None,
                 start,
                 end,
                 start_naive: 0,
@@ -330,9 +329,9 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
         events_archive,
         event_data
             .expand_from_ids(
-                &mut events
+                &mut events_archive
                     .iter()
-                    .map(|e| e.expansion_id)
+                    .filter_map(|e| e.recurrence_key())
                     .collect::<AHashSet<_>>(),
                 Tz::UTC
             )
@@ -353,7 +352,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
         }
     });
     for event in events.iter_mut().chain(events_archive.iter_mut()) {
-        event.expansion_id = 0;
+        event.own_recurrence_id = None;
         event.start_naive = 0;
     }
 

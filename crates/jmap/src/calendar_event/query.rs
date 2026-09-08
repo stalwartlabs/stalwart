@@ -10,7 +10,7 @@ use chrono::offset::TimeZone;
 use common::{Server, auth::AccessToken};
 use groupware::{
     cache::GroupwareCache,
-    calendar::{CalendarEvent, CalendarEventContent},
+    calendar::{CalendarEvent, CalendarEventContent, expand::RecurrenceKey},
 };
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
@@ -394,6 +394,9 @@ impl CalendarEventQuery for Server {
                     .expand(default_tz, time_range)
                     .unwrap_or_default()
                 {
+                    let Some(recurrence_key) = expansion.recurrence_key() else {
+                        continue;
+                    };
                     if expanded_results.len() < max_instances {
                         expanded_results.push(SearchResult {
                             created: calendar_event.created.to_native().to_be_bytes(),
@@ -401,7 +404,7 @@ impl CalendarEventQuery for Server {
                             start: expansion.start.to_be_bytes(),
                             uid: uid.clone(),
                             document_id,
-                            expansion_id: expansion.expansion_id.into(),
+                            recurrence_key,
                         });
                     } else {
                         return Err(trc::JmapEvent::InvalidArguments.into_err().details(
@@ -438,7 +441,7 @@ impl CalendarEventQuery for Server {
 
                 // Add results
                 for result in expanded_results {
-                    if !response.add(result.expansion_id.unwrap() + 1, result.document_id) {
+                    if !response.add(result.recurrence_key.prefix(), result.document_id) {
                         break;
                     }
                 }
@@ -501,7 +504,7 @@ fn local_timestamp(dt: &JSCalendarDateTime, tz: Tz) -> Option<i64> {
 
 #[derive(Debug)]
 struct SearchResult {
-    expansion_id: Option<u32>,
+    recurrence_key: RecurrenceKey,
     document_id: u32,
     start: [u8; std::mem::size_of::<i64>()],
     created: [u8; std::mem::size_of::<i64>()],

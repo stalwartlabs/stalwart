@@ -20,9 +20,7 @@ impl SymmetricEncrypt {
 
     pub fn new(key: &[u8], context: &str) -> Self {
         SymmetricEncrypt {
-            aes: Aes256GcmSiv::new(Key::<Aes256GcmSiv>::from_slice(&blake3::derive_key(
-                context, key,
-            ))),
+            aes: Aes256GcmSiv::new(&Key::<Aes256GcmSiv>::from(blake3::derive_key(context, key))),
         }
     }
 
@@ -33,7 +31,10 @@ impl SymmetricEncrypt {
         aad: &[u8],
     ) -> Result<Vec<u8>, String> {
         self.aes
-            .encrypt(Nonce::from_slice(nonce), Payload { msg: bytes, aad })
+            .encrypt(
+                <&Nonce>::try_from(nonce).map_err(|e| e.to_string())?,
+                Payload { msg: bytes, aad },
+            )
             .map_err(|e| e.to_string())
     }
 
@@ -44,7 +45,10 @@ impl SymmetricEncrypt {
         aad: &[u8],
     ) -> Result<Vec<u8>, String> {
         self.aes
-            .decrypt(Nonce::from_slice(nonce), Payload { msg: bytes, aad })
+            .decrypt(
+                <&Nonce>::try_from(nonce).map_err(|e| e.to_string())?,
+                Payload { msg: bytes, aad },
+            )
             .map_err(|e| e.to_string())
     }
 }

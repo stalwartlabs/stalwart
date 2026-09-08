@@ -91,7 +91,7 @@ pub(crate) fn organizer_handle_update(
             let method = if matches!(instance.comp.status(), Some(ICalendarStatus::Cancelled)) {
                 &ICalendarMethod::Cancel
             } else {
-                &ICalendarMethod::Add
+                &ICalendarMethod::Request
             };
 
             changed_instances.extend(instance.attendees.iter().filter_map(|attendee| {

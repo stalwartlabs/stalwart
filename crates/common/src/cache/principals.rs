@@ -11,10 +11,9 @@ use crate::{
         ACCOUNT_FLAG_ENCRYPT_ALGO_AES256_GCM, ACCOUNT_FLAG_ENCRYPT_ALGO_CHACHA20_POLY1305,
         ACCOUNT_FLAG_ENCRYPT_APPEND, ACCOUNT_FLAG_ENCRYPT_METHOD_PGP,
         ACCOUNT_FLAG_ENCRYPT_METHOD_SMIME, ACCOUNT_FLAG_ENCRYPT_TRAIN_SPAM_FILTER, ACCOUNT_IS_USER,
-        AccountCache, AccountInfo, AccountTenantIds, DOMAIN_FLAG_RELAY,
-        DOMAIN_FLAG_SCIM_PROVISIONING, DOMAIN_FLAG_SUB_ADDRESSING, DomainCache, EmailAddress,
-        EmailAddressRef, EmailCache, MailingListCache, PermissionsGroup, RECOVERY_ADMIN_ID,
-        RoleCache, TenantCache, permissions::BuildPermissions,
+        AccountCache, AccountInfo, AccountTenantIds, DOMAIN_FLAG_RELAY, DOMAIN_FLAG_SUB_ADDRESSING,
+        DomainCache, EmailAddress, EmailAddressRef, EmailCache, MailingListCache, PermissionsGroup,
+        RECOVERY_ADMIN_ID, RoleCache, TenantCache, permissions::BuildPermissions,
     },
     config::smtp::auth::DkimSigners,
     expr::if_block::BootstrapExprExt,
@@ -164,7 +163,7 @@ impl Server {
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL
                 if domain.allow_scim_provisioning {
-                    flags |= DOMAIN_FLAG_SCIM_PROVISIONING;
+                    flags |= crate::auth::DOMAIN_FLAG_SCIM_PROVISIONING;
                 }
                 // SPDX-SnippetEnd
 

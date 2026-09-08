@@ -162,7 +162,11 @@ impl PrincipalPropFind for Server {
                             ));
                         }
                         WebDavProperty::QuotaAvailableBytes if !is_principal => {
-                            fields.push(DavPropertyValue::new(property.clone(), quota.available));
+                            if let Some(available) = quota.available {
+                                fields.push(DavPropertyValue::new(property.clone(), available));
+                            } else {
+                                fields_not_found.push(DavPropertyValue::empty(property.clone()));
+                            }
                         }
                         WebDavProperty::QuotaUsedBytes if !is_principal => {
                             fields.push(DavPropertyValue::new(property.clone(), quota.used));

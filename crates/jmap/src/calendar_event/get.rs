@@ -218,7 +218,7 @@ impl CalendarEventGet for Server {
             || return_is_origin.is_some()
             || jmap_properties.contains(&JSCalendarProperty::UseDefaultAlerts);
 
-        'outer: while let Some(id) = ids.next() {
+        while let Some(id) = ids.next() {
             // Obtain the calendar_event object
             let document_id = id.document_id();
             if !calendar_event_ids.contains(document_id) {
@@ -226,18 +226,18 @@ impl CalendarEventGet for Server {
                 continue;
             }
 
-            // Extract expansion ids from synthetic ids
-            let mut expansion_ids = AHashSet::new();
+            // Extract recurrence keys from synthetic ids
+            let mut recurrence_keys = AHashSet::new();
             let mut include_base_event = false;
-            if let Some(expansion_id) = id.expansion_id() {
-                expansion_ids.insert(expansion_id);
+            if let Some(recurrence_key) = id.recurrence_key() {
+                recurrence_keys.insert(recurrence_key);
             } else {
                 include_base_event = true;
             }
             while let Some(next_id) = ids.peek() {
                 if next_id.document_id() == document_id {
-                    if let Some(expansion_id) = next_id.expansion_id() {
-                        expansion_ids.insert(expansion_id);
+                    if let Some(recurrence_key) = next_id.recurrence_key() {
+                        recurrence_keys.insert(recurrence_key);
                     } else {
                         include_base_event = true;
                     }
@@ -264,7 +264,7 @@ impl CalendarEventGet for Server {
                 .caused_by(trc::location!())?;
 
             // Serve requests that need no payload from the metadata record alone
-            if !needs_content && expansion_ids.is_empty() {
+            if !needs_content && recurrence_keys.is_empty() {
                 let mut result = Map::with_capacity(jmap_properties.len());
                 for property in &jmap_properties {
                     match property {
@@ -368,20 +368,17 @@ impl CalendarEventGet for Server {
             }
 
             // Expand synthetic ids
-            let mut results = Vec::with_capacity(expansion_ids.len() + 1);
-            if !expansion_ids.is_empty() {
+            let mut results = Vec::with_capacity(recurrence_keys.len() + 1);
+            if !recurrence_keys.is_empty() {
                 let ical = &content.data.event;
-                if let Some(expansions) =
-                    content.data.expand_from_ids(&mut expansion_ids, default_tz)
+                if let Some(expansions) = content
+                    .data
+                    .expand_from_ids(&mut recurrence_keys, default_tz)
                 {
                     for expansion in expansions {
-                        if !expansion.is_valid() {
-                            response.push_not_found(<Id as CalendarSyntheticId>::new(
-                                expansion.expansion_id,
-                                document_id,
-                            ));
-                            continue 'outer;
-                        }
+                        let Some(recurrence_key) = expansion.recurrence_key() else {
+                            continue;
+                        };
                         let component = &ical.components[expansion.comp_id as usize];
                         let source_component = component;
                         let is_recurrent = component.is_recurrent();
@@ -509,19 +506,18 @@ impl CalendarEventGet for Server {
                         }
 
                         results.push((
-                            <Id as CalendarSyntheticId>::new(expansion.expansion_id, document_id),
+                            <Id as CalendarSyntheticId>::new(recurrence_key, document_id),
                             expanded_ical,
                             expansion,
                         ));
                     }
-                } else {
-                    for expansion_id in expansion_ids {
-                        response.push_not_found(<Id as CalendarSyntheticId>::new(
-                            expansion_id,
-                            document_id,
-                        ));
-                    }
-                    continue;
+                }
+
+                for recurrence_key in recurrence_keys {
+                    response.push_not_found(<Id as CalendarSyntheticId>::new(
+                        recurrence_key,
+                        document_id,
+                    ));
                 }
             }
 

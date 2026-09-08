@@ -13,7 +13,12 @@ use registry::{
             TaskStatus, TaskTlsReport, TlsExternalReport, TlsInternalReport,
         },
     },
-    types::{EnumImpl, ObjectImpl, datetime::UTCDateTime, id::ObjectId, index::IndexBuilder},
+    types::{
+        EnumImpl, ObjectImpl,
+        datetime::UTCDateTime,
+        id::ObjectId,
+        index::{IndexBuilder, IndexValue},
+    },
 };
 use store::{
     SerializeInfallible, U64_LEN,
@@ -22,6 +27,7 @@ use store::{
         BatchBuilder, RegistryClass, TaskId, TaskQueueClass, ValueClass, assert::AssertValue,
         key::KeySerializer,
     },
+    xxhash_rust::xxh3::Xxh3,
 };
 use types::id::Id;
 
@@ -113,6 +119,8 @@ pub trait ExternalReportIndex: ObjectImpl {
 
     fn success_fail_count(&self) -> (u64, u64);
 
+    fn unique_key(&self) -> Option<[u8; 16]>;
+
     fn write_ops(&self, batch: &mut BatchBuilder, item_id: u64, is_set: bool) {
         let object_id = Self::OBJECT.to_id();
         let mut index_builder = IndexBuilder::default();
@@ -129,6 +137,11 @@ pub trait ExternalReportIndex: ObjectImpl {
         index_builder.search(Property::TotalFailedSessions, fail_count);
 
         index_builder.search(Property::ExpiresAt, self.expires_at());
+
+        if let Some(unique_key) = self.unique_key() {
+            index_builder.unique(Property::ReportId, IndexValue::Bytes(unique_key.to_vec()));
+        }
+
         batch.registry_index(object_id, item_id, index_builder.keys.iter(), is_set);
 
         let key = ValueClass::Registry(RegistryClass::Item { object_id, item_id });
@@ -241,6 +254,10 @@ impl ExternalReportIndex for ArfExternalReport {
     fn success_fail_count(&self) -> (u64, u64) {
         (self.report.incidents, 0)
     }
+
+    fn unique_key(&self) -> Option<[u8; 16]> {
+        None
+    }
 }
 
 impl ExternalReportIndex for DmarcExternalReport {
@@ -294,6 +311,20 @@ impl ExternalReportIndex for DmarcExternalReport {
 
         (success_count, fail_count)
     }
+
+    fn unique_key(&self) -> Option<[u8; 16]> {
+        let report = &self.report;
+
+        Some(report_key(
+            [
+                report.org_name.as_str(),
+                report.policy_domain.as_str(),
+                report.report_id.as_str(),
+            ],
+            report.date_range_begin,
+            report.date_range_end,
+        ))
+    }
 }
 
 impl ExternalReportIndex for TlsExternalReport {
@@ -344,6 +375,32 @@ impl ExternalReportIndex for TlsExternalReport {
 
         (success_count, fail_count)
     }
+
+    fn unique_key(&self) -> Option<[u8; 16]> {
+        let report = &self.report;
+
+        Some(report_key(
+            [
+                report.organization_name.as_deref().unwrap_or_default(),
+                report.report_id.as_str(),
+            ],
+            report.date_range_start,
+            report.date_range_end,
+        ))
+    }
+}
+
+fn report_key<const N: usize>(fields: [&str; N], from: UTCDateTime, to: UTCDateTime) -> [u8; 16] {
+    let mut hasher = Xxh3::new();
+
+    for field in fields {
+        hasher.update(field.as_bytes());
+        hasher.update(&[0u8]);
+    }
+    hasher.update(&(from.timestamp() as u64).to_be_bytes());
+    hasher.update(&(to.timestamp() as u64).to_be_bytes());
+
+    hasher.digest128().to_be_bytes()
 }
 
 #[inline(always)]

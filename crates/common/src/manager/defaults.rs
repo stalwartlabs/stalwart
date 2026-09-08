@@ -252,7 +252,7 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                 expiry: MtaDeliveryExpiration::Attempts(MtaDeliveryExpirationAttempts {
                     max_attempts: 8,
                 }),
-                notify: MtaDeliveryScheduleIntervalsOrDefault::Custom(Default::default()),
+                notify: MtaDeliveryScheduleIntervalsOrDefault::Default,
                 retry: MtaDeliveryScheduleIntervalsOrDefault::Custom(
                     MtaDeliveryScheduleIntervals {
                         intervals: List::from_iter([

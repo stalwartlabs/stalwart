@@ -1,30 +1,17 @@
 [package]
 name = "migration"
-version = "0.16.20"
+version = "0.16.21"
 edition = "2024"
 
 [dependencies]
-utils = { path = "../utils" }
-nlp = { path = "../nlp" }
 store = { path = "../store" }
 trc = { path = "../trc" }
 types = { path = "../types" }
 common = { path =  "../common" }
 email = { path =  "../email" }
-directory = { path =  "../directory" }
-smtp = { path =  "../smtp" }
 spam-filter = { path =  "../spam-filter" }
 registry = { path =  "../registry" }
-proc_macros = { path =  "../utils/proc-macros" }
 tokio = { version = "1.53", features = ["net", "macros"] }
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-rkyv.workspace = true
-compact_str = "0.10.0"
-lz4_flex = { version = "0.14", default-features = false } 
-base64 = "0.23"
-futures = "0.3"
-num_cpus = "1.17.0"
 
 [features]
 test_mode = []

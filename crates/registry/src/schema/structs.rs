@@ -5010,6 +5010,8 @@ pub struct SieveUserInterpreter {
     pub max_var_size: u64,
     #[serde(rename = "maxScripts")]
     pub max_scripts: Option<u64>,
+    #[serde(rename = "dkimSignDomain")]
+    pub dkim_sign_domain: Expression,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

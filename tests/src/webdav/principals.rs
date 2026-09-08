@@ -373,8 +373,7 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                 .is_not_empty();
             props
                 .get(DavProperty::WebDav(WebDavProperty::QuotaAvailableBytes))
-                .with_status(StatusCode::OK)
-                .is_not_empty();
+                .with_status(StatusCode::NOT_FOUND);
             props
                 .get(DavProperty::WebDav(WebDavProperty::QuotaUsedBytes))
                 .with_status(StatusCode::OK)

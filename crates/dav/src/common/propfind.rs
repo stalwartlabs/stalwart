@@ -139,7 +139,7 @@ pub(crate) struct PropFindAccountData {
 #[derive(Clone, Default)]
 pub(crate) struct PropFindAccountQuota {
     pub used: u64,
-    pub available: u64,
+    pub available: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -760,14 +760,17 @@ impl PropFindRequestHandler for Server {
                             }
                         }
                         WebDavProperty::QuotaAvailableBytes => {
-                            if item.is_container {
-                                fields.push(DavPropertyValue::new(
-                                    property.clone(),
-                                    data.quota(self, account_id)
-                                        .await
-                                        .caused_by(trc::location!())?
-                                        .available,
-                                ));
+                            let available = if item.is_container {
+                                data.quota(self, account_id)
+                                    .await
+                                    .caused_by(trc::location!())?
+                                    .available
+                            } else {
+                                None
+                            };
+
+                            if let Some(available) = available {
+                                fields.push(DavPropertyValue::new(property.clone(), available));
                             } else if !skip_not_found {
                                 fields_not_found.push(DavPropertyValue::empty(property.clone()));
                             }
@@ -1267,27 +1270,32 @@ impl PropFindRequestHandler for Server {
 
     async fn dav_quota(&self, account_id: u32) -> trc::Result<PropFindAccountQuota> {
         let account = self.account(account_id).await.caused_by(trc::location!())?;
-        let quota = if account.quota_disk > 0 {
-            account.quota_disk
-        } else if let Some(tenant_id) = account.id_tenant {
-            let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
-            if tenant.quota_disk > 0 {
-                tenant.quota_disk
-            } else {
-                u32::MAX as u64
-            }
-        } else {
-            u32::MAX as u64
-        };
         let used = self
             .get_used_quota_account(account_id)
             .await
-            .caused_by(trc::location!())? as u64;
+            .caused_by(trc::location!())?
+            .max(0) as u64;
+        let mut available =
+            (account.quota_disk > 0).then(|| account.quota_disk.saturating_sub(used));
 
-        Ok(PropFindAccountQuota {
-            used,
-            available: quota.saturating_sub(used),
-        })
+        if let Some(tenant_id) = account.id_tenant {
+            let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
+
+            if tenant.quota_disk > 0 {
+                let tenant_used = self
+                    .get_used_quota_tenant(tenant_id)
+                    .await
+                    .caused_by(trc::location!())?
+                    .max(0) as u64;
+                let tenant_available = tenant.quota_disk.saturating_sub(tenant_used);
+
+                available = Some(available.map_or(tenant_available, |available| {
+                    available.min(tenant_available)
+                }));
+            }
+        }
+
+        Ok(PropFindAccountQuota { used, available })
     }
 }
 #[allow(clippy::too_many_arguments)]

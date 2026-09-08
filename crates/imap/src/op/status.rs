@@ -63,42 +63,52 @@ impl<T: SessionStream> Session<T> {
                 match request {
                     Ok(arguments) => {
                         let op_start = Instant::now();
-                        let caches = match &mut caches {
-                            Some(caches) => caches,
-                            None => caches.insert(
+                        let synchronized = match &mut caches {
+                            Some(caches) => Ok(caches),
+                            None => {
+                                // Refresh mailboxes
                                 data.synchronize_mailboxes(false)
                                     .await
-                                    .imap_ctx(&arguments.tag, trc::location!())?
-                                    .caches,
-                            ),
+                                    .imap_ctx(&arguments.tag, trc::location!())
+                                    .map(|state| caches.insert(state.caches))
+                            }
                         };
 
                         // Fetch status
-                        let status = data
-                            .status(caches, arguments.mailbox_name, &arguments.items)
-                            .await
-                            .imap_ctx(&arguments.tag, trc::location!())?;
+                        let status = match synchronized {
+                            Ok(caches) => {
+                                data.status(caches, arguments.mailbox_name, &arguments.items)
+                                    .await
+                                    .imap_ctx(&arguments.tag, trc::location!())
+                            }
+                            Err(err) => Err(err),
+                        };
 
-                        trc::event!(
-                            Imap(trc::ImapEvent::Status),
-                            SpanId = data.session_id,
-                            MailboxName = status.mailbox_name.clone(),
-                            Details = arguments
-                                .items
-                                .iter()
-                                .map(|c| trc::Value::from(format!("{c:?}")))
-                                .collect::<Vec<_>>(),
-                            Elapsed = op_start.elapsed()
-                        );
+                        match status {
+                            Ok(status) => {
+                                trc::event!(
+                                    Imap(trc::ImapEvent::Status),
+                                    SpanId = data.session_id,
+                                    MailboxName = status.mailbox_name.clone(),
+                                    Details = arguments
+                                        .items
+                                        .iter()
+                                        .map(|c| trc::Value::from(format!("{c:?}")))
+                                        .collect::<Vec<_>>(),
+                                    Elapsed = op_start.elapsed()
+                                );
 
-                        let mut buf = Vec::with_capacity(32);
-                        status.serialize(&mut buf, is_utf8);
-                        data.write_bytes(
-                            StatusResponse::completed(Command::Status)
-                                .with_tag(arguments.tag)
-                                .serialize(buf),
-                        )
-                        .await?;
+                                let mut buf = Vec::with_capacity(32);
+                                status.serialize(&mut buf, is_utf8);
+                                data.write_bytes(
+                                    StatusResponse::completed(Command::Status)
+                                        .with_tag(arguments.tag)
+                                        .serialize(buf),
+                                )
+                                .await?;
+                            }
+                            Err(err) => data.write_error(err).await?,
+                        }
                     }
                     Err(err) => data.write_error(err).await?,
                 }

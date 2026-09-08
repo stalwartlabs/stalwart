@@ -38,6 +38,18 @@ static PEBBLE: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static POWERDNS: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 static SCIM_TESTER: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
 
+const OPENLDAP_LDAPI_URL: &str = "ldapi://%2Fvar%2Frun%2Fslapd%2Fldapi/";
+
+const OPENLDAP_ALLOW_UNAUTHENTICATED_BIND: &str = r#"set -e
+ldapmodify -Y EXTERNAL -Q -H "$LDAPI" <<'EOF'
+dn: cn=config
+changetype: modify
+replace: olcAllows
+olcAllows: bind_anon_dn
+EOF
+test "$(ldapwhoami -x -H "$LDAPI" -D uid=john.doe,ou=users,dc=stalwart,dc=test -w '')" = anonymous
+"#;
+
 const POWERDNS_ZONE_INIT: &str = r#"set -e
 for i in $(seq 1 60); do
     pdnsutil list-all-zones >/dev/null 2>&1 && break
@@ -524,7 +536,7 @@ pub async fn ensure_powerdns() {
 
 pub async fn ensure_openldap() {
     const BOOTSTRAP_DIR: &str = "/container/service/slapd/assets/config/bootstrap/ldif/custom";
-    OPENLDAP
+    let container = OPENLDAP
         .get_or_init(|| async {
             GenericImage::new("osixia/openldap", "1.5.0")
                 .with_wait_for(WaitFor::message_on_stderr("slapd starting"))
@@ -551,6 +563,22 @@ pub async fn ensure_openldap() {
         })
         .await;
     wait_for_tcp(389).await;
+
+    let setup = format!("LDAPI={OPENLDAP_LDAPI_URL}\n{OPENLDAP_ALLOW_UNAUTHENTICATED_BIND}");
+    let mut result = container
+        .exec(
+            ExecCommand::new(["bash", "-c", setup.as_str()])
+                .with_cmd_ready_condition(CmdWaitFor::exit()),
+        )
+        .await
+        .expect("Failed to exec OpenLDAP unauthenticated bind setup");
+    if result.exit_code().await.ok().flatten() != Some(0) {
+        let stdout =
+            String::from_utf8_lossy(&result.stdout_to_vec().await.unwrap_or_default()).into_owned();
+        let stderr =
+            String::from_utf8_lossy(&result.stderr_to_vec().await.unwrap_or_default()).into_owned();
+        panic!("OpenLDAP unauthenticated bind setup failed:\n{stdout}\n{stderr}");
+    }
 }
 
 async fn create_minio_bucket() {

@@ -73,6 +73,19 @@ pub async fn test(
     imap.send("CREATE \"Second trash\" (USE (\\Trash))").await;
     imap.assert_read(Type::Tagged, ResponseType::No).await;
 
+    // Every command in a pipelined batch is answered, even after a failure
+    imap.send_raw(concat!(
+        "_p1 STATUS \"Tofu\" (MESSAGES)\r\n",
+        "_p2 STATUS \"Does Not Exist\" (MESSAGES)\r\n",
+        "_x STATUS \"Fruit/Apple\" (MESSAGES)\r\n"
+    ))
+    .await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_contains("_p1 OK")
+        .assert_contains("_p2 NO [NONEXISTENT]")
+        .assert_contains("* STATUS \"Fruit/Apple\"");
+
     // Enable IMAP4rev2
     imap.send("ENABLE IMAP4rev2").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
