@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{borrow::Cow, str::CharIndices};
+use std::borrow::Cow;
 
 use super::Token;
 
 pub struct WordTokenizer<'x> {
     max_token_length: usize,
     text: &'x str,
-    iterator: CharIndices<'x>,
+    pos: usize,
 }
 
 impl WordTokenizer<'_> {
@@ -19,9 +19,140 @@ impl WordTokenizer<'_> {
         WordTokenizer {
             max_token_length,
             text,
-            iterator: text.char_indices(),
+            pos: 0,
         }
     }
+}
+
+pub(super) struct AlnumRun {
+    pub start: usize,
+    pub end: usize,
+    pub resume: usize,
+    pub has_upper: bool,
+    pub is_ascii: bool,
+}
+
+const ASCII_CASE_BIT: u8 = 0x20;
+
+struct WideStop {
+    pos: usize,
+    len: usize,
+    has_upper: bool,
+}
+
+#[inline(never)]
+fn skip_wide(text: &str, from: usize) -> WideStop {
+    for (offset, ch) in text[from..].char_indices() {
+        if ch.is_ascii() {
+            return WideStop {
+                pos: from + offset,
+                len: 0,
+                has_upper: false,
+            };
+        }
+        if ch.is_alphanumeric() {
+            return WideStop {
+                pos: from + offset,
+                len: ch.len_utf8(),
+                has_upper: ch.is_uppercase(),
+            };
+        }
+    }
+    WideStop {
+        pos: text.len(),
+        len: 0,
+        has_upper: false,
+    }
+}
+
+#[inline(never)]
+fn extend_wide(text: &str, from: usize) -> WideStop {
+    let mut has_upper = false;
+    for (offset, ch) in text[from..].char_indices() {
+        if ch.is_ascii() {
+            return WideStop {
+                pos: from + offset,
+                len: 0,
+                has_upper,
+            };
+        }
+        if !ch.is_alphanumeric() {
+            return WideStop {
+                pos: from + offset,
+                len: ch.len_utf8(),
+                has_upper,
+            };
+        }
+        has_upper = has_upper || ch.is_uppercase();
+    }
+    WideStop {
+        pos: text.len(),
+        len: 0,
+        has_upper,
+    }
+}
+
+#[inline(always)]
+pub(super) fn next_alnum_run(text: &str, from: usize) -> Option<AlnumRun> {
+    let bytes = text.as_bytes();
+    let mut pos = from;
+
+    let (start, first_len, first_upper) = 'find: loop {
+        match bytes.get(pos) {
+            Some(&byte) if byte < 0x80 => {
+                if byte.is_ascii_alphanumeric() {
+                    break 'find (pos, 0, false);
+                }
+                pos += 1;
+            }
+            Some(_) => {
+                let hit = skip_wide(text, pos);
+                pos = hit.pos;
+                if hit.len != 0 {
+                    break 'find (pos, hit.len, hit.has_upper);
+                }
+                if pos == bytes.len() {
+                    return None;
+                }
+            }
+            None => return None,
+        }
+    };
+
+    let mut case_bits = u8::MAX;
+    let mut has_upper = first_upper;
+    let mut is_ascii = first_len == 0;
+    let mut end = start + first_len;
+    let resume = 'run: loop {
+        while let Some(&byte) = bytes.get(end) {
+            if byte >= 0x80 {
+                let hit = extend_wide(text, end);
+                if hit.pos != end {
+                    has_upper |= hit.has_upper;
+                    is_ascii = false;
+                    end = hit.pos;
+                }
+                if hit.len != 0 {
+                    break 'run end + hit.len;
+                }
+                continue 'run;
+            }
+            if !byte.is_ascii_alphanumeric() {
+                break 'run end + 1;
+            }
+            case_bits &= byte;
+            end += 1;
+        }
+        break 'run end;
+    };
+
+    Some(AlnumRun {
+        start,
+        end,
+        resume,
+        has_upper: has_upper || case_bits & ASCII_CASE_BIT == 0,
+        is_ascii,
+    })
 }
 
 /// Parses indo-european text into lowercase tokens.
@@ -29,45 +160,65 @@ impl<'x> Iterator for WordTokenizer<'x> {
     type Item = Token<Cow<'x, str>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((token_start, ch)) = self.iterator.next() {
-            if ch.is_alphanumeric() {
-                let mut is_uppercase = ch.is_uppercase();
-                let token_end = (&mut self.iterator)
-                    .filter_map(|(pos, ch)| {
-                        if ch.is_alphanumeric() {
-                            if !is_uppercase && ch.is_uppercase() {
-                                is_uppercase = true;
-                            }
-                            None
-                        } else {
-                            pos.into()
-                        }
-                    })
-                    .next()
-                    .unwrap_or(self.text.len());
+        let text = self.text;
+        loop {
+            let run = next_alnum_run(text, self.pos)?;
+            self.pos = run.resume;
 
-                let token_len = token_end - token_start;
-                if token_end > token_start && token_len <= self.max_token_length {
-                    return Token::new(
-                        token_start,
-                        token_len,
-                        if is_uppercase {
-                            self.text[token_start..token_end].to_lowercase().into()
-                        } else {
-                            self.text[token_start..token_end].into()
-                        },
-                    )
-                    .into();
-                }
+            let token_len = run.end - run.start;
+            if token_len <= self.max_token_length {
+                let word = &text[run.start..run.end];
+                return Some(Token::new(
+                    run.start,
+                    token_len,
+                    if run.has_upper {
+                        Cow::Owned(word.to_lowercase())
+                    } else {
+                        Cow::Borrowed(word)
+                    },
+                ));
             }
         }
-        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn word_tokenizer_cases() {
+        let tokens = WordTokenizer::new("abc Def \u{1c5}x \u{391}\u{3a3} a\u{663} \u{212a}", 40)
+            .collect::<Vec<_>>();
+        let words = tokens
+            .iter()
+            .map(|t| (t.word.as_ref(), t.from, t.to))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            words,
+            vec![
+                ("abc", 0, 3),
+                ("def", 4, 7),
+                ("\u{1c5}x", 8, 11),
+                ("\u{3b1}\u{3c2}", 12, 16),
+                ("a\u{663}", 17, 20),
+                ("k", 21, 24),
+            ]
+        );
+        assert!(matches!(tokens[0].word, Cow::Borrowed(_)));
+        assert!(matches!(tokens[1].word, Cow::Owned(_)));
+        assert!(matches!(tokens[2].word, Cow::Borrowed(_)));
+        assert!(matches!(tokens[3].word, Cow::Owned(_)));
+        assert_eq!(
+            WordTokenizer::new("ab abc abcd", 3)
+                .map(|t| t.word.into_owned())
+                .collect::<Vec<_>>(),
+            vec!["ab".to_string(), "abc".to_string()]
+        );
+        assert_eq!(WordTokenizer::new("", 3).count(), 0);
+        assert_eq!(WordTokenizer::new("...", 3).count(), 0);
+        assert_eq!(WordTokenizer::new("a", 0).count(), 0);
+    }
 
     #[test]
     fn indo_european_tokenizer() {

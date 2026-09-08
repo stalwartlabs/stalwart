@@ -10,6 +10,7 @@ use crate::modules::expression::StringResolver;
 use crate::modules::html::SRC;
 use crate::{
     Hostname, SpamFilterContext, TextPart,
+    analysis::to_lowercase_cow,
     modules::html::{A, HREF, HtmlToken},
 };
 use common::Server;
@@ -45,105 +46,24 @@ pub struct UrlParsed {
 impl SpamFilterAnalyzeUrl for Server {
     async fn spam_filter_analyze_url(&self, ctx: &mut SpamFilterContext<'_>) {
         // Extract URLs
-        let mut urls: HashSet<ElementLocation<UrlParts<'static>>> =
-            HashSet::from_iter(ctx.output.subject_tokens.iter().filter_map(|t| match t {
-                TokenType::Url(url) | TokenType::UrlNoScheme(url) => Some(ElementLocation::new(
-                    url.to_owned(),
-                    Location::HeaderSubject,
-                )),
-                _ => None,
-            }));
-        for (part_id, part) in ctx.output.text_parts.iter().enumerate() {
-            let part_id = part_id as u32;
-            let is_body = ctx.input.message.text_body.contains(&part_id)
-                || ctx.input.message.html_body.contains(&part_id);
-            let text_location = if is_body {
-                Location::BodyText
-            } else {
-                Location::Attachment
-            };
-
-            let tokens = match part {
-                TextPart::Plain { tokens, .. } => tokens,
-                TextPart::Html {
-                    html_tokens,
-                    tokens,
-                    ..
-                } => {
-                    for token in html_tokens {
-                        if let HtmlToken::StartTag { attributes, .. } = token {
-                            for (attr, value) in attributes {
-                                match value {
-                                    Some(value) if [HREF, SRC].contains(attr) => {
-                                        urls.insert(ElementLocation::new(
-                                            UrlParts::new(value.trim().to_string()),
-                                            if is_body {
-                                                Location::BodyHtml
-                                            } else {
-                                                Location::Attachment
-                                            },
-                                        ));
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                    tokens
-                }
-                TextPart::None => &[][..],
-            };
-
-            for token in tokens {
-                match token {
-                    TokenType::Url(url) | TokenType::UrlNoScheme(url) => {
-                        if !ctx.input.is_train
-                            && is_body
-                            && !ctx.result.has_tag("RCPT_DOMAIN_IN_BODY")
-                            && let Some(url_parsed) = &url.url_parsed
-                        {
-                            let host = url_parsed.host.sld_or_default();
-                            for rcpt in ctx.output.all_recipients() {
-                                if rcpt.email.domain_part.sld_or_default() == host {
-                                    ctx.result.add_tag("RCPT_DOMAIN_IN_BODY");
-                                    break;
-                                }
-                            }
-                        }
-
-                        urls.insert(ElementLocation::new(url.to_owned(), text_location));
-                    }
-                    _ => {}
-                }
-            }
-
-            if is_body && !ctx.input.is_train {
-                let is_single = match part {
-                    TextPart::Plain { tokens, .. } => is_single_url(tokens),
-                    TextPart::Html {
-                        html_tokens,
-                        tokens,
-                        ..
-                    } => is_single_html_url(html_tokens, tokens),
-                    TextPart::None => false,
-                };
-
-                if is_single {
-                    ctx.result.add_tag("URL_ONLY");
-                }
-            }
-        }
+        let mut urls = collect_urls(ctx);
 
         if !ctx.input.is_train {
             let mut redirected_urls = HashSet::new();
+            let mut has_zwsp = false;
+            let mut has_suspicious = false;
             for url in &urls {
-                for ch in url.element.url.chars() {
-                    if ch.is_zwsp() {
-                        ctx.result.add_tag("ZERO_WIDTH_SPACE_URL");
-                    }
+                if !(has_zwsp && has_suspicious) && !url.element.url.is_ascii() {
+                    for ch in url.element.url.chars() {
+                        if ch.is_zwsp() {
+                            has_zwsp = true;
+                            ctx.result.add_tag("ZERO_WIDTH_SPACE_URL");
+                        }
 
-                    if ch.is_obscured() {
-                        ctx.result.add_tag("SUSPICIOUS_URL");
+                        if ch.is_obscured() {
+                            has_suspicious = true;
+                            ctx.result.add_tag("SUSPICIOUS_URL");
+                        }
                     }
                 }
 
@@ -277,6 +197,106 @@ impl SpamFilterAnalyzeUrl for Server {
     }
 }
 
+pub fn collect_urls(
+    ctx: &mut SpamFilterContext<'_>,
+) -> HashSet<ElementLocation<UrlParts<'static>>> {
+    let mut urls: HashSet<ElementLocation<UrlParts<'static>>> =
+        HashSet::from_iter(ctx.output.subject_tokens.iter().filter_map(|t| match t {
+            TokenType::Url(url) | TokenType::UrlNoScheme(url) => Some(ElementLocation::new(
+                url.as_ref().to_owned(),
+                Location::HeaderSubject,
+            )),
+            _ => None,
+        }));
+    for (part_id, part) in ctx.output.text_parts.iter().enumerate() {
+        let part_id = part_id as u32;
+        let is_body = ctx.input.message.text_body.contains(&part_id)
+            || ctx.input.message.html_body.contains(&part_id);
+        let text_location = if is_body {
+            Location::BodyText
+        } else {
+            Location::Attachment
+        };
+
+        let tokens = match part {
+            TextPart::Plain { tokens, .. } => tokens,
+            TextPart::Html {
+                html_tokens,
+                tokens,
+                ..
+            } => {
+                for token in html_tokens {
+                    if let HtmlToken::StartTag { attributes, .. } = token {
+                        for (attr, value) in attributes {
+                            match value {
+                                Some(value) if [HREF, SRC].contains(attr) => {
+                                    let value = value.trim();
+                                    if !urls.contains(to_lowercase_cow(value).as_ref()) {
+                                        urls.insert(ElementLocation::new(
+                                            UrlParts::new(value.to_string()),
+                                            if is_body {
+                                                Location::BodyHtml
+                                            } else {
+                                                Location::Attachment
+                                            },
+                                        ));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                tokens
+            }
+            TextPart::None => &[][..],
+        };
+
+        for token in tokens {
+            match token {
+                TokenType::Url(url) | TokenType::UrlNoScheme(url) => {
+                    if !ctx.input.is_train
+                        && is_body
+                        && !ctx.result.has_tag("RCPT_DOMAIN_IN_BODY")
+                        && let Some(url_parsed) = &url.url_parsed
+                    {
+                        let host = url_parsed.host.sld_or_default();
+                        for rcpt in ctx.output.all_recipients() {
+                            if rcpt.email.domain_part.sld_or_default() == host {
+                                ctx.result.add_tag("RCPT_DOMAIN_IN_BODY");
+                                break;
+                            }
+                        }
+                    }
+
+                    if !urls.contains(url.url.as_str()) {
+                        urls.insert(ElementLocation::new(url.as_ref().to_owned(), text_location));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if is_body && !ctx.input.is_train {
+            let is_single = match part {
+                TextPart::Plain { tokens, .. } => is_single_url(tokens),
+                TextPart::Html {
+                    html_tokens,
+                    tokens,
+                    ..
+                } => is_single_html_url(html_tokens, tokens),
+                TextPart::None => false,
+            };
+
+            if is_single {
+                ctx.result.add_tag("URL_ONLY");
+            }
+        }
+    }
+
+    urls
+}
+
 #[allow(unreachable_code)]
 #[allow(unused_variables)]
 async fn http_get_header(
@@ -340,7 +360,7 @@ fn is_single_url<T, E, U, I>(tokens: &[TokenType<T, E, U, I>]) -> bool {
 }
 
 fn is_single_html_url<T, E, U, I>(
-    html_tokens: &[HtmlToken],
+    html_tokens: &[HtmlToken<'_>],
     tokens: &[TokenType<T, E, U, I>],
 ) -> bool {
     let mut url_count = 0;
@@ -392,6 +412,8 @@ impl Hash for UrlParts<'_> {
     }
 }
 
+const NO_SCHEME_PREFIX: &str = "https://";
+
 impl<'x> UrlParts<'x> {
     pub fn new(url: impl Into<Cow<'x, str>>) -> Self {
         let url_original = url.into();
@@ -406,7 +428,15 @@ impl<'x> UrlParts<'x> {
 
     pub fn no_scheme(url: impl Into<Cow<'x, str>>) -> Self {
         let url_original = url.into();
-        let url = format!("https://{}", url_original.trim().to_lowercase());
+        let trimmed = url_original.trim();
+        let mut url = String::with_capacity(NO_SCHEME_PREFIX.len() + trimmed.len());
+        url.push_str(NO_SCHEME_PREFIX);
+        if trimmed.is_ascii() {
+            url.push_str(trimmed);
+            url.make_ascii_lowercase();
+        } else {
+            url.push_str(&trimmed.to_lowercase());
+        }
 
         Self {
             url_parsed: Self::parse(&url),
@@ -416,6 +446,11 @@ impl<'x> UrlParts<'x> {
     }
 
     fn parse(url: &str) -> Option<UrlParsed> {
+        match url.as_bytes().first() {
+            None | Some(b'/') => return None,
+            _ => {}
+        }
+
         url.parse::<Uri>().ok().and_then(|parts| {
             parts
                 .host()

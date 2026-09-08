@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: LicenseRef-SEL
  */
 
-use std::{future::Future, time::Instant};
-
-use common::Server;
-use trc::AiEvent;
-
 use crate::SpamFilterContext;
+use common::Server;
+use std::{future::Future, time::Instant};
+use trc::AiEvent;
 
 pub trait SpamFilterAnalyzeLlm: Sync + Send {
     fn spam_filter_analyze_llm(

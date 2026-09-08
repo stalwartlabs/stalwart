@@ -4,13 +4,34 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::{SpamFilterContext, analysis::eq_lowercase};
 use common::Server;
 use mail_parser::HeaderName;
+use std::future::Future;
 use store::ahash::AHashSet;
 
-use crate::SpamFilterContext;
+const TAG_BYTE: [u8; 256] = tag_byte_table();
+
+const fn tag_byte_table() -> [u8; 256] {
+    let mut table = [b' '; 256];
+    let mut idx = 0;
+    while idx < 256 {
+        let byte = idx as u8;
+        table[idx] = if byte.is_ascii_digit() || byte.is_ascii_uppercase() {
+            byte
+        } else if byte.is_ascii_lowercase() {
+            byte - 32
+        } else if byte == b'-' {
+            b'_'
+        } else if byte & 0xc0 == 0x80 {
+            0
+        } else {
+            b' '
+        };
+        idx += 1;
+    }
+    table
+}
 
 pub trait SpamFilterAnalyzeHeaders: Sync + Send {
     fn spam_filter_analyze_headers(
@@ -22,24 +43,12 @@ pub trait SpamFilterAnalyzeHeaders: Sync + Send {
 impl SpamFilterAnalyzeHeaders for Server {
     async fn spam_filter_analyze_headers(&self, ctx: &mut SpamFilterContext<'_>) {
         let mut list_score = 0.0;
-        let mut unique_headers = AHashSet::new();
+        let mut unique_headers = AHashSet::with_capacity(13);
         let raw_message = ctx.input.message.raw_message();
 
         for header in ctx.input.message.headers() {
             // Add header exists tag
-            let hdr_name = header.name();
-            let mut tag: String = String::with_capacity(hdr_name.len() + 5);
-            tag.push_str("X_HDR_");
-            for ch in hdr_name.chars() {
-                if ch.is_ascii_alphanumeric() {
-                    tag.push(ch.to_ascii_uppercase());
-                } else if ch == '-' {
-                    tag.push('_');
-                } else {
-                    tag.push(' ');
-                }
-            }
-            ctx.result.add_tag(tag);
+            ctx.result.add_tag(header_exists_tag(header.name()));
 
             match &header.name {
                 HeaderName::ContentType
@@ -93,23 +102,20 @@ impl SpamFilterAnalyzeHeaders for Server {
                     ctx.result.add_tag("HAS_LIST_UNSUB");
                 }
                 HeaderName::Other(name) => {
-                    let value = header
-                        .value()
-                        .as_text()
-                        .unwrap_or_default()
-                        .trim()
-                        .to_lowercase();
-
                     if name.eq_ignore_ascii_case("Precedence") {
-                        if value == "bulk" {
+                        let value = header.value().as_text().unwrap_or_default().trim();
+
+                        if eq_lowercase(value, "bulk") {
                             list_score += 0.25;
                             ctx.result.add_tag("PRECEDENCE_BULK");
-                        } else if value == "list" {
+                        } else if eq_lowercase(value, "list") {
                             list_score += 0.25;
                         }
                     } else if name.eq_ignore_ascii_case("X-Loop") {
                         list_score += 0.125;
                     } else if name.eq_ignore_ascii_case("X-Priority") {
+                        let value = header.value().as_text().unwrap_or_default().trim();
+
                         match value.parse::<i32>().unwrap_or(i32::MAX) {
                             0 => {
                                 ctx.result.add_tag("HAS_X_PRIO_ZERO");
@@ -142,4 +148,16 @@ impl SpamFilterAnalyzeHeaders for Server {
             ctx.result.add_tag("MISSING_ESSENTIAL_HEADERS");
         }
     }
+}
+
+fn header_exists_tag(name: &str) -> String {
+    let mut tag = String::with_capacity(name.len() + 6);
+    tag.push_str("X_HDR_");
+    for &byte in name.as_bytes() {
+        let mapped = TAG_BYTE[byte as usize];
+        if mapped != 0 {
+            tag.push(mapped as char);
+        }
+    }
+    tag
 }

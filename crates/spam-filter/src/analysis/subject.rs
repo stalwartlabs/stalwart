@@ -4,14 +4,44 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::{
+    SpamFilterContext,
+    analysis::{ExcessEncoding, excess_encoding},
+};
 use common::Server;
 use mail_parser::HeaderName;
 use nlp::tokenizers::types::TokenType;
 use smtp_proto::{MAIL_BODY_8BITMIME, MAIL_BODY_BINARYMIME, MAIL_SMTPUTF8};
+use std::future::Future;
 
-use crate::SpamFilterContext;
+const CLASS_OTHER: u8 = 0;
+const CLASS_SPACE: u8 = 1;
+const CLASS_UPPER: u8 = 2;
+const CLASS_LOWER: u8 = 3;
+const CLASS_CURRENCY: u8 = 4;
+const ASCII_CLASS: [u8; 256] = ascii_class_table();
+
+const fn ascii_class_table() -> [u8; 256] {
+    let mut table = [CLASS_OTHER; 256];
+    table[0x09] = CLASS_SPACE;
+    table[0x0a] = CLASS_SPACE;
+    table[0x0b] = CLASS_SPACE;
+    table[0x0c] = CLASS_SPACE;
+    table[0x0d] = CLASS_SPACE;
+    table[0x20] = CLASS_SPACE;
+    table[b'$' as usize] = CLASS_CURRENCY;
+    let mut byte = b'A';
+    while byte <= b'Z' {
+        table[byte as usize] = CLASS_UPPER;
+        byte += 1;
+    }
+    let mut byte = b'a';
+    while byte <= b'z' {
+        table[byte as usize] = CLASS_LOWER;
+        byte += 1;
+    }
+    table
+}
 
 pub trait SpamFilterAnalyzeSubject: Sync + Send {
     fn spam_filter_analyze_subject(
@@ -45,37 +75,62 @@ impl SpamFilterAnalyzeSubject for Server {
         let mut word_count = 0;
         let mut upper_count = 0;
         let mut lower_count = 0;
+        let mut has_currency = false;
 
-        let mut last_ch = ' ';
-        let mut is_ascii = true;
+        let subject_thread = ctx.output.subject_thread.as_str();
+        let is_ascii = subject_thread.is_ascii();
 
-        for ch in ctx.output.subject_thread.chars() {
-            if !ch.is_whitespace() {
-                if last_ch.is_whitespace() {
-                    word_count += 1;
-                }
-
-                match ch {
-                    '$' | '€' | '£' | '¥' | '₹' | '₽' | '₿' => {
-                        ctx.result.add_tag("SUBJECT_HAS_CURRENCY");
+        if is_ascii {
+            let mut last_is_space = true;
+            for &byte in subject_thread.as_bytes() {
+                match ASCII_CLASS[byte as usize] {
+                    CLASS_SPACE => {
+                        last_is_space = true;
                     }
-                    _ => {
-                        if ch.is_alphabetic() {
-                            if ch.is_uppercase() {
-                                upper_count += 1;
-                            } else {
-                                lower_count += 1;
-                            }
+                    class => {
+                        if last_is_space {
+                            word_count += 1;
+                        }
+                        last_is_space = false;
+                        match class {
+                            CLASS_UPPER => upper_count += 1,
+                            CLASS_LOWER => lower_count += 1,
+                            CLASS_CURRENCY => has_currency = true,
+                            _ => {}
                         }
                     }
                 }
             }
+        } else {
+            let mut last_ch = ' ';
+            for ch in subject_thread.chars() {
+                if !ch.is_whitespace() {
+                    if last_ch.is_whitespace() {
+                        word_count += 1;
+                    }
 
-            if !ch.is_ascii() {
-                is_ascii = false;
+                    match ch {
+                        '$' | '€' | '£' | '¥' | '₹' | '₽' | '₿' => {
+                            has_currency = true;
+                        }
+                        _ => {
+                            if ch.is_alphabetic() {
+                                if ch.is_uppercase() {
+                                    upper_count += 1;
+                                } else {
+                                    lower_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                last_ch = ch;
             }
+        }
 
-            last_ch = ch;
+        if has_currency {
+            ctx.result.add_tag("SUBJECT_HAS_CURRENCY");
         }
 
         if ctx.output.subject_lc.is_empty() {
@@ -128,14 +183,14 @@ impl SpamFilterAnalyzeSubject for Server {
                 }
                 TokenType::Email(email) => {
                     // Subject contains recipient
-                    if ctx.output.env_to_orig_addr.contains(email)
-                        || ctx.output.all_recipients().any(|r| &r.email == email)
+                    if ctx.output.env_to_orig_addr.contains(email.as_ref())
+                        || ctx.output.all_recipients().any(|r| r.email == **email)
                     {
                         ctx.result.add_tag("RCPT_IN_SUBJECT");
                     } else {
                         let host = email.domain_part.sld_or_default();
                         for rcpt in ctx.output.all_recipients() {
-                            if &rcpt.email == email {
+                            if rcpt.email == **email {
                                 ctx.result.add_tag("RCPT_IN_SUBJECT");
                                 break;
                             } else if rcpt.email.domain_part.sld_or_default() == host {
@@ -165,14 +220,17 @@ impl SpamFilterAnalyzeSubject for Server {
         }
 
         // Validate unnecessary encoding
-        let subject_raw_utf8 = subject_raw_utf8.unwrap_or_default();
-        if is_ascii && subject_raw_utf8.contains("=?") && subject_raw_utf8.contains("?=") {
-            if subject_raw_utf8.contains("?q?") || subject_raw_utf8.contains("?Q?") {
-                // Subject header is unnecessarily encoded in quoted-printable
-                ctx.result.add_tag("SUBJ_EXCESS_QP");
-            } else if subject_raw_utf8.contains("?b?") || subject_raw_utf8.contains("?B?") {
-                // Subject header is unnecessarily encoded in base64
-                ctx.result.add_tag("SUBJ_EXCESS_BASE64");
+        if is_ascii {
+            match excess_encoding(subject_raw_utf8.unwrap_or_default()) {
+                ExcessEncoding::QuotedPrintable => {
+                    // Subject header is unnecessarily encoded in quoted-printable
+                    ctx.result.add_tag("SUBJ_EXCESS_QP");
+                }
+                ExcessEncoding::Base64 => {
+                    // Subject header is unnecessarily encoded in base64
+                    ctx.result.add_tag("SUBJ_EXCESS_BASE64");
+                }
+                ExcessEncoding::None | ExcessEncoding::Other => {}
             }
         }
     }

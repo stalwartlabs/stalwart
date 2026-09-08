@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::SpamFilterContext;
 use common::Server;
 use mail_parser::HeaderName;
+use std::future::Future;
 use store::write::now;
-
-use crate::SpamFilterContext;
 
 pub trait SpamFilterAnalyzeDate: Sync + Send {
     fn spam_filter_analyze_date(

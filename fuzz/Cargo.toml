@@ -10,8 +10,18 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 imap_proto = { path = "../crates/imap-proto" }
+nlp = { path = "../crates/nlp" }
+spam-filter = { path = "../crates/spam-filter" }
+common = { path = "../crates/common" }
+utils = { path = "../crates/utils" }
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 
 [workspace]
+
+[patch.crates-io]
+hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+hickory-net = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
+hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
 
 [[bin]]
 name = "imap_receiver"
@@ -23,6 +33,41 @@ bench = false
 [[bin]]
 name = "imap_utf7"
 path = "fuzz_targets/imap_utf7.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "nlp_types"
+path = "fuzz_targets/nlp_types.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "nlp_word_space"
+path = "fuzz_targets/nlp_word_space.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spam_html"
+path = "fuzz_targets/spam_html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spam_normalizers"
+path = "fuzz_targets/spam_normalizers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spam_context"
+path = "fuzz_targets/spam_context.rs"
 test = false
 doc = false
 bench = false

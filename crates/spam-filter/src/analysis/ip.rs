@@ -5,7 +5,10 @@
  */
 
 use super::ElementLocation;
-use crate::{IpParts, SpamFilterContext, TextPart, modules::dnsbl::check_dnsbl};
+use crate::{
+    IpParts, SpamFilterContext, TextPart, modules::dnsbl::check_dnsbl,
+    modules::sanitize::can_be_ip_addr,
+};
 use common::{
     Server,
     config::mailstore::spamfilter::{Element, IpResolver, Location},
@@ -127,7 +130,11 @@ impl SpamFilterAnalyzeIp for Server {
 impl IpParts {
     pub fn new(text: &str) -> IpParts {
         IpParts {
-            ip: text.parse().ok(),
+            ip: if can_be_ip_addr(text) {
+                text.parse().ok()
+            } else {
+                None
+            },
         }
     }
 }

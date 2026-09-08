@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
-use common::{
-    Server,
-    config::mailstore::spamfilter::{IpResolver, Location},
-};
-
 use crate::{
     SpamFilterContext, TextPart,
     modules::expression::{EmailHeader, SpamFilterResolver, StringResolver},
 };
+use common::{
+    Server,
+    config::mailstore::spamfilter::{IpResolver, Location},
+};
+use std::future::Future;
 
 pub trait SpamFilterAnalyzeRules: Sync + Send {
     fn spam_filter_analyze_rules(

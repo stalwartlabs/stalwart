@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::{
+    SpamFilterContext,
+    analysis::{ExcessEncoding, excess_encoding},
+};
 use common::Server;
 use mail_parser::HeaderName;
-
-use crate::SpamFilterContext;
+use std::future::Future;
 
 pub trait SpamFilterAnalyzeReplyTo: Sync + Send {
     fn spam_filter_analyze_reply_to(
@@ -103,18 +104,17 @@ impl SpamFilterAnalyzeReplyTo for Server {
             }
 
             // Validate unnecessary encoding
-            let reply_to_raw_utf8 = std::str::from_utf8(reply_to_raw).unwrap_or_default();
-            if reply_to.email.address.is_ascii()
-                && reply_to_name.is_ascii()
-                && reply_to_raw_utf8.contains("=?")
-                && reply_to_raw_utf8.contains("?=")
-            {
-                if reply_to_raw_utf8.contains("?q?") || reply_to_raw_utf8.contains("?Q?") {
-                    // Reply-To header is unnecessarily encoded in quoted-printable
-                    ctx.result.add_tag("REPLYTO_EXCESS_QP");
-                } else if reply_to_raw_utf8.contains("?b?") || reply_to_raw_utf8.contains("?B?") {
-                    // Reply-To header is unnecessarily encoded in base64
-                    ctx.result.add_tag("REPLYTO_EXCESS_BASE64");
+            if reply_to.email.address.is_ascii() && reply_to_name.is_ascii() {
+                match excess_encoding(std::str::from_utf8(reply_to_raw).unwrap_or_default()) {
+                    ExcessEncoding::QuotedPrintable => {
+                        // Reply-To header is unnecessarily encoded in quoted-printable
+                        ctx.result.add_tag("REPLYTO_EXCESS_QP");
+                    }
+                    ExcessEncoding::Base64 => {
+                        // Reply-To header is unnecessarily encoded in base64
+                        ctx.result.add_tag("REPLYTO_EXCESS_BASE64");
+                    }
+                    ExcessEncoding::None | ExcessEncoding::Other => {}
                 }
             }
         } else {

@@ -4,15 +4,55 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::str::CharIndices;
-
 use super::Token;
+
+const ASCII_SPACE: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut byte = 0x09u8;
+    while byte <= 0x0d {
+        table[byte as usize] = true;
+        byte += 1;
+    }
+    table[0x20] = true;
+    table
+};
+
+const QUEUE_COMPACTION_HEAD: usize = 1024;
+const CLASS_ALPHA: u8 = 1;
+const CLASS_DIGIT: u8 = 2;
+
+const ASCII_ALNUM: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut byte = b'A';
+    while byte <= b'Z' {
+        table[byte as usize] = CLASS_ALPHA;
+        table[(byte + 32) as usize] = CLASS_ALPHA;
+        byte += 1;
+    }
+    let mut byte = b'0';
+    while byte <= b'9' {
+        table[byte as usize] = CLASS_DIGIT;
+        byte += 1;
+    }
+    table
+};
+
+#[cfg(test)]
+pub(super) fn ascii_alnum_class(byte: u8) -> u8 {
+    ASCII_ALNUM[byte as usize]
+}
+
+#[cfg(test)]
+pub(super) fn ascii_space_class(byte: u8) -> bool {
+    ASCII_SPACE[byte as usize]
+}
 
 #[derive(Debug)]
 pub struct TypesTokenizer<'x> {
     text: &'x str,
-    iter: CharIndices<'x>,
+    pos: usize,
     tokens: Vec<Token<TokenType<&'x str, &'x str, &'x str, &'x str>>>,
+    head: usize,
     peek_pos: usize,
     last_ch_is_space: bool,
     last_token_is_dot: bool,
@@ -53,10 +93,10 @@ impl<'x> Iterator for TypesTokenizer<'x> {
 
         // Try parsing URL with scheme
         if self.tokenize_urls
-            && matches!(
-            token.word,
-            TokenType::Alphabetic(t) | TokenType::Alphanumeric(t)
-            if t.len() <= 8 && t.is_ascii())
+            && let TokenType::Alphabetic(scheme) | TokenType::Alphanumeric(scheme) = token.word
+            && scheme_may_follow(self.text, token.to)
+            && scheme.len() <= 8
+            && scheme.is_ascii()
             && self.try_skip_url_scheme()
         {
             if let Some(url) = self.try_parse_url(token.into()) {
@@ -68,7 +108,11 @@ impl<'x> Iterator for TypesTokenizer<'x> {
         }
 
         // Try parsing email
-        if self.tokenize_emails && token.word.is_email_atom() {
+        if self.tokenize_emails
+            && token.word.is_email_atom()
+            && email_may_follow(self.text, token.to)
+            && email_at_reachable(self.text, token.from, token.to)
+        {
             self.peek_rewind();
             if let Some(email) = self.try_parse_email() {
                 self.peek_advance();
@@ -78,7 +122,11 @@ impl<'x> Iterator for TypesTokenizer<'x> {
         }
 
         // Try parsing URL without scheme
-        if self.tokenize_urls_without_scheme && token.word.is_domain_atom(true) {
+        if self.tokenize_urls_without_scheme
+            && token.word.is_domain_atom(true)
+            && host_may_follow(self.text, token.to)
+            && host_dot_reachable(self.text, token.from, token.to)
+        {
             self.peek_rewind();
             if let Some(url) = self.try_parse_url(None) {
                 self.peek_advance();
@@ -105,9 +153,10 @@ impl<'x> TypesTokenizer<'x> {
     pub fn new(text: &'x str) -> Self {
         Self {
             text,
-            iter: text.char_indices(),
+            pos: 0,
             tokens: Vec::new(),
             eof: false,
+            head: 0,
             peek_pos: 0,
             last_ch_is_space: false,
             last_token_is_dot: false,
@@ -138,56 +187,110 @@ impl<'x> TypesTokenizer<'x> {
         self
     }
 
+    #[inline(always)]
+    fn char_at(&self, pos: usize) -> Option<char> {
+        self.text.get(pos..).and_then(|rest| rest.chars().next())
+    }
+
     fn consume(&mut self) -> bool {
-        let mut has_alpha = false;
-        let mut has_number = false;
-
-        let mut start_pos = usize::MAX;
-        let mut end_pos = usize::MAX;
-
-        let mut stop_char = None;
-
-        for (pos, ch) in self.iter.by_ref() {
-            if ch.is_alphabetic() {
-                has_alpha = true;
-            } else if ch.is_ascii_digit() {
-                has_number = true;
-            } else {
-                let last_was_space = self.last_ch_is_space;
-                self.last_ch_is_space = ch.is_whitespace();
-                stop_char = Token {
-                    word: if self.last_ch_is_space {
-                        if last_was_space {
-                            continue;
-                        } else {
-                            TokenType::Space
-                        }
-                    } else if ch.is_ascii() {
-                        TokenType::Punctuation(ch)
-                    } else {
-                        TokenType::Other(ch)
-                    },
-                    from: pos,
-                    to: pos + ch.len_utf8(),
-                }
-                .into();
-                break;
-            }
-            self.last_ch_is_space = false;
-
-            if start_pos == usize::MAX {
-                start_pos = pos;
-            }
-            end_pos = pos + ch.len_utf8();
+        if self.head == self.tokens.len() {
+            self.tokens.clear();
+            self.head = 0;
+        } else if self.head >= QUEUE_COMPACTION_HEAD {
+            self.tokens.drain(..self.head);
+            self.head = 0;
         }
 
-        if start_pos != usize::MAX {
+        let bytes = self.text.as_bytes();
+        let mut pos = self.pos;
+
+        if self.last_ch_is_space {
+            while let Some(&byte) = bytes.get(pos) {
+                if byte < 0x80 {
+                    if !ASCII_SPACE[byte as usize] {
+                        break;
+                    }
+                    pos += 1;
+                } else {
+                    match self.char_at(pos) {
+                        Some(ch) if ch.is_whitespace() => pos += ch.len_utf8(),
+                        _ => break,
+                    }
+                }
+            }
+        }
+
+        let start_pos = pos;
+        let mut classes = 0u8;
+        let stop_char = loop {
+            while let Some(&byte) = bytes.get(pos) {
+                let class = ASCII_ALNUM[byte as usize];
+                if class == 0 {
+                    break;
+                }
+                classes |= class;
+                pos += 1;
+            }
+            match bytes.get(pos) {
+                None => break None,
+                Some(&byte) if byte < 0x80 => {
+                    let is_space = ASCII_SPACE[byte as usize];
+                    break Some((
+                        if is_space {
+                            TokenType::Space
+                        } else {
+                            TokenType::Punctuation(byte as char)
+                        },
+                        1usize,
+                        is_space,
+                    ));
+                }
+                Some(_) => match self.char_at(pos) {
+                    Some(ch) if ch.is_alphabetic() => {
+                        classes |= CLASS_ALPHA;
+                        pos += ch.len_utf8();
+                    }
+                    Some(ch) => {
+                        let is_space = ch.is_whitespace();
+                        break Some((
+                            if is_space {
+                                TokenType::Space
+                            } else {
+                                TokenType::Other(ch)
+                            },
+                            ch.len_utf8(),
+                            is_space,
+                        ));
+                    }
+                    None => break None,
+                },
+            }
+        };
+
+        let end_pos = pos;
+        if end_pos != start_pos {
+            self.last_ch_is_space = false;
+        }
+
+        let stop_char = stop_char.map(|(word, len, is_space)| {
+            let from = pos;
+            pos += len;
+            self.last_ch_is_space = is_space;
+            Token {
+                word,
+                from,
+                to: from + len,
+            }
+        });
+        self.pos = pos;
+
+        if end_pos != start_pos {
             let text = &self.text[start_pos..end_pos];
 
             self.tokens.push(Token {
-                word: if has_alpha && has_number {
+                word: if classes == CLASS_ALPHA | CLASS_DIGIT {
                     TokenType::Alphanumeric(text)
-                } else if has_alpha {
+                } else if classes == CLASS_ALPHA {
                     TokenType::Alphabetic(text)
                 } else {
                     TokenType::Integer(text)
@@ -209,31 +312,36 @@ impl<'x> TypesTokenizer<'x> {
     }
 
     fn next_(&mut self) -> Option<Token<TokenType<&'x str, &'x str, &'x str, &'x str>>> {
-        if self.tokens.is_empty() && !self.eof {
+        if self.head == self.tokens.len() && !self.eof {
             self.consume();
         }
-        if !self.tokens.is_empty() {
-            Some(self.tokens.remove(0))
-        } else {
-            None
+        match self.tokens.get(self.head) {
+            Some(&token) => {
+                self.head += 1;
+                Some(token)
+            }
+            None => None,
         }
     }
 
     fn peek(&mut self) -> Option<Token<TokenType<&'x str, &'x str, &'x str, &'x str>>> {
-        while self.tokens.len() <= self.peek_pos && !self.eof {
+        while self.tokens.len() - self.head <= self.peek_pos && !self.eof {
             self.consume();
         }
-        self.tokens.get(self.peek_pos).map(|t| {
-            self.peek_pos += 1;
-            *t
-        })
+        debug_assert!(self.head + self.peek_pos <= self.tokens.len());
+        match self.tokens.get(self.head + self.peek_pos) {
+            Some(&token) => {
+                self.peek_pos += 1;
+                Some(token)
+            }
+            None => None,
+        }
     }
 
     fn peek_advance(&mut self) {
-        if self.peek_pos > 0 {
-            self.tokens.drain(..self.peek_pos);
-            self.peek_pos = 0;
-        }
+        debug_assert!(self.head + self.peek_pos <= self.tokens.len());
+        self.head += self.peek_pos;
+        self.peek_pos = 0;
     }
 
     #[inline(always)]
@@ -288,18 +396,12 @@ impl<'x> TypesTokenizer<'x> {
             let mut dot_count = 0;
             let mut is_ipv6 = false;
 
-            let mut last_label_is_tld = false;
+            let mut last_label = None;
 
             while let Some(token) = self.peek() {
                 match token.word {
                     TokenType::Alphabetic(text) | TokenType::Alphanumeric(text) => {
-                        last_label_is_tld = text.len() >= 2
-                            && psl::Psl::find(
-                                &psl::List,
-                                [text.to_ascii_lowercase().as_bytes()].into_iter(),
-                            )
-                            .typ
-                            .is_some();
+                        last_label = Some(text);
                         text_count += 1;
                     }
                     TokenType::Integer(text) => {
@@ -344,8 +446,10 @@ impl<'x> TypesTokenizer<'x> {
             self.peek_pos = restore_pos;
             let is_ip = is_ipv6 || (int_count == 4 && dot_count == 3 && text_count == 0);
             if end_pos != usize::MAX {
-                is_valid_host =
-                    (last_label_is_tld && dot_count >= 1 && (text_count + int_count) >= 2) || is_ip;
+                is_valid_host = is_ip
+                    || (dot_count >= 1
+                        && (text_count + int_count) >= 2
+                        && last_label_is_tld(last_label));
                 (start_pos, end_pos, is_ip)
             } else {
                 return None;
@@ -502,7 +606,7 @@ impl<'x> TypesTokenizer<'x> {
         let mut last_ch = u8::MAX;
         let mut has_int = false;
         let mut has_alpha = false;
-        let mut last_label_is_tld = false;
+        let mut last_label = None;
 
         let mut dot_count = 0;
         let mut start_pos = usize::MAX;
@@ -526,26 +630,20 @@ impl<'x> TypesTokenizer<'x> {
                         .map(|(from, to)| (from, to, true));
                 }
                 TokenType::Alphabetic(text) | TokenType::Alphanumeric(text) if text.len() <= 63 => {
-                    last_label_is_tld = text.len() >= 2
-                        && psl::Psl::find(
-                            &psl::List,
-                            [text.to_ascii_lowercase().as_bytes()].into_iter(),
-                        )
-                        .typ
-                        .is_some();
+                    last_label = Some(text);
                     has_alpha = true;
                     last_ch = 0;
                 }
                 TokenType::Other(_) => {
                     has_alpha = true;
-                    last_label_is_tld = false;
+                    last_label = None;
                     last_ch = 0;
                 }
                 TokenType::Integer(text) => {
                     if text.len() <= 3 {
                         has_int = true;
                     }
-                    last_label_is_tld = false;
+                    last_label = None;
                     last_ch = 0;
                 }
                 _ => {
@@ -570,7 +668,7 @@ impl<'x> TypesTokenizer<'x> {
         }
 
         let is_ipv4 = has_int && !has_alpha && dot_count == 3;
-        if end_pos != usize::MAX && dot_count >= 1 && (last_label_is_tld || is_ipv4) {
+        if end_pos != usize::MAX && dot_count >= 1 && (is_ipv4 || last_label_is_tld(last_label)) {
             (start_pos, end_pos, is_ipv4).into()
         } else {
             None
@@ -605,6 +703,15 @@ impl<'x> TypesTokenizer<'x> {
 
     fn try_parse_number(&mut self) -> Option<Token<TokenType<&'x str, &'x str, &'x str, &'x str>>> {
         self.peek_rewind();
+        if let Some(token) = self.tokens.get(self.head)
+            && !matches!(
+                token.word,
+                TokenType::Integer(_) | TokenType::Punctuation('-')
+            )
+        {
+            return None;
+        }
+
         let mut start_pos = usize::MAX;
         let mut end_pos = usize::MAX;
         let mut restore_pos = self.peek_pos;
@@ -658,6 +765,13 @@ impl<'x> TypesTokenizer<'x> {
     }
 
     fn try_skip_url_scheme(&mut self) -> bool {
+        if let Some(token) = self.tokens.get(self.head + self.peek_pos)
+            && !matches!(token.word, TokenType::Punctuation(':' | '+'))
+        {
+            self.peek_pos = 0;
+            return false;
+        }
+
         enum State {
             None,
             PlusAlpha,
@@ -684,6 +798,173 @@ impl<'x> TypesTokenizer<'x> {
         self.peek_rewind();
         false
     }
+}
+
+const FOLLOW_RUN: u8 = 1 << 0;
+const FOLLOW_EMAIL_PUNCT: u8 = 1 << 1;
+const FOLLOW_DOT: u8 = 1 << 2;
+const FOLLOW_AT: u8 = 1 << 3;
+const FOLLOW_HYPHEN: u8 = 1 << 4;
+const FOLLOW_NON_ASCII: u8 = 1 << 5;
+
+const FOLLOW_CLASS: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut index = 0;
+    while index < 256 {
+        let byte = index as u8;
+        let mut class = 0;
+        if byte.is_ascii_alphanumeric() {
+            class |= FOLLOW_RUN;
+        }
+        if matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'/'
+                | b'='
+                | b'?'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'{'
+                | b'|'
+                | b'}'
+                | b'~'
+        ) {
+            class |= FOLLOW_EMAIL_PUNCT;
+        }
+        if byte == b'.' {
+            class |= FOLLOW_DOT;
+        }
+        if byte == b'@' {
+            class |= FOLLOW_AT;
+        }
+        if byte == b'-' {
+            class |= FOLLOW_HYPHEN;
+        }
+        if byte >= 0x80 {
+            class |= FOLLOW_NON_ASCII;
+        }
+        table[index] = class;
+        index += 1;
+    }
+    table
+};
+
+#[inline(always)]
+fn follow_class(text: &str, at: usize) -> u8 {
+    match text.as_bytes().get(at) {
+        Some(&byte) => FOLLOW_CLASS[byte as usize],
+        None => 0,
+    }
+}
+
+const FOLLOW_EMAILISH: u8 = FOLLOW_RUN | FOLLOW_EMAIL_PUNCT | FOLLOW_DOT | FOLLOW_NON_ASCII;
+const FOLLOW_HOSTISH: u8 = FOLLOW_RUN | FOLLOW_DOT | FOLLOW_HYPHEN | FOLLOW_NON_ASCII;
+
+const REACH_SCAN: usize = 8;
+
+#[inline(always)]
+fn reachable_before_stop(text: &str, from: usize, at: usize, wanted: u8, allowed: u8) -> bool {
+    let bytes = text.as_bytes();
+    let limit = bytes.len().min(from.saturating_add(255));
+    let Some(window) = bytes.get(at..limit) else {
+        return false;
+    };
+    for &byte in window.iter().take(REACH_SCAN) {
+        if byte == wanted {
+            return true;
+        }
+        if FOLLOW_CLASS[byte as usize] & allowed == 0 {
+            return false;
+        }
+    }
+    window
+        .get(REACH_SCAN..)
+        .and_then(|tail| {
+            memchr::memchr(wanted, tail).map(|pos| {
+                tail.iter()
+                    .take(pos)
+                    .all(|&byte| FOLLOW_CLASS[byte as usize] & allowed != 0)
+            })
+        })
+        .unwrap_or(false)
+}
+
+#[inline(always)]
+fn email_at_reachable(text: &str, from: usize, at: usize) -> bool {
+    reachable_before_stop(text, from, at, b'@', FOLLOW_EMAILISH)
+}
+
+#[inline(always)]
+fn host_dot_reachable(text: &str, from: usize, at: usize) -> bool {
+    reachable_before_stop(text, from, at, b'.', FOLLOW_HOSTISH)
+}
+
+#[inline(always)]
+fn scheme_may_follow(text: &str, at: usize) -> bool {
+    matches!(text.as_bytes().get(at), Some(b':' | b'+'))
+}
+
+#[inline(always)]
+fn email_may_follow(text: &str, at: usize) -> bool {
+    let class = follow_class(text, at);
+    if class & (FOLLOW_RUN | FOLLOW_EMAIL_PUNCT | FOLLOW_AT | FOLLOW_NON_ASCII) != 0 {
+        true
+    } else {
+        class & FOLLOW_DOT != 0
+            && follow_class(text, at + 1) & (FOLLOW_RUN | FOLLOW_EMAIL_PUNCT | FOLLOW_NON_ASCII)
+                != 0
+    }
+}
+
+#[inline(always)]
+fn host_may_follow(text: &str, at: usize) -> bool {
+    let class = follow_class(text, at);
+    if class & (FOLLOW_RUN | FOLLOW_HYPHEN | FOLLOW_NON_ASCII) != 0 {
+        true
+    } else {
+        class & FOLLOW_DOT != 0 && follow_class(text, at + 1) & (FOLLOW_RUN | FOLLOW_NON_ASCII) != 0
+    }
+}
+
+#[inline(always)]
+fn last_label_is_tld(label: Option<&str>) -> bool {
+    match label {
+        Some(text) if text.len() >= 2 => is_public_suffix(text),
+        _ => false,
+    }
+}
+
+#[inline(never)]
+fn is_public_suffix(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if !bytes.iter().any(u8::is_ascii_uppercase) {
+        return has_suffix_type(bytes);
+    }
+    let mut buf = [0u8; 64];
+    match buf.get_mut(..bytes.len()) {
+        Some(lowered) => {
+            for (dst, src) in lowered.iter_mut().zip(bytes) {
+                *dst = src.to_ascii_lowercase();
+            }
+            has_suffix_type(lowered)
+        }
+        None => has_suffix_type(text.to_ascii_lowercase().as_bytes()),
+    }
+}
+
+#[inline(always)]
+fn has_suffix_type(label: &[u8]) -> bool {
+    psl::Psl::find(&psl::List, [label].into_iter())
+        .typ
+        .is_some()
 }
 
 impl<T, E, U, I> TokenType<T, E, U, I> {
@@ -732,6 +1013,139 @@ impl<T, E, U, I> TokenType<T, E, U, I> {
 mod test {
 
     use super::{TokenType, TypesTokenizer};
+
+    #[test]
+    fn ascii_class_tables_match_predicates() {
+        for byte in 0..=255u8 {
+            let expected_alnum = if byte < 0x80 {
+                let ch = byte as char;
+                if ch.is_alphabetic() {
+                    super::CLASS_ALPHA
+                } else if ch.is_ascii_digit() {
+                    super::CLASS_DIGIT
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            assert_eq!(super::ascii_alnum_class(byte), expected_alnum, "{byte:#x}");
+            let expected_space = byte < 0x80 && (byte as char).is_whitespace();
+            assert_eq!(super::ascii_space_class(byte), expected_space, "{byte:#x}");
+        }
+    }
+
+    #[test]
+    fn character_classes() {
+        for (text, expected) in [
+            ("\u{663}", vec![TokenType::Other('\u{663}')]),
+            (
+                "a\u{663}",
+                vec![TokenType::Alphabetic("a"), TokenType::Other('\u{663}')],
+            ),
+            (
+                "\u{85}x",
+                vec![TokenType::Space, TokenType::Alphabetic("x")],
+            ),
+            ("\u{a0}\u{3000}", vec![TokenType::Space]),
+            (
+                "\0\u{7f}",
+                vec![
+                    TokenType::Punctuation('\0'),
+                    TokenType::Punctuation('\u{7f}'),
+                ],
+            ),
+            (
+                "\u{9f}\u{200b}",
+                vec![TokenType::Other('\u{9f}'), TokenType::Other('\u{200b}')],
+            ),
+            ("BUL\u{212a}", vec![TokenType::Alphabetic("BUL\u{212a}")]),
+            ("\u{1c5}1", vec![TokenType::Alphanumeric("\u{1c5}1")]),
+            (
+                "a \t b",
+                vec![
+                    TokenType::Alphabetic("a"),
+                    TokenType::Space,
+                    TokenType::Alphabetic("b"),
+                ],
+            ),
+        ] {
+            let tokens = TypesTokenizer::new(text)
+                .map(|t| t.word)
+                .collect::<Vec<_>>();
+            assert_eq!(tokens, expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn number_and_scheme_edges() {
+        for (text, expected) in [
+            (
+                "5.",
+                vec![TokenType::Integer("5"), TokenType::Punctuation('.')],
+            ),
+            (
+                "1.5.5",
+                vec![
+                    TokenType::Integer("1"),
+                    TokenType::Punctuation('.'),
+                    TokenType::Integer("5"),
+                    TokenType::Punctuation('.'),
+                    TokenType::Integer("5"),
+                ],
+            ),
+            ("1.5", vec![TokenType::Float("1.5")]),
+            (
+                "-7 x",
+                vec![
+                    TokenType::Integer("-7"),
+                    TokenType::Space,
+                    TokenType::Alphabetic("x"),
+                ],
+            ),
+            (
+                "--5",
+                vec![TokenType::Punctuation('-'), TokenType::Integer("-5")],
+            ),
+            ("a+b://x", vec![TokenType::UrlNoHost("a+b://x")]),
+            ("http://a.com.5", vec![TokenType::Url("http://a.com.5")]),
+            ("http://[::1]/", vec![TokenType::Url("http://[::1]/")]),
+            (
+                "x.com.",
+                vec![TokenType::UrlNoScheme("x.com"), TokenType::Punctuation('.')],
+            ),
+            (
+                "x.y.",
+                vec![
+                    TokenType::Alphabetic("x"),
+                    TokenType::Punctuation('.'),
+                    TokenType::Alphabetic("y"),
+                    TokenType::Punctuation('.'),
+                ],
+            ),
+        ] {
+            let tokens = TypesTokenizer::new(text)
+                .map(|t| t.word)
+                .collect::<Vec<_>>();
+            assert_eq!(tokens, expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn queue_stays_bounded_on_long_peek_chains() {
+        let text = "a.".repeat(20_000);
+        let mut tokenizer = TypesTokenizer::new(&text);
+        let mut count = 0;
+        while tokenizer.next().is_some() {
+            count += 1;
+            assert!(
+                tokenizer.tokens.len() < 4096,
+                "queue grew to {}",
+                tokenizer.tokens.len()
+            );
+        }
+        assert_eq!(count, 40_000);
+    }
 
     #[test]
     fn type_tokenizer() {

@@ -5,23 +5,30 @@
  */
 
 use common::config::mailstore::spamfilter::PyzorConfig;
-use mail_parser::{Message, PartType, decoders::html::add_html_token};
+use mail_parser::{Message, PartType};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
+
+use super::html::{TEXT_STOP, byte_table, push_span, scan_until};
 use sha1::{Digest, Sha1};
 use std::{
     borrow::Cow,
     net::SocketAddr,
+    ops::Range,
     time::{Duration, SystemTime},
 };
 use tokio::net::UdpSocket;
 use utils::HexEncode;
 
-const MIN_LINE_LENGTH: usize = 8;
-const ATOMIC_NUM_LINES: usize = 4;
-const DIGEST_SPEC: &[(usize, usize)] = &[(20, 3), (60, 3)];
+static TAG_STOP: [bool; 256] = byte_table(b"<>/! \t\r\n");
+static STYLE_STOP: [bool; 256] = byte_table(b"< \t\r\n");
+static COMMENT_MARK: [bool; 256] = byte_table(b"->");
+
+pub(crate) const MIN_LINE_LENGTH: usize = 8;
+pub(crate) const ATOMIC_NUM_LINES: usize = 4;
+pub(crate) const DIGEST_SPEC: &[(usize, usize)] = &[(20, 3), (60, 3)];
 
 #[derive(Default, Debug, PartialEq, Eq)]
-pub(crate) struct PyzorResponse {
+pub struct PyzorResponse {
     pub code: u32,
     pub count: u64,
     pub wl_count: u64,
@@ -138,7 +145,7 @@ async fn pyzor_send_message(
     }
 }
 
-trait PyzorWrite {
+pub trait PyzorWrite {
     fn write_all(&mut self, data: &[u8]);
 }
 
@@ -154,7 +161,7 @@ impl PyzorWrite for Sha1 {
     }
 }
 
-trait PyzorDigest<W: PyzorWrite> {
+pub trait PyzorDigest<W: PyzorWrite> {
     fn pyzor_digest(&self, writer: W) -> W;
 }
 
@@ -164,15 +171,12 @@ pub trait PyzorCheck {
 
 impl<W: PyzorWrite> PyzorDigest<W> for Message<'_> {
     fn pyzor_digest(&self, writer: W) -> W {
-        let parts = self
-            .parts
-            .iter()
-            .filter_map(|part| match &part.body {
-                PartType::Text(text) => Some(text.as_ref().into()),
-                PartType::Html(html) => Some(html_to_text(html.as_ref()).into()),
-                _ => None,
-            })
-            .collect::<Vec<Cow<str>>>();
+        let mut parts = Vec::with_capacity(self.parts.len());
+        parts.extend(self.parts.iter().filter_map(|part| match &part.body {
+            PartType::Text(text) => Some(Cow::Borrowed(text.as_ref())),
+            PartType::Html(html) => Some(Cow::Owned(html_to_text(html.as_ref()))),
+            _ => None,
+        }));
 
         pyzor_digest(writer, parts.iter().flat_map(|text| text.lines()))
     }
@@ -217,30 +221,19 @@ fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> String
     format!("{message}\nSig: {sig}\n")
 }
 
-fn pyzor_digest<'x, I, W>(mut writer: W, lines: I) -> W
+pub fn pyzor_digest<'x, I, W>(mut writer: W, lines: I) -> W
 where
     I: Iterator<Item = &'x str>,
     W: PyzorWrite,
 {
-    let mut result = Vec::with_capacity(16);
+    let mut buffer = String::new();
+    let mut kept: Vec<Range<usize>> = Vec::with_capacity(16);
 
     for line in lines {
-        let mut clean_line = String::with_capacity(line.len());
+        buffer.reserve(line.len());
+        let line_start = buffer.len();
         let mut token_start = usize::MAX;
         let mut token_end = usize::MAX;
-
-        let add_line = |line: &mut String, span: &str| {
-            if !span.contains(char::from(0)) {
-                if span.len() < 10 {
-                    line.push_str(span);
-                }
-            } else {
-                let span = span.replace(char::from(0), "");
-                if span.len() < 10 {
-                    line.push_str(&span);
-                }
-            }
-        };
 
         for token in TypesTokenizer::new(line) {
             match token.word {
@@ -262,7 +255,7 @@ where
                 | TokenType::IpAddr(_)
                 | TokenType::Email(_) => {
                     if token_start != usize::MAX {
-                        add_line(&mut clean_line, &line[token_start..token_end]);
+                        add_span(&mut buffer, &line[token_start..token_end]);
                         token_start = usize::MAX;
                         token_end = usize::MAX;
                     }
@@ -271,34 +264,49 @@ where
         }
 
         if token_start != usize::MAX {
-            add_line(&mut clean_line, &line[token_start..token_end]);
+            add_span(&mut buffer, &line[token_start..token_end]);
         }
 
-        if clean_line.len() >= MIN_LINE_LENGTH {
-            result.push(clean_line);
+        if buffer.len() - line_start >= MIN_LINE_LENGTH {
+            kept.push(line_start..buffer.len());
+        } else {
+            buffer.truncate(line_start);
         }
     }
 
-    if result.len() > ATOMIC_NUM_LINES {
+    if kept.len() > ATOMIC_NUM_LINES {
         for (offset, length) in DIGEST_SPEC {
             for i in 0..*length {
-                if let Some(line) = result.get((*offset * result.len() / 100) + i) {
-                    writer.write_all(line.as_bytes());
+                if let Some(line) = kept.get((*offset * kept.len() / 100) + i) {
+                    writer.write_all(buffer[line.clone()].as_bytes());
                 }
             }
         }
     } else {
-        for line in result {
-            writer.write_all(line.as_bytes());
+        for line in kept {
+            writer.write_all(buffer[line].as_bytes());
         }
     }
 
     writer
 }
 
-fn html_to_text(input: &str) -> String {
+#[inline(always)]
+fn add_span(line: &mut String, span: &str) {
+    if !span.as_bytes().contains(&0) {
+        if span.len() < 10 {
+            line.push_str(span);
+        }
+    } else if span.len() - span.as_bytes().iter().filter(|&&ch| ch == 0).count() < 10 {
+        for part in span.split('\0') {
+            line.push_str(part);
+        }
+    }
+}
+
+pub fn html_to_text(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
-    let input = input.as_bytes();
+    let bytes = input.as_bytes();
 
     let mut in_tag = false;
     let mut in_comment = false;
@@ -315,112 +323,150 @@ fn html_to_text(input: &str) -> String {
     let mut tag_token_pos = 0;
     let mut comment_pos = 0;
 
-    for (pos, ch) in input.iter().enumerate() {
-        if !in_comment {
-            match ch {
-                b'<' => {
-                    if !(in_tag || in_style || in_script || is_token_start) {
-                        add_html_token(
-                            &mut result,
-                            &input[token_start..token_end + 1],
-                            is_after_space,
-                        );
-                        is_after_space = false;
-                    }
+    let mut pos = 0;
 
-                    tag_token_pos = 0;
-                    in_tag = true;
-                    is_token_start = true;
-                    is_tag_close = false;
-                    continue;
+    while let Some(&ch) = bytes.get(pos) {
+        if in_comment {
+            let stop = scan_until(bytes, pos, &COMMENT_MARK);
+            if stop > pos {
+                comment_pos = 0;
+            }
+            pos = stop;
+            match bytes.get(pos) {
+                None => break,
+                Some(b'-') => {
+                    comment_pos += 1;
                 }
-                b'>' if in_tag => {
-                    if tag_token_pos == 1
-                        && let Some(tag) = input.get(token_start..token_end + 1)
-                    {
-                        if tag.eq_ignore_ascii_case(b"style") {
-                            in_style = !is_tag_close;
-                        } else if tag.eq_ignore_ascii_case(b"script") {
-                            in_script = !is_tag_close;
-                        }
+                Some(_) => {
+                    if comment_pos == 2 {
+                        in_comment = false;
+                        in_tag = false;
+                        is_token_start = true;
                     }
+                    comment_pos = 0;
+                }
+            }
+            pos += 1;
+            continue;
+        }
 
-                    in_tag = false;
-                    is_token_start = true;
-                    is_after_space = !result.is_empty();
-
-                    continue;
-                }
-                b'/' if in_tag => {
-                    if tag_token_pos == 0 {
-                        is_tag_close = true;
-                    }
-                    continue;
-                }
-                b'!' if in_tag && tag_token_pos == 0 => {
-                    if let Some(b"--") = input.get(pos + 1..pos + 3) {
-                        in_comment = true;
-                        continue;
-                    }
-                }
-                b' ' | b'\t' | b'\r' | b'\n' => {
-                    if !(in_tag || in_style || in_script) {
-                        if !is_token_start {
-                            add_html_token(
-                                &mut result,
-                                &input[token_start..token_end + 1],
-                                is_after_space,
-                            );
-                        }
-                        is_after_space = true;
-                    }
-
-                    is_token_start = true;
-                    continue;
-                }
-                b'&' if !(in_tag || is_token_start || in_style || in_script) => {
-                    add_html_token(
+        match ch {
+            b'<' => {
+                if !(in_tag || in_style || in_script || is_token_start) {
+                    push_span(
                         &mut result,
-                        &input[token_start..token_end + 1],
+                        input,
+                        token_start,
+                        token_end + 1,
                         is_after_space,
                     );
-                    is_token_start = true;
                     is_after_space = false;
                 }
-                b';' if !(in_tag || is_token_start || in_style || in_script) => {
-                    add_html_token(&mut result, &input[token_start..pos + 1], is_after_space);
-                    is_token_start = true;
-                    is_after_space = false;
+
+                tag_token_pos = 0;
+                in_tag = true;
+                is_token_start = true;
+                is_tag_close = false;
+                pos += 1;
+                continue;
+            }
+            b'>' if in_tag => {
+                if tag_token_pos == 1
+                    && let Some(tag) = bytes.get(token_start..token_end + 1)
+                {
+                    if tag.eq_ignore_ascii_case(b"style") {
+                        in_style = !is_tag_close;
+                    } else if tag.eq_ignore_ascii_case(b"script") {
+                        in_script = !is_tag_close;
+                    }
+                }
+
+                in_tag = false;
+                is_token_start = true;
+                is_after_space = !result.is_empty();
+                pos += 1;
+                continue;
+            }
+            b'/' if in_tag => {
+                if tag_token_pos == 0 {
+                    is_tag_close = true;
+                }
+                pos += 1;
+                continue;
+            }
+            b'!' if in_tag && tag_token_pos == 0 => {
+                if let Some(b"--") = bytes.get(pos + 1..pos + 3) {
+                    in_comment = true;
+                    pos += 1;
                     continue;
                 }
-                _ => (),
             }
-            if is_token_start {
-                token_start = pos;
-                is_token_start = false;
-                if in_tag {
-                    tag_token_pos += 1;
+            b' ' | b'\t' | b'\r' | b'\n' => {
+                if !(in_tag || in_style || in_script) {
+                    if !is_token_start {
+                        push_span(
+                            &mut result,
+                            input,
+                            token_start,
+                            token_end + 1,
+                            is_after_space,
+                        );
+                    }
+                    is_after_space = true;
                 }
+
+                is_token_start = true;
+                pos += 1;
+                while matches!(bytes.get(pos), Some(b' ' | b'\t' | b'\r' | b'\n')) {
+                    pos += 1;
+                }
+                continue;
             }
-            token_end = pos;
-        } else {
-            match ch {
-                b'-' => comment_pos += 1,
-                b'>' if comment_pos == 2 => {
-                    comment_pos = 0;
-                    in_comment = false;
-                    in_tag = false;
-                    is_token_start = true;
-                }
-                _ => comment_pos = 0,
+            b'&' if !(in_tag || is_token_start || in_style || in_script) => {
+                push_span(
+                    &mut result,
+                    input,
+                    token_start,
+                    token_end + 1,
+                    is_after_space,
+                );
+                is_token_start = true;
+                is_after_space = false;
+            }
+            b';' if !(in_tag || is_token_start || in_style || in_script) => {
+                push_span(&mut result, input, token_start, pos + 1, is_after_space);
+                is_token_start = true;
+                is_after_space = false;
+                pos += 1;
+                continue;
+            }
+            _ => (),
+        }
+
+        if is_token_start {
+            token_start = pos;
+            is_token_start = false;
+            if in_tag {
+                tag_token_pos += 1;
             }
         }
+        let stop = if in_tag {
+            scan_until(bytes, pos + 1, &TAG_STOP)
+        } else if in_style || in_script {
+            scan_until(bytes, pos + 1, &STYLE_STOP)
+        } else {
+            scan_until(bytes, pos + 1, &TEXT_STOP)
+        };
+        token_end = stop - 1;
+        pos = stop;
     }
 
     if !(in_tag || is_token_start || in_style || in_script) {
-        add_html_token(
+        push_span(
             &mut result,
-            &input[token_start..token_end + 1],
+            input,
+            token_start,
+            token_end + 1,
             is_after_space,
         );
     }

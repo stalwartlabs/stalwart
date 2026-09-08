@@ -23,6 +23,8 @@ use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 use store::ahash::AHashSet;
 
+pub type ContextToken<'x> = TokenType<Cow<'x, str>, Box<Email>, Box<UrlParts<'x>>, IpParts>;
+
 pub struct SpamFilterInput<'x> {
     pub message: &'x Message<'x>,
     pub span_id: u64,
@@ -75,7 +77,7 @@ pub struct SpamFilterOutput<'x> {
     pub subject_lc: String,
     pub subject_thread: String,
     pub subject_thread_lc: String,
-    pub subject_tokens: Vec<TokenType<Cow<'x, str>, Email, UrlParts<'x>, IpParts>>,
+    pub subject_tokens: Vec<ContextToken<'x>>,
 
     pub ips: AHashSet<ElementLocation<IpAddr>>,
     pub urls: HashSet<ElementLocation<UrlParts<'x>>>,
@@ -87,18 +89,18 @@ pub struct SpamFilterOutput<'x> {
 
 #[derive(Debug)]
 pub struct IpParts {
-    ip: Option<IpAddr>,
+    pub ip: Option<IpAddr>,
 }
 
 pub enum TextPart<'x> {
     Plain {
         text_body: &'x str,
-        tokens: Vec<TokenType<Cow<'x, str>, Email, UrlParts<'x>, IpParts>>,
+        tokens: Vec<ContextToken<'x>>,
     },
     Html {
-        html_tokens: Vec<HtmlToken>,
+        html_tokens: Vec<HtmlToken<'x>>,
         text_body: String,
-        tokens: Vec<TokenType<Cow<'x, str>, Email, UrlParts<'x>, IpParts>>,
+        tokens: Vec<ContextToken<'x>>,
     },
     None,
 }

@@ -745,7 +745,7 @@ fn html_tokens(contents: String) {
 
         let tokens = html_to_tokens(input);
         assert!(!tokens.is_empty(), "No tokens parsed for input: {}", input);
-        let expected_tokens: Vec<HtmlToken> = serde_json::from_str(expected).unwrap();
+        let expected_tokens: Vec<HtmlToken<'_>> = serde_json::from_str(expected).unwrap();
 
         assert_eq!(tokens, expected_tokens, "Input: {}", input);
         num_tests += 1;

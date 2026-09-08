@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::SpamFilterContext;
 use common::Server;
 use mail_auth::{Dkim2Result, DkimResult, DmarcResult, SpfResult, dmarc::Policy};
-
-use crate::SpamFilterContext;
+use std::future::Future;
 
 pub trait SpamFilterAnalyzeDmarc: Sync + Send {
     fn spam_filter_analyze_dmarc(

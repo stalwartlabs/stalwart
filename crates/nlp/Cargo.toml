@@ -15,6 +15,7 @@ jieba-rs = "0.10" # Chinese stemmer
 lru-cache = "0.1.2"
 parking_lot = "0.12.5"
 psl = "2"
+memchr = "2.8"
 maplit = "1.0.2"
 hashify = "0.2.9"
 rand = "0.10.2"

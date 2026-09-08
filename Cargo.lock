@@ -5170,6 +5170,7 @@ dependencies = [
  "jieba-rs",
  "lru-cache",
  "maplit",
+ "memchr",
  "nohash",
  "parking_lot",
  "psl",

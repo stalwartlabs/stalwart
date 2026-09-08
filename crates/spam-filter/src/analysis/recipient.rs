@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::future::Future;
-
+use crate::{
+    SpamFilterContext,
+    analysis::{ExcessEncoding, excess_encoding},
+};
 use common::{Server, scripts::functions::text::levenshtein_distance};
 use mail_parser::HeaderName;
 use smtp_proto::{MAIL_BODY_8BITMIME, MAIL_BODY_BINARYMIME, MAIL_SMTPUTF8};
+use std::future::Future;
 use store::ahash::HashSet;
-
-use crate::SpamFilterContext;
 
 pub trait SpamFilterAnalyzeRecipient: Sync + Send {
     fn spam_filter_analyze_recipient(
@@ -87,15 +88,17 @@ impl SpamFilterAnalyzeRecipient for Server {
                 if recipients.iter().all(|rcpt| {
                     rcpt.name.as_ref().is_none_or(|name| name.is_ascii())
                         && rcpt.email.address.is_ascii()
-                }) && raw_utf8.contains("=?")
-                    && raw_utf8.contains("?=")
-                {
-                    if raw_utf8.contains("?q?") || raw_utf8.contains("?Q?") {
-                        // To header is unnecessarily encoded in quoted-printable
-                        ctx.result.add_tag("TO_EXCESS_QP");
-                    } else if raw_utf8.contains("?b?") || raw_utf8.contains("?B?") {
-                        // To header is unnecessarily encoded in base64
-                        ctx.result.add_tag("TO_EXCESS_BASE64");
+                }) {
+                    match excess_encoding(raw_utf8) {
+                        ExcessEncoding::QuotedPrintable => {
+                            // To header is unnecessarily encoded in quoted-printable
+                            ctx.result.add_tag("TO_EXCESS_QP");
+                        }
+                        ExcessEncoding::Base64 => {
+                            // To header is unnecessarily encoded in base64
+                            ctx.result.add_tag("TO_EXCESS_BASE64");
+                        }
+                        ExcessEncoding::None | ExcessEncoding::Other => {}
                     }
                 }
 
@@ -111,11 +114,17 @@ impl SpamFilterAnalyzeRecipient for Server {
             }
         }
 
-        let unique_recipients = ctx
-            .output
-            .all_recipients()
-            .filter(|rcpt| !rcpt.email.address.is_empty())
-            .collect::<HashSet<_>>();
+        let mut unique_recipients: HashSet<_> = HashSet::with_capacity_and_hasher(
+            ctx.output.recipients_to.len()
+                + ctx.output.recipients_cc.len()
+                + ctx.output.recipients_bcc.len(),
+            Default::default(),
+        );
+        unique_recipients.extend(
+            ctx.output
+                .all_recipients()
+                .filter(|rcpt| !rcpt.email.address.is_empty()),
+        );
         let rcpt_count = unique_recipients.len();
 
         match unique_recipients.len() {
@@ -218,50 +227,124 @@ impl SpamFilterAnalyzeRecipient for Server {
             ctx.result.add_tag("RCPT_BOUNCEMOREONE");
         }
 
-        let rcpts = ctx
-            .output
-            .recipients_to
-            .iter()
-            .chain(ctx.output.recipients_cc.iter())
-            .collect::<Vec<_>>();
+        let mut rcpts =
+            Vec::with_capacity(ctx.output.recipients_to.len() + ctx.output.recipients_cc.len());
+        rcpts.extend(
+            ctx.output
+                .recipients_to
+                .iter()
+                .chain(ctx.output.recipients_cc.iter()),
+        );
 
         let mut is_sorted = false;
-        if rcpts.len() >= 6 {
+        if rcpts.len() >= 6
+            && rcpts
+                .windows(2)
+                .all(|pair| pair[0].email.address <= pair[1].email.address)
+        {
             // Check if the recipients list is sorted
-            let mut sorted = true;
-            for i in 1..rcpts.len() {
-                if rcpts[i - 1].email.address > rcpts[i].email.address {
-                    sorted = false;
-                    break;
-                }
-            }
-            if sorted {
-                ctx.result.add_tag("SORTED_RECIPS");
-                is_sorted = true;
-            }
+            ctx.result.add_tag("SORTED_RECIPS");
+            is_sorted = true;
         }
 
-        if !is_sorted && rcpt_count >= 5 {
+        let combinations = rcpts.len() * rcpts.len().saturating_sub(1) / 2;
+        if !is_sorted && rcpt_count >= 5 && combinations != 0 {
             // Look for similar recipients
             let mut hits = 0;
-            let mut combinations = 0;
-            for i in 0..rcpts.len() {
+            let mut remaining = combinations;
+            let is_suspicious = |hits: usize| hits as f64 / combinations as f64 > 0.65;
+
+            'pairs: for i in 0..rcpts.len() {
                 for j in i + 1..rcpts.len() {
                     let a = &rcpts[i].email;
                     let b = &rcpts[j].email;
 
-                    if levenshtein_distance(&a.local_part, &b.local_part) < 3
+                    if levenshtein_below(&a.local_part, &b.local_part, 3)
                         || (a.domain_part.fqdn != b.domain_part.fqdn
-                            && levenshtein_distance(&a.domain_part.fqdn, &b.domain_part.fqdn) < 4)
+                            && levenshtein_below(&a.domain_part.fqdn, &b.domain_part.fqdn, 4))
                     {
                         hits += 1;
                     }
-                    combinations += 1;
+                    remaining -= 1;
+
+                    if is_suspicious(hits) || !is_suspicious(hits + remaining) {
+                        break 'pairs;
+                    }
                 }
             }
 
-            if hits as f64 / combinations as f64 > 0.65 {
+            if is_suspicious(hits) {
                 ctx.result.add_tag("SUSPICIOUS_RECIPS");
+            }
+        }
+    }
+}
+
+#[inline(always)]
+pub(crate) fn levenshtein_below(left: &str, right: &str, limit: usize) -> bool {
+    if left.is_ascii() && right.is_ascii() {
+        let length_diff = left.len().abs_diff(right.len());
+        if length_diff >= limit {
+            return false;
+        }
+        if length_diff == 0 {
+            let mismatches = left
+                .as_bytes()
+                .iter()
+                .zip(right.as_bytes())
+                .filter(|(a, b)| a != b)
+                .count();
+            if mismatches < limit {
+                return true;
+            }
+        }
+    }
+
+    levenshtein_distance(left, right) < limit
+}
+
+#[cfg(test)]
+mod tests {
+    use super::levenshtein_below;
+    use common::scripts::functions::text::levenshtein_distance;
+
+    #[test]
+    fn levenshtein_gate_matches_distance() {
+        let samples = [
+            "",
+            "a",
+            "ab",
+            "abc",
+            "abd",
+            "abcd",
+            "bcd",
+            "xyz",
+            "john",
+            "jon",
+            "johnny",
+            "jhon",
+            "example.com",
+            "exampel.com",
+            "example.org",
+            "\u{e9}cole",
+            "ecole",
+            "\u{e9}col",
+            "\u{c9}cole",
+            "日本",
+            "日本語",
+            "abcdefghij",
+            "abcdefghix",
+            "jbcdefghij",
+        ];
+        for left in samples {
+            for right in samples {
+                for limit in 0..6 {
+                    assert_eq!(
+                        levenshtein_below(left, right, limit),
+                        levenshtein_distance(left, right) < limit,
+                        "{left:?} {right:?} {limit}"
+                    );
+                }
             }
         }
     }

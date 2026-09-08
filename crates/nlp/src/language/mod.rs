@@ -36,7 +36,7 @@ impl Language {
             Language::None => {
                 Box::new(
                     SpaceTokenizer::new(text, max_token_length).map(|word| Token {
-                        word: word.into(),
+                        word,
                         from: 0,
                         to: 0,
                     }),

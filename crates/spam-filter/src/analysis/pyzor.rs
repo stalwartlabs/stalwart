@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{future::Future, time::Instant};
-
-use common::Server;
-
 use crate::{SpamFilterContext, modules::pyzor::pyzor_check};
+use common::Server;
+use std::{future::Future, time::Instant};
 
 pub trait SpamFilterAnalyzePyzor: Sync + Send {
     fn spam_filter_analyze_pyzor(
