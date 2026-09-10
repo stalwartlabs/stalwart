@@ -99,7 +99,7 @@ impl<T: SessionStream> Session<T> {
             .and_then(|name| {
                 self.server
                     .get_trusted_sieve_script(&name, self.data.session_id)
-                    .map(|s| (s.clone(), name))
+                    .map(|s| (s, name))
             });
 
         let session_config = &self.server.core.smtp.session;
@@ -117,11 +117,7 @@ impl<T: SessionStream> Session<T> {
             // Sieve filtering
             if let Some((script, script_id)) = rcpt_script {
                 match self
-                    .run_script(
-                        script_id,
-                        script.clone(),
-                        self.build_script_parameters("rcpt"),
-                    )
+                    .run_script(script_id, script, self.build_script_parameters("rcpt"))
                     .await
                 {
                     ScriptResult::Accept { modifications } if !modifications.is_empty() => {

@@ -15,7 +15,8 @@ use crate::{
     file::{DavFileResource, FileItemId},
 };
 use common::{
-    DavResourcePath, GroupwareResources, Server, auth::AccessToken, storage::index::ObjectIndexBuilder,
+    DavResourcePath, GroupwareResources, Server, auth::AccessToken,
+    storage::index::ObjectIndexBuilder,
 };
 use dav_proto::{Depth, RequestHeaders};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};

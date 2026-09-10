@@ -6,7 +6,7 @@
 
 use sieve::{Context, runtime::Variable};
 
-pub fn fn_img_metadata<'x>(ctx: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_img_metadata<'x>(ctx: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     ctx.message()
         .part(ctx.part())
         .map(|p| p.contents())

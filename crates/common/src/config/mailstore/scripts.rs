@@ -24,7 +24,7 @@ use registry::{
     types::EnumImpl,
 };
 use sieve::{Compiler, Runtime, Sieve, compiler::grammar::Capability};
-use std::{collections::hash_map::Entry, sync::Arc};
+use std::collections::hash_map::Entry;
 use store::registry::bootstrap::Bootstrap;
 
 pub struct Scripting {
@@ -38,8 +38,8 @@ pub struct Scripting {
     pub return_path: IfBlock,
     pub sign: IfBlock,
     pub untrusted_sign: IfBlock,
-    pub trusted_scripts: AHashMap<String, Arc<Sieve>>,
-    pub untrusted_scripts: AHashMap<String, Arc<Sieve>>,
+    pub trusted_scripts: AHashMap<String, Sieve<'static>>,
+    pub untrusted_scripts: AHashMap<String, Sieve<'static>>,
     pub http_client: reqwest::Client,
 }
 
@@ -146,7 +146,7 @@ impl Scripting {
         untrusted_runtime.set_local_hostname(local_hostname);
 
         // Parse trusted scripts
-        let mut trusted_scripts: AHashMap<String, Arc<Sieve>> = AHashMap::new();
+        let mut trusted_scripts: AHashMap<String, Sieve<'static>> = AHashMap::new();
         for script in bp.list_infallible::<SieveSystemScript>().await {
             if !script.object.is_active {
                 continue;
@@ -155,7 +155,7 @@ impl Scripting {
             match trusted_compiler.compile(script.object.contents.as_bytes()) {
                 Ok(compiled) => match trusted_scripts.entry(script.object.name.to_lowercase()) {
                     Entry::Vacant(entry) => {
-                        entry.insert(compiled.into());
+                        entry.insert(compiled);
                     }
                     Entry::Occupied(_) => {
                         bp.build_error(
@@ -177,7 +177,7 @@ impl Scripting {
         }
 
         // Parse untrusted scripts
-        let mut untrusted_scripts: AHashMap<String, Arc<Sieve>> = AHashMap::new();
+        let mut untrusted_scripts: AHashMap<String, Sieve<'static>> = AHashMap::new();
         for script in bp.list_infallible::<SieveUserScript>().await {
             if !script.object.is_active {
                 continue;
@@ -186,7 +186,7 @@ impl Scripting {
             match untrusted_compiler.compile(script.object.contents.as_bytes()) {
                 Ok(compiled) => match untrusted_scripts.entry(script.object.name.to_lowercase()) {
                     Entry::Vacant(entry) => {
-                        entry.insert(compiled.into());
+                        entry.insert(compiled);
                     }
                     Entry::Occupied(_) => {
                         bp.build_error(
@@ -240,19 +240,19 @@ impl Scripting {
         }
     }
 
-    pub fn trusted_script(&self, name: &str) -> Option<&Arc<Sieve>> {
+    pub fn trusted_script(&self, name: &str) -> Option<&Sieve<'static>> {
         script_by_name(&self.trusted_scripts, name)
     }
 
-    pub fn untrusted_script(&self, name: &str) -> Option<&Arc<Sieve>> {
+    pub fn untrusted_script(&self, name: &str) -> Option<&Sieve<'static>> {
         script_by_name(&self.untrusted_scripts, name)
     }
 }
 
 fn script_by_name<'x>(
-    scripts: &'x AHashMap<String, Arc<Sieve>>,
+    scripts: &'x AHashMap<String, Sieve<'static>>,
     name: &str,
-) -> Option<&'x Arc<Sieve>> {
+) -> Option<&'x Sieve<'static>> {
     scripts
         .get(name)
         .or_else(|| scripts.get(name.to_lowercase().as_str()))

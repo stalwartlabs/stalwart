@@ -16,7 +16,7 @@ groupware = { path =  "../groupware" }
 registry = { path =  "../registry" }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
 mail-builder = { version = "0.5" }
-sieve-rs = { version = "0.8", features = ["rkyv"] } 
+sieve-rs = { version = "1.0" }
 tokio = { version = "1.53", features = ["net", "macros"] }
 aes = "0.9"
 aes-gcm = "0.11.1"

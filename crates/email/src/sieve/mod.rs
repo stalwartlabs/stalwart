@@ -6,20 +6,41 @@
 
 use common::KV_SIEVE_ID;
 use sieve::Sieve;
-use std::sync::Arc;
-use store::{blake3, write::ArchiveVersion};
+use store::{
+    blake3,
+    write::{Archive, ArchiveBytes, ArchiveVersion},
+};
+use trc::AddContext;
 use types::blob_hash::BlobHash;
 
 pub mod delete;
 pub mod index;
 pub mod ingest;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ActiveScript {
     pub document_id: u32,
     pub version: ArchiveVersion,
     pub script_name: String,
-    pub script: Arc<Sieve>,
+    pub script: Bytecode,
+}
+
+#[derive(Debug)]
+pub enum Bytecode {
+    Stored(Archive<ArchiveBytes>),
+    Compiled(Vec<u8>),
+}
+
+impl ActiveScript {
+    pub fn bytecode(&self) -> trc::Result<&[u8]> {
+        match &self.script {
+            Bytecode::Stored(archive) => archive
+                .unarchive::<SieveScript>()
+                .caused_by(trc::location!())
+                .map(|script| script.script.as_ref()),
+            Bytecode::Compiled(bytes) => Ok(bytes),
+        }
+    }
 }
 
 #[derive(
@@ -77,20 +98,13 @@ impl SieveScript {
         self
     }
 
-    pub fn with_script(mut self, script: &Sieve) -> trc::Result<Self> {
-        self.set_script(script)?;
-        Ok(self)
+    pub fn with_script(mut self, script: &Sieve<'_>) -> Self {
+        self.set_script(script);
+        self
     }
 
-    pub fn set_script(&mut self, script: &Sieve) -> trc::Result<()> {
-        self.script = script.to_bytes().map_err(|err| {
-            trc::StoreEvent::UnexpectedError
-                .caused_by(trc::location!())
-                .reason(err)
-                .details("Failed to serialize compiled Sieve script")
-        })?;
-
-        Ok(())
+    pub fn set_script(&mut self, script: &Sieve<'_>) {
+        self.script = script.to_bytes();
     }
 }
 

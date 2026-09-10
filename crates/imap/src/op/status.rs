@@ -76,11 +76,10 @@ impl<T: SessionStream> Session<T> {
 
                         // Fetch status
                         let status = match synchronized {
-                            Ok(caches) => {
-                                data.status(caches, arguments.mailbox_name, &arguments.items)
-                                    .await
-                                    .imap_ctx(&arguments.tag, trc::location!())
-                            }
+                            Ok(caches) => data
+                                .status(caches, arguments.mailbox_name, &arguments.items)
+                                .await
+                                .imap_ctx(&arguments.tag, trc::location!()),
                             Err(err) => Err(err),
                         };
 

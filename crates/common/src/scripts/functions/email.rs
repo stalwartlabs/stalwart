@@ -5,10 +5,11 @@
  */
 
 use sieve::{Context, runtime::Variable};
+use std::borrow::Cow;
 
 use super::ApplyString;
 
-pub fn fn_is_email<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_email<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     let mut last_ch = 0;
     let mut in_quote = false;
     let mut at_count = 0;
@@ -78,13 +79,14 @@ pub fn fn_is_email<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     (at_count == 1 && dot_count > 0 && lp_len > 0 && value > 0).into()
 }
 
-pub fn fn_email_part<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
-    v[0].transform(|s| {
+pub fn fn_email_part<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
+    let part = v[1].to_string();
+    v[0].transform_str(|s| {
         s.rsplit_once('@')
-            .map(|(u, d)| match v[1].to_string().as_ref() {
-                "local" => Variable::from(u.trim()),
-                "domain" => Variable::from(d.trim()),
-                _ => Variable::default(),
+            .map(|(u, d)| match part.as_ref() {
+                "local" => Cow::Borrowed(u.trim()),
+                "domain" => Cow::Borrowed(d.trim()),
+                _ => Cow::Borrowed(""),
             })
             .unwrap_or_default()
     })

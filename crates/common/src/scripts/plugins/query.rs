@@ -14,7 +14,7 @@ pub fn register(plugin_id: u32, fnc_map: &mut FunctionMap) {
     fnc_map.set_external_function("query", plugin_id, 3);
 }
 
-pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
+pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
     // Obtain store name
     let store = match &ctx.arguments[0] {
         Variable::String(v) if !v.is_empty() => ctx

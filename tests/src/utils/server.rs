@@ -537,7 +537,11 @@ impl TestServer {
         (Session::test_with_shutdown(self.server.clone(), rx), tx)
     }
 
-    pub async fn resources(&self, name: &'static str, collection: Collection) -> Arc<GroupwareResources> {
+    pub async fn resources(
+        &self,
+        name: &'static str,
+        collection: Collection,
+    ) -> Arc<GroupwareResources> {
         let account_id = self.account(name).id().document_id();
         self.server
             .fetch_groupware_resources(account_id, account_id, collection.into())

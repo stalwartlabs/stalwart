@@ -144,8 +144,8 @@ impl GroupwareResources {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID,
-        PathIndex, ResourceStore, UpdateLock,
+        ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata,
+        GroupwareResources, NO_ID, PathIndex, ResourceStore, UpdateLock,
         auth::AccessToken,
         storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
     };

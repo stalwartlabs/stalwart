@@ -6,8 +6,9 @@
 
 use crate::utils::server::TestServer;
 use common::{
-    CustomKeywords, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, MessageCache,
-    MessageUid, MessagesCache, PathIndex, ResourceStore, UpdateLock,
+    CustomKeywords, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata,
+    GroupwareResources, MessageCache, MessageUid, MessagesCache, PathIndex, ResourceStore,
+    UpdateLock,
     cache::swap::{
         SwapBackend, SwapCadence, SwapKey, SwapPart, SwapTier, blob::BlobSwapStore,
         file::FileSwapStore,

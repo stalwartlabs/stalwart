@@ -5,8 +5,9 @@
  */
 
 use crate::{
-    ArenaRef, CachedName, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, DavResourcePath,
-    GroupwareResourceRef, GroupwareResources, NO_ID, PathChunk, TinyCalendarPreferences,
+    ArenaRef, CachedName, DavName, DavPath, DavResourcePath, GroupwareResource,
+    GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID, PathChunk,
+    TinyCalendarPreferences,
 };
 use store::rand::{RngExt, distr::Alphanumeric};
 use types::acl::AclGrant;
@@ -79,7 +80,9 @@ impl GroupwareResourceRef<'_> {
             GroupwareResourceMetadata::File { name, .. }
             | GroupwareResourceMetadata::Calendar { name, .. }
             | GroupwareResourceMetadata::AddressBook { name, .. } => Some(self.chunk.str_at(*name)),
-            GroupwareResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
+            GroupwareResourceMetadata::CalendarEventNotification { names, .. }
+                if names.is_empty() =>
+            {
                 Some(if self.resource.document_id == SCHEDULE_INBOX_ID {
                     "inbox"
                 } else {
@@ -191,7 +194,8 @@ impl GroupwareResource {
     pub fn is_container(&self) -> bool {
         match &self.data {
             GroupwareResourceMetadata::File { size, .. } => *size == NO_ID,
-            GroupwareResourceMetadata::Calendar { .. } | GroupwareResourceMetadata::AddressBook { .. } => true,
+            GroupwareResourceMetadata::Calendar { .. }
+            | GroupwareResourceMetadata::AddressBook { .. } => true,
             GroupwareResourceMetadata::CalendarEventNotification { names, .. } => names.is_empty(),
             _ => false,
         }
@@ -208,8 +212,12 @@ impl GroupwareResource {
     #[inline(always)]
     pub fn parent_id(&self) -> Option<u32> {
         match &self.data {
-            GroupwareResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => Some(*parent_id),
-            GroupwareResourceMetadata::CalendarEventNotification { names, .. } if names.is_empty() => {
+            GroupwareResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => {
+                Some(*parent_id)
+            }
+            GroupwareResourceMetadata::CalendarEventNotification { names, .. }
+                if names.is_empty() =>
+            {
                 Some(SCHEDULE_INBOX_ID)
             }
             _ => None,
@@ -258,7 +266,9 @@ impl GroupwareResource {
     #[inline(always)]
     pub fn event_id(&self) -> Option<u32> {
         match &self.data {
-            GroupwareResourceMetadata::CalendarEventNotification { event_id, .. } => Some(*event_id),
+            GroupwareResourceMetadata::CalendarEventNotification { event_id, .. } => {
+                Some(*event_id)
+            }
             _ => None,
         }
     }

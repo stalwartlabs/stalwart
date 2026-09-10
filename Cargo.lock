@@ -7901,18 +7901,18 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sieve-rs"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cc5f9ebe4ba923a82f7524bee0d37a67b829d9befdd32e6840839d14ce6354e"
+version = "1.0.0"
 dependencies = [
  "ahash",
- "arc-swap",
+ "bumpalo",
  "fancy-regex 0.19.1",
+ "hashbrown 0.17.1",
  "hashify",
  "mail-builder 0.5.0",
  "mail-parser",
- "rkyv",
+ "memchr",
  "serde",
+ "smallvec",
 ]
 
 [[package]]

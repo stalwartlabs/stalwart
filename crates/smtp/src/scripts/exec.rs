@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{sync::Arc, time::SystemTime};
+use std::time::SystemTime;
 
 use common::network::SessionStream;
 
@@ -25,7 +25,7 @@ impl<T: SessionStream> Session<T> {
             .set_variable("helo_domain", self.data.helo_domain.as_str().to_lowercase())
             .set_variable(
                 "authenticated_as",
-                self.authenticated_as().unwrap_or_default().to_string(),
+                self.authenticated_as().unwrap_or_default(),
             )
             .set_variable(
                 "now",
@@ -83,7 +83,7 @@ impl<T: SessionStream> Session<T> {
         if let Some(mail_from) = &self.data.mail_from {
             params
                 .envelope
-                .push((Envelope::From, mail_from.address_lcase.to_string().into()));
+                .push((Envelope::From, mail_from.address_lcase.as_str().into()));
             if let Some(env_id) = &mail_from.dsn_info {
                 params
                     .envelope
@@ -94,7 +94,7 @@ impl<T: SessionStream> Session<T> {
                 if let Some(rcpt) = self.data.rcpt_to.last() {
                     params
                         .envelope
-                        .push((Envelope::To, rcpt.address_lcase.to_string().into()));
+                        .push((Envelope::To, rcpt.address_lcase.as_str().into()));
                     if let Some(orcpt) = &rcpt.dsn_info {
                         params
                             .envelope
@@ -108,7 +108,7 @@ impl<T: SessionStream> Session<T> {
                 let mut has_orcpts = false;
 
                 for rcpt in &self.data.rcpt_to {
-                    recipients.push(Variable::from(rcpt.address_lcase.to_string()));
+                    recipients.push(Variable::from(rcpt.address_lcase.as_str()));
                     orcpts.push(match &rcpt.dsn_info {
                         Some(orcpt) => {
                             has_orcpts = true;
@@ -157,7 +157,7 @@ impl<T: SessionStream> Session<T> {
     pub async fn run_script(
         &self,
         script_id: String,
-        script: Arc<Sieve>,
+        script: &Sieve<'_>,
         params: ScriptParameters<'_>,
     ) -> ScriptResult {
         Box::pin(

@@ -14,17 +14,20 @@ pub fn register(plugin_id: u32, fnc_map: &mut FunctionMap) {
     fnc_map.set_external_function("add_header", plugin_id, 2);
 }
 
-pub fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
-    Ok(if let (Variable::String(name), Variable::String(value)) =
-        (&ctx.arguments[0], &ctx.arguments[1])
-    {
-        ctx.modifications.push(ScriptModification::AddHeader {
-            name: name.clone(),
-            value: value.clone(),
-        });
-        true
-    } else {
-        false
-    }
-    .into())
+pub fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
+    let mut arguments = ctx.arguments.into_iter();
+    Ok(
+        if let (Some(Variable::String(name)), Some(Variable::String(value))) =
+            (arguments.next(), arguments.next())
+        {
+            ctx.modifications.push(ScriptModification::AddHeader {
+                name: name.into_owned(),
+                value: value.into_owned(),
+            });
+            true
+        } else {
+            false
+        }
+        .into(),
+    )
 }

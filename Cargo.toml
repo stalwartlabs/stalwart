@@ -36,6 +36,9 @@ exclude = ["fuzz"]
 [workspace.dependencies]
 rkyv = { version = "0.8.18", features = ["little_endian", "unaligned"] }
 
+[patch.crates-io]
+sieve-rs = { path = "../sieve" }
+
 [workspace.lints.clippy]
 result_unit_err = "allow"
 

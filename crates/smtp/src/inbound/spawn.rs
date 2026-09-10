@@ -86,11 +86,7 @@ impl<T: SessionStream> Session<T> {
                     .map(|s| (s, name))
             })
             && let ScriptResult::Reject(message) = self
-                .run_script(
-                    script_id,
-                    script.clone(),
-                    self.build_script_parameters("connect"),
-                )
+                .run_script(script_id, script, self.build_script_parameters("connect"))
                 .await
         {
             let _ = self.write(message.as_bytes()).await;

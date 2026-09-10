@@ -14,7 +14,7 @@ pub fn register(plugin_id: u32, fnc_map: &mut FunctionMap) {
     fnc_map.set_external_function("llm_prompt", plugin_id, 3);
 }
 
-pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
+pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL

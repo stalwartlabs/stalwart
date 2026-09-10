@@ -6,8 +6,8 @@
 
 use super::server::tls::build_self_signed_cert;
 use crate::{
-    Caches, Data, GroupwareResource, GroupwareResources, MailboxCache, MessageStoreCache, MessageUid,
-    TlsConnectors,
+    Caches, Data, GroupwareResource, GroupwareResources, MailboxCache, MessageStoreCache,
+    MessageUid, TlsConnectors,
     auth::{AccessTokenInner, AccountCache, DomainCache, MailingListCache, RoleCache, TenantCache},
     cache::{RevalidateInterval, swap::SwapReceiver},
     config::{

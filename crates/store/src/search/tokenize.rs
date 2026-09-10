@@ -25,10 +25,7 @@ pub(crate) fn tokenize<'x>(
     match language {
         Language::None => {
             for word in SpaceTokenizer::new(text, MAX_TOKEN_LENGTH) {
-                if !cb(QueryToken {
-                    word,
-                    stem: None,
-                }) {
+                if !cb(QueryToken { word, stem: None }) {
                     return;
                 }
             }

@@ -708,7 +708,7 @@ impl<T: SessionStream> Session<T> {
                 )
                 .with_message(parsed_message);
 
-            let modifications = match self.run_script(script_id, script.clone(), params).await {
+            let modifications = match self.run_script(script_id, script, params).await {
                 ScriptResult::Accept { modifications } => modifications,
                 ScriptResult::Replace {
                     message,

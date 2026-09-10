@@ -16,8 +16,8 @@ use crate::{
 };
 use calcard::common::timezone::Tz;
 use common::{
-    ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID, PathIndex,
-    ResourceStore, Server, TinyCalendarPreferences, UpdateLock,
+    ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources,
+    NO_ID, PathIndex, ResourceStore, Server, TinyCalendarPreferences, UpdateLock,
     storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
 };
 use std::sync::Arc;

@@ -209,7 +209,6 @@ async fn sieve_scripts() {
         if name.starts_with("stage_") || name.ends_with("_include") {
             continue;
         }
-        let script = script.clone();
         let params = session
             .build_script_parameters("data")
             .set_variable("from", "john.doe@example.org")
@@ -231,8 +230,7 @@ async fn sieve_scripts() {
         .sieve
         .trusted_scripts
         .get("spamtest_include")
-        .expect("spamtest_include script not found")
-        .clone();
+        .expect("spamtest_include script not found");
     for (percentage, score, expected) in [
         (None, 0.0, "spamtest=0 percent=0 score= is_spam="),
         (Some(0), -3.5, "spamtest=1 percent=0 score=-3.5 is_spam=0"),
@@ -258,7 +256,7 @@ async fn sieve_scripts() {
 
         match test
             .server
-            .run_script("spamtest_include".into(), spamtest_script.clone(), params)
+            .run_script("spamtest_include".into(), spamtest_script, params)
             .await
         {
             ScriptResult::Reject(message) => {

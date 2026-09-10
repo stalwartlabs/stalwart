@@ -6,8 +6,9 @@
 
 use super::{SwapPart, frame::SwapFrame};
 use crate::{
-    ArenaRef, CachedName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, PathChunk,
-    PathIndex, ResourceChunk, ResourceStore, TinyCalendarPreferences, UpdateLock,
+    ArenaRef, CachedName, DavPath, GroupwareResource, GroupwareResourceMetadata,
+    GroupwareResources, PathChunk, PathIndex, ResourceChunk, ResourceStore,
+    TinyCalendarPreferences, UpdateLock,
 };
 use calcard::common::timezone::Tz;
 use rkyv::with::InlineAsBox;
@@ -183,12 +184,14 @@ impl ArchivedFlatResource {
                 uid: self.ref_b(),
                 etag: self.etag.to_native(),
             },
-            KIND_CALENDAR_EVENT_NOTIFICATION => GroupwareResourceMetadata::CalendarEventNotification {
-                names: self.ref_a(),
-                created_at: self.created_at.to_native(),
-                event_id: self.num_a.to_native(),
-                etag: self.etag.to_native(),
-            },
+            KIND_CALENDAR_EVENT_NOTIFICATION => {
+                GroupwareResourceMetadata::CalendarEventNotification {
+                    names: self.ref_a(),
+                    created_at: self.created_at.to_native(),
+                    event_id: self.num_a.to_native(),
+                    etag: self.etag.to_native(),
+                }
+            }
             KIND_ADDRESS_BOOK => GroupwareResourceMetadata::AddressBook {
                 name: self.ref_a(),
                 acls: self.ref_b(),
@@ -900,24 +903,30 @@ mod tests {
         let (mut chunks, path_chunks) = resources.pack();
         chunks[0].records[0].ref_a_off = u32::MAX - 1;
         assert!(
-            GroupwareResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
-                .is_none(),
+            GroupwareResources::from_snapshot(
+                &resources.seal_snapshot(chunks, path_chunks).unwrap()
+            )
+            .is_none(),
             "an arena offset past the end of the chunk was accepted"
         );
 
         let (mut chunks, path_chunks) = resources.pack();
         chunks[0].records[0].ref_b_len = u32::MAX;
         assert!(
-            GroupwareResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
-                .is_none(),
+            GroupwareResources::from_snapshot(
+                &resources.seal_snapshot(chunks, path_chunks).unwrap()
+            )
+            .is_none(),
             "an arena length past the end of the chunk was accepted"
         );
 
         let (chunks, mut path_chunks) = resources.pack();
         path_chunks[0].path_lengths[0] = u32::MAX;
         assert!(
-            GroupwareResources::from_snapshot(&resources.seal_snapshot(chunks, path_chunks).unwrap())
-                .is_none(),
+            GroupwareResources::from_snapshot(
+                &resources.seal_snapshot(chunks, path_chunks).unwrap()
+            )
+            .is_none(),
             "a path reaching past the end of its byte arena was accepted"
         );
     }

@@ -8,7 +8,7 @@ use sieve::{Context, runtime::Variable};
 
 use crate::scripts::IsMixedCharset;
 
-pub fn fn_is_ascii<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_ascii<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     match &v[0] {
         Variable::String(s) => s.is_ascii(),
         Variable::Integer(_) | Variable::Float(_) => true,
@@ -20,7 +20,7 @@ pub fn fn_is_ascii<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     .into()
 }
 
-pub fn fn_has_zwsp<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_has_zwsp<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     match &v[0] {
         Variable::String(s) => s.chars().any(|c| c.is_zwsp()),
         Variable::Array(a) => a.iter().any(|v| match v {
@@ -32,7 +32,7 @@ pub fn fn_has_zwsp<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     .into()
 }
 
-pub fn fn_has_obscured<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_has_obscured<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     match &v[0] {
         Variable::String(s) => s.chars().any(|c| c.is_obscured()),
         Variable::Array(a) => a.iter().any(|v| match v {
@@ -68,20 +68,20 @@ impl CharUtils for char {
     }
 }
 
-pub fn fn_cure_text<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_cure_text<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     decancer::cure(v[0].to_string().as_ref(), decancer::Options::default())
         .map(String::from)
         .unwrap_or_default()
         .into()
 }
 
-pub fn fn_unicode_skeleton<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_unicode_skeleton<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     unicode_security::skeleton(v[0].to_string().as_ref())
         .collect::<String>()
         .into()
 }
 
-pub fn fn_is_mixed_charset<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_mixed_charset<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     let text = v[0].to_string();
     if !text.is_empty() {
         text.as_ref().is_mixed_charset()

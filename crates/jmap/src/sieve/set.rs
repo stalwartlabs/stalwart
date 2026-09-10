@@ -563,7 +563,7 @@ impl SieveScriptSet for Server {
                     match self.core.sieve.untrusted_compiler.compile(&bytes) {
                         Ok(script) => {
                             changes.size = bytes.len() as u32;
-                            changes.set_script(&script).caused_by(trc::location!())?;
+                            changes.set_script(&script);
                             bytes.into()
                         }
                         Err(err) => {

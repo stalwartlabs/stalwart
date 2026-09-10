@@ -28,7 +28,7 @@ pub struct PluginContext<'x> {
     pub server: &'x Server,
     pub message: &'x Message<'x>,
     pub modifications: &'x mut Vec<ScriptModification>,
-    pub arguments: Vec<Variable>,
+    pub arguments: Vec<Variable<'x>>,
 }
 
 const PLUGINS_REGISTER: [RegisterPluginFnc; 13] = [
@@ -72,7 +72,7 @@ impl RegisterSievePlugins for FunctionMap {
 }
 
 impl Core {
-    pub async fn run_plugin(&self, id: u32, ctx: PluginContext<'_>) -> Input {
+    pub async fn run_plugin(&self, id: u32, ctx: PluginContext<'_>) -> Input<'static> {
         #[cfg(feature = "test_mode")]
         if id == PLUGINS_REGISTER.len() as u32 {
             return test_print(ctx);
@@ -100,14 +100,14 @@ impl Core {
             Ok(result) => result.into(),
             Err(err) => {
                 trc::error!(err.span_id(session_id).details("Sieve runtime error"));
-                Input::FncResult(Variable::default())
+                Input::Value(Variable::default())
             }
         }
     }
 }
 
 #[cfg(feature = "test_mode")]
-pub fn test_print(ctx: PluginContext<'_>) -> Input {
+pub fn test_print(ctx: PluginContext<'_>) -> Input<'static> {
     println!("{}", ctx.arguments[0].to_string());
-    Input::True
+    Input::Bool(true)
 }

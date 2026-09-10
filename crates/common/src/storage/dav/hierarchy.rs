@@ -6,8 +6,8 @@
 
 use super::{CONTAINER_FLAG, encode_path_segment};
 use crate::{
-    ArenaRef, DavPath, GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID, PathChunk,
-    PathIndex, ResourceChunk, ResourceStore,
+    ArenaRef, DavPath, GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID,
+    PathChunk, PathIndex, ResourceChunk, ResourceStore,
 };
 use ahash::{AHashMap, AHashSet};
 use std::borrow::Cow;
@@ -202,9 +202,14 @@ impl GroupwareResources {
         }
     }
 
-    fn container_path_of<'x>(&'x self, container: &'x GroupwareResourceRef<'x>) -> Option<Cow<'x, str>> {
+    fn container_path_of<'x>(
+        &'x self,
+        container: &'x GroupwareResourceRef<'x>,
+    ) -> Option<Cow<'x, str>> {
         match &container.resource.data {
-            GroupwareResourceMetadata::File { .. } => self.nested_path_of(container).map(Cow::Owned),
+            GroupwareResourceMetadata::File { .. } => {
+                self.nested_path_of(container).map(Cow::Owned)
+            }
             _ => container.container_name().map(encode_path_segment),
         }
     }
@@ -237,7 +242,9 @@ impl GroupwareResources {
 
     fn nesting_parent(resource: &GroupwareResourceRef<'_>) -> Option<u32> {
         match &resource.resource.data {
-            GroupwareResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => Some(*parent_id),
+            GroupwareResourceMetadata::File { parent_id, .. } if *parent_id != NO_ID => {
+                Some(*parent_id)
+            }
             _ => None,
         }
     }

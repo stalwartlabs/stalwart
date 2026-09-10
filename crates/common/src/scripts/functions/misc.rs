@@ -15,7 +15,7 @@ use utils::HexEncode;
 
 use super::ApplyString;
 
-pub fn fn_is_empty<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_empty<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     match &v[0] {
         Variable::String(s) => s.is_empty(),
         Variable::Integer(_) | Variable::Float(_) => false,
@@ -24,29 +24,29 @@ pub fn fn_is_empty<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     .into()
 }
 
-pub fn fn_is_number<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_number<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     matches!(&v[0], Variable::Integer(_) | Variable::Float(_)).into()
 }
 
-pub fn fn_is_ip_addr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_ip_addr<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     v[0].to_string().parse::<std::net::IpAddr>().is_ok().into()
 }
 
-pub fn fn_is_ipv4_addr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_ipv4_addr<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     v[0].to_string()
         .parse::<std::net::IpAddr>()
         .is_ok_and(|ip| matches!(ip, IpAddr::V4(_)))
         .into()
 }
 
-pub fn fn_is_ipv6_addr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_ipv6_addr<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     v[0].to_string()
         .parse::<std::net::IpAddr>()
         .is_ok_and(|ip| matches!(ip, IpAddr::V6(_)))
         .into()
 }
 
-pub fn fn_is_ip_in_cidr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_is_ip_in_cidr<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     let Ok(ip) = v[0].to_string().parse::<IpAddr>() else {
         return false.into();
     };
@@ -56,7 +56,7 @@ pub fn fn_is_ip_in_cidr<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
         .into()
 }
 
-pub fn fn_ip_reverse_name<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_ip_reverse_name<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     v[0].to_string()
         .parse::<std::net::IpAddr>()
         .map(|ip| ip.to_reverse_name())
@@ -64,24 +64,22 @@ pub fn fn_ip_reverse_name<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable 
         .into()
 }
 
-pub fn fn_detect_file_type<'x>(ctx: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_detect_file_type<'x>(ctx: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
+    let as_extension = v[0].to_string() == "ext";
     ctx.message()
         .part(ctx.part())
         .and_then(|p| infer::get(p.contents()))
-        .map(|t| {
-            Variable::from(
-                if v[0].to_string() != "ext" {
-                    t.mime_type()
-                } else {
-                    t.extension()
-                }
-                .to_string(),
-            )
+        .map(|file_type| {
+            Variable::borrowed(if as_extension {
+                file_type.extension()
+            } else {
+                file_type.mime_type()
+            })
         })
         .unwrap_or_default()
 }
 
-pub fn fn_hash<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
+pub fn fn_hash<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     use sha1::Digest;
     let hash = v[1].to_string();
 
@@ -106,7 +104,7 @@ pub fn fn_hash<'x>(_: &'x Context<'x>, v: Vec<Variable>) -> Variable {
     })
 }
 
-pub fn fn_get_var_names<'x>(ctx: &'x Context<'x>, _: Vec<Variable>) -> Variable {
+pub fn fn_get_var_names<'x>(ctx: &Context<'x>, _: &[Variable<'x>]) -> Variable<'x> {
     Variable::Array(
         ctx.global_variable_names()
             .map(|v| Variable::from(v.to_uppercase()))

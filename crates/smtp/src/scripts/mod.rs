@@ -34,8 +34,8 @@ pub enum ScriptResult {
 pub struct ScriptParameters<'x> {
     message: Option<Message<'x>>,
     headers: Option<&'x [u8]>,
-    variables: AHashMap<Cow<'static, str>, Variable>,
-    envelope: Vec<(Envelope, Variable)>,
+    variables: AHashMap<Cow<'static, str>, Variable<'x>>,
+    envelope: Vec<(Envelope, Variable<'x>)>,
     from_addr: String,
     from_name: String,
     return_path: String,
@@ -107,13 +107,13 @@ impl<'x> ScriptParameters<'x> {
     pub fn set_variable(
         mut self,
         name: impl Into<Cow<'static, str>>,
-        value: impl Into<Variable>,
+        value: impl Into<Variable<'x>>,
     ) -> Self {
         self.variables.insert(name.into(), value.into());
         self
     }
 
-    pub fn set_envelope(mut self, envelope: Envelope, value: impl Into<Variable>) -> Self {
+    pub fn set_envelope(mut self, envelope: Envelope, value: impl Into<Variable<'x>>) -> Self {
         self.envelope.push((envelope, value.into()));
         self
     }

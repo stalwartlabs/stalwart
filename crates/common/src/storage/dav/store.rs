@@ -5,8 +5,8 @@
  */
 
 use crate::{
-    ArenaRef, CachedName, DAV_CHUNK, DavName, GroupwareResource, GroupwareResourceMetadata, GroupwareResourceRef,
-    NO_ID, ResourceChunk, ResourceStore, TinyCalendarPreferences,
+    ArenaRef, CachedName, DAV_CHUNK, DavName, GroupwareResource, GroupwareResourceMetadata,
+    GroupwareResourceRef, NO_ID, ResourceChunk, ResourceStore, TinyCalendarPreferences,
 };
 use std::{ops::Range, sync::Arc};
 use types::acl::AclGrant;
@@ -296,10 +296,13 @@ impl ResourceStore {
 
     pub fn iter(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
         self.chunks.iter().flat_map(|chunk| {
-            chunk.records.iter().map(move |resource| GroupwareResourceRef {
-                chunk: chunk.as_ref(),
-                resource,
-            })
+            chunk
+                .records
+                .iter()
+                .map(move |resource| GroupwareResourceRef {
+                    chunk: chunk.as_ref(),
+                    resource,
+                })
         })
     }
 
@@ -308,10 +311,13 @@ impl ResourceStore {
             .iter()
             .filter(|chunk| !chunk.acls.is_empty())
             .flat_map(|chunk| {
-                chunk.records.iter().map(move |resource| GroupwareResourceRef {
-                    chunk: chunk.as_ref(),
-                    resource,
-                })
+                chunk
+                    .records
+                    .iter()
+                    .map(move |resource| GroupwareResourceRef {
+                        chunk: chunk.as_ref(),
+                        resource,
+                    })
             })
             .filter(|resource| resource.has_acls())
     }

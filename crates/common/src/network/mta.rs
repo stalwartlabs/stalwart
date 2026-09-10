@@ -226,7 +226,7 @@ impl Server {
         }
     }
 
-    pub fn get_trusted_sieve_script(&self, name: &str, session_id: u64) -> Option<&Arc<Sieve>> {
+    pub fn get_trusted_sieve_script(&self, name: &str, session_id: u64) -> Option<&Sieve<'static>> {
         self.core.sieve.trusted_script(name).or_else(|| {
             trc::event!(
                 Sieve(trc::SieveEvent::ScriptNotFound),
@@ -238,7 +238,11 @@ impl Server {
         })
     }
 
-    pub fn get_untrusted_sieve_script(&self, name: &str, session_id: u64) -> Option<&Arc<Sieve>> {
+    pub fn get_untrusted_sieve_script(
+        &self,
+        name: &str,
+        session_id: u64,
+    ) -> Option<&Sieve<'static>> {
         self.core.sieve.untrusted_script(name).or_else(|| {
             trc::event!(
                 Sieve(trc::SieveEvent::ScriptNotFound),

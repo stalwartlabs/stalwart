@@ -15,7 +15,7 @@ pub fn register_header(plugin_id: u32, fnc_map: &mut FunctionMap) {
     fnc_map.set_external_function("http_header", plugin_id, 4);
 }
 
-pub async fn exec_header(ctx: PluginContext<'_>) -> trc::Result<Variable> {
+pub async fn exec_header(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
     let url = ctx.arguments[0].to_string();
     let header = ctx.arguments[1].to_string();
     let agent = ctx.arguments[2].to_string();

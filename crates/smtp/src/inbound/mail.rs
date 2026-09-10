@@ -165,11 +165,7 @@ impl<T: SessionStream> Session<T> {
             })
         {
             match self
-                .run_script(
-                    script_id,
-                    script.clone(),
-                    self.build_script_parameters("mail"),
-                )
+                .run_script(script_id, script, self.build_script_parameters("mail"))
                 .await
             {
                 ScriptResult::Accept { modifications } if !modifications.is_empty() => {

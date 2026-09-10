@@ -10,8 +10,8 @@ use crate::{
     file::{ArchivedFileNode, FileNode},
 };
 use common::{
-    ArenaRef, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID, PathIndex,
-    ResourceStore, Server, UpdateLock,
+    ArenaRef, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID,
+    PathIndex, ResourceStore, Server, UpdateLock,
     storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
 };
 use std::sync::Arc;

@@ -14,6 +14,7 @@ pub mod unicode;
 pub mod url;
 
 use sieve::{FunctionMap, runtime::Variable};
+use std::borrow::Cow;
 
 use self::{array::*, email::*, header::*, image::*, misc::*, text::*, unicode::*, url::*};
 
@@ -135,11 +136,26 @@ pub fn register_functions_untrusted() -> FunctionMap {
 }
 
 pub trait ApplyString<'x> {
-    fn transform(&self, f: impl Fn(&'_ str) -> Variable) -> Variable;
+    fn transform(&self, f: impl Fn(&str) -> Variable<'x>) -> Variable<'x>;
+    fn transform_str<F: StrTransform>(&self, f: F) -> Variable<'x>;
+    fn split_str<F: StrSplit>(&self, split: F) -> Variable<'x>;
+    fn split_str_once<F: StrSplitOnce>(&self, split: F) -> Variable<'x>;
 }
 
-impl ApplyString<'_> for Variable {
-    fn transform(&self, f: impl Fn(&'_ str) -> Variable) -> Variable {
+pub trait StrTransform: for<'s> Fn(&'s str) -> Cow<'s, str> {}
+
+impl<F: for<'s> Fn(&'s str) -> Cow<'s, str>> StrTransform for F {}
+
+pub trait StrSplit: for<'s> Fn(&'s str, &mut dyn FnMut(&'s str)) {}
+
+impl<F: for<'s> Fn(&'s str, &mut dyn FnMut(&'s str))> StrSplit for F {}
+
+pub trait StrSplitOnce: for<'s> Fn(&'s str) -> Option<(&'s str, &'s str)> {}
+
+impl<F: for<'s> Fn(&'s str) -> Option<(&'s str, &'s str)>> StrSplitOnce for F {}
+
+impl<'x> ApplyString<'x> for Variable<'x> {
+    fn transform(&self, f: impl Fn(&str) -> Variable<'x>) -> Variable<'x> {
         match self {
             Variable::String(s) => f(s),
             Variable::Array(list) => list
@@ -152,5 +168,64 @@ impl ApplyString<'_> for Variable {
                 .into(),
             v => f(v.to_string().as_ref()),
         }
+    }
+
+    fn transform_str<F: StrTransform>(&self, f: F) -> Variable<'x> {
+        match self {
+            Variable::Array(list) => list
+                .iter()
+                .map(|v| transform_str_item(v, &f))
+                .collect::<Vec<_>>()
+                .into(),
+            v => transform_str_item(v, &f),
+        }
+    }
+
+    fn split_str<F: StrSplit>(&self, split: F) -> Variable<'x> {
+        let mut parts = Vec::new();
+        match self {
+            Variable::String(Cow::Borrowed(text)) => {
+                split(text, &mut |part| parts.push(Variable::borrowed(part)));
+            }
+            value => {
+                let text = value.to_string();
+                split(text.as_ref(), &mut |part| {
+                    parts.push(Variable::from(part.to_string()))
+                });
+            }
+        }
+        parts.into()
+    }
+
+    fn split_str_once<F: StrSplitOnce>(&self, split: F) -> Variable<'x> {
+        match self {
+            Variable::String(Cow::Borrowed(text)) => split(text)
+                .map(|(head, tail)| {
+                    Variable::from(vec![Variable::borrowed(head), Variable::borrowed(tail)])
+                })
+                .unwrap_or_default(),
+            value => {
+                let text = value.to_string();
+                split(text.as_ref())
+                    .map(|(head, tail)| {
+                        Variable::from(vec![
+                            Variable::from(head.to_string()),
+                            Variable::from(tail.to_string()),
+                        ])
+                    })
+                    .unwrap_or_default()
+            }
+        }
+    }
+}
+
+fn transform_str_item<'x, F: StrTransform>(value: &Variable<'x>, f: &F) -> Variable<'x> {
+    match value {
+        Variable::String(Cow::Borrowed(s)) => match f(s) {
+            Cow::Borrowed(s) => Variable::borrowed(s),
+            Cow::Owned(s) => Variable::from(s),
+        },
+        Variable::String(s) => Variable::from(f(s).into_owned()),
+        v => Variable::from(f(v.to_string().as_ref()).into_owned()),
     }
 }

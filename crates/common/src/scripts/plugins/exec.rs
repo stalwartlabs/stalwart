@@ -14,8 +14,13 @@ pub fn register(plugin_id: u32, fnc_map: &mut FunctionMap) {
     fnc_map.set_external_function("exec", plugin_id, 2);
 }
 
-pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable> {
-    let mut arguments = ctx.arguments.into_iter();
+pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
+    let mut arguments = ctx
+        .arguments
+        .into_iter()
+        .map(Variable::into_owned)
+        .collect::<Vec<_>>()
+        .into_iter();
 
     tokio::task::spawn_blocking(move || {
         let command = arguments
