@@ -12,7 +12,12 @@ use common::{
 };
 
 use mail_parser::Message;
-use sieve::{Envelope, SpamStatus, runtime::Variable};
+use sieve::{
+    Envelope, SpamStatus,
+    compiler::grammar::actions::action_redirect::{Notify, NotifyItem},
+    runtime::Variable,
+};
+use smtp_proto::{RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS};
 
 pub mod envelope;
 pub mod event_loop;
@@ -132,5 +137,20 @@ impl<'x> ScriptParameters<'x> {
 impl Default for ScriptParameters<'_> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub fn notify_flags(notify: &Notify) -> u64 {
+    match notify {
+        Notify::Never => RCPT_NOTIFY_NEVER,
+        Notify::Items(items) => items.iter().fold(0, |flags, item| {
+            flags
+                | match item {
+                    NotifyItem::Success => RCPT_NOTIFY_SUCCESS,
+                    NotifyItem::Failure => RCPT_NOTIFY_FAILURE,
+                    NotifyItem::Delay => RCPT_NOTIFY_DELAY,
+                }
+        }),
+        Notify::Default => 0,
     }
 }

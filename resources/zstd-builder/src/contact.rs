@@ -4,8 +4,7 @@ use calcard::{
     Entry, Parser,
     vcard::{VCard, VCardParameterName, VCardParameterValue, VCardProperty, VCardValue},
 };
-use common::DavName;
-use groupware::contact::ContactCard;
+use groupware::contact::ContactCardContent;
 
 use crate::corpus::{Corpus, Rng, Stats, archive, collect_files, scrub};
 
@@ -34,16 +33,12 @@ pub fn build(dir: &Path, keep_text: bool, stats: &mut Stats) -> std::io::Result<
             match parser.entry() {
                 Entry::VCard(real) if !real.entries.is_empty() => {
                     seed += 1;
-                    let size = real.to_string().len();
                     if keep_text {
-                        corpus.push_both(archive(&contact(&mut Rng::new(seed), real, size)));
+                        corpus.push_both(archive(&contact(real)));
                     } else {
                         let mut scrubbed = real.clone();
                         scrub_vcard(&mut Rng::new(seed ^ SCRUB_SEED), &mut scrubbed);
-                        corpus.push(
-                            archive(&contact(&mut Rng::new(seed), scrubbed, size)),
-                            archive(&contact(&mut Rng::new(seed), real, size)),
-                        );
+                        corpus.push(archive(&contact(scrubbed)), archive(&contact(real)));
                     }
                     stats.read += 1;
                     found += 1;
@@ -61,24 +56,10 @@ pub fn build(dir: &Path, keep_text: bool, stats: &mut Stats) -> std::io::Result<
     Ok(corpus)
 }
 
-fn contact(rng: &mut Rng, card: VCard, size: usize) -> ContactCard {
-    let name = card
-        .uid()
-        .map(|uid| uid.to_string())
-        .unwrap_or_else(|| rng.token(36));
-    let created = 1_750_000_000 + rng.below(86400 * 365) as i64;
-
-    ContactCard {
-        names: vec![DavName {
-            name: format!("{name}.vcf"),
-            parent_id: rng.below(3) as u32,
-        }],
-        display_name: None,
+fn contact(card: VCard) -> ContactCardContent {
+    ContactCardContent {
         card,
         dead_properties: Default::default(),
-        created,
-        modified: created + rng.below(86400 * 30) as i64,
-        size: size as u32,
     }
 }
 

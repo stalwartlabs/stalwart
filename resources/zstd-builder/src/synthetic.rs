@@ -642,13 +642,17 @@ fn metadata(rng: &mut Rng) -> Box<[Metadata]> {
     }];
     if rng.chance(50) {
         entries.push(Metadata::QueueSize {
-            key: rng.domain().into_bytes().into_boxed_slice(),
+            key: quota_key(rng),
             id: rng.next_u64(),
         });
         entries.push(Metadata::QueueCount {
-            key: rng.domain().into_bytes().into_boxed_slice(),
+            key: quota_key(rng),
             id: rng.next_u64(),
         });
     }
     entries.into_boxed_slice()
+}
+
+fn quota_key(rng: &mut Rng) -> u128 {
+    (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64())
 }

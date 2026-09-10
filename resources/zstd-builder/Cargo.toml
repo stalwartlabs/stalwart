@@ -21,15 +21,12 @@ mail-builder = { version = "0.5" }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }
 serde_json = "1.0"
-sieve-rs = { version = "1.0", features = ["rkyv", "serde"] }
+sieve-rs = { version = "1.0" }
 smtp-proto = { version = "0.2.3", features = ["rkyv"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 zstd = { version = "0.13", features = ["zdict_builder", "experimental"] }
 
 [patch.crates-io]
-hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
-hickory-net = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
-hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns", rev = "e645086f7863eaab8d961421a348b06ea613ebd3" }
 sieve-rs = { path = "../../../sieve" }
 
 [profile.release]

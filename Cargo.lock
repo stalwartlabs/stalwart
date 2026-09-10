@@ -7902,6 +7902,8 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "sieve-rs"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fabd36845a9418dd73ca312f5e87f57f6662cf61d125f40a33c5349fdc24cfb"
 dependencies = [
  "ahash",
  "bumpalo",

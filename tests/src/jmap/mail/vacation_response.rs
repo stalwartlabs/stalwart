@@ -60,7 +60,7 @@ pub async fn test(test: &TestServer) {
     // Await vacation response
     assert_message_delivery(
         &mut smtp_rx,
-        MockMessage::new("<jdoe@example.com>", ["<bill@remote.org>"], "@Kokomo"),
+        MockMessage::new("<>", ["<bill@remote.org>"], "@Kokomo"),
     )
     .await;
 
@@ -149,7 +149,7 @@ pub async fn test(test: &TestServer) {
 
     assert_message_delivery(
         &mut smtp_rx,
-        MockMessage::new("<jdoe@example.com>", ["<jane_smith@remote.org>"], "@Kokomo"),
+        MockMessage::new("<>", ["<jane_smith@remote.org>"], "@Kokomo"),
     )
     .await;
 

@@ -8,10 +8,7 @@ use calcard::{
         ICalendarValue, Uri,
     },
 };
-use common::DavName;
-use groupware::calendar::{
-    CalendarEvent, CalendarEventData, EVENT_DRAFT, EVENT_INVITE_OTHERS, EventPreferences,
-};
+use groupware::calendar::{CalendarEventContent, CalendarEventData, EventPreferences};
 
 use crate::corpus::{Corpus, Rng, Stats, archive, collect_files, scrub};
 
@@ -63,15 +60,14 @@ pub fn build(dir: &Path, keep_text: bool, stats: &mut Stats) -> std::io::Result<
             match parser.entry() {
                 Entry::ICalendar(real) if !real.components.is_empty() => {
                     seed += 1;
-                    let size = real.to_string().len();
                     if keep_text {
-                        corpus.push_both(sample(&mut Rng::new(seed), real, size));
+                        corpus.push_both(sample(&mut Rng::new(seed), real));
                     } else {
                         let mut scrubbed = real.clone();
                         scrub_ical(&mut Rng::new(seed ^ SCRUB_SEED), &mut scrubbed);
                         corpus.push(
-                            sample(&mut Rng::new(seed), scrubbed, size),
-                            sample(&mut Rng::new(seed), real, size),
+                            sample(&mut Rng::new(seed), scrubbed),
+                            sample(&mut Rng::new(seed), real),
                         );
                     }
                     stats.read += 1;
@@ -90,29 +86,17 @@ pub fn build(dir: &Path, keep_text: bool, stats: &mut Stats) -> std::io::Result<
     Ok(corpus)
 }
 
-fn sample(rng: &mut Rng, ical: ICalendar, size: usize) -> Vec<u8> {
-    archive(&event(rng, ical, size))
+fn sample(rng: &mut Rng, ical: ICalendar) -> Vec<u8> {
+    archive(&event(rng, ical))
 }
 
-fn event(rng: &mut Rng, ical: ICalendar, size: usize) -> CalendarEvent {
-    let name = ical
-        .uids()
-        .next()
-        .map(|uid| uid.to_string())
-        .unwrap_or_else(|| rng.token(36));
+fn event(rng: &mut Rng, ical: ICalendar) -> CalendarEventContent {
     let mut next_email_alarm = None;
     let mut data =
         CalendarEventData::new(ical, Tz::Floating, MAX_EXPANSIONS, &mut next_email_alarm);
     stabilise(&mut data);
-    let created = timestamp(rng);
-    let display_name_len = rng.range(6, 24);
 
-    CalendarEvent {
-        names: vec![DavName {
-            name: format!("{name}.ics"),
-            parent_id: rng.below(4) as u32,
-        }],
-        display_name: rng.chance(20).then(|| rng.token(display_name_len)),
+    CalendarEventContent {
         data,
         preferences: if rng.chance(15) {
             vec![EventPreferences {
@@ -124,18 +108,7 @@ fn event(rng: &mut Rng, ical: ICalendar, size: usize) -> CalendarEvent {
         } else {
             Vec::new()
         },
-        flags: if rng.chance(10) {
-            EVENT_DRAFT
-        } else if rng.chance(30) {
-            EVENT_INVITE_OTHERS
-        } else {
-            0
-        },
         dead_properties: Default::default(),
-        size: size as u32,
-        created,
-        modified: created + rng.below(86400 * 30) as i64,
-        schedule_tag: rng.chance(20).then(|| rng.below(64) as u32),
     }
 }
 
@@ -147,10 +120,6 @@ fn stabilise(data: &mut CalendarEventData) {
     let mut alarms = std::mem::take(&mut data.alarms).into_vec();
     alarms.sort_unstable_by_key(|alarm| (alarm.parent_id, alarm.id));
     data.alarms = alarms.into_boxed_slice();
-}
-
-fn timestamp(rng: &mut Rng) -> i64 {
-    1_750_000_000 + rng.below(86400 * 365) as i64
 }
 
 fn scrub_ical(rng: &mut Rng, ical: &mut ICalendar) {

@@ -47,14 +47,9 @@ pub fn build(compiler: &Compiler, corpus: &mut Corpus, stats: &mut Stats) {
                 continue;
             }
         };
-        let Ok(script) = script.to_bytes() else {
-            stats.skipped += 1;
-            continue;
-        };
-
         object.blob_hash = BlobHash::generate(&source);
         object.size = source.len() as u32;
-        object.script = script;
+        object.script = script.to_bytes();
 
         corpus.push_both(archive(&object));
         stats.read += 1;

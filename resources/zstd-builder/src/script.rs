@@ -55,14 +55,11 @@ pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
         };
 
         let mut rng = Rng::new(index as u64 + 1);
-        let Some(script) = constants::sanitize(&script, &mut rng) else {
-            stats.skipped += 1;
-            continue;
-        };
-        let Ok(script) = script.to_bytes() else {
-            stats.skipped += 1;
-            continue;
-        };
+        let script = constants::sanitize(&raw, &mut rng)
+            .and_then(|sanitized| compiler.compile(&sanitized).ok())
+            .filter(|sanitized| sanitized.code_len() == script.code_len())
+            .unwrap_or(script)
+            .to_bytes();
 
         let name_len = rng.range(4, 20);
         let sample = archive(&SieveScript {
