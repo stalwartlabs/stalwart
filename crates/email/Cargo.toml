@@ -26,7 +26,7 @@ rasn = "0.28"
 rasn-cms = "0.28"
 rasn-pkix = "0.28"
 rsa = { version = "0.9.10", features = ["sha2"] }
-rand = "0.8"
+rand = "0.10"
 sequoia-openpgp = { version = "2.4", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 hashify = "0.2"
 rkyv = { version = "0.8.18", features = ["little_endian"] }
