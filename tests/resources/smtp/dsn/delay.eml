@@ -3,19 +3,19 @@ To: sender@foobar.org
 Auto-Submitted: auto-generated
 Subject: Warning: Delay in message delivery
 MIME-Version: 1.0
-Content-Type: multipart/report; report-type="delivery-status"; 
-	boundary="mime_boundary"
+Content-Type: multipart/report; report-type="delivery-status";
+ boundary="mime_boundary"
 
 
 --mime_boundary
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 
-There was a temporary problem delivering your message to the following recip=
-ients:
+There was a temporary problem delivering your message to the following reci=
+pients:
 
-<john.doe@example.org> (connection to 'mx.domain.org' failed: Connection tim=
-eout)
+<john.doe@example.org> (connection to 'mx.domain.org' failed: Connection ti=
+meout)
 
 
 --mime_boundary

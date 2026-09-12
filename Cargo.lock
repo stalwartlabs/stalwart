@@ -1050,7 +1050,7 @@ dependencies = [
  "chrono-tz",
  "hashify",
  "jmap-tools",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "rkyv",
  "serde",
@@ -1336,7 +1336,7 @@ dependencies = [
  "libc",
  "lz4_flex 0.14.0",
  "mail-auth",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "md5",
  "nlp",
@@ -1578,9 +1578,9 @@ checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "crc32fast"
-version = "1.5.1"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8498c871161e1742aaa9d52551b2d6ebdd4c3d45a3be423e3728f33b955be550"
+checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
 dependencies = [
  "cfg-if",
 ]
@@ -2149,7 +2149,7 @@ dependencies = [
  "deadpool",
  "jsonwebtoken",
  "ldap3",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "md5",
  "nohash-hasher",
@@ -2393,7 +2393,7 @@ dependencies = [
  "hashify",
  "jmap-tools",
  "jmap_proto",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "nlp",
  "rand 0.8.8",
@@ -3326,7 +3326,7 @@ dependencies = [
  "jmap",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "mime",
  "percent-encoding",
@@ -4110,9 +4110,9 @@ dependencies = [
 
 [[package]]
 name = "jiff"
-version = "0.2.35"
+version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc"
+checksum = "0ab1baf72f08796de0260609515130699b890ac25f30e610ad894bc5856cafdb"
 dependencies = [
  "defmt",
  "jiff-core",
@@ -4127,18 +4127,19 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09"
+checksum = "5e52fe76043ccecc9005d2305ebaadf7d7fc0cc89ca6baa10a94d6bc68c7128c"
 dependencies = [
  "defmt",
+ "log",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.35"
+version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204"
+checksum = "378268a1116ad67ae6228701118ac9f491d78fda38a40a1f1a9e1348de6f7212"
 dependencies = [
  "jiff-core",
  "proc-macro2",
@@ -4182,7 +4183,7 @@ dependencies = [
  "jmap-tools",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "nlp",
  "p256",
@@ -4550,9 +4551,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.23"
+version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d8f1ea3f21fd3405dcaf6c9b5c1630af9afc422d9073ea39c5f6d6c772e08ed"
+checksum = "6480ccc157a1389bb2e4891b24751b0f798ba640d22386f23143fbcc89da195a"
 dependencies = [
  "libc",
 ]
@@ -4691,9 +4692,9 @@ dependencies = [
 
 [[package]]
 name = "mail-auth"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b75697a18e5a34b6e69627e683836723b1661fcf4296f1881651bcbe8dbb42f"
+checksum = "91467164efd189faa2b8e5ac72198d536c5a42a1d61c40a9dd2af75cdfa1e102"
 dependencies = [
  "aws-lc-rs",
  "flate2",
@@ -4702,7 +4703,7 @@ dependencies = [
  "hashify",
  "hickory-resolver",
  "idna",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "memchr",
  "quick-xml 0.42.0",
@@ -4721,6 +4722,15 @@ name = "mail-builder"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c942e8a4b83f9351236c1e531ea9fa0237913d63c7fc36818430e0128a1ddf3"
+dependencies = [
+ "gethostname",
+]
+
+[[package]]
+name = "mail-builder"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccbc27cb02a58a311a404769a22f5abf63fe3173b290d80be7c534f9c7023151"
 dependencies = [
  "gethostname",
 ]
@@ -7711,7 +7721,7 @@ dependencies = [
  "hkdf 0.13.0",
  "jmap-tools",
  "jmap_proto",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "memory-stats",
  "p256",
@@ -7894,7 +7904,7 @@ dependencies = [
  "arc-swap",
  "fancy-regex 0.19.1",
  "hashify",
- "mail-builder",
+ "mail-builder 0.5.0",
  "mail-parser",
  "rkyv",
  "serde",
@@ -8005,9 +8015,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.16.0"
+version = "1.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
+checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 
 [[package]]
 name = "smtp"
@@ -8022,7 +8032,7 @@ dependencies = [
  "email",
  "hashify",
  "mail-auth",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "parking_lot",
  "rand 0.10.2",
@@ -8534,7 +8544,7 @@ dependencies = [
  "jmap-tools",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
+ "mail-builder 1.0.0",
  "mail-parser",
  "managesieve",
  "nlp",

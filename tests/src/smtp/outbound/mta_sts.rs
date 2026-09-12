@@ -137,8 +137,8 @@ async fn mta_sts_verify() {
         .read_lines(&local)
         .await
         .assert_contains("<bill@foobar.org> (MTA-STS failed to authenticate")
-        .assert_contains("Record not f=")
-        .assert_contains("ound");
+        .assert_contains("Record not =")
+        .assert_contains("found");
     local.read_event().await.assert_done();
 
     // Expect TLS failure report

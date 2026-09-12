@@ -53,7 +53,7 @@
       },
       {
         "name": "To",
-        "value": " \"Colleagues\": \"James Smythe\" <james@vandelay.com>; \r\n\t\"Friends\": <jane@example.com>, \r\n\t=?utf-8?Q?John_Sm=C3=AEth?= <john@example.com>;"
+        "value": " \"Colleagues\": \"James Smythe\" <james@vandelay.com>;, \"Friends\":\r\n <jane@example.com>, =?utf-8?Q?John_Sm=C3=AEth?= <john@example.com>;"
       },
       {
         "name": "MIME-Version",
@@ -61,7 +61,7 @@
       },
       {
         "name": "Content-Type",
-        "value": " multipart/mixed; \r\n\tboundary=\"boundary_0\""
+        "value": " multipart/mixed;\r\n boundary=\"boundary_0\""
       }
     ],
     "type": "multipart/mixed",
@@ -70,7 +70,7 @@
         "headers": [
           {
             "name": "Content-Type",
-            "value": " multipart/alternative; \r\n\tboundary=\"boundary_1\""
+            "value": " multipart/alternative;\r\n boundary=\"boundary_1\""
           }
         ],
         "type": "multipart/alternative",
@@ -153,7 +153,7 @@
         "headers": [
           {
             "name": "Content-Disposition",
-            "value": " attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
+            "value": " attachment;\r\n filename*=UTF-8''Book%20about%20%E2%98%95%20tables.pdf"
           },
           {
             "name": "Content-Type",
@@ -305,7 +305,7 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": " attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
+          "value": " attachment;\r\n filename*=UTF-8''Book%20about%20%E2%98%95%20tables.pdf"
         },
         {
           "name": "Content-Type",

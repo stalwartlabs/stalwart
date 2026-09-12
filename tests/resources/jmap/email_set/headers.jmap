@@ -72,7 +72,7 @@
     "headers": [
       {
         "name": "Bcc",
-        "value": " =?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\r\n\t<addr1@example.com>"
+        "value": " =?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\r\n <addr1@example.com>"
       },
       {
         "name": "Cc",
@@ -92,11 +92,11 @@
       },
       {
         "name": "List-Owner",
-        "value": " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\r\n\t<mailto:list-manager@host.com?body=subscribe%20list>"
+        "value": " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\r\n <mailto:list-manager@host.com?body=subscribe%20list>"
       },
       {
         "name": "List-Subscribe",
-        "value": " <ftp://ftp.host.com/list.txt>,\r\n\t<mailto:list@host.com?subject=subscribe>"
+        "value": " <ftp://ftp.host.com/list.txt>,\r\n <mailto:list@host.com?subject=subscribe>"
       },
       {
         "name": "List-Subscribe",
@@ -112,7 +112,7 @@
       },
       {
         "name": "Reply-To",
-        "value": " =?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?= <addr2@example.com>, \r\n\t=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?= <addr3@example.com>"
+        "value": " =?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?= <addr2@example.com>,\r\n =?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?= <addr3@example.com>"
       },
       {
         "name": "Resent-Date",
@@ -136,15 +136,15 @@
       },
       {
         "name": "To",
-        "value": " \"Greg Vaudreuil\" <gvaudre@NRI.Reston.VA.US>, \r\n\t\"Ned Freed\" <ned@innosoft.com>, \"Keith Moore\" <moore@cs.utk.edu>"
+        "value": " \"Greg Vaudreuil\" <gvaudre@NRI.Reston.VA.US>, \"Ned Freed\"\r\n <ned@innosoft.com>, \"Keith Moore\" <moore@cs.utk.edu>"
       },
       {
         "name": "X-AddressesGroup",
-        "value": " \"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>;"
+        "value": " \"A Group\": \"Ed Jones\" <c@a.test>, <joe@where.test>, \"John\"\r\n <jdoe@one.test>;"
       },
       {
         "name": "X-AddressesGroup",
-        "value": " \"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>;"
+        "value": " \"List 1\": <addr1@test.com>, <addr2@test.com>;, \"List 2\":\r\n <addr3@test.com>, <addr4@test.com>;, <addr5@test.com>, <addr6@test.com>"
       },
       {
         "name": "X-References",
@@ -168,7 +168,7 @@
       },
       {
         "name": "Content-Type",
-        "value": " multipart/alternative; \r\n\tboundary=\"boundary_0\""
+        "value": " multipart/alternative;\r\n boundary=\"boundary_0\""
       }
     ],
     "type": "multipart/alternative",

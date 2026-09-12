@@ -42,7 +42,7 @@
       },
       {
         "name": "Content-Type",
-        "value": " multipart/mixed; \r\n\tboundary=\"boundary_0\""
+        "value": " multipart/mixed;\r\n boundary=\"boundary_0\""
       }
     ],
     "type": "multipart/mixed",
@@ -73,7 +73,7 @@
         "headers": [
           {
             "name": "Content-Type",
-            "value": " multipart/mixed; \r\n\tboundary=\"boundary_1\""
+            "value": " multipart/mixed;\r\n boundary=\"boundary_1\""
           }
         ],
         "type": "multipart/mixed",
@@ -82,7 +82,7 @@
             "headers": [
               {
                 "name": "Content-Type",
-                "value": " multipart/alternative; \r\n\tboundary=\"boundary_2\""
+                "value": " multipart/alternative;\r\n boundary=\"boundary_2\""
               }
             ],
             "type": "multipart/alternative",
@@ -91,7 +91,7 @@
                 "headers": [
                   {
                     "name": "Content-Type",
-                    "value": " multipart/mixed; \r\n\tboundary=\"boundary_3\""
+                    "value": " multipart/mixed;\r\n boundary=\"boundary_3\""
                   }
                 ],
                 "type": "multipart/mixed",
@@ -167,7 +167,7 @@
                 "headers": [
                   {
                     "name": "Content-Type",
-                    "value": " multipart/related; \r\n\tboundary=\"boundary_4\""
+                    "value": " multipart/related;\r\n boundary=\"boundary_4\""
                   }
                 ],
                 "type": "multipart/related",

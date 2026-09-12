@@ -9,7 +9,7 @@ store = { path =  "../store" }
 trc = { path = "../trc" }
 registry = { path = "../registry" }
 mail-parser = { version = "0.11" }
-mail-builder = { version = "0.5" } 
+mail-builder = { version = "1.0" } 
 tokio = { version = "1.53", features = ["net"] }
 ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 deadpool = { version = "0.13", features = ["managed", "rt_tokio_1"] }

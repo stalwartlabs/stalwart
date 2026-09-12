@@ -796,7 +796,7 @@ impl<T: SessionStream> Session<T> {
                 .unwrap_or(true)
         {
             headers.extend_from_slice(b"Message-ID: ");
-            let _ = generate_message_id_header(&mut headers, &self.hostname);
+            generate_message_id_header(&mut headers, &self.hostname);
             headers.extend_from_slice(b"\r\n");
         }
 

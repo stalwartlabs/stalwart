@@ -3,8 +3,8 @@ To: sender@foobar.org
 Auto-Submitted: auto-generated
 Subject: Successfully delivered message
 MIME-Version: 1.0
-Content-Type: multipart/report; report-type="delivery-status"; 
-	boundary="mime_boundary"
+Content-Type: multipart/report; report-type="delivery-status";
+ boundary="mime_boundary"
 
 
 --mime_boundary
@@ -13,8 +13,8 @@ Content-Transfer-Encoding: quoted-printable
 
 Your message has been successfully delivered to the following recipients:
 
-<jane@example.org> (delivered to 'mx2.example.org' with code 250 (2.1.5) 'Me=
-ssage accepted for delivery')
+<jane@example.org> (delivered to 'mx2.example.org' with code 250 (2.1.5) 'M=
+essage accepted for delivery')
 
 
 --mime_boundary
