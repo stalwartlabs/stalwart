@@ -8,6 +8,7 @@ use super::assert_is_unique_uid;
 use crate::{
     DavError, DavMethod,
     common::{
+        assert_parent_limit,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -23,6 +24,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use store::write::{BatchBuilder, PendingId, now};
 use store::{
     ValueKey,
@@ -483,16 +485,16 @@ async fn copy_event(
     let mut batch = BatchBuilder::new();
 
     // Validate UID
+    let to_resources = server
+        .fetch_groupware_resources(
+            access_token.account_id(),
+            to_account_id,
+            SyncCollection::Calendar,
+        )
+        .await
+        .caused_by(trc::location!())?;
     assert_is_unique_uid(
-        server
-            .fetch_groupware_resources(
-                access_token.account_id(),
-                to_account_id,
-                SyncCollection::Calendar,
-            )
-            .await
-            .caused_by(trc::location!())?
-            .as_ref(),
+        to_resources.as_ref(),
         to_calendar_id,
         Some(event.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
     )?;
@@ -506,6 +508,11 @@ async fn copy_event(
             name: new_name.to_string(),
             parent_id: to_calendar_id,
         });
+        assert_parent_limit(
+            event.inner.names.len(),
+            new_event.names.len(),
+            server.core.groupware.max_calendars_per_event,
+        )?;
         new_event
             .update_meta(
                 changed_by,
@@ -542,6 +549,14 @@ async fn copy_event(
             name: new_name.to_string(),
             parent_id: to_calendar_id,
         }];
+        if to_document_id.is_none() {
+            server.assert_object_quota(
+                &*server.account(to_account_id).await?,
+                StorageQuota::MaxCalendarEvents,
+                1,
+                || to_resources.resources.count(false),
+            )?;
+        }
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
         new_event
             .insert(
@@ -740,6 +755,25 @@ async fn move_event(
             .await
             .caused_by(trc::location!())?;
 
+        let to_account = server.account(to_account_id).await?;
+        if to_document_id.is_none()
+            && server
+                .object_quota_limit(&to_account, StorageQuota::MaxCalendarEvents)
+                .is_some()
+        {
+            let to_resources = server
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    to_account_id,
+                    SyncCollection::Calendar,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            server.assert_object_quota(&to_account, StorageQuota::MaxCalendarEvents, 1, || {
+                to_resources.resources.count(false)
+            })?;
+        }
+
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
         new_event
             .insert(
@@ -886,6 +920,48 @@ async fn copy_container(
         .deserialize::<Calendar>()
         .caused_by(trc::location!())?;
 
+    // Validate quota
+    let to_account = server.account(to_account_id).await?;
+    let has_container_quota = to_document_id.is_none()
+        && server
+            .object_quota_limit(&to_account, StorageQuota::MaxCalendars)
+            .is_some();
+    let has_item_quota = from_account_id != to_account_id
+        && server
+            .object_quota_limit(&to_account, StorageQuota::MaxCalendarEvents)
+            .is_some();
+    let to_resources = if has_container_quota || has_item_quota {
+        Some(
+            server
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    to_account_id,
+                    SyncCollection::Calendar,
+                )
+                .await
+                .caused_by(trc::location!())?,
+        )
+    } else {
+        None
+    };
+    if has_container_quota && let Some(to_resources) = &to_resources {
+        server.assert_object_quota(&to_account, StorageQuota::MaxCalendars, 1, || {
+            to_resources.resources.count(true)
+        })?;
+    }
+    let deleted_events = match &to_resources {
+        Some(to_resources) if has_item_quota => to_children_ids
+            .iter()
+            .filter(|document_id| {
+                to_resources
+                    .resources
+                    .find(**document_id, false)
+                    .is_some_and(|item| item.child_names().len() <= 1)
+            })
+            .count(),
+        _ => 0,
+    };
+
     // Prepare write batch
     let mut batch = BatchBuilder::new();
 
@@ -974,6 +1050,7 @@ async fn copy_container(
 
     // Copy children
     let mut required_space = 0;
+    let mut created_events = 0;
     for from_child_document_id in from_children_ids {
         if let Some(event_) = server
             .store()
@@ -1022,6 +1099,11 @@ async fn copy_container(
                 }
 
                 new_event.names.push(new_name);
+                assert_parent_limit(
+                    event.inner.names.len(),
+                    new_event.names.len(),
+                    server.core.groupware.max_calendars_per_event,
+                )?;
                 new_event
                     .update_meta(
                         access_token.account_tenant_ids(),
@@ -1071,6 +1153,7 @@ async fn copy_container(
                     batch.reserve_document_id(to_account_id, Collection::CalendarEvent);
                 new_event.names = vec![new_name];
                 required_space += new_event.size as u64;
+                created_events += 1;
                 new_event
                     .insert(
                         new_content,
@@ -1086,12 +1169,21 @@ async fn copy_container(
         }
     }
 
+    if has_item_quota
+        && created_events > deleted_events
+        && let Some(to_resources) = &to_resources
+    {
+        server.assert_object_quota(
+            &to_account,
+            StorageQuota::MaxCalendarEvents,
+            created_events - deleted_events,
+            || to_resources.resources.count(false),
+        )?;
+    }
+
     if from_account_id != to_account_id && required_space > 0 {
         server
-            .has_available_quota(
-                server.account(to_account_id).await?.as_ref(),
-                required_space,
-            )
+            .has_available_quota(&to_account, required_space)
             .await?;
     }
 

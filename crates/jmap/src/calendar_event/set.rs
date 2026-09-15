@@ -20,6 +20,7 @@ use chrono::DateTime;
 use common::{
     DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountInfo},
+    storage::quota::ObjectQuotaUsage,
 };
 use compact_str::ToCompactString;
 use groupware::{
@@ -48,6 +49,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Map, Value};
+use registry::schema::enums::StorageQuota;
 use std::{borrow::Cow, str::FromStr};
 use store::{
     ValueKey,
@@ -128,11 +130,26 @@ impl CalendarEventSet for Server {
                 (None, None, None)
             };
 
+        // Obtain quota
+        let quota = if request.has_creates() {
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
+            self.object_quota_usage(&account, StorageQuota::MaxCalendarEvents, || {
+                cache.resources.count(false)
+            })
+        } else {
+            ObjectQuotaUsage::unlimited()
+        };
+
         // Process creates
         let mut batch = BatchBuilder::new();
         let send_scheduling_messages = request.arguments.send_scheduling_messages.unwrap_or(false);
         let mut created_slots = PendingCreates::new();
         'create: for (id, object) in request.unwrap_create() {
+            if !quota.has_room(created_slots.len()) {
+                response.not_created.append(id, too_many_events());
+                continue 'create;
+            }
+
             match self
                 .create_calendar_event(
                     &cache,
@@ -325,6 +342,15 @@ impl CalendarEventSet for Server {
                 &mut js_calendar_group,
             ) {
                 update.fail(&mut response, err);
+                continue 'update;
+            }
+
+            // Validate calendarIds limit
+            let max_calendars = self.core.groupware.max_calendars_per_event;
+            if new_calendar_event.names.len() > max_calendars
+                && new_calendar_event.names.len() > calendar_event.inner.names.len()
+            {
+                update.fail(&mut response, too_many_calendars(max_calendars));
                 continue 'update;
             }
 
@@ -749,6 +775,11 @@ impl CalendarEventSet for Server {
                 return Ok(Err(err));
             }
         };
+        if event.names.len() > self.core.groupware.max_calendars_per_event {
+            return Ok(Err(too_many_calendars(
+                self.core.groupware.max_calendars_per_event,
+            )));
+        }
 
         // Convert JSCalendar to iCalendar
         let Some(mut ical) = js_calendar_group.into_icalendar() else {
@@ -964,6 +995,21 @@ fn stamp_updated(ical: &mut ICalendar, timestamp: i64) {
             component.add_dtstamp(dtstamp.clone());
         }
     }
+}
+
+pub(crate) fn too_many_events() -> SetError<JSCalendarProperty<Id>> {
+    SetError::over_quota().with_description(concat!(
+        "There are too many calendar events, ",
+        "please delete some before adding a new one."
+    ))
+}
+
+fn too_many_calendars(max: usize) -> SetError<JSCalendarProperty<Id>> {
+    SetError::invalid_properties()
+        .with_property(JSCalendarProperty::CalendarIds)
+        .with_description(format!(
+            "A calendar event cannot belong to more than {max} calendars."
+        ))
 }
 
 fn update_calendar_event<'x>(

@@ -119,19 +119,20 @@ pub enum Keyword {
     Unsubscribed,
 }
 
+const UNIQUE_SCAN_THRESHOLD: usize = 16;
+
 impl Keyword {
-    pub const MAX_LENGTH: usize = 128;
+    pub const MAX_LENGTH: usize = 1024;
 
     pub fn parse(value: &str) -> Self {
-        Self::try_parse(value)
-            .unwrap_or_else(|| Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect()))
+        Self::try_parse(value).unwrap_or_else(|| Keyword::from_str(value))
     }
 
     pub fn from_string(value: String) -> Self {
         if value.len() <= Keyword::MAX_LENGTH {
             Keyword::Other(value.into())
         } else {
-            Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect())
+            Keyword::Other(truncate(&value))
         }
     }
 
@@ -140,7 +141,7 @@ impl Keyword {
         if value.len() <= Keyword::MAX_LENGTH {
             Keyword::Other(value.into())
         } else {
-            Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect())
+            Keyword::Other(truncate(value))
         }
     }
 
@@ -148,8 +149,26 @@ impl Keyword {
         if value.len() <= Keyword::MAX_LENGTH {
             Keyword::Other(value)
         } else {
-            Keyword::Other(value.chars().take(Keyword::MAX_LENGTH).collect())
+            Keyword::Other(truncate(&value))
         }
+    }
+
+    pub fn unique(keywords: impl IntoIterator<Item = Keyword>) -> Vec<Keyword> {
+        let mut keywords = keywords.into_iter().collect::<Vec<_>>();
+        if keywords.len() <= UNIQUE_SCAN_THRESHOLD {
+            let mut idx = 0;
+            while idx < keywords.len() {
+                if keywords[..idx].contains(&keywords[idx]) {
+                    keywords.remove(idx);
+                } else {
+                    idx += 1;
+                }
+            }
+        } else {
+            let mut seen = std::collections::HashSet::with_capacity(keywords.len());
+            keywords.retain(|keyword| seen.insert(keyword.clone()));
+        }
+        keywords
     }
 
     pub fn try_parse(value: &str) -> Option<Self> {
@@ -436,5 +455,58 @@ impl<'de> serde::Deserialize<'de> for Keyword {
 impl<'x, P: Property, E: Element + From<Keyword>> From<Keyword> for Value<'x, P, E> {
     fn from(id: Keyword) -> Self {
         Value::Element(E::from(id))
+    }
+}
+
+fn truncate(value: &str) -> CompactString {
+    let end = value
+        .char_indices()
+        .map(|(offset, ch)| offset + ch.len_utf8())
+        .find(|&end| end > Keyword::MAX_LENGTH)
+        .unwrap_or(value.len());
+    value[..end].into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Keyword;
+
+    #[test]
+    fn truncation_keeps_keywords_detectably_long() {
+        let exact = "a".repeat(Keyword::MAX_LENGTH);
+        assert_eq!(
+            Keyword::parse(&exact),
+            Keyword::Other(exact.as_str().into())
+        );
+
+        for value in ["a".repeat(5000), "é".repeat(3000), "€".repeat(2000)] {
+            let Keyword::Other(name) = Keyword::parse(&value) else {
+                panic!("expected custom keyword");
+            };
+            assert!(name.len() > Keyword::MAX_LENGTH, "{} bytes", name.len());
+            assert!(
+                name.len() <= Keyword::MAX_LENGTH + 4,
+                "{} bytes",
+                name.len()
+            );
+            assert!(value.starts_with(name.as_str()));
+        }
+    }
+
+    #[test]
+    fn unique_preserves_order() {
+        let keywords = ["b", "$seen", "a", "b", "$seen", "c"].map(Keyword::parse);
+        assert_eq!(
+            Keyword::unique(keywords),
+            ["b", "$seen", "a", "c"].map(Keyword::parse).to_vec()
+        );
+
+        let many = (0..40)
+            .chain(0..40)
+            .map(|idx| Keyword::parse(&format!("k{idx}")));
+        let unique = Keyword::unique(many);
+        assert_eq!(unique.len(), 40);
+        assert_eq!(unique[0], Keyword::parse("k0"));
+        assert_eq!(unique[39], Keyword::parse("k39"));
     }
 }

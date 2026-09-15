@@ -22,6 +22,7 @@ use dav_proto::{Depth, RequestHeaders};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use std::sync::Arc;
 use store::{
     ValueKey,
@@ -241,8 +242,55 @@ impl FileCopyMoveRequestHandler for Server {
                 .subtree(from_resource_name)
                 .map(|a| a.size() as u64)
                 .sum::<u64>();
-            self.has_available_quota(self.account(to_account_id).await?.as_ref(), space_needed)
-                .await?;
+            let to_account = self.account(to_account_id).await?;
+            self.has_available_quota(&to_account, space_needed).await?;
+
+            let files_limit = self.object_quota_limit(&to_account, StorageQuota::MaxFiles);
+            let folders_limit = self.object_quota_limit(&to_account, StorageQuota::MaxFolders);
+            let is_item_overwrite = delete_destination
+                .as_ref()
+                .is_some_and(|d| !d.is_container && !from_resource.resource.is_container);
+            if (files_limit.is_some() || folders_limit.is_some()) && !is_item_overwrite {
+                let (created_files, created_folders) = if !from_resource.resource.is_container {
+                    (1, 0)
+                } else {
+                    match (is_move, headers.depth) {
+                        (false, Depth::Zero) => (0, 1),
+                        (false, Depth::One) => {
+                            count_nodes(from_resources.subtree_with_depth(from_resource_name, 1))
+                        }
+                        _ => count_nodes(from_resources.subtree(from_resource_name)),
+                    }
+                };
+                let (deleted_files, deleted_folders) = if delete_destination.is_some() {
+                    count_nodes(to_resources.subtree(destination_resource_name))
+                } else {
+                    (0, 0)
+                };
+                let new_files = created_files.saturating_sub(deleted_files);
+                let new_folders = created_folders.saturating_sub(deleted_folders);
+
+                if new_files > 0 || new_folders > 0 {
+                    let used_folders = to_resources.resources.count(true);
+                    let used_files = to_resources.resources.len().saturating_sub(used_folders);
+                    if new_files > 0 {
+                        self.assert_object_quota(
+                            &to_account,
+                            StorageQuota::MaxFiles,
+                            new_files,
+                            || used_files,
+                        )?;
+                    }
+                    if new_folders > 0 {
+                        self.assert_object_quota(
+                            &to_account,
+                            StorageQuota::MaxFolders,
+                            new_folders,
+                            || used_folders,
+                        )?;
+                    }
+                }
+            }
         }
 
         // Delete collection
@@ -335,6 +383,16 @@ impl FileCopyMoveRequestHandler for Server {
             }
         })
     }
+}
+
+fn count_nodes<'x>(nodes: impl Iterator<Item = DavResourcePath<'x>>) -> (usize, usize) {
+    nodes.fold((0, 0), |(files, folders), node| {
+        if node.is_container() {
+            (files, folders + 1)
+        } else {
+            (files + 1, folders)
+        }
+    })
 }
 
 #[derive(Debug)]

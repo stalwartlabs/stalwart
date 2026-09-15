@@ -725,6 +725,17 @@ impl EmailSet for Server {
                 }
             }
 
+            // Validate per-email limits
+            if let Err(err) = self
+                .core
+                .email
+                .limits
+                .validate_email(mailboxes.len(), &keywords)
+            {
+                response.not_created.append(id, err.into());
+                continue 'create;
+            }
+
             // Make sure the message is not empty
             if builder.headers.is_empty()
                 && builder.body.is_none()
@@ -795,7 +806,7 @@ impl EmailSet for Server {
                     response.not_created.append(
                         id,
                         SetError::new(SetErrorType::OverQuota)
-                            .with_description("You have exceeded your disk quota."),
+                            .with_description("You have exceeded your account quota."),
                     );
                 }
                 Err(err) => return Err(err),
@@ -901,6 +912,12 @@ impl EmailSet for Server {
             let has_mailbox_changes = new_data.has_mailbox_changes(&data);
             if !has_keyword_changes && !has_mailbox_changes {
                 response.updated.append(id, None);
+                continue 'update;
+            }
+
+            // Validate per-email limits
+            if let Err(err) = new_data.validate_limits(&data, &self.core.email.limits) {
+                response.not_updated.append(id, err.into());
                 continue 'update;
             }
 

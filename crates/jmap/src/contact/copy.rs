@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{changes::state::JmapCacheState, contact::set::ContactCardSet};
+use crate::{
+    changes::state::JmapCacheState,
+    contact::set::{ContactCardSet, too_many_contacts},
+};
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use http_proto::HttpSessionData;
@@ -22,6 +25,7 @@ use jmap_proto::{
     },
     types::state::State,
 };
+use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
@@ -107,9 +111,17 @@ impl JmapContactCardCopy for Server {
         let mut created_slots: Vec<(Id, Slot)> = Vec::new();
 
         // Obtain quota
+        let quota = self.object_quota_usage(&account, StorageQuota::MaxContactCards, || {
+            cache.resources.count(false)
+        });
         let mut batch = BatchBuilder::new();
 
         'create: for (id, create) in request.create.into_valid() {
+            if !quota.has_room(created_slots.len()) {
+                response.not_created.append(id, too_many_contacts());
+                continue;
+            }
+
             let from_contact_id = id.document_id();
             if !from_contact_ids.contains(from_contact_id) {
                 response.not_created.append(

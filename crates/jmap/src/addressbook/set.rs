@@ -7,7 +7,7 @@
 use crate::api::acl::{JmapAcl, JmapRights};
 use crate::api::pending_creates::PendingCreates;
 use crate::changes::state::JmapCacheState;
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{Server, auth::AccessToken, sharing::EffectiveAcl, storage::quota::ObjectQuotaUsage};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -23,6 +23,7 @@ use jmap_proto::{
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
 use rand::{RngExt, distr::Alphanumeric};
+use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
     ahash::AHashSet,
@@ -67,9 +68,30 @@ impl AddressBookSet for Server {
         let mut set_default: Option<PendingId> = None;
         let mut created_slots = PendingCreates::new();
 
+        // Obtain quota
+        let quota = if request.has_creates() && !is_shared {
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
+            self.object_quota_usage(&account, StorageQuota::MaxAddressBooks, || {
+                cache.resources.count(true)
+            })
+        } else {
+            ObjectQuotaUsage::unlimited()
+        };
+
         // Process creates
         let mut batch = BatchBuilder::new();
         'create: for (id, object) in request.unwrap_create() {
+            if !quota.has_room(created_slots.len()) {
+                response.not_created.append(
+                    id,
+                    SetError::over_quota().with_description(concat!(
+                        "There are too many address books, ",
+                        "please delete some before adding a new one."
+                    )),
+                );
+                continue 'create;
+            }
+
             if is_shared {
                 response.not_created.append(
                     id,

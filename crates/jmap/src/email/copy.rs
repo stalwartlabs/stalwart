@@ -209,6 +209,17 @@ impl JmapEmailCopy for Server {
                 }
             }
 
+            // Validate per-email limits
+            if let Err(err) = self
+                .core
+                .email
+                .limits
+                .validate_email(mailboxes.len(), &keywords)
+            {
+                response.not_created.append(id, err.into());
+                continue 'create;
+            }
+
             // Add response
             match self
                 .copy_message(

@@ -11,6 +11,7 @@ pub mod authorization;
 pub mod crypto;
 pub mod delivery;
 pub mod directory;
+pub mod limits;
 pub mod oidc;
 pub mod purge;
 pub mod quota;
@@ -65,6 +66,7 @@ pub async fn system_tests() {
     tenant::test(&mut test).await;
     security::test(&mut test).await;
     quota::test(&mut test).await;
+    limits::test(&mut test).await;
     purge::test(&mut test).await;
     delivery::test(&mut test).await;
     crypto::test(&mut test).await;

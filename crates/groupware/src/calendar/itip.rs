@@ -37,7 +37,7 @@ use common::{
     i18n,
 };
 use compact_str::ToCompactString;
-use registry::schema::enums::Permission;
+use registry::schema::enums::{Permission, StorageQuota};
 use std::net::IpAddr;
 use store::{
     ValueKey, rand,
@@ -270,16 +270,30 @@ impl ItipIngest for Server {
             itip_import_message(&mut ical)?;
 
             // Validate quota
+            let account = self.account(account_id).await?;
             if self
-                .has_available_quota(
-                    self.account(account_id).await?.as_ref(),
-                    itip_message.len() as u64,
-                )
+                .has_available_quota(&account, itip_message.len() as u64)
                 .await
                 .is_err()
+                || !self
+                    .has_document_quota(
+                        &account,
+                        StorageQuota::MaxCalendarEvents,
+                        Collection::CalendarEvent,
+                    )
+                    .await
+                    .caused_by(trc::location!())?
             {
                 return Err(ItipIngestError::Message(ItipError::QuotaExceeded));
             }
+            let has_notification_quota = self
+                .has_document_quota(
+                    &account,
+                    StorageQuota::MaxCalendarEventNotifications,
+                    Collection::CalendarEventNotification,
+                )
+                .await
+                .caused_by(trc::location!())?;
 
             // Obtain parent calendar
             let Some(parent_id) = self
@@ -321,8 +335,6 @@ impl ItipIngest for Server {
             // Prepare write batch
             let mut batch = BatchBuilder::new();
             let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
-            let itip_document_id =
-                batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
             event
                 .insert(
                     event_content,
@@ -334,16 +346,20 @@ impl ItipIngest for Server {
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
-            notification
-                .insert(
-                    notification_content,
-                    account_info.account_tenant_ids(),
-                    account_id,
-                    itip_document_id,
-                    Some(document_id),
-                    &mut batch,
-                )
-                .caused_by(trc::location!())?;
+            if has_notification_quota {
+                let itip_document_id =
+                    batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
+                notification
+                    .insert(
+                        notification_content,
+                        account_info.account_tenant_ids(),
+                        account_id,
+                        itip_document_id,
+                        Some(document_id),
+                        &mut batch,
+                    )
+                    .caused_by(trc::location!())?;
+            }
             self.commit_batch(batch).await.caused_by(trc::location!())?;
 
             Ok(None)
@@ -831,15 +847,24 @@ async fn commit_itip_merge(
     }
 
     // Validate quota
+    let account = server.account(account_id).await?;
     let extra_bytes = (new_size as u64).saturating_sub(event_.inner.size.to_native() as u64);
     if extra_bytes > 0
         && server
-            .has_available_quota(server.account(account_id).await?.as_ref(), extra_bytes)
+            .has_available_quota(&account, extra_bytes)
             .await
             .is_err()
     {
         return Err(ItipIngestError::Message(ItipError::QuotaExceeded));
     }
+    let has_notification_quota = server
+        .has_document_quota(
+            &account,
+            StorageQuota::MaxCalendarEventNotifications,
+            Collection::CalendarEventNotification,
+        )
+        .await
+        .caused_by(trc::location!())?;
 
     // Build event
     let now = now() as i64;
@@ -870,8 +895,6 @@ async fn commit_itip_merge(
 
     // Prepare write batch
     let mut batch = BatchBuilder::new();
-    let itip_document_id =
-        batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
     event
         .update_full(
             content,
@@ -892,16 +915,20 @@ async fn commit_itip_merge(
             next_alarm.write_task(&mut batch);
         }
     }
-    notification
-        .insert(
-            notification_content,
-            account_info.account_tenant_ids(),
-            account_id,
-            itip_document_id,
-            None,
-            &mut batch,
-        )
-        .caused_by(trc::location!())?;
+    if has_notification_quota {
+        let itip_document_id =
+            batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
+        notification
+            .insert(
+                notification_content,
+                account_info.account_tenant_ids(),
+                account_id,
+                itip_document_id,
+                None,
+                &mut batch,
+            )
+            .caused_by(trc::location!())?;
+    }
     server
         .commit_batch(batch)
         .await

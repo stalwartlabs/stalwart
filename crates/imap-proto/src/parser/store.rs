@@ -94,9 +94,11 @@ impl Request<Command> {
                 for token in tokens {
                     match token {
                         Token::Argument(flag) => {
-                            keywords.push(
-                                Flag::parse_imap(flag).map_err(|v| bad(self.tag.clone(), v))?,
-                            );
+                            let flag =
+                                Flag::parse_imap(flag).map_err(|v| bad(self.tag.clone(), v))?;
+                            if !keywords.contains(&flag) {
+                                keywords.push(flag);
+                            }
                         }
                         Token::ParenthesisClose => {
                             break;
@@ -153,6 +155,21 @@ mod tests {
                     operation: Operation::Add,
                     keywords: vec![Flag::Deleted],
                     tag: "A003".into(),
+                    unchanged_since: None,
+                },
+            ),
+            (
+                "A005 STORE 1 +FLAGS (\\Seen foo \\seen foo bar)\r\n",
+                store::Arguments {
+                    sequence_set: Sequence::Number { value: 1 },
+                    is_silent: false,
+                    operation: Operation::Add,
+                    keywords: vec![
+                        Flag::Seen,
+                        Flag::Keyword("foo".into()),
+                        Flag::Keyword("bar".into()),
+                    ],
+                    tag: "A005".into(),
                     unchanged_since: None,
                 },
             ),

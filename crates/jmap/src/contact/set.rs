@@ -11,6 +11,7 @@ use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
 use common::{
     DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountCache},
+    storage::quota::ObjectQuotaUsage,
 };
 use groupware::{
     DestroyArchive, SizeWriter,
@@ -26,6 +27,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerHandler, JsonPointerItem, Key, Value};
+use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
     ahash::AHashSet,
@@ -101,10 +103,24 @@ impl ContactCardSet for Server {
                 (None, None, None)
             };
 
+        // Obtain quota
+        let quota = if request.has_creates() {
+            self.object_quota_usage(&account, StorageQuota::MaxContactCards, || {
+                cache.resources.count(false)
+            })
+        } else {
+            ObjectQuotaUsage::unlimited()
+        };
+
         // Process creates
         let mut batch = BatchBuilder::new();
         let mut created_slots = PendingCreates::new();
         'create: for (id, object) in request.unwrap_create() {
+            if !quota.has_room(created_slots.len()) {
+                response.not_created.append(id, too_many_contacts());
+                continue 'create;
+            }
+
             match self
                 .create_contact_card(
                     &cache,
@@ -222,6 +238,17 @@ impl ContactCardSet for Server {
                     );
                     continue 'update;
                 }
+            }
+
+            // Validate addressBookIds limit
+            let max_address_books = self.core.groupware.max_address_books_per_card;
+            if new_contact_card.names.len() > max_address_books
+                && new_contact_card.names.len() > contact_card.inner.names.len()
+            {
+                response
+                    .not_updated
+                    .append(id, too_many_address_books(max_address_books));
+                continue 'update;
             }
 
             // Validate new addressBookIds
@@ -428,6 +455,11 @@ impl ContactCardSet for Server {
         if let Err(err) = update_contact_card(None, updates, &mut names, &mut js_contact) {
             return Ok(Err(err));
         }
+        if names.len() > self.core.groupware.max_address_books_per_card {
+            return Ok(Err(too_many_address_books(
+                self.core.groupware.max_address_books_per_card,
+            )));
+        }
 
         // Verify that the address book ids valid
         for name in &names {
@@ -499,6 +531,21 @@ impl ContactCardSet for Server {
         .caused_by(trc::location!())
         .map(|_| Ok(document_id))
     }
+}
+
+pub(crate) fn too_many_contacts() -> SetError<JSContactProperty<Id>> {
+    SetError::over_quota().with_description(concat!(
+        "There are too many contact cards, ",
+        "please delete some before adding a new one."
+    ))
+}
+
+fn too_many_address_books(max: usize) -> SetError<JSContactProperty<Id>> {
+    SetError::invalid_properties()
+        .with_property(JSContactProperty::AddressBookIds)
+        .with_description(format!(
+            "A contact card cannot belong to more than {max} address books."
+        ))
 }
 
 fn update_contact_card<'x>(

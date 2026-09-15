@@ -8,6 +8,7 @@ use super::{
     ingest::{EmailIngest, IngestedEmail},
     metadata::MessageMetadata,
 };
+use crate::cache::MessageCacheFetch;
 use crate::message::{
     index::extractors::VisitTextArchived,
     ingest::ThreadInfo,
@@ -18,7 +19,10 @@ use crate::message::{
 use common::{MessageUid, Server, storage::index::ObjectIndexBuilder};
 use mail_parser::{DateTime, parsers::fields::thread::thread_name};
 use registry::{
-    schema::structs::{Task, TaskMergeThreads, TaskStatus},
+    schema::{
+        enums::StorageQuota,
+        structs::{Task, TaskMergeThreads, TaskStatus},
+    },
     types::map::Map,
 };
 use store::{
@@ -98,7 +102,20 @@ impl EmailCopy for Server {
         // Check quota
         let size = metadata.root_part().offset_end.to_native();
         let to_account = self.account(to_account_id).await?;
-        match self.has_available_quota(&to_account, size as u64).await {
+        let quota_result = match self.has_available_quota(&to_account, size as u64).await {
+            Ok(_) => match self.object_quota_limit(&to_account, StorageQuota::MaxEmails) {
+                Some(limit) => {
+                    let used = self
+                        .count_emails(to_account_id, limit)
+                        .await
+                        .caused_by(trc::location!())?;
+                    self.assert_object_quota(&to_account, StorageQuota::MaxEmails, 1, || used)
+                }
+                None => Ok(()),
+            },
+            result => result,
+        };
+        match quota_result {
             Ok(_) => (),
             Err(err) => {
                 if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota))

@@ -672,7 +672,7 @@ impl Action {
 
 impl ObjectImpl for AddressBook {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 1;
+    const VERSION: u8 = 2;
     const OBJECT: ObjectType = ObjectType::AddressBook;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -697,6 +697,13 @@ impl ObjectImpl for AddressBook {
                 errors.push(ValidationError::min_value(Property::MaxContacts, 1));
             }
         }
+        let value = &self.max_address_books_per_card;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxAddressBooksPerCard,
+                1,
+            ));
+        }
         errors.len() == neb
     }
 
@@ -711,6 +718,7 @@ impl Pickle for AddressBook {
         self.max_address_books.pickle(out);
         self.max_contacts.pickle(out);
         self.v_card_version.pickle(out);
+        self.max_address_books_per_card.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -722,6 +730,9 @@ impl Pickle for AddressBook {
         this.max_contacts = Pickle::unpickle(stream)?;
         if stream.version() >= 1 {
             this.v_card_version = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_address_books_per_card = Pickle::unpickle(stream)?;
         }
         Some(this)
     }
@@ -736,13 +747,14 @@ impl Default for AddressBook {
             max_address_books: Some(250u64),
             max_contacts: Default::default(),
             v_card_version: VCardVersion::V4,
+            max_address_books_per_card: 10u64,
         }
     }
 }
 
 impl IntoValue for AddressBook {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(8);
+        let mut map = jmap_tools::Map::with_capacity(9);
         map.insert_unchecked(
             Property::DefaultDisplayName,
             self.default_display_name.into_value(),
@@ -758,6 +770,10 @@ impl IntoValue for AddressBook {
         );
         map.insert_unchecked(Property::MaxContacts, self.max_contacts.into_value());
         map.insert_unchecked(Property::VCardVersion, self.v_card_version.into_value());
+        map.insert_unchecked(
+            Property::MaxAddressBooksPerCard,
+            self.max_address_books_per_card.into_value(),
+        );
         JmapValue::Object(map)
     }
 }
@@ -779,6 +795,9 @@ impl RegistryJsonPropertyPatch for AddressBook {
             Some(Property::MaxAddressBooks) => self.max_address_books.patch(pointer, value),
             Some(Property::MaxContacts) => self.max_contacts.patch(pointer, value),
             Some(Property::VCardVersion) => self.v_card_version.patch(pointer, value),
+            Some(Property::MaxAddressBooksPerCard) => {
+                self.max_address_books_per_card.patch(pointer, value)
+            }
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -4924,7 +4943,7 @@ impl CacheSwap {
 
 impl ObjectImpl for Calendar {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Calendar;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -4969,6 +4988,13 @@ impl ObjectImpl for Calendar {
                 ));
             }
         }
+        let value = &self.max_calendars_per_event;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxCalendarsPerEvent,
+                1,
+            ));
+        }
         errors.len() == neb
     }
 
@@ -4986,6 +5012,7 @@ impl Pickle for Calendar {
         self.max_events.pickle(out);
         self.max_participant_identities.pickle(out);
         self.max_event_notifications.pickle(out);
+        self.max_calendars_per_event.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -4999,6 +5026,9 @@ impl Pickle for Calendar {
         this.max_events = Pickle::unpickle(stream)?;
         this.max_participant_identities = Pickle::unpickle(stream)?;
         this.max_event_notifications = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.max_calendars_per_event = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -5015,13 +5045,14 @@ impl Default for Calendar {
             max_events: Default::default(),
             max_participant_identities: Some(100u64),
             max_event_notifications: Default::default(),
+            max_calendars_per_event: 10u64,
         }
     }
 }
 
 impl IntoValue for Calendar {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(11);
+        let mut map = jmap_tools::Map::with_capacity(12);
         map.insert_unchecked(
             Property::DefaultDisplayName,
             self.default_display_name.into_value(),
@@ -5048,6 +5079,10 @@ impl IntoValue for Calendar {
         map.insert_unchecked(
             Property::MaxEventNotifications,
             self.max_event_notifications.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxCalendarsPerEvent,
+            self.max_calendars_per_event.into_value(),
         );
         JmapValue::Object(map)
     }
@@ -5078,6 +5113,9 @@ impl RegistryJsonPropertyPatch for Calendar {
             }
             Some(Property::MaxEventNotifications) => {
                 self.max_event_notifications.patch(pointer, value)
+            }
+            Some(Property::MaxCalendarsPerEvent) => {
+                self.max_calendars_per_event.patch(pointer, value)
             }
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
@@ -20528,7 +20566,7 @@ impl RegistryJsonPropertyPatch for ElasticSearchStore {
 
 impl ObjectImpl for Email {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Email;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -20586,6 +20624,24 @@ impl ObjectImpl for Email {
                 errors.push(ValidationError::min_value(Property::MaxPublicKeys, 1));
             }
         }
+        let value = &self.max_mailboxes_per_email;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxMailboxesPerEmail,
+                1,
+            ));
+        }
+        let value = &self.max_flags_per_email;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxFlagsPerEmail, 1));
+        }
+        let value = &self.max_flag_length;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxFlagLength, 1));
+        }
+        if *value > 1024 {
+            errors.push(ValidationError::max_value(Property::MaxFlagLength, 1024));
+        }
         errors.len() == neb
     }
 
@@ -20608,6 +20664,9 @@ impl Pickle for Email {
         self.max_mailboxes.pickle(out);
         self.max_masked_addresses.pickle(out);
         self.max_public_keys.pickle(out);
+        self.max_mailboxes_per_email.pickle(out);
+        self.max_flags_per_email.pickle(out);
+        self.max_flag_length.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -20626,6 +20685,15 @@ impl Pickle for Email {
         this.max_mailboxes = Pickle::unpickle(stream)?;
         this.max_masked_addresses = Pickle::unpickle(stream)?;
         this.max_public_keys = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.max_mailboxes_per_email = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.max_flags_per_email = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.max_flag_length = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -20647,13 +20715,16 @@ impl Default for Email {
             max_mailboxes: Some(250u64),
             max_masked_addresses: Some(5u64),
             max_public_keys: Some(5u64),
+            max_mailboxes_per_email: 100u64,
+            max_flags_per_email: 100u64,
+            max_flag_length: 128u64,
         }
     }
 }
 
 impl IntoValue for Email {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(16);
+        let mut map = jmap_tools::Map::with_capacity(19);
         map.insert_unchecked(
             Property::MaxAttachmentSize,
             self.max_attachment_size.into_value(),
@@ -20686,6 +20757,15 @@ impl IntoValue for Email {
             self.max_masked_addresses.into_value(),
         );
         map.insert_unchecked(Property::MaxPublicKeys, self.max_public_keys.into_value());
+        map.insert_unchecked(
+            Property::MaxMailboxesPerEmail,
+            self.max_mailboxes_per_email.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxFlagsPerEmail,
+            self.max_flags_per_email.into_value(),
+        );
+        map.insert_unchecked(Property::MaxFlagLength, self.max_flag_length.into_value());
         JmapValue::Object(map)
     }
 }
@@ -20715,6 +20795,11 @@ impl RegistryJsonPropertyPatch for Email {
             Some(Property::MaxMailboxes) => self.max_mailboxes.patch(pointer, value),
             Some(Property::MaxMaskedAddresses) => self.max_masked_addresses.patch(pointer, value),
             Some(Property::MaxPublicKeys) => self.max_public_keys.patch(pointer, value),
+            Some(Property::MaxMailboxesPerEmail) => {
+                self.max_mailboxes_per_email.patch(pointer, value)
+            }
+            Some(Property::MaxFlagsPerEmail) => self.max_flags_per_email.patch(pointer, value),
+            Some(Property::MaxFlagLength) => self.max_flag_length.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

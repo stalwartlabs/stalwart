@@ -5,7 +5,10 @@
  */
 
 use crate::{
-    calendar_event::{CalendarSyntheticId, set::CalendarEventSet},
+    calendar_event::{
+        CalendarSyntheticId,
+        set::{CalendarEventSet, too_many_events},
+    },
     changes::state::JmapCacheState,
 };
 use calcard::jscalendar::JSCalendarProperty;
@@ -26,6 +29,7 @@ use jmap_proto::{
     },
     types::state::State,
 };
+use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
@@ -115,10 +119,21 @@ impl JmapCalendarEventCopy for Server {
             .await
             .caused_by(trc::location!())?;
 
+        // Obtain quota
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
+        let quota = self.object_quota_usage(&account, StorageQuota::MaxCalendarEvents, || {
+            cache.resources.count(false)
+        });
+
         // Prepare batch
         let mut batch = BatchBuilder::new();
 
         'create: for (id, create) in request.create.into_valid() {
+            if !quota.has_room(created_slots.len()) {
+                response.not_created.append(id, too_many_events());
+                continue;
+            }
+
             let from_calendar_event_id = id.document_id();
             if !from_calendar_event_ids.contains(from_calendar_event_id) {
                 response.not_created.append(

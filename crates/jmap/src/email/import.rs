@@ -128,6 +128,17 @@ impl EmailImport for Server {
                 }
             }
 
+            // Validate per-email limits
+            if let Err(err) = self
+                .core
+                .email
+                .limits
+                .validate_email(mailbox_ids.len(), &email.keywords)
+            {
+                response.not_created.append(id, err.into());
+                continue;
+            }
+
             let MaybeInvalid::Value(blob_id) = email.blob_id else {
                 response.not_created.append(
                     id,
@@ -202,7 +213,7 @@ impl EmailImport for Server {
                         response.not_created.append(
                             id,
                             SetError::new(SetErrorType::OverQuota)
-                                .with_description("You have exceeded your disk quota."),
+                                .with_description("You have exceeded your account quota."),
                         );
                     }
                     trc::EventType::MessageIngest(trc::MessageIngestEvent::Error) => {

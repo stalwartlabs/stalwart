@@ -102,10 +102,11 @@ impl Request<Command> {
                                     }
                                 }
                                 State::Flags => {
-                                    message.flags.push(
-                                        Flag::parse_imap(value)
-                                            .map_err(|v| bad(self.tag.clone(), v))?,
-                                    );
+                                    let flag = Flag::parse_imap(value)
+                                        .map_err(|v| bad(self.tag.clone(), v))?;
+                                    if !message.flags.contains(&flag) {
+                                        message.flags.push(flag);
+                                    }
                                 }
                                 State::UTF8 => {
                                     return Err(bad(
@@ -179,6 +180,18 @@ mod tests {
                     messages: vec![Message {
                         message: vec![b'a'],
                         flags: vec![Flag::Seen, Flag::Draft, Flag::MDNSent],
+                        received_at: None,
+                    }],
+                },
+            ),
+            (
+                "A003 APPEND \"hi\" ($Junk foo $junk foo) {1+}\r\na\r\n",
+                append::Arguments {
+                    tag: "A003".into(),
+                    mailbox_name: "hi".into(),
+                    messages: vec![Message {
+                        message: vec![b'a'],
+                        flags: vec![Flag::Junk, Flag::Keyword("foo".into())],
                         received_at: None,
                     }],
                 },

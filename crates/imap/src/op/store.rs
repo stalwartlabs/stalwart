@@ -4,16 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ImapContext;
+use super::{ImapContext, IntoImapError};
 use crate::core::{SelectedMailbox, Session, SessionData};
-use common::{MessageStoreCache, cache::email::MessageRef, network::SessionStream};
+use common::{
+    MessageStoreCache,
+    cache::email::MessageRef,
+    config::mailstore::limits::{EmailLimitError, EmailLimits},
+    network::SessionStream,
+};
 use compact_str::{CompactString, format_compact};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::TRASH_ID,
     message::{
         ingest::EmailIngest,
-        messagedata::{KeywordDiff, merge_keywords},
+        messagedata::{KeywordDiff, SERVER_SET_KEYWORDS, merge_keywords},
     },
 };
 use imap_proto::{
@@ -133,6 +138,30 @@ impl KeywordEdit {
                 Err(name) => self.added_extra.push(name.into()),
             }
         }
+    }
+
+    fn net_change(&self) -> isize {
+        ((self.added & !SERVER_SET_KEYWORDS).count_ones() as isize
+            + self.added_extra.len() as isize)
+            - ((self.removed & !SERVER_SET_KEYWORDS).count_ones() as isize
+                + self.removed_extra.len() as isize)
+    }
+
+    fn validate_limits(
+        &self,
+        cache: &MessageStoreCache,
+        message: MessageRef<'_>,
+        limits: &EmailLimits,
+    ) -> Result<(), EmailLimitError> {
+        if self.added & !SERVER_SET_KEYWORDS == 0 && self.added_extra.is_empty() {
+            return Ok(());
+        }
+        let prev_count = cache.keyword_count(message);
+        limits.validate_keyword_change(
+            prev_count,
+            prev_count.saturating_add_signed(self.net_change()),
+        )?;
+        limits.validate_keyword_names(self.added_extra.iter().map(|name| name.as_str()))
     }
 
     fn is_empty(&self) -> bool {
@@ -348,7 +377,7 @@ impl<T: SessionStream> SessionData<T> {
         let set_keywords = arguments
             .keywords
             .iter()
-            .map(|k| Keyword::from(k.clone()))
+            .map(|keyword| Keyword::from(keyword.clone()))
             .collect::<Vec<_>>();
         let mut changed_mailboxes: Vec<u32> = Vec::new();
         let mut batch = BatchBuilder::new();
@@ -363,6 +392,10 @@ impl<T: SessionStream> SessionData<T> {
             let edit = KeywordEdit::compute(&cache, message, &arguments.operation, &set_keywords);
             if edit.is_empty() {
                 continue;
+            }
+            if let Err(err) = edit.validate_limits(&cache, message, &self.server.core.email.limits)
+            {
+                return Err(err.into_imap_error().id(response.tag.unwrap_or_default()));
             }
 
             // Train spam filter

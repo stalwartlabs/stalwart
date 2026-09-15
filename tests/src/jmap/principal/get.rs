@@ -73,7 +73,7 @@ pub async fn test(test: &TestServer) {
           "isReadOnly": false,
           "accountCapabilities": {
             "urn:ietf:params:jmap:mail": {
-              "maxMailboxesPerEmail": null,
+              "maxMailboxesPerEmail": 100,
               "maxMailboxDepth": 10,
               "maxSizeMailboxName": 255,
               "maxSizeAttachmentsPerEmail": 50000000,
@@ -105,13 +105,13 @@ pub async fn test(test: &TestServer) {
             },
             "urn:ietf:params:jmap:vacationresponse": {},
             "urn:ietf:params:jmap:contacts": {
-              "maxAddressBooksPerCard": null,
+              "maxAddressBooksPerCard": 10,
               "mayCreateAddressBook": true
             },
             "urn:ietf:params:jmap:contacts:parse": {},
             "urn:ietf:params:jmap:emailpush": {},
             "urn:ietf:params:jmap:calendars": {
-              "maxCalendarsPerEvent": null,
+              "maxCalendarsPerEvent": 10,
               "minDateTime": "0001-01-01T00:00:00Z",
               "maxDateTime": "9999-12-31T23:59:59Z",
               "maxExpandedQueryDuration": "P52W1D",

@@ -109,7 +109,10 @@ mod tests {
             tracker.track(1, event(1, 1_000));
         }
         assert_eq!(tracker.tracked_events, MAX_SPAN_EVENTS);
-        assert_eq!(tracker.finish(1).map(|events| events.len()), Some(MAX_SPAN_EVENTS));
+        assert_eq!(
+            tracker.finish(1).map(|events| events.len()),
+            Some(MAX_SPAN_EVENTS)
+        );
         assert_eq!(tracker.tracked_events, 0);
 
         for span_id in 0..MAX_TRACKED_EVENTS as u64 + 100 {

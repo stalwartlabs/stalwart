@@ -28,9 +28,10 @@ use common::{
     storage::dav::{ResourceChunkBuilder, hierarchy::PathUpdate},
 };
 use file::{build_file_resources, build_nested_hierarchy, push_file};
+use registry::schema::enums::StorageQuota;
 use std::{sync::Arc, time::Instant};
 use store::{
-    ValueKey,
+    IterateParams, ValueKey,
     ahash::AHashMap,
     query::log::{Change, Query},
     write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
@@ -119,6 +120,20 @@ pub trait GroupwareCache: Sync + Send {
         account_id: u32,
         collection: SyncCollection,
     ) -> Option<Arc<GroupwareResources>>;
+
+    fn count_documents(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        limit: usize,
+    ) -> impl Future<Output = trc::Result<usize>> + Send;
+
+    fn has_document_quota(
+        &self,
+        account: &AccountCache,
+        quota: StorageQuota,
+        collection: Collection,
+    ) -> impl Future<Output = trc::Result<bool>> + Send;
 }
 
 impl GroupwareCache for Server {
@@ -480,6 +495,72 @@ impl GroupwareCache for Server {
             self.fetch_groupware_resources(access_account_id, account_id, SyncCollection::Calendar)
                 .await
                 .map(|c| c.document_ids(true).next())
+        }
+    }
+
+    async fn count_documents(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        limit: usize,
+    ) -> trc::Result<usize> {
+        let caches = &self.inner.cache;
+        let cached = match collection {
+            Collection::Calendar | Collection::CalendarEvent => caches
+                .events
+                .inner()
+                .contains_key(&account_id)
+                .then_some(SyncCollection::Calendar),
+            Collection::AddressBook | Collection::ContactCard => caches
+                .contacts
+                .inner()
+                .contains_key(&account_id)
+                .then_some(SyncCollection::AddressBook),
+            Collection::CalendarEventNotification => caches
+                .scheduling
+                .inner()
+                .contains_key(&account_id)
+                .then_some(SyncCollection::CalendarEventNotification),
+            _ => None,
+        };
+        if let Some(sync_collection) = cached {
+            let is_container = matches!(collection, Collection::Calendar | Collection::AddressBook);
+            return self
+                .fetch_groupware_resources(account_id, account_id, sync_collection)
+                .await
+                .map(|resources| resources.resources.count(is_container));
+        }
+
+        let mut count = 0;
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    ValueKey::archive(account_id, collection, 0),
+                    ValueKey::archive(account_id, collection, u32::MAX),
+                )
+                .no_values(),
+                |_, _| {
+                    count += 1;
+                    Ok(count < limit)
+                },
+            )
+            .await
+            .caused_by(trc::location!())
+            .map(|_| count)
+    }
+
+    async fn has_document_quota(
+        &self,
+        account: &AccountCache,
+        quota: StorageQuota,
+        collection: Collection,
+    ) -> trc::Result<bool> {
+        match self.object_quota_limit(account, quota) {
+            Some(limit) => self
+                .count_documents(account.id, collection, limit)
+                .await
+                .map(|used| used < limit),
+            None => Ok(true),
         }
     }
 

@@ -32,8 +32,12 @@ use tokio::sync::OwnedSemaphorePermit;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
+    keyword::Keyword,
     type_state::{DataType, StateChange},
 };
+
+const TOO_MANY_MAILBOXES: &str = "Message belongs to too many mailboxes.";
+const TOO_MANY_KEYWORDS: &str = "Message exceeds the keyword limits of the destination.";
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_copy_move(
@@ -325,6 +329,17 @@ impl<T: SessionStream> SessionData<T> {
                     if is_move {
                         new_data.remove_mailbox(src_mailbox.id.mailbox_id);
                     }
+                    if self
+                        .server
+                        .core
+                        .email
+                        .limits
+                        .validate_mailbox_change(data.mailboxes.len(), new_data.mailboxes.len())
+                        .is_err()
+                    {
+                        error = Some((ResponseCode::Limit, TOO_MANY_MAILBOXES));
+                        continue;
+                    }
 
                     // Reserve IMAP UIDs
                     let uid_slots = batch.reserve_uids(
@@ -414,6 +429,29 @@ impl<T: SessionStream> SessionData<T> {
             for imap_id in &ids {
                 let id = imap_id.id;
                 let email = cache.email_by_id(&id);
+                let keywords = email
+                    .map(|email| cache.expand_keywords(email).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let user_keywords = keywords
+                    .iter()
+                    .filter(|keyword| {
+                        !matches!(keyword, Keyword::HasAttachment | Keyword::HasNoAttachment)
+                    })
+                    .count();
+                if self
+                    .server
+                    .core
+                    .email
+                    .limits
+                    .validate_keywords(
+                        user_keywords,
+                        keywords.iter().filter_map(|keyword| keyword.id().err()),
+                    )
+                    .is_err()
+                {
+                    error = Some((ResponseCode::Limit, TOO_MANY_KEYWORDS));
+                    continue;
+                }
                 match self
                     .server
                     .copy_message(
@@ -421,9 +459,7 @@ impl<T: SessionStream> SessionData<T> {
                         id,
                         dest_account_id,
                         vec![dest_mailbox_id],
-                        email
-                            .map(|e| cache.expand_keywords(e).collect())
-                            .unwrap_or_default(),
+                        keywords,
                         email.map(|email| email.received_at()).unwrap_or_else(now),
                         self.session_id,
                     )
@@ -464,6 +500,20 @@ impl<T: SessionStream> SessionData<T> {
                             } else {
                                 let mut new_data = data.clone();
                                 new_data.add_mailbox(MessageUid::new_unassigned(dest_mailbox_id));
+                                if self
+                                    .server
+                                    .core
+                                    .email
+                                    .limits
+                                    .validate_mailbox_change(
+                                        data.mailboxes.len(),
+                                        new_data.mailboxes.len(),
+                                    )
+                                    .is_err()
+                                {
+                                    error = Some((ResponseCode::Limit, TOO_MANY_MAILBOXES));
+                                    continue;
+                                }
 
                                 let mut batch = BatchBuilder::new();
                                 let uid_slots = batch.reserve_uids(

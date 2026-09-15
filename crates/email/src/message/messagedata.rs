@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{MessageUid, Server};
+use common::{
+    MessageUid, Server,
+    config::mailstore::limits::{EmailLimitError, EmailLimits},
+};
 use compact_str::CompactString;
 use store::{
     Deserialize, IterateParams, Serialize, U32_LEN, U64_LEN, ValueKey,
@@ -22,6 +25,8 @@ use types::{
     keyword::{HASATTACHMENT, HASNOATTACHMENT, Keyword},
 };
 use utils::codec::leb128::{Leb128_, Leb128Iterator};
+
+pub const SERVER_SET_KEYWORDS: u32 = (1 << HASATTACHMENT) | (1 << HASNOATTACHMENT);
 
 #[derive(Debug, Clone)]
 pub struct MessageData {
@@ -198,6 +203,25 @@ impl MessageData {
             Ok(id) => (self.keywords & (1 << id)) != 0,
             Err(name) => self.keywords_extra.iter().any(|k| k.as_str() == name),
         }
+    }
+
+    pub fn keyword_count(&self) -> usize {
+        (self.keywords & !SERVER_SET_KEYWORDS).count_ones() as usize + self.keywords_extra.len()
+    }
+
+    pub fn validate_limits(
+        &self,
+        prev_data: &MessageData,
+        limits: &EmailLimits,
+    ) -> Result<(), EmailLimitError> {
+        limits.validate_mailbox_change(prev_data.mailboxes.len(), self.mailboxes.len())?;
+        limits.validate_keyword_change(prev_data.keyword_count(), self.keyword_count())?;
+        limits.validate_keyword_names(
+            self.keywords_extra
+                .iter()
+                .filter(|keyword| !prev_data.keywords_extra.contains(keyword))
+                .map(|keyword| keyword.as_str()),
+        )
     }
 
     pub fn has_keyword_changes(&self, prev_data: &MessageData) -> bool {
@@ -539,5 +563,83 @@ impl Iterator for KeywordsIter {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::config::mailstore::limits::{EmailLimitError, EmailLimits};
+
+    const LIMITS: EmailLimits = EmailLimits {
+        mailboxes_per_email: 2,
+        keywords_per_email: 2,
+        keyword_length: 4,
+    };
+
+    fn message(mailboxes: &[u32], keywords: &[&str]) -> MessageData {
+        let mut data = MessageData {
+            mailboxes: mailboxes
+                .iter()
+                .copied()
+                .map(MessageUid::new_unassigned)
+                .collect(),
+            keywords: 0,
+            keywords_extra: Vec::new(),
+            thread_id: 0,
+            size: 0,
+            received_at: 0,
+            sent_at: 0,
+            change_id: 0,
+        };
+        data.set_keywords(keywords.iter().map(|name| Keyword::parse(name)).collect());
+        data
+    }
+
+    #[test]
+    fn keyword_count_ignores_server_set_keywords() {
+        let mut data = message(&[0], &["$seen", "custom"]);
+        assert_eq!(data.keyword_count(), 2);
+        data.keywords |= 1 << HASATTACHMENT;
+        assert_eq!(data.keyword_count(), 2);
+        data.keywords |= 1 << HASNOATTACHMENT;
+        assert_eq!(data.keyword_count(), 2);
+    }
+
+    #[test]
+    fn validate_limits_on_update() {
+        let prev = message(&[0], &["$seen"]);
+
+        let next = message(&[0, 1], &["$seen", "abcd"]);
+        assert_eq!(next.validate_limits(&prev, &LIMITS), Ok(()));
+
+        let next = message(&[0, 1, 2], &["$seen"]);
+        assert_eq!(
+            next.validate_limits(&prev, &LIMITS),
+            Err(EmailLimitError::TooManyMailboxes { max: 2 })
+        );
+
+        let next = message(&[0], &["$seen", "$flagged", "$draft"]);
+        assert_eq!(
+            next.validate_limits(&prev, &LIMITS),
+            Err(EmailLimitError::TooManyKeywords { max: 2 })
+        );
+
+        let next = message(&[0], &["$seen", "abcde"]);
+        assert_eq!(
+            next.validate_limits(&prev, &LIMITS),
+            Err(EmailLimitError::KeywordTooLong { max: 4 })
+        );
+    }
+
+    #[test]
+    fn validate_limits_allows_existing_violations() {
+        let prev = message(&[0, 1, 2], &["$seen", "$flagged", "$draft", "abcdef"]);
+
+        let next = message(&[0, 1], &["$seen", "$flagged", "abcdef"]);
+        assert_eq!(next.validate_limits(&prev, &LIMITS), Ok(()));
+
+        let next = message(&[0, 1, 2], &["$seen", "$flagged", "$draft", "abcdef"]);
+        assert_eq!(next.validate_limits(&prev, &LIMITS), Ok(()));
     }
 }

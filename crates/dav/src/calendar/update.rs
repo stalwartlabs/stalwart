@@ -37,6 +37,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use std::collections::HashSet;
 use store::write::{BatchBuilder, now};
 use store::{
@@ -403,6 +404,12 @@ impl CalendarUpdateRequestHandler for Server {
                 validate_ical(&ical)?.into(),
             )?;
 
+            // Validate object quota
+            let account = self.account(account_id).await?;
+            self.assert_object_quota(&account, StorageQuota::MaxCalendarEvents, 1, || {
+                resources.resources.count(false)
+            })?;
+
             // Build event
             let mut next_email_alarm = None;
             let mut event = CalendarEvent {
@@ -475,11 +482,8 @@ impl CalendarUpdateRequestHandler for Server {
 
             // Validate quota
             if !bytes.is_empty() {
-                self.has_available_quota(
-                    self.account(account_id).await?.as_ref(),
-                    bytes.len() as u64,
-                )
-                .await?;
+                self.has_available_quota(&account, bytes.len() as u64)
+                    .await?;
             }
 
             // Prepare write batch

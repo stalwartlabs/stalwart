@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::message::messagedata::{EmailMessageData, KeywordsIter, MessageData};
+use crate::message::messagedata::{
+    EmailMessageData, KeywordsIter, MessageData, SERVER_SET_KEYWORDS,
+};
 use common::{
     CustomKeywords, MessageCache, MessageStoreCache, MessagesCache, Server, auth::AccessToken,
     cache::email::MessageRef, sharing::EffectiveAcl,
@@ -307,6 +309,8 @@ pub trait MessageCacheAccess {
 
     fn has_keyword(&self, message: MessageRef<'_>, keyword: &Keyword) -> bool;
 
+    fn keyword_count(&self, message: MessageRef<'_>) -> usize;
+
     fn received(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = MessageRef<'_>>;
 
     fn sent(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = MessageRef<'_>>;
@@ -469,6 +473,11 @@ impl MessageCacheAccess for MessageStoreCache {
                 .iter()
                 .map(|name| Keyword::Other(name.clone())),
         )
+    }
+
+    fn keyword_count(&self, message: MessageRef<'_>) -> usize {
+        (message.keywords() & !(HAS_CUSTOM_KEYWORDS | SERVER_SET_KEYWORDS)).count_ones() as usize
+            + self.custom_keywords(message).len()
     }
 
     fn has_keyword(&self, message: MessageRef<'_>, keyword: &Keyword) -> bool {

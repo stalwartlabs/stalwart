@@ -96,6 +96,72 @@ impl Server {
     pub fn object_quota(&self, user_quotas: Option<&ObjectQuota>, object: StorageQuota) -> u32 {
         user_quotas.unwrap_or(&self.core.email.max_objects).0[object as usize]
     }
+
+    #[inline(always)]
+    pub fn object_quota_limit(
+        &self,
+        account: &AccountCache,
+        object: StorageQuota,
+    ) -> Option<usize> {
+        let limit = self.object_quota(account.object_quotas(), object);
+        (limit != u32::MAX).then_some(limit as usize)
+    }
+
+    pub fn object_quota_usage(
+        &self,
+        account: &AccountCache,
+        object: StorageQuota,
+        used: impl FnOnce() -> usize,
+    ) -> ObjectQuotaUsage {
+        self.object_quota_limit(account, object)
+            .map_or_else(ObjectQuotaUsage::unlimited, |limit| ObjectQuotaUsage {
+                used: used(),
+                limit,
+            })
+    }
+
+    pub fn assert_object_quota(
+        &self,
+        account: &AccountCache,
+        object: StorageQuota,
+        requested: usize,
+        used: impl FnOnce() -> usize,
+    ) -> trc::Result<()> {
+        let Some(limit) = self.object_quota_limit(account, object) else {
+            return Ok(());
+        };
+        let used = used();
+        if used.saturating_add(requested) <= limit {
+            Ok(())
+        } else {
+            Err(trc::LimitEvent::Quota
+                .into_err()
+                .account_id(account.id)
+                .ctx(trc::Key::Collection, object.as_str())
+                .ctx(trc::Key::Limit, limit)
+                .ctx(trc::Key::Total, used))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectQuotaUsage {
+    pub used: usize,
+    pub limit: usize,
+}
+
+impl ObjectQuotaUsage {
+    pub fn unlimited() -> Self {
+        Self {
+            used: 0,
+            limit: usize::MAX,
+        }
+    }
+
+    #[inline(always)]
+    pub fn has_room(&self, pending: usize) -> bool {
+        self.used.saturating_add(pending) < self.limit
+    }
 }
 
 impl ObjectQuota {
@@ -131,5 +197,26 @@ impl Default for ObjectQuota {
 impl Default for TenantQuota {
     fn default() -> Self {
         Self([u32::MAX; TenantStorageQuota::COUNT - 1])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ObjectQuotaUsage;
+
+    #[test]
+    fn quota_usage_has_room() {
+        let usage = ObjectQuotaUsage { used: 3, limit: 5 };
+        assert!(usage.has_room(0));
+        assert!(usage.has_room(1));
+        assert!(!usage.has_room(2));
+
+        let full = ObjectQuotaUsage { used: 5, limit: 5 };
+        assert!(!full.has_room(0));
+
+        let over = ObjectQuotaUsage { used: 7, limit: 5 };
+        assert!(!over.has_room(0));
+
+        assert!(ObjectQuotaUsage::unlimited().has_room(usize::MAX - 1));
     }
 }

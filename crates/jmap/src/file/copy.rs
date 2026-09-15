@@ -9,6 +9,7 @@ use crate::{
     api::acl::JmapAcl,
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
+    file::FileNodeQuota,
     file::set::{
         Collision, NoResolver, fetch_existing_modified, find_sibling_collision, pick_unique_rename,
         update_file_node, validate_file_node_hierarchy,
@@ -128,6 +129,8 @@ impl FileNodeCopy for Server {
             .unwrap_or(false);
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
 
+        let account = self.account(account_id).await.caused_by(trc::location!())?;
+        let quota = FileNodeQuota::new(self, &account, &cache);
         let mut batch = BatchBuilder::new();
         let mut pending_names: AHashMap<(ParentRef, String), Option<u32>> = AHashMap::new();
         let mut implicit_destroys: AHashSet<u32> = AHashSet::new();
@@ -382,6 +385,15 @@ impl FileNodeCopy for Server {
                 self.refresh_acls(&file_node.acls, None)
                     .await
                     .caused_by(trc::location!())?;
+            }
+
+            if let Err(err) = quota.validate(
+                file_node.file.is_none(),
+                created_slots.len(),
+                created_folders.len(),
+            ) {
+                response.not_created.append(id, err);
+                continue 'create;
             }
 
             let document_id = batch.reserve_document_id(account_id, Collection::FileNode);

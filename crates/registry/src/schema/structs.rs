@@ -94,6 +94,8 @@ pub struct AddressBook {
     pub max_contacts: Option<u64>,
     #[serde(rename = "vCardVersion")]
     pub v_card_version: VCardVersion,
+    #[serde(rename = "maxAddressBooksPerCard")]
+    pub max_address_books_per_card: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -693,6 +695,8 @@ pub struct Calendar {
     pub max_participant_identities: Option<u64>,
     #[serde(rename = "maxEventNotifications")]
     pub max_event_notifications: Option<u64>,
+    #[serde(rename = "maxCalendarsPerEvent")]
+    pub max_calendars_per_event: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2835,6 +2839,12 @@ pub struct Email {
     pub max_masked_addresses: Option<u64>,
     #[serde(rename = "maxPublicKeys")]
     pub max_public_keys: Option<u64>,
+    #[serde(rename = "maxMailboxesPerEmail")]
+    pub max_mailboxes_per_email: u64,
+    #[serde(rename = "maxFlagsPerEmail")]
+    pub max_flags_per_email: u64,
+    #[serde(rename = "maxFlagLength")]
+    pub max_flag_length: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

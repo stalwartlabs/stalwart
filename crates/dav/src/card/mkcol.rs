@@ -24,6 +24,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use store::write::BatchBuilder;
 use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
@@ -55,20 +56,26 @@ impl CardMkColRequestHandler for Server {
             .ok_or(DavError::Code(StatusCode::FORBIDDEN))?;
         if !access_token.is_member(account_id) {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
-        } else if name.contains('/')
-            || self
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    account_id,
-                    SyncCollection::AddressBook,
-                )
-                .await
-                .caused_by(trc::location!())?
-                .by_path(name)
-                .is_some()
-        {
+        }
+        let resources = self
+            .fetch_groupware_resources(
+                access_token.account_id(),
+                account_id,
+                SyncCollection::AddressBook,
+            )
+            .await
+            .caused_by(trc::location!())?;
+        if name.contains('/') || resources.by_path(name).is_some() {
             return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
         }
+
+        // Validate quota
+        self.assert_object_quota(
+            &*self.account(account_id).await?,
+            StorageQuota::MaxAddressBooks,
+            1,
+            || resources.resources.count(true),
+        )?;
 
         // Validate headers
         self.validate_headers(

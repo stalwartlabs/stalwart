@@ -27,6 +27,7 @@ use mail_parser::{
 };
 use registry::{
     schema::{
+        enums::StorageQuota,
         prelude::{ObjectType, Permission, Property},
         structs::{SpamTrainingSample, Task, TaskMergeThreads, TaskStatus},
     },
@@ -147,9 +148,37 @@ impl EmailIngest for Server {
         let tenant_id = params.access_token.tenant_id();
         let mut raw_message_len = params.raw_message.len() as u64;
         let account = self.account(account_id).await.caused_by(trc::location!())?;
+        let limits = &self.core.email.limits;
+        if matches!(
+            params.source,
+            IngestSource::Smtp { .. } | IngestSource::Restore
+        ) {
+            params.mailbox_ids.truncate(limits.mailboxes_per_email);
+            if !params.keywords.is_empty() {
+                params.keywords = Keyword::unique(
+                    std::mem::take(&mut params.keywords)
+                        .into_iter()
+                        .filter(|keyword| limits.is_keyword_allowed(keyword)),
+                );
+                params.keywords.truncate(limits.keywords_per_email);
+            }
+        } else if let Err(err) = limits.validate_email(params.mailbox_ids.len(), &params.keywords) {
+            return Err(
+                trc::EventType::MessageIngest(trc::MessageIngestEvent::Error)
+                    .ctx(trc::Key::Code, 550)
+                    .ctx(trc::Key::Reason, err.to_string()),
+            );
+        }
         self.has_available_quota(&account, raw_message_len)
             .await
             .caused_by(trc::location!())?;
+        if let Some(limit) = self.object_quota_limit(&account, StorageQuota::MaxEmails) {
+            let used = self
+                .count_emails(account_id, limit)
+                .await
+                .caused_by(trc::location!())?;
+            self.assert_object_quota(&account, StorageQuota::MaxEmails, 1, || used)?;
+        }
 
         // Parse message
         let mut raw_message = Cow::from(params.raw_message);

@@ -31,6 +31,7 @@ pub struct GroupwareConfig {
     pub max_ical_size: usize,
     pub max_ical_instances: usize,
     pub max_ical_attendees_per_instance: usize,
+    pub max_calendars_per_event: usize,
     pub default_calendar_name: Option<String>,
     pub default_calendar_display_name: Option<String>,
     pub alarms_enabled: bool,
@@ -51,6 +52,7 @@ pub struct GroupwareConfig {
     // Addressbook settings
     pub max_vcard_size: usize,
     pub vcard_version: VCardVersion,
+    pub max_address_books_per_card: usize,
     pub default_addressbook_name: Option<String>,
     pub default_addressbook_display_name: Option<String>,
 
@@ -115,7 +117,9 @@ impl GroupwareConfig {
             max_ical_size: calendar.max_i_calendar_size as usize,
             max_ical_instances: calendar.max_recurrence_expansions as usize,
             max_ical_attendees_per_instance: calendar.max_attendees as usize,
+            max_calendars_per_event: calendar.max_calendars_per_event as usize,
             max_vcard_size: book.max_v_card_size as usize,
+            max_address_books_per_card: book.max_address_books_per_card as usize,
             vcard_version: match book.v_card_version {
                 RegistryVCardVersion::V3 => VCardVersion::V3_0,
                 RegistryVCardVersion::V4 => VCardVersion::V4_0,

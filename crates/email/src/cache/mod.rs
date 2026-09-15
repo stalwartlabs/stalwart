@@ -15,11 +15,16 @@ use email::{full_email_cache_build, update_email_cache};
 use mailbox::{full_mailbox_cache_build, update_mailbox_cache};
 use std::{collections::hash_map::Entry, sync::Arc, time::Instant};
 use store::{
+    IterateParams, ValueKey,
     ahash::AHashMap,
     query::log::{Change, Changes, Query},
+    write::ValueClass,
 };
 use trc::{AddContext, CacheEvent};
-use types::collection::SyncCollection;
+use types::{
+    collection::{Collection, SyncCollection},
+    field::EmailField,
+};
 
 pub mod email;
 pub mod mailbox;
@@ -29,9 +34,55 @@ pub trait MessageCacheFetch: Sync + Send {
         &self,
         account_id: u32,
     ) -> impl Future<Output = trc::Result<Arc<MessageStoreCache>>> + Send;
+
+    fn count_emails(
+        &self,
+        account_id: u32,
+        limit: usize,
+    ) -> impl Future<Output = trc::Result<usize>> + Send;
 }
 
 impl MessageCacheFetch for Server {
+    async fn count_emails(&self, account_id: u32, limit: usize) -> trc::Result<usize> {
+        if self.inner.cache.messages.inner().contains_key(&account_id) {
+            return self
+                .get_cached_messages(account_id)
+                .await
+                .map(|cache| cache.emails.len());
+        }
+
+        let collection: u8 = Collection::Email.into();
+        let class = ValueClass::Immutable(EmailField::SortKeys.into());
+        let mut count = 0;
+        self.core
+            .storage
+            .data
+            .iterate(
+                IterateParams::new(
+                    ValueKey {
+                        account_id,
+                        collection,
+                        document_id: 0,
+                        class: class.clone(),
+                    },
+                    ValueKey {
+                        account_id,
+                        collection,
+                        document_id: u32::MAX,
+                        class,
+                    },
+                )
+                .no_values(),
+                |_, _| {
+                    count += 1;
+                    Ok(count < limit)
+                },
+            )
+            .await
+            .caused_by(trc::location!())
+            .map(|_| count)
+    }
+
     async fn get_cached_messages(&self, account_id: u32) -> trc::Result<Arc<MessageStoreCache>> {
         let cache_store = &self.inner.cache.messages;
         let mut cache = match cache_store.get_value_or_guard_async(&account_id).await {

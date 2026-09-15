@@ -18,7 +18,7 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use registry::{
-    schema::structs::{Calendar, Email, SieveUserInterpreter},
+    schema::structs::{AddressBook, Calendar, Email, SieveUserInterpreter},
     types::EnumImpl,
 };
 use store::registry::bootstrap::Bootstrap;
@@ -55,7 +55,7 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::Mail,
             Capabilities::Mail(MailCapabilities {
-                max_mailboxes_per_email: None,
+                max_mailboxes_per_email: email.max_mailboxes_per_email.into(),
                 max_mailbox_depth: email.max_mailbox_depth,
                 max_size_mailbox_name: email.max_mailbox_name_length,
                 max_size_attachments_per_email: email.max_attachment_size,
@@ -75,6 +75,7 @@ impl JmapConfig {
         );
 
         // Add calendar capabilities
+        let calendar = bp.setting_infallible::<Calendar>().await;
         self.capabilities.session.append(
             Capability::Calendars,
             Capabilities::Empty(EmptyCapabilities::default()),
@@ -82,7 +83,7 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::Calendars,
             Capabilities::Calendar(CalendarCapabilities {
-                max_calendars_per_event: None,
+                max_calendars_per_event: calendar.max_calendars_per_event.into(),
                 min_date_time: UTCDate {
                     year: 1,
                     month: 1,
@@ -107,11 +108,7 @@ impl JmapConfig {
                 },
                 max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365)
                     .to_string(),
-                max_participants_per_event: bp
-                    .setting_infallible::<Calendar>()
-                    .await
-                    .max_attendees
-                    .into(),
+                max_participants_per_event: calendar.max_attendees.into(),
                 may_create_calendar: true,
             }),
         );
@@ -126,6 +123,7 @@ impl JmapConfig {
         );
 
         // Add contacts capabilities
+        let address_book = bp.setting_infallible::<AddressBook>().await;
         self.capabilities.session.append(
             Capability::Contacts,
             Capabilities::Empty(EmptyCapabilities::default()),
@@ -133,7 +131,7 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::Contacts,
             Capabilities::Contacts(ContactsCapabilities {
-                max_address_books_per_card: None,
+                max_address_books_per_card: address_book.max_address_books_per_card.into(),
                 may_create_address_book: true,
             }),
         );

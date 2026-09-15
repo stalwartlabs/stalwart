@@ -9,6 +9,7 @@ use common::{
     config::smtp::queue::QueueName,
     network::{ServerInstance, stream::NullIo},
     storage::index::ObjectIndexBuilder,
+    storage::quota::ObjectQuotaUsage,
 };
 use email::{
     identity::Identity,
@@ -28,6 +29,7 @@ use jmap_proto::{
     types::{date::UTCDate, state::State},
 };
 use jmap_tools::{Key, Map, Value};
+use registry::schema::enums::StorageQuota;
 use smtp::{
     core::{Session, SessionData},
     queue::spool::SmtpSpool,
@@ -36,13 +38,13 @@ use smtp_proto::{MailFrom, RcptTo, request::parser::Rfc5321Parser};
 use std::{borrow::Cow, future::Future};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use store::{
-    ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, now},
+    IterateParams, ValueKey,
+    write::{Archive, ArchiveBytes, BatchBuilder, IndexPropertyClass, ValueClass, now},
 };
 use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
-    field::EmailField,
+    field::{EmailField, EmailSubmissionField},
     id::Id,
 };
 use utils::{map::vec_map::VecMap, sanitize_email};
@@ -54,6 +56,12 @@ pub trait EmailSubmissionSet: Sync + Send {
         instance: &Arc<ServerInstance>,
         next_call: &mut Option<Call<RequestMethod<'x>>>,
     ) -> impl Future<Output = trc::Result<SetResponse<email_submission::EmailSubmission>>> + Send;
+
+    fn count_submissions(
+        &self,
+        account_id: u32,
+        limit: usize,
+    ) -> impl Future<Output = trc::Result<usize>> + Send;
 
     fn send_message(
         &self,
@@ -67,6 +75,41 @@ pub trait EmailSubmissionSet: Sync + Send {
 }
 
 impl EmailSubmissionSet for Server {
+    async fn count_submissions(&self, account_id: u32, limit: usize) -> trc::Result<usize> {
+        let class = |value| {
+            ValueClass::IndexProperty(IndexPropertyClass::Integer {
+                property: EmailSubmissionField::Metadata.into(),
+                value,
+            })
+        };
+        let mut count = 0;
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    ValueKey {
+                        account_id,
+                        collection: Collection::EmailSubmission.into(),
+                        document_id: 0,
+                        class: class(0),
+                    },
+                    ValueKey {
+                        account_id,
+                        collection: Collection::EmailSubmission.into(),
+                        document_id: u32::MAX,
+                        class: class(u64::MAX),
+                    },
+                )
+                .no_values(),
+                |_, _| {
+                    count += 1;
+                    Ok(count < limit)
+                },
+            )
+            .await
+            .caused_by(trc::location!())
+            .map(|_| count)
+    }
+
     async fn email_submission_set<'x>(
         &self,
         mut request: SetRequest<'x, email_submission::EmailSubmission>,
@@ -77,11 +120,37 @@ impl EmailSubmissionSet for Server {
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
+        // Obtain submission quota
+        let limit = if request.has_creates() {
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
+            self.object_quota_limit(&account, StorageQuota::MaxEmailSubmissions)
+        } else {
+            None
+        };
+        let quota = match limit {
+            Some(limit) => ObjectQuotaUsage {
+                used: self.count_submissions(account_id, limit).await?,
+                limit,
+            },
+            None => ObjectQuotaUsage::unlimited(),
+        };
+
         // Process creates
         let mut success_email_ids = HashMap::new();
         let mut batch = BatchBuilder::new();
         let mut pending_creates = Vec::new();
         for (id, object) in request.unwrap_create() {
+            if !quota.has_room(pending_creates.len()) {
+                response.not_created.append(
+                    id,
+                    SetError::new(SetErrorType::OverQuota).with_description(concat!(
+                        "There are too many email submissions, ",
+                        "please delete some before adding a new one."
+                    )),
+                );
+                continue;
+            }
+
             match self
                 .send_message(account_id, &response, instance, object)
                 .await?

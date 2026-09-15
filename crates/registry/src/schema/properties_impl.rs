@@ -890,6 +890,7 @@ impl EnumImpl for Property {
             b"match" => Property::Match,
             b"maxAccountSize" => Property::MaxAccountSize,
             b"maxAddressBooks" => Property::MaxAddressBooks,
+            b"maxAddressBooksPerCard" => Property::MaxAddressBooksPerCard,
             b"maxAge" => Property::MaxAge,
             b"maxAllowedPacket" => Property::MaxAllowedPacket,
             b"maxApiKeys" => Property::MaxApiKeys,
@@ -899,6 +900,7 @@ impl EnumImpl for Property {
             b"maxAttendees" => Property::MaxAttendees,
             b"maxAuthFailures" => Property::MaxAuthFailures,
             b"maxCalendars" => Property::MaxCalendars,
+            b"maxCalendarsPerEvent" => Property::MaxCalendarsPerEvent,
             b"maxChangesHistory" => Property::MaxChangesHistory,
             b"maxConcurrent" => Property::MaxConcurrent,
             b"maxConcurrentRequests" => Property::MaxConcurrentRequests,
@@ -914,6 +916,8 @@ impl EnumImpl for Property {
             b"maxEvents" => Property::MaxEvents,
             b"maxFailures" => Property::MaxFailures,
             b"maxFiles" => Property::MaxFiles,
+            b"maxFlagLength" => Property::MaxFlagLength,
+            b"maxFlagsPerEmail" => Property::MaxFlagsPerEmail,
             b"maxFolders" => Property::MaxFolders,
             b"maxHeaderSize" => Property::MaxHeaderSize,
             b"maxICalendarSize" => Property::MaxICalendarSize,
@@ -925,6 +929,7 @@ impl EnumImpl for Property {
             b"maxMailboxDepth" => Property::MaxMailboxDepth,
             b"maxMailboxNameLength" => Property::MaxMailboxNameLength,
             b"maxMailboxes" => Property::MaxMailboxes,
+            b"maxMailboxesPerEmail" => Property::MaxMailboxesPerEmail,
             b"maxMaskedAddresses" => Property::MaxMaskedAddresses,
             b"maxMatchVars" => Property::MaxMatchVars,
             b"maxMessageSize" => Property::MaxMessageSize,
@@ -1843,6 +1848,7 @@ impl EnumImpl for Property {
             Property::Match => "match",
             Property::MaxAccountSize => "maxAccountSize",
             Property::MaxAddressBooks => "maxAddressBooks",
+            Property::MaxAddressBooksPerCard => "maxAddressBooksPerCard",
             Property::MaxAge => "maxAge",
             Property::MaxAllowedPacket => "maxAllowedPacket",
             Property::MaxApiKeys => "maxApiKeys",
@@ -1852,6 +1858,7 @@ impl EnumImpl for Property {
             Property::MaxAttendees => "maxAttendees",
             Property::MaxAuthFailures => "maxAuthFailures",
             Property::MaxCalendars => "maxCalendars",
+            Property::MaxCalendarsPerEvent => "maxCalendarsPerEvent",
             Property::MaxChangesHistory => "maxChangesHistory",
             Property::MaxConcurrent => "maxConcurrent",
             Property::MaxConcurrentRequests => "maxConcurrentRequests",
@@ -1867,6 +1874,8 @@ impl EnumImpl for Property {
             Property::MaxEvents => "maxEvents",
             Property::MaxFailures => "maxFailures",
             Property::MaxFiles => "maxFiles",
+            Property::MaxFlagLength => "maxFlagLength",
+            Property::MaxFlagsPerEmail => "maxFlagsPerEmail",
             Property::MaxFolders => "maxFolders",
             Property::MaxHeaderSize => "maxHeaderSize",
             Property::MaxICalendarSize => "maxICalendarSize",
@@ -1878,6 +1887,7 @@ impl EnumImpl for Property {
             Property::MaxMailboxDepth => "maxMailboxDepth",
             Property::MaxMailboxNameLength => "maxMailboxNameLength",
             Property::MaxMailboxes => "maxMailboxes",
+            Property::MaxMailboxesPerEmail => "maxMailboxesPerEmail",
             Property::MaxMaskedAddresses => "maxMaskedAddresses",
             Property::MaxMatchVars => "maxMatchVars",
             Property::MaxMessageSize => "maxMessageSize",
@@ -2800,6 +2810,7 @@ impl EnumImpl for Property {
             374 => Some(Property::Match),
             942 => Some(Property::MaxAccountSize),
             23 => Some(Property::MaxAddressBooks),
+            948 => Some(Property::MaxAddressBooksPerCard),
             566 => Some(Property::MaxAge),
             576 => Some(Property::MaxAllowedPacket),
             115 => Some(Property::MaxApiKeys),
@@ -2809,6 +2820,7 @@ impl EnumImpl for Property {
             157 => Some(Property::MaxAttendees),
             425 => Some(Property::MaxAuthFailures),
             160 => Some(Property::MaxCalendars),
+            949 => Some(Property::MaxCalendarsPerEvent),
             201 => Some(Property::MaxChangesHistory),
             426 => Some(Property::MaxConcurrent),
             439 => Some(Property::MaxConcurrentRequests),
@@ -2824,6 +2836,8 @@ impl EnumImpl for Property {
             161 => Some(Property::MaxEvents),
             547 => Some(Property::MaxFailures),
             378 => Some(Property::MaxFiles),
+            952 => Some(Property::MaxFlagLength),
+            951 => Some(Property::MaxFlagsPerEmail),
             379 => Some(Property::MaxFolders),
             715 => Some(Property::MaxHeaderSize),
             159 => Some(Property::MaxICalendarSize),
@@ -2835,6 +2849,7 @@ impl EnumImpl for Property {
             355 => Some(Property::MaxMailboxDepth),
             356 => Some(Property::MaxMailboxNameLength),
             364 => Some(Property::MaxMailboxes),
+            950 => Some(Property::MaxMailboxesPerEmail),
             365 => Some(Property::MaxMaskedAddresses),
             718 => Some(Property::MaxMatchVars),
             354 => Some(Property::MaxMessageSize),
@@ -3272,7 +3287,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 948;
+    const COUNT: usize = 953;
 }
 
 impl serde::Serialize for Property {

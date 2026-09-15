@@ -294,6 +294,19 @@ impl ResourceStore {
         self.total == 0
     }
 
+    pub fn count(&self, is_container: bool) -> usize {
+        if self.unified_id_space {
+            self.iter()
+                .filter(|resource| resource.is_container() == is_container)
+                .count()
+        } else {
+            self.chunks[self.run(is_container)]
+                .iter()
+                .map(|chunk| chunk.records.len())
+                .sum()
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
         self.chunks.iter().flat_map(|chunk| {
             chunk
@@ -651,5 +664,53 @@ mod tests {
 
         assert!(store.find(0, true).is_some(), "container must be findable");
         assert!(store.find(0, false).is_none(), "not an item");
+    }
+
+    fn file(builder: &mut ResourceChunkBuilder, document_id: u32, size: u32) {
+        let name = builder.push_str("node");
+        let acls = builder.push_acls(&[]);
+        builder.records.push(GroupwareResource {
+            document_id,
+            data: GroupwareResourceMetadata::File {
+                name,
+                size,
+                parent_id: 0,
+                acls,
+                etag: document_id,
+            },
+        });
+    }
+
+    #[test]
+    fn count_split_id_space() {
+        let mut containers = ResourceChunkBuilder::with_capacity(2);
+        calendar(&mut containers, 0, "default");
+        calendar(&mut containers, 1, "work");
+        let mut items = ResourceChunkBuilder::with_capacity(3);
+        event(&mut items, 0, 0, "a.ics");
+        event(&mut items, 1, 0, "b.ics");
+        event(&mut items, 2, 1, "c.ics");
+
+        let store = ResourceStore::from_sorted(vec![containers], vec![items], false);
+        assert_eq!(store.count(true), 2);
+        assert_eq!(store.count(false), 3);
+
+        let empty = ResourceStore::from_sorted(Vec::new(), Vec::new(), false);
+        assert_eq!(empty.count(true), 0);
+        assert_eq!(empty.count(false), 0);
+    }
+
+    #[test]
+    fn count_unified_id_space() {
+        let mut nodes = ResourceChunkBuilder::with_capacity(4);
+        file(&mut nodes, 0, NO_ID);
+        file(&mut nodes, 1, 10);
+        file(&mut nodes, 2, NO_ID);
+        file(&mut nodes, 3, 20);
+        file(&mut nodes, 4, 0);
+
+        let store = ResourceStore::from_sorted(vec![nodes], Vec::new(), true);
+        assert_eq!(store.count(true), 2);
+        assert_eq!(store.count(false), 3);
     }
 }

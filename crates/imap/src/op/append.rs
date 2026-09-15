@@ -4,19 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ImapContext, ToModSeq};
+use super::{ImapContext, IntoImapError, ToModSeq};
 use crate::core::{MailboxId, Row, SelectedMailbox, Session, SessionData};
 use common::{
     MAX_RECEIVED_AT, auth::BuildAccessToken, ipc::PushNotification, network::SessionStream,
 };
-use email::message::ingest::{EmailIngest, IngestEmail, IngestSource};
+use email::{
+    cache::MessageCacheFetch,
+    message::ingest::{EmailIngest, IngestEmail, IngestSource},
+};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{append::Arguments, select::HighestModSeq},
     receiver::Request,
 };
 use mail_parser::MessageParser;
-use registry::schema::enums::Permission;
+use registry::schema::enums::{Permission, StorageQuota};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::OwnedSemaphorePermit;
 use types::{
@@ -128,11 +131,52 @@ impl<T: SessionStream> SessionData<T> {
                 .build()
         };
 
+        // RFC 9738 makes APPEND atomic, so the whole batch must fit in the email quota
+        if arguments.messages.len() > 1 {
+            let account = self
+                .server
+                .account(account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?;
+            if let Some(limit) = self
+                .server
+                .object_quota_limit(&account, StorageQuota::MaxEmails)
+            {
+                let used = self
+                    .server
+                    .count_emails(account_id, limit)
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?;
+                self.server
+                    .assert_object_quota(
+                        &account,
+                        StorageQuota::MaxEmails,
+                        arguments.messages.len(),
+                        || used,
+                    )
+                    .map_err(|err| {
+                        err.details("Quota exceeded.")
+                            .code(ResponseCode::OverQuota)
+                            .id(arguments.tag.clone())
+                    })?;
+            }
+        }
+
         // Append messages
         let mut response = StatusResponse::completed(Command::Append);
         let mut created = Vec::with_capacity(arguments.messages.len());
         let mut last_change_id = None;
+        let limits = &self.server.core.email.limits;
         for message in arguments.messages {
+            let keywords = message
+                .flags
+                .into_iter()
+                .map(Keyword::from)
+                .collect::<Vec<_>>();
+            if let Err(err) = limits.validate_email(1, &keywords) {
+                return Err(err.into_imap_error().id(arguments.tag));
+            }
+
             let received_at = message
                 .received_at
                 .map(|received_at| received_at.clamp(0, MAX_RECEIVED_AT as i64) as u64);
@@ -145,7 +189,7 @@ impl<T: SessionStream> SessionData<T> {
                     blob_hash: None,
                     access_token: &access_token,
                     mailbox_ids: vec![mailbox_id],
-                    keywords: message.flags.into_iter().map(Keyword::from).collect(),
+                    keywords,
                     received_at,
                     source: IngestSource::Imap {
                         train_classifier: true,
@@ -167,8 +211,7 @@ impl<T: SessionStream> SessionData<T> {
                 Err(err) => {
                     return Err(
                         if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota)) {
-                            err.details("Disk quota exceeded.")
-                                .code(ResponseCode::OverQuota)
+                            err.details("Quota exceeded.").code(ResponseCode::OverQuota)
                         } else if err.matches(trc::EventType::Limit(trc::LimitEvent::TenantQuota)) {
                             err.details("Organization disk quota exceeded.")
                                 .code(ResponseCode::OverQuota)

@@ -11,6 +11,7 @@ use crate::{
     },
     blob::download::BlobDownload,
     changes::state::JmapCacheState,
+    file::FileNodeQuota,
 };
 use common::{GroupwareResources, Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
@@ -86,6 +87,14 @@ impl FileNodeSet for Server {
             .unwrap_or(false);
         let mut pending_names: AHashMap<(ParentRef, String), Option<u32>> = AHashMap::new();
         let mut implicit_destroys: AHashSet<u32> = AHashSet::new();
+
+        // Obtain quota
+        let quota = if request.has_creates() {
+            let account = self.account(account_id).await.caused_by(trc::location!())?;
+            FileNodeQuota::new(self, &account, &cache)
+        } else {
+            FileNodeQuota::unlimited()
+        };
 
         // Process creates
         let mut batch = BatchBuilder::new();
@@ -291,6 +300,16 @@ impl FileNodeSet for Server {
                 self.refresh_acls(&file_node.acls, None)
                     .await
                     .caused_by(trc::location!())?;
+            }
+
+            // Validate quota
+            if let Err(err) = quota.validate(
+                file_node.file.is_none(),
+                created_slots.len(),
+                created_folders.len(),
+            ) {
+                response.not_created.append(id, err);
+                continue 'create;
             }
 
             // Insert record

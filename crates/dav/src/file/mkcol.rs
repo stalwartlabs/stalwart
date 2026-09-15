@@ -23,6 +23,7 @@ use dav_proto::{
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use store::write::{BatchBuilder, now};
 use trc::AddContext;
 use types::{
@@ -68,6 +69,14 @@ impl FileMkColRequestHandler for Server {
             access_token.is_member(account_id),
             resource.resource.0,
             Acl::AddItems,
+        )?;
+
+        // Validate quota
+        self.assert_object_quota(
+            &*self.account(account_id).await?,
+            StorageQuota::MaxFolders,
+            1,
+            || resources.resources.count(true),
         )?;
 
         // Validate headers

@@ -8,6 +8,7 @@ use super::assert_is_unique_uid;
 use crate::{
     DavError, DavMethod,
     common::{
+        assert_parent_limit,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -22,6 +23,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use store::write::{BatchBuilder, PendingId};
 use store::{
     ValueKey,
@@ -465,16 +467,16 @@ async fn copy_card(
     let mut batch = BatchBuilder::new();
 
     // Validate UID
+    let to_resources = server
+        .fetch_groupware_resources(
+            access_token.account_id(),
+            to_account_id,
+            SyncCollection::AddressBook,
+        )
+        .await
+        .caused_by(trc::location!())?;
     assert_is_unique_uid(
-        server
-            .fetch_groupware_resources(
-                access_token.account_id(),
-                to_account_id,
-                SyncCollection::AddressBook,
-            )
-            .await
-            .caused_by(trc::location!())?
-            .as_ref(),
+        to_resources.as_ref(),
         to_addressbook_id,
         Some(card.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
     )?;
@@ -487,6 +489,11 @@ async fn copy_card(
             name: new_name.to_string(),
             parent_id: to_addressbook_id,
         });
+        assert_parent_limit(
+            card.inner.names.len(),
+            new_card.names.len(),
+            server.core.groupware.max_address_books_per_card,
+        )?;
         new_card
             .update_meta(
                 access_token.account_tenant_ids(),
@@ -519,6 +526,15 @@ async fn copy_card(
         let new_content = content_
             .deserialize::<ContactCardContent>()
             .caused_by(trc::location!())?;
+
+        if to_document_id.is_none() {
+            server.assert_object_quota(
+                &*server.account(to_account_id).await?,
+                StorageQuota::MaxContactCards,
+                1,
+                || to_resources.resources.count(false),
+            )?;
+        }
 
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::ContactCard);
         new_card
@@ -697,6 +713,25 @@ async fn move_card(
             .deserialize::<ContactCardContent>()
             .caused_by(trc::location!())?;
 
+        let to_account = server.account(to_account_id).await?;
+        if to_document_id.is_none()
+            && server
+                .object_quota_limit(&to_account, StorageQuota::MaxContactCards)
+                .is_some()
+        {
+            let to_resources = server
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    to_account_id,
+                    SyncCollection::AddressBook,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            server.assert_object_quota(&to_account, StorageQuota::MaxContactCards, 1, || {
+                to_resources.resources.count(false)
+            })?;
+        }
+
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::ContactCard);
         new_card
             .insert(
@@ -842,6 +877,48 @@ async fn copy_container(
         .deserialize::<AddressBook>()
         .caused_by(trc::location!())?;
 
+    // Validate quota
+    let to_account = server.account(to_account_id).await?;
+    let has_container_quota = to_document_id.is_none()
+        && server
+            .object_quota_limit(&to_account, StorageQuota::MaxAddressBooks)
+            .is_some();
+    let has_item_quota = from_account_id != to_account_id
+        && server
+            .object_quota_limit(&to_account, StorageQuota::MaxContactCards)
+            .is_some();
+    let to_resources = if has_container_quota || has_item_quota {
+        Some(
+            server
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    to_account_id,
+                    SyncCollection::AddressBook,
+                )
+                .await
+                .caused_by(trc::location!())?,
+        )
+    } else {
+        None
+    };
+    if has_container_quota && let Some(to_resources) = &to_resources {
+        server.assert_object_quota(&to_account, StorageQuota::MaxAddressBooks, 1, || {
+            to_resources.resources.count(true)
+        })?;
+    }
+    let deleted_cards = match &to_resources {
+        Some(to_resources) if has_item_quota => to_children_ids
+            .iter()
+            .filter(|document_id| {
+                to_resources
+                    .resources
+                    .find(**document_id, false)
+                    .is_some_and(|item| item.child_names().len() <= 1)
+            })
+            .count(),
+        _ => 0,
+    };
+
     // Prepare write batch
     let mut batch = BatchBuilder::new();
 
@@ -921,6 +998,7 @@ async fn copy_container(
 
     // Copy children
     let mut required_space = 0;
+    let mut created_cards = 0;
     for from_child_document_id in from_children_ids {
         if let Some(card_) = server
             .store()
@@ -969,6 +1047,11 @@ async fn copy_container(
                 }
 
                 new_card.names.push(new_name);
+                assert_parent_limit(
+                    card.inner.names.len(),
+                    new_card.names.len(),
+                    server.core.groupware.max_address_books_per_card,
+                )?;
                 new_card
                     .update_meta(
                         access_token.account_tenant_ids(),
@@ -1014,6 +1097,7 @@ async fn copy_container(
                     batch.reserve_document_id(to_account_id, Collection::ContactCard);
                 new_card.names = vec![new_name];
                 required_space += new_card.size as u64;
+                created_cards += 1;
                 new_card
                     .insert(
                         new_content,
@@ -1029,12 +1113,21 @@ async fn copy_container(
         }
     }
 
+    if has_item_quota
+        && created_cards > deleted_cards
+        && let Some(to_resources) = &to_resources
+    {
+        server.assert_object_quota(
+            &to_account,
+            StorageQuota::MaxContactCards,
+            created_cards - deleted_cards,
+            || to_resources.resources.count(false),
+        )?;
+    }
+
     if from_account_id != to_account_id && required_space > 0 {
         server
-            .has_available_quota(
-                server.account(to_account_id).await?.as_ref(),
-                required_space,
-            )
+            .has_available_quota(&to_account, required_space)
             .await?;
     }
 

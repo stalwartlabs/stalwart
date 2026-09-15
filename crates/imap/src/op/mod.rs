@@ -5,6 +5,7 @@
  */
 
 use ::store::query::log::Query;
+use common::config::mailstore::limits::EmailLimitError;
 use compact_str::CompactString;
 use imap_proto::ResponseCode;
 
@@ -41,6 +42,19 @@ trait FromModSeq {
 
 trait ToModSeq {
     fn to_modseq(&self) -> u64;
+}
+
+trait IntoImapError {
+    fn into_imap_error(self) -> trc::Error;
+}
+
+impl IntoImapError for EmailLimitError {
+    fn into_imap_error(self) -> trc::Error {
+        trc::ImapEvent::Error
+            .into_err()
+            .details(self.to_string())
+            .code(ResponseCode::Limit)
+    }
 }
 
 impl FromModSeq for Query {

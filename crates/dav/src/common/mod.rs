@@ -32,6 +32,7 @@ use groupware::{
     },
     file::{ArchivedFileNode, FileNode},
 };
+use hyper::StatusCode;
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
 use store::write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder};
@@ -44,6 +45,18 @@ pub mod acl;
 pub mod lock;
 pub mod propfind;
 pub mod uri;
+
+pub(crate) fn assert_parent_limit(
+    prev_count: usize,
+    count: usize,
+    max: usize,
+) -> crate::Result<()> {
+    if count <= max || count <= prev_count {
+        Ok(())
+    } else {
+        Err(crate::DavError::Code(StatusCode::FORBIDDEN))
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct DavQuery<'x> {

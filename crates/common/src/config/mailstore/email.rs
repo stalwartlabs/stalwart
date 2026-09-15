@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::{config::mailstore::limits::EmailLimits, storage::ObjectQuota};
 use ahash::{AHashMap, AHashSet};
 use nlp::language::Language;
 use registry::{
@@ -29,8 +30,6 @@ use store::{
 use types::special_use::SpecialUse;
 use utils::cron::SimpleCron;
 
-use crate::storage::ObjectQuota;
-
 #[derive(Clone)]
 pub struct EmailConfig {
     pub default_language: Language,
@@ -39,6 +38,7 @@ pub struct EmailConfig {
 
     pub mailbox_max_depth: usize,
     pub mailbox_name_max_len: usize,
+    pub limits: EmailLimits,
 
     pub mail_attachments_max_size: usize,
     pub mail_max_size: usize,
@@ -265,6 +265,11 @@ impl EmailConfig {
                 .unwrap_or(Language::English),
             mailbox_max_depth: email.max_mailbox_depth as usize,
             mailbox_name_max_len: email.max_mailbox_name_length as usize,
+            limits: EmailLimits {
+                mailboxes_per_email: email.max_mailboxes_per_email as usize,
+                keywords_per_email: email.max_flags_per_email as usize,
+                keyword_length: email.max_flag_length as usize,
+            },
             mail_attachments_max_size: email.max_attachment_size as usize,
             mail_max_size: email.max_message_size as usize,
             mail_autoexpunge_after: dr.expunge_trash_after.map(|d| d.into_inner().as_secs()),

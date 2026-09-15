@@ -24,6 +24,7 @@ use groupware::{
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use registry::schema::enums::StorageQuota;
 use store::write::{BatchBuilder, now};
 use store::{
     ValueKey,
@@ -241,13 +242,16 @@ impl FileUpdateRequestHandler for Server {
             )
             .await?;
 
+            // Validate object quota
+            let account = self.account(account_id).await?;
+            self.assert_object_quota(&account, StorageQuota::MaxFiles, 1, || {
+                resources.resources.count(false)
+            })?;
+
             // Validate quota
             if !bytes.is_empty() {
-                self.has_available_quota(
-                    self.account(account_id).await?.as_ref(),
-                    bytes.len() as u64,
-                )
-                .await?;
+                self.has_available_quota(&account, bytes.len() as u64)
+                    .await?;
             }
 
             // Write blob
