@@ -12,6 +12,7 @@ use common::{
     config::groupware::CalendarTemplateVariable,
     network::{ServerInstance, stream::NullIo},
 };
+use compact_str::format_compact;
 use groupware::{
     calendar::itip::ItipIngest,
     scheduling::{
@@ -245,7 +246,7 @@ async fn send_imip(
                         DocumentId = document_id,
                         From = from,
                         To = to,
-                        Reason = format!("Server rejected MAIL-FROM: {}", error.trim()),
+                        Reason = format_compact!("Server rejected MAIL-FROM: {}", error.trim()),
                     );
                     return;
                 }
@@ -265,7 +266,7 @@ async fn send_imip(
                         DocumentId = document_id,
                         From = from,
                         To = to,
-                        Reason = format!("Server rejected RCPT-TO: {}", error.trim()),
+                        Reason = format_compact!("Server rejected RCPT-TO: {}", error.trim()),
                     );
                     return;
                 }
@@ -289,7 +290,7 @@ async fn send_imip(
                         To = to,
                         AccountId = account_id,
                         DocumentId = document_id,
-                        Reason = format!(
+                        Reason = format_compact!(
                             "Server rejected DATA: {}",
                             std::str::from_utf8(&response).unwrap().trim()
                         ),

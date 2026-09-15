@@ -46,6 +46,7 @@ use crate::{
     vacation::{get::VacationResponseGet, set::VacationResponseSet},
 };
 use common::{Server, auth::AccessToken};
+use compact_str::format_compact;
 use http_proto::HttpSessionData;
 use jmap_proto::{
     request::{
@@ -111,7 +112,7 @@ impl RequestHandler for Server {
                     response.push_response(
                         call.id,
                         MethodName::error(),
-                        trc::JmapEvent::UnknownMethod.into_err().details(format!(
+                        trc::JmapEvent::UnknownMethod.into_err().details(format_compact!(
                             "Method {} requires capability {} which is not present in the \"using\" property.",
                             call.name,
                             capability.as_str()

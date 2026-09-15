@@ -6,6 +6,7 @@
 
 use super::{SqlDirectory, SqlMappings};
 use crate::{Account, Credentials, Recipient, core::secret::verify_secret_hash};
+use compact_str::CompactString;
 use store::{NamedRows, Rows, Value};
 use trc::AddContext;
 use utils::sanitize_email;
@@ -26,7 +27,7 @@ impl SqlDirectory {
             return Err(trc::AuthEvent::Failed
                 .into_err()
                 .details("Empty secret rejected")
-                .ctx(trc::Key::AccountName, username.to_string()));
+                .ctx(trc::Key::AccountName, CompactString::from(username)));
         }
 
         let Recipient::Account(mut account) = self.mappings.row_to_account(
@@ -38,7 +39,7 @@ impl SqlDirectory {
             return Err(trc::AuthEvent::Failed
                 .into_err()
                 .details("SQL login query did not return an account")
-                .ctx(trc::Key::AccountName, username.to_string()));
+                .ctx(trc::Key::AccountName, CompactString::from(username)));
         };
 
         // Validate secret
@@ -47,13 +48,13 @@ impl SqlDirectory {
                 return Err(trc::AuthEvent::Failed
                     .into_err()
                     .details("Invalid credentials")
-                    .ctx(trc::Key::AccountName, username.to_string()));
+                    .ctx(trc::Key::AccountName, CompactString::from(username)));
             }
         } else {
             return Err(trc::AuthEvent::Error
                 .into_err()
                 .details("Account does not have a secret")
-                .ctx(trc::Key::AccountName, username.to_string()));
+                .ctx(trc::Key::AccountName, CompactString::from(username)));
         }
 
         // Obtain members

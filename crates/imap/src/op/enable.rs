@@ -6,6 +6,7 @@
 
 use crate::core::Session;
 use common::network::SessionStream;
+use compact_str::format_compact;
 use imap_proto::{
     Command, StatusResponse,
     protocol::{ProtocolVersion, capability::Capability, enable},
@@ -64,7 +65,7 @@ impl<T: SessionStream> Session<T> {
             Details = response
                 .enabled
                 .iter()
-                .map(|c| trc::Value::from(format!("{c:?}")))
+                .map(|c| trc::Value::from(format_compact!("{c:?}")))
                 .collect::<Vec<_>>(),
             Elapsed = op_start.elapsed()
         );

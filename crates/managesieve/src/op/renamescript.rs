@@ -6,6 +6,7 @@
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use compact_str::format_compact;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
 use registry::schema::enums::Permission;
@@ -54,7 +55,9 @@ impl<T: SessionStream> Session<T> {
         if self.validate_name(account_id, &new_name).await?.is_some() {
             return Err(trc::ManageSieveEvent::Error
                 .into_err()
-                .details(format!("A sieve script with name '{name}' already exists.",))
+                .details(format_compact!(
+                    "A sieve script with name '{name}' already exists.",
+                ))
                 .code(ResponseCode::AlreadyExists));
         }
 

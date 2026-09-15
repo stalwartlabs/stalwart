@@ -169,7 +169,7 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
                                 LocalPort = local_port,
                                 RemoteIp = session.remote_ip,
                                 RemotePort = session.remote_port,
-                                Reason = err.to_string(),
+                                Reason = err.to_compact_string(),
                             );
 
                             return;

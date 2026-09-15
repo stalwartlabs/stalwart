@@ -9,6 +9,7 @@ use super::{
     acme::resolver::{IsTlsAlpnChallenge, build_acme_static_resolver},
 };
 use crate::{Inner, Server};
+use compact_str::{CompactString, ToCompactString};
 use rustls::{
     SupportedProtocolVersion,
     server::{ClientHello, ResolvesServerCert},
@@ -75,7 +76,7 @@ impl CertificateResolver {
                     .or_else(|| {
                         trc::event!(
                             Tls(trc::TlsEvent::CertificateNotFound),
-                            Hostname = name.to_string(),
+                            Hostname = CompactString::from(name),
                         );
                         certs.get("*")
                     })
@@ -132,7 +133,7 @@ impl TcpAcceptor {
                                         trc::event!(
                                             Acme(trc::AcmeEvent::ClientSuppliedSni),
                                             ListenerId = instance.id.clone(),
-                                            Domain = domain.to_string(),
+                                            Domain = CompactString::from(domain),
                                             Result = key.is_some(),
                                         );
 
@@ -164,7 +165,7 @@ impl TcpAcceptor {
                                         trc::event!(
                                             Acme(trc::AcmeEvent::TlsAlpnError),
                                             ListenerId = instance.id.clone(),
-                                            Reason = err.to_string(),
+                                            Reason = err.to_compact_string(),
                                         );
                                     }
                                 }
@@ -178,7 +179,7 @@ impl TcpAcceptor {
                             trc::event!(
                                 Tls(trc::TlsEvent::HandshakeError),
                                 ListenerId = instance.id.clone(),
-                                Reason = err.to_string(),
+                                Reason = err.to_compact_string(),
                             );
                         }
                     }

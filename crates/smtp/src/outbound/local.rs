@@ -17,6 +17,7 @@ use crate::{
     scripts::notify_flags,
 };
 use common::Server;
+use compact_str::CompactString;
 use email::message::delivery::{IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery};
 use smtp_proto::Response;
 use trc::SieveEvent;
@@ -143,7 +144,7 @@ impl MessageWrapper {
                         .message
                         .recipients
                         .into_iter()
-                        .map(|r| trc::Value::from(r.address().to_string()))
+                        .map(|r| trc::Value::from(CompactString::from(r.address())))
                         .collect::<Vec<_>>(),
                 );
             }

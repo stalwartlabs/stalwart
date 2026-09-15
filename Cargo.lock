@@ -1316,6 +1316,7 @@ dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
  "bincode",
+ "bytes",
  "calcard",
  "chrono",
  "compact_str",
@@ -2147,6 +2148,7 @@ dependencies = [
  "ahash",
  "argon2 0.6.0",
  "base64 0.23.1",
+ "compact_str",
  "deadpool",
  "jsonwebtoken",
  "ldap3",
@@ -3316,6 +3318,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "common",
+ "compact_str",
  "dav",
  "directory",
  "email",
@@ -4176,6 +4179,7 @@ dependencies = [
  "calcard",
  "chrono",
  "common",
+ "compact_str",
  "directory",
  "email",
  "futures-util",
@@ -5995,6 +5999,7 @@ name = "pop3"
 version = "0.16.21"
 dependencies = [
  "common",
+ "compact_str",
  "directory",
  "email",
  "imap",
@@ -6817,6 +6822,7 @@ name = "registry"
 version = "0.16.21"
 dependencies = [
  "ahash",
+ "compact_str",
  "hashify",
  "jmap-tools",
  "lz4_flex 0.14.0",
@@ -7720,6 +7726,7 @@ dependencies = [
  "base64 0.23.1",
  "calcard",
  "common",
+ "compact_str",
  "dns-update",
  "email",
  "groupware",
@@ -9137,6 +9144,7 @@ dependencies = [
  "compact_str",
  "event_macro",
  "hashify",
+ "itoa",
  "mail-auth",
  "mail-parser",
  "parking_lot",

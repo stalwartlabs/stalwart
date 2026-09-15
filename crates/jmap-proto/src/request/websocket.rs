@@ -11,6 +11,7 @@ use crate::{
     request::{Call, deserialize::DeserializeArguments},
     response::{Response, ResponseMethod, serialize::serialize_hex, status::PushObject},
 };
+use compact_str::format_compact;
 use serde::{
     Deserialize, Deserializer,
     de::{self, MapAccess, Visitor},
@@ -115,7 +116,7 @@ impl<'x> WebSocketMessage<'x> {
                 Ok(msg) => Ok(msg),
                 Err(err) => Err(trc::JmapEvent::NotRequest
                     .into_err()
-                    .details(format!("Invalid WebSocket JMAP request {err}"))),
+                    .details(format_compact!("Invalid WebSocket JMAP request {err}"))),
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())

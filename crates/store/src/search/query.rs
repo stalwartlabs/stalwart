@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use ahash::{AHashMap, AHashSet};
+use compact_str::format_compact;
 use nlp::language::Language;
 use roaring::{RoaringBitmap, RoaringTreemap};
 use std::borrow::Cow;
@@ -172,7 +173,9 @@ impl Store {
                 filter @ (SearchFilter::Not | SearchFilter::DocumentSet(_)) => {
                     return Err(trc::StoreEvent::NotSupported
                         .into_err()
-                        .details(format!("Unsupported global query filter {filter:?}")));
+                        .details(format_compact!(
+                            "Unsupported global query filter {filter:?}"
+                        )));
                 }
             }
         }

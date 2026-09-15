@@ -6,6 +6,7 @@
 
 use crate::{Core, Server};
 use base64::{Engine, engine::general_purpose};
+use compact_str::{CompactString, ToCompactString};
 use dns_update::{
     DnsRecord, DnsRecordType, TsigAlgorithm,
     providers::{ovh::OvhEndpoint, rfc2136::DnsAddress},
@@ -1122,7 +1123,7 @@ impl DnsUpdater {
     ) -> Result<(), String> {
         let record_values = records
             .iter()
-            .map(|r| trc::Value::String(r.to_string().into()))
+            .map(|r| trc::Value::String(r.to_compact_string()))
             .collect::<Vec<_>>();
 
         if let Err(err) = self
@@ -1141,8 +1142,8 @@ impl DnsUpdater {
 
         trc::event!(
             Dns(DnsEvent::RecordCreated),
-            Hostname = name.to_string(),
-            Details = origin.to_string(),
+            Hostname = CompactString::from(name),
+            Details = CompactString::from(origin),
             Type = record_type.as_str(),
             Value = record_values,
         );
@@ -1158,7 +1159,7 @@ impl DnsUpdater {
     ) -> Result<(), String> {
         let record_values = records
             .iter()
-            .map(|r| trc::Value::String(r.to_string().into()))
+            .map(|r| trc::Value::String(r.to_compact_string()))
             .collect::<Vec<_>>();
 
         if let Err(err) = self
@@ -1177,8 +1178,8 @@ impl DnsUpdater {
 
         trc::event!(
             Dns(DnsEvent::RecordCreated),
-            Hostname = name.to_string(),
-            Details = origin.to_string(),
+            Hostname = CompactString::from(name),
+            Details = CompactString::from(origin),
             Type = record_type.as_str(),
             Value = record_values,
         );
@@ -1203,7 +1204,7 @@ impl DnsUpdater {
     ) -> Result<(), String> {
         let record_values = records
             .iter()
-            .map(|r| trc::Value::String(r.to_string().into()))
+            .map(|r| trc::Value::String(r.to_compact_string()))
             .collect::<Vec<_>>();
 
         match self
@@ -1215,9 +1216,9 @@ impl DnsUpdater {
             Err(err) => {
                 trc::event!(
                     Dns(DnsEvent::RecordDeletionFailed),
-                    Hostname = name.to_string(),
-                    Reason = err.to_string(),
-                    Details = origin.to_string(),
+                    Hostname = CompactString::from(name),
+                    Reason = err.to_compact_string(),
+                    Details = CompactString::from(origin),
                     Type = record_type.as_str(),
                     Value = record_values,
                 );
@@ -1250,22 +1251,22 @@ impl DnsUpdater {
                     } else {
                         trc::event!(
                             Dns(DnsEvent::RecordNotPropagated),
-                            Hostname = name.to_string(),
-                            Details = origin.to_string(),
-                            Result = result.to_string(),
+                            Hostname = CompactString::from(name),
+                            Details = CompactString::from(origin),
+                            Result = CompactString::from(result),
                             Type = DnsRecordType::TXT.as_str(),
-                            Value = expected.to_string(),
+                            Value = CompactString::from(expected),
                         );
                     }
                 }
                 Err(err) => {
                     trc::event!(
                         Dns(DnsEvent::RecordLookupFailed),
-                        Hostname = name.to_string(),
-                        Details = origin.to_string(),
-                        Reason = err.to_string(),
+                        Hostname = CompactString::from(name),
+                        Details = CompactString::from(origin),
+                        Reason = err.to_compact_string(),
                         Type = DnsRecordType::TXT.as_str(),
-                        Value = expected.to_string(),
+                        Value = CompactString::from(expected),
                     );
                 }
             }
@@ -1276,18 +1277,18 @@ impl DnsUpdater {
         if did_propagate {
             trc::event!(
                 Dns(DnsEvent::RecordPropagated),
-                Hostname = name.to_string(),
-                Details = origin.to_string(),
+                Hostname = CompactString::from(name),
+                Details = CompactString::from(origin),
                 Type = DnsRecordType::TXT.as_str(),
-                Value = expected.to_string(),
+                Value = CompactString::from(expected),
             );
         } else {
             trc::event!(
                 Dns(DnsEvent::RecordPropagationTimeout),
-                Hostname = name.to_string(),
-                Details = origin.to_string(),
+                Hostname = CompactString::from(name),
+                Details = CompactString::from(origin),
                 Type = DnsRecordType::TXT.as_str(),
-                Value = expected.to_string(),
+                Value = CompactString::from(expected),
             );
         }
         did_propagate

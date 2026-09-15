@@ -4,27 +4,66 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use ahash::AHashSet;
+use compact_str::ToCompactString;
+#[cfg(target_os = "linux")]
 use std::io::Write;
+use std::thread::Builder;
 use trc::ipc::subscriber::SubscriberBuilder;
-use trc::{Event, EventDetails, Level, TelemetryEvent};
+use trc::{Event, EventDetails, Level, TelemetryEvent, event::KeySet};
 
 pub(crate) fn spawn_journald_tracer(builder: SubscriberBuilder, subscriber: Subscriber) {
     let (_, mut rx) = builder.register();
-    tokio::spawn(async move {
-        while let Some(events) = rx.recv().await {
-            for event in events {
-                subscriber.send_event(&event);
+    if let Err(err) = Builder::new()
+        .name("stalwart-journald".to_string())
+        .spawn(move || {
+            let mut buf = Vec::with_capacity(1024);
+            let mut lost_events = 0u64;
+            let mut is_failing = false;
+
+            while let Some(events) = rx.blocking_recv() {
+                for event in events {
+                    buf.clear();
+                    subscriber.encode_event(&event, &mut buf);
+
+                    match subscriber.send_payload(&buf) {
+                        Ok(_) => {
+                            if is_failing {
+                                is_failing = false;
+                                trc::event!(
+                                    Telemetry(TelemetryEvent::JournalError),
+                                    Details = "Resumed sending events to journald",
+                                    Total = std::mem::take(&mut lost_events),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            lost_events += 1;
+                            if !is_failing {
+                                is_failing = true;
+                                trc::event!(
+                                    Telemetry(TelemetryEvent::JournalError),
+                                    Details = "Failed to send event to journald",
+                                    Reason = err.to_compact_string(),
+                                );
+                            }
+                        }
+                    }
+                }
             }
-        }
-    });
+        })
+    {
+        trc::event!(
+            Telemetry(TelemetryEvent::JournalError),
+            Details = "Failed to spawn journald writer thread",
+            Reason = err.to_compact_string(),
+        );
+    }
 }
 
 impl Subscriber {
-    fn send_event(&self, event: &Event<EventDetails>) {
-        let mut buf = Vec::with_capacity(256);
+    fn encode_event(&self, event: &Event<EventDetails>, buf: &mut Vec<u8>) {
         put_field_wellformed(
-            &mut buf,
+            buf,
             "PRIORITY",
             &[match event.inner.level {
                 Level::Error => self.priority_mappings.error as u8,
@@ -34,34 +73,24 @@ impl Subscriber {
                 Level::Trace | Level::Disable => self.priority_mappings.trace as u8,
             }],
         );
-        put_field_length_encoded(&mut buf, "SYSLOG_IDENTIFIER", |buf| {
-            write!(buf, "{}", self.syslog_identifier).unwrap()
+        put_field_length_encoded(buf, "SYSLOG_IDENTIFIER", |buf| {
+            buf.extend_from_slice(self.syslog_identifier.as_bytes())
         });
-        put_field_length_encoded(&mut buf, "MESSAGE", |buf| {
-            write!(buf, "{}", event.inner.typ.description()).unwrap()
+        put_field_length_encoded(buf, "MESSAGE", |buf| {
+            buf.extend_from_slice(event.inner.typ.description().as_bytes())
         });
 
-        let mut seen_keys = AHashSet::new();
+        let mut seen_keys = KeySet::default();
         for (key, value) in event.keys.iter().chain(
             event
                 .inner
                 .span
                 .as_ref()
-                .map_or(([]).iter(), |span| span.keys.iter()),
+                .map_or(&[][..], |span| span.keys.as_slice()),
         ) {
             if seen_keys.insert(*key) {
-                put_field_length_encoded(&mut buf, key.as_str(), |buf| {
-                    write!(buf, "{value}").unwrap()
-                });
+                put_field_length_encoded(buf, key.as_str(), |buf| value.write_display(buf));
             }
-        }
-
-        if let Err(err) = self.send_payload(&buf) {
-            trc::event!(
-                Telemetry(TelemetryEvent::JournalError),
-                Details = "Failed to send event to journald",
-                Reason = err.to_string()
-            );
         }
     }
 }
@@ -325,9 +354,7 @@ impl std::fmt::Debug for Subscriber {
 /// not delete from `buf`, but may append arbitrary data.  This function then determines the length
 /// of the data written and adds it in the appropriate place in `buf`.
 fn put_field_length_encoded(buf: &mut Vec<u8>, name: &str, write_value: impl FnOnce(&mut Vec<u8>)) {
-    for ch in name.as_bytes() {
-        buf.push(ch.to_ascii_uppercase());
-    }
+    buf.extend(name.bytes().map(|ch| ch.to_ascii_uppercase()));
     buf.push(b'\n');
     buf.extend_from_slice(&[0; 8]); // Length tag, to be populated
     let start = buf.len();

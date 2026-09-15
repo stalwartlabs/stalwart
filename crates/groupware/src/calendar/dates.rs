@@ -184,7 +184,7 @@ impl CalendarEventData {
                     .into_iter()
                     .map(|e| e.error.to_compact_string())
                     .collect::<Vec<_>>(),
-                Details = ical.to_string(),
+                Details = ical.to_compact_string(),
                 Limit = max_expansions,
             );
         }

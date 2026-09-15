@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use compact_str::ToCompactString;
+use compact_str::{CompactString, ToCompactString};
 use http_body_util::BodyExt;
 
 use crate::HttpRequest;
@@ -40,9 +40,8 @@ pub async fn fetch_body(
                             v.to_str().unwrap_or_default().to_compact_string().into()
                         ]))
                         .collect::<Vec<_>>(),
-                    Contents = std::str::from_utf8(&bytes)
-                        .unwrap_or("[binary data]")
-                        .to_string(),
+                    Contents =
+                        CompactString::from(std::str::from_utf8(&bytes).unwrap_or("[binary data]")),
                     Size = bytes.len(),
                     Limit = max_size,
                 );
@@ -63,9 +62,7 @@ pub async fn fetch_body(
                 v.to_str().unwrap_or_default().to_compact_string().into()
             ]))
             .collect::<Vec<_>>(),
-        Contents = std::str::from_utf8(&bytes)
-            .unwrap_or("[binary data]")
-            .to_string(),
+        Contents = CompactString::from(std::str::from_utf8(&bytes).unwrap_or("[binary data]")),
         Size = bytes.len(),
     );
 

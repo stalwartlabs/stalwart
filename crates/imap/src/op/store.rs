@@ -7,7 +7,7 @@
 use super::ImapContext;
 use crate::core::{SelectedMailbox, Session, SessionData};
 use common::{MessageStoreCache, cache::email::MessageRef, network::SessionStream};
-use compact_str::CompactString;
+use compact_str::{CompactString, format_compact};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::TRASH_ID,
@@ -306,11 +306,11 @@ impl<T: SessionStream> SessionData<T> {
                 SpanId = self.session_id,
                 AccountId = mailbox.id.account_id,
                 MailboxId = mailbox.id.mailbox_id,
-                Type = format!("{:?}", arguments.operation),
+                Type = format_compact!("{:?}", arguments.operation),
                 Details = arguments
                     .keywords
                     .iter()
-                    .map(|c| trc::Value::from(format!("{c:?}")))
+                    .map(|c| trc::Value::from(format_compact!("{c:?}")))
                     .collect::<Vec<_>>(),
                 Elapsed = op_start.elapsed()
             );
@@ -481,11 +481,11 @@ impl<T: SessionStream> SessionData<T> {
                 .iter()
                 .map(|resolved| trc::Value::from(resolved.id))
                 .collect::<Vec<_>>(),
-            Type = format!("{:?}", arguments.operation),
+            Type = format_compact!("{:?}", arguments.operation),
             Details = arguments
                 .keywords
                 .iter()
-                .map(|c| trc::Value::from(format!("{c:?}")))
+                .map(|c| trc::Value::from(format_compact!("{c:?}")))
                 .collect::<Vec<_>>(),
             Elapsed = op_start.elapsed()
         );

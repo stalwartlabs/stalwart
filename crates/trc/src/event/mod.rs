@@ -14,7 +14,10 @@ pub mod enums_impl;
 use compact_str::ToCompactString;
 use std::fmt::Display;
 
-use crate::*;
+use crate::{
+    ipc::{USIZE_BITS, USIZE_BITS_MASK, bitset::Bitset},
+    *,
+};
 
 impl<T> Event<T> {
     pub fn with_capacity(inner: T, capacity: usize) -> Self {
@@ -31,7 +34,7 @@ impl<T> Event<T> {
     pub fn new(inner: T) -> Self {
         Self {
             inner,
-            keys: Vec::with_capacity(5),
+            keys: Vec::new(),
         }
     }
 
@@ -64,6 +67,8 @@ impl<T> Event<T> {
     }
 }
 
+const ERROR_KEYS_CAPACITY: usize = 5;
+
 impl Error {
     #[inline(always)]
     pub fn new(inner: EventType) -> Self {
@@ -71,20 +76,28 @@ impl Error {
     }
 
     #[inline(always)]
+    fn push_key(&mut self, key: Key, value: Value) {
+        if self.0.keys.capacity() == 0 {
+            self.0.keys = Vec::with_capacity(ERROR_KEYS_CAPACITY);
+        }
+        self.0.keys.push((key, value));
+    }
+
+    #[inline(always)]
     pub fn set_ctx(&mut self, key: Key, value: impl Into<Value>) {
-        self.0.keys.push((key, value.into()));
+        self.push_key(key, value.into());
     }
 
     #[inline(always)]
     pub fn ctx(mut self, key: Key, value: impl Into<Value>) -> Self {
-        self.0.keys.push((key, value.into()));
+        self.push_key(key, value.into());
         self
     }
 
     #[inline(always)]
     pub fn ctx_unique(mut self, key: Key, value: impl Into<Value>) -> Self {
         if self.0.keys.iter().all(|(k, _)| *k != key) {
-            self.0.keys.push((key, value.into()));
+            self.push_key(key, value.into());
         }
         self
     }
@@ -242,43 +255,122 @@ impl Event<EventDetails> {
     }
 }
 
+const KEY_SET_WORDS: usize = 4;
+
+#[derive(Default, Clone, Copy)]
+pub struct KeySet([u64; KEY_SET_WORDS]);
+
+impl KeySet {
+    #[inline(always)]
+    pub fn insert(&mut self, key: Key) -> bool {
+        let id = key as usize;
+        match self.0.get_mut(id >> 6) {
+            Some(word) => {
+                let bit = 1u64 << (id & 63);
+                let is_new = *word & bit == 0;
+                *word |= bit;
+                is_new
+            }
+            None => true,
+        }
+    }
+
+    #[inline(always)]
+    pub fn contains(&self, key: Key) -> bool {
+        let id = key as usize;
+        self.0
+            .get(id >> 6)
+            .is_some_and(|word| word & (1u64 << (id & 63)) != 0)
+    }
+}
+
+pub(crate) type EventSet = Bitset<{ TOTAL_EVENT_COUNT.div_ceil(USIZE_BITS) }>;
+
+pub(crate) static SPAN_START_EVENTS: EventSet = EventClass::SpanStart.events();
+pub(crate) static SPAN_END_EVENTS: EventSet = EventClass::SpanEnd.events();
+pub(crate) static SPAN_EVENTS: EventSet = EventClass::Span.events();
+pub(crate) static UNCOUNTED_EVENTS: EventSet = EventClass::Uncounted.events();
+static RAW_IO_EVENTS: EventSet = EventClass::RawIo.events();
+
+#[derive(Clone, Copy)]
+enum EventClass {
+    SpanStart,
+    SpanEnd,
+    Span,
+    RawIo,
+    Uncounted,
+}
+
+impl EventClass {
+    const fn contains(self, event: EventType) -> bool {
+        match self {
+            EventClass::SpanStart => matches!(
+                event,
+                EventType::Smtp(SmtpEvent::ConnectionStart)
+                    | EventType::Imap(ImapEvent::ConnectionStart)
+                    | EventType::ManageSieve(ManageSieveEvent::ConnectionStart)
+                    | EventType::Pop3(Pop3Event::ConnectionStart)
+                    | EventType::Http(HttpEvent::ConnectionStart)
+                    | EventType::Delivery(DeliveryEvent::AttemptStart)
+            ),
+            EventClass::SpanEnd => matches!(
+                event,
+                EventType::Smtp(SmtpEvent::ConnectionEnd)
+                    | EventType::Imap(ImapEvent::ConnectionEnd)
+                    | EventType::ManageSieve(ManageSieveEvent::ConnectionEnd)
+                    | EventType::Pop3(Pop3Event::ConnectionEnd)
+                    | EventType::Http(HttpEvent::ConnectionEnd)
+                    | EventType::Delivery(DeliveryEvent::AttemptEnd)
+            ),
+            EventClass::RawIo => matches!(
+                event,
+                EventType::Imap(ImapEvent::RawInput | ImapEvent::RawOutput)
+                    | EventType::Smtp(SmtpEvent::RawInput | SmtpEvent::RawOutput)
+                    | EventType::Pop3(Pop3Event::RawInput | Pop3Event::RawOutput)
+                    | EventType::ManageSieve(
+                        ManageSieveEvent::RawInput | ManageSieveEvent::RawOutput
+                    )
+                    | EventType::Delivery(DeliveryEvent::RawInput | DeliveryEvent::RawOutput)
+                    | EventType::Milter(MilterEvent::Read | MilterEvent::Write)
+            ),
+            EventClass::Span => {
+                EventClass::SpanStart.contains(event) || EventClass::SpanEnd.contains(event)
+            }
+            EventClass::Uncounted => {
+                EventClass::SpanEnd.contains(event) || EventClass::RawIo.contains(event)
+            }
+        }
+    }
+
+    const fn events(self) -> EventSet {
+        let mut set = [0usize; TOTAL_EVENT_COUNT.div_ceil(USIZE_BITS)];
+        let variants = EventType::variants();
+        let mut idx = 0;
+        while idx < variants.len() {
+            if self.contains(variants[idx]) {
+                let id = variants[idx].to_id() as usize;
+                set[id / USIZE_BITS] |= 1 << (id & USIZE_BITS_MASK);
+            }
+            idx += 1;
+        }
+        Bitset(set)
+    }
+}
+
 impl EventType {
     #[inline(always)]
     pub fn is_span_start(&self) -> bool {
-        matches!(
-            self,
-            EventType::Smtp(SmtpEvent::ConnectionStart)
-                | EventType::Imap(ImapEvent::ConnectionStart)
-                | EventType::ManageSieve(ManageSieveEvent::ConnectionStart)
-                | EventType::Pop3(Pop3Event::ConnectionStart)
-                | EventType::Http(HttpEvent::ConnectionStart)
-                | EventType::Delivery(DeliveryEvent::AttemptStart)
-        )
+        SPAN_START_EVENTS.get(self.to_id() as usize)
     }
 
     #[inline(always)]
     pub fn is_span_end(&self) -> bool {
-        matches!(
-            self,
-            EventType::Smtp(SmtpEvent::ConnectionEnd)
-                | EventType::Imap(ImapEvent::ConnectionEnd)
-                | EventType::ManageSieve(ManageSieveEvent::ConnectionEnd)
-                | EventType::Pop3(Pop3Event::ConnectionEnd)
-                | EventType::Http(HttpEvent::ConnectionEnd)
-                | EventType::Delivery(DeliveryEvent::AttemptEnd)
-        )
+        SPAN_END_EVENTS.get(self.to_id() as usize)
     }
 
+    #[inline(always)]
     pub fn is_raw_io(&self) -> bool {
-        matches!(
-            self,
-            EventType::Imap(ImapEvent::RawInput | ImapEvent::RawOutput)
-                | EventType::Smtp(SmtpEvent::RawInput | SmtpEvent::RawOutput)
-                | EventType::Pop3(Pop3Event::RawInput | Pop3Event::RawOutput)
-                | EventType::ManageSieve(ManageSieveEvent::RawInput | ManageSieveEvent::RawOutput)
-                | EventType::Delivery(DeliveryEvent::RawInput | DeliveryEvent::RawOutput)
-                | EventType::Milter(MilterEvent::Read | MilterEvent::Write)
-        )
+        RAW_IO_EVENTS.get(self.to_id() as usize)
     }
 
     #[inline(always)]

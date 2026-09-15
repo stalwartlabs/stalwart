@@ -9,6 +9,7 @@ use common::{
     KV_RATE_LIMIT_SMTP, ThrottleKey, config::smtp::*, expr::functions::ResolveVariable,
     network::SessionStream,
 };
+use compact_str::ToCompactString;
 use queue::QueueQuota;
 use registry::schema::{enums::ExpressionVariable, prelude::Property, structs::Rate};
 use trc::SmtpEvent;
@@ -213,7 +214,7 @@ impl<T: SessionStream> Session<T> {
                         trc::event!(
                             Smtp(SmtpEvent::RateLimitExceeded),
                             SpanId = self.data.session_id,
-                            Id = t.id.to_string(),
+                            Id = t.id.to_compact_string(),
                             Limit = vec![
                                 trc::Value::from(t.rate.count),
                                 trc::Value::from(t.rate.period.into_inner())

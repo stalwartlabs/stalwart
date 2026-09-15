@@ -12,6 +12,7 @@ use crate::{
         query::RegistryQueryFilters,
     },
 };
+use compact_str::format_compact;
 use jmap_proto::{error::set::SetError, types::state::State};
 use jmap_tools::JsonPointer;
 use mail_parser::{MessageParser, parsers::fields::thread::thread_name};
@@ -334,10 +335,12 @@ pub(crate) async fn spam_sample_query(
             }
         }
         property => {
-            return Err(trc::JmapEvent::UnsupportedSort.into_err().details(format!(
-                "Property {} is not supported for sorting",
-                property
-            )));
+            return Err(trc::JmapEvent::UnsupportedSort
+                .into_err()
+                .details(format_compact!(
+                    "Property {} is not supported for sorting",
+                    property
+                )));
         }
     }
 

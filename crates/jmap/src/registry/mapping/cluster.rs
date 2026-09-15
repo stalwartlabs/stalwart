@@ -55,7 +55,7 @@ pub(crate) async fn cluster_node_query(
     {
         return Err(trc::JmapEvent::UnsupportedSort
             .into_err()
-            .details("Only sorting by 'nodeId' is supported for cluster nodes".to_string()));
+            .details("Only sorting by 'nodeId' is supported for cluster nodes"));
     }
 
     let nodes = req.server.registry().cluster_node_list().await?;

@@ -6,6 +6,7 @@
 
 use ahash::AHashSet;
 use common::{Server, psl};
+use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_auth::{
     flate2::read::GzDecoder,
     report::{Feedback, Report, tlsrpt::TlsReport},
@@ -165,8 +166,8 @@ impl AnalyzeReport for Server {
                                 trc::event!(
                                     IncomingReport(IncomingReportEvent::DecompressError),
                                     SpanId = session_id,
-                                    From = from.to_string(),
-                                    Reason = err.to_string(),
+                                    From = CompactString::from(&from),
+                                    Reason = err.to_compact_string(),
                                     CausedBy = trc::location!()
                                 );
 
@@ -196,8 +197,8 @@ impl AnalyzeReport for Server {
                                 trc::event!(
                                     IncomingReport(IncomingReportEvent::DecompressError),
                                     SpanId = session_id,
-                                    From = from.to_string(),
-                                    Reason = err.to_string(),
+                                    From = CompactString::from(&from),
+                                    Reason = err.to_compact_string(),
                                     CausedBy = trc::location!()
                                 );
                                 continue;
@@ -206,8 +207,8 @@ impl AnalyzeReport for Server {
                                 trc::event!(
                                     IncomingReport(IncomingReportEvent::DecompressError),
                                     SpanId = session_id,
-                                    From = from.to_string(),
-                                    Reason = err.to_string(),
+                                    From = CompactString::from(&from),
+                                    Reason = err.to_compact_string(),
                                     CausedBy = trc::location!()
                                 );
                                 continue;
@@ -227,7 +228,7 @@ impl AnalyzeReport for Server {
                             trc::event!(
                                 IncomingReport(IncomingReportEvent::DmarcParseFailed),
                                 SpanId = session_id,
-                                From = from.to_string(),
+                                From = CompactString::from(&from),
                                 Reason = err,
                                 CausedBy = trc::location!()
                             );
@@ -245,8 +246,8 @@ impl AnalyzeReport for Server {
                             trc::event!(
                                 IncomingReport(IncomingReportEvent::TlsRpcParseFailed),
                                 SpanId = session_id,
-                                From = from.to_string(),
-                                Reason = format!("{err:?}"),
+                                From = CompactString::from(&from),
+                                Reason = format_compact!("{err:?}"),
                                 CausedBy = trc::location!()
                             );
 
@@ -263,7 +264,7 @@ impl AnalyzeReport for Server {
                             trc::event!(
                                 IncomingReport(IncomingReportEvent::ArfParseFailed),
                                 SpanId = session_id,
-                                From = from.to_string(),
+                                From = CompactString::from(&from),
                                 CausedBy = trc::location!()
                             );
 

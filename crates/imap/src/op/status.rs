@@ -11,7 +11,7 @@ use crate::{
     spawn_op,
 };
 use common::{MessageStoreCache, network::SessionStream};
-use compact_str::CompactString;
+use compact_str::{CompactString, format_compact};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{
@@ -92,7 +92,7 @@ impl<T: SessionStream> Session<T> {
                                     Details = arguments
                                         .items
                                         .iter()
-                                        .map(|c| trc::Value::from(format!("{c:?}")))
+                                        .map(|c| trc::Value::from(format_compact!("{c:?}")))
                                         .collect::<Vec<_>>(),
                                     Elapsed = op_start.elapsed()
                                 );

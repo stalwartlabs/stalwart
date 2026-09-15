@@ -8,8 +8,6 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Expr, ExprPath, Ident, Token, parse::Parse, parse_macro_input};
 
-static mut GLOBAL_ID_COUNTER: usize = 0;
-
 #[proc_macro_attribute]
 pub fn key_names(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
@@ -72,15 +70,6 @@ pub fn key_names(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    TokenStream::from(expanded)
-}
-
-#[proc_macro]
-pub fn total_event_count(_item: TokenStream) -> TokenStream {
-    let count = unsafe { GLOBAL_ID_COUNTER };
-    let expanded = quote! {
-        #count
-    };
     TokenStream::from(expanded)
 }
 

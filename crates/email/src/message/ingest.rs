@@ -16,6 +16,7 @@ use crate::{
     },
 };
 use common::{MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken};
+use compact_str::{CompactString, ToCompactString};
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
@@ -409,7 +410,7 @@ impl EmailIngest for Server {
                                             trc::event!(
                                                 Calendar(trc::CalendarEvent::ItipMessageReceived),
                                                 SpanId = params.session_id,
-                                                From = sender.to_string(),
+                                                From = CompactString::from(&*sender),
                                                 AccountId = account_id,
                                             );
                                         }
@@ -423,9 +424,9 @@ impl EmailIngest for Server {
                                                             trc::CalendarEvent::ItipMessageError
                                                         ),
                                                         SpanId = params.session_id,
-                                                        From = sender.to_string(),
+                                                        From = CompactString::from(&*sender),
                                                         AccountId = account_id,
-                                                        Details = err.to_string(),
+                                                        Details = err.to_compact_string(),
                                                     )
                                                 }
                                             }
@@ -443,7 +444,7 @@ impl EmailIngest for Server {
                                         .from()
                                         .and_then(|a| a.first())
                                         .and_then(|a| a.address())
-                                        .map(|a| a.to_string()),
+                                        .map(CompactString::from),
                                     AccountId = account_id,
                                     Details = "iMIP message too large",
                                     Limit = self.core.groupware.itip_inbound_max_ical_size,

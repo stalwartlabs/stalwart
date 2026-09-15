@@ -22,6 +22,7 @@ use common::{
     manager::application::Resource,
     network::{SessionData, SessionManager, SessionStream},
 };
+use compact_str::{CompactString, ToCompactString};
 use dav::{DavMethod, request::DavRequestHandler};
 use groupware::DavResourceName;
 use http_proto::{
@@ -722,7 +723,7 @@ impl ParseHttp for Server {
                 Security(SecurityEvent::ScanBan),
                 SpanId = session.session_id,
                 RemoteIp = session.remote_ip,
-                Path = path.to_string(),
+                Path = CompactString::from(path),
             );
         }
 
@@ -750,7 +751,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                         trc::event!(
                             Http(trc::HttpEvent::RequestUrl),
                             SpanId = session.session_id,
-                            Url = req.uri().to_string(),
+                            Url = req.uri().to_compact_string(),
                         );
 
                         session.remote_ip
@@ -795,7 +796,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                             Http(trc::HttpEvent::RequestUrl),
                             SpanId = session.session_id,
                             RemoteIp = forwarded_for,
-                            Url = req.uri().to_string(),
+                            Url = req.uri().to_compact_string(),
                         );
 
                         forwarded_for
@@ -889,7 +890,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                             Security(SecurityEvent::ScanBan),
                             SpanId = session.session_id,
                             RemoteIp = session.remote_ip,
-                            Reason = http_err.to_string(),
+                            Reason = http_err.to_compact_string(),
                         );
                         return;
                     }
@@ -907,7 +908,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
         trc::event!(
             Http(trc::HttpEvent::Error),
             SpanId = session.session_id,
-            Reason = http_err.to_string(),
+            Reason = http_err.to_compact_string(),
         );
     }
 }

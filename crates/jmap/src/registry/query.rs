@@ -17,6 +17,7 @@ use crate::{
     },
 };
 use common::{Server, auth::AccessToken};
+use compact_str::format_compact;
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::registry::{Registry, RegistryComparator, RegistryFilter, RegistryFilterOperator},
@@ -289,7 +290,10 @@ impl RegistryQuery for Server {
                             .find(|i| i.prop == property && i.value != IndexSchemaValueType::Text)
                         else {
                             return Err(trc::JmapEvent::UnsupportedSort.into_err().details(
-                                format!("Property {} is not supported for sorting", property),
+                                format_compact!(
+                                    "Property {} is not supported for sorting",
+                                    property
+                                ),
                             ));
                         };
 
@@ -377,7 +381,7 @@ impl RegistryQueryFilters for QueryRequest<Registry> {
                         };
                         if !cb(property, operator, value) {
                             return Err(trc::JmapEvent::UnsupportedFilter.into_err().details(
-                                format!(
+                                format_compact!(
                                     "Filter on property {} is not supported or invalid",
                                     property
                                 ),
@@ -385,16 +389,14 @@ impl RegistryQueryFilters for QueryRequest<Registry> {
                         }
                     }
                     RegistryFilter::_T(other) => {
-                        return Err(trc::JmapEvent::UnsupportedFilter
-                            .into_err()
-                            .details(other.to_string()));
+                        return Err(trc::JmapEvent::UnsupportedFilter.into_err().details(other));
                     }
                 },
                 Filter::And | Filter::Close => {}
                 Filter::Or | Filter::Not => {
                     return Err(trc::JmapEvent::UnsupportedFilter
                         .into_err()
-                        .details("Only AND is supported in filters".to_string()));
+                        .details("Only AND is supported in filters"));
                 }
             }
         }
@@ -455,7 +457,10 @@ impl RegistryQueryFilters for QueryRequest<Registry> {
             }
             RegistryComparator::_T(other) => Err(trc::JmapEvent::UnsupportedSort
                 .into_err()
-                .details(format!("Property {} is not supported for sorting", other))),
+                .details(format_compact!(
+                    "Property {} is not supported for sorting",
+                    other
+                ))),
         }
     }
 }

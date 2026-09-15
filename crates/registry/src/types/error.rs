@@ -9,6 +9,7 @@ use crate::{
     schema::prelude::Property,
     types::{EnumImpl, id::ObjectId},
 };
+use compact_str::ToCompactString;
 use std::{borrow::Cow, fmt::Display};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -129,7 +130,7 @@ impl Error {
                     Id = object_id.id().id(),
                     Reason = errors
                         .iter()
-                        .map(|err| trc::Value::from(err.to_string()))
+                        .map(|err| trc::Value::from(err.to_compact_string()))
                         .collect::<Vec<_>>(),
                 );
             }

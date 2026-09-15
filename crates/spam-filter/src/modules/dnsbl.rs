@@ -11,6 +11,7 @@ use common::{
     config::mailstore::spamfilter::{DnsBlServer, Element, IpResolver, Location},
     expr::functions::ResolveVariable,
 };
+use compact_str::ToCompactString;
 use mail_auth::{Error, common::resolver::ToFqdn};
 use std::{
     net::Ipv4Addr,
@@ -130,7 +131,7 @@ async fn is_dnsbl(
                         Result = result
                             .entry
                             .iter()
-                            .map(|ip| trc::Value::from(ip.to_string()))
+                            .map(|ip| trc::Value::from(ip.to_compact_string()))
                             .collect::<Vec<_>>(),
                         Details = element.as_str(),
                         Elapsed = time.elapsed()
@@ -177,7 +178,7 @@ async fn is_dnsbl(
                         Hostname = zone,
                         Elapsed = time.elapsed(),
                         Details = element.as_str(),
-                        CausedBy = err.to_string()
+                        CausedBy = err.to_compact_string()
                     );
 
                     return None;

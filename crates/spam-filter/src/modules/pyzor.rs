@@ -5,6 +5,7 @@
  */
 
 use common::config::mailstore::spamfilter::PyzorConfig;
+use compact_str::ToCompactString;
 use mail_parser::{Message, PartType};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 
@@ -83,7 +84,7 @@ pub(crate) async fn pyzor_check(
         .map_err(|err| {
             trc::SpamEvent::PyzorError
                 .into_err()
-                .ctx(trc::Key::Url, config.address.to_string())
+                .ctx(trc::Key::Url, config.address.to_compact_string())
                 .reason(err)
                 .details("Pyzor failed")
         })

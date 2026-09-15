@@ -14,6 +14,7 @@ use crate::{Hostname, SpamFilterInput};
 use common::config::mailstore::spamfilter;
 use common::manager::{SPAM_CLASSIFIER_KEY, SPAM_TRAINER_KEY};
 use common::{Server, config::mailstore::spamfilter::Location, ipc::BroadcastEvent};
+use compact_str::CompactString;
 use mail_auth::DmarcResult;
 use mail_parser::{MessageParser, MimeHeaders};
 use nlp::classifier::feature::{
@@ -689,7 +690,7 @@ impl SpamClassifier for Server {
                 .iter()
                 .zip(ctx.input.env_rcpt_rewritten_to.iter())
                 .map(|(v, rcpt)| trc::Value::Array(vec![
-                    trc::Value::from(rcpt.to_string()),
+                    trc::Value::from(CompactString::from(*rcpt)),
                     trc::Value::from(*v)
                 ]))
                 .collect::<Vec<_>>(),

@@ -12,6 +12,7 @@ use crate::request::{
     CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
     QueryRequestMethod, SetRequestMethod, deserialize::DeserializeArguments,
 };
+use compact_str::{CompactString, ToCompactString};
 use serde::{
     Deserialize, Deserializer,
     de::{self, SeqAccess, Visitor},
@@ -31,8 +32,8 @@ impl<'x> Request<'x> {
                 }
                 Err(err) => Err(trc::JmapEvent::NotRequest
                     .into_err()
-                    .reason(err.to_string())
-                    .details(String::from_utf8_lossy(json).into_owned())),
+                    .reason(err)
+                    .details(CompactString::from(String::from_utf8_lossy(json)))),
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())
@@ -96,7 +97,7 @@ impl<'de> Visitor<'de> for CallVisitor {
                     method: RequestMethod::Error(
                         trc::JmapEvent::UnknownMethod
                             .into_err()
-                            .details(method_name.to_string()),
+                            .details(method_name),
                     ),
                     name: MethodName::error(),
                 });
@@ -702,7 +703,7 @@ impl RequestMethod<'_> {
         RequestMethod::Error(
             trc::JmapEvent::InvalidArguments
                 .into_err()
-                .details(err.to_string()),
+                .details(err.to_compact_string()),
         )
     }
 }

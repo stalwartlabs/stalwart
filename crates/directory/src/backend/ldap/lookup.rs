@@ -6,6 +6,7 @@
 
 use super::{LdapDirectory, LdapMappings};
 use crate::{Account, Credentials, Group, IntoError, Recipient, core::secret::verify_secret_hash};
+use compact_str::CompactString;
 use ldap3::{Ldap, LdapConnAsync, ResultEntry, Scope, SearchEntry};
 use store::xxhash_rust;
 use utils::sanitize_email;
@@ -215,7 +216,7 @@ impl LdapDirectory {
         .map(|(rs, _)| {
             trc::event!(
                 Store(trc::StoreEvent::LdapQuery),
-                Details = filter.to_string(),
+                Details = CompactString::from(filter),
                 Result = rs.first().map(result_to_trace).unwrap_or_default()
             );
 

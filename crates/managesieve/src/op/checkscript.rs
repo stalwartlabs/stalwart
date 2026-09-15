@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use compact_str::ToCompactString;
 use std::time::Instant;
 
 use common::network::SessionStream;
@@ -44,7 +45,7 @@ impl<T: SessionStream> Session<T> {
             .map_err(|err| {
                 trc::ManageSieveEvent::Error
                     .into_err()
-                    .details(err.to_string())
+                    .details(err.to_compact_string())
             })
     }
 }

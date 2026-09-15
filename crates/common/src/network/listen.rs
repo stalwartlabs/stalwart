@@ -12,6 +12,7 @@ use crate::{
     BuildServer, Inner, Server,
     config::server::{Listener, Listeners, ServerProtocol, TcpListener},
 };
+use compact_str::{ToCompactString, format_compact};
 use proxy_header::io::ProxiedStream;
 use rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256;
 use std::{
@@ -163,7 +164,7 @@ impl Listener {
                                                         LocalIp = local_addr.ip(),
                                                         LocalPort = local_addr.port(),
                                                         Tls = is_tls,
-                                                        Reason = err.to_string(),
+                                                        Reason = err.to_compact_string(),
                                                     );
                                                 }
                                             }
@@ -192,7 +193,7 @@ impl Listener {
                                         LocalIp = local_addr.ip(),
                                         LocalPort = local_addr.port(),
                                         Tls = is_tls,
-                                        Reason = err.to_string(),
+                                        Reason = err.to_compact_string(),
                                     );
 
                                     tokio::select! {
@@ -305,7 +306,7 @@ impl SocketOpts {
         if let Err(err) = stream.set_nodelay(self.nodelay) {
             trc::event!(
                 Network(trc::NetworkEvent::SetOptError),
-                Reason = err.to_string(),
+                Reason = err.to_compact_string(),
                 Details = "Failed to set TCP_NODELAY",
             );
         }
@@ -314,7 +315,7 @@ impl SocketOpts {
         {
             trc::event!(
                 Network(trc::NetworkEvent::SetOptError),
-                Reason = err.to_string(),
+                Reason = err.to_compact_string(),
                 Details = "Failed to set TTL",
             );
         }
@@ -391,7 +392,7 @@ impl ServerInstance {
                         Tls(trc::TlsEvent::Handshake),
                         ListenerId = self.id.clone(),
                         SpanId = session_id,
-                        Version = format!(
+                        Version = format_compact!(
                             "{:?}",
                             stream
                                 .get_ref()
@@ -399,7 +400,7 @@ impl ServerInstance {
                                 .protocol_version()
                                 .unwrap_or(rustls::ProtocolVersion::TLSv1_3)
                         ),
-                        Details = format!(
+                        Details = format_compact!(
                             "{:?}",
                             stream
                                 .get_ref()
@@ -415,7 +416,7 @@ impl ServerInstance {
                         Tls(trc::TlsEvent::HandshakeError),
                         ListenerId = self.id.clone(),
                         SpanId = session_id,
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
                     Err(())
                 }

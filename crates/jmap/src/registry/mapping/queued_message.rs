@@ -394,7 +394,7 @@ pub(crate) async fn queued_message_query(
     {
         return Err(trc::JmapEvent::UnsupportedSort
             .into_err()
-            .details("Only sorting by 'due' is supported for queued messages".to_string()));
+            .details("Only sorting by 'due' is supported for queued messages"));
     }
 
     let params = req

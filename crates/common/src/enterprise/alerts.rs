@@ -11,6 +11,7 @@
 use super::{AlertContent, AlertContentToken, AlertMethod};
 use crate::Server;
 use crate::expr::functions::EmptyResolver;
+use compact_str::CompactString;
 use mail_builder::{
     MessageBuilder,
     headers::{
@@ -66,7 +67,7 @@ impl Server {
                             Id = alert.id.id().id(),
                             To = to
                                 .iter()
-                                .map(|t| trc::Value::from(t.to_string()))
+                                .map(|t| trc::Value::from(CompactString::from(t)))
                                 .collect::<Vec<_>>(),
                             Details = subject.clone()
                         );

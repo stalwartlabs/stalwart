@@ -17,6 +17,7 @@ use common::{
     },
     ipc::{TlsEvent, ToHash},
 };
+use compact_str::{CompactString, ToCompactString};
 use mail_auth::{
     flate2::{Compression, write::GzEncoder},
     mta_sts::{ReportUri, TlsRpt},
@@ -102,7 +103,7 @@ impl TlsReporting for Server {
             OutgoingReport(OutgoingReportEvent::TlsAggregate),
             SpanId = span_id,
             ReportId = event_from,
-            Domain = domain_name.to_string(),
+            Domain = CompactString::from(domain_name),
             RangeFrom = trc::Value::Timestamp(event_from),
             RangeTo = trc::Value::Timestamp(event_to),
         );
@@ -118,7 +119,7 @@ impl TlsReporting for Server {
                 trc::event!(
                     OutgoingReport(OutgoingReportEvent::SubmissionError),
                     SpanId = span_id,
-                    Reason = err.to_string(),
+                    Reason = err.to_compact_string(),
                     Details = "Failed to compress report"
                 );
 
@@ -153,7 +154,7 @@ impl TlsReporting for Server {
                             trc::event!(
                                 OutgoingReport(OutgoingReportEvent::HttpSubmission),
                                 SpanId = span_id,
-                                Url = uri.to_string(),
+                                Url = CompactString::from(uri),
                                 Code = response.status().as_u16(),
                             );
 
@@ -162,7 +163,7 @@ impl TlsReporting for Server {
                             trc::event!(
                                 OutgoingReport(OutgoingReportEvent::SubmissionError),
                                 SpanId = span_id,
-                                Url = uri.to_string(),
+                                Url = CompactString::from(uri),
                                 Code = response.status().as_u16(),
                                 Details = "Invalid HTTP response"
                             );
@@ -172,8 +173,8 @@ impl TlsReporting for Server {
                         trc::event!(
                             OutgoingReport(OutgoingReportEvent::SubmissionError),
                             SpanId = span_id,
-                            Url = uri.to_string(),
-                            Reason = err.to_string(),
+                            Url = CompactString::from(uri),
+                            Reason = err.to_compact_string(),
                             Details = "HTTP submission error"
                         );
                     }

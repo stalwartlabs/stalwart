@@ -23,6 +23,7 @@ use calcard::{
     },
 };
 use common::{GroupwareResource, Server, auth::AccessToken};
+use compact_str::ToCompactString;
 use dav_proto::{
     RequestHeaders,
     schema::{
@@ -234,7 +235,7 @@ impl CalendarQueryHandler {
                             trc::event!(
                                 Calendar(trc::CalendarEvent::RuleExpansionError),
                                 Reason = "chrono error",
-                                Details = event.data.event.to_string(),
+                                Details = event.data.event.to_compact_string(),
                             );
                             vec![]
                         })

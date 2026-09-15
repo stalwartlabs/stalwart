@@ -21,6 +21,7 @@ use common::{
     DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountInfo},
 };
+use compact_str::ToCompactString;
 use groupware::{
     DestroyArchive, SizeWriter,
     cache::GroupwareCache,
@@ -534,7 +535,7 @@ impl CalendarEventSet for Server {
                             Calendar(trc::CalendarEvent::ItipMessageError),
                             AccountId = account_id,
                             DocumentId = document_id,
-                            Reason = err.to_string(),
+                            Reason = err.to_compact_string(),
                         );
 
                         // Event changed, but there are no iTIP messages to send
@@ -897,7 +898,7 @@ impl CalendarEventSet for Server {
                     trc::event!(
                         Calendar(trc::CalendarEvent::ItipMessageError),
                         AccountId = account_id,
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
                 }
             }

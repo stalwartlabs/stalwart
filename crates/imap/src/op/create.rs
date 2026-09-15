@@ -9,6 +9,7 @@ use crate::{
     op::ImapContext,
 };
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use compact_str::format_compact;
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -186,7 +187,7 @@ impl<T: SessionStream> SessionData<T> {
         if name.is_empty() {
             return Err(trc::ImapEvent::Error
                 .into_err()
-                .details(format!("Invalid folder name '{mailbox_name}'.",)));
+                .details(format_compact!("Invalid folder name '{mailbox_name}'.",)));
         }
 
         // Build path
@@ -248,7 +249,7 @@ impl<T: SessionStream> SessionData<T> {
                         (account, full_path, prefix)
                     } else {
                         #[allow(clippy::unnecessary_literal_unwrap)]
-                        return Err(trc::ImapEvent::Error.into_err().details(format!(
+                        return Err(trc::ImapEvent::Error.into_err().details(format_compact!(
                             "Shared account '{}' not found.",
                             prefix.unwrap_or_default()
                         )));
@@ -272,7 +273,7 @@ impl<T: SessionStream> SessionData<T> {
             if account.id_by_name(&full_path).is_some() {
                 return Err(trc::ImapEvent::Error
                     .into_err()
-                    .details(format!("Mailbox '{}' already exists.", full_path))
+                    .details(format_compact!("Mailbox '{}' already exists.", full_path))
                     .code(ResponseCode::AlreadyExists));
             }
 
@@ -345,7 +346,7 @@ impl<T: SessionStream> SessionData<T> {
                 {
                     return Err(trc::ImapEvent::Error
                         .into_err()
-                        .details(format!(
+                        .details(format_compact!(
                             "A mailbox with role '{}' already exists.",
                             special_use.as_str().unwrap_or_default()
                         ))

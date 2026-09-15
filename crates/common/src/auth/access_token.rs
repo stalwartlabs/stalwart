@@ -14,6 +14,7 @@ use crate::{
     network::limiter::{ConcurrencyLimiter, LimiterResult},
 };
 use ahash::AHasher;
+use compact_str::format_compact;
 use registry::{
     schema::{
         enums::Permission,
@@ -89,7 +90,7 @@ impl Server {
                             if !collection.is_valid() {
                                 return Err(trc::StoreEvent::DataCorruption
                                     .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
-                                    .details(format!("{acl_item:?}"))
+                                    .details(format_compact!("{acl_item:?}"))
                                     .account_id(grant_account_id)
                                     .caused_by(trc::location!()));
                             }

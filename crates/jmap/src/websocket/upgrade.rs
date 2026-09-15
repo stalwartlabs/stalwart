@@ -6,6 +6,7 @@
 
 use super::stream::WebSocketHandler;
 use common::{Server, auth::AccessToken};
+use compact_str::ToCompactString;
 use http_proto::*;
 use hyper::StatusCode;
 use hyper_util::rt::TokioIo;
@@ -98,7 +99,7 @@ impl WebSocketUpgrade for Server {
                         Jmap(JmapEvent::WebsocketError),
                         Details = "Websocket upgrade failed",
                         SpanId = session_id,
-                        Reason = err.to_string()
+                        Reason = err.to_compact_string()
                     );
                 }
             }

@@ -6,6 +6,7 @@
 
 use crate::{core::Session, reporting::send::MtaReportSend};
 use common::network::SessionStream;
+use compact_str::CompactString;
 use mail_auth::{
     AuthenticatedMessage, AuthenticationResults, DkimOutput, common::verify::VerifySignature,
 };
@@ -41,7 +42,7 @@ impl<T: SessionStream> Session<T> {
             trc::event!(
                 OutgoingReport(OutgoingReportEvent::DkimRateLimited),
                 SpanId = self.data.session_id,
-                To = rcpt.to_string(),
+                To = CompactString::from(rcpt),
                 Limit = vec![
                     trc::Value::from(rate.count),
                     trc::Value::from(rate.period.into_inner())
@@ -90,8 +91,8 @@ impl<T: SessionStream> Session<T> {
         trc::event!(
             OutgoingReport(OutgoingReportEvent::DkimReport),
             SpanId = self.data.session_id,
-            From = from_addr.to_string(),
-            To = rcpt.to_string(),
+            From = CompactString::from(&from_addr),
+            To = CompactString::from(rcpt),
         );
 
         // Send report

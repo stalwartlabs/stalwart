@@ -6,6 +6,7 @@
 
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
+use compact_str::ToCompactString;
 use email::sieve::SieveScript;
 use imap_proto::receiver::Request;
 use registry::schema::enums::{Permission, StorageQuota};
@@ -84,12 +85,12 @@ impl<T: SessionStream> Session<T> {
                 return Err(if let ErrorType::ScriptTooLong = &err.error_type() {
                     trc::ManageSieveEvent::Error
                         .into_err()
-                        .details(err.to_string())
+                        .details(err.to_compact_string())
                         .code(ResponseCode::QuotaMaxSize)
                 } else {
                     trc::ManageSieveEvent::Error
                         .into_err()
-                        .details(err.to_string())
+                        .details(err.to_compact_string())
                 });
             }
         };
@@ -153,7 +154,7 @@ impl<T: SessionStream> Session<T> {
             trc::event!(
                 ManageSieve(trc::ManageSieveEvent::UpdateScript),
                 SpanId = self.session_id,
-                Id = name.to_string(),
+                Id = name,
                 DocumentId = document_id,
                 Size = script_size,
                 Elapsed = op_start.elapsed(),

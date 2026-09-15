@@ -6,6 +6,7 @@
 
 use common::auth::AccessToken;
 use common::{HttpAuthCache, Server, auth::AuthRequest, network::limiter::InFlight};
+use compact_str::CompactString;
 use directory::Credentials;
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
@@ -57,7 +58,7 @@ impl Authenticator for Server {
                     trc::AuthEvent::Error
                         .into_err()
                         .details("Failed to decode Basic auth request.")
-                        .id(token.to_string())
+                        .id(CompactString::from(token))
                         .caused_by(trc::location!())
                 })?
             } else if mechanism.eq_ignore_ascii_case("bearer") {
@@ -77,7 +78,7 @@ impl Authenticator for Server {
                 return Err(trc::AuthEvent::Error
                     .into_err()
                     .reason("Unsupported authentication mechanism.")
-                    .details(token.to_string())
+                    .details(CompactString::from(token))
                     .caused_by(trc::location!()));
             };
 

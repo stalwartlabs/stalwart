@@ -8,6 +8,7 @@ use crate::expr::{
     self,
     if_block::{BootstrapExprExt, IfBlock},
 };
+use compact_str::ToCompactString;
 use mail_auth::{
     common::crypto::{Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
     dkim::{Canonicalization, Done},
@@ -134,7 +135,7 @@ impl DkimSigners {
                 .details(
                     errors
                         .into_iter()
-                        .map(|v| trc::Value::from(v.to_string()))
+                        .map(|v| trc::Value::from(v.to_compact_string()))
                         .collect::<Vec<_>>(),
                 ));
         }

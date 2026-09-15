@@ -15,6 +15,7 @@ use common::{
     config::smtp::session::{Milter, Stage},
     network::SessionStream,
 };
+use compact_str::ToCompactString;
 use mail_auth::AuthenticatedMessage;
 use smtp_proto::{IntoString, request::parser::Rfc5321Parser};
 use std::{borrow::Cow, time::Instant};
@@ -57,7 +58,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Milter(MilterEvent::ActionAccept),
                         SpanId = self.data.session_id,
-                        Id = milter.id.to_string(),
+                        Id = milter.id.to_compact_string(),
                         Elapsed = time.elapsed(),
                     );
 
@@ -91,7 +92,7 @@ impl<T: SessionStream> Session<T> {
                         }),
                         SpanId = self.data.session_id,
                         QueueId = queue_id,
-                        Id = milter.id.to_string(),
+                        Id = milter.id.to_compact_string(),
                         Elapsed = time.elapsed(),
                     );
 
@@ -119,9 +120,10 @@ impl<T: SessionStream> Session<T> {
                 }
                 Err(Rejection::Error(err)) => {
                     let (code, details) = match err {
-                        Error::Io(details) => {
-                            (MilterEvent::IoError, trc::Value::from(details.to_string()))
-                        }
+                        Error::Io(details) => (
+                            MilterEvent::IoError,
+                            trc::Value::from(details.to_compact_string()),
+                        ),
                         Error::FrameTooLarge(size) => {
                             (MilterEvent::FrameTooLarge, trc::Value::from(size))
                         }
@@ -130,7 +132,7 @@ impl<T: SessionStream> Session<T> {
                         }
                         Error::Unexpected(response) => (
                             MilterEvent::UnexpectedResponse,
-                            trc::Value::from(response.to_string()),
+                            trc::Value::from(response.to_compact_string()),
                         ),
                         Error::Timeout => (MilterEvent::Timeout, trc::Value::None),
                         Error::TLSInvalidName => (MilterEvent::TlsInvalidName, trc::Value::None),
@@ -140,7 +142,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Milter(code),
                         SpanId = self.data.session_id,
-                        Id = milter.id.to_string(),
+                        Id = milter.id.to_compact_string(),
                         Details = details,
                         Elapsed = time.elapsed(),
                     );
@@ -326,7 +328,7 @@ impl SessionData {
                                     Milter(MilterEvent::ParseError),
                                     SpanId = self.session_id,
                                     Details = "Failed to parse milter mailFrom parameters",
-                                    Reason = err.to_string(),
+                                    Reason = err.to_compact_string(),
                                 );
                             }
                         }
@@ -362,7 +364,7 @@ impl SessionData {
                                         Milter(MilterEvent::ParseError),
                                         SpanId = self.session_id,
                                         Details = "Failed to parse milter rcptTo parameters",
-                                        Reason = err.to_string(),
+                                        Reason = err.to_compact_string(),
                                     );
                                 }
                             }

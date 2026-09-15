@@ -8,6 +8,7 @@ use argon2::Argon2;
 use argon2::PasswordHash;
 use argon2::PasswordHasher;
 use argon2::PasswordVerifier;
+use compact_str::CompactString;
 use mail_builder::encoders::Base64Encoder;
 use mail_parser::decoders::base64::base64_decode;
 use pbkdf2::Pbkdf2;
@@ -41,7 +42,7 @@ pub async fn verify_mfa_secret_hash(
                     .map_err(|err| {
                         trc::AuthEvent::Error
                             .reason(err)
-                            .details(totp_uri.to_string())
+                            .details(CompactString::from(totp_uri))
                     })?
                     .check_current(totp_token)
                     .is_some();
@@ -126,7 +127,7 @@ async fn verify_hash_prefix(hashed_secret: &str, secret: &[u8]) -> trc::Result<b
     } else {
         Err(trc::AuthEvent::Error
             .into_err()
-            .details(hashed_secret.to_string()))
+            .details(CompactString::from(hashed_secret)))
     }
 }
 
@@ -228,12 +229,12 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                 "PLAIN" | "CLEAR" => Ok(hashed_secret.as_bytes() == secret),
                 _ => Err(trc::AuthEvent::Error
                     .ctx(trc::Key::Reason, "Unsupported algorithm")
-                    .details(hashed_secret.to_string())),
+                    .details(CompactString::from(hashed_secret))),
             }
         } else {
             Err(trc::AuthEvent::Error
                 .into_err()
-                .details(hashed_secret.to_string()))
+                .details(CompactString::from(hashed_secret)))
         }
     } else if !hashed_secret.is_empty() {
         Ok(hashed_secret.as_bytes() == secret)

@@ -36,7 +36,7 @@ impl PrincipalGet for Server {
         {
             return Err(trc::JmapEvent::Forbidden
                 .into_err()
-                .details("The administrator has disabled directory queries.".to_string()));
+                .details("The administrator has disabled directory queries."));
         }
 
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;

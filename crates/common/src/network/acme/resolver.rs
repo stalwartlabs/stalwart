@@ -8,6 +8,7 @@ use crate::{
     KV_ACME, Server,
     network::acme::{SerializedCert, StaticResolver, directory::ACME_TLS_ALPN_NAME},
 };
+use compact_str::{CompactString, ToCompactString};
 use rustls::{
     ServerConfig,
     crypto::aws_lc_rs::sign::any_ecdsa_type,
@@ -41,8 +42,8 @@ impl Server {
                         Err(err) => {
                             trc::event!(
                                 Acme(AcmeEvent::Error),
-                                Domain = domain.to_string(),
-                                Reason = err.to_string(),
+                                Domain = CompactString::from(domain),
+                                Reason = err.to_compact_string(),
                                 Details = "Failed to parse private key"
                             );
                             None
@@ -53,7 +54,7 @@ impl Server {
                 Err(err) => {
                     trc::event!(
                         Acme(AcmeEvent::Error),
-                        Domain = domain.to_string(),
+                        Domain = CompactString::from(domain),
                         CausedBy = err,
                         Details = "Failed to unarchive certificate"
                     );
@@ -63,13 +64,16 @@ impl Server {
             Err(err) => {
                 trc::event!(
                     Acme(AcmeEvent::Error),
-                    Domain = domain.to_string(),
+                    Domain = CompactString::from(domain),
                     CausedBy = err
                 );
                 None
             }
             Ok(None) => {
-                trc::event!(Acme(AcmeEvent::TokenNotFound), Domain = domain.to_string());
+                trc::event!(
+                    Acme(AcmeEvent::TokenNotFound),
+                    Domain = CompactString::from(domain)
+                );
                 None
             }
         }

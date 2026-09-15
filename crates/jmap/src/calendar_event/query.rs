@@ -308,9 +308,9 @@ impl CalendarEventQuery for Server {
                             comparator.is_ascending,
                         ))
                     }
-                    CalendarEventComparator::_T(other) => Err(trc::JmapEvent::UnsupportedSort
-                        .into_err()
-                        .details(other.to_string())),
+                    CalendarEventComparator::_T(other) => {
+                        Err(trc::JmapEvent::UnsupportedSort.into_err().details(other))
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?
         } else {

@@ -6,6 +6,7 @@
 
 use crate::api::{ToRequestError, notifications_into_push_objects, request::RequestHandler};
 use common::{Server, auth::AccessToken, ipc::PushNotification};
+use compact_str::ToCompactString;
 use futures_util::{SinkExt, StreamExt};
 use http_proto::HttpSessionData;
 use hyper::upgrade::Upgraded;
@@ -126,7 +127,7 @@ impl WebSocketHandler for Server {
                                         trc::event!(Jmap(JmapEvent::WebsocketError),
                                                     Details = "Failed to send text message",
                                                     SpanId = session.session_id,
-                                                    Reason = err.to_string()
+                                                    Reason = err.to_compact_string()
                                         );
                                     }
                                 }
@@ -135,7 +136,7 @@ impl WebSocketHandler for Server {
                                         trc::event!(Jmap(JmapEvent::WebsocketError),
                                                     Details = "Failed to send pong message",
                                                     SpanId = session.session_id,
-                                                    Reason = err.to_string()
+                                                    Reason = err.to_compact_string()
                                         );
                                     }
                                 }
@@ -153,7 +154,7 @@ impl WebSocketHandler for Server {
                             trc::event!(Jmap(JmapEvent::WebsocketError),
                                                     Details = "Websocket error",
                                                     SpanId = session.session_id,
-                                                    Reason = err.to_string()
+                                                    Reason = err.to_compact_string()
                                         );
                             break;
                         }
@@ -241,7 +242,7 @@ impl WebSocketHandler for Server {
                                 Jmap(JmapEvent::WebsocketError),
                                 Details = "Failed to send state change message.",
                                 SpanId = session.session_id,
-                                Reason = err.to_string()
+                                Reason = err.to_compact_string()
                             );
                         }
                     }
@@ -257,7 +258,7 @@ impl WebSocketHandler for Server {
                         Jmap(JmapEvent::WebsocketError),
                         Details = "Failed to send ping message.",
                         SpanId = session.session_id,
-                        Reason = err.to_string()
+                        Reason = err.to_compact_string()
                     );
                     break;
                 }

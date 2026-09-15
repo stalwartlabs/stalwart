@@ -4,75 +4,156 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{path::PathBuf, time::SystemTime};
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    thread::Builder,
+    time::SystemTime,
+};
 
 use crate::config::telemetry::{LogTracer, RotationStrategy};
 
+use compact_str::{CompactString, ToCompactString};
 use mail_parser::DateTime;
-use tokio::{
-    fs::{File, OpenOptions},
-    io::BufWriter,
+use tokio::sync::mpsc::Receiver;
+use trc::{
+    TelemetryEvent,
+    ipc::subscriber::{EventBatch, SubscriberBuilder},
+    serializers::text::FmtWriter,
 };
-use trc::{TelemetryEvent, ipc::subscriber::SubscriberBuilder, serializers::text::FmtWriter};
+
+const FLUSH_THRESHOLD: usize = 1 << 16;
 
 pub(crate) fn spawn_log_tracer(builder: SubscriberBuilder, settings: LogTracer) {
-    let (_, mut rx) = builder.register();
-    tokio::spawn(async move {
-        if let Some(writer) = settings.build_writer().await {
-            let mut buf = FmtWriter::new(writer)
+    let (_, rx) = builder.register();
+    if let Err(err) = Builder::new()
+        .name("stalwart-log".to_string())
+        .spawn(move || LogWriter::new(settings).run(rx))
+    {
+        trc::event!(
+            Telemetry(TelemetryEvent::LogError),
+            Details = "Failed to spawn log writer thread",
+            Reason = err.to_compact_string(),
+        );
+    }
+}
+
+struct LogWriter {
+    formatter: FmtWriter,
+    settings: LogTracer,
+    file: Option<File>,
+    file_timestamp: u64,
+    rotation_timestamp: u64,
+    buf: Vec<u8>,
+    lost_events: u64,
+    pending_events: u64,
+    is_failing: bool,
+    is_torn: bool,
+}
+
+impl LogWriter {
+    fn new(settings: LogTracer) -> Self {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+
+        Self {
+            formatter: FmtWriter::new()
                 .with_ansi(settings.ansi)
-                .with_multiline(settings.multiline);
-            let mut roatation_timestamp = settings.next_rotation();
+                .with_multiline(settings.multiline),
+            file: None,
+            file_timestamp: now,
+            rotation_timestamp: settings.next_rotation(now),
+            settings,
+            buf: Vec::with_capacity(FLUSH_THRESHOLD),
+            lost_events: 0,
+            pending_events: 0,
+            is_failing: false,
+            is_torn: false,
+        }
+    }
 
-            while let Some(events) = rx.recv().await {
-                for event in events {
-                    // Check if we need to rotate the log file
-                    if roatation_timestamp != 0 && event.inner.timestamp > roatation_timestamp {
-                        if let Err(err) = buf.flush().await {
-                            trc::event!(
-                                Telemetry(TelemetryEvent::LogError),
-                                Reason = err.to_string(),
-                                Details = "Failed to flush log buffer"
-                            );
-                        }
+    fn run(mut self, mut rx: Receiver<EventBatch>) {
+        self.flush();
 
-                        if let Some(writer) = settings.build_writer().await {
-                            buf.update_writer(writer);
-                            roatation_timestamp = settings.next_rotation();
-                        } else {
-                            return;
-                        };
-                    }
-
-                    if let Err(err) = buf.write(&event).await {
-                        trc::event!(
-                            Telemetry(TelemetryEvent::LogError),
-                            Reason = err.to_string(),
-                            Details = "Failed to write event to log"
-                        );
-                        return;
-                    }
+        while let Some(events) = rx.blocking_recv() {
+            for event in events {
+                let timestamp = event.inner.timestamp;
+                if self.rotation_timestamp != 0 && timestamp > self.rotation_timestamp {
+                    self.flush();
+                    self.file = None;
+                    self.file_timestamp = timestamp;
+                    self.rotation_timestamp = self.settings.next_rotation(timestamp);
                 }
 
-                if let Err(err) = buf.flush().await {
+                self.formatter.write(&event, &mut self.buf);
+                self.pending_events += 1;
+                if self.buf.len() >= FLUSH_THRESHOLD {
+                    self.flush();
+                }
+            }
+
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.is_torn && !self.buf.is_empty() {
+            self.buf.insert(0, b'\n');
+        }
+
+        let result = match &mut self.file {
+            Some(file) => file.write_all(&self.buf),
+            None => match self.settings.open(self.file_timestamp) {
+                Ok(file) => self.file.insert(file).write_all(&self.buf),
+                Err((path, err)) => {
+                    self.failed(err, "Failed to create log file", Some(path));
+                    return;
+                }
+            },
+        };
+
+        match result {
+            Ok(()) => {
+                self.is_torn = false;
+                self.buf.clear();
+                self.pending_events = 0;
+                if self.is_failing {
+                    self.is_failing = false;
                     trc::event!(
                         Telemetry(TelemetryEvent::LogError),
-                        Reason = err.to_string(),
-                        Details = "Failed to flush log buffer"
+                        Details = "Resumed writing to log file",
+                        Total = std::mem::take(&mut self.lost_events),
                     );
                 }
             }
+            Err(err) => {
+                self.file = None;
+                self.is_torn = true;
+                self.failed(err, "Failed to write to log file", None);
+            }
         }
-    });
+    }
+
+    fn failed(&mut self, err: std::io::Error, details: &'static str, path: Option<CompactString>) {
+        self.buf.clear();
+        self.lost_events += std::mem::take(&mut self.pending_events);
+        if !self.is_failing {
+            self.is_failing = true;
+            trc::event!(
+                Telemetry(TelemetryEvent::LogError),
+                Details = details,
+                Path = path,
+                Reason = err.to_compact_string(),
+            );
+        }
+    }
 }
 
 impl LogTracer {
-    pub async fn build_writer(&self) -> Option<BufWriter<File>> {
-        let now = DateTime::from_timestamp(
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs()) as i64,
-        );
+    fn open(&self, timestamp: u64) -> Result<File, (CompactString, std::io::Error)> {
+        let now = DateTime::from_timestamp(timestamp as i64);
         let file_name = match self.rotate {
             RotationStrategy::Daily => {
                 format!(
@@ -96,31 +177,15 @@ impl LogTracer {
         };
         let path = PathBuf::from(&self.path).join(file_name);
 
-        match OpenOptions::new()
+        OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)
-            .await
-        {
-            Ok(writer) => Some(BufWriter::new(writer)),
-            Err(err) => {
-                trc::event!(
-                    Telemetry(TelemetryEvent::LogError),
-                    Details = "Failed to create log file",
-                    Path = path.to_string_lossy().into_owned(),
-                    Reason = err.to_string(),
-                );
-                None
-            }
-        }
+            .map_err(|err| (CompactString::from(path.to_string_lossy()), err))
     }
 
-    pub fn next_rotation(&self) -> u64 {
-        let mut now = DateTime::from_timestamp(
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs()) as i64,
-        );
+    fn next_rotation(&self, timestamp: u64) -> u64 {
+        let mut now = DateTime::from_timestamp(timestamp as i64);
 
         now.second = 0;
 

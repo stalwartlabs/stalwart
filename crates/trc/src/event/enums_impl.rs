@@ -627,6 +627,7 @@ impl EventType {
             b"telemetry.otel-metrics-exporter-error" => EventType::Telemetry(TelemetryEvent::OtelMetricsExporterError),
             b"telemetry.prometheus-exporter-error" => EventType::Telemetry(TelemetryEvent::PrometheusExporterError),
             b"telemetry.journal-error" => EventType::Telemetry(TelemetryEvent::JournalError),
+            b"telemetry.events-dropped" => EventType::Telemetry(TelemetryEvent::EventsDropped),
             b"telemetry.metrics-collected" => EventType::Telemetry(TelemetryEvent::MetricsCollected),
             b"telemetry.metrics-stored" => EventType::Telemetry(TelemetryEvent::MetricsStored),
             b"telemetry.metrics-pushed" => EventType::Telemetry(TelemetryEvent::MetricsPushed),
@@ -1409,6 +1410,7 @@ impl EventType {
                 "telemetry.prometheus-exporter-error"
             }
             EventType::Telemetry(TelemetryEvent::JournalError) => "telemetry.journal-error",
+            EventType::Telemetry(TelemetryEvent::EventsDropped) => "telemetry.events-dropped",
             EventType::Telemetry(TelemetryEvent::MetricsCollected) => "telemetry.metrics-collected",
             EventType::Telemetry(TelemetryEvent::MetricsStored) => "telemetry.metrics-stored",
             EventType::Telemetry(TelemetryEvent::MetricsPushed) => "telemetry.metrics-pushed",
@@ -2062,6 +2064,7 @@ impl EventType {
             EventType::Telemetry(TelemetryEvent::OtelMetricsExporterError) => 537,
             EventType::Telemetry(TelemetryEvent::PrometheusExporterError) => 538,
             EventType::Telemetry(TelemetryEvent::JournalError) => 534,
+            EventType::Telemetry(TelemetryEvent::EventsDropped) => 644,
             EventType::Telemetry(TelemetryEvent::MetricsCollected) => 151,
             EventType::Telemetry(TelemetryEvent::MetricsStored) => 366,
             EventType::Telemetry(TelemetryEvent::MetricsPushed) => 146,
@@ -2753,6 +2756,7 @@ impl EventType {
                 TelemetryEvent::PrometheusExporterError,
             )),
             534 => Some(EventType::Telemetry(TelemetryEvent::JournalError)),
+            644 => Some(EventType::Telemetry(TelemetryEvent::EventsDropped)),
             151 => Some(EventType::Telemetry(TelemetryEvent::MetricsCollected)),
             366 => Some(EventType::Telemetry(TelemetryEvent::MetricsStored)),
             146 => Some(EventType::Telemetry(TelemetryEvent::MetricsPushed)),
@@ -3135,6 +3139,7 @@ impl EventType {
             EventType::Telemetry(TelemetryEvent::OtelMetricsExporterError) => Level::Warn,
             EventType::Telemetry(TelemetryEvent::PrometheusExporterError) => Level::Warn,
             EventType::Telemetry(TelemetryEvent::JournalError) => Level::Warn,
+            EventType::Telemetry(TelemetryEvent::EventsDropped) => Level::Warn,
             EventType::Tls(TlsEvent::NoCertificatesAvailable) => Level::Warn,
             EventType::Tls(TlsEvent::MultipleCertificatesAvailable) => Level::Warn,
             _ => Level::Debug,
@@ -3902,6 +3907,7 @@ impl EventType {
                 "Prometheus exporter error"
             }
             EventType::Telemetry(TelemetryEvent::JournalError) => "Journal collector error",
+            EventType::Telemetry(TelemetryEvent::EventsDropped) => "Telemetry events dropped",
             EventType::Telemetry(TelemetryEvent::MetricsCollected) => "Metrics collected",
             EventType::Telemetry(TelemetryEvent::MetricsStored) => "Metric store",
             EventType::Telemetry(TelemetryEvent::MetricsPushed) => "Metrics pushed",
@@ -4838,6 +4844,7 @@ impl EventType {
             EventType::Telemetry(TelemetryEvent::OtelMetricsExporterError),
             EventType::Telemetry(TelemetryEvent::PrometheusExporterError),
             EventType::Telemetry(TelemetryEvent::JournalError),
+            EventType::Telemetry(TelemetryEvent::EventsDropped),
             EventType::Telemetry(TelemetryEvent::MetricsCollected),
             EventType::Telemetry(TelemetryEvent::MetricsStored),
             EventType::Telemetry(TelemetryEvent::MetricsPushed),
@@ -5245,6 +5252,7 @@ impl MetricType {
             b"telemetry.otel-metrics-exporter-error" => MetricType::TelemetryOtelMetricsExporterError,
             b"telemetry.prometheus-exporter-error" => MetricType::TelemetryPrometheusExporterError,
             b"telemetry.journal-error" => MetricType::TelemetryJournalError,
+            b"telemetry.events-dropped" => MetricType::TelemetryEventsDropped,
             b"tls.handshake-error" => MetricType::TlsHandshakeError,
             b"user.count" => MetricType::UserCount,
         }
@@ -5632,6 +5640,7 @@ impl MetricType {
             }
             MetricType::TelemetryPrometheusExporterError => "telemetry.prometheus-exporter-error",
             MetricType::TelemetryJournalError => "telemetry.journal-error",
+            MetricType::TelemetryEventsDropped => "telemetry.events-dropped",
             MetricType::TlsHandshakeError => "tls.handshake-error",
             MetricType::UserCount => "user.count",
         }
@@ -6006,6 +6015,7 @@ impl MetricType {
             MetricType::TelemetryOtelMetricsExporterError => 333,
             MetricType::TelemetryPrometheusExporterError => 334,
             MetricType::TelemetryJournalError => 335,
+            MetricType::TelemetryEventsDropped => 369,
             MetricType::TlsHandshakeError => 336,
             MetricType::UserCount => 25,
         }
@@ -6380,6 +6390,7 @@ impl MetricType {
             333 => Some(MetricType::TelemetryOtelMetricsExporterError),
             334 => Some(MetricType::TelemetryPrometheusExporterError),
             335 => Some(MetricType::TelemetryJournalError),
+            369 => Some(MetricType::TelemetryEventsDropped),
             336 => Some(MetricType::TlsHandshakeError),
             25 => Some(MetricType::UserCount),
             _ => None,
@@ -6729,6 +6740,7 @@ impl MetricType {
             MetricType::TelemetryOtelMetricsExporterError => 537,
             MetricType::TelemetryPrometheusExporterError => 538,
             MetricType::TelemetryJournalError => 534,
+            MetricType::TelemetryEventsDropped => 644,
             MetricType::TlsHandshakeError => 544,
             _ => usize::MAX,
         }
@@ -7115,6 +7127,7 @@ impl MetricType {
             MetricType::TelemetryOtelMetricsExporterError => "OpenTelemetry metrics exporter error",
             MetricType::TelemetryPrometheusExporterError => "Prometheus exporter error",
             MetricType::TelemetryJournalError => "Journal collector error",
+            MetricType::TelemetryEventsDropped => "Telemetry events dropped",
             MetricType::TlsHandshakeError => "TLS handshake error",
             MetricType::UserCount => "Total number of users",
         }
@@ -7473,6 +7486,7 @@ impl MetricType {
             | MetricType::TelemetryOtelMetricsExporterError
             | MetricType::TelemetryPrometheusExporterError
             | MetricType::TelemetryJournalError
+            | MetricType::TelemetryEventsDropped
             | MetricType::TlsHandshakeError => "count",
             MetricType::DomainCount => "domains",
             MetricType::QueueCount => "messages",
@@ -7863,6 +7877,7 @@ impl MetricType {
             MetricType::TelemetryOtelMetricsExporterError,
             MetricType::TelemetryPrometheusExporterError,
             MetricType::TelemetryJournalError,
+            MetricType::TelemetryEventsDropped,
             MetricType::TlsHandshakeError,
             MetricType::UserCount,
         ]

@@ -7,6 +7,7 @@
 use crate::core::Session;
 use ahash::AHashMap;
 use common::USER_AGENT;
+use compact_str::{CompactString, format_compact};
 use mail_auth::report::{
     ActionDisposition, AuthFailureType, DeliveryResult, DmarcResult, Feedback, FeedbackType,
     Report, tlsrpt::TlsReport,
@@ -113,9 +114,9 @@ impl LogReport for Report {
             ),
             RangeFrom = trc::Value::Timestamp(self.date_range_begin()),
             RangeTo = trc::Value::Timestamp(self.date_range_end()),
-            Domain = self.domain().to_string(),
-            From = self.email().to_string(),
-            Id = self.report_id().to_string(),
+            Domain = CompactString::from(self.domain()),
+            From = CompactString::from(self.email()),
+            Id = CompactString::from(self.report_id()),
             DmarcPass = dmarc_pass,
             DmarcQuarantine = dmarc_quarantine,
             DmarcReject = dmarc_reject,
@@ -156,12 +157,12 @@ impl LogReport for TlsReport {
                     trc::Value::Timestamp(self.date_range.start_datetime.to_timestamp() as u64),
                 RangeTo = trc::Value::Timestamp(self.date_range.end_datetime.to_timestamp() as u64),
                 Domain = policy.policy.policy_domain.clone(),
-                From = self.contact_info.as_deref().unwrap_or_default().to_string(),
+                From = CompactString::from(self.contact_info.as_deref().unwrap_or_default()),
                 Id = self.report_id.clone(),
-                Policy = format!("{:?}", policy.policy.policy_type),
+                Policy = format_compact!("{:?}", policy.policy.policy_type),
                 TotalSuccesses = policy.summary.total_success,
                 TotalFailures = policy.summary.total_failure,
-                Details = format!("{details:?}"),
+                Details = format_compact!("{details:?}"),
             );
         }
     }
@@ -197,7 +198,7 @@ impl LogReport for Feedback<'_> {
                 .collect::<Vec<_>>(),
             RemoteIp = self.source_ip(),
             Total = self.incidents(),
-            Result = format!("{:?}", self.delivery_result()),
+            Result = format_compact!("{:?}", self.delivery_result()),
             Details = self
                 .authentication_results()
                 .iter()

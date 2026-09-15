@@ -70,6 +70,7 @@ hashify = "0.2"
 rkyv.workspace = true
 tinyvec = { version = "1.12.0", features = ["alloc"] }
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
+bytes = "1"
 lz4_flex = { version = "0.14", features = ["frame"], default-features = false }
 hickory-proto = "0.26.2"
 nohash-hasher = "0.2.0"

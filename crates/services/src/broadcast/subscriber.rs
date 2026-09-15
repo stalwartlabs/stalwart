@@ -9,6 +9,7 @@ use common::{
     BuildServer, Inner,
     ipc::{BroadcastEvent, PushEvent, PushNotification, QueueEvent, RegistryChange},
 };
+use compact_str::format_compact;
 use registry::types::EnumImpl;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
@@ -262,7 +263,7 @@ fn log_event(event: &BroadcastEvent) -> trc::Value {
             let mut array = Vec::with_capacity(items.len() + 1);
             array.push("CacheInvalidation".into());
             for item in items {
-                array.push(format!("{:?}", item).into());
+                array.push(format_compact!("{:?}", item).into());
             }
             trc::Value::Array(array)
         }

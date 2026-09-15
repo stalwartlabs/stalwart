@@ -10,7 +10,7 @@ use common::{
     network::SessionStream,
 };
 
-use compact_str::ToCompactString;
+use compact_str::{CompactString, ToCompactString, format_compact};
 use registry::schema::enums::ExpressionVariable;
 use smtp_proto::{
     request::receiver::{
@@ -123,7 +123,7 @@ impl<T: SessionStream> Session<T> {
                                     trc::event!(
                                         Smtp(SmtpEvent::AlreadyAuthenticated),
                                         SpanId = self.data.session_id,
-                                        AccountName = authenticated_as.to_string(),
+                                        AccountName = CompactString::from(authenticated_as),
                                     );
 
                                     self.write(b"503 5.5.1 Already authenticated.\r\n").await?;
@@ -245,7 +245,7 @@ impl<T: SessionStream> Session<T> {
                                 trc::event!(
                                     Smtp(SmtpEvent::CommandNotImplemented),
                                     SpanId = self.data.session_id,
-                                    Details = format!("{cmd:?}"),
+                                    Details = format_compact!("{cmd:?}"),
                                 );
 
                                 self.write(b"502 5.5.1 Command not implemented.\r\n")
@@ -511,7 +511,7 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
                     trc::event!(
                         Network(NetworkEvent::FlushError),
                         SpanId = self.data.session_id,
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
                     Err(())
                 }
@@ -520,7 +520,7 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
                 trc::event!(
                     Network(NetworkEvent::WriteError),
                     SpanId = self.data.session_id,
-                    Reason = err.to_string(),
+                    Reason = err.to_compact_string(),
                 );
 
                 Err(())
@@ -536,8 +536,9 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
                     Smtp(SmtpEvent::RawInput),
                     SpanId = self.data.session_id,
                     Size = len,
-                    Contents =
-                        String::from_utf8_lossy(bytes.get(0..len).unwrap_or_default()).into_owned(),
+                    Contents = CompactString::from(String::from_utf8_lossy(
+                        bytes.get(0..len).unwrap_or_default()
+                    )),
                 );
 
                 Ok(len)
@@ -546,7 +547,7 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
                 trc::event!(
                     Network(NetworkEvent::ReadError),
                     SpanId = self.data.session_id,
-                    Reason = err.to_string(),
+                    Reason = err.to_compact_string(),
                 );
 
                 Err(())

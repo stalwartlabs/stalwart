@@ -27,6 +27,7 @@ use common::{
     network::SessionStream,
     scripts::ScriptModification,
 };
+use compact_str::{CompactString, ToCompactString};
 use mail_auth::{
     AuthenticatedMessage, AuthenticationResults, Dkim2Result, DkimResult, DmarcResult, ReceivedSpf,
     SpfOutput, SpfResult,
@@ -275,14 +276,14 @@ impl<T: SessionStream> Session<T> {
                 trc::event!(
                     Smtp(SmtpEvent::Dkim2DsnDiscarded),
                     SpanId = self.data.session_id,
-                    From = mail_from.address.to_string(),
+                    From = CompactString::from(&mail_from.address),
                     To = self
                         .data
                         .rcpt_to
                         .iter()
-                        .map(|rcpt| trc::Value::from(rcpt.address.to_string()))
+                        .map(|rcpt| trc::Value::from(CompactString::from(&rcpt.address)))
                         .collect::<Vec<_>>(),
-                    Reason = failure.to_string(),
+                    Reason = failure.to_compact_string(),
                 );
 
                 self.data.messages_sent += 1;
@@ -417,8 +418,8 @@ impl<T: SessionStream> Session<T> {
                     }),
                     SpanId = self.data.session_id,
                     Strict = strict,
-                    Domain = dmarc_output.domain().to_string(),
-                    Policy = dmarc_policy.to_string(),
+                    Domain = CompactString::from(dmarc_output.domain()),
+                    Policy = dmarc_policy.to_compact_string(),
                     Result = trc::Error::from(&dmarc_result),
                     Elapsed = time.elapsed(),
                 );

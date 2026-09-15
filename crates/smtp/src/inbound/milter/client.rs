@@ -5,6 +5,7 @@
  */
 
 use common::config::smtp::session::Milter;
+use compact_str::ToCompactString;
 use rustls_pki_types::ServerName;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -312,8 +313,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
         trc::event!(
             Milter(MilterEvent::Write),
             SpanId = self.session_id,
-            Id = self.id.to_string(),
-            Contents = action.to_string(),
+            Id = self.id.to_compact_string(),
+            Contents = action.to_compact_string(),
         );
 
         tokio::time::timeout(self.timeout_cmd, async {
@@ -332,8 +333,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                         trc::event!(
                             Milter(MilterEvent::Read),
                             SpanId = self.session_id,
-                            Id = self.id.to_string(),
-                            Contents = response.to_string(),
+                            Id = self.id.to_compact_string(),
+                            Contents = response.to_compact_string(),
                         );
 
                         return Ok(response);

@@ -9,6 +9,7 @@ use crate::backend::oidc::lookup::fetch_jwks_keys;
 use crate::backend::oidc::{
     DiscoveryDocument, JwksCache, OidcConfig, OidcDiscovery, OidcError, OpenIdDirectory,
 };
+use compact_str::{CompactString, format_compact};
 use registry::schema::structs;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -67,8 +68,8 @@ impl OpenIdDirectory {
                 if !supported.contains(scope) {
                     trc::event!(
                         Auth(AuthEvent::Warning),
-                        Url = config.issue_url.to_string(),
-                        Reason = format!(
+                        Url = CompactString::from(&config.issue_url),
+                        Reason = format_compact!(
                             "Required scope '{}' is not in scopes_supported from the IdP",
                             scope
                         )
@@ -82,10 +83,11 @@ impl OpenIdDirectory {
                 if !supported.iter().any(|c| c == name) {
                     trc::event!(
                         Auth(AuthEvent::Warning),
-                        Url = config.issue_url.to_string(),
-                        Reason = format!(
+                        Url = CompactString::from(&config.issue_url),
+                        Reason = format_compact!(
                             "Configured {} claim '{}' is not in claims_supported from the IdP",
-                            label, name
+                            label,
+                            name
                         )
                     );
                 }

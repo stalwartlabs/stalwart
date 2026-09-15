@@ -5,6 +5,7 @@
  */
 
 use common::auth::AccessToken;
+use compact_str::format_compact;
 use jmap_proto::{
     method::set::SetRequest,
     object::JmapObject,
@@ -35,7 +36,10 @@ impl JmapAuthorization for AccessToken {
         } else {
             Err(trc::JmapEvent::Forbidden
                 .into_err()
-                .details(format!("You are not an owner of account {}", account_id)))
+                .details(format_compact!(
+                    "You are not an owner of account {}",
+                    account_id
+                )))
         }
     }
 
@@ -47,10 +51,12 @@ impl JmapAuthorization for AccessToken {
         if self.has_access(to_account_id.document_id(), to_collection) {
             Ok(self)
         } else {
-            Err(trc::JmapEvent::Forbidden.into_err().details(format!(
-                "You do not have access to account {}",
-                to_account_id
-            )))
+            Err(trc::JmapEvent::Forbidden
+                .into_err()
+                .details(format_compact!(
+                    "You do not have access to account {}",
+                    to_account_id
+                )))
         }
     }
 

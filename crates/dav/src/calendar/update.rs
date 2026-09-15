@@ -21,6 +21,7 @@ use calcard::{
     icalendar::{ICalendar, ICalendarComponentType},
 };
 use common::{DavName, Server, auth::AccessToken};
+use compact_str::ToCompactString;
 use dav_proto::{
     RequestHeaders, Return,
     schema::{property::Rfc1123DateTime, response::CalCondition},
@@ -302,7 +303,7 @@ impl CalendarUpdateRequestHandler for Server {
                             Calendar(trc::CalendarEvent::ItipMessageError),
                             AccountId = account_id,
                             DocumentId = document_id,
-                            Reason = err.to_string(),
+                            Reason = err.to_compact_string(),
                         );
 
                         // Event changed, but there are no iTIP messages to send
@@ -458,7 +459,7 @@ impl CalendarUpdateRequestHandler for Server {
                         trc::event!(
                             Calendar(trc::CalendarEvent::ItipMessageError),
                             AccountId = account_id,
-                            Reason = err.to_string(),
+                            Reason = err.to_compact_string(),
                         );
                     }
                 }

@@ -11,6 +11,7 @@ use crate::{
         query::RegistryQueryFilters,
     },
 };
+use compact_str::format_compact;
 use jmap_proto::{error::set::SetError, types::state::State};
 use jmap_tools::{Key, Value};
 use registry::{
@@ -395,10 +396,12 @@ pub(crate) async fn report_query(
             }
         }
         property => {
-            return Err(trc::JmapEvent::UnsupportedSort.into_err().details(format!(
-                "Property {} is not supported for sorting",
-                property
-            )));
+            return Err(trc::JmapEvent::UnsupportedSort
+                .into_err()
+                .details(format_compact!(
+                    "Property {} is not supported for sorting",
+                    property
+                )));
         }
     };
 

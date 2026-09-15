@@ -17,6 +17,7 @@ use common::config::smtp::queue::{ArchivedQueueExpiry, QueueName};
 use common::ipc::{BroadcastEvent, QueueEvent};
 use common::network::RcptResolution;
 use common::{KV_LOCK_QUEUE_MESSAGE, Server};
+use compact_str::{CompactString, ToCompactString};
 use mail_auth::AuthenticatedMessage;
 use registry::schema::prelude::{ObjectType, Property};
 use registry::schema::structs::SpamTrainingSample;
@@ -267,7 +268,7 @@ impl SmtpSpool for Server {
                     trc::event!(
                         Queue(trc::QueueEvent::Locked),
                         QueueId = queue_id,
-                        QueueName = queue_name.to_string()
+                        QueueName = queue_name.to_compact_string()
                     );
                 }
                 result
@@ -638,7 +639,7 @@ impl MessageWrapper {
                     err.span_id(self.span_id)
                         .caused_by(trc::location!())
                         .details("Failed to resolve recipient.")
-                        .ctx(trc::Key::To, rcpt.to_string())
+                        .ctx(trc::Key::To, CompactString::from(rcpt))
                 );
                 self.add_expanded_recipient(rcpt, server).await;
             }

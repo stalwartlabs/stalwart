@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use compact_str::CompactString;
 use sieve::{FunctionMap, compiler::Number, runtime::Variable};
 use std::time::Instant;
 use trc::{AiEvent, SecurityEvent};
@@ -65,7 +66,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
                     trc::event!(
                         Ai(AiEvent::LlmResponse),
                         Id = ai_api.id.clone(),
-                        Value = prompt.to_string(),
+                        Value = CompactString::from(prompt.as_ref()),
                         Details = response.clone(),
                         Elapsed = time.elapsed(),
                         SpanId = ctx.session_id,

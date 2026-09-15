@@ -9,6 +9,7 @@ use crate::{
     scripts::ScriptResult,
 };
 use common::{config::smtp::session::Stage, network::SessionStream, scripts::ScriptModification};
+use compact_str::CompactString;
 use mail_auth::{IprevOutput, IprevResult, SpfOutput, SpfResult, spf::verify::SpfParameters};
 use mail_parser::DateTime;
 use registry::schema::structs::Rate;
@@ -248,7 +249,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Smtp(SmtpEvent::MailFromUnauthorized),
                         SpanId = self.data.session_id,
-                        From = address_lcase.to_string(),
+                        From = CompactString::from(address_lcase),
                         Details = [trc::Value::String(authenticated_as.into())]
                             .into_iter()
                             .chain(
@@ -506,12 +507,11 @@ impl<T: SessionStream> Session<T> {
                     }),
                     SpanId = self.data.session_id,
                     Domain = self.data.helo_domain.clone(),
-                    From = if !mail_from.address.is_empty() {
+                    From = CompactString::from(if !mail_from.address.is_empty() {
                         mail_from.address.as_str()
                     } else {
                         "<>"
-                    }
-                    .to_string(),
+                    }),
                     Result = trc::Error::from(&spf_output),
                     Elapsed = time.elapsed(),
                 );

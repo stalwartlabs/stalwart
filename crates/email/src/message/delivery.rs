@@ -141,7 +141,7 @@ impl MailDelivery for Server {
                 Err(err) => {
                     trc::error!(
                         err.details("Failed to lookup recipient.")
-                            .ctx(trc::Key::To, rcpt.address.to_string())
+                            .ctx(trc::Key::To, rcpt.address)
                             .span_id(message.session_id)
                             .caused_by(trc::location!())
                     );
@@ -262,7 +262,7 @@ impl MailDelivery for Server {
                     };
 
                     trc::error!(
-                        err.ctx(trc::Key::To, rcpt.address.to_string())
+                        err.ctx(trc::Key::To, rcpt.address)
                             .span_id(message.session_id)
                     );
 

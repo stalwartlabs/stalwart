@@ -36,6 +36,7 @@ use common::{
     auth::{AccessToken, AccountInfo, oauth::GrantType},
     i18n,
 };
+use compact_str::ToCompactString;
 use registry::schema::enums::Permission;
 use std::net::IpAddr;
 use store::{
@@ -534,7 +535,7 @@ impl ItipIngest for Server {
                     AccountId = rsvp.account_id,
                     DocumentId = rsvp.document_id,
                     From = rsvp.attendee.clone(),
-                    Details = err.to_string(),
+                    Details = err.to_compact_string(),
                 );
 
                 return Ok(RsvpResponse::error(RsvpError::ServerError, language));
@@ -564,7 +565,7 @@ impl ItipIngest for Server {
                     AccountId = rsvp.account_id,
                     DocumentId = rsvp.document_id,
                     From = rsvp.attendee.clone(),
-                    Details = err.to_string(),
+                    Details = err.to_compact_string(),
                 );
 
                 return Ok(RsvpResponse::error(RsvpError::ServerError, language));

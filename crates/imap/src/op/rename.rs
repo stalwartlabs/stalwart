@@ -6,6 +6,7 @@
 
 use crate::core::{Session, SessionData};
 use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
+use compact_str::format_compact;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{ObjectId, rename::Arguments},
@@ -85,7 +86,10 @@ impl<T: SessionStream> SessionData<T> {
             } else {
                 return Err(trc::ImapEvent::Error
                     .into_err()
-                    .details(format!("Mailbox '{}' not found.", arguments.mailbox_name))
+                    .details(format_compact!(
+                        "Mailbox '{}' not found.",
+                        arguments.mailbox_name
+                    ))
                     .code(ResponseCode::NonExistent)
                     .id(arguments.tag));
             }
@@ -105,7 +109,10 @@ impl<T: SessionStream> SessionData<T> {
             .ok_or_else(|| {
                 trc::ImapEvent::Error
                     .into_err()
-                    .details(format!("Mailbox '{}' not found.", arguments.mailbox_name))
+                    .details(format_compact!(
+                        "Mailbox '{}' not found.",
+                        arguments.mailbox_name
+                    ))
                     .caused_by(trc::location!())
                     .code(ResponseCode::NonExistent)
                     .id(arguments.tag.clone())

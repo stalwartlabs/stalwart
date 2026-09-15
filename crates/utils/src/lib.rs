@@ -136,7 +136,7 @@ pub async fn wait_for_shutdown() {
                 trc::event!(
                     Server(trc::ServerEvent::ThreadError),
                     Details = "Unable to listen for shutdown signal",
-                    Reason = err.to_string(),
+                    Reason = err.to_compact_string(),
                 );
                 "Error"
             }

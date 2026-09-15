@@ -14,6 +14,7 @@ use crate::{
     manager::defaults::BootstrapDefaults,
 };
 use arc_swap::ArcSwap;
+use compact_str::CompactString;
 use std::{
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
@@ -169,7 +170,7 @@ impl BootManager {
                 if bootstrap.registry.is_bootstrap_mode() {
                     trc::event!(
                         Server(trc::ServerEvent::BootstrapMode),
-                        Hostname = bootstrap.registry.local_hostname().to_string(),
+                        Hostname = CompactString::from(bootstrap.registry.local_hostname()),
                         Details =
                             "No configuration file was found. Port 8080 is open for initial setup.",
                         Version = env!("CARGO_PKG_VERSION"),
@@ -178,13 +179,13 @@ impl BootManager {
                     trc::event!(
                         Server(trc::ServerEvent::RecoveryMode),
                         Details = "Port 8080 is open for troubleshooting and recovery.",
-                        Hostname = bootstrap.registry.local_hostname().to_string(),
+                        Hostname = CompactString::from(bootstrap.registry.local_hostname()),
                         Version = env!("CARGO_PKG_VERSION"),
                     );
                 } else {
                     trc::event!(
                         Server(trc::ServerEvent::Startup),
-                        Hostname = bootstrap.registry.local_hostname().to_string(),
+                        Hostname = CompactString::from(bootstrap.registry.local_hostname()),
                         Version = env!("CARGO_PKG_VERSION"),
                     );
                 }
@@ -193,11 +194,9 @@ impl BootManager {
                     trc::event!(
                         Cluster(trc::ClusterEvent::Startup),
                         Id = bootstrap.registry.node_id(),
-                        Type = bootstrap
-                            .registry
-                            .cluster_role()
-                            .unwrap_or("[default]")
-                            .to_string(),
+                        Type = CompactString::from(
+                            bootstrap.registry.cluster_role().unwrap_or("[default]")
+                        ),
                         Details = bootstrap.registry.cluster_push_shard()
                     );
                 }

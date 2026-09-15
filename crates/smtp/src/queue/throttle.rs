@@ -8,6 +8,7 @@ use crate::core::throttle::NewKey;
 use common::{
     KV_RATE_LIMIT_SMTP, Server, config::smtp::QueueRateLimiter, expr::functions::ResolveVariable,
 };
+use compact_str::ToCompactString;
 use registry::schema::prelude::Property;
 use std::future::Future;
 use store::write::now;
@@ -51,7 +52,7 @@ impl IsAllowed for Server {
                     trc::event!(
                         Queue(trc::QueueEvent::RateLimitExceeded),
                         SpanId = session_id,
-                        Id = throttle.id.to_string(),
+                        Id = throttle.id.to_compact_string(),
                         Limit = vec![
                             trc::Value::from(throttle.rate.count),
                             trc::Value::from(throttle.rate.period.into_inner())

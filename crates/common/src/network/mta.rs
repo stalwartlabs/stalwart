@@ -21,6 +21,7 @@ use crate::{
     manager::SPAM_CLASSIFIER_KEY,
     network::RcptResolution,
 };
+use compact_str::{CompactString, ToCompactString};
 use directory::Recipient;
 use mail_auth::IpLookupStrategy;
 use registry::schema::{enums::ExpressionVariable, structs::MaskedEmail};
@@ -218,7 +219,7 @@ impl Server {
         } else {
             trc::event!(
                 Dkim(trc::DkimEvent::SignerNotFound),
-                Id = domain.to_string(),
+                Id = CompactString::from(domain),
                 SpanId = session_id,
             );
 
@@ -230,7 +231,7 @@ impl Server {
         self.core.sieve.trusted_script(name).or_else(|| {
             trc::event!(
                 Sieve(trc::SieveEvent::ScriptNotFound),
-                Id = name.to_string(),
+                Id = CompactString::from(name),
                 SpanId = session_id,
             );
 
@@ -246,7 +247,7 @@ impl Server {
         self.core.sieve.untrusted_script(name).or_else(|| {
             trc::event!(
                 Sieve(trc::SieveEvent::ScriptNotFound),
-                Id = name.to_string(),
+                Id = CompactString::from(name),
                 SpanId = session_id,
             );
 
@@ -272,7 +273,7 @@ impl Server {
                 _ => {
                     trc::event!(
                         Smtp(trc::SmtpEvent::IdNotFound),
-                        Id = name.to_string(),
+                        Id = CompactString::from(name),
                         Details = "Gateway not found",
                         SpanId = session_id,
                     );
@@ -292,7 +293,7 @@ impl Server {
                 if name != &DEFAULT_QUEUE_NAME {
                     trc::event!(
                         Smtp(trc::SmtpEvent::IdNotFound),
-                        Id = name.to_string(),
+                        Id = name.to_compact_string(),
                         Details = "Virtual queue not found",
                     );
                 }
@@ -328,7 +329,7 @@ impl Server {
                 if name != "default" {
                     trc::event!(
                         Smtp(trc::SmtpEvent::IdNotFound),
-                        Id = name.to_string(),
+                        Id = CompactString::from(name),
                         Details = "Queue strategy not found",
                         SpanId = session_id,
                     );
@@ -356,7 +357,7 @@ impl Server {
                 if name != "default" {
                     trc::event!(
                         Smtp(trc::SmtpEvent::IdNotFound),
-                        Id = name.to_string(),
+                        Id = CompactString::from(name),
                         Details = "TLS strategy not found",
                         SpanId = session_id,
                     );
@@ -388,7 +389,7 @@ impl Server {
                 if name != "default" {
                     trc::event!(
                         Smtp(trc::SmtpEvent::IdNotFound),
-                        Id = name.to_string(),
+                        Id = CompactString::from(name),
                         Details = "Connection strategy not found",
                         SpanId = session_id,
                     );

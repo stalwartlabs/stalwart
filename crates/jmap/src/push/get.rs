@@ -110,9 +110,9 @@ impl PushSubscriptionFetch for Server {
                         result.insert_unchecked(PushSubscriptionProperty::Id, id);
                     }
                     PushSubscriptionProperty::Url | PushSubscriptionProperty::Keys => {
-                        return Err(trc::JmapEvent::Forbidden.into_err().details(
-                            "The 'url' and 'keys' properties are not readable".to_string(),
-                        ));
+                        return Err(trc::JmapEvent::Forbidden
+                            .into_err()
+                            .details("The 'url' and 'keys' properties are not readable"));
                     }
                     PushSubscriptionProperty::DeviceClientId => {
                         result.insert_unchecked(

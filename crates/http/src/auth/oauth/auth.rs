@@ -21,6 +21,7 @@ use common::{
         },
     },
 };
+use compact_str::format_compact;
 use directory::Credentials;
 use http_proto::*;
 use std::future::Future;
@@ -255,7 +256,7 @@ impl OAuthApiHandler for Server {
                     ) {
                         return Err(trc::AuthEvent::Error
                             .into_err()
-                            .details(format!("Unknown resource indicator: {}", resource)));
+                            .details(format_compact!("Unknown resource indicator: {}", resource)));
                     }
                 }
 

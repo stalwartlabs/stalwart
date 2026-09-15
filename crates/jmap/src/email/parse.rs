@@ -6,6 +6,7 @@
 
 use crate::blob::download::BlobDownload;
 use common::{Server, auth::AccessToken};
+use compact_str::format_compact;
 use email::message::index::PREVIEW_LENGTH;
 use email::message::{
     body::{ToBodyPart, TruncateBody},
@@ -284,7 +285,7 @@ impl EmailParse for Server {
                     _ => {
                         return Err(trc::JmapEvent::InvalidArguments
                             .into_err()
-                            .details(format!("Invalid property {property:?}")));
+                            .details(format_compact!("Invalid property {property:?}")));
                     }
                 }
             }

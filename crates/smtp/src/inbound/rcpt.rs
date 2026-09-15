@@ -14,6 +14,7 @@ use common::{
     network::{RcptResolution, SessionStream},
     scripts::ScriptModification,
 };
+use compact_str::CompactString;
 use smtp_proto::{
     RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, RcptTo,
 };
@@ -363,7 +364,7 @@ impl<T: SessionStream> Session<T> {
                             err.span_id(self.data.session_id)
                                 .caused_by(trc::location!())
                                 .details("Failed to look up mailing list member.")
-                                .ctx(trc::Key::To, member.to_string())
+                                .ctx(trc::Key::To, CompactString::from(member.as_ref()))
                         );
                         false
                     }
@@ -384,7 +385,7 @@ impl<T: SessionStream> Session<T> {
                                 err.span_id(self.data.session_id)
                                     .caused_by(trc::location!())
                                     .details("Failed to resolve mailing list member.")
-                                    .ctx(trc::Key::To, member.to_string())
+                                    .ctx(trc::Key::To, CompactString::from(member.as_ref()))
                             );
                             member.to_string()
                         }

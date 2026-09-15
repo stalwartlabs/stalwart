@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use compact_str::{CompactString, ToCompactString, format_compact};
 use std::{
     net::IpAddr,
     sync::{Arc, atomic::AtomicU64},
@@ -116,15 +117,15 @@ impl Server {
                         trc::event!(
                             Resource(trc::ResourceEvent::Error),
                             Details = "Failed to UTF-8 decode ASN/Geo data",
-                            Hostname = format!("{}.{}.", ip.to_reverse_name(), zone),
+                            Hostname = format_compact!("{}.{}.", ip.to_reverse_name(), zone),
                         );
                     }
                     Err(err) => {
                         trc::event!(
                             Resource(trc::ResourceEvent::Error),
                             Details = "Failed to lookup ASN/Geo data",
-                            Hostname = format!("{}.{}.", ip.to_reverse_name(), zone),
-                            CausedBy = err.to_string()
+                            Hostname = format_compact!("{}.{}.", ip.to_reverse_name(), zone),
+                            CausedBy = err.to_compact_string()
                         );
                     }
                 }
@@ -242,10 +243,10 @@ impl Server {
                                                     Resource(trc::ResourceEvent::Error),
                                                     Details = "Invalid ASN/Geo data",
                                                     Url = url.clone(),
-                                                    Details = data
-                                                        .get(line_start..idx)
-                                                        .unwrap_or_default()
-                                                        .to_string(),
+                                                    Details = CompactString::from(
+                                                        data.get(line_start..idx)
+                                                            .unwrap_or_default()
+                                                    ),
                                                 );
                                                 has_errors = true;
                                             }

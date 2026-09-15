@@ -20,6 +20,7 @@ use crate::{
 };
 use ::registry::schema::{enums::PostgreSqlRecyclingMethod, structs};
 use ahash::AHashSet;
+use compact_str::ToCompactString;
 use deadpool_postgres::{
     Config, ManagerConfig, Object, Pool, PoolConfig, RecyclingMethod, Runtime,
 };
@@ -216,7 +217,7 @@ async fn discover_ts_configs(pool: &Pool) -> AHashSet<&'static str> {
             trc::event!(
                 Store(trc::StoreEvent::PostgresqlError),
                 Details = "Failed to query pg_ts_config, assuming english only",
-                Reason = err.to_string(),
+                Reason = err.to_compact_string(),
             );
         }
     }

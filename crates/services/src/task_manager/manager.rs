@@ -26,6 +26,7 @@ use common::config::server::ServerProtocol;
 use common::network::limiter::ConcurrencyLimiter;
 use common::network::{ServerInstance, TcpAcceptor};
 use common::{Inner, Server};
+use compact_str::CompactString;
 use registry::schema::enums::TaskType;
 use registry::schema::structs::{
     Task, TaskManager, TaskRetryStrategy, TaskStatus, TaskStatusFailed, TaskStatusRetry,
@@ -555,7 +556,7 @@ async fn update_tasks(
                         TaskManager(TaskManagerEvent::TaskRetry),
                         Id = task_id,
                         Details = task.task.name(),
-                        Reason = message.to_string(),
+                        Reason = CompactString::from(&message),
                         NextRetry = trc::Value::Timestamp(retry_at),
                     );
 
@@ -572,7 +573,7 @@ async fn update_tasks(
                         TaskManager(TaskManagerEvent::TaskFailed),
                         Id = task_id,
                         Details = task.task.name(),
-                        Reason = message.to_string(),
+                        Reason = CompactString::from(&message),
                     );
 
                     task.task.set_status(TaskStatus::Failed(TaskStatusFailed {

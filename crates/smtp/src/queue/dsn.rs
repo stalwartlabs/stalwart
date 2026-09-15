@@ -13,6 +13,7 @@ use crate::inbound::dkim::DkimSign;
 use crate::queue::spool::QueueParams;
 use crate::queue::{MessageWrapper, UnexpectedResponse};
 use common::Server;
+use compact_str::{CompactString, ToCompactString};
 use mail_builder::MessageBuilder;
 use mail_builder::headers::HeaderType;
 use mail_builder::headers::content_type::ContentType;
@@ -83,7 +84,7 @@ impl SendDsn for Server {
                         To = rcpt.address.clone(),
                         Hostname = response.hostname.clone(),
                         Code = response.response.code,
-                        Details = response.response.message.to_string(),
+                        Details = CompactString::from(&*response.response.message),
                     );
                 }
                 Status::TemporaryFailure(response) if rcpt.notify.due <= now => {
@@ -92,7 +93,7 @@ impl SendDsn for Server {
                         SpanId = message.span_id,
                         To = rcpt.address.clone(),
                         Hostname = response.entity.clone(),
-                        Details = response.details.to_string(),
+                        Details = response.details.to_compact_string(),
                         NextRetry = trc::Value::Timestamp(rcpt.retry.due),
                         Expires = rcpt
                             .expiration_time(message.message.created)
@@ -106,7 +107,7 @@ impl SendDsn for Server {
                         SpanId = message.span_id,
                         To = rcpt.address.clone(),
                         Hostname = response.entity.clone(),
-                        Details = response.details.to_string(),
+                        Details = response.details.to_compact_string(),
                         Total = rcpt.retry.inner,
                     );
                 }

@@ -7,6 +7,7 @@
 use super::ImapContext;
 use crate::core::Session;
 use common::network::SessionStream;
+use compact_str::format_compact;
 use email::cache::MessageCacheFetch;
 use imap_proto::{
     Command, ResponseCode, ResponseType, StatusResponse, protocol::uidbatches, receiver::Request,
@@ -27,7 +28,7 @@ impl<T: SessionStream> Session<T> {
         if arguments.batch_size < min_batch_size {
             return Err(trc::ImapEvent::Error
                 .into_err()
-                .details(format!("Minimum batch size is {min_batch_size}."))
+                .details(format_compact!("Minimum batch size is {min_batch_size}."))
                 .code(ResponseCode::TooFew)
                 .id(arguments.tag));
         }
@@ -51,7 +52,7 @@ impl<T: SessionStream> Session<T> {
         {
             return Err(trc::ImapEvent::Error
                 .into_err()
-                .details(format!(
+                .details(format_compact!(
                     "A single UIDBATCHES response is limited to {max_uid_batches} ranges."
                 ))
                 .code(ResponseCode::TooMany)
@@ -83,7 +84,7 @@ impl<T: SessionStream> Session<T> {
             if arguments.batch_range.is_none() && total_batches > max_uid_batches as usize {
                 return Err(trc::ImapEvent::Error
                     .into_err()
-                    .details(format!(
+                    .details(format_compact!(
                         "A single UIDBATCHES response is limited to {max_uid_batches} ranges."
                     ))
                     .code(ResponseCode::TooMany)

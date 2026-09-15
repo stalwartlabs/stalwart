@@ -11,6 +11,7 @@ use crate::{
         AcmeDnsParameters, AcmeError, AcmeResult, ParsedCert, directory::AcmeRequestBuilder,
     },
 };
+use compact_str::ToCompactString;
 use registry::{
     schema::{
         enums::{AcmeChallengeType, AcmeRenewBefore, DnsRecordType},
@@ -205,7 +206,7 @@ impl Server {
                     Acme(trc::AcmeEvent::OrderCompleted),
                     Domain = domain.name.clone(),
                     Hostname = new_sans.as_slice(),
-                    Id = id.to_string(),
+                    Id = id.to_compact_string(),
                     ValidFrom =
                         trc::Value::Timestamp(parsed_cert.valid_not_before.timestamp() as u64),
                     ValidTo = trc::Value::Timestamp(parsed_cert.valid_not_after.timestamp() as u64),

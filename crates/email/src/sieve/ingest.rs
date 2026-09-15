@@ -18,6 +18,7 @@ use common::{
     MessageStoreCache, Server, auth::AccessToken, config::mailstore::spamfilter::spam_status,
     scripts::plugins::PluginContext,
 };
+use compact_str::{CompactString, ToCompactString};
 use mail_builder::headers::date::Date;
 use mail_parser::{HeaderName, MessageParser};
 use sieve::{
@@ -142,7 +143,7 @@ impl<'x> SieveHandler<'x> {
         if self.received_headers >= self.max_received_headers {
             trc::event!(
                 Smtp(SmtpEvent::LoopDetected),
-                From = self.mail_from.to_string(),
+                From = CompactString::from(self.mail_from),
                 Total = self.received_headers,
                 Limit = self.max_received_headers,
                 SpanId = self.session_id,
@@ -159,7 +160,7 @@ impl<'x> SieveHandler<'x> {
         if message.raw_message.len() > self.mail_max_size {
             trc::event!(
                 Sieve(SieveEvent::MessageTooLarge),
-                From = self.mail_from.to_string(),
+                From = CompactString::from(self.mail_from),
                 To = recipients
                     .iter()
                     .map(|r| trc::Value::String(r.as_str().into()))
@@ -173,7 +174,7 @@ impl<'x> SieveHandler<'x> {
 
         trc::event!(
             Sieve(SieveEvent::SendMessage),
-            From = sender_address.to_string(),
+            From = CompactString::from(sender_address),
             To = recipients
                 .iter()
                 .map(|r| trc::Value::String(r.as_str().into()))
@@ -601,7 +602,7 @@ impl SieveScriptIngest for Server {
                 Err(err) => {
                     trc::event!(
                         Sieve(SieveEvent::RuntimeError),
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                         SpanId = session_id
                     );
                 }

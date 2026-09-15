@@ -32,6 +32,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 base64 = "0.23"
 dns-update = { version = "0.5" }
 psl = "2"
+compact_str = "0.10.0"
 
 [dev-dependencies]
 

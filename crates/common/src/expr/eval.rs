@@ -31,7 +31,7 @@ impl Server {
             trc::event!(
                 Eval(EvalEvent::Result),
                 SpanId = session_id,
-                Id = if_block.id.to_string(),
+                Id = if_block.id.to_compact_string(),
                 Key = if_block.property.as_str(),
                 Result = ""
             );
@@ -53,9 +53,9 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Result),
                     SpanId = session_id,
-                    Id = if_block.id.to_string(),
+                    Id = if_block.id.to_compact_string(),
                     Key = if_block.property.as_str(),
-                    Result = format!("{result:?}"),
+                    Result = format_compact!("{result:?}"),
                 );
 
                 match result.try_into() {
@@ -64,7 +64,7 @@ impl Server {
                         trc::event!(
                             Eval(EvalEvent::Result),
                             SpanId = session_id,
-                            Id = if_block.id.to_string(),
+                            Id = if_block.id.to_compact_string(),
                             Key = if_block.property.as_str(),
                             Result = "",
                         );
@@ -77,7 +77,7 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Error),
                     SpanId = session_id,
-                    Id = if_block.id.to_string(),
+                    Id = if_block.id.to_compact_string(),
                     Key = if_block.property.as_str(),
                     CausedBy = err,
                 );
@@ -113,9 +113,9 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Result),
                     SpanId = session_id,
-                    Id = obj_id.to_string(),
+                    Id = obj_id.to_compact_string(),
                     Key = property.as_str(),
-                    Result = format!("{result:?}"),
+                    Result = format_compact!("{result:?}"),
                 );
 
                 match result.try_into() {
@@ -124,7 +124,7 @@ impl Server {
                         trc::event!(
                             Eval(EvalEvent::Error),
                             SpanId = session_id,
-                            Id = obj_id.to_string(),
+                            Id = obj_id.to_compact_string(),
                             Key = property.as_str(),
                             Details = "Failed to convert result",
                         );
@@ -137,7 +137,7 @@ impl Server {
                 trc::event!(
                     Eval(EvalEvent::Error),
                     SpanId = session_id,
-                    Id = obj_id.to_string(),
+                    Id = obj_id.to_compact_string(),
                     Key = property.as_str(),
                     CausedBy = err,
                 );

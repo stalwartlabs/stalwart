@@ -20,6 +20,7 @@ use common::{
         },
     },
 };
+use compact_str::CompactString;
 use directory::core::secret::{hash_secret, verify_secret_hash};
 use http_proto::{request::fetch_body, *};
 use hyper::StatusCode;
@@ -187,13 +188,13 @@ impl ClientRegistrationHandler for Server {
             return Err(trc::StoreEvent::UnexpectedError
                 .into_err()
                 .details("Failed to register OAuth client.")
-                .reason(result.to_string())
+                .reason(result)
                 .caused_by(trc::location!()));
         }
 
         trc::event!(
             Auth(AuthEvent::ClientRegistration),
-            Id = client_id.to_string(),
+            Id = CompactString::from(&client_id),
             RemoteIp = session.remote_ip
         );
 

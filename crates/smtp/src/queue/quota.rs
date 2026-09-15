@@ -8,6 +8,7 @@ use super::{Metadata, QueueEnvelope, Status};
 use crate::{core::throttle::NewKey, queue::MessageWrapper};
 use ahash::AHashSet;
 use common::{Server, config::smtp::queue::QueueQuota, expr::functions::ResolveVariable};
+use compact_str::ToCompactString;
 use registry::schema::prelude::Property;
 use std::future::Future;
 use store::{
@@ -53,7 +54,7 @@ impl HasQueueQuota for Server {
                     trc::event!(
                         Queue(QueueEvent::QuotaExceeded),
                         SpanId = message.span_id,
-                        Id = quota.id.to_string(),
+                        Id = quota.id.to_compact_string(),
                         Type = "Sender"
                     );
 
@@ -81,7 +82,7 @@ impl HasQueueQuota for Server {
                         trc::event!(
                             Queue(QueueEvent::QuotaExceeded),
                             SpanId = message.span_id,
-                            Id = quota.id.to_string(),
+                            Id = quota.id.to_compact_string(),
                             Type = "Domain"
                         );
 
@@ -107,7 +108,7 @@ impl HasQueueQuota for Server {
                     trc::event!(
                         Queue(QueueEvent::QuotaExceeded),
                         SpanId = message.span_id,
-                        Id = quota.id.to_string(),
+                        Id = quota.id.to_compact_string(),
                         Type = "Recipient"
                     );
 

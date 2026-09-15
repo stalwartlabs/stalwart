@@ -26,6 +26,7 @@ use common::{
     ipc::CacheInvalidation,
     storage::encryption::{EncryptionMethod, parse_public_key},
 };
+use compact_str::{CompactString, format_compact};
 use directory::core::secret::{SecretVerificationResult, hash_secret, verify_mfa_secret_hash};
 use jmap_proto::{error::set::SetError, request::MaybeInvalid, types::state::State};
 use jmap_tools::{JsonPointer, JsonPointerItem, Key, Map, Value};
@@ -259,7 +260,7 @@ pub(crate) async fn account_set(
                                                 .ctx(trc::Key::RemoteIp, set.remote_ip)
                                                 .ctx(
                                                     trc::Key::AccountName,
-                                                    account.name().to_string(),
+                                                    CompactString::from(account.name()),
                                                 ));
                                         } else {
                                             set.response.not_updated.append(
@@ -902,10 +903,12 @@ pub(crate) async fn credential_query(
             }
         }
         property => {
-            return Err(trc::JmapEvent::UnsupportedSort.into_err().details(format!(
-                "Property {} is not supported for sorting",
-                property
-            )));
+            return Err(trc::JmapEvent::UnsupportedSort
+                .into_err()
+                .details(format_compact!(
+                    "Property {} is not supported for sorting",
+                    property
+                )));
         }
     }
 

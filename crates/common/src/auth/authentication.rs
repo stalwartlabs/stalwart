@@ -13,6 +13,7 @@ use crate::{
     },
 };
 use base64::{Engine, engine::general_purpose};
+use compact_str::CompactString;
 use directory::{
     Credentials, Directory, Recipient,
     core::secret::{SecretVerificationResult, verify_mfa_secret_hash, verify_secret_hash},
@@ -65,7 +66,10 @@ impl Server {
                     Err(trc::SecurityEvent::AuthenticationBan
                         .into_err()
                         .ctx(trc::Key::RemoteIp, req.remote_ip)
-                        .ctx_opt(trc::Key::AccountName, req.username().map(|s| s.to_string())))
+                        .ctx_opt(
+                            trc::Key::AccountName,
+                            req.username().map(CompactString::from),
+                        ))
                 } else {
                     Err(err.ctx(trc::Key::RemoteIp, req.remote_ip))
                 }
@@ -94,10 +98,10 @@ impl Server {
                             {
                                 trc::event!(
                                     Auth(trc::AuthEvent::Success),
-                                    AccountName = address.to_string(),
+                                    AccountName = CompactString::from(address),
                                     AccountId = account_id,
                                     SpanId = req.session_id,
-                                    Details = fallback_user.to_string(),
+                                    Details = CompactString::from(fallback_user),
                                 );
 
                                 self.access_token(account_id)
@@ -106,13 +110,13 @@ impl Server {
                             } else {
                                 Err(trc::AuthEvent::Failed
                                     .into_err()
-                                    .ctx(trc::Key::AccountName, address.to_string())
+                                    .ctx(trc::Key::AccountName, CompactString::from(address))
                                     .reason("Master user account not found for fallback admin authentication"))
                             }
                         } else {
                             trc::event!(
                                 Auth(trc::AuthEvent::Success),
-                                AccountName = fallback_user.to_string(),
+                                AccountName = CompactString::from(fallback_user),
                                 SpanId = req.session_id,
                             );
 
@@ -121,7 +125,7 @@ impl Server {
                     } else {
                         Err(trc::AuthEvent::Failed
                             .into_err()
-                            .ctx(trc::Key::AccountName, fallback_user.to_string())
+                            .ctx(trc::Key::AccountName, CompactString::from(fallback_user))
                             .ctx(trc::Key::SpanId, req.session_id)
                             .reason("Fallback admin authentication failed"))
                     };
@@ -145,7 +149,7 @@ impl Server {
                     if username.is_master() {
                         return Err(trc::AuthEvent::Failed
                             .into_err()
-                            .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                            .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                             .ctx(trc::Key::SpanId, req.session_id)
                             .reason("App passwords cannot be used for impersonation"));
                     }
@@ -163,7 +167,7 @@ impl Server {
                     } else {
                         Err(trc::AuthEvent::Failed
                             .into_err()
-                            .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                            .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                             .reason("App password authentication failed: account not found"))
                     };
                 }
@@ -198,7 +202,7 @@ impl Server {
                         let Some(credential) = account.password_credential() else {
                             return Err(trc::AuthEvent::Failed
                                 .into_err()
-                                .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                                .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                                 .ctx(trc::Key::AccountId, account_id)
                                 .ctx(trc::Key::SpanId, req.session_id)
                                 .reason("Password credential not found for account"));
@@ -220,14 +224,17 @@ impl Server {
                             }
                             SecretVerificationResult::Invalid => Err(trc::AuthEvent::Failed
                                 .into_err()
-                                .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                                .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                                 .ctx(trc::Key::AccountId, account_id)
                                 .ctx(trc::Key::SpanId, req.session_id)
                                 .reason("Authentication failed")),
                             SecretVerificationResult::MissingMfaToken => {
                                 Err(trc::AuthEvent::MfaRequired
                                     .into_err()
-                                    .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                                    .ctx(
+                                        trc::Key::AccountName,
+                                        CompactString::from(auth_as_address),
+                                    )
                                     .ctx(trc::Key::AccountId, account_id)
                                     .ctx(trc::Key::SpanId, req.session_id)
                                     .reason("MFA token required"))
@@ -236,14 +243,14 @@ impl Server {
                     } else {
                         Err(trc::AuthEvent::Error
                             .into_err()
-                            .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                            .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                             .ctx(trc::Key::AccountId, account_id)
                             .reason("Account not found in registry"))
                     }
                 } else {
                     Err(trc::AuthEvent::Failed
                         .into_err()
-                        .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                        .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                         .reason("Account not found"))
                 }?;
 
@@ -251,7 +258,7 @@ impl Server {
                 if is_alias_login && !token.has_permission(Permission::AuthenticateWithAlias) {
                     return Err(trc::AuthEvent::Failed
                         .into_err()
-                        .ctx(trc::Key::AccountName, auth_as_address.to_string())
+                        .ctx(trc::Key::AccountName, CompactString::from(auth_as_address))
                         .ctx(trc::Key::AccountId, token.account_id())
                         .ctx(trc::Key::SpanId, req.session_id)
                         .reason("Authenticated using an email alias but account does not have AuthenticateAlias permission"));
@@ -270,10 +277,10 @@ impl Server {
                     {
                         trc::event!(
                             Auth(trc::AuthEvent::Success),
-                            AccountName = address.to_string(),
+                            AccountName = CompactString::from(address),
                             AccountId = account_id,
                             SpanId = req.session_id,
-                            Details = master_address.to_string(),
+                            Details = CompactString::from(master_address),
                         );
 
                         self.access_token(account_id)
@@ -282,14 +289,14 @@ impl Server {
                     } else {
                         Err(trc::AuthEvent::Failed
                             .into_err()
-                            .ctx(trc::Key::AccountName, address.to_string())
-                            .details(master_address.to_string())
+                            .ctx(trc::Key::AccountName, CompactString::from(address))
+                            .details(CompactString::from(master_address))
                             .reason("Master user account not found"))
                     }
                 } else {
                     trc::event!(
                         Auth(trc::AuthEvent::Success),
-                        AccountName = auth_as_address.to_string(),
+                        AccountName = CompactString::from(auth_as_address),
                         AccountId = token.account_id(),
                         SpanId = req.session_id,
                     );
@@ -484,7 +491,7 @@ impl Server {
         } else {
             Err(trc::AuthEvent::Failed
                 .into_err()
-                .ctx(trc::Key::Details, domain_name.to_string())
+                .ctx(trc::Key::Details, CompactString::from(domain_name))
                 .reason("Domain not found"))
         }
     }
@@ -493,7 +500,7 @@ impl Server {
         if address.domain().is_none() {
             trc::event!(
                 Auth(trc::AuthEvent::Warning),
-                AccountName = address.address().to_string(),
+                AccountName = CompactString::from(address.address()),
                 Reason = "No domain in username",
             );
             address.domain_start = address.name.len() + 1;

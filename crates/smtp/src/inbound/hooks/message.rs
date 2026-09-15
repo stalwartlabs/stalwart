@@ -22,6 +22,7 @@ use common::{
     config::smtp::session::{MTAHook, Stage},
     network::SessionStream,
 };
+use compact_str::ToCompactString;
 use mail_auth::AuthenticatedMessage;
 use std::time::Instant;
 use trc::MtaHookEvent;
@@ -62,7 +63,7 @@ impl<T: SessionStream> Session<T> {
                         }),
                         SpanId = self.data.session_id,
                         QueueId = queue_id,
-                        Id = mta_hook.id.to_string(),
+                        Id = mta_hook.id.to_compact_string(),
                         Elapsed = time.elapsed(),
                     );
 
@@ -153,7 +154,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         MtaHook(MtaHookEvent::Error),
                         SpanId = self.data.session_id,
-                        Id = mta_hook.id.to_string(),
+                        Id = mta_hook.id.to_compact_string(),
                         Reason = err,
                         Elapsed = time.elapsed(),
                     );

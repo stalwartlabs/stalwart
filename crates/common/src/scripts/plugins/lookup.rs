@@ -6,6 +6,7 @@
 
 use super::PluginContext;
 use crate::scripts::into_sieve_value;
+use compact_str::CompactString;
 use sieve::{FunctionMap, runtime::Variable};
 use store::{Deserialize, Value, dispatch::lookup::KeyValue};
 
@@ -32,7 +33,10 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError
-            .ctx(trc::Key::Id, ctx.arguments[0].to_string().into_owned())
+            .ctx(
+                trc::Key::Id,
+                CompactString::from(ctx.arguments[0].to_string()),
+            )
             .details("Unknown store")
     })?;
 
@@ -58,7 +62,10 @@ pub async fn exec_get(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> 
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError
-            .ctx(trc::Key::Id, ctx.arguments[0].to_string().into_owned())
+            .ctx(
+                trc::Key::Id,
+                CompactString::from(ctx.arguments[0].to_string()),
+            )
             .details("Unknown store")
     })?
     .key_get::<VariableWrapper>(ctx.arguments[1].to_string())
@@ -79,7 +86,10 @@ pub async fn exec_set(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> 
     }
     .ok_or_else(|| {
         trc::SieveEvent::RuntimeError
-            .ctx(trc::Key::Id, ctx.arguments[0].to_string().into_owned())
+            .ctx(
+                trc::Key::Id,
+                CompactString::from(ctx.arguments[0].to_string()),
+            )
             .details("Unknown store")
     })?
     .key_set(

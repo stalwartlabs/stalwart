@@ -6,6 +6,7 @@
 
 use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
 use common::{Server, auth::AccessToken};
+use compact_str::ToCompactString;
 use email::{
     cache::{
         MessageCacheFetch,
@@ -130,7 +131,7 @@ impl EmailQuery for Server {
                         let header_name = header.next().ok_or_else(|| {
                             trc::JmapEvent::InvalidArguments
                                 .into_err()
-                                .details("Header name is missing.".to_string())
+                                .details("Header name is missing.")
                         })?;
 
                         if let Some(header_name) = HeaderName::parse(header_name) {
@@ -297,7 +298,7 @@ impl EmailQuery for Server {
                     other => {
                         return Err(trc::JmapEvent::UnsupportedFilter
                             .into_err()
-                            .details(other.to_string()));
+                            .details(other.to_compact_string()));
                     }
                 },
                 Filter::And => {
@@ -369,7 +370,7 @@ impl EmailQuery for Server {
                 other => {
                     return Err(trc::JmapEvent::UnsupportedSort
                         .into_err()
-                        .details(other.to_string()));
+                        .details(other.to_compact_string()));
                 }
             });
         }

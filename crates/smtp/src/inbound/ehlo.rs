@@ -9,6 +9,7 @@ use common::{
     config::smtp::session::{Mechanism, Stage},
     network::SessionStream,
 };
+use compact_str::CompactString;
 use mail_auth::{
     SpfResult,
     spf::verify::{HasValidLabels, SpfParameters},
@@ -30,7 +31,7 @@ impl<T: SessionStream> Session<T> {
                 trc::event!(
                     Smtp(SmtpEvent::InvalidEhlo),
                     SpanId = self.data.session_id,
-                    Domain = domain.as_ref().to_string(),
+                    Domain = CompactString::from(domain.as_ref()),
                 );
 
                 return self.write(b"550 5.5.0 Invalid EHLO domain.\r\n").await;
@@ -39,7 +40,7 @@ impl<T: SessionStream> Session<T> {
             trc::event!(
                 Smtp(SmtpEvent::Ehlo),
                 SpanId = self.data.session_id,
-                Domain = domain.as_ref().to_string(),
+                Domain = CompactString::from(domain.as_ref()),
             );
 
             // SPF check

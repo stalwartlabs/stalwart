@@ -12,6 +12,7 @@ use super::{
 use crate::state_manager::PushRegistration;
 use calcard::jscalendar::JSCalendarDateTime;
 use common::{Server, ipc::PushNotification, network::webpush::Vapid};
+use compact_str::{CompactString, ToCompactString};
 use email::push::{PushSubscription, Urgency};
 use jmap_proto::{
     object::email::{EmailProperty, EmailValue},
@@ -287,7 +288,7 @@ pub(crate) async fn http_request(
                 trc::event!(
                     PushSubscription(PushSubscriptionEvent::Error),
                     Details = "Failed to encrypt push subscription",
-                    Url = details.url.to_string(),
+                    Url = CompactString::from(&details.url),
                     Reason = err
                 );
                 return true;
@@ -307,7 +308,7 @@ pub(crate) async fn http_request(
             if status.is_success() {
                 trc::event!(
                     PushSubscription(PushSubscriptionEvent::Success),
-                    Url = details.url.to_string()
+                    Url = CompactString::from(&details.url)
                 );
 
                 true
@@ -318,7 +319,7 @@ pub(crate) async fn http_request(
                 trc::event!(
                     PushSubscription(PushSubscriptionEvent::Error),
                     Details = "HTTP POST failed",
-                    Url = details.url.to_string(),
+                    Url = CompactString::from(&details.url),
                     Code = status.as_u16(),
                     Reason = reason,
                 );
@@ -330,8 +331,8 @@ pub(crate) async fn http_request(
             trc::event!(
                 PushSubscription(PushSubscriptionEvent::Error),
                 Details = "HTTP POST failed",
-                Url = details.url.to_string(),
-                Reason = err.to_string()
+                Url = CompactString::from(&details.url),
+                Reason = err.to_compact_string()
             );
 
             false

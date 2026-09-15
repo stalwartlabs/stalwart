@@ -18,6 +18,7 @@ use super::{
 };
 
 const MAX_BATCH_SIZE: usize = 32768;
+const MAX_LOSSLESS_BATCH_SIZE: usize = MAX_BATCH_SIZE * 16;
 
 pub type Interests = Box<Bitset<{ TOTAL_EVENT_COUNT.div_ceil(USIZE_BITS) }>>;
 pub type EventBatch = Vec<Arc<Event<EventDetails>>>;
@@ -39,33 +40,37 @@ pub struct SubscriberBuilder {
 
 impl Subscriber {
     #[inline(always)]
-    pub fn push_event(&mut self, event_id: usize, trace: Arc<Event<EventDetails>>) {
+    pub fn push_event(&mut self, event_id: usize, trace: &Arc<Event<EventDetails>>) {
         if self.interests.get(event_id) {
-            self.batch.push(trace);
+            self.batch.push(trace.clone());
         }
     }
 
-    pub fn send_batch(&mut self) -> Result<(), ChannelError> {
-        if !self.batch.is_empty() {
-            match self
-                .tx
-                .try_send(std::mem::replace(&mut self.batch, Vec::with_capacity(128)))
-            {
-                Ok(_) => Ok(()),
-                Err(TrySendError::Full(mut events)) => {
-                    if self.lossy && events.len() > MAX_BATCH_SIZE {
+    pub fn send_batch(&mut self) -> Result<u64, ChannelError> {
+        if self.batch.is_empty() {
+            return Ok(0);
+        }
+
+        match self
+            .tx
+            .try_send(std::mem::replace(&mut self.batch, Vec::with_capacity(128)))
+        {
+            Ok(_) => Ok(0),
+            Err(TrySendError::Full(mut events)) => {
+                let total = events.len();
+                if self.lossy {
+                    if total > MAX_BATCH_SIZE {
                         events.retain(|e| e.inner.level == Level::Error);
-                        if events.len() > MAX_BATCH_SIZE {
-                            events.truncate(MAX_BATCH_SIZE);
-                        }
+                        events.truncate(MAX_BATCH_SIZE);
                     }
-                    self.batch = events;
-                    Ok(())
+                } else if total > MAX_LOSSLESS_BATCH_SIZE {
+                    events.truncate(MAX_LOSSLESS_BATCH_SIZE);
                 }
-                Err(TrySendError::Closed(_)) => Err(ChannelError),
+                let dropped = (total - events.len()) as u64;
+                self.batch = events;
+                Ok(dropped)
             }
-        } else {
-            Ok(())
+            Err(TrySendError::Closed(_)) => Err(ChannelError),
         }
     }
 }
@@ -81,7 +86,7 @@ impl SubscriberBuilder {
 
     pub fn with_default_interests(mut self, level: Level) -> Self {
         for event in EventType::variants() {
-            if event.level() >= level {
+            if level.is_contained(event.level()) {
                 self.interests.set(*event);
             }
         }

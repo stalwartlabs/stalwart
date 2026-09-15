@@ -6,8 +6,8 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 644;
-pub const TOTAL_METRIC_COUNT: usize = 369;
+pub const TOTAL_EVENT_COUNT: usize = 645;
+pub const TOTAL_METRIC_COUNT: usize = 370;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
@@ -873,6 +873,7 @@ pub enum TelemetryEvent {
     OtelMetricsExporterError = 537,
     PrometheusExporterError = 538,
     JournalError = 534,
+    EventsDropped = 644,
     MetricsCollected = 151,
     MetricsStored = 366,
     MetricsPushed = 146,
@@ -1291,6 +1292,7 @@ pub enum MetricType {
     TelemetryOtelMetricsExporterError = 333,
     TelemetryPrometheusExporterError = 334,
     TelemetryJournalError = 335,
+    TelemetryEventsDropped = 369,
     TlsHandshakeError = 336,
     UserCount = 25,
 }

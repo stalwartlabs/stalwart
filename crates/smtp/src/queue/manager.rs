@@ -15,6 +15,7 @@ use common::{
     config::smtp::queue::{QueueExpiry, QueueName},
     ipc::{QueueEvent, QueueEventStatus},
 };
+use compact_str::ToCompactString;
 use rand::{RngExt, seq::SliceRandom};
 use std::{
     collections::hash_map::Entry,
@@ -201,7 +202,7 @@ impl Queue {
                         trc::event!(
                             Queue(trc::QueueEvent::BackPressure),
                             Reason = "Processing capacity for this queue exceeded.",
-                            QueueName = queue_event.queue_name.to_string(),
+                            QueueName = queue_event.queue_name.to_compact_string(),
                             Limit = stats.max_in_flight,
                         );
                     }

@@ -7,6 +7,7 @@
 use std::sync::atomic::Ordering;
 
 use atomics::{array::AtomicU32Array, gauge::AtomicGauge, histogram::AtomicHistogram};
+use event::UNCOUNTED_EVENTS;
 use ipc::{
     collector::{Collector, GlobalInterests},
     subscriber::Interests,
@@ -71,7 +72,7 @@ pub struct EventCounter {
 impl Collector {
     pub fn record_metric(event: EventType, event_id: usize, keys: &[(Key, Value)]) {
         // Increment the event counter
-        if !event.is_span_end() && !event.is_raw_io() {
+        if !UNCOUNTED_EVENTS.get(event_id) {
             EVENT_COUNTERS.add(event_id, 1);
         }
 

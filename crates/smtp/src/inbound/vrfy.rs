@@ -6,6 +6,7 @@
 
 use crate::core::Session;
 use common::network::{RcptResolution, SessionStream};
+use compact_str::CompactString;
 use std::{borrow::Cow, fmt::Write};
 use trc::SmtpEvent;
 use utils::DomainPart;
@@ -26,7 +27,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Smtp(SmtpEvent::Vrfy),
                         SpanId = self.data.session_id,
-                        To = address.as_ref().to_string(),
+                        To = CompactString::from(address.as_ref()),
                     );
 
                     self.write(format!("250 {}\r\n", address.as_ref()).as_bytes())
@@ -40,7 +41,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Smtp(SmtpEvent::VrfyNotFound),
                         SpanId = self.data.session_id,
-                        To = address.as_ref().to_string(),
+                        To = CompactString::from(address.as_ref()),
                     );
 
                     self.write(b"550 5.1.2 Address not found.\r\n").await
@@ -60,7 +61,7 @@ impl<T: SessionStream> Session<T> {
             trc::event!(
                 Smtp(SmtpEvent::VrfyDisabled),
                 SpanId = self.data.session_id,
-                To = address.as_ref().to_string(),
+                To = CompactString::from(address.as_ref()),
             );
 
             self.write(b"252 2.5.1 VRFY is disabled.\r\n").await
@@ -92,7 +93,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Smtp(SmtpEvent::Expn),
                         SpanId = self.data.session_id,
-                        To = address.as_ref().to_string(),
+                        To = CompactString::from(address.as_ref()),
                     );
 
                     self.write(result.as_bytes()).await
@@ -101,7 +102,7 @@ impl<T: SessionStream> Session<T> {
                     trc::event!(
                         Smtp(SmtpEvent::ExpnNotFound),
                         SpanId = self.data.session_id,
-                        To = address.as_ref().to_string(),
+                        To = CompactString::from(address.as_ref()),
                     );
 
                     self.write(b"550 5.1.2 Mailing list not found.\r\n").await
@@ -121,7 +122,7 @@ impl<T: SessionStream> Session<T> {
             trc::event!(
                 Smtp(SmtpEvent::ExpnDisabled),
                 SpanId = self.data.session_id,
-                To = address.as_ref().to_string(),
+                To = CompactString::from(address.as_ref()),
             );
 
             self.write(b"252 2.5.1 EXPN is disabled.\r\n").await

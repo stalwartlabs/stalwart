@@ -14,6 +14,7 @@ use common::{
     config::smtp::queue::QueueExpiry,
     scripts::{ScriptModification, plugins::PluginContext},
 };
+use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_parser::{Encoding, Message, MessagePart, PartType};
 use sieve::{
     Arena, Context, Handler, Input, Mailbox, MatchAs, MessageSource as SieveMessageSource,
@@ -91,9 +92,9 @@ impl<'x> Handler<'x> for SmtpHandler<'x> {
                 if !optional {
                     trc::event!(
                         Sieve(SieveEvent::ScriptNotFound),
-                        Id = self.script_id.to_string(),
+                        Id = CompactString::from(self.script_id),
                         SpanId = self.session_id,
-                        Details = name.name().to_string(),
+                        Details = CompactString::from(name.name()),
                     );
                 }
 
@@ -166,9 +167,9 @@ impl<'x> Handler<'x> for SmtpHandler<'x> {
                     Recipient::List(list) => {
                         trc::event!(
                             Sieve(SieveEvent::NotSupported),
-                            Id = self.script_id.to_string(),
+                            Id = CompactString::from(self.script_id),
                             SpanId = self.session_id,
-                            Details = list.to_string(),
+                            Details = CompactString::from(list),
                             Reason = "Sending to lists is not supported.",
                         );
 
@@ -195,10 +196,10 @@ impl<'x> Handler<'x> for SmtpHandler<'x> {
                 };
                 trc::event!(
                     Sieve(SieveEvent::NotSupported),
-                    Id = self.script_id.to_string(),
+                    Id = CompactString::from(self.script_id),
                     SpanId = self.session_id,
                     Reason = "Unsupported action",
-                    Details = format!("{action:?}"),
+                    Details = format_compact!("{action:?}"),
                 );
                 return Reply::Error(RuntimeError::CapabilityNotSupported(capability.into()));
             }
@@ -349,7 +350,7 @@ impl RunScript for Server {
                         Sieve(SieveEvent::RuntimeError),
                         Id = script_id.clone(),
                         SpanId = session_id,
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
 
                     break;
@@ -562,13 +563,13 @@ impl QueueSieveMessage for Server {
             trc::event!(
                 Sieve(SieveEvent::QuotaExceeded),
                 SpanId = session_id,
-                Id = script_id.to_string(),
+                Id = CompactString::from(script_id),
                 From = message.message.return_path,
                 To = message
                     .message
                     .recipients
                     .into_iter()
-                    .map(|r| trc::Value::from(r.address().to_string()))
+                    .map(|r| trc::Value::from(CompactString::from(r.address())))
                     .collect::<Vec<_>>(),
             );
 

@@ -45,6 +45,7 @@ chrono = "0.4"
 rand = "0.10.2"
 rkyv.workspace = true
 hashify = "0.2"
+compact_str = "0.10.0"
 
 [features]
 test_mode = []

@@ -6,6 +6,7 @@
 
 use crate::changes::state::JmapCacheState;
 use common::{Server, auth::AccessToken};
+use compact_str::format_compact;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{
@@ -475,7 +476,7 @@ impl EmailGet for Server {
                     (_, Some(_)) => {
                         return Err(trc::JmapEvent::InvalidArguments
                             .into_err()
-                            .details(format!("Invalid property {property:?}")));
+                            .details(format_compact!("Invalid property {property:?}")));
                     }
                     (_, None) => {
                         debug_assert!(

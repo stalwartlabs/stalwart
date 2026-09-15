@@ -6,6 +6,7 @@
 
 use crate::queue::{Error, ErrorDetails, HostResponse, Status};
 use common::config::smtp::resolver::{Tlsa, TlsaEntry, TlsaMatching};
+use compact_str::{CompactString, ToCompactString};
 use rustls_pki_types::{CertificateDer, Der, ServerName, TrustAnchor, UnixTime};
 use sha2::{Digest, Sha256, Sha512};
 use trc::DaneEvent;
@@ -37,7 +38,7 @@ impl TlsaVerify for Tlsa {
                 trc::event!(
                     Dane(DaneEvent::NoCertificatesFound),
                     SpanId = session_id,
-                    Hostname = hostname.to_string(),
+                    Hostname = CompactString::from(hostname),
                 );
 
                 return Err(Status::TemporaryFailure(Box::new(ErrorDetails {
@@ -55,8 +56,8 @@ impl TlsaVerify for Tlsa {
                     trc::event!(
                         Dane(DaneEvent::CertificateParseError),
                         SpanId = session_id,
-                        Hostname = hostname.to_string(),
-                        Reason = err.to_string(),
+                        Hostname = CompactString::from(hostname),
+                        Reason = err.to_compact_string(),
                     );
 
                     return Err(Status::TemporaryFailure(Box::new(ErrorDetails {
@@ -80,7 +81,7 @@ impl TlsaVerify for Tlsa {
             trc::event!(
                 Dane(DaneEvent::AuthenticationSuccess),
                 SpanId = session_id,
-                Hostname = hostname.to_string(),
+                Hostname = CompactString::from(hostname),
             );
 
             Ok(())
@@ -88,7 +89,7 @@ impl TlsaVerify for Tlsa {
             trc::event!(
                 Dane(DaneEvent::AuthenticationFailure),
                 SpanId = session_id,
-                Hostname = hostname.to_string(),
+                Hostname = CompactString::from(hostname),
             );
 
             Err(Status::TemporaryFailure(Box::new(ErrorDetails {
@@ -112,7 +113,7 @@ fn verify_end_entity(
                 trc::event!(
                     Dane(DaneEvent::TlsaRecordMatch),
                     SpanId = session_id,
-                    Hostname = hostname.to_string(),
+                    Hostname = CompactString::from(hostname),
                     Type = "end-entity",
                 );
                 return true;
@@ -206,7 +207,7 @@ fn verify_trust_anchor(
         trc::event!(
             Dane(DaneEvent::TlsaRecordMatch),
             SpanId = session_id,
-            Hostname = hostname.to_string(),
+            Hostname = CompactString::from(hostname),
             Type = "trust-anchor",
         );
 

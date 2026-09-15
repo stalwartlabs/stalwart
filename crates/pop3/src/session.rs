@@ -15,6 +15,7 @@ use common::{
     BuildServer,
     network::{SessionData, SessionManager, SessionResult, SessionStream},
 };
+use compact_str::ToCompactString;
 use std::borrow::Cow;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::server::TlsStream;
@@ -98,7 +99,7 @@ impl<T: SessionStream> Session<T> {
                             trc::event!(
                                 Network(trc::NetworkEvent::ReadError),
                                 SpanId = self.session_id,
-                                Reason = err.to_string()    ,
+                                Reason = err.to_compact_string()    ,
                                 CausedBy = trc::location!()
                             );
                             break;

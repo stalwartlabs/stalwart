@@ -7,6 +7,7 @@
 use crate::{Server, manager::fetch_resource};
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
+use compact_str::{CompactString, format_compact};
 use registry::schema::{enums::CompressionAlgo, structs::Application};
 use std::{
     borrow::Cow,
@@ -109,7 +110,7 @@ impl WebApplications {
                 .map_err(|err| {
                     trc::ResourceEvent::Error
                         .reason(err)
-                        .ctx(trc::Key::Path, path.to_string())
+                        .ctx(trc::Key::Path, CompactString::from(path))
                         .caused_by(trc::location!())
                 })
         } else {
@@ -135,7 +136,7 @@ impl WebApplications {
                     Resource(trc::ResourceEvent::Error),
                     Reason = err,
                     Url = app.url.clone(),
-                    Details = format!(
+                    Details = format_compact!(
                         "Failed to delete application bundle for prefixes: {}",
                         app.prefixes.join(", ")
                     )
@@ -160,7 +161,7 @@ impl WebApplications {
                         Resource(trc::ResourceEvent::Error),
                         Reason = err,
                         Url = app.url.clone(),
-                        Details = format!(
+                        Details = format_compact!(
                             "Failed to unpack application for prefixes: {}",
                             app.prefixes.join(", ")
                         )
@@ -330,7 +331,7 @@ impl WebApplicationManager {
         trc::event!(
             Resource(trc::ResourceEvent::ApplicationUnpacked),
             Url = self.url.clone(),
-            Path = self.bundle_path.path.to_string_lossy().into_owned(),
+            Path = CompactString::from(self.bundle_path.path.to_string_lossy()),
         );
 
         Ok(routes)

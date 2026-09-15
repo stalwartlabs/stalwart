@@ -466,7 +466,7 @@ pub(crate) async fn task_query(
     {
         return Err(trc::JmapEvent::UnsupportedSort
             .into_err()
-            .details("Only sorting by 'due' is supported for tasks".to_string()));
+            .details("Only sorting by 'due' is supported for tasks"));
     }
 
     let params = req

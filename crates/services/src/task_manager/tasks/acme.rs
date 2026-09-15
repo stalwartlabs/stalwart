@@ -6,6 +6,7 @@
 
 use crate::task_manager::{TaskFailureType, TaskResult};
 use common::{Server, network::acme::AcmeError};
+use compact_str::ToCompactString;
 use registry::schema::structs::TaskDomainManagement;
 use std::time::Duration;
 use store::write::now;
@@ -57,9 +58,9 @@ async fn acme_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                 ) {
                     trc::event!(
                         Acme(trc::AcmeEvent::Error),
-                        Id = task.domain_id.to_string(),
+                        Id = task.domain_id.to_compact_string(),
                         Total = retry as u64,
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
                 }
 

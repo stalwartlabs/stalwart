@@ -14,6 +14,7 @@ jmap-tools = { version = "0.1" }
 mail-auth = { version = "0.12" }
 tokio = { version = "1.53", features = ["fs"] }
 lz4_flex = { version = "0.14", features = ["alloc"], default-features = false }
+compact_str = "0.10.0"
 
 [features]
 test_mode = []

@@ -18,6 +18,7 @@ ahash = "0.8.12"
 rkyv.workspace = true
 compact_str = "0.10.0"
 hashify = "0.2.9"
+itoa = "1"
 
 [features]
 test_mode = []

@@ -12,6 +12,7 @@ use crate::{
     write::SearchIndex,
 };
 use ahash::AHashSet;
+use compact_str::CompactString;
 use deadpool_postgres::Pool;
 use std::sync::Arc;
 use tokio_postgres::error::SqlState;
@@ -37,13 +38,13 @@ pub struct PostgresStore {
 fn into_error(err: tokio_postgres::error::Error) -> trc::Error {
     let mut local_err = trc::StoreEvent::PostgresqlError.reason(error_chain(&err));
     if let Some(db_err) = err.as_db_error() {
-        local_err = local_err.code(db_err.code().code().to_string());
+        local_err = local_err.code(CompactString::from(db_err.code().code()));
         if let Some(detail) = db_err.detail() {
-            local_err = local_err.details(detail.to_string());
+            local_err = local_err.details(CompactString::from(detail));
         }
 
         if let Some(hint) = db_err.hint() {
-            local_err = local_err.caused_by(hint.to_string());
+            local_err = local_err.caused_by(CompactString::from(hint));
         }
     }
     local_err

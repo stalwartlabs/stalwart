@@ -16,6 +16,7 @@ use crate::{
     },
 };
 use common::Server;
+use compact_str::format_compact;
 use jmap_proto::types::state::State;
 use registry::{
     jmap::{IntoValue, JmapValue},
@@ -318,10 +319,12 @@ pub(crate) async fn trace_query(
         .extract_parameters(req.server.core.jmap.query_max_results, None)?;
 
     if !matches!(params.sort_by, Property::Id | Property::Timestamp) {
-        return Err(trc::JmapEvent::UnsupportedSort.into_err().details(format!(
-            "Property {} is not supported for sorting",
-            params.sort_by
-        )));
+        return Err(trc::JmapEvent::UnsupportedSort
+            .into_err()
+            .details(format_compact!(
+                "Property {} is not supported for sorting",
+                params.sort_by
+            )));
     }
 
     let results = req

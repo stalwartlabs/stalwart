@@ -29,7 +29,7 @@ use common::Server;
 use common::config::smtp::queue::RoutingStrategy;
 use common::config::{server::ServerProtocol, smtp::report::AggregateFrequency};
 use common::ipc::{PolicyType, QueueEvent, QueueEventStatus, TlsEvent};
-use compact_str::ToCompactString;
+use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_auth::RecordSet;
 use mail_auth::{
     mta_sts::TlsRpt,
@@ -59,7 +59,7 @@ impl QueuedMessage {
                         Delivery(DeliveryEvent::AttemptStart),
                         SpanId = message.span_id,
                         QueueId = message.queue_id,
-                        QueueName = message.queue_name.to_string(),
+                        QueueName = message.queue_name.to_compact_string(),
                         From = if !message.message.return_path.is_empty() {
                             trc::Value::String(message.message.return_path.as_ref().into())
                         } else {
@@ -187,7 +187,7 @@ impl QueuedMessage {
             if let Err(retry_at) = server.is_allowed(throttle, &message, message.span_id).await {
                 trc::event!(
                     Delivery(DeliveryEvent::RateLimitExceeded),
-                    Id = throttle.id.to_string(),
+                    Id = throttle.id.to_compact_string(),
                     SpanId = span_id,
                     NextRetry = trc::Value::Timestamp(retry_at)
                 );
@@ -272,7 +272,7 @@ impl QueuedMessage {
             trc::event!(
                 Delivery(DeliveryEvent::DomainDeliveryStart),
                 SpanId = message.span_id,
-                Domain = domain.to_string(),
+                Domain = CompactString::from(domain),
             );
 
             // Build envelope
@@ -287,9 +287,9 @@ impl QueuedMessage {
                 {
                     trc::event!(
                         Delivery(DeliveryEvent::RateLimitExceeded),
-                        Id = throttle.id.to_string(),
+                        Id = throttle.id.to_compact_string(),
                         SpanId = span_id,
-                        Domain = domain.to_string(),
+                        Domain = CompactString::from(domain),
                     );
 
                     delivery_results.push(DeliveryResult::rate_limited(rcpt_idxs, retry_at));
@@ -356,14 +356,14 @@ impl QueuedMessage {
                                 trc::event!(
                                     TlsRpt(TlsRptEvent::RecordFetch),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
+                                    Domain = CompactString::from(domain),
                                     Details = record
                                         .rua
                                         .iter()
                                         .map(|uri| trc::Value::from(match uri {
                                             mail_auth::mta_sts::ReportUri::Mail(uri)
                                             | mail_auth::mta_sts::ReportUri::Http(uri) =>
-                                                uri.to_string(),
+                                                CompactString::from(uri),
                                         }))
                                         .collect::<Vec<_>>(),
                                     Elapsed = time.elapsed(),
@@ -375,7 +375,7 @@ impl QueuedMessage {
                                 trc::event!(
                                     TlsRpt(TlsRptEvent::RecordNotFound),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
+                                    Domain = CompactString::from(domain),
                                     Elapsed = time.elapsed(),
                                 );
                                 None
@@ -384,7 +384,7 @@ impl QueuedMessage {
                                 trc::event!(
                                     TlsRpt(TlsRptEvent::RecordFetchError),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
+                                    Domain = CompactString::from(domain),
                                     CausedBy = trc::Error::from(err),
                                     Elapsed = time.elapsed(),
                                 );
@@ -409,7 +409,7 @@ impl QueuedMessage {
                         trc::event!(
                             MtaSts(MtaStsEvent::PolicyFetch),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
+                            Domain = CompactString::from(domain),
                             Strict = mta_sts_policy.enforce(),
                             Details = mta_sts_policy
                                 .mx
@@ -472,7 +472,7 @@ impl QueuedMessage {
                                 trc::event!(
                                     MtaSts(MtaStsEvent::PolicyNotFound),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
+                                    Domain = CompactString::from(domain),
                                     Strict = strict,
                                     Elapsed = time.elapsed(),
                                 );
@@ -481,7 +481,7 @@ impl QueuedMessage {
                                 trc::event!(
                                     MtaSts(MtaStsEvent::PolicyFetchError),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
+                                    Domain = CompactString::from(domain),
                                     CausedBy = trc::Error::from(err.clone()),
                                     Strict = strict,
                                     Elapsed = time.elapsed(),
@@ -491,8 +491,8 @@ impl QueuedMessage {
                                 trc::event!(
                                     MtaSts(MtaStsEvent::PolicyFetchError),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
-                                    Reason = err.to_string(),
+                                    Domain = CompactString::from(domain),
+                                    Reason = err.to_compact_string(),
                                     Strict = strict,
                                     Elapsed = time.elapsed(),
                                 );
@@ -501,7 +501,7 @@ impl QueuedMessage {
                                 trc::event!(
                                     MtaSts(MtaStsEvent::InvalidPolicy),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
+                                    Domain = CompactString::from(domain),
                                     Reason = reason.clone(),
                                     Strict = strict,
                                     Elapsed = time.elapsed(),
@@ -535,7 +535,7 @@ impl QueuedMessage {
                         trc::event!(
                             Delivery(DeliveryEvent::MxLookupFailed),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
+                            Domain = CompactString::from(domain),
                             Details = "No MX records were found, attempting implicit MX.",
                             Elapsed = time.elapsed(),
                         );
@@ -549,7 +549,7 @@ impl QueuedMessage {
                         trc::event!(
                             Delivery(DeliveryEvent::MxLookupFailed),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
+                            Domain = CompactString::from(domain),
                             CausedBy = trc::Error::from(err.clone()),
                             Elapsed = time.elapsed(),
                         );
@@ -566,7 +566,7 @@ impl QueuedMessage {
                     trc::event!(
                         Delivery(DeliveryEvent::MxLookup),
                         SpanId = message.span_id,
-                        Domain = domain.to_string(),
+                        Domain = CompactString::from(domain),
                         Details = remote_hosts_
                             .iter()
                             .map(|h| trc::Value::String(h.hostname().into()))
@@ -578,7 +578,7 @@ impl QueuedMessage {
                     trc::event!(
                         Delivery(DeliveryEvent::NullMx),
                         SpanId = message.span_id,
-                        Domain = domain.to_string(),
+                        Domain = CompactString::from(domain),
                         Elapsed = time.elapsed(),
                     );
 
@@ -623,8 +623,8 @@ impl QueuedMessage {
                         trc::event!(
                             MtaSts(MtaStsEvent::NotAuthorized),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
-                            Hostname = envelope.mx.to_string(),
+                            Domain = CompactString::from(domain),
+                            Hostname = CompactString::from(envelope.mx),
                             Details = mta_sts_policy
                                 .mx
                                 .iter()
@@ -647,8 +647,8 @@ impl QueuedMessage {
                         trc::event!(
                             MtaSts(MtaStsEvent::Authorized),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
-                            Hostname = envelope.mx.to_string(),
+                            Domain = CompactString::from(domain),
+                            Hostname = CompactString::from(envelope.mx),
                             Details = mta_sts_policy
                                 .mx
                                 .iter()
@@ -682,8 +682,8 @@ impl QueuedMessage {
                         trc::event!(
                             Delivery(DeliveryEvent::IpLookup),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
-                            Hostname = envelope.mx.to_string(),
+                            Domain = CompactString::from(domain),
+                            Hostname = CompactString::from(envelope.mx),
                             Details = resolved
                                 .ips
                                 .iter()
@@ -699,9 +699,9 @@ impl QueuedMessage {
                         trc::event!(
                             Delivery(DeliveryEvent::IpLookupFailed),
                             SpanId = message.span_id,
-                            Domain = domain.to_string(),
-                            Hostname = envelope.mx.to_string(),
-                            Details = status.to_string(),
+                            Domain = CompactString::from(domain),
+                            Hostname = CompactString::from(envelope.mx),
+                            Details = status.to_compact_string(),
                             Elapsed = time.elapsed(),
                         );
 
@@ -737,9 +737,9 @@ impl QueuedMessage {
                                         trc::event!(
                                             Dane(DaneEvent::TlsaRecordFetch),
                                             SpanId = message.span_id,
-                                            Domain = domain.to_string(),
-                                            Hostname = envelope.mx.to_string(),
-                                            Details = format!("{tlsa:?}"),
+                                            Domain = CompactString::from(domain),
+                                            Hostname = CompactString::from(envelope.mx),
+                                            Details = format_compact!("{tlsa:?}"),
                                             Strict = strict,
                                             Elapsed = time.elapsed(),
                                         );
@@ -749,9 +749,9 @@ impl QueuedMessage {
                                         trc::event!(
                                             Dane(DaneEvent::TlsaRecordInvalid),
                                             SpanId = message.span_id,
-                                            Domain = domain.to_string(),
-                                            Hostname = envelope.mx.to_string(),
-                                            Details = format!("{tlsa:?}"),
+                                            Domain = CompactString::from(domain),
+                                            Hostname = CompactString::from(envelope.mx),
+                                            Details = format_compact!("{tlsa:?}"),
                                             Strict = strict,
                                             Elapsed = time.elapsed(),
                                         );
@@ -796,8 +796,8 @@ impl QueuedMessage {
                                     trc::event!(
                                         Dane(DaneEvent::BogusDnssecRecord),
                                         SpanId = message.span_id,
-                                        Domain = domain.to_string(),
-                                        Hostname = envelope.mx.to_string(),
+                                        Domain = CompactString::from(domain),
+                                        Hostname = CompactString::from(envelope.mx),
                                         Details = "TLSA",
                                         Strict = strict,
                                         Elapsed = time.elapsed(),
@@ -837,8 +837,8 @@ impl QueuedMessage {
                                     trc::event!(
                                         Dane(DaneEvent::TlsaRecordNotDnssecSigned),
                                         SpanId = message.span_id,
-                                        Domain = domain.to_string(),
-                                        Hostname = envelope.mx.to_string(),
+                                        Domain = CompactString::from(domain),
+                                        Hostname = CompactString::from(envelope.mx),
                                         Strict = strict,
                                         Elapsed = time.elapsed(),
                                     );
@@ -888,8 +888,8 @@ impl QueuedMessage {
                                         trc::event!(
                                             Dane(DaneEvent::TlsaRecordNotFound),
                                             SpanId = message.span_id,
-                                            Domain = domain.to_string(),
-                                            Hostname = envelope.mx.to_string(),
+                                            Domain = CompactString::from(domain),
+                                            Hostname = CompactString::from(envelope.mx),
                                             Strict = strict,
                                             Elapsed = time.elapsed(),
                                         );
@@ -930,8 +930,8 @@ impl QueuedMessage {
                                         trc::event!(
                                             Dane(DaneEvent::TlsaRecordFetchError),
                                             SpanId = message.span_id,
-                                            Domain = domain.to_string(),
-                                            Hostname = envelope.mx.to_string(),
+                                            Domain = CompactString::from(domain),
+                                            Hostname = CompactString::from(envelope.mx),
                                             CausedBy = trc::Error::from(err.clone()),
                                             Strict = strict,
                                             Elapsed = time.elapsed(),
@@ -948,8 +948,8 @@ impl QueuedMessage {
                             trc::event!(
                                 Dane(DaneEvent::BogusDnssecRecord),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
                                 Details = dnssec_entity,
                                 Strict = strict,
                                 Elapsed = time.elapsed(),
@@ -986,8 +986,8 @@ impl QueuedMessage {
                             trc::event!(
                                 Dane(DaneEvent::TlsaRecordNotDnssecSigned),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
                                 Strict = strict,
                                 Elapsed = time.elapsed(),
                             );
@@ -1039,7 +1039,7 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::RateLimitExceeded),
                                 SpanId = message.span_id,
-                                Id = throttle.id.to_string(),
+                                Id = throttle.id.to_compact_string(),
                                 RemoteIp = remote_ip,
                             );
                             delivery_results
@@ -1088,8 +1088,8 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::Connect),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
                                 LocalIp = envelope.local_ip,
                                 RemoteIp = remote_ip,
                                 RemotePort = remote_host.port(),
@@ -1102,8 +1102,8 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::ConnectError),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
                                 LocalIp = envelope.local_ip,
                                 RemoteIp = remote_ip,
                                 RemotePort = remote_host.port(),
@@ -1158,9 +1158,9 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::GreetingFailed),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
-                                Details = status.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
+                                Details = status.to_compact_string(),
                             );
 
                             last_status = status;
@@ -1174,8 +1174,8 @@ impl QueuedMessage {
                                 trc::event!(
                                     Delivery(DeliveryEvent::Ehlo),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
-                                    Hostname = envelope.mx.to_string(),
+                                    Domain = CompactString::from(domain),
+                                    Hostname = CompactString::from(envelope.mx),
                                     Details = capabilities.capabilities(),
                                     Elapsed = time.elapsed(),
                                 );
@@ -1186,9 +1186,9 @@ impl QueuedMessage {
                                 trc::event!(
                                     Delivery(DeliveryEvent::EhloRejected),
                                     SpanId = message.span_id,
-                                    Domain = domain.to_string(),
-                                    Hostname = envelope.mx.to_string(),
-                                    Details = status.to_string(),
+                                    Domain = CompactString::from(domain),
+                                    Hostname = CompactString::from(envelope.mx),
+                                    Details = status.to_compact_string(),
                                     Elapsed = time.elapsed(),
                                 );
 
@@ -1209,16 +1209,16 @@ impl QueuedMessage {
                                     trc::event!(
                                         Delivery(DeliveryEvent::StartTls),
                                         SpanId = message.span_id,
-                                        Domain = domain.to_string(),
-                                        Hostname = envelope.mx.to_string(),
-                                        Version = format!(
+                                        Domain = CompactString::from(domain),
+                                        Hostname = CompactString::from(envelope.mx),
+                                        Version = format_compact!(
                                             "{:?}",
                                             smtp_client
                                                 .tls_connection()
                                                 .protocol_version()
                                                 .unwrap()
                                         ),
-                                        Details = format!(
+                                        Details = format_compact!(
                                             "{:?}",
                                             smtp_client
                                                 .tls_connection()
@@ -1301,14 +1301,15 @@ impl QueuedMessage {
                                     trc::event!(
                                         Delivery(DeliveryEvent::StartTlsUnavailable),
                                         SpanId = message.span_id,
-                                        Domain = domain.to_string(),
-                                        Hostname = envelope.mx.to_string(),
+                                        Domain = CompactString::from(domain),
+                                        Hostname = CompactString::from(envelope.mx),
                                         Code = response.as_ref().map(|r| r.code()),
-                                        Details = response
-                                            .as_ref()
-                                            .map(|r| r.message().as_ref())
-                                            .unwrap_or("STARTTLS was not advertised by host")
-                                            .to_string(),
+                                        Details = CompactString::from(
+                                            response
+                                                .as_ref()
+                                                .map(|r| r.message().as_ref())
+                                                .unwrap_or("STARTTLS was not advertised by host")
+                                        ),
                                         Elapsed = time.elapsed(),
                                     );
 
@@ -1353,8 +1354,8 @@ impl QueuedMessage {
                                     trc::event!(
                                         Delivery(DeliveryEvent::StartTlsError),
                                         SpanId = message.span_id,
-                                        Domain = domain.to_string(),
-                                        Hostname = envelope.mx.to_string(),
+                                        Domain = CompactString::from(domain),
+                                        Hostname = CompactString::from(envelope.mx),
                                         Reason = from_mail_send_error(&error),
                                         Elapsed = time.elapsed(),
                                     );
@@ -1394,8 +1395,8 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::StartTlsDisabled),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
                             );
 
                             message
@@ -1418,8 +1419,8 @@ impl QueuedMessage {
                                     trc::event!(
                                         Delivery(DeliveryEvent::ImplicitTlsError),
                                         SpanId = message.span_id,
-                                        Domain = domain.to_string(),
-                                        Hostname = envelope.mx.to_string(),
+                                        Domain = CompactString::from(domain),
+                                        Hostname = CompactString::from(envelope.mx),
                                         Reason = from_mail_send_error(&error),
                                     );
 
@@ -1434,8 +1435,8 @@ impl QueuedMessage {
                             trc::event!(
                                 Delivery(DeliveryEvent::GreetingFailed),
                                 SpanId = message.span_id,
-                                Domain = domain.to_string(),
-                                Hostname = envelope.mx.to_string(),
+                                Domain = CompactString::from(domain),
+                                Hostname = CompactString::from(envelope.mx),
                                 Details = from_error_status(&status),
                             );
 
@@ -1543,8 +1544,8 @@ impl MessageWrapper {
                         Delivery(DeliveryEvent::Failed),
                         SpanId = self.span_id,
                         QueueId = self.queue_id,
-                        QueueName = self.queue_name.as_str().to_string(),
-                        To = rcpt.address().to_string(),
+                        QueueName = CompactString::from(self.queue_name.as_str()),
+                        To = CompactString::from(rcpt.address()),
                         Reason = from_error_details(&err.details),
                         Details = trc::Value::Timestamp(now),
                         Expires = rcpt
@@ -1562,8 +1563,8 @@ impl MessageWrapper {
                         Delivery(DeliveryEvent::Failed),
                         SpanId = self.span_id,
                         QueueId = self.queue_id,
-                        QueueName = self.queue_name.as_str().to_string(),
-                        To = rcpt.address().to_string(),
+                        QueueName = CompactString::from(self.queue_name.as_str()),
+                        To = CompactString::from(rcpt.address()),
                         Reason = "Message expired without any delivery attempts made.",
                         Details = trc::Value::Timestamp(now),
                         Expires = rcpt

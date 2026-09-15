@@ -13,6 +13,7 @@ use crate::network::acme::{
 };
 use crate::{KV_ACME, Server};
 use chrono::{TimeZone, Utc};
+use compact_str::{CompactString, ToCompactString, format_compact};
 use dns_update::DnsRecord;
 use futures::future::try_join_all;
 use rcgen::{CertificateParams, DistinguishedName, KeyPair, PKCS_ECDSA_P256_SHA256};
@@ -115,8 +116,8 @@ impl AcmeRequestBuilder {
 
         trc::event!(
             Acme(AcmeEvent::OrderStart),
-            Url = self.directory.new_order.to_string(),
-            Details = order_url.to_string(),
+            Url = CompactString::from(&self.directory.new_order),
+            Details = CompactString::from(&order_url),
             Hostname = domains.as_slice(),
             Type = self.challenge.as_str(),
         );
@@ -137,7 +138,7 @@ impl AcmeRequestBuilder {
                     }
                     trc::event!(
                         Acme(AcmeEvent::AuthCompleted),
-                        Url = self.directory.new_order.to_string(),
+                        Url = CompactString::from(&self.directory.new_order),
                         Hostname = domains.as_slice(),
                     );
                     let response = self.order(&order_url).await?;
@@ -148,7 +149,7 @@ impl AcmeRequestBuilder {
                     for i in 0u64..10 {
                         trc::event!(
                             Acme(AcmeEvent::OrderProcessing),
-                            Url = self.directory.new_order.to_string(),
+                            Url = CompactString::from(&self.directory.new_order),
                             Hostname = domains.as_slice(),
                             Total = i,
                         );
@@ -176,7 +177,7 @@ impl AcmeRequestBuilder {
                 OrderStatus::Ready => {
                     trc::event!(
                         Acme(AcmeEvent::OrderReady),
-                        Url = self.directory.new_order.to_string(),
+                        Url = CompactString::from(&self.directory.new_order),
                         Hostname = domains.as_slice(),
                     );
 
@@ -189,7 +190,7 @@ impl AcmeRequestBuilder {
                 OrderStatus::Valid { certificate } => {
                     trc::event!(
                         Acme(AcmeEvent::OrderValid),
-                        Url = self.directory.new_order.to_string(),
+                        Url = CompactString::from(&self.directory.new_order),
                         Hostname = domains.as_slice(),
                     );
 
@@ -209,8 +210,8 @@ impl AcmeRequestBuilder {
 
                     trc::event!(
                         Acme(AcmeEvent::OrderInvalid),
-                        Url = self.directory.new_order.to_string(),
-                        Details = order_url.to_string(),
+                        Url = CompactString::from(&self.directory.new_order),
+                        Details = order_url,
                         Hostname = domains.as_slice(),
                         Reason = reason.clone(),
                     );
@@ -240,9 +241,9 @@ impl AcmeRequestBuilder {
 
                 trc::event!(
                     Acme(AcmeEvent::AuthStart),
-                    Hostname = domain.to_string(),
+                    Hostname = CompactString::from(&domain),
                     Type = self.challenge.as_str(),
-                    Url = self.directory.new_order.to_string(),
+                    Url = CompactString::from(&self.directory.new_order),
                 );
 
                 let challenge = auth
@@ -324,10 +325,10 @@ impl AcmeRequestBuilder {
             _ => {
                 trc::event!(
                     Acme(AcmeEvent::AuthError),
-                    Hostname = auth.identifier.hostname().to_string(),
+                    Hostname = CompactString::from(auth.identifier.hostname()),
                     Type = self.challenge.as_str(),
-                    Url = self.directory.new_order.to_string(),
-                    Details = url.to_string(),
+                    Url = CompactString::from(&self.directory.new_order),
+                    Details = CompactString::from(url),
                     Reason = auth.to_error(),
                 );
 
@@ -347,8 +348,8 @@ impl AcmeRequestBuilder {
                 AuthStatus::Pending => {
                     trc::event!(
                         Acme(AcmeEvent::AuthPending),
-                        Hostname = domain.to_string(),
-                        Url = self.directory.new_order.to_string(),
+                        Hostname = CompactString::from(&domain),
+                        Url = CompactString::from(&self.directory.new_order),
                         Total = i,
                     );
 
@@ -357,8 +358,8 @@ impl AcmeRequestBuilder {
                 AuthStatus::Valid => {
                     trc::event!(
                         Acme(AcmeEvent::AuthValid),
-                        Hostname = domain.to_string(),
-                        Url = self.directory.new_order.to_string(),
+                        Hostname = domain,
+                        Url = CompactString::from(&self.directory.new_order),
                     );
 
                     return Ok(());
@@ -366,10 +367,10 @@ impl AcmeRequestBuilder {
                 _ => {
                     trc::event!(
                         Acme(AcmeEvent::AuthError),
-                        Hostname = domain.to_string(),
+                        Hostname = CompactString::from(domain),
                         Type = self.challenge.as_str(),
-                        Url = self.directory.new_order.to_string(),
-                        Details = url.to_string(),
+                        Url = CompactString::from(&self.directory.new_order),
+                        Details = CompactString::from(url),
                         Reason = response.body.to_error(),
                     );
 
@@ -380,10 +381,10 @@ impl AcmeRequestBuilder {
 
         trc::event!(
             Acme(AcmeEvent::AuthTooManyAttempts),
-            Hostname = domain.to_string(),
+            Hostname = CompactString::from(&domain),
             Type = self.challenge.as_str(),
-            Url = self.directory.new_order.to_string(),
-            Details = url.to_string(),
+            Url = CompactString::from(&self.directory.new_order),
+            Details = CompactString::from(url),
             Total = 5u64,
         );
 
@@ -411,9 +412,9 @@ impl AcmeRequestBuilder {
                 Err(err) => {
                     trc::event!(
                         Acme(AcmeEvent::ProcessCert),
-                        Url = alternate.to_string(),
+                        Url = CompactString::from(alternate),
                         Hostname = domains,
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
                 }
             }
@@ -422,7 +423,7 @@ impl AcmeRequestBuilder {
         trc::event!(
             Acme(AcmeEvent::ProcessCert),
             Hostname = domains,
-            Reason = format!(
+            Reason = format_compact!(
                 "Preferred certificate chain '{preferred}' not offered by the CA; using the default chain",
             ),
         );

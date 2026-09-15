@@ -9,6 +9,7 @@ use crate::{
     spawn_op,
 };
 use common::{MessageStoreCache, network::SessionStream};
+use compact_str::format_compact;
 use email::{
     cache::{
         MessageCacheFetch,
@@ -538,7 +539,7 @@ impl<T: SessionStream> SessionData<T> {
                     } else {
                         return Err(trc::ImapEvent::Error
                             .into_err()
-                            .details(format!("Failed to parse email id '{id}'.",)));
+                            .details(format_compact!("Failed to parse email id '{id}'.",)));
                     }
                 }
                 Filter::ThreadId(id) => {
@@ -549,7 +550,7 @@ impl<T: SessionStream> SessionData<T> {
                     } else {
                         return Err(trc::ImapEvent::Error
                             .into_err()
-                            .details(format!("Failed to parse thread id '{id}'.",)));
+                            .details(format_compact!("Failed to parse thread id '{id}'.",)));
                     }
                 }
                 Filter::Bcc(text) => {

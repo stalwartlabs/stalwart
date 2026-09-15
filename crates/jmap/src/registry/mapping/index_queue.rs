@@ -129,7 +129,7 @@ pub(crate) async fn index_queue_status_query(
     {
         return Err(trc::JmapEvent::UnsupportedSort
             .into_err()
-            .details("Only sorting by 'id' is supported for index queues".to_string()));
+            .details("Only sorting by 'id' is supported for index queues"));
     }
 
     // Paging by anchor is resolved by the response builder, which needs the full result set

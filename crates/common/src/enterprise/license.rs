@@ -22,6 +22,7 @@
 use crate::manager::fetch_resource;
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use compact_str::ToCompactString;
 use hyper::{HeaderMap, header::AUTHORIZATION};
 use std::{
     fmt::{Display, Formatter},
@@ -211,7 +212,7 @@ impl LicenseKey {
                     trc::event!(
                         Server(ServerEvent::Licensing),
                         Details = "Failed to decode license renewal",
-                        Reason = err.to_string(),
+                        Reason = err.to_compact_string(),
                     );
                     Err(err)
                 }

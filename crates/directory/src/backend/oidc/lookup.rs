@@ -9,6 +9,7 @@ use crate::{
     backend::oidc::{CachedKey, OidcError, OpenIdDirectory},
 };
 use ahash::AHashMap;
+use compact_str::{CompactString, format_compact};
 use jsonwebtoken::{
     Algorithm, DecodingKey, Header, Validation, decode, decode_header,
     jwk::{self, JwkSet},
@@ -323,8 +324,8 @@ pub(super) async fn fetch_jwks_keys(
                 Some(other) => {
                     trc::event!(
                         Auth(AuthEvent::Warning),
-                        Url = jwks_uri.to_string(),
-                        Reason = format!("Unsupported RSA key algorithm {:?}", other)
+                        Url = CompactString::from(jwks_uri),
+                        Reason = format_compact!("Unsupported RSA key algorithm {:?}", other)
                     );
                     continue;
                 }
@@ -335,8 +336,8 @@ pub(super) async fn fetch_jwks_keys(
                 _ => {
                     trc::event!(
                         Auth(AuthEvent::Warning),
-                        Url = jwks_uri.to_string(),
-                        Reason = format!("Unsupported EC curve {:?}", ec.curve)
+                        Url = CompactString::from(jwks_uri),
+                        Reason = format_compact!("Unsupported EC curve {:?}", ec.curve)
                     );
                     continue;
                 }
@@ -345,8 +346,8 @@ pub(super) async fn fetch_jwks_keys(
             jwk::AlgorithmParameters::OctetKey(_) => {
                 trc::event!(
                     Auth(AuthEvent::Warning),
-                    Url = jwks_uri.to_string(),
-                    Reason = format!(
+                    Url = CompactString::from(jwks_uri),
+                    Reason = format_compact!(
                         "Symmetric (HMAC) key found in JWKS (kid={:?}), skipping — HMAC is not accepted",
                         key.common.key_id
                     )
@@ -356,8 +357,8 @@ pub(super) async fn fetch_jwks_keys(
             _ => {
                 trc::event!(
                     Auth(AuthEvent::Warning),
-                    Url = jwks_uri.to_string(),
-                    Reason = format!(
+                    Url = CompactString::from(jwks_uri),
+                    Reason = format_compact!(
                         "Unrecognised key type in JWKS (kid={:?}), skipping",
                         key.common.key_id
                     )
@@ -371,8 +372,8 @@ pub(super) async fn fetch_jwks_keys(
             Err(e) => {
                 trc::event!(
                     Auth(AuthEvent::Warning),
-                    Url = jwks_uri.to_string(),
-                    Reason = format!(
+                    Url = CompactString::from(jwks_uri),
+                    Reason = format_compact!(
                         "Failed to build DecodingKey from JWK (kid={:?}): {e}",
                         key.common.key_id
                     )

@@ -99,7 +99,7 @@ impl<T: SessionStream> SessionData<T> {
                 trc::ImapEvent::Error
                     .into_err()
                     .details("Invalid quota root parameter.")
-                    .id(arguments.tag.to_string())
+                    .id(arguments.tag.clone())
             })?;
 
         // Obtain access token for mailbox

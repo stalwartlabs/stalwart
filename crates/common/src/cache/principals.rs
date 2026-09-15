@@ -23,6 +23,7 @@ use crate::{
         encryption::{EncryptionMethod, parse_public_key},
     },
 };
+use compact_str::{CompactString, ToCompactString};
 use registry::{
     schema::{
         enums::{DkimRotationStage, Locale, StorageQuota, TenantStorageQuota},
@@ -55,7 +56,7 @@ impl Server {
         if let Some(domain_id) = domain_names.get(domain) {
             trc::event!(
                 Cache(CacheEvent::Hit),
-                Key = domain.to_string(),
+                Key = CompactString::from(domain),
                 Collection = "domainName",
             );
 
@@ -110,7 +111,7 @@ impl Server {
 
                     trc::event!(
                         Cache(CacheEvent::Miss),
-                        Key = domain.to_string(),
+                        Key = CompactString::from(domain),
                         Collection = "domainName",
                     );
 
@@ -119,7 +120,7 @@ impl Server {
             } else {
                 trc::event!(
                     Cache(CacheEvent::Hit),
-                    Key = domain.to_string(),
+                    Key = CompactString::from(domain),
                     Collection = "domainNameNegative",
                 );
 
@@ -223,7 +224,7 @@ impl Server {
         if let Some(email) = emails.get(&EmailAddressRef::new(local_part, domain_id)) {
             trc::event!(
                 Cache(CacheEvent::Hit),
-                Key = local_part.to_string(),
+                Key = CompactString::from(local_part),
                 Domain = domain_id,
                 Collection = "email",
             );
@@ -237,7 +238,7 @@ impl Server {
             {
                 trc::event!(
                     Cache(CacheEvent::Miss),
-                    Key = local_part.to_string(),
+                    Key = CompactString::from(local_part),
                     Domain = domain_id,
                     Collection = "email",
                 );
@@ -292,7 +293,7 @@ impl Server {
                                 .details(
                                     "Object with email property is not an account or mailing list.",
                                 )
-                                .ctx(trc::Key::Id, object.to_string())
+                                .ctx(trc::Key::Id, object.to_compact_string())
                                 .caused_by(trc::location!()));
                         }
                     };
@@ -311,7 +312,7 @@ impl Server {
             } else {
                 trc::event!(
                     Cache(CacheEvent::Hit),
-                    Key = local_part.to_string(),
+                    Key = CompactString::from(local_part),
                     Domain = domain_id,
                     Collection = "emailNegative",
                 );

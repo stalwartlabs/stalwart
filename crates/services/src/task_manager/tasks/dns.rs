@@ -6,6 +6,7 @@
 
 use crate::task_manager::TaskResult;
 use common::Server;
+use compact_str::{CompactString, format_compact};
 use dns_update::{CAARecord, DnsRecord, DnsRecordType, Error as DnsUpdateError, KeyValue};
 use registry::schema::structs::{
     DnsManagement, Domain, Task, TaskDnsManagement, TaskDomainManagement, TaskStatus,
@@ -91,9 +92,9 @@ async fn dns_management(server: &Server, task: &TaskDnsManagement) -> trc::Resul
                     trc::event!(
                         Dns(DnsEvent::RecordLookupFailed),
                         Hostname = name.clone(),
-                        Details = origin.to_string(),
+                        Details = CompactString::from(origin),
                         Type = record_type.as_str(),
-                        Reason = format!(
+                        Reason = format_compact!(
                             "DNS provider cannot list RRSet, unrelated records at this name may be overwritten: {reason}"
                         ),
                     );
@@ -102,9 +103,9 @@ async fn dns_management(server: &Server, task: &TaskDnsManagement) -> trc::Resul
                     trc::event!(
                         Dns(DnsEvent::RecordLookupFailed),
                         Hostname = name.clone(),
-                        Details = origin.to_string(),
+                        Details = CompactString::from(origin),
                         Type = record_type.as_str(),
-                        Reason = format!("DNS provider failed to list RRSet: {err}"),
+                        Reason = format_compact!("DNS provider failed to list RRSet: {err}"),
                     );
                 }
             }

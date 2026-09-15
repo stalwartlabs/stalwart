@@ -42,7 +42,7 @@ pub struct EventDetails {
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-#[repr(usize)]
+#[repr(u8)]
 pub enum Level {
     Trace = 0,
     Debug = 1,

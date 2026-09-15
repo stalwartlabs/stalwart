@@ -5,6 +5,7 @@
  */
 
 use crate::config::telemetry::OtelMetrics;
+use compact_str::ToCompactString;
 use opentelemetry_sdk::metrics::{
     Temporality,
     data::{
@@ -83,7 +84,7 @@ impl OtelMetrics {
         if let Err(err) = self.exporter.export(&rm).await {
             trc::event!(
                 Telemetry(TelemetryEvent::OtelMetricsExporterError),
-                Reason = err.to_string(),
+                Reason = err.to_compact_string(),
             );
         }
     }
@@ -93,7 +94,7 @@ impl OtelMetrics {
         /*let _ = set_error_handler(|error| {
             trc::event!(
                 Telemetry(TelemetryEvent::OtelMetricsExporterError),
-                Reason = error.to_string(),
+                Reason = error.to_compact_string(),
             );
         });*/
     }

@@ -12,6 +12,7 @@ use crate::queue::{Error, MessageWrapper, Recipient, Status};
 use crate::queue::{ErrorDetails, HostResponse, UnexpectedResponse};
 use common::Server;
 use common::config::smtp::queue::ConnectionStrategy;
+use compact_str::CompactString;
 use directory::Credentials;
 use smtp_proto::{
     EXT_CHUNKING, EXT_DSN, EXT_REQUIRE_TLS, EXT_SIZE, EXT_SMTP_UTF8, EhloResponse, MAIL_REQUIRETLS,
@@ -52,7 +53,7 @@ impl MessageWrapper {
                     trc::event!(
                         Delivery(DeliveryEvent::Ehlo),
                         SpanId = params.session_id,
-                        Hostname = params.hostname.to_string(),
+                        Hostname = CompactString::from(params.hostname),
                         Details = capabilities.capabilities(),
                         Elapsed = time.elapsed(),
                     );
@@ -63,7 +64,7 @@ impl MessageWrapper {
                     trc::event!(
                         Delivery(DeliveryEvent::EhloRejected),
                         SpanId = params.session_id,
-                        Hostname = params.hostname.to_string(),
+                        Hostname = CompactString::from(params.hostname),
                         CausedBy = from_error_status(&status),
                         Elapsed = time.elapsed(),
                     );
@@ -81,7 +82,7 @@ impl MessageWrapper {
                 trc::event!(
                     Delivery(DeliveryEvent::AuthFailed),
                     SpanId = params.session_id,
-                    Hostname = params.hostname.to_string(),
+                    Hostname = CompactString::from(params.hostname),
                     CausedBy = from_mail_send_error(&err),
                     Elapsed = time.elapsed(),
                 );
@@ -97,7 +98,7 @@ impl MessageWrapper {
             trc::event!(
                 Delivery(DeliveryEvent::Auth),
                 SpanId = params.session_id,
-                Hostname = params.hostname.to_string(),
+                Hostname = CompactString::from(params.hostname),
                 Elapsed = time.elapsed(),
             );
 
@@ -134,10 +135,10 @@ impl MessageWrapper {
                 trc::event!(
                     Delivery(DeliveryEvent::MailFrom),
                     SpanId = params.session_id,
-                    Hostname = params.hostname.to_string(),
-                    From = self.message.return_path.to_string(),
+                    Hostname = CompactString::from(params.hostname),
+                    From = CompactString::from(&*self.message.return_path),
                     Code = response.code,
-                    Details = response.message.to_string(),
+                    Details = CompactString::from(response.message),
                     Elapsed = time.elapsed(),
                 );
             }
@@ -145,7 +146,7 @@ impl MessageWrapper {
                 trc::event!(
                     Delivery(DeliveryEvent::MailFromRejected),
                     SpanId = params.session_id,
-                    Hostname = params.hostname.to_string(),
+                    Hostname = CompactString::from(params.hostname),
                     CausedBy = from_mail_send_error(&err),
                     Elapsed = time.elapsed(),
                 );
@@ -179,10 +180,10 @@ impl MessageWrapper {
                         trc::event!(
                             Delivery(DeliveryEvent::RcptTo),
                             SpanId = params.session_id,
-                            Hostname = params.hostname.to_string(),
-                            To = rcpt.address().to_string(),
+                            Hostname = CompactString::from(params.hostname),
+                            To = CompactString::from(rcpt.address()),
                             Code = response.code,
-                            Details = response.message.to_string(),
+                            Details = CompactString::from(&response.message),
                             Elapsed = time.elapsed(),
                         );
 
@@ -199,10 +200,10 @@ impl MessageWrapper {
                         trc::event!(
                             Delivery(DeliveryEvent::RcptToRejected),
                             SpanId = params.session_id,
-                            Hostname = params.hostname.to_string(),
-                            To = rcpt.address().to_string(),
+                            Hostname = CompactString::from(params.hostname),
+                            To = CompactString::from(rcpt.address()),
                             Code = response.code,
-                            Details = response.message.to_string(),
+                            Details = CompactString::from(&response.message),
                             Elapsed = time.elapsed(),
                         );
 
@@ -227,8 +228,8 @@ impl MessageWrapper {
                     trc::event!(
                         Delivery(DeliveryEvent::RcptToFailed),
                         SpanId = params.session_id,
-                        Hostname = params.hostname.to_string(),
-                        To = rcpt.address().to_string(),
+                        Hostname = CompactString::from(params.hostname),
+                        To = CompactString::from(rcpt.address()),
                         CausedBy = from_mail_send_error(&err),
                         Elapsed = time.elapsed(),
                     );
@@ -256,7 +257,7 @@ impl MessageWrapper {
                 trc::event!(
                     Delivery(DeliveryEvent::MessageRejected),
                     SpanId = params.session_id,
-                    Hostname = params.hostname.to_string(),
+                    Hostname = CompactString::from(params.hostname),
                     CausedBy = from_error_status(&status),
                     Elapsed = time.elapsed(),
                 );
@@ -279,10 +280,10 @@ impl MessageWrapper {
                                 trc::event!(
                                     Delivery(DeliveryEvent::Delivered),
                                     SpanId = params.session_id,
-                                    Hostname = params.hostname.to_string(),
-                                    To = rcpt.address().to_string(),
+                                    Hostname = CompactString::from(params.hostname),
+                                    To = CompactString::from(rcpt.address()),
                                     Code = response.code,
-                                    Details = response.message.to_string(),
+                                    Details = CompactString::from(&response.message),
                                     Elapsed = time.elapsed(),
                                 );
 
@@ -292,9 +293,9 @@ impl MessageWrapper {
                             trc::event!(
                                 Delivery(DeliveryEvent::MessageRejected),
                                 SpanId = params.session_id,
-                                Hostname = params.hostname.to_string(),
+                                Hostname = CompactString::from(params.hostname),
                                 Code = response.code,
-                                Details = response.message.to_string(),
+                                Details = CompactString::from(&response.message),
                                 Elapsed = time.elapsed(),
                             );
 
@@ -314,7 +315,7 @@ impl MessageWrapper {
                         trc::event!(
                             Delivery(DeliveryEvent::MessageRejected),
                             SpanId = params.session_id,
-                            Hostname = params.hostname.to_string(),
+                            Hostname = CompactString::from(params.hostname),
                             CausedBy = from_error_status(&status),
                             Elapsed = time.elapsed(),
                         );
@@ -340,10 +341,10 @@ impl MessageWrapper {
                                         trc::event!(
                                             Delivery(DeliveryEvent::Delivered),
                                             SpanId = params.session_id,
-                                            Hostname = params.hostname.to_string(),
-                                            To = rcpt.address().to_string(),
+                                            Hostname = CompactString::from(params.hostname),
+                                            To = CompactString::from(rcpt.address()),
                                             Code = response.code,
-                                            Details = response.message.to_string(),
+                                            Details = CompactString::from(&*response.message),
                                             Elapsed = time.elapsed(),
                                         );
 
@@ -356,10 +357,10 @@ impl MessageWrapper {
                                         trc::event!(
                                             Delivery(DeliveryEvent::RcptToRejected),
                                             SpanId = params.session_id,
-                                            Hostname = params.hostname.to_string(),
-                                            To = rcpt.address().to_string(),
+                                            Hostname = CompactString::from(params.hostname),
+                                            To = CompactString::from(rcpt.address()),
                                             Code = response.code,
-                                            Details = response.message.to_string(),
+                                            Details = CompactString::from(&*response.message),
                                             Elapsed = time.elapsed(),
                                         );
 
@@ -390,7 +391,7 @@ impl MessageWrapper {
                         trc::event!(
                             Delivery(DeliveryEvent::MessageRejected),
                             SpanId = params.session_id,
-                            Hostname = params.hostname.to_string(),
+                            Hostname = CompactString::from(params.hostname),
                             CausedBy = from_error_status(&status),
                             Elapsed = time.elapsed(),
                         );

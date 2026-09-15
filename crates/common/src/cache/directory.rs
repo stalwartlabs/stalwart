@@ -5,6 +5,7 @@
  */
 
 use crate::{Server, auth::DomainCache, cache::invalidate::CacheInvalidationBuilder};
+use compact_str::CompactString;
 use registry::{
     schema::{
         prelude::{Object, ObjectType},
@@ -188,7 +189,7 @@ impl Server {
                             "Accounts in this domain are provisioned through SCIM, ",
                             "just-in-time provisioning is disabled"
                         ))
-                        .ctx(trc::Key::Domain, domain.name().to_string()));
+                        .ctx(trc::Key::Domain, CompactString::from(domain.name())));
                 }
                 // SPDX-SnippetEnd
 
@@ -400,7 +401,7 @@ impl Server {
                             "Groups in this domain are provisioned through SCIM, ",
                             "just-in-time provisioning is disabled"
                         ))
-                        .ctx(trc::Key::Domain, domain.name().to_string()));
+                        .ctx(trc::Key::Domain, CompactString::from(domain.name())));
                 }
                 // SPDX-SnippetEnd
 
@@ -488,12 +489,12 @@ impl Server {
                     trc::AuthEvent::Error
                         .into_err()
                         .details("Account domain does not exist or has been disabled")
-                        .ctx(trc::Key::Domain, domain.to_string())
+                        .ctx(trc::Key::Domain, CompactString::from(domain))
                 }),
             None => {
                 trc::event!(
                     Auth(trc::AuthEvent::Warning),
-                    AccountName = email.to_string().clone(),
+                    AccountName = CompactString::from(email),
                     Details = "Directory account is not an email, appended default domain",
                 );
                 self.domain_by_id(self.core.email.default_domain_id)

@@ -10,6 +10,7 @@ use common::{
     BuildServer,
     network::{SessionData, SessionManager, SessionResult, SessionStream, stream::NullIo},
 };
+use compact_str::ToCompactString;
 use imap_proto::{
     protocol::{ProtocolVersion, SerializeResponse},
     receiver::Receiver,
@@ -81,7 +82,7 @@ impl<T: SessionStream> Session<T> {
                             trc::event!(
                                 Network(trc::NetworkEvent::ReadError),
                                 SpanId = self.session_id,
-                                Reason = err.to_string(),
+                                Reason = err.to_compact_string(),
                                 CausedBy = trc::location!()
                             );
                             break;
@@ -128,7 +129,7 @@ impl<T: SessionStream> Session<T> {
         if let Err(err) = session.stream.write_all(greeting).await {
             trc::event!(
                 Network(trc::NetworkEvent::WriteError),
-                Reason = err.to_string(),
+                Reason = err.to_compact_string(),
                 SpanId = session.session_id,
                 Details = "Failed to write to stream"
             );

@@ -10,6 +10,7 @@ use crate::{
     spawn_op,
 };
 use common::{MessageStoreCache, network::SessionStream};
+use compact_str::format_compact;
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{
@@ -605,21 +606,19 @@ impl<T: SessionStream> SessionData<T> {
                             }
                             Err(_) => {
                                 self.flush_output(&mut output, true).await?;
-                                self.write_error(
-                                    trc::ImapEvent::Error
-                                        .into_err()
-                                        .details(format!(
-                                            "Failed to decode part {} of message {}.",
-                                            sections
-                                                .iter()
-                                                .map(|s| s.to_string())
-                                                .collect::<Vec<_>>()
-                                                .join("."),
-                                            if is_uid { uid } else { seqnum }
-                                        ))
-                                        .code(ResponseCode::UnknownCte),
-                                )
-                                .await?;
+                                let err = trc::ImapEvent::Error
+                                    .into_err()
+                                    .details(format_compact!(
+                                        "Failed to decode part {} of message {}.",
+                                        sections
+                                            .iter()
+                                            .map(|s| s.to_string())
+                                            .collect::<Vec<_>>()
+                                            .join("."),
+                                        if is_uid { uid } else { seqnum }
+                                    ))
+                                    .code(ResponseCode::UnknownCte);
+                                self.write_error(err).await?;
                                 continue;
                             }
                             _ => (),
@@ -716,7 +715,7 @@ impl<T: SessionStream> SessionData<T> {
             Details = arguments
                 .attributes
                 .iter()
-                .map(|c| trc::Value::from(format!("{c:?}")))
+                .map(|c| trc::Value::from(format_compact!("{c:?}")))
                 .collect::<Vec<_>>(),
             Elapsed = op_start.elapsed()
         );

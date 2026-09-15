@@ -294,7 +294,7 @@ impl<T: SessionStream> Session<T> {
                 trc::ImapEvent::Error
                     .into_err()
                     .details("Account does not exist")
-                    .id(arguments.tag.to_string())
+                    .id(arguments.tag.clone())
                     .caused_by(trc::location!())
             })?;
 

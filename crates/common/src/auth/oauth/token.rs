@@ -7,6 +7,7 @@
 use super::{GrantType, crypto::SymmetricEncrypt};
 use crate::Server;
 use base64::{Engine, engine::general_purpose};
+use compact_str::CompactString;
 use std::time::SystemTime;
 use store::rand::{RngExt, rng};
 use utils::codec::leb128::{Leb128Iterator, Leb128Vec};
@@ -85,7 +86,7 @@ impl Server {
                 .into_err()
                 .ctx(trc::Key::Reason, FAILED_TO_DECODE_TOKEN)
                 .caused_by(trc::location!())
-                .details(token_.to_string())
+                .details(CompactString::from(token_))
         })?;
 
         // Validate expiration

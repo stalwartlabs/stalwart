@@ -8,6 +8,7 @@
 pub mod journald;
 pub mod log;
 pub mod otel;
+pub mod spans;
 pub mod stdout;
 
 // SPDX-SnippetBegin
@@ -90,7 +91,7 @@ fn map_value(value: &Value) -> TraceValue {
         }),
         Value::Duration(value) => TraceValue::Duration(TraceValueDuration { value: *value }),
         Value::Bytes(items) => TraceValue::String(TraceValueString {
-            value: String::from_utf8_lossy(items).to_string(),
+            value: String::from_utf8_lossy(items).into_owned(),
         }),
         Value::Bool(value) => TraceValue::Boolean(TraceValueBoolean { value: *value }),
         Value::Ipv4(ipv4_addr) => TraceValue::IpAddr(TraceValueIpAddr {

@@ -14,6 +14,7 @@ use common::{
         generate_dkim_selector,
     },
 };
+use compact_str::CompactString;
 use registry::{
     schema::{
         enums::{DkimRotationStage, DkimSignatureType, DnsRecordType},
@@ -318,7 +319,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
 
                     trc::event!(
                         Dkim(DkimEvent::SignaturePublished),
-                        Id = new_signature.selector().to_string(),
+                        Id = CompactString::from(new_signature.selector()),
                         Details = domain.name.clone()
                     );
 
@@ -386,7 +387,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
 
         trc::event!(
             Dkim(DkimEvent::SignatureRetiring),
-            Id = new_signature.selector().to_string(),
+            Id = CompactString::from(new_signature.selector()),
             Details = domain.name.clone()
         );
 
@@ -428,7 +429,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
 
                     trc::event!(
                         Dkim(DkimEvent::SignatureRetired),
-                        Id = new_signature.selector().to_string(),
+                        Id = CompactString::from(new_signature.selector()),
                         Details = domain.name.clone()
                     );
 
@@ -484,13 +485,13 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                 Hostname = record.clone(),
                 Details = origin.clone(),
                 Type = "TXT",
-                Reason = err.to_string(),
+                Reason = err,
             );
         }
 
         trc::event!(
             Dkim(DkimEvent::SignatureDeleted),
-            Id = signature.object.selector().to_string(),
+            Id = CompactString::from(signature.object.selector()),
             Details = domain.name.clone()
         );
 

@@ -5,90 +5,51 @@
  */
 
 use std::{
-    io::{Error, stderr},
-    pin::Pin,
-    task::{Context, Poll},
+    io::{Write, stderr},
+    thread::Builder,
 };
 
 use crate::config::telemetry::ConsoleTracer;
-use std::io::Write;
-use tokio::io::AsyncWrite;
-use trc::{ipc::subscriber::SubscriberBuilder, serializers::text::FmtWriter};
+use compact_str::ToCompactString;
+use trc::{TelemetryEvent, ipc::subscriber::SubscriberBuilder, serializers::text::FmtWriter};
+
+const FLUSH_THRESHOLD: usize = 1 << 16;
 
 pub(crate) fn spawn_console_tracer(builder: SubscriberBuilder, settings: ConsoleTracer) {
     let (_, mut rx) = builder.register();
-    tokio::spawn(async move {
-        let mut buf = FmtWriter::new(StdErrWriter::default())
-            .with_ansi(settings.ansi)
-            .with_multiline(settings.multiline);
+    if let Err(err) = Builder::new()
+        .name("stalwart-console".to_string())
+        .spawn(move || {
+            let mut formatter = FmtWriter::new()
+                .with_ansi(settings.ansi)
+                .with_multiline(settings.multiline);
+            let mut buf = Vec::with_capacity(if settings.buffered {
+                FLUSH_THRESHOLD
+            } else {
+                1024
+            });
 
-        while let Some(events) = rx.recv().await {
-            for event in events {
-                let _ = buf.write(&event).await;
+            while let Some(events) = rx.blocking_recv() {
+                let mut stderr = stderr().lock();
+                for event in events {
+                    formatter.write(&event, &mut buf);
+                    if !settings.buffered || buf.len() >= FLUSH_THRESHOLD {
+                        let _ = stderr.write_all(&buf);
+                        buf.clear();
+                    }
+                }
 
-                if !settings.buffered {
-                    let _ = buf.flush().await;
+                if !buf.is_empty() {
+                    let _ = stderr.write_all(&buf);
+                    buf.clear();
                 }
             }
-
-            if settings.buffered {
-                let _ = buf.flush().await;
-            }
-        }
-    });
-}
-
-const BUFFER_CAPACITY: usize = 4096;
-
-pub struct StdErrWriter {
-    buffer: Vec<u8>,
-}
-
-impl AsyncWrite for StdErrWriter {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-        bytes: &[u8],
-    ) -> Poll<Result<usize, Error>> {
-        let bytes_len = bytes.len();
-        let buffer_len = self.buffer.len();
-
-        if buffer_len + bytes_len < BUFFER_CAPACITY {
-            self.buffer.extend_from_slice(bytes);
-            Poll::Ready(Ok(bytes_len))
-        } else if bytes_len > BUFFER_CAPACITY {
-            let result = stderr()
-                .write_all(&self.buffer)
-                .and_then(|_| stderr().write_all(bytes));
-            self.buffer.clear();
-            Poll::Ready(result.map(|_| bytes_len))
-        } else {
-            let result = stderr().write_all(&self.buffer);
-            self.buffer.clear();
-            self.buffer.extend_from_slice(bytes);
-            Poll::Ready(result.map(|_| bytes_len))
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        Poll::Ready(if !self.buffer.is_empty() {
-            let result = stderr().write_all(&self.buffer);
-            self.buffer.clear();
-            result
-        } else {
-            Ok(())
         })
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl Default for StdErrWriter {
-    fn default() -> Self {
-        Self {
-            buffer: Vec::with_capacity(BUFFER_CAPACITY),
-        }
+    {
+        trc::event!(
+            Telemetry(TelemetryEvent::LogError),
+            Details = "Failed to spawn console writer thread",
+            Reason = err.to_compact_string(),
+        );
     }
 }

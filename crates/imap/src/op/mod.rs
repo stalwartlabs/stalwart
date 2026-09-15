@@ -5,6 +5,7 @@
  */
 
 use ::store::query::log::Query;
+use compact_str::CompactString;
 use imap_proto::ResponseCode;
 
 pub mod acl;
@@ -99,12 +100,12 @@ impl<T> ImapContext<T> for trc::Result<T> {
             Ok(value) => Ok(value),
             Err(err) => Err(
                 if !err.matches(trc::EventType::Imap(trc::ImapEvent::Error)) {
-                    err.ctx(trc::Key::Id, tag.to_string())
+                    err.ctx(trc::Key::Id, CompactString::from(tag))
                         .ctx(trc::Key::Details, "Internal Server Error")
                         .ctx(trc::Key::Code, ResponseCode::ContactAdmin)
                         .ctx(trc::Key::CausedBy, location)
                 } else {
-                    err.ctx(trc::Key::Id, tag.to_string())
+                    err.ctx(trc::Key::Id, CompactString::from(tag))
                 },
             ),
         }

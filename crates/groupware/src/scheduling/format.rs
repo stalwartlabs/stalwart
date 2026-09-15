@@ -11,6 +11,7 @@ use calcard::{
 };
 use chrono::{DateTime, NaiveDate, TimeZone, Weekday};
 use common::i18n::{self, Locale, PluralForms};
+use compact_str::ToCompactString;
 use icu_datetime::{DateTimeFormatter, fieldsets};
 use icu_locale_core::{Locale as IcuLocale, locale};
 use icu_plurals::{PluralCategory, PluralRuleType, PluralRules, PluralRulesOptions};
@@ -43,7 +44,7 @@ impl TextFormatter {
                     .into_err()
                     .caused_by(trc::location!())
                     .details(detail)
-                    .ctx(trc::Key::Reason, err.to_string())
+                    .ctx(trc::Key::Reason, err.to_compact_string())
             }
         };
         let plural_prefs = (&icu_locale).into();
@@ -54,7 +55,7 @@ impl TextFormatter {
                     .into_err()
                     .caused_by(trc::location!())
                     .details("Failed to load plural rules")
-                    .ctx(trc::Key::Reason, err.to_string())
+                    .ctx(trc::Key::Reason, err.to_compact_string())
             })
         };
 

@@ -6,6 +6,7 @@
 
 use crate::network::acme::{AcmeError, AcmeResult};
 use chrono::{DateTime, Utc};
+use compact_str::CompactString;
 use hyper::{
     Method, StatusCode,
     header::{CONTENT_TYPE, USER_AGENT},
@@ -55,7 +56,7 @@ pub(crate) async fn https(
 
         trc::event!(
             Acme(trc::AcmeEvent::RenewBackoff),
-            Url = url.to_string(),
+            Url = CompactString::from(url),
             Code = response.status().as_u16(),
             Elapsed = wait.unwrap_or_default(),
         );

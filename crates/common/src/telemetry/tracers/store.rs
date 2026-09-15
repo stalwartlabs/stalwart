@@ -8,8 +8,10 @@
  *
  */
 
-use crate::{config::telemetry::StoreTracer, telemetry::tracers::TraceEvents};
-use ahash::AHashMap;
+use crate::{
+    config::telemetry::StoreTracer,
+    telemetry::tracers::{TraceEvents, spans::SpanTracker},
+};
 use registry::{
     schema::structs::{
         Trace, TraceKeyValue, TraceValue, TraceValueIpAddr, TraceValueList, TraceValueString,
@@ -29,12 +31,10 @@ use trc::{
 };
 use utils::snowflake::SnowflakeIdGenerator;
 
-const MAX_EVENTS: usize = 2048;
-
 pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTracer) {
     let (_, mut rx) = builder.register();
     tokio::spawn(async move {
-        let mut active_spans = AHashMap::new();
+        let mut active_spans = SpanTracker::default();
         let store = settings.store;
         let data_store = settings.data;
         let index_tx = settings.index_tx;
@@ -42,15 +42,16 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
         let mut task_batch = BatchBuilder::new();
 
         while let Some(events) = rx.recv().await {
+            if let Some(event) = events.last() {
+                active_spans.sweep(event.inner.timestamp);
+            }
+
             for event in events {
                 if let Some(span) = &event.inner.span {
                     let span_id = span.span_id().unwrap();
                     if !event.inner.typ.is_span_end() {
-                        let events = active_spans.entry(span_id).or_insert_with(Vec::new);
-                        if events.len() < MAX_EVENTS {
-                            events.push(event);
-                        }
-                    } else if let Some(events) = active_spans.remove(&span_id)
+                        active_spans.track(span_id, event);
+                    } else if let Some(events) = active_spans.finish(span_id)
                         && events
                             .iter()
                             .chain([span, &event])

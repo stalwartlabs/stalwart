@@ -36,17 +36,19 @@ impl<const N: usize> AtomicHistogram<N> {
     pub fn observe(&self, value: u64) {
         self.sum.fetch_add(value, Ordering::Relaxed);
         self.count.fetch_add(1, Ordering::Relaxed);
-        self.min.fetch_min(value, Ordering::Relaxed);
-        self.max.fetch_max(value, Ordering::Relaxed);
-
-        for (idx, upper_bound) in self.upper_bounds.iter().enumerate() {
-            if value < *upper_bound {
-                self.buckets.add(idx, 1);
-                return;
-            }
+        if value < self.min.load(Ordering::Relaxed) {
+            self.min.fetch_min(value, Ordering::Relaxed);
+        }
+        if value > self.max.load(Ordering::Relaxed) {
+            self.max.fetch_max(value, Ordering::Relaxed);
         }
 
-        unreachable!()
+        let bucket = self
+            .upper_bounds
+            .iter()
+            .position(|upper_bound| value < *upper_bound)
+            .unwrap_or(N - 1);
+        self.buckets.add(bucket, 1);
     }
 
     pub fn id(&self) -> MetricType {
