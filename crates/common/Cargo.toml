@@ -64,7 +64,7 @@ psl = "2"
 aes-gcm-siv = "0.12.1"
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 rsa = "0.9.10"
-p256 = { version = "0.13", features = ["ecdh", "ecdsa", "pkcs8", "pem"] }
+p256 = { version = "0.14", features = ["ecdh", "ecdsa", "pkcs8", "pem"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 hashify = "0.2"
 rkyv = { version = "0.8.18", features = ["little_endian"] }
