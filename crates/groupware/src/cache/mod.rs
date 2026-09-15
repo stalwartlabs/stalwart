@@ -891,9 +891,11 @@ mod tests {
     use super::*;
     use crate::calendar::{SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID};
     use common::{
-        ArenaRef, DavName, GroupwareResource, GroupwareResourceMetadata, NO_ID, ResourceStore,
-        storage::dav::CONTAINER_FLAG,
+        ArenaRef, DavName, FileFlags, GroupwareResource, GroupwareResourceMetadata, NO_ID,
+        ResourceStore,
+        storage::dav::{CONTAINER_FLAG, FILE_KIND_DIRECTORY, FILE_KIND_FILE},
     };
+    use types::media_type::MediaTypeId;
 
     #[derive(Clone)]
     enum Spec {
@@ -1040,6 +1042,19 @@ mod tests {
                             parent_id: parent_id.unwrap_or(NO_ID),
                             acls,
                             etag: *etag,
+                            modified: 0,
+                            created_delta: 0,
+                            flags: FileFlags::new(
+                                if size.is_some() {
+                                    FILE_KIND_FILE
+                                } else {
+                                    FILE_KIND_DIRECTORY
+                                },
+                                false,
+                                0,
+                                MediaTypeId::NONE,
+                                0,
+                            ),
                         },
                     });
                 }

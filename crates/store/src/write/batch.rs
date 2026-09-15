@@ -687,7 +687,7 @@ impl BatchBuilder {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.batch_ops == 0
+        self.batch_ops == 0 && self.commit_points.is_empty() && self.changes.is_empty()
     }
 
     pub fn schedule_task(&mut self, task: Task) -> &mut Self {
@@ -854,5 +854,37 @@ impl CommitPointIterator {
 impl Default for BatchBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_split_on_last_write_is_not_empty() {
+        let mut batch = BatchBuilder::new();
+        assert!(batch.is_empty());
+        batch
+            .with_account_id(1)
+            .with_collection(Collection::FileNode)
+            .with_document(1);
+        for key in 0..=1000u32 {
+            batch.set(ValueClass::Property(key as u8), key.to_be_bytes().to_vec());
+        }
+        batch.commit_point();
+        assert!(batch.commit_points.len() == 1 && batch.batch_ops == 0);
+        assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn batch_with_only_changes_is_not_empty() {
+        let mut batch = BatchBuilder::new();
+        batch
+            .with_account_id(1)
+            .with_collection(Collection::FileNode)
+            .with_document(1)
+            .log_item_update(SyncCollection::FileNode, None);
+        assert!(!batch.is_empty());
     }
 }

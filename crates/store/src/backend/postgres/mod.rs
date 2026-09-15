@@ -169,7 +169,6 @@ impl PsqlSearchField for ContactSearchField {
 impl PsqlSearchField for FileSearchField {
     fn column(&self) -> &'static str {
         match self {
-            FileSearchField::Name => "name",
             FileSearchField::Content => "body",
         }
     }

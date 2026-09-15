@@ -4740,6 +4740,14 @@ pub struct Search {
     pub index_tracing_fields: Map<SearchTracingField>,
     #[serde(rename = "indexConcurrency")]
     pub index_concurrency: u64,
+    #[serde(rename = "indexFiles")]
+    pub index_files: bool,
+    #[serde(rename = "maxExtractDocumentSize")]
+    pub max_extract_document_size: u64,
+    #[serde(rename = "maxExtractTextSize")]
+    pub max_extract_text_size: u64,
+    #[serde(rename = "maxExtractDecompressedSize")]
+    pub max_extract_decompressed_size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,13 +6,13 @@
 
 use super::ChunkAccumulator;
 use crate::{
-    DavResourceName, encode_path_segment,
-    file::{ArchivedFileNode, FileNode},
+    DavResourceName,
+    file::{ArchivedFileNode, FileNode, FileNodeRole},
 };
 use common::{
-    ArenaRef, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources, NO_ID,
-    PathIndex, ResourceStore, Server, UpdateLock,
-    storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
+    ArenaRef, DavPath, FileFlags, GroupwareResource, GroupwareResourceMetadata, GroupwareResources,
+    NO_ID, PathIndex, ResourceStore, Server, UpdateLock,
+    storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder, canonical_path_segment},
 };
 use std::sync::Arc;
 use store::ahash::AHashMap;
@@ -21,6 +21,7 @@ use types::{
     acl::AclGrant,
     collection::{Collection, SyncCollection},
     field::Field,
+    media_type::media_type_essence,
 };
 use utils::{map::bitmap::Bitmap, topological::TopologicalSort};
 
@@ -92,7 +93,8 @@ pub(super) fn build_nested_hierarchy(resources: &ResourceStore) -> PathIndex {
             names.insert(
                 resource.document_id(),
                 (
-                    encode_path_segment(resource.container_name().unwrap_or_default()).into_owned(),
+                    canonical_path_segment(resource.container_name().unwrap_or_default())
+                        .into_owned(),
                     parent_id,
                     0,
                     resource.is_container(),
@@ -150,7 +152,12 @@ pub(super) fn push_file(
     etag: u32,
 ) {
     let parent_id = node.parent_id.to_native();
-    let name = builder.push_str(node.name.as_str());
+    let file = node.file();
+    let media_type = file
+        .and_then(|file| file.media_type.as_deref())
+        .and_then(media_type_essence);
+    let (name, media_type_id, extra_len) =
+        builder.push_file_name(node.name.as_str(), media_type.as_deref());
     let acls = builder.push_acls(
         &node
             .acls
@@ -161,18 +168,28 @@ pub(super) fn push_file(
             })
             .collect::<Vec<_>>(),
     );
+    let modified = node.modified.to_native();
     builder.records.push(GroupwareResource {
         document_id,
         data: GroupwareResourceMetadata::File {
             name,
-            size: node
-                .file
-                .as_ref()
-                .map(|f| f.size.to_native())
-                .unwrap_or(NO_ID),
+            size: file.map_or(NO_ID, |f| f.size.to_native()),
             parent_id: if parent_id > 0 { parent_id - 1 } else { NO_ID },
             acls,
             etag,
+            modified,
+            created_delta: node
+                .created
+                .to_native()
+                .saturating_sub(modified)
+                .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            flags: FileFlags::new(
+                node.kind_id(),
+                file.is_some_and(|f| f.executable),
+                node.role().map_or(0, FileNodeRole::id),
+                media_type_id,
+                extra_len,
+            ),
         },
     });
 }
@@ -180,6 +197,8 @@ pub(super) fn push_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE};
+    use types::media_type::MediaTypeId;
 
     const MISSING_DOCUMENT_ID: u32 = 9;
 
@@ -221,6 +240,19 @@ mod tests {
                     parent_id: node.parent_id.unwrap_or(NO_ID),
                     acls,
                     etag: 0,
+                    modified: 0,
+                    created_delta: 0,
+                    flags: FileFlags::new(
+                        if node.size.is_some() {
+                            FILE_KIND_FILE
+                        } else {
+                            FILE_KIND_DIRECTORY
+                        },
+                        false,
+                        0,
+                        MediaTypeId::NONE,
+                        0,
+                    ),
                 },
             });
         }
@@ -294,8 +326,8 @@ mod tests {
                 "My%20Documents",
                 "My%20Documents/Berichte%202026",
                 "My%20Documents/Berichte%202026/%C3%9Cnterlagen%20Q1.txt",
-                "My%20Folder",
-                "My%20Folder/file(1)+a:b.txt",
+                "My%2520Folder",
+                "My%2520Folder/file(1)+a:b.txt",
             ]
         );
         assert_eq!(

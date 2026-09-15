@@ -8,19 +8,20 @@ use crate::{
     DavError, DavMethod,
     common::{
         ETag, ExtractETag,
-        acl::ResourceAcl,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
-    file::DavFileResource,
+    file::{DavFileResource, file_name_from_uri, is_symlink, validate_file_parent_acl},
 };
 use common::{
-    Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
+    Server,
+    auth::AccessToken,
+    storage::{dav::MAX_FILE_NODE_DEPTH, index::ObjectIndexBuilder},
 };
 use dav_proto::{RequestHeaders, Return, schema::property::Rfc1123DateTime};
 use groupware::{
     cache::GroupwareCache,
-    file::{FileNode, FileProperties},
+    file::{FileNode, FileNodeContent, FileProperties},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -77,10 +78,20 @@ impl FileUpdateRequestHandler for Server {
             return Err(DavError::Code(StatusCode::PAYLOAD_TOO_LARGE));
         }
 
-        if let Some(document_id) = resources
-            .by_path(resource_name.as_ref())
-            .map(|r| r.document_id())
-        {
+        if !access_token.is_member(account_id) {
+            resources.hide_undiscoverable(
+                &resources.file_access(access_token).discoverable,
+                resource_name.as_ref(),
+                StatusCode::FORBIDDEN,
+                StatusCode::CONFLICT,
+            )?;
+        }
+
+        if let Some(existing) = resources.by_path(resource_name.as_ref()) {
+            if is_symlink(&existing) {
+                return Err(DavError::Code(StatusCode::CONFLICT));
+            }
+            let document_id = existing.document_id();
             // Update
             let node_ = self
                 .store()
@@ -98,11 +109,9 @@ impl FileUpdateRequestHandler for Server {
 
             // Validate ACL
             if !access_token.is_member(account_id)
-                && !node
-                    .inner
-                    .acls
-                    .effective_acl(access_token)
-                    .contains(Acl::Modify)
+                && !resources
+                    .file_acl(access_token, document_id)
+                    .contains(Acl::ModifyItems)
             {
                 return Err(DavError::Code(StatusCode::FORBIDDEN));
             }
@@ -129,7 +138,10 @@ impl FileUpdateRequestHandler for Server {
                 Err(DavError::Code(StatusCode::PRECONDITION_FAILED))
                     if headers.ret == Return::Representation =>
                 {
-                    let file = node.inner.file.as_ref().unwrap();
+                    let file = node
+                        .inner
+                        .file()
+                        .ok_or(DavError::Code(StatusCode::PRECONDITION_FAILED))?;
                     let contents = self
                         .blob_store()
                         .get_blob(file.blob_hash.0.as_slice(), 0..usize::MAX)
@@ -155,17 +167,17 @@ impl FileUpdateRequestHandler for Server {
             }
 
             // Verify that the node is a file
-            if let Some(file) = node.inner.file.as_ref() {
+            let current_size = if let Some(file) = node.inner.file() {
                 if BlobHash::generate(&bytes).as_slice() == file.blob_hash.0.as_slice() {
                     return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                 }
+                u32::from(file.size) as u64
             } else {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
-            }
+            };
 
             // Validate quota
-            let extra_bytes = (bytes.len() as u64)
-                .saturating_sub(u32::from(node.inner.file.as_ref().unwrap().size) as u64);
+            let extra_bytes = (bytes.len() as u64).saturating_sub(current_size);
             if extra_bytes > 0 {
                 self.has_available_quota(self.account(account_id).await?.as_ref(), extra_bytes)
                     .await?;
@@ -179,14 +191,15 @@ impl FileUpdateRequestHandler for Server {
 
             // Build node
             let mut new_node = node.deserialize::<FileNode>().caused_by(trc::location!())?;
-            let new_file = new_node.file.as_mut().unwrap();
-            new_file.blob_hash = blob_hash;
-            new_file.media_type = headers
-                .content_type
-                .filter(|ct| !ct.is_empty() && *ct != "application/octet-stream")
-                .map(|v| v.to_string());
-            new_file.size = bytes.len() as u32;
-            new_node.modified = now() as i64;
+            if let Some(new_file) = new_node.file_mut() {
+                new_file.blob_hash = blob_hash;
+                new_file.media_type = headers
+                    .content_type
+                    .filter(|ct| !ct.is_empty() && *ct != "application/octet-stream")
+                    .map(|v| v.to_string());
+                new_file.size = bytes.len() as u32;
+            }
+            new_node.stamp_update(true);
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
@@ -209,22 +222,20 @@ impl FileUpdateRequestHandler for Server {
         } else {
             // Insert
             let orig_resource_name = resource_name;
-            let (parent, resource_name) = resources
-                .map_parent(orig_resource_name.as_ref())
-                .ok_or(DavError::Code(StatusCode::CONFLICT))?;
+            let parent = resources.map_directory_parent(orig_resource_name)?;
+            let name = file_name_from_uri(headers.uri)?;
+            if orig_resource_name.split('/').count() > MAX_FILE_NODE_DEPTH {
+                return Err(DavError::Code(StatusCode::FORBIDDEN));
+            }
 
             // Validate ACL
-            let parent_id = resources.validate_and_map_parent_acl(
+            let parent_id = validate_file_parent_acl(
+                &resources,
                 access_token,
                 access_token.is_member(account_id),
-                parent.map(|r| r.document_id()),
+                parent.map(|parent| parent.document_id()),
                 Acl::AddItems,
             )?;
-
-            // Verify that parent is a collection
-            if parent.as_ref().is_some_and(|r| !r.is_container()) {
-                return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
-            }
 
             // Validate headers
             self.validate_headers(
@@ -264,9 +275,8 @@ impl FileUpdateRequestHandler for Server {
             let now = now();
             let node = FileNode {
                 parent_id,
-                name: resource_name.to_string(),
-                display_name: None,
-                file: Some(FileProperties {
+                name,
+                content: FileNodeContent::File(FileProperties {
                     blob_hash,
                     size: bytes.len() as u32,
                     media_type: headers.content_type.map(|v| v.to_string()),
@@ -274,12 +284,9 @@ impl FileUpdateRequestHandler for Server {
                 }),
                 created: now as i64,
                 modified: now as i64,
-                dead_properties: Default::default(),
-                acls: parent
-                    .as_ref()
-                    .map(|p| p.resource.acls())
-                    .map(|acls| acls.to_vec())
-                    .unwrap_or_default(),
+                accessed: now as i64,
+                changed: now as i64,
+                ..Default::default()
             };
 
             // Prepare write batch

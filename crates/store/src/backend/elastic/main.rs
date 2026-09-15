@@ -10,8 +10,8 @@ use crate::{
     SearchStore,
     backend::elastic::ElasticSearchStore,
     search::{
-        CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
-        TracingSearchField,
+        CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField,
+        SearchableField, TracingSearchField,
     },
 };
 use registry::schema::structs;
@@ -43,6 +43,7 @@ impl ElasticSearchStore {
         self.create_index::<EmailSearchField>().await?;
         self.create_index::<CalendarSearchField>().await?;
         self.create_index::<ContactSearchField>().await?;
+        self.create_index::<FileSearchField>().await?;
         self.create_index::<TracingSearchField>().await?;
         Ok(())
     }
@@ -121,6 +122,7 @@ impl ElasticSearchStore {
             SearchIndex::Email,
             SearchIndex::Calendar,
             SearchIndex::Contacts,
+            SearchIndex::File,
             SearchIndex::Tracing,
         ] {
             assert_success(

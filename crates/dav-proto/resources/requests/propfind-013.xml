@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:"><D:foo/><D:prop><D:displayname/></D:prop></D:propfind>

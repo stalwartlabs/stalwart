@@ -15,6 +15,28 @@ use trc::AddContext;
 use types::collection::{Collection, VanishedCollection};
 
 impl FileNode {
+    pub fn stamp_insert(&mut self, set_created: bool, set_modified: bool, set_accessed: bool) {
+        let now = now() as i64;
+        if set_created {
+            self.created = now;
+        }
+        if set_modified {
+            self.modified = now;
+        }
+        if set_accessed {
+            self.accessed = now;
+        }
+        self.changed = now;
+    }
+
+    pub fn stamp_update(&mut self, set_modified: bool) {
+        let now = now() as i64;
+        if set_modified {
+            self.modified = now;
+        }
+        self.changed = now;
+    }
+
     pub fn insert(
         self,
         changed_by: AccountTenantIds,
@@ -25,13 +47,8 @@ impl FileNode {
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
         let mut node = self;
-        let now = now() as i64;
-        if set_created {
-            node.created = now;
-        }
-        if set_modified {
-            node.modified = now;
-        }
+        let set_accessed = node.accessed == 0;
+        node.stamp_insert(set_created, set_modified, set_accessed);
 
         // Prepare write batch
         batch
@@ -46,34 +63,21 @@ impl FileNode {
             .map(|b| b.commit_point())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn insert_with_parent(
+    pub fn insert_stamped(
         self,
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: Slot,
         parent_id: Option<Slot>,
-        set_created: bool,
-        set_modified: bool,
         batch: &mut BatchBuilder,
     ) -> trc::Result<&mut BatchBuilder> {
-        let mut node = self;
-        let now = now() as i64;
-        if set_created {
-            node.created = now;
-        }
-        if set_modified {
-            node.modified = now;
-        }
-
-        // Prepare write batch
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
             .create_document(document_id)
             .custom(
                 ObjectIndexBuilder::<(), _>::new()
-                    .with_changes(node)
+                    .with_changes(self)
                     .with_changed_by(changed_by)
                     .with_pending_id_opt(parent_id),
             )
@@ -90,9 +94,7 @@ impl FileNode {
         batch: &'x mut BatchBuilder,
     ) -> trc::Result<&'x mut BatchBuilder> {
         let mut new_node = self;
-        if set_modified {
-            new_node.modified = now() as i64;
-        }
+        new_node.stamp_update(set_modified);
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)
@@ -106,24 +108,18 @@ impl FileNode {
             .map(|b| b.commit_point())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn update_with_parent<'x>(
+    pub fn update_stamped<'x>(
         self,
         changed_by: AccountTenantIds,
         node: Archive<&ArchivedFileNode>,
         account_id: u32,
         document_id: u32,
         parent_id: Option<Slot>,
-        set_modified: bool,
         batch: &'x mut BatchBuilder,
     ) -> trc::Result<&'x mut BatchBuilder> {
-        let mut new_node = self;
-        if set_modified {
-            new_node.modified = now() as i64;
-        }
         let builder = ObjectIndexBuilder::new()
             .with_current(node)
-            .with_changes(new_node)
+            .with_changes(self)
             .with_changed_by(changed_by);
         batch
             .with_account_id(account_id)

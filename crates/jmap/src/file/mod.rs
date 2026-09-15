@@ -10,8 +10,16 @@ use registry::schema::enums::StorageQuota;
 
 pub mod copy;
 pub mod get;
+pub mod node;
 pub mod query;
 pub mod set;
+pub mod writer;
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ObjectCounts {
+    pub files: usize,
+    pub folders: usize,
+}
 
 pub(crate) struct FileNodeQuota {
     files: ObjectQuotaUsage,
@@ -50,23 +58,30 @@ impl FileNodeQuota {
     pub(crate) fn validate(
         &self,
         is_folder: bool,
-        created: usize,
-        created_folders: usize,
+        created: ObjectCounts,
+        destroyed: ObjectCounts,
     ) -> Result<(), SetError<FileNodeProperty>> {
-        let (usage, pending, description) = if is_folder {
+        let (usage, pending, released, description) = if is_folder {
             (
                 &self.folders,
-                created_folders,
+                created.folders,
+                destroyed.folders,
                 "There are too many folders, please delete some before adding a new one.",
             )
         } else {
             (
                 &self.files,
-                created.saturating_sub(created_folders),
+                created.files,
+                destroyed.files,
                 "There are too many files, please delete some before adding a new one.",
             )
         };
-        if usage.has_room(pending) {
+        if (ObjectQuotaUsage {
+            used: usage.used.saturating_sub(released),
+            limit: usage.limit,
+        })
+        .has_room(pending)
+        {
             Ok(())
         } else {
             Err(SetError::over_quota().with_description(description))

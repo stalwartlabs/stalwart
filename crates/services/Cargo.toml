@@ -11,6 +11,8 @@ trc = { path = "../trc" }
 email = { path = "../email" }
 smtp = { path = "../smtp" }
 groupware = { path = "../groupware" }
+nlp = { path = "../nlp" }
+text-extract = { path = "../text-extract" }
 spam-filter = { path = "../spam-filter" }
 types = { path = "../types" }
 jmap_proto = { path = "../jmap-proto" }

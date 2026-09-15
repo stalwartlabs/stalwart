@@ -22,6 +22,8 @@ use tokio_postgres::{
     types::{FromSql, ToSql, Type, WrongType},
 };
 
+const MAX_TSVECTOR_CHARS: usize = 250_000;
+
 impl PostgresStore {
     fn ts_config(&self, language: &Language) -> &'static str {
         pg_lang(language)
@@ -69,7 +71,12 @@ impl PostgresStore {
                         (0, PG_UNSTEMMED_LANG)
                     };
 
-                    if field.is_text() {
+                    if field.is_text() && text_len > MAX_TSVECTOR_CHARS {
+                        let _ = write!(
+                            &mut query,
+                            "to_tsvector('{language}',left({value_ref},{MAX_TSVECTOR_CHARS}))"
+                        );
+                    } else if field.is_text() {
                         let _ = write!(&mut query, "to_tsvector('{language}',{value_ref})");
                     } else if text_len > 512 {
                         query.push_str("left(");

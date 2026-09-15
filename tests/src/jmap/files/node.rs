@@ -490,10 +490,7 @@ pub async fn test(test: &TestServer) {
     let twin_first = response.created(0).id().to_string();
     let err = response.not_created(1);
     assert_eq!(err.typ(), "alreadyExists");
-    assert!(
-        err.pointer("/existingId").is_none(),
-        "Pending Create collision has no committed existingId, got {err:?}"
-    );
+    assert_eq!(err.text_field("existingId"), twin_first.as_str());
     account
         .jmap_destroy(
             MethodObject::FileNode,
@@ -543,10 +540,7 @@ pub async fn test(test: &TestServer) {
     let twin_survivor = response.created(0).id().to_string();
     let err = response.not_created(1);
     assert_eq!(err.typ(), "alreadyExists");
-    assert!(
-        err.pointer("/existingId").is_none(),
-        "Pending Create + Replace returns alreadyExists with no existingId, got {err:?}"
-    );
+    assert_eq!(err.text_field("existingId"), twin_survivor.as_str());
     account
         .jmap_destroy(
             MethodObject::FileNode,
@@ -609,10 +603,7 @@ pub async fn test(test: &TestServer) {
         .pointer(&format!("/methodResponses/0/1/notUpdated/{lhs_id}"))
         .expect("update should fail");
     assert_eq!(upd_err.typ(), "alreadyExists");
-    assert!(
-        upd_err.pointer("/existingId").is_none(),
-        "Pending-from-Create collision has no existingId, got {upd_err:?}"
-    );
+    assert_eq!(upd_err.text_field("existingId"), new1_id.as_str());
     account
         .jmap_destroy(
             MethodObject::FileNode,
@@ -702,7 +693,7 @@ pub async fn test(test: &TestServer) {
     response.created(1);
     let dav_parent_path = "/dav/file/jdoe%40example.com/%C3%9Cnterlagen%202026";
     let dav_child_path =
-        "/dav/file/jdoe%40example.com/%C3%9Cnterlagen%202026/Q1%20%26%20Q2%20%28final%29";
+        "/dav/file/jdoe%40example.com/%C3%9Cnterlagen%202026/Q1%20&%20Q2%20(final)";
     dav_client
         .propfind(dav_parent_path, ["D:getetag"])
         .await

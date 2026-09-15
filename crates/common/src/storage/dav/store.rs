@@ -112,12 +112,18 @@ impl ResourceChunkBuilder {
                 parent_id,
                 acls,
                 etag,
+                modified,
+                created_delta,
+                flags,
             } => GroupwareResourceMetadata::File {
-                name: self.push_str(src.chunk.str_at(*name)),
+                name: self.push_file_bytes(src.chunk, *name, *flags),
                 size: *size,
                 parent_id: *parent_id,
                 acls: self.push_acls(src.chunk.acls_at(*acls)),
                 etag: *etag,
+                modified: *modified,
+                created_delta: *created_delta,
+                flags: *flags,
             },
             GroupwareResourceMetadata::Calendar {
                 name,
@@ -485,7 +491,11 @@ impl ResourceStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GroupwareResourceMetadata;
+    use crate::{
+        FileFlags, GroupwareResourceMetadata,
+        storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE},
+    };
+    use types::media_type::MediaTypeId;
 
     fn calendar(builder: &mut ResourceChunkBuilder, document_id: u32, name: &str) {
         let name = builder.push_str(name);
@@ -677,6 +687,19 @@ mod tests {
                 parent_id: 0,
                 acls,
                 etag: document_id,
+                modified: 0,
+                created_delta: 0,
+                flags: FileFlags::new(
+                    if size == NO_ID {
+                        FILE_KIND_DIRECTORY
+                    } else {
+                        FILE_KIND_FILE
+                    },
+                    false,
+                    0,
+                    MediaTypeId::NONE,
+                    0,
+                ),
             },
         });
     }

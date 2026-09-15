@@ -8,8 +8,8 @@ use super::{MysqlStore, into_error};
 use crate::{
     backend::mysql::{MysqlSearchField, sql::SqlStatements},
     search::{
-        CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
-        TracingSearchField,
+        CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField,
+        SearchableField, TracingSearchField,
     },
     *,
 };
@@ -127,7 +127,7 @@ impl MysqlStore {
         create_search_tables::<EmailSearchField>(&mut conn).await?;
         create_search_tables::<CalendarSearchField>(&mut conn).await?;
         create_search_tables::<ContactSearchField>(&mut conn).await?;
-        //create_search_tables::<FileSearchField>(&mut conn).await?;
+        create_search_tables::<FileSearchField>(&mut conn).await?;
         create_search_tables::<TracingSearchField>(&mut conn).await?;
 
         Ok(())

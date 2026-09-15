@@ -36,6 +36,7 @@ pub fn xml_pretty_print(xml_string: &str) -> String {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct RequestHeaders<'x> {
     pub uri: &'x str,
+    pub raw_uri: &'x str,
     pub depth: Depth,
     pub timeout: Timeout,
     pub content_type: Option<&'x str>,

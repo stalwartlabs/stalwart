@@ -198,24 +198,27 @@ pub async fn test(test: &TestServer) {
     }
 
     // PUT under resources should fail
-    for (path, contents) in [
+    for (path, contents, expected_status) in [
         (
             "/dav/file/john%40example.com/file1.txt/other-file.txt",
             TEST_FILE_1,
+            StatusCode::CONFLICT,
         ),
         (
             "/dav/card/john%40example.com/default/card1.vcf/other-file.vcf",
             TEST_VCARD_1,
+            StatusCode::METHOD_NOT_ALLOWED,
         ),
         (
             "/dav/cal/john%40example.com/default/event1.ics/other-file.ical",
             TEST_ICAL_1,
+            StatusCode::METHOD_NOT_ALLOWED,
         ),
     ] {
         client
             .request("PUT", path, contents)
             .await
-            .with_status(StatusCode::METHOD_NOT_ALLOWED);
+            .with_status(expected_status);
     }
 
     // PUT a non-vCard/iCalendar file should fail

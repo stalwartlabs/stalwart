@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ArchivedFileNode, FileNode};
+use super::{
+    ArchivedFileNode, ArchivedFileNodeContent, FileNode, FileNodeContent, content::FileContentKind,
+};
 use common::storage::index::{
     IndexValue, IndexableAndSerializableObject, IndexableObject, SerializableObject,
     serialize_object,
 };
-use store::write::{ArchiveCompression, BatchBuilder, Compression, Slot};
+use store::write::{ArchiveCompression, BatchBuilder, Compression, SearchIndex, Slot};
 use types::{acl::AclGrant, collection::SyncCollection};
 
 impl IndexableObject for FileNode {
@@ -29,10 +31,19 @@ impl IndexableObject for FileNode {
             },
         ]);
 
-        if let Some(file) = &self.file {
-            values.extend([IndexValue::Blob {
-                value: file.blob_hash.clone(),
-            }]);
+        if let Some(file) = self.file() {
+            values.extend([
+                IndexValue::SearchIndex {
+                    index: SearchIndex::File,
+                    hash: FileContentKind::index_hash(
+                        FileContentKind::detect(&self.name, file.media_type.as_deref()),
+                        file.blob_hash.as_slice(),
+                    ),
+                },
+                IndexValue::Blob {
+                    value: file.blob_hash.clone(),
+                },
+            ]);
         }
 
         values.into_iter()
@@ -61,10 +72,19 @@ impl IndexableObject for &ArchivedFileNode {
             },
         ]);
 
-        if let Some(file) = self.file.as_ref() {
-            values.extend([IndexValue::Blob {
-                value: (&file.blob_hash).into(),
-            }]);
+        if let Some(file) = self.file() {
+            values.extend([
+                IndexValue::SearchIndex {
+                    index: SearchIndex::File,
+                    hash: FileContentKind::index_hash(
+                        FileContentKind::detect(&self.name, file.media_type.as_deref()),
+                        file.blob_hash.0.as_slice(),
+                    ),
+                },
+                IndexValue::Blob {
+                    value: (&file.blob_hash).into(),
+                },
+            ]);
         }
 
         values.into_iter()
@@ -90,7 +110,13 @@ impl FileNode {
         self.dead_properties.size()
             + self.display_name.as_ref().map_or(0, |n| n.len())
             + self.name.len()
-            + self.file.as_ref().map_or(0, |f| f.size as usize)
+            + match &self.content {
+                FileNodeContent::Directory => 0,
+                FileNodeContent::File(file) => {
+                    file.size as usize + file.media_type.as_ref().map_or(0, |t| t.len())
+                }
+                FileNodeContent::Symlink(target) => target.len(),
+            }
             + std::mem::size_of::<FileNode>()
     }
 }
@@ -100,10 +126,13 @@ impl ArchivedFileNode {
         self.dead_properties.size()
             + self.display_name.as_ref().map_or(0, |n| n.len())
             + self.name.len()
-            + self
-                .file
-                .as_ref()
-                .map_or(0, |f| f.size.to_native() as usize)
+            + match &self.content {
+                ArchivedFileNodeContent::Directory => 0,
+                ArchivedFileNodeContent::File(file) => {
+                    file.size.to_native() as usize + file.media_type.as_ref().map_or(0, |t| t.len())
+                }
+                ArchivedFileNodeContent::Symlink(target) => target.len(),
+            }
             + std::mem::size_of::<FileNode>()
     }
 }

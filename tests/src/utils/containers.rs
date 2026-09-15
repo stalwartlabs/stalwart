@@ -20,6 +20,8 @@ const ACME_NETWORK: &str = "stalwart-test-acme";
 
 pub const IMAPTEST_TESTS_DIR: &str = "/tests";
 
+const LITMUS_SUITES_DIR: &str = "/usr/local/libexec/litmus";
+
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
 
 static FOUNDATIONDB: OnceCell<ContainerAsync<GenericImage>> = OnceCell::const_new();
@@ -429,6 +431,70 @@ impl ImapTest {
             .expect("imaptest did not report an exit code");
 
         ImapTestRun {
+            exit_code,
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        }
+    }
+}
+
+pub struct Litmus {
+    container: ContainerAsync<GenericImage>,
+}
+
+pub struct LitmusRun {
+    pub exit_code: i64,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl Litmus {
+    pub async fn start() -> Self {
+        let container = GenericBuildableImage::new("stalwart-test-litmus", "local")
+            .with_dockerfile_string(include_str!("../../docker/litmus/Dockerfile"))
+            .build_image()
+            .await
+            .expect("Failed to build the litmus image")
+            .with_host("host.docker.internal", Host::HostGateway)
+            .with_startup_timeout(READY_TIMEOUT)
+            .start()
+            .await
+            .expect("Failed to start the litmus container");
+
+        Litmus { container }
+    }
+
+    pub async fn run_suite(&self, suite: &str, url: &str, user: &str, password: &str) -> LitmusRun {
+        let command = [
+            format!("{LITMUS_SUITES_DIR}/{suite}"),
+            "--no-colour".to_string(),
+            url.to_string(),
+            user.to_string(),
+            password.to_string(),
+        ];
+        self.exec(command).await
+    }
+
+    pub async fn debug_log(&self) -> String {
+        self.exec(["cat", "debug.log"]).await.stdout
+    }
+
+    async fn exec(&self, command: impl IntoIterator<Item = impl Into<String>>) -> LitmusRun {
+        let mut result = self
+            .container
+            .exec(ExecCommand::new(command).with_cmd_ready_condition(CmdWaitFor::exit()))
+            .await
+            .expect("Failed to exec litmus");
+
+        let stdout = result.stdout_to_vec().await.unwrap_or_default();
+        let stderr = result.stderr_to_vec().await.unwrap_or_default();
+        let exit_code = result
+            .exit_code()
+            .await
+            .expect("Failed to read the litmus exit code")
+            .expect("litmus did not report an exit code");
+
+        LitmusRun {
             exit_code,
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),

@@ -5,4 +5,11 @@
  */
 
 pub mod acl;
+pub mod dav;
+pub mod dav_rights;
+pub mod inheritance;
 pub mod node;
+pub mod properties;
+pub mod query;
+pub mod requests;
+pub mod search;

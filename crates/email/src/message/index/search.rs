@@ -5,12 +5,13 @@
  */
 
 use crate::message::{
-    index::{MAX_MESSAGE_PARTS, extractors::VisitTextArchived},
+    index::{MAX_MESSAGE_PARTS, attachment::AttachmentText, extractors::VisitTextArchived},
     metadata::{
         ArchivedMessageMetadata, ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue,
         ArchivedMetadataPartType, DecodedPartContent, MetadataHeaderName,
     },
 };
+use common::config::mailstore::email::ExtractLimits;
 use mail_parser::{decoders::html::html_to_text, parsers::fields::thread::thread_name};
 use nlp::{
     language::{
@@ -35,8 +36,10 @@ impl ArchivedMessageMetadata {
         raw_message: &[u8],
         index_fields: &AHashSet<SearchField>,
         default_language: Language,
+        extract_limits: &ExtractLimits,
     ) -> IndexDocument {
         let mut detector = LanguageDetector::new();
+        let mut attachments = AttachmentText::new(extract_limits);
         let mut language = Language::Unknown;
         let message_contents = &self.contents[0];
         let mut document = IndexDocument::new(SearchIndex::Email)
@@ -206,8 +209,16 @@ impl ArchivedMessageMetadata {
                     if message_contents.is_html_part(part_id)
                         || message_contents.is_text_part(part_id)
                     {
-                        if index_fields.is_empty()
-                            || index_fields.contains(&SearchField::Email(EmailSearchField::Body))
+                        if (index_fields.is_empty()
+                            || index_fields.contains(&SearchField::Email(EmailSearchField::Body)))
+                            && !attachments.index_rtf(
+                                part,
+                                text.as_ref(),
+                                &mut document,
+                                &mut detector,
+                                part_language,
+                                EmailSearchField::Body,
+                            )
                         {
                             if part_language.is_unknown() {
                                 detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE);
@@ -219,8 +230,16 @@ impl ArchivedMessageMetadata {
                                 part_language,
                             );
                         }
-                    } else if index_fields.is_empty()
-                        || index_fields.contains(&SearchField::Email(EmailSearchField::Attachment))
+                    } else if (index_fields.is_empty()
+                        || index_fields.contains(&SearchField::Email(EmailSearchField::Attachment)))
+                        && !attachments.index_rtf(
+                            part,
+                            text.as_ref(),
+                            &mut document,
+                            &mut detector,
+                            part_language,
+                            EmailSearchField::Attachment,
+                        )
                     {
                         if part_language.is_unknown() {
                             detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE);
@@ -232,6 +251,19 @@ impl ArchivedMessageMetadata {
                             part_language,
                         );
                     }
+                }
+                ArchivedMetadataPartType::Binary
+                    if index_fields.is_empty()
+                        || index_fields
+                            .contains(&SearchField::Email(EmailSearchField::Attachment)) =>
+                {
+                    attachments.index_binary(
+                        part,
+                        &raw_message,
+                        &mut document,
+                        &mut detector,
+                        part_language,
+                    );
                 }
                 ArchivedMetadataPartType::Message(nested_message_id)
                     if index_fields.is_empty()
@@ -277,6 +309,17 @@ impl ArchivedMessageMetadata {
                                     _ => unreachable!(),
                                 };
 
+                                if attachments.index_rtf(
+                                    sub_part,
+                                    text.as_ref(),
+                                    &mut document,
+                                    &mut detector,
+                                    language,
+                                    EmailSearchField::Attachment,
+                                ) {
+                                    continue;
+                                }
+
                                 if language.is_unknown() {
                                     detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE);
                                 }
@@ -287,6 +330,13 @@ impl ArchivedMessageMetadata {
                                     language,
                                 );
                             }
+                            ArchivedMetadataPartType::Binary => attachments.index_binary(
+                                sub_part,
+                                &raw_message,
+                                &mut document,
+                                &mut detector,
+                                language,
+                            ),
                             _ => (),
                         }
                     }

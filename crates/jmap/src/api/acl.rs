@@ -211,18 +211,26 @@ impl JmapRights {
         if access_token.is_member(account_id)
             || grants.effective_acl(access_token).contains(Acl::Share)
         {
-            let mut share_with = Map::with_capacity(grants.len());
-            for grant in grants {
-                share_with.insert_unchecked(
-                    Key::Property(Id::from(grant.account_id).into()),
-                    Self::rights::<T>(grant.grants),
-                );
-            }
-
-            Value::Object(share_with)
+            Self::grants_value::<T>(grants)
         } else {
             Value::Null
         }
+    }
+
+    pub fn grants_value<T: JmapSharedObject>(
+        grants: &[AclGrant],
+    ) -> Value<'static, T::Property, T::Element>
+    where
+        T::Property: From<Id>,
+    {
+        let mut share_with = Map::with_capacity(grants.len());
+        for grant in grants {
+            share_with.insert_unchecked(
+                Key::Property(Id::from(grant.account_id).into()),
+                Self::rights::<T>(grant.grants),
+            );
+        }
+        Value::Object(share_with)
     }
 }
 

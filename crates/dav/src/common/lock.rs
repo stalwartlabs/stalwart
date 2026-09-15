@@ -5,9 +5,12 @@
  */
 
 use super::uri::{DavUriResource, OwnedUri, UriResource, Urn};
+use crate::file::is_symlink;
 use crate::{DavError, DavErrorCondition, DavMethod};
 use common::KV_LOCK_DAV;
-use common::{GroupwareResources, Server, auth::AccessToken};
+use common::{
+    GroupwareResources, Server, auth::AccessToken, storage::dav::canonical_dav_resource_uri,
+};
 use dav_proto::schema::property::{ActiveLock, LockScope, WebDavProperty};
 use dav_proto::schema::request::DavPropertyValue;
 use dav_proto::schema::response::{BaseCondition, List, PropResponse};
@@ -16,6 +19,7 @@ use dav_proto::{RequestHeaders, schema::request::LockInfo};
 use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use std::borrow::Cow;
 use std::sync::Arc;
 use store::dispatch::lookup::KeyValue;
 use store::write::serialize::rkyv_deserialize;
@@ -25,6 +29,8 @@ use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 use types::dead_property::DeadProperty;
 use utils::map::vec_map::VecMap;
+
+const FILE_COLLECTION_PREFIX: &str = "file/";
 
 #[derive(Debug, Default, Clone)]
 pub struct ResourceState<'x> {
@@ -118,6 +124,20 @@ impl LockRequestHandler for Server {
         let account_id = resource.account_id;
         if !access_token.is_member(account_id) {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
+        }
+        if resource.collection == Collection::FileNode
+            && self
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    account_id,
+                    SyncCollection::FileNode,
+                )
+                .await
+                .caused_by(trc::location!())?
+                .by_path(resource_path)
+                .is_some_and(|existing| is_symlink(&existing))
+        {
+            return Err(DavError::Code(StatusCode::NOT_FOUND));
         }
 
         let resources = vec![ResourceState {
@@ -345,6 +365,11 @@ impl LockRequestHandler for Server {
         method: DavMethod,
     ) -> crate::Result<()> {
         let no_if_headers = headers.if_.is_empty();
+        let if_resources = headers
+            .if_
+            .iter()
+            .map(|if_| if_.resource.map(canonical_if_resource))
+            .collect::<Vec<_>>();
         match method {
             DavMethod::GET | DavMethod::HEAD if no_if_headers => {
                 // Return early for GET/HEAD requests without If headers
@@ -382,32 +407,35 @@ impl LockRequestHandler for Server {
             DavMethod::GET | DavMethod::HEAD | DavMethod::LOCK | DavMethod::UNLOCK
         ) {
             let mut base_path = None;
+            let submitted_tokens = headers
+                .if_
+                .iter()
+                .flat_map(|if_| if_.list.iter())
+                .filter_map(|cond| match cond {
+                    Condition::StateToken { token, .. } => Some(*token),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
 
-            'outer: for (pos, resource) in resources.iter().enumerate() {
+            for (pos, resource) in resources.iter().enumerate() {
                 if pos == 0 && matches!(method, DavMethod::COPY) {
                     continue;
                 }
 
                 if let Some(idx) = locks.find_cache_pos(self, resource).await? {
-                    let mut failed_locks = Vec::new();
-
-                    for (lock_path, lock_item) in locks.find_locks_by_pos(idx, resource, true)? {
-                        let lock_token = lock_item.urn().to_string();
-                        if headers.if_.iter().any(|if_| {
-                            if_.resource
-                                .is_none_or(|r| {
-                                    r.trim_end_matches('/').ends_with(lock_path)})
-                                && if_.list.iter().any(|cond| matches!(cond, Condition::StateToken { token, .. } if token == &lock_token))
-                        }) {
-                            break 'outer;
-                        } else {
-                            let base_path = base_path.get_or_insert_with(|| {
-                                headers.base_uri()
-                                    .unwrap_or_default()
-                            });
-                            failed_locks.push(format!("{base_path}/{lock_path}").into());
-                        }
-                    }
+                    let failed_locks = locks
+                        .find_locks_by_pos(idx, resource, true)?
+                        .into_iter()
+                        .filter(|(_, lock_item)| {
+                            let lock_token = lock_item.urn().to_string();
+                            !submitted_tokens.contains(&lock_token.as_str())
+                        })
+                        .map(|(lock_path, _)| {
+                            let base_path = base_path
+                                .get_or_insert_with(|| headers.base_uri().unwrap_or_default());
+                            format!("{base_path}/{lock_path}").into()
+                        })
+                        .collect::<Vec<_>>();
 
                     if !failed_locks.is_empty() {
                         lock_response = Err(DavErrorCondition::new(
@@ -434,14 +462,14 @@ impl LockRequestHandler for Server {
         };
         let mut cached_resources: Option<(u32, SyncCollection, Arc<GroupwareResources>)> = None;
 
-        'outer: for if_ in &headers.if_ {
+        'outer: for (if_, if_resource) in headers.if_.iter().zip(&if_resources) {
             if if_.list.is_empty() {
                 continue;
             }
 
             let mut resource_state = &mut resource_not_found;
 
-            if let Some(resource) = if_.resource {
+            if let Some(resource) = if_resource.as_deref() {
                 if let Some(resource) = self
                     .validate_uri(access_token, resource)
                     .await
@@ -895,6 +923,17 @@ impl OwnedUri<'_> {
 impl ResourceState<'_> {
     pub fn lock_key(&self) -> Vec<u8> {
         build_lock_key(self.account_id, self.collection.main_collection())
+    }
+}
+
+fn canonical_if_resource(uri: &str) -> Cow<'_, str> {
+    if uri
+        .split_once("/dav/")
+        .is_some_and(|(_, path)| path.starts_with(FILE_COLLECTION_PREFIX))
+    {
+        canonical_dav_resource_uri(uri).unwrap_or(Cow::Borrowed(uri))
+    } else {
+        Cow::Borrowed(uri)
     }
 }
 

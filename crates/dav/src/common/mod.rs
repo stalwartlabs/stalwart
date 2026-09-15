@@ -170,7 +170,7 @@ impl<'x> DavQuery<'x> {
             },
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
-            uri: headers.uri,
+            uri: headers.raw_uri,
             vcard_version: headers.vcard_version,
             sync_type: Default::default(),
             limit: Default::default(),
@@ -191,7 +191,7 @@ impl<'x> DavQuery<'x> {
             propfind: multiget.properties,
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
-            uri: headers.uri,
+            uri: headers.raw_uri,
             vcard_version: headers.vcard_version,
             sync_type: Default::default(),
             depth: Default::default(),
@@ -215,7 +215,7 @@ impl<'x> DavQuery<'x> {
             limit: query.limit,
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
-            uri: headers.uri,
+            uri: headers.raw_uri,
             vcard_version: headers.vcard_version,
             sync_type: Default::default(),
             depth: Default::default(),
@@ -242,7 +242,7 @@ impl<'x> DavQuery<'x> {
             propfind: query.properties,
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
-            uri: headers.uri,
+            uri: headers.raw_uri,
             sync_type: Default::default(),
             depth: Default::default(),
             limit: Default::default(),
@@ -275,7 +275,7 @@ impl<'x> DavQuery<'x> {
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
             expand: false,
-            uri: headers.uri,
+            uri: headers.raw_uri,
             vcard_version: headers.vcard_version,
         }
     }
@@ -304,7 +304,7 @@ impl<'x> DavQuery<'x> {
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
             expand: true,
-            uri: headers.uri,
+            uri: headers.raw_uri,
             sync_type: Default::default(),
             limit: Default::default(),
             vcard_version: headers.vcard_version,
@@ -450,9 +450,7 @@ impl<'x> ArchivedResource<'x> {
 
     pub fn content_length(&self) -> Option<u32> {
         match self {
-            ArchivedResource::FileNode(archive) => {
-                archive.inner.file.as_ref().map(|f| f.size.to_native())
-            }
+            ArchivedResource::FileNode(archive) => archive.inner.file().map(|f| f.size.to_native()),
             ArchivedResource::CalendarEvent(archive, _) => archive.inner.size.to_native().into(),
             ArchivedResource::CalendarEventNotification(archive, _) => {
                 archive.inner.size.to_native().into()
@@ -466,11 +464,9 @@ impl<'x> ArchivedResource<'x> {
 
     pub fn content_type(&self) -> Option<&str> {
         match self {
-            ArchivedResource::FileNode(archive) => archive
-                .inner
-                .file
-                .as_ref()
-                .and_then(|f| f.media_type.as_deref()),
+            ArchivedResource::FileNode(archive) => {
+                archive.inner.file().and_then(|f| f.media_type.as_deref())
+            }
             ArchivedResource::CalendarEvent(..)
             | ArchivedResource::CalendarEventNotification(..) => "text/calendar".into(),
             ArchivedResource::ContactCard(..) => "text/vcard".into(),
@@ -517,7 +513,7 @@ impl<'x> ArchivedResource<'x> {
                 ReportSet::AddressbookMultiGet,
             ]
             .into(),
-            ArchivedResource::FileNode(archive) if archive.inner.file.is_none() => vec![
+            ArchivedResource::FileNode(archive) if archive.inner.is_directory() => vec![
                 ReportSet::SyncCollection,
                 ReportSet::AclPrincipalPropSet,
                 ReportSet::PrincipalMatch,
@@ -541,7 +537,7 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::AddressBook(_) => {
                 vec![ResourceType::Collection, ResourceType::AddressBook].into()
             }
-            ArchivedResource::FileNode(archive) if archive.inner.file.is_none() => {
+            ArchivedResource::FileNode(archive) if archive.inner.is_directory() => {
                 vec![ResourceType::Collection].into()
             }
             ArchivedResource::CalendarEventNotificationCollection(true) => {

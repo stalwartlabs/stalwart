@@ -13,8 +13,8 @@ use crate::{
         tls::MakeRustlsConnect,
     },
     search::{
-        CalendarSearchField, ContactSearchField, EmailSearchField, SearchableField,
-        TracingSearchField,
+        CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField,
+        SearchableField, TracingSearchField,
     },
     *,
 };
@@ -140,7 +140,7 @@ impl PostgresStore {
         create_search_tables::<EmailSearchField>(&conn).await?;
         create_search_tables::<CalendarSearchField>(&conn).await?;
         create_search_tables::<ContactSearchField>(&conn).await?;
-        //create_search_tables::<FileSearchField>(&conn).await?;
+        create_search_tables::<FileSearchField>(&conn).await?;
         create_search_tables::<TracingSearchField>(&conn).await?;
 
         Ok(())

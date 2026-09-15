@@ -1,0 +1,29 @@
+[package]
+name = "text-extract-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+text-extract = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "extract"
+path = "fuzz_targets/extract.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package"
+path = "fuzz_targets/package.rs"
+test = false
+doc = false
+bench = false

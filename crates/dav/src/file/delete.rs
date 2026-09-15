@@ -10,6 +10,7 @@ use crate::{
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
+    file::DavFileResource,
 };
 use common::{Server, auth::AccessToken};
 use dav_proto::RequestHeaders;
@@ -52,9 +53,20 @@ impl FileDeleteRequestHandler for Server {
             .await
             .caused_by(trc::location!())?;
 
+        let access =
+            (!access_token.is_member(account_id)).then(|| resources.file_access(access_token));
+        if let Some(access) = &access {
+            resources.hide_undiscoverable(
+                &access.discoverable,
+                delete_path,
+                StatusCode::NOT_FOUND,
+                StatusCode::NOT_FOUND,
+            )?;
+        }
+
         // Find ids to delete
         let mut ids = resources.subtree(delete_path).collect::<Vec<_>>();
-        if ids.is_empty() {
+        if ids.is_empty() || ids.first().is_some_and(super::is_symlink) {
             return Err(DavError::Code(StatusCode::NOT_FOUND));
         }
 
@@ -68,13 +80,10 @@ impl FileDeleteRequestHandler for Server {
         sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
 
         // Validate ACLs
-        if !access_token.is_member(account_id) {
-            let permissions = resources.shared_containers(access_token, [Acl::Delete], false);
-            if permissions.len() < sorted_ids.len() as u64
-                || !sorted_ids.iter().all(|id| permissions.contains(*id))
-            {
-                return Err(DavError::Code(StatusCode::FORBIDDEN));
-            }
+        if let Some(access) = &access
+            && !sorted_ids.iter().all(|id| access.has_acl(*id, Acl::Delete))
+        {
+            return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
 
         // Validate headers

@@ -10,6 +10,7 @@ use types::acl::{Acl, AclGrant, ArchivedAclGrant};
 use utils::map::bitmap::Bitmap;
 
 pub mod acl;
+pub mod file;
 pub mod notification;
 pub mod resources;
 

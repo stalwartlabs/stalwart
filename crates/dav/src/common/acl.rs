@@ -6,10 +6,12 @@
 
 use super::ArchivedResource;
 use crate::{
-    DavError, DavErrorCondition, DavResourceName, common::uri::DavUriResource,
+    DavError, DavErrorCondition, DavResourceName,
+    common::uri::DavUriResource,
+    file::{DavFileResource, is_symlink},
     principal::propfind::PrincipalPropFind,
 };
-use common::{GroupwareResources, Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use dav_proto::{
     RequestHeaders,
     schema::{
@@ -66,16 +68,6 @@ pub(crate) trait DavAclHandler: Sync + Send {
     ) -> impl Future<Output = crate::Result<Vec<Ace>>> + Send;
 }
 
-pub(crate) trait ResourceAcl {
-    fn validate_and_map_parent_acl(
-        &self,
-        access_token: &AccessToken,
-        is_member: bool,
-        parent_id: Option<u32>,
-        check_acls: impl Into<Bitmap<Acl>> + Send,
-    ) -> crate::Result<u32>;
-}
-
 impl DavAclHandler for Server {
     async fn handle_acl_request(
         &self,
@@ -104,6 +96,15 @@ impl DavAclHandler for Server {
         let resource = resource_
             .resource
             .and_then(|r| resources.by_path(r))
+            .filter(|r| {
+                collection != Collection::FileNode
+                    || (!is_symlink(r)
+                        && (access_token.is_member(account_id)
+                            || resources
+                                .file_access(access_token)
+                                .discoverable
+                                .contains(r.document_id())))
+            })
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         if !resource.resource.is_container() && !matches!(collection, Collection::FileNode) {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
@@ -127,7 +128,12 @@ impl DavAclHandler for Server {
         // Validate ACL
         let acls = container.acls().unwrap();
         if !access_token.is_member(account_id)
-            && !acls.effective_acl(access_token).contains(Acl::Share)
+            && !if collection == Collection::FileNode {
+                resources.file_acl(access_token, resource.document_id())
+            } else {
+                acls.effective_acl(access_token)
+            }
+            .contains(Acl::Share)
         {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
@@ -189,6 +195,9 @@ impl DavAclHandler for Server {
                             &mut batch,
                         )
                         .caused_by(trc::location!())?;
+                    if resource.is_container() {
+                        resources.log_descendant_updates(&mut batch, account_id, resource.path());
+                    }
                 }
                 _ => unreachable!(),
             }
@@ -500,33 +509,6 @@ impl DavAclHandler for Server {
     }
 }
 
-impl ResourceAcl for GroupwareResources {
-    fn validate_and_map_parent_acl(
-        &self,
-        access_token: &AccessToken,
-        is_member: bool,
-        parent_id: Option<u32>,
-        check_acls: impl Into<Bitmap<Acl>> + Send,
-    ) -> crate::Result<u32> {
-        match parent_id {
-            Some(parent_id) => {
-                if is_member || self.has_access_to_container(access_token, parent_id, check_acls) {
-                    Ok(parent_id + 1)
-                } else {
-                    Err(DavError::Code(StatusCode::FORBIDDEN))
-                }
-            }
-            None => {
-                if is_member {
-                    Ok(0)
-                } else {
-                    Err(DavError::Code(StatusCode::FORBIDDEN))
-                }
-            }
-        }
-    }
-}
-
 pub(crate) trait Privileges {
     fn current_privilege_set(
         &self,
@@ -579,4 +561,33 @@ pub(crate) fn current_user_privilege_set(acl_bitmap: Bitmap<Acl>) -> Vec<Privile
         }
     }
     acls.into_iter().collect()
+}
+
+pub(crate) fn file_privilege_set(acl_bitmap: Bitmap<Acl>) -> Vec<Privilege> {
+    let mut privileges = Vec::with_capacity(8);
+    if acl_bitmap.contains(Acl::Read) || acl_bitmap.contains(Acl::ReadItems) {
+        privileges.push(Privilege::Read);
+        privileges.push(Privilege::ReadCurrentUserPrivilegeSet);
+    }
+    let mut write = true;
+    for (acl, privilege) in [
+        (Acl::Modify, Privilege::WriteProperties),
+        (Acl::ModifyItems, Privilege::WriteContent),
+        (Acl::AddItems, Privilege::Bind),
+        (Acl::RemoveItems, Privilege::Unbind),
+    ] {
+        if acl_bitmap.contains(acl) {
+            privileges.push(privilege);
+        } else {
+            write = false;
+        }
+    }
+    if write && acl_bitmap.contains(Acl::Delete) {
+        privileges.push(Privilege::Write);
+    }
+    if acl_bitmap.contains(Acl::Share) {
+        privileges.push(Privilege::ReadAcl);
+        privileges.push(Privilege::WriteAcl);
+    }
+    privileges
 }

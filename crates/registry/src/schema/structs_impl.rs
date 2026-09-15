@@ -35235,7 +35235,7 @@ impl S3StoreRegion {
 
 impl ObjectImpl for Search {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 1;
+    const VERSION: u8 = 2;
     const OBJECT: ObjectType = ObjectType::Search;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -35247,6 +35247,24 @@ impl ObjectImpl for Search {
         let value = &self.index_concurrency;
         if *value < 1 {
             errors.push(ValidationError::min_value(Property::IndexConcurrency, 1));
+        }
+        let value = &self.max_extract_document_size;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxExtractDocumentSize,
+                1,
+            ));
+        }
+        let value = &self.max_extract_text_size;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxExtractTextSize, 1));
+        }
+        let value = &self.max_extract_decompressed_size;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxExtractDecompressedSize,
+                1,
+            ));
         }
         errors.len() == neb
     }
@@ -35268,6 +35286,10 @@ impl Pickle for Search {
         self.index_telemetry.pickle(out);
         self.index_tracing_fields.pickle(out);
         self.index_concurrency.pickle(out);
+        self.index_files.pickle(out);
+        self.max_extract_document_size.pickle(out);
+        self.max_extract_text_size.pickle(out);
+        self.max_extract_decompressed_size.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -35285,6 +35307,18 @@ impl Pickle for Search {
         this.index_tracing_fields = Pickle::unpickle(stream)?;
         if stream.version() >= 1 {
             this.index_concurrency = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.index_files = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_document_size = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_text_size = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_decompressed_size = Pickle::unpickle(stream)?;
         }
         Some(this)
     }
@@ -35334,13 +35368,17 @@ impl Default for Search {
                 SearchTracingField::Keywords,
             ]),
             index_concurrency: 5u64,
+            index_files: true,
+            max_extract_document_size: 67108864u64,
+            max_extract_text_size: 4194304u64,
+            max_extract_decompressed_size: 268435456u64,
         }
     }
 }
 
 impl IntoValue for Search {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(14);
+        let mut map = jmap_tools::Map::with_capacity(18);
         map.insert_unchecked(Property::IndexBatchSize, self.index_batch_size.into_value());
         map.insert_unchecked(
             Property::DefaultLanguage,
@@ -35374,6 +35412,19 @@ impl IntoValue for Search {
             Property::IndexConcurrency,
             self.index_concurrency.into_value(),
         );
+        map.insert_unchecked(Property::IndexFiles, self.index_files.into_value());
+        map.insert_unchecked(
+            Property::MaxExtractDocumentSize,
+            self.max_extract_document_size.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExtractTextSize,
+            self.max_extract_text_size.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExtractDecompressedSize,
+            self.max_extract_decompressed_size.into_value(),
+        );
         JmapValue::Object(map)
     }
 }
@@ -35397,6 +35448,14 @@ impl RegistryJsonPropertyPatch for Search {
             Some(Property::IndexTelemetry) => self.index_telemetry.patch(pointer, value),
             Some(Property::IndexTracingFields) => self.index_tracing_fields.patch(pointer, value),
             Some(Property::IndexConcurrency) => self.index_concurrency.patch(pointer, value),
+            Some(Property::IndexFiles) => self.index_files.patch(pointer, value),
+            Some(Property::MaxExtractDocumentSize) => {
+                self.max_extract_document_size.patch(pointer, value)
+            }
+            Some(Property::MaxExtractTextSize) => self.max_extract_text_size.patch(pointer, value),
+            Some(Property::MaxExtractDecompressedSize) => {
+                self.max_extract_decompressed_size.patch(pointer, value)
+            }
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

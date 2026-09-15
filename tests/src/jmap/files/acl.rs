@@ -54,7 +54,7 @@ pub async fn test(test: &TestServer) {
           "mayModifyContent": true,
           "mayShare": true
         },
-        "shareWith": {}
+        "shareWith": null
         }));
 
     // Obtain share notifications
@@ -394,7 +394,7 @@ pub async fn test(test: &TestServer) {
         .assert_is_equal(json!({
         "id": john_folder_id,
         "name": "Jane's updated name",
-        "shareWith": {}
+        "shareWith": null
         }));
 
     // Verify Jane can no longer access the folder or its contacts

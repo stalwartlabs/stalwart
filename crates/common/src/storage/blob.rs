@@ -89,7 +89,7 @@ impl Server {
                 hash: hash.clone(),
                 to: BlobLink::Temporary { until },
             },
-            vec![],
+            (data.len() as u64).to_be_bytes().to_vec(),
         );
 
         self.core

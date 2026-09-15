@@ -12,9 +12,9 @@ use crate::{
 use store::rand::{RngExt, distr::Alphanumeric};
 use types::acl::AclGrant;
 
-use super::{CONTAINER_FLAG, SCHEDULE_INBOX_ID};
+use super::{CONTAINER_FLAG, FILE_KIND_FILE, SCHEDULE_INBOX_ID};
 
-impl GroupwareResourceRef<'_> {
+impl<'x> GroupwareResourceRef<'x> {
     #[inline(always)]
     pub fn document_id(&self) -> u32 {
         self.resource.document_id
@@ -75,7 +75,7 @@ impl GroupwareResourceRef<'_> {
     }
 
     #[inline(always)]
-    pub fn container_name(&self) -> Option<&str> {
+    pub fn container_name(&self) -> Option<&'x str> {
         match &self.resource.data {
             GroupwareResourceMetadata::File { name, .. }
             | GroupwareResourceMetadata::Calendar { name, .. }
@@ -193,7 +193,7 @@ impl GroupwareResource {
     #[inline(always)]
     pub fn is_container(&self) -> bool {
         match &self.data {
-            GroupwareResourceMetadata::File { size, .. } => *size == NO_ID,
+            GroupwareResourceMetadata::File { flags, .. } => flags.is_directory(),
             GroupwareResourceMetadata::Calendar { .. }
             | GroupwareResourceMetadata::AddressBook { .. } => true,
             GroupwareResourceMetadata::CalendarEventNotification { names, .. } => names.is_empty(),
@@ -204,7 +204,11 @@ impl GroupwareResource {
     #[inline(always)]
     pub fn size(&self) -> Option<u32> {
         match &self.data {
-            GroupwareResourceMetadata::File { size, .. } if *size != NO_ID => Some(*size),
+            GroupwareResourceMetadata::File { size, flags, .. }
+                if flags.kind() == FILE_KIND_FILE =>
+            {
+                Some(*size)
+            }
             _ => None,
         }
     }
@@ -242,6 +246,11 @@ impl GroupwareResource {
             | GroupwareResourceMetadata::CalendarEventNotification { created_at, .. } => {
                 Some(*created_at)
             }
+            GroupwareResourceMetadata::File {
+                modified,
+                created_delta,
+                ..
+            } => modified.checked_add(*created_delta as i64),
             _ => None,
         }
     }
@@ -259,6 +268,7 @@ impl GroupwareResource {
                 modified_at,
                 ..
             } => Some(*created_at + *modified_at as i64),
+            GroupwareResourceMetadata::File { modified, .. } => Some(*modified),
             _ => None,
         }
     }

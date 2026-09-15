@@ -124,8 +124,17 @@ impl BlobDownload for Server {
                                         .caused_by(trc::location!())?
                                         .shared_messages(access_token, Acl::ReadItems)
                                         .contains(*document_id),
-                                    collection @ (Collection::FileNode
-                                    | Collection::ContactCard
+                                    Collection::FileNode => self
+                                        .fetch_groupware_resources(
+                                            access_token.account_id(),
+                                            *account_id,
+                                            SyncCollection::FileNode,
+                                        )
+                                        .await
+                                        .caused_by(trc::location!())?
+                                        .file_acl(access_token, *document_id)
+                                        .contains(Acl::ReadItems),
+                                    collection @ (Collection::ContactCard
                                     | Collection::CalendarEvent) => self
                                         .fetch_groupware_resources(
                                             access_token.account_id(),

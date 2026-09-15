@@ -113,7 +113,7 @@ impl SearchField {
                 | ContactSearchField::Address
                 | ContactSearchField::Note,
             )
-            | SearchField::File(FileSearchField::Name | FileSearchField::Content)
+            | SearchField::File(FileSearchField::Content)
             | SearchField::Tracing(TracingSearchField::Keywords) => json!({
               "type": "text"
             }),

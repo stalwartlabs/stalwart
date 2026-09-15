@@ -55,7 +55,7 @@ impl MeiliSearchStore {
 
             let response = assert_success(
                 self.client
-                    .put(format!(
+                    .post(format!(
                         "{}/indexes/{}/documents",
                         self.url,
                         index.index_name()

@@ -8,6 +8,7 @@ use crate::index_queue::document::{
     build_calendar_document, build_contact_document, build_email_document,
     build_tracing_span_document,
 };
+use crate::index_queue::file::build_file_document;
 use crate::index_queue::{
     BULK_LINGER, BulkRequest, Deletion, ITEM_OVERSCAN, LOCK_EXPIRY, LOCK_MARGIN,
     MAX_DELETE_CLAUSES, Partition, PartitionFailure, PartitionOutcome, PendingItem, QueuedItem,
@@ -197,7 +198,10 @@ async fn process_items(
                 SearchIndex::Tracing => {
                     build_tracing_span_document(server, item.document_id()).await
                 }
-                SearchIndex::File | SearchIndex::InMemory => Ok(None),
+                SearchIndex::File => {
+                    build_file_document(server, item.id_prefix, item.id_suffix).await
+                }
+                SearchIndex::InMemory => Ok(None),
             };
 
             match document {

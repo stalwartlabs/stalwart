@@ -181,48 +181,75 @@ pub async fn jmap_tests() {
 
     test.insert_account(admin);
 
-    mail::get::test(&test).await;
-    mail::set::test(&test).await;
-    mail::parse::test(&test).await;
-    mail::query::test(&test).await;
-    mail::search_snippet::test(&test).await;
-    mail::changes::test(&test).await;
-    mail::query_changes::test(&test).await;
-    mail::copy::test(&test).await;
-    mail::thread_get::test(&test).await;
-    mail::thread_merge::test(&test).await;
-    mail::mailbox::test(&test).await;
-    mail::acl::test(&test).await;
-    mail::sieve_script::test(&test).await;
-    mail::vacation_response::test(&test).await;
-    mail::submission::test(&test).await;
-    mail::cache::test(&test).await;
+    let groups = std::env::var("JMAP_TESTS").ok();
+    let enabled = |group: &str| {
+        groups
+            .as_deref()
+            .is_none_or(|groups| groups.split(',').any(|g| g.trim() == group))
+    };
 
-    core::event_source::test(&test).await;
-    core::websocket::test(&test).await;
-    core::push_subscription::test(&test).await;
-    core::blob::test(&test).await;
+    if enabled("mail") {
+        mail::get::test(&test).await;
+        mail::set::test(&test).await;
+        mail::parse::test(&test).await;
+        mail::query::test(&test).await;
+        mail::search_snippet::test(&test).await;
+        mail::changes::test(&test).await;
+        mail::query_changes::test(&test).await;
+        mail::copy::test(&test).await;
+        mail::thread_get::test(&test).await;
+        mail::thread_merge::test(&test).await;
+        mail::mailbox::test(&test).await;
+        mail::acl::test(&test).await;
+        mail::sieve_script::test(&test).await;
+        mail::vacation_response::test(&test).await;
+        mail::submission::test(&test).await;
+        mail::cache::test(&test).await;
+    }
 
-    contacts::addressbook::test(&test).await;
-    contacts::contact::test(&test).await;
-    contacts::acl::test(&test).await;
+    if enabled("core") {
+        core::event_source::test(&test).await;
+        core::websocket::test(&test).await;
+        core::push_subscription::test(&test).await;
+        core::blob::test(&test).await;
+    }
 
-    files::node::test(&test).await;
-    files::acl::test(&test).await;
+    if enabled("contacts") {
+        contacts::addressbook::test(&test).await;
+        contacts::contact::test(&test).await;
+        contacts::acl::test(&test).await;
+    }
 
-    calendar::calendars::test(&test).await;
-    calendar::event::test(&test).await;
-    calendar::instance::test(&test).await;
-    calendar::notification::test(&test).await;
-    calendar::alarm::test(&test).await;
+    if enabled("files") {
+        files::node::test(&test).await;
+        files::properties::test(&test).await;
+        files::query::test(&test).await;
+        files::requests::test(&test).await;
+        files::search::test(&test).await;
+        files::dav::test(&test).await;
+        files::acl::test(&test).await;
+        files::inheritance::test(&test).await;
+        files::dav_rights::test(&test).await;
+    }
 
-    calendar::identity::test(&test).await;
-    calendar::acl::test(&test).await;
+    if enabled("calendar") {
+        calendar::calendars::test(&test).await;
+        calendar::event::test(&test).await;
+        calendar::instance::test(&test).await;
+        calendar::notification::test(&test).await;
+        calendar::alarm::test(&test).await;
+        calendar::identity::test(&test).await;
+        calendar::acl::test(&test).await;
+    }
 
-    principal::get::test(&test).await;
-    principal::availability::test(&test).await;
+    if enabled("principal") {
+        principal::get::test(&test).await;
+        principal::availability::test(&test).await;
+    }
 
-    compliance::test(&test).await;
+    if enabled("compliance") {
+        compliance::test(&test).await;
+    }
 
     if test.is_reset() {
         test.temp_dir.delete();

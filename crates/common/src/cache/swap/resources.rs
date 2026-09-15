@@ -6,7 +6,7 @@
 
 use super::{SwapPart, frame::SwapFrame};
 use crate::{
-    ArenaRef, CachedName, DavPath, GroupwareResource, GroupwareResourceMetadata,
+    ArenaRef, CachedName, DavPath, FileFlags, GroupwareResource, GroupwareResourceMetadata,
     GroupwareResources, PathChunk, PathIndex, ResourceChunk, ResourceStore,
     TinyCalendarPreferences, UpdateLock,
 };
@@ -60,6 +60,9 @@ impl FlatResource {
                 size,
                 parent_id,
                 acls,
+                modified,
+                created_delta,
+                flags,
                 ..
             } => {
                 flat.kind = KIND_FILE;
@@ -67,6 +70,8 @@ impl FlatResource {
                 flat.set_ref_b(acls);
                 flat.num_a = *size;
                 flat.num_b = *parent_id;
+                flat.created_at = *modified;
+                flat.start = ((flags.0 as u64) << 32 | *created_delta as u32 as u64) as i64;
             }
             GroupwareResourceMetadata::Calendar {
                 name,
@@ -159,13 +164,19 @@ impl ArchivedFlatResource {
 
     fn unpack(&self) -> Option<GroupwareResource> {
         let data = match self.kind.to_native() {
-            KIND_FILE => GroupwareResourceMetadata::File {
-                name: self.ref_a(),
-                size: self.num_a.to_native(),
-                parent_id: self.num_b.to_native(),
-                acls: self.ref_b(),
-                etag: self.etag.to_native(),
-            },
+            KIND_FILE => {
+                let packed = self.start.to_native() as u64;
+                GroupwareResourceMetadata::File {
+                    name: self.ref_a(),
+                    size: self.num_a.to_native(),
+                    parent_id: self.num_b.to_native(),
+                    acls: self.ref_b(),
+                    etag: self.etag.to_native(),
+                    modified: self.created_at.to_native(),
+                    created_delta: packed as u32 as i32,
+                    flags: FileFlags((packed >> 32) as u32),
+                }
+            }
             KIND_CALENDAR => GroupwareResourceMetadata::Calendar {
                 name: self.ref_a(),
                 acls: self.ref_b(),
@@ -265,9 +276,20 @@ impl GroupwareResource {
             GroupwareResourceMetadata::File {
                 name,
                 acls: acl_ref,
+                flags,
                 ..
+            } => {
+                flags.is_valid()
+                    && fits_within(
+                        ArenaRef {
+                            off: name.off,
+                            len: name.len.saturating_add(flags.extra_len() as u32),
+                        },
+                        bytes,
+                    )
+                    && fits_within(*acl_ref, acls)
             }
-            | GroupwareResourceMetadata::AddressBook {
+            GroupwareResourceMetadata::AddressBook {
                 name,
                 acls: acl_ref,
                 ..
@@ -594,7 +616,10 @@ impl GroupwareResources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DAV_CHUNK, DavName, storage::dav::ResourceChunkBuilder};
+    use crate::{
+        DAV_CHUNK, DavName,
+        storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_SYMLINK, ResourceChunkBuilder},
+    };
     use types::acl::Acl;
 
     fn grants(account_id: u32) -> AclGrant {
@@ -697,7 +722,14 @@ mod tests {
         let mut entries = Vec::new();
 
         for document_id in 0..count as u32 {
-            let name = chunk.push_str(&format!("file-{document_id}.txt"));
+            let (name, media_id, extra_len) = chunk.push_file_name(
+                &format!("file {document_id}.txt"),
+                match document_id % 3 {
+                    0 => Some("text/plain"),
+                    1 => Some("application/x-stalwart-test"),
+                    _ => None,
+                },
+            );
             let acls = if document_id % 4 == 0 {
                 chunk.push_acls(&[grants(document_id + 900)])
             } else {
@@ -708,6 +740,19 @@ mod tests {
                 data: GroupwareResourceMetadata::File {
                     etag: document_id + 900,
                     name,
+                    modified: 1_700_000_000 + document_id as i64,
+                    created_delta: -(document_id as i32),
+                    flags: FileFlags::new(
+                        if document_id % 5 == 0 {
+                            FILE_KIND_DIRECTORY
+                        } else {
+                            FILE_KIND_SYMLINK
+                        },
+                        document_id % 7 == 0,
+                        (document_id % 10) as u8,
+                        media_id,
+                        extra_len,
+                    ),
                     size: 1024 + document_id,
                     parent_id: if document_id == 0 {
                         crate::NO_ID
@@ -774,6 +819,8 @@ mod tests {
             assert_eq!(a.uid(), b.uid());
             assert_eq!(a.event_id(), b.event_id());
             assert_eq!(a.container_name(), b.container_name());
+            assert_eq!(a.file_flags(), b.file_flags());
+            assert_eq!(a.media_type(), b.media_type());
             assert_eq!(a.has_acls(), b.has_acls());
             for account_id in [100u32, 101, 102, 300, 301, 302] {
                 let left_pref = a.calendar_preferences(account_id);

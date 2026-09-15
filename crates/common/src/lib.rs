@@ -449,6 +449,9 @@ pub enum GroupwareResourceMetadata {
         parent_id: u32,
         acls: ArenaRef,
         etag: u32,
+        modified: i64,
+        created_delta: i32,
+        flags: FileFlags,
     },
     Calendar {
         name: ArenaRef,
@@ -484,6 +487,9 @@ pub enum GroupwareResourceMetadata {
         etag: u32,
     },
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileFlags(pub u32);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TinyCalendarPreferences {

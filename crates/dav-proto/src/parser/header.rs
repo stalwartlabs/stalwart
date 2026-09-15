@@ -12,6 +12,7 @@ impl<'x> RequestHeaders<'x> {
     pub fn new(uri: &'x str) -> Self {
         RequestHeaders {
             uri,
+            raw_uri: uri,
             ..Default::default()
         }
     }
@@ -25,6 +26,7 @@ impl<'x> RequestHeaders<'x> {
                 }
             },
             "Destination" => {
+                let value = strip_query_and_fragment(value);
                 self.destination = Some(value);
                 return true;
             },
@@ -409,6 +411,10 @@ impl Depth {
     }
 }
 
+pub fn strip_query_and_fragment(uri: &str) -> &str {
+    uri.split_once(['?', '#']).map_or(uri, |(path, _)| path)
+}
+
 fn try_unwrap_coded_url(url: &str) -> &str {
     url.strip_prefix("<")
         .and_then(|url| url.strip_suffix(">"))
@@ -418,6 +424,22 @@ fn try_unwrap_coded_url(url: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn destination_drops_query_and_fragment() {
+        for (value, expected) in [
+            (
+                "http://h/dav/file/john/b%20c?x#y",
+                "http://h/dav/file/john/b%20c",
+            ),
+            ("/dav/file/john/a.txt#frag", "/dav/file/john/a.txt"),
+            ("/dav/file/john/a.txt", "/dav/file/john/a.txt"),
+        ] {
+            let mut headers = RequestHeaders::new("/dav/file/john/x.txt");
+            assert!(headers.parse("Destination", value));
+            assert_eq!(headers.destination, Some(expected));
+        }
+    }
 
     #[test]
     fn parse_accept_vcard_version() {

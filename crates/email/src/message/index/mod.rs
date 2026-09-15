@@ -23,6 +23,7 @@ use types::{
     field::{EmailField, Field},
 };
 
+pub mod attachment;
 pub mod extractors;
 pub mod metadata;
 pub mod search;

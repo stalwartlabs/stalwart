@@ -20,8 +20,12 @@ use crate::{
         CARD_CONTAINER_PROPS, CARD_ITEM_PROPS,
         query::{serialize_vcard_with_props, vcard_query},
     },
-    common::{DavQueryResource, acl::current_user_privilege_set, uri::DavUriResource},
-    file::{FILE_CONTAINER_PROPS, FILE_ITEM_PROPS},
+    common::{
+        DavQueryResource,
+        acl::{current_user_privilege_set, file_privilege_set},
+        uri::DavUriResource,
+    },
+    file::{FILE_CONTAINER_PROPS, FILE_ITEM_PROPS, is_symlink},
     principal::{
         CurrentUserPrincipal,
         propfind::{PrincipalPropFind, build_home_set},
@@ -31,6 +35,8 @@ use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
 use common::{
     DavResourcePath, GroupwareResources, Server,
     auth::{AccessToken, AccountCache},
+    sharing::file::FileNodeAccess,
+    storage::dav::canonical_dav_resource_uri,
 };
 use dav_proto::{
     Depth, RequestHeaders,
@@ -60,7 +66,7 @@ use groupware::{
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use registry::schema::{enums::Permission, prelude::ObjectType};
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 use store::{
     ahash::AHashMap,
     query::log::{Change, Query},
@@ -134,6 +140,7 @@ pub(crate) struct PropFindAccountData {
     pub owner: Option<Href>,
     pub locks: Option<Archive<ArchiveBytes>>,
     pub locks_not_found: bool,
+    pub file_access: Option<FileNodeAccess>,
 }
 
 #[derive(Clone, Default)]
@@ -149,6 +156,7 @@ pub(crate) struct PropFindItem {
     pub document_id: u32,
     pub parent_id: Option<u32>,
     pub is_container: bool,
+    pub is_discover_only: bool,
 }
 
 impl PropFindRequestHandler for Server {
@@ -623,6 +631,26 @@ impl PropFindRequestHandler for Server {
             let mut fields = Vec::with_capacity(properties.len());
             let mut fields_not_found = Vec::new();
             for property in &properties {
+                if item.is_discover_only {
+                    match property {
+                        DavProperty::WebDav(
+                            WebDavProperty::ResourceType | WebDavProperty::DisplayName,
+                        ) => {}
+                        DavProperty::WebDav(WebDavProperty::CurrentUserPrivilegeSet) => {
+                            fields.push(DavPropertyValue::new(
+                                property.clone(),
+                                Vec::<Privilege>::new(),
+                            ));
+                            continue;
+                        }
+                        _ => {
+                            if !skip_not_found {
+                                fields_not_found.push(DavPropertyValue::empty(property.clone()));
+                            }
+                            continue;
+                        }
+                    }
+                }
                 match property {
                     DavProperty::WebDav(dav_property) => match dav_property {
                         WebDavProperty::CreationDate => {
@@ -853,6 +881,20 @@ impl PropFindRequestHandler for Server {
                                     collection,
                                     Collection::Calendar | Collection::CalendarEvent
                                 ))
+                            } else if matches!(archive, ArchivedResource::FileNode(_)) {
+                                let acl = match data
+                                    .accounts
+                                    .get(&account_id)
+                                    .and_then(|account| account.file_access.as_ref())
+                                {
+                                    Some(access) => access.acl(item.document_id),
+                                    None => data
+                                        .resources(self, access_token, account_id, sync_collection)
+                                        .await
+                                        .caused_by(trc::location!())?
+                                        .file_acl(access_token, item.document_id),
+                                };
+                                file_privilege_set(acl)
                             } else if let Some(acls) = archive.acls() {
                                 access_token.current_privilege_set(
                                     account_id,
@@ -1213,6 +1255,7 @@ impl PropFindRequestHandler for Server {
 
             // Add dead properties
             if skip_not_found
+                && !item.is_discover_only
                 && let Some(dead_properties) =
                     dead_properties.filter(|dead_properties| !dead_properties.0.is_empty())
             {
@@ -1322,7 +1365,15 @@ async fn get(
         .caused_by(trc::location!())?;
 
     // Obtain document ids
-    let mut display_containers = if !access_token.is_member(account_id) {
+    let is_file = sync_collection == SyncCollection::FileNode;
+    let mut file_readable = None;
+    let mut display_containers = if is_file && !access_token.is_member(account_id) {
+        let access = resources.file_access(access_token);
+        file_readable = Some(access.readable.clone());
+        let discoverable = access.discoverable.clone();
+        data.accounts.entry(account_id).or_default().file_access = Some(access);
+        Some(discoverable)
+    } else if !access_token.is_member(account_id) {
         resources
             .shared_containers(
                 access_token,
@@ -1337,6 +1388,10 @@ async fn get(
     } else {
         None
     };
+    let file_discoverable = display_containers
+        .as_ref()
+        .filter(|_| is_file && matches!(query.sync_type, SyncType::From { .. }))
+        .cloned();
     let mut display_children = display_containers
         .as_ref()
         .filter(|_| container_has_children)
@@ -1437,6 +1492,27 @@ async fn get(
                     .vanished(account_id, vanished_collection.into(), Query::Since(id))
                     .await
                     .caused_by(trc::location!())?;
+                if is_file {
+                    let scope = resource.resource.map_or_else(
+                        || resources.base_path.clone(),
+                        |path| resources.format_collection(path),
+                    );
+                    vanished.retain(|href| {
+                        href.starts_with(scope.as_str())
+                            && href
+                                .strip_prefix(resources.base_path.as_str())
+                                .is_some_and(|path| {
+                                    file_discoverable.as_ref().is_none_or(|discoverable| {
+                                        path.trim_end_matches('/')
+                                            .rsplit_once('/')
+                                            .and_then(|(parent, _)| resources.by_path(parent))
+                                            .is_some_and(|parent| {
+                                                discoverable.contains(parent.document_id())
+                                            })
+                                    })
+                                })
+                    });
+                }
                 total_changes += vanished.len();
             }
 
@@ -1517,8 +1593,17 @@ async fn get(
                         containers.contains(item.document_id())
                     }
                 }) && (!query.depth_no_root || item.path() != resource)
+                    && (!is_file || !is_symlink(item))
             })
-            .map(|item| PropFindItem::new(resources.format_resource(item), account_id, item))
+            .map(|item| {
+                let is_discover_only = is_discover_only(file_readable.as_ref(), &item);
+                let href = if is_file && item.path() == resource {
+                    requested_href(query.uri, item.is_container())
+                } else {
+                    resources.format_resource(item)
+                };
+                PropFindItem::new(href, account_id, item).with_discover_only(is_discover_only)
+            })
             .collect::<Vec<_>>();
     } else {
         if !query.depth_no_root && query.sync_type.is_none_or_initial() {
@@ -1549,9 +1634,13 @@ async fn get(
                         } else {
                             containers.contains(item.document_id())
                         }
-                    })
+                    }) && (!is_file || !is_symlink(item))
                 })
-                .map(|item| PropFindItem::new(resources.format_resource(item), account_id, item))
+                .map(|item| {
+                    let is_discover_only = is_discover_only(file_readable.as_ref(), &item);
+                    PropFindItem::new(resources.format_resource(item), account_id, item)
+                        .with_discover_only(is_discover_only)
+                })
                 .collect::<Vec<_>>();
 
             // Assisted discovery:
@@ -1708,6 +1797,18 @@ async fn multiget(
     Ok(paths)
 }
 
+pub(crate) fn requested_href(uri: &str, is_container: bool) -> String {
+    if is_container && !uri.ends_with('/') {
+        format!("{uri}/")
+    } else {
+        uri.to_string()
+    }
+}
+
+fn is_discover_only(readable: Option<&RoaringBitmap>, item: &DavResourcePath<'_>) -> bool {
+    readable.is_some_and(|readable| !readable.contains(item.document_id()))
+}
+
 impl PropFindItem {
     pub fn new(name: String, account_id: u32, resource: DavResourcePath<'_>) -> Self {
         Self {
@@ -1716,7 +1817,13 @@ impl PropFindItem {
             document_id: resource.document_id(),
             parent_id: resource.parent_id(),
             is_container: resource.is_container(),
+            is_discover_only: false,
         }
+    }
+
+    pub fn with_discover_only(mut self, is_discover_only: bool) -> Self {
+        self.is_discover_only = is_discover_only;
+        self
     }
 }
 
@@ -1802,19 +1909,30 @@ impl PropFindData {
             }
         }
 
-        if let Some(lock_data) = &data.locks {
-            let base_uri = dav_base_uri(&item.name).unwrap_or_default();
-            lock_data.unarchive::<LockData>().map(|locks| {
-                locks
-                    .find_locks(&item.name.strip_prefix(base_uri).unwrap()[1..], false)
-                    .iter()
-                    .map(|(path, lock)| lock.to_active_lock(format!("{base_uri}/{path}")))
-                    .collect::<Vec<_>>()
-                    .into()
-            })
+        let Some(lock_data) = &data.locks else {
+            return Ok(None);
+        };
+        let base_uri = dav_base_uri(&item.name).unwrap_or_default();
+        let name = if collection_container == Collection::FileNode {
+            canonical_dav_resource_uri(&item.name).unwrap_or(Cow::Borrowed(item.name.as_str()))
         } else {
-            Ok(None)
-        }
+            Cow::Borrowed(item.name.as_str())
+        };
+        let Some(path) = name
+            .strip_prefix(base_uri)
+            .and_then(|path| path.strip_prefix('/'))
+            .map(|path| path.trim_end_matches('/'))
+        else {
+            return Ok(None);
+        };
+        lock_data.unarchive::<LockData>().map(|locks| {
+            locks
+                .find_locks(path, false)
+                .iter()
+                .map(|(path, lock)| lock.to_active_lock(format!("{base_uri}/{path}")))
+                .collect::<Vec<_>>()
+                .into()
+        })
     }
 }
 

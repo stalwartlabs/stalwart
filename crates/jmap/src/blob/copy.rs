@@ -13,7 +13,10 @@ use jmap_proto::{
 };
 use registry::schema::enums::Permission;
 use std::future::Future;
-use store::write::{BatchBuilder, BlobLink, BlobOp, now};
+use store::{
+    U64_LEN, ValueKey,
+    write::{BatchBuilder, BlobLink, BlobOp, ValueClass, now, serialize::RawValue},
+};
 use trc::AddContext;
 use types::blob::{BlobClass, BlobId};
 use utils::map::vec_map::VecMap;
@@ -73,6 +76,28 @@ impl BlobCopy for Server {
                     continue;
                 }
 
+                let link_value = match &blob_id.class {
+                    BlobClass::Reserved {
+                        account_id: from_account_id,
+                        expires,
+                    } => self
+                        .store()
+                        .get_value::<RawValue>(ValueKey {
+                            account_id: *from_account_id,
+                            collection: 0,
+                            document_id: 0,
+                            class: ValueClass::Blob(BlobOp::Link {
+                                hash: blob_id.hash.clone(),
+                                to: BlobLink::Temporary { until: *expires },
+                            }),
+                        })
+                        .await
+                        .caused_by(trc::location!())?
+                        .map(|value| value.0)
+                        .filter(|value| value.len() == U64_LEN)
+                        .unwrap_or_default(),
+                    BlobClass::Linked { .. } => Vec::new(),
+                };
                 let mut batch = BatchBuilder::new();
                 let until = now() + self.core.jmap.upload_tmp_ttl;
                 batch.with_account_id(account_id).set(
@@ -80,7 +105,7 @@ impl BlobCopy for Server {
                         hash: blob_id.hash.clone(),
                         to: BlobLink::Temporary { until },
                     },
-                    vec![],
+                    link_value,
                 );
                 self.store()
                     .write_batch(&mut batch)

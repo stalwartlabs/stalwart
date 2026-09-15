@@ -4,49 +4,46 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{
+    get::date_value,
+    node::{NodePatch, PatchEffects, default_media_type, invalid, node_type_from_id},
+    writer::{Claim, FileNodeWriter, NodeRef, Placement, Rejection, WriteOptions, fetch_archive},
+};
 use crate::{
     api::{
-        acl::{JmapAcl, JmapRights},
+        acl::JmapRights,
         parent_ref::{CreateResolver, ParentRef},
     },
-    blob::download::BlobDownload,
     changes::state::JmapCacheState,
-    file::FileNodeQuota,
 };
-use common::{GroupwareResources, Server, auth::AccessToken, sharing::EffectiveAcl};
-use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
+use common::{Server, auth::AccessToken};
+use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
     object::{
         AnyId,
-        file_node::{self, FileNodeProperty, FileNodeValue, OnExists},
+        file_node::{self, FileNodeProperty, FileNodeValue},
     },
     references::resolve::ResolveCreatedReference,
     request::MaybeInvalid,
     types::state::State,
 };
-use jmap_tools::{JsonPointerItem, Key, Map, Value};
+use jmap_tools::{Key, Map, Value};
+use std::borrow::Cow;
 use store::{
-    ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{Archive, ArchiveBytes, BatchBuilder, Slot, now},
+    write::{Archive, ArchiveBytes, Slot},
 };
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant},
-    blob::BlobId,
     collection::{Collection, SyncCollection},
     id::Id,
+    media_type::media_type_essence,
 };
-
-const FORBIDDEN_NAME_CHARS: &str = "/<>:\"\\|?*";
-const FORBIDDEN_NODE_NAMES: &[&str] = &[
-    ".", "..", "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
-    "COM7", "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
-    "LPT9",
-];
+use utils::map::bitmap::Bitmap;
 
 pub trait FileNodeSet: Sync + Send {
     fn file_node_set(
@@ -55,6 +52,54 @@ pub trait FileNodeSet: Sync + Send {
         access_token: &AccessToken,
         session: &HttpSessionData,
     ) -> impl Future<Output = trc::Result<SetResponse<file_node::FileNode>>> + Send;
+}
+
+pub(super) type NodeValues = Map<'static, FileNodeProperty, FileNodeValue>;
+
+pub(super) struct PreparedCreate {
+    create_id: String,
+    slot: Slot,
+    node: FileNode,
+    parent: ParentRef,
+    omitted: Omitted,
+}
+
+struct PreparedUpdate {
+    id: Id,
+    archive: Archive<ArchiveBytes>,
+    node: FileNode,
+    parent: ParentRef,
+    previous: (ParentRef, String),
+    effects: PatchEffects,
+    report_size: bool,
+    echo: Omitted,
+}
+
+enum Planned {
+    Create(PreparedCreate),
+    Update(PreparedUpdate),
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Omitted {
+    node_type: bool,
+    media_type: bool,
+    executable: bool,
+    created: bool,
+    modified: bool,
+    accessed: bool,
+    subscribed: bool,
+}
+
+pub(super) struct CreatedNode {
+    pub create_id: String,
+    pub slot: Slot,
+    pub values: NodeValues,
+}
+
+enum RejectedKey {
+    Create(String),
+    Update(Id),
 }
 
 impl FileNodeSet for Server {
@@ -74,1009 +119,788 @@ impl FileNodeSet for Server {
             .await?;
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
             .with_state(cache.assert_state(false, &request.if_in_state)?);
-        let mut will_destroy = response.collect_will_destroy(request.unwrap_destroy());
-        let is_shared = access_token.is_shared(account_id);
-        let on_destroy_remove_children = request
-            .arguments
-            .on_destroy_remove_children
-            .unwrap_or(false);
-        let on_exists = request.arguments.on_exists;
-        let case_insensitive = request
-            .arguments
-            .compare_case_insensitively
-            .unwrap_or(false);
-        let mut pending_names: AHashMap<(ParentRef, String), Option<u32>> = AHashMap::new();
-        let mut implicit_destroys: AHashSet<u32> = AHashSet::new();
-
-        // Obtain quota
-        let quota = if request.has_creates() {
-            let account = self.account(account_id).await.caused_by(trc::location!())?;
-            FileNodeQuota::new(self, &account, &cache)
-        } else {
-            FileNodeQuota::unlimited()
+        let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
+        let options = WriteOptions {
+            on_exists: request.arguments.on_exists,
+            remove_children: request
+                .arguments
+                .on_destroy_remove_children
+                .unwrap_or(false),
+            case_insensitive: request
+                .arguments
+                .compare_case_insensitively
+                .unwrap_or(false),
         };
-
-        // Process creates
-        let mut batch = BatchBuilder::new();
-        let mut created_folders: AHashMap<ParentRef, Vec<AclGrant>> = AHashMap::new();
-        let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
-        let mut created_slots: Vec<(String, Slot, Option<String>)> = Vec::new();
-        'create: for (id, object) in request.unwrap_create() {
-            let mut file_node = FileNode::default();
-            let parent;
-
-            // Process changes
-            let has_acl_changes = match update_file_node(
-                None,
-                object,
-                &mut file_node,
-                true,
-                &CreateResolver::new(&pending_creates),
-            ) {
-                Ok(result) => {
-                    if let Some(blob_id) = result.blob_id {
-                        let file_details = file_node.file.get_or_insert_default();
-                        if !self.has_access_blob(&blob_id, access_token).await? {
-                            response.not_created.append(
-                                id,
-                                SetError::forbidden().with_description(format!(
-                                    "You do not have access to blobId {blob_id}."
-                                )),
-                            );
-                            continue;
-                        } else if let Some(blob_contents) = self
-                            .blob_store()
-                            .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
-                            .await?
-                        {
-                            file_details.size = blob_contents.len() as u32;
-                        } else {
-                            response.not_created.append(
-                                id,
-                                SetError::invalid_properties()
-                                    .with_property(FileNodeProperty::BlobId)
-                                    .with_description("Blob could not be found."),
-                            );
-                            continue 'create;
-                        }
-
-                        file_details.blob_hash = blob_id.hash;
-                    }
-
-                    // Validate blob hash
-                    if file_node
-                        .file
-                        .as_ref()
-                        .is_some_and(|f| f.blob_hash.is_empty())
-                    {
-                        response.not_created.append(
-                            id,
-                            SetError::invalid_properties()
-                                .with_property(FileNodeProperty::BlobId)
-                                .with_description("Missing blob id."),
-                        );
-                        continue 'create;
-                    }
-
-                    parent = result.parent;
-                    file_node.parent_id = parent.as_stored();
-                    result.has_acl_changes
-                }
-                Err(err) => {
-                    response.not_created.append(id, err);
-                    continue 'create;
-                }
-            };
-
-            // Validate hierarchy
-            if let Err(err) =
-                validate_file_node_hierarchy(None, parent, is_shared, &cache, &created_folders)
-            {
-                response.not_created.append(id, err);
-                continue 'create;
-            }
-
-            if file_node.modified == 0 {
-                file_node.modified = now() as i64;
-            }
-
-            let renamed = match find_sibling_collision(
-                None,
-                parent,
-                &file_node,
-                &cache,
-                &pending_names,
-                case_insensitive,
-            ) {
-                Collision::None => false,
-                Collision::Existing(existing) => {
-                    let effective = match on_exists {
-                        OnExists::Newest => {
-                            let existing_modified =
-                                fetch_existing_modified(self.store(), account_id, existing).await?;
-                            if file_node.modified > existing_modified {
-                                OnExists::Replace
-                            } else {
-                                response.not_created.append(
-                                    id,
-                                    SetError::already_exists().with_existing_id(Id::from(existing)),
-                                );
-                                continue 'create;
-                            }
-                        }
-                        other => other,
-                    };
-                    match effective {
-                        OnExists::Reject => {
-                            response.not_created.append(
-                                id,
-                                SetError::already_exists().with_existing_id(Id::from(existing)),
-                            );
-                            continue 'create;
-                        }
-                        OnExists::Rename => {
-                            file_node.name = pick_unique_rename(
-                                &file_node.name,
-                                None,
-                                parent,
-                                &cache,
-                                &pending_names,
-                                case_insensitive,
-                            );
-                            true
-                        }
-                        OnExists::Replace => {
-                            if let Some(target) = cache.any_resource_path_by_id(existing) {
-                                let subtree_len = cache.subtree(target.path()).count();
-                                if subtree_len > 1 && !on_destroy_remove_children {
-                                    response
-                                        .not_created
-                                        .append(id, SetError::node_has_children());
-                                    continue 'create;
-                                }
-                            }
-                            implicit_destroys.insert(existing);
-                            false
-                        }
-                        OnExists::Newest => unreachable!(),
-                    }
-                }
-                Collision::Pending => match on_exists {
-                    OnExists::Reject | OnExists::Replace | OnExists::Newest => {
-                        let key = pending_key(parent, &file_node, case_insensitive);
-                        let mut err = SetError::already_exists();
-                        if let Some(Some(doc_id)) = pending_names.get(&key) {
-                            err = err.with_existing_id(Id::from(*doc_id));
-                        }
-                        response.not_created.append(id, err);
-                        continue 'create;
-                    }
-                    OnExists::Rename => {
-                        file_node.name = pick_unique_rename(
-                            &file_node.name,
-                            None,
-                            parent,
-                            &cache,
-                            &pending_names,
-                            case_insensitive,
-                        );
-                        true
-                    }
-                },
-            };
-
-            // Inherit ACLs from parent
-            if !parent.is_root() {
-                let parent_acls = created_folders.get(&parent).cloned().or_else(|| {
-                    parent
-                        .document_id()
-                        .and_then(|parent_id| cache.container_resource_by_id(parent_id))
-                        .map(|r| r.acls().to_vec())
-                });
-                if !has_acl_changes {
-                    if let Some(parent_acls) = parent_acls {
-                        file_node.acls = parent_acls;
-                    }
-                } else if is_shared
-                    && parent_acls
-                        .is_none_or(|acls| !acls.effective_acl(access_token).contains(Acl::Share))
-                {
-                    response.not_created.append(
-                        id,
-                        SetError::forbidden()
-                            .with_description("You are not allowed to share this file node."),
-                    );
-                    continue 'create;
-                }
-            }
-
-            // Validate ACLs
-            if !file_node.acls.is_empty() {
-                if let Err(err) = self.acl_validate(&file_node.acls).await {
-                    response.not_created.append(id, err.into());
-                    continue 'create;
-                }
-
-                self.refresh_acls(&file_node.acls, None)
-                    .await
-                    .caused_by(trc::location!())?;
-            }
-
-            // Validate quota
-            if let Err(err) = quota.validate(
-                file_node.file.is_none(),
-                created_slots.len(),
-                created_folders.len(),
-            ) {
-                response.not_created.append(id, err);
-                continue 'create;
-            }
-
-            // Insert record
-            let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
-            if file_node.file.is_none() {
-                created_folders.insert(ParentRef::pending(document_id), file_node.acls.clone());
-            }
-            let final_name = file_node.name.clone();
-            pending_names.insert(pending_key(parent, &file_node, case_insensitive), None);
-            let set_created = file_node.created == 0;
-            let set_modified = file_node.modified == 0;
-            pending_creates.insert(id.clone(), document_id);
-            file_node
-                .insert_with_parent(
-                    access_token.account_tenant_ids(),
-                    account_id,
-                    document_id,
-                    parent.slot(),
-                    set_created,
-                    set_modified,
-                    &mut batch,
-                )
-                .caused_by(trc::location!())?;
-            created_slots.push((id, document_id, renamed.then_some(final_name)));
+        let mut writer = FileNodeWriter::new(self, access_token, account_id, &cache, options);
+        if request.has_creates() {
+            writer = writer.with_quota().await?;
         }
 
-        // Process updates
-        'update: for (id, object) in request.unwrap_update() {
+        let moving = request
+            .update
+            .as_ref()
+            .map(|updates| {
+                updates
+                    .iter()
+                    .filter_map(|(id, object)| match id {
+                        MaybeInvalid::Value(id)
+                            if object.as_object().is_some_and(|object| {
+                                object.contains_key(&Key::Property(FileNodeProperty::ParentId))
+                            }) =>
+                        {
+                            Some(id.document_id())
+                        }
+                        _ => None,
+                    })
+                    .collect::<AHashSet<_>>()
+            })
+            .unwrap_or_default();
+        let (destroy_groups, not_destroyed) = writer.plan_destroys(will_destroy, &moving);
+        for (id, err) in not_destroyed {
+            response.not_destroyed.append(id, err);
+        }
+
+        let mut planned = Vec::new();
+        let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
+        for (create_id, object) in request.unwrap_create() {
+            let resolver = CreateResolver::new(&pending_creates);
+            match prepare_create(
+                &mut writer,
+                create_id,
+                FileNode::default(),
+                object,
+                &resolver,
+            )
+            .await?
+            {
+                Ok(create) => {
+                    pending_creates.insert(create.create_id.clone(), create.slot);
+                    planned.push(Planned::Create(create));
+                }
+                Err((create_id, err)) => response.not_created.append(create_id, err),
+            }
+        }
+
+        for (id, object) in request.unwrap_update() {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
                     response.not_updated.append(invalid, SetError::not_found());
-                    continue 'update;
+                    continue;
                 }
             };
-            // Make sure id won't be destroyed
-            if will_destroy.contains(&id) || implicit_destroys.contains(&id.document_id()) {
-                response.not_updated.append(id, SetError::will_destroy());
-                continue 'update;
+            let resolver = CreateResolver::new(&pending_creates);
+            match prepare_update(&writer, id, object, &resolver).await? {
+                Ok(update) => planned.push(Planned::Update(update)),
+                Err(err) => response.not_updated.append(id, err),
             }
+        }
 
-            // Obtain file node
-            let document_id = id.document_id();
-            let file_node_ = if let Some(file_node_) = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::FileNode,
-                    document_id,
-                ))
-                .await?
-            {
-                file_node_
-            } else {
-                response.not_updated.append(id, SetError::not_found());
-                continue 'update;
-            };
-            let file_node = file_node_
-                .to_unarchived::<FileNode>()
-                .caused_by(trc::location!())?;
-            let mut new_file_node = file_node
-                .deserialize::<FileNode>()
-                .caused_by(trc::location!())?;
-            let parent;
-
-            // Apply changes
-            let (has_acl_changes, modified_set) = match update_file_node(
-                Some(id),
-                object,
-                &mut new_file_node,
-                false,
-                &CreateResolver::new(&pending_creates),
-            ) {
-                Ok(result) => {
-                    let modified_set = result.modified_set;
-                    if let Some(blob_id) = result.blob_id {
-                        let file_details = new_file_node.file.get_or_insert_default();
-                        if !self.has_access_blob(&blob_id, access_token).await? {
-                            response.not_updated.append(
-                                id,
-                                SetError::forbidden().with_description(format!(
-                                    "You do not have access to blobId {blob_id}."
-                                )),
-                            );
-                            continue;
-                        } else if let Some(blob_contents) = self
-                            .blob_store()
-                            .get_blob(blob_id.hash.as_slice(), 0..usize::MAX)
-                            .await?
-                        {
-                            file_details.size = blob_contents.len() as u32;
-                        } else {
-                            response.not_updated.append(
-                                id,
-                                SetError::invalid_properties()
-                                    .with_property(FileNodeProperty::BlobId)
-                                    .with_description("Blob could not be found."),
-                            );
-                            continue 'update;
+        let mut created = Vec::new();
+        let mut awaiting_existing = Vec::new();
+        let mut unprocessed = planned
+            .iter()
+            .map(Planned::node_ref)
+            .collect::<AHashSet<_>>();
+        let mut allow_defer = true;
+        while !planned.is_empty() {
+            let pending = planned.len();
+            let mut deferred = Vec::new();
+            for mut item in planned {
+                let node_ref = item.node_ref();
+                match item.place(&mut writer, allow_defer.then_some(&unprocessed)) {
+                    Claim::Deferred => deferred.push(item),
+                    Claim::Rejected(rejection) => {
+                        unprocessed.remove(&node_ref);
+                        let key = item.reject(&mut writer);
+                        match rejection.existing {
+                            Some(slot) => awaiting_existing.push((key, rejection.error, slot)),
+                            None => key.append(&mut response, rejection.error),
                         }
-
-                        file_details.blob_hash = blob_id.hash;
                     }
-
-                    parent = result.parent;
-                    new_file_node.parent_id = parent.as_stored();
-                    (result.has_acl_changes, modified_set)
-                }
-                Err(err) => {
-                    response.not_updated.append(id, err);
-                    continue 'update;
-                }
-            };
-
-            // Validate hierarchy
-            if let Err(err) = validate_file_node_hierarchy(
-                Some(document_id),
-                parent,
-                is_shared,
-                &cache,
-                &created_folders,
-            ) {
-                response.not_updated.append(id, err);
-                continue 'update;
-            }
-
-            let renamed = match find_sibling_collision(
-                Some(document_id),
-                parent,
-                &new_file_node,
-                &cache,
-                &pending_names,
-                case_insensitive,
-            ) {
-                Collision::None => false,
-                Collision::Existing(existing) => {
-                    let effective = match on_exists {
-                        OnExists::Newest => {
-                            let existing_modified =
-                                fetch_existing_modified(self.store(), account_id, existing).await?;
-                            if new_file_node.modified > existing_modified {
-                                OnExists::Replace
-                            } else {
-                                response.not_updated.append(
-                                    id,
-                                    SetError::already_exists().with_existing_id(Id::from(existing)),
-                                );
-                                continue 'update;
+                    Claim::Accepted { renamed } => {
+                        unprocessed.remove(&node_ref);
+                        match item {
+                            Planned::Create(create) => {
+                                created.push(commit_create(&mut writer, create, renamed)?);
+                            }
+                            Planned::Update(update) => {
+                                let id = update.id;
+                                let values = commit_update(&mut writer, update, renamed)?;
+                                response.updated.append(id, values);
                             }
                         }
-                        other => other,
-                    };
-                    match effective {
-                        OnExists::Reject => {
-                            response.not_updated.append(
-                                id,
-                                SetError::already_exists().with_existing_id(Id::from(existing)),
-                            );
-                            continue 'update;
-                        }
-                        OnExists::Rename => {
-                            new_file_node.name = pick_unique_rename(
-                                &new_file_node.name,
-                                Some(document_id),
-                                parent,
-                                &cache,
-                                &pending_names,
-                                case_insensitive,
-                            );
-                            true
-                        }
-                        OnExists::Replace => {
-                            if let Some(target) = cache.any_resource_path_by_id(existing) {
-                                let subtree_len = cache.subtree(target.path()).count();
-                                if subtree_len > 1 && !on_destroy_remove_children {
-                                    response
-                                        .not_updated
-                                        .append(id, SetError::node_has_children());
-                                    continue 'update;
-                                }
-                            }
-                            implicit_destroys.insert(existing);
-                            false
-                        }
-                        OnExists::Newest => unreachable!(),
                     }
-                }
-                Collision::Pending => match on_exists {
-                    OnExists::Reject | OnExists::Replace | OnExists::Newest => {
-                        let key = pending_key(parent, &new_file_node, case_insensitive);
-                        let mut err = SetError::already_exists();
-                        if let Some(Some(doc_id)) = pending_names.get(&key) {
-                            err = err.with_existing_id(Id::from(*doc_id));
-                        }
-                        response.not_updated.append(id, err);
-                        continue 'update;
-                    }
-                    OnExists::Rename => {
-                        new_file_node.name = pick_unique_rename(
-                            &new_file_node.name,
-                            Some(document_id),
-                            parent,
-                            &cache,
-                            &pending_names,
-                            case_insensitive,
-                        );
-                        true
-                    }
-                },
-            };
-
-            // Validate ACL
-            if is_shared {
-                let acl = file_node.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Share)) {
-                    response.not_updated.append(
-                        id,
-                        SetError::forbidden()
-                            .with_description("You are not allowed to modify this file node."),
-                    );
-                    continue 'update;
                 }
             }
-            if has_acl_changes {
-                if let Err(err) = self.acl_validate(&new_file_node.acls).await {
-                    response.not_updated.append(id, err.into());
-                    continue 'update;
+            if deferred.len() == pending {
+                for index in resolve_name_cycles(&mut writer, &deferred)
+                    .into_iter()
+                    .rev()
+                {
+                    if let Planned::Update(update) = deferred.remove(index) {
+                        unprocessed.remove(&NodeRef::Node(update.id.document_id()));
+                        let id = update.id;
+                        let values = commit_update(&mut writer, update, false)?;
+                        response.updated.append(id, values);
+                    }
                 }
-                self.refresh_acls(
-                    &new_file_node.acls,
-                    Some(
-                        file_node
-                            .inner
-                            .acls
-                            .iter()
-                            .map(AclGrant::from)
-                            .collect::<Vec<_>>()
-                            .as_slice(),
-                    ),
-                )
+            }
+            allow_defer = deferred.len() < pending;
+            planned = deferred;
+        }
+
+        let (destroyed, not_destroyed) = writer.execute_destroys(destroy_groups).await?;
+        response.destroyed.extend(destroyed);
+        for (id, err) in not_destroyed {
+            response.not_destroyed.append(id, err);
+        }
+        writer.finish();
+
+        if !writer.batch.is_empty() {
+            let assigned_ids = self
+                .commit_batch(writer.batch)
                 .await
                 .caused_by(trc::location!())?;
-            }
 
-            let final_name = new_file_node.name.clone();
-            pending_names.insert(
-                pending_key(parent, &new_file_node, case_insensitive),
-                Some(document_id),
-            );
-            // Update record. Bump modified to now() unless the client supplied a value.
-            new_file_node
-                .update_with_parent(
-                    access_token.account_tenant_ids(),
-                    file_node,
-                    account_id,
-                    document_id,
-                    parent.slot(),
-                    !modified_set,
-                    &mut batch,
-                )
-                .caused_by(trc::location!())?;
-            let updated_value = if renamed {
-                let mut map = jmap_tools::Map::with_capacity(1);
-                map.insert_unchecked(
-                    Key::Property(FileNodeProperty::Name),
-                    Value::Str(std::borrow::Cow::Owned(final_name)),
+            for (key, err, slot) in awaiting_existing {
+                key.append(
+                    &mut response,
+                    err.with_existing_id(Id::from(assigned_ids.slot(slot))),
                 );
-                Some(Value::Object(map))
-            } else {
-                None
-            };
-            response.updated.append(id, updated_value);
-        }
-
-        // Process deletions
-        for did in &implicit_destroys {
-            let id = Id::from(*did);
-            if !will_destroy.contains(&id) {
-                will_destroy.push(id);
             }
-        }
-        let mut destroy_ids = AHashSet::with_capacity(will_destroy.len());
-        'destroy: for id in will_destroy {
-            let document_id = id.document_id();
-
-            let Some(file_node) = cache.any_resource_path_by_id(document_id) else {
-                response.not_destroyed.append(id, SetError::not_found());
-                continue 'destroy;
-            };
-
-            // Find ids to delete
-            let mut ids = cache.subtree(file_node.path()).collect::<Vec<_>>();
-            if ids.is_empty() {
-                debug_assert!(false, "Resource found in cache but not in subtree");
-                continue 'destroy;
-            }
-
-            // Sort ids descending from the deepest to the root
-            ids.sort_unstable_by_key(|b| std::cmp::Reverse(b.hierarchy_seq()));
-            let mut sorted_ids = Vec::with_capacity(ids.len());
-            sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
-
-            // Validate not already deleted
-            for child_id in &sorted_ids {
-                if !destroy_ids.insert(*child_id) {
-                    response.not_destroyed.append(
-                        id,
-                        SetError::will_destroy().with_description(
-                            "File node or one of its children is already marked for deletion.",
-                        ),
-                    );
-                    continue 'destroy;
-                }
-            }
-
-            // Validate ACLs
-            if !access_token.is_member(account_id) {
-                let permissions = cache.shared_containers(access_token, [Acl::Delete], false);
-                if permissions.len() < sorted_ids.len() as u64
-                    || !sorted_ids.iter().all(|id| permissions.contains(*id))
-                {
-                    response.not_destroyed.append(
-                        id,
-                        SetError::forbidden()
-                            .with_description("You are not allowed to delete this file node."),
-                    );
-                    continue 'destroy;
-                }
-            }
-
-            // Obtain children ids
-            if sorted_ids.len() > 1 && !on_destroy_remove_children {
-                response
-                    .not_destroyed
-                    .append(id, SetError::node_has_children());
-                continue 'destroy;
-            }
-
-            // Delete record
-            response
-                .destroyed
-                .extend(sorted_ids.iter().copied().map(Id::from));
-
-            DestroyArchive(sorted_ids)
-                .delete_batch(
-                    self,
-                    access_token.account_tenant_ids(),
-                    account_id,
-                    cache.format_resource(file_node).into(),
-                    &mut batch,
-                )
-                .await?;
-        }
-
-        // Write changes
-        if !batch.is_empty() {
-            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
-
-            for (create_id, slot, renamed) in created_slots {
-                let mut map = Map::from(vec![(
+            for create in created {
+                let mut values = create.values;
+                values.insert_unchecked(
                     Key::Property(FileNodeProperty::Id),
-                    Value::Element(Id::from(assigned_ids.slot(slot)).into()),
-                )]);
-                if let Some(final_name) = renamed {
-                    map.insert_unchecked(
-                        Key::Property(FileNodeProperty::Name),
-                        Value::Str(std::borrow::Cow::Owned(final_name)),
-                    );
-                }
-                response.created.insert(create_id, Value::Object(map));
+                    Value::Element(FileNodeValue::Id(Id::from(assigned_ids.slot(create.slot)))),
+                );
+                response
+                    .created
+                    .insert(create.create_id, Value::Object(values));
             }
 
             response.new_state =
                 State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::FileNode))
                     .into();
+        } else {
+            for (key, err, _) in awaiting_existing {
+                key.append(&mut response, err);
+            }
         }
 
         Ok(response)
     }
 }
 
-pub(super) struct UpdateResult {
-    pub(super) has_acl_changes: bool,
-    pub(super) blob_id: Option<BlobId>,
-    pub(super) modified_set: bool,
-    pub(super) parent: ParentRef,
+impl Planned {
+    fn node_ref(&self) -> NodeRef {
+        match self {
+            Planned::Create(create) => NodeRef::Pending(create.slot),
+            Planned::Update(update) => NodeRef::Node(update.id.document_id()),
+        }
+    }
+
+    fn place(
+        &mut self,
+        writer: &mut FileNodeWriter<'_>,
+        unprocessed: Option<&AHashSet<NodeRef>>,
+    ) -> Claim {
+        match self {
+            Planned::Create(create) => place_create(writer, create, unprocessed),
+            Planned::Update(update) => place_update(writer, update, unprocessed),
+        }
+    }
+
+    fn reject(self, writer: &mut FileNodeWriter<'_>) -> RejectedKey {
+        match self {
+            Planned::Create(create) => {
+                writer.discard_create(create.slot);
+                RejectedKey::Create(create.create_id)
+            }
+            Planned::Update(update) => RejectedKey::Update(update.id),
+        }
+    }
+}
+
+impl RejectedKey {
+    fn append(
+        self,
+        response: &mut SetResponse<file_node::FileNode>,
+        err: SetError<FileNodeProperty>,
+    ) {
+        match self {
+            RejectedKey::Create(create_id) => response.not_created.append(create_id, err),
+            RejectedKey::Update(id) => response.not_updated.append(id, err),
+        }
+    }
+}
+
+pub(super) async fn create_node<R: ResolveCreatedReference<FileNodeProperty, FileNodeValue>>(
+    writer: &mut FileNodeWriter<'_>,
+    create_id: String,
+    node: FileNode,
+    object: Value<'_, FileNodeProperty, FileNodeValue>,
+    resolver: &R,
+) -> trc::Result<Result<CreatedNode, (String, Rejection)>> {
+    let mut create = match prepare_create(writer, create_id, node, object, resolver).await? {
+        Ok(create) => create,
+        Err((create_id, err)) => return Ok(Err((create_id, err.into()))),
+    };
+    match place_create(writer, &mut create, None) {
+        Claim::Accepted { renamed } => commit_create(writer, create, renamed).map(Ok),
+        Claim::Rejected(rejection) => {
+            writer.discard_create(create.slot);
+            Ok(Err((create.create_id, rejection)))
+        }
+        Claim::Deferred => {
+            writer.discard_create(create.slot);
+            Ok(Err((create.create_id, SetError::already_exists().into())))
+        }
+    }
+}
+
+async fn prepare_create<R: ResolveCreatedReference<FileNodeProperty, FileNodeValue>>(
+    writer: &mut FileNodeWriter<'_>,
+    create_id: String,
+    mut node: FileNode,
+    object: Value<'_, FileNodeProperty, FileNodeValue>,
+    resolver: &R,
+) -> trc::Result<Result<PreparedCreate, (String, SetError<FileNodeProperty>)>> {
+    let patch = match NodePatch::parse(None, object, &node, true, resolver) {
+        Ok(patch) => patch,
+        Err(err) => return Ok(Err((create_id, err))),
+    };
+    let parent = patch.parent.unwrap_or(ParentRef::ROOT);
+    if parent.is_root() && !writer.is_owner() {
+        return Ok(Err((
+            create_id,
+            SetError::forbidden()
+                .with_description("Cannot create top-level folder in a shared account."),
+        )));
+    } else if !writer.can_add_to(parent) {
+        return Ok(Err((
+            create_id,
+            SetError::forbidden()
+                .with_description("You are not allowed to create file nodes in this folder."),
+        )));
+    }
+    let blob = match patch.blob_to_resolve(&node) {
+        Some(blob_id) => match writer.resolve_blob(blob_id).await? {
+            Ok(blob) => Some(blob),
+            Err(err) => return Ok(Err((create_id, err))),
+        },
+        None => None,
+    };
+    let omitted = Omitted {
+        node_type: patch.kind.is_none(),
+        media_type: patch.echoes_type(),
+        executable: patch.executable.is_none(),
+        created: patch.created.is_none(),
+        modified: patch.modified.is_none() || patch.server_modified,
+        accessed: patch.accessed.is_none() || patch.server_accessed,
+        subscribed: patch.subscribed.is_none(),
+    };
+    let effects = match patch.apply(&mut node, true, blob, writer.personal_id) {
+        Ok(effects) => effects,
+        Err(err) => return Ok(Err((create_id, err))),
+    };
+    if effects.acls
+        && writer
+            .inherited_rights(parent)
+            .is_some_and(|rights| !rights.contains(Acl::Share))
+    {
+        return Ok(Err((
+            create_id,
+            SetError::forbidden().with_description("You are not allowed to share this file node."),
+        )));
+    }
+    if !node.acls.is_empty()
+        && let Err(err) = writer.validate_acls(&node.acls, None).await?
+    {
+        return Ok(Err((create_id, err)));
+    }
+
+    let slot = writer
+        .batch
+        .reserve_document_id(writer.account_id, Collection::FileNode);
+    writer.stage_create(slot, parent);
+    Ok(Ok(PreparedCreate {
+        create_id,
+        slot,
+        node,
+        parent,
+        omitted,
+    }))
+}
+
+fn place_create(
+    writer: &mut FileNodeWriter<'_>,
+    create: &mut PreparedCreate,
+    unprocessed: Option<&AHashSet<NodeRef>>,
+) -> Claim {
+    match writer.validate_placement(None, create.parent, true, unprocessed) {
+        Ok(Placement::Ready) => {}
+        Ok(Placement::Deferred) => return Claim::Deferred,
+        Err(err) => return Claim::Rejected(err.into()),
+    }
+    if let Err(err) = writer.validate_quota(create.node.is_directory()) {
+        return Claim::Rejected(err.into());
+    }
+    writer.claim_name(
+        None,
+        Some(create.slot),
+        None,
+        create.parent,
+        &mut create.node,
+        unprocessed,
+    )
+}
+
+fn commit_create(
+    writer: &mut FileNodeWriter<'_>,
+    create: PreparedCreate,
+    renamed: bool,
+) -> trc::Result<CreatedNode> {
+    let PreparedCreate {
+        create_id,
+        slot,
+        mut node,
+        parent,
+        omitted,
+    } = create;
+    writer.register_created(slot, parent, node.is_directory());
+    node.stamp_insert(
+        omitted.created && node.created == 0,
+        omitted.modified && node.modified == 0,
+        omitted.accessed && node.accessed == 0,
+    );
+    node.parent_id = parent.as_stored();
+    let values = created_values(&node, &omitted, writer.inherited_rights(parent), renamed);
+    node.insert_stamped(
+        writer.access_token.account_tenant_ids(),
+        writer.account_id,
+        slot,
+        parent.slot(),
+        &mut writer.batch,
+    )
+    .caused_by(trc::location!())?;
+    Ok(CreatedNode {
+        create_id,
+        slot,
+        values,
+    })
+}
+
+async fn prepare_update(
+    writer: &FileNodeWriter<'_>,
+    id: Id,
+    object: Value<'_, FileNodeProperty, FileNodeValue>,
+    resolver: &CreateResolver<'_>,
+) -> trc::Result<Result<PreparedUpdate, SetError<FileNodeProperty>>> {
+    let document_id = id.document_id();
+    if writer.is_destroyed(document_id) {
+        return Ok(Err(SetError::will_destroy()));
+    } else if !writer.is_visible(document_id) {
+        return Ok(Err(SetError::not_found()));
+    }
+    let Some(archive) = fetch_archive(writer.server, writer.account_id, document_id).await? else {
+        return Ok(Err(SetError::not_found()));
+    };
+    let current = archive
+        .to_unarchived::<FileNode>()
+        .caused_by(trc::location!())?;
+    let mut node = current
+        .deserialize::<FileNode>()
+        .caused_by(trc::location!())?;
+    let old_parent = ParentRef::from_stored(node.parent_id);
+
+    let patch = match NodePatch::parse(Some(id), object, &node, false, resolver) {
+        Ok(patch) => patch,
+        Err(err) => return Ok(Err(err)),
+    };
+    let blob = match patch.blob_to_resolve(&node) {
+        Some(_) if !writer.has_right(document_id, Acl::ModifyItems) => {
+            return Ok(Err(SetError::forbidden().with_description(
+                "You are not allowed to modify the content of this file node.",
+            )));
+        }
+        Some(blob_id) if node.file().is_some() => match writer.resolve_blob(blob_id).await? {
+            Ok(blob) => Some(blob),
+            Err(err) => return Ok(Err(err)),
+        },
+        _ => None,
+    };
+    if let Some(my_rights) = patch.my_rights.as_ref() {
+        let current = match writer.rights_of(document_id) {
+            Some(rights) => JmapRights::rights::<file_node::FileNode>(rights),
+            None => JmapRights::all_rights::<file_node::FileNode>(),
+        };
+        if !same_object(my_rights, &current) {
+            return Ok(Err(invalid(
+                FileNodeProperty::MyRights,
+                "myRights is server-set and not settable by clients.",
+            )));
+        }
+    }
+    let report_size = blob.is_some() && patch.size.is_none();
+    let echo = Omitted {
+        media_type: patch.media_type.is_some() && patch.echoes_type(),
+        modified: patch.server_modified,
+        accessed: patch.server_accessed,
+        ..Default::default()
+    };
+    let parent = patch.parent.unwrap_or(old_parent);
+    let previous = (old_parent, node.name.clone());
+    let effects = match patch.apply(&mut node, false, blob, writer.personal_id) {
+        Ok(effects) => effects,
+        Err(err) => return Ok(Err(err)),
+    };
+    if let Err(err) = writer.validate_update_rights(document_id, old_parent, parent, &effects) {
+        return Ok(Err(err));
+    }
+    if effects.acls {
+        let previous_acls = current
+            .inner
+            .acls
+            .iter()
+            .map(AclGrant::from)
+            .collect::<Vec<_>>();
+        if let Err(err) = writer
+            .validate_acls(&node.acls, Some(&previous_acls))
+            .await?
+        {
+            return Ok(Err(err));
+        }
+    }
+
+    Ok(Ok(PreparedUpdate {
+        id,
+        archive,
+        node,
+        parent,
+        previous,
+        effects,
+        report_size,
+        echo,
+    }))
+}
+
+fn place_update(
+    writer: &mut FileNodeWriter<'_>,
+    update: &mut PreparedUpdate,
+    unprocessed: Option<&AHashSet<NodeRef>>,
+) -> Claim {
+    let document_id = update.id.document_id();
+    if writer.is_destroyed(document_id) {
+        return Claim::Rejected(SetError::will_destroy().into());
+    }
+    if let Some(unprocessed) = unprocessed
+        && (update.effects.renamed || update.effects.moved)
+        && writer
+            .holder_of(update.parent, &update.node.name)
+            .is_some_and(|holder| {
+                holder != NodeRef::Node(document_id) && unprocessed.contains(&holder)
+            })
+    {
+        return Claim::Deferred;
+    }
+    match writer.validate_placement(
+        Some(document_id),
+        update.parent,
+        update.effects.moved,
+        unprocessed,
+    ) {
+        Ok(Placement::Ready) => {}
+        Ok(Placement::Deferred) => return Claim::Deferred,
+        Err(err) => return Claim::Rejected(err.into()),
+    }
+    if !update.effects.renamed && !update.effects.moved {
+        return Claim::Accepted { renamed: false };
+    }
+    writer.claim_name(
+        Some(document_id),
+        None,
+        Some((update.previous.0, update.previous.1.as_str())),
+        update.parent,
+        &mut update.node,
+        unprocessed,
+    )
+}
+
+fn commit_update(
+    writer: &mut FileNodeWriter<'_>,
+    update: PreparedUpdate,
+    renamed: bool,
+) -> trc::Result<Option<Value<'static, FileNodeProperty, FileNodeValue>>> {
+    if !update.effects.changes_node() && !update.effects.subscription {
+        return Ok(None);
+    }
+    let document_id = update.id.document_id();
+    let current = update
+        .archive
+        .to_unarchived::<FileNode>()
+        .caused_by(trc::location!())?;
+    let mut node = update.node;
+    node.parent_id = update.parent.as_stored();
+    node.stamp_update(false);
+    writer.register_update(
+        document_id,
+        update.parent,
+        &update.effects,
+        node.is_directory(),
+    );
+
+    let mut values = Map::with_capacity(3);
+    values.insert_unchecked(
+        Key::Property(FileNodeProperty::Changed),
+        date_value(Some(node.changed)),
+    );
+    if renamed {
+        values.insert_unchecked(
+            Key::Property(FileNodeProperty::Name),
+            Value::Str(Cow::Owned(node.name.clone())),
+        );
+    }
+    if let Some(file) = node.file() {
+        if update.report_size {
+            values.insert_unchecked(
+                Key::Property(FileNodeProperty::Size),
+                Value::Number(file.size.into()),
+            );
+        }
+        if update.echo.media_type {
+            values.insert_unchecked(
+                Key::Property(FileNodeProperty::Type),
+                Value::Str(normalized_media_type(file.media_type.as_deref())),
+            );
+        }
+    }
+    for (echo, property, timestamp) in [
+        (
+            update.echo.modified,
+            FileNodeProperty::Modified,
+            node.modified,
+        ),
+        (
+            update.echo.accessed,
+            FileNodeProperty::Accessed,
+            node.accessed,
+        ),
+    ] {
+        if echo {
+            values.insert_unchecked(Key::Property(property), date_value(Some(timestamp)));
+        }
+    }
+
+    node.update_stamped(
+        writer.access_token.account_tenant_ids(),
+        current,
+        writer.account_id,
+        document_id,
+        update.parent.slot(),
+        &mut writer.batch,
+    )
+    .caused_by(trc::location!())?;
+    if update.effects.renamed || update.effects.moved {
+        writer.log_vanished_href(document_id);
+    }
+    Ok(Some(Value::Object(values)))
+}
+
+fn resolve_name_cycles(writer: &mut FileNodeWriter<'_>, deferred: &[Planned]) -> Vec<usize> {
+    const UNVISITED: u8 = 0;
+    const VISITING: u8 = 1;
+    const VISITED: u8 = 2;
+
+    let updates = deferred
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| match item {
+            Planned::Update(update) => Some((update.id.document_id(), index)),
+            Planned::Create(_) => None,
+        })
+        .collect::<AHashMap<_, _>>();
+    let waits_on = deferred
+        .iter()
+        .map(|item| match item {
+            Planned::Update(update) => match writer.holder_of(update.parent, &update.node.name) {
+                Some(NodeRef::Node(holder_id)) => updates.get(&holder_id).copied(),
+                _ => None,
+            },
+            Planned::Create(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    let mut state = vec![UNVISITED; deferred.len()];
+    let mut path = Vec::new();
+    let mut committed = Vec::new();
+    for start in 0..deferred.len() {
+        path.clear();
+        let mut current = Some(start);
+        while let Some(index) = current {
+            match state.get(index).copied() {
+                Some(UNVISITED) => {
+                    state[index] = VISITING;
+                    path.push(index);
+                    current = waits_on.get(index).copied().flatten();
+                }
+                Some(VISITING) => {
+                    let cycle = path
+                        .iter()
+                        .copied()
+                        .skip_while(|member| *member != index)
+                        .collect::<Vec<_>>();
+                    if claim_cycle(writer, deferred, &cycle) {
+                        committed.extend(cycle);
+                    }
+                    current = None;
+                }
+                _ => current = None,
+            }
+        }
+        for index in &path {
+            state[*index] = VISITED;
+        }
+    }
+    committed.sort_unstable();
+    committed
+}
+
+fn claim_cycle(writer: &mut FileNodeWriter<'_>, deferred: &[Planned], cycle: &[usize]) -> bool {
+    let members = cycle
+        .iter()
+        .filter_map(|index| match deferred.get(*index) {
+            Some(Planned::Update(update)) => Some(update),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut staged = Vec::with_capacity(members.len());
+    let mut valid = true;
+    for update in &members {
+        let document_id = update.id.document_id();
+        if writer.is_destroyed(document_id)
+            || !matches!(
+                writer.validate_placement(
+                    Some(document_id),
+                    update.parent,
+                    update.effects.moved,
+                    None
+                ),
+                Ok(Placement::Ready)
+            )
+        {
+            valid = false;
+            break;
+        }
+        if update.effects.moved {
+            writer.stage_move(document_id, update.parent);
+            staged.push(document_id);
+        }
+    }
+    let claimed = valid
+        && writer.claim_cycle(members.iter().map(|update| {
+            (
+                update.id.document_id(),
+                update.previous.0,
+                update.previous.1.as_str(),
+                update.parent,
+                update.node.name.as_str(),
+            )
+        }));
+    if !claimed {
+        for document_id in staged {
+            writer.unstage_move(document_id);
+        }
+    }
+    claimed
+}
+
+fn created_values(
+    node: &FileNode,
+    omitted: &Omitted,
+    rights: Option<Bitmap<Acl>>,
+    renamed: bool,
+) -> NodeValues {
+    let mut values = Map::with_capacity(10);
+    if renamed {
+        values.insert_unchecked(
+            Key::Property(FileNodeProperty::Name),
+            Value::Str(Cow::Owned(node.name.clone())),
+        );
+    }
+    if omitted.node_type {
+        values.insert_unchecked(
+            Key::Property(FileNodeProperty::NodeType),
+            Value::Str(node_type_from_id(node.kind_id()).as_str().into()),
+        );
+    }
+    if let Some(file) = node.file() {
+        values.insert_unchecked(
+            Key::Property(FileNodeProperty::Size),
+            Value::Number(file.size.into()),
+        );
+        if omitted.media_type {
+            values.insert_unchecked(
+                Key::Property(FileNodeProperty::Type),
+                Value::Str(normalized_media_type(file.media_type.as_deref())),
+            );
+        }
+        if omitted.executable {
+            values.insert_unchecked(
+                Key::Property(FileNodeProperty::Executable),
+                Value::Bool(file.executable),
+            );
+        }
+    }
+    for (is_omitted, property, timestamp) in [
+        (omitted.created, FileNodeProperty::Created, node.created),
+        (omitted.modified, FileNodeProperty::Modified, node.modified),
+        (omitted.accessed, FileNodeProperty::Accessed, node.accessed),
+        (true, FileNodeProperty::Changed, node.changed),
+    ] {
+        if is_omitted {
+            values.insert_unchecked(Key::Property(property), date_value(Some(timestamp)));
+        }
+    }
+    if omitted.subscribed {
+        values.insert_unchecked(
+            Key::Property(FileNodeProperty::IsSubscribed),
+            Value::Bool(true),
+        );
+    }
+    values.insert_unchecked(
+        Key::Property(FileNodeProperty::MyRights),
+        match rights {
+            Some(rights) => JmapRights::rights::<file_node::FileNode>(rights),
+            None => JmapRights::all_rights::<file_node::FileNode>(),
+        },
+    );
+    values
+}
+
+fn normalized_media_type(media_type: Option<&str>) -> Cow<'static, str> {
+    media_type
+        .and_then(media_type_essence)
+        .map_or(Cow::Borrowed(default_media_type()), |essence| {
+            Cow::Owned(essence.into_owned())
+        })
+}
+
+fn same_object(
+    a: &Value<'_, FileNodeProperty, FileNodeValue>,
+    b: &Value<'_, FileNodeProperty, FileNodeValue>,
+) -> bool {
+    match (a.as_object(), b.as_object()) {
+        (Some(a), Some(b)) => {
+            a.len() == b.len() && a.iter().all(|(key, value)| b.get(key) == Some(value))
+        }
+        _ => false,
+    }
 }
 
 impl ResolveCreatedReference<FileNodeProperty, FileNodeValue> for CreateResolver<'_> {
     fn get_created_id(&self, id_ref: &str) -> Option<AnyId> {
         self.created_id(id_ref)
     }
-}
-
-pub(super) struct NoResolver;
-
-impl ResolveCreatedReference<FileNodeProperty, FileNodeValue> for NoResolver {
-    fn get_created_id(&self, _: &str) -> Option<AnyId> {
-        None
-    }
-}
-
-pub(super) fn update_file_node<R: ResolveCreatedReference<FileNodeProperty, FileNodeValue>>(
-    expected_id: Option<Id>,
-    updates: Value<'_, FileNodeProperty, FileNodeValue>,
-    file_node: &mut FileNode,
-    is_create: bool,
-    resolver: &R,
-) -> Result<UpdateResult, SetError<FileNodeProperty>> {
-    let mut has_acl_changes = false;
-    let mut parent = ParentRef::from_stored(file_node.parent_id);
-    let mut blob_id = None;
-    let mut pending_size: Option<u32> = None;
-    let mut pending_type: Option<Option<String>> = None;
-    let mut pending_executable: Option<bool> = None;
-    let mut modified_set = false;
-
-    for (property, mut value) in updates.into_expanded_object() {
-        let Key::Property(property) = property else {
-            return Err(SetError::invalid_properties()
-                .with_property(property.to_owned())
-                .with_description("Invalid property."));
-        };
-
-        resolver.resolve_self_references(&mut value, 0, false)?;
-
-        match (property, value) {
-            (FileNodeProperty::Name, Value::Str(value)) => {
-                if !(1..=255).contains(&value.len()) {
-                    return Err(SetError::invalid_properties()
-                        .with_property(FileNodeProperty::Name)
-                        .with_description("Name must be between 1 and 255 octets."));
-                } else if value.contains(|c: char| FORBIDDEN_NAME_CHARS.contains(c)) {
-                    return Err(SetError::invalid_properties()
-                        .with_property(FileNodeProperty::Name)
-                        .with_description("Name contains a forbidden character."));
-                } else if FORBIDDEN_NODE_NAMES
-                    .iter()
-                    .any(|n| n.eq_ignore_ascii_case(value.as_ref()))
-                {
-                    return Err(SetError::invalid_properties()
-                        .with_property(FileNodeProperty::Name)
-                        .with_description("Name is reserved and cannot be used."));
-                }
-                file_node.name = value.into_owned();
-            }
-            (FileNodeProperty::ParentId, Value::Element(FileNodeValue::Id(value))) => {
-                parent = ParentRef::from_id(value);
-            }
-            (FileNodeProperty::ParentId, Value::Null) => {
-                parent = ParentRef::ROOT;
-            }
-            (FileNodeProperty::BlobId, Value::Element(FileNodeValue::BlobId(value))) => {
-                if file_node
-                    .file
-                    .as_ref()
-                    .is_none_or(|f| f.blob_hash != value.hash)
-                {
-                    blob_id = Some(value);
-                }
-            }
-            (FileNodeProperty::BlobId, Value::Null) => {}
-            (FileNodeProperty::Size, Value::Number(value)) => {
-                let value = value.cast_to_u64();
-                if value > u32::MAX as u64 {
-                    return Err(SetError::invalid_properties()
-                        .with_property(FileNodeProperty::Size)
-                        .with_description("size is too large."));
-                }
-                pending_size = Some(value as u32);
-            }
-            (FileNodeProperty::Size, Value::Null) => {
-                pending_size = Some(0);
-            }
-            (FileNodeProperty::Type, Value::Str(value))
-                if (1..=256).contains(&value.len()) && value.contains('/') =>
-            {
-                // TODO: validate full RFC 6838 Section 4.2 ABNF for media types
-                pending_type = Some(Some(value.into_owned()));
-            }
-            (FileNodeProperty::Type, Value::Null) => {
-                pending_type = Some(None);
-            }
-            (FileNodeProperty::Executable, Value::Bool(value)) => {
-                pending_executable = Some(value);
-            }
-            (FileNodeProperty::Executable, Value::Null) => {
-                pending_executable = Some(false);
-            }
-            (FileNodeProperty::Created, Value::Element(FileNodeValue::Date(value)))
-                if is_create =>
-            {
-                file_node.created = value.timestamp();
-            }
-            (FileNodeProperty::Created, _) => {
-                return Err(SetError::invalid_properties()
-                    .with_property(FileNodeProperty::Created)
-                    .with_description("created is immutable after creation."));
-            }
-            (FileNodeProperty::Modified, Value::Element(FileNodeValue::Date(value))) => {
-                file_node.modified = value.timestamp();
-                modified_set = true;
-            }
-            (FileNodeProperty::Modified, Value::Null) => {
-                file_node.modified = now() as i64;
-                modified_set = true;
-            }
-            // TODO: persist accessed per-user (draft-13 section 3.1)
-            (FileNodeProperty::Accessed, _) => {}
-            (FileNodeProperty::NodeType, _) if is_create => {}
-            (FileNodeProperty::NodeType, _) => {
-                return Err(SetError::invalid_properties()
-                    .with_property(FileNodeProperty::NodeType)
-                    .with_description("nodeType is immutable after creation."));
-            }
-            // TODO: implement symlink target storage and resolution
-            (FileNodeProperty::Target, _) => {}
-            (FileNodeProperty::Changed, _) => {
-                return Err(SetError::invalid_properties()
-                    .with_property(FileNodeProperty::Changed)
-                    .with_description("changed is server-set and not settable by clients."));
-            }
-            // TODO: store and validate FileNode role for directories
-            (FileNodeProperty::Role, _) => {}
-            (FileNodeProperty::ShareWith, value) => {
-                file_node.acls = JmapRights::acl_set::<file_node::FileNode>(value)?;
-                has_acl_changes = true;
-            }
-            (FileNodeProperty::Pointer(pointer), value)
-                if matches!(
-                    pointer.first(),
-                    Some(JsonPointerItem::Key(Key::Property(
-                        FileNodeProperty::ShareWith
-                    )))
-                ) =>
-            {
-                let mut pointer = pointer.iter();
-                pointer.next();
-
-                file_node.acls = JmapRights::acl_patch::<file_node::FileNode>(
-                    std::mem::take(&mut file_node.acls),
-                    pointer,
-                    value,
-                )?;
-                has_acl_changes = true;
-            }
-            (FileNodeProperty::Id, value) => {
-                if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {
-                    return Err(SetError::invalid_properties()
-                        .with_property(FileNodeProperty::Id)
-                        .with_description("The id property is immutable."));
-                }
-            }
-            (property, _) => {
-                return Err(SetError::invalid_properties()
-                    .with_property(property.clone())
-                    .with_description("Field could not be set."));
-            }
-        }
-    }
-
-    let will_be_file = file_node.file.is_some() || blob_id.is_some();
-    if will_be_file {
-        let file = file_node.file.get_or_insert_default();
-        if let Some(size) = pending_size {
-            file.size = size;
-        }
-        if let Some(media_type) = pending_type {
-            file.media_type = media_type;
-        }
-        if let Some(executable) = pending_executable {
-            file.executable = executable;
-        }
-    } else {
-        let sets_non_null = matches!(pending_type, Some(Some(_)))
-            || matches!(pending_size, Some(s) if s != 0)
-            || matches!(pending_executable, Some(true));
-        if sets_non_null {
-            return Err(SetError::invalid_properties()
-                .with_property(FileNodeProperty::Type)
-                .with_description("size, type and executable may only be set on file nodes."));
-        }
-    }
-
-    // Validate name
-    if file_node.name.is_empty() {
-        return Err(SetError::invalid_properties()
-            .with_property(FileNodeProperty::Name)
-            .with_description("Missing name."));
-    }
-
-    Ok(UpdateResult {
-        has_acl_changes,
-        blob_id,
-        modified_set,
-        parent,
-    })
-}
-
-pub(super) fn validate_file_node_hierarchy(
-    document_id: Option<u32>,
-    parent: ParentRef,
-    is_shared: bool,
-    cache: &GroupwareResources,
-    created_folders: &AHashMap<ParentRef, Vec<AclGrant>>,
-) -> Result<(), SetError<FileNodeProperty>> {
-    if parent.is_root() {
-        if is_shared && document_id.is_none() {
-            return Err(SetError::invalid_properties()
-                .with_property(FileNodeProperty::ParentId)
-                .with_description("Cannot create top-level folder in a shared account."));
-        }
-
-        return Ok(());
-    };
-
-    if let (Some(document_id), Some(parent_id)) = (document_id, parent.document_id()) {
-        if document_id == parent_id {
-            return Err(SetError::invalid_properties()
-                .with_property(FileNodeProperty::ParentId)
-                .with_description("A file node cannot be its own parent."));
-        }
-
-        // Validate circular references
-        if let Some(file) = cache.container_resource_path_by_id(document_id)
-            && cache
-                .subtree(file.path())
-                .any(|r| r.document_id() == parent_id)
-        {
-            return Err(SetError::invalid_properties()
-                .with_property(FileNodeProperty::ParentId)
-                .with_description("Circular reference in parent ids."));
-        }
-    }
-
-    // Make sure the parent is a container
-    if !created_folders.contains_key(&parent)
-        && parent
-            .document_id()
-            .is_none_or(|parent_id| cache.container_resource_by_id(parent_id).is_none())
-    {
-        return Err(SetError::invalid_properties()
-            .with_property(FileNodeProperty::ParentId)
-            .with_description("Parent ID does not exist or is not a folder."));
-    }
-
-    Ok(())
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub(super) enum Collision {
-    None,
-    Existing(u32),
-    Pending,
-}
-
-pub(super) async fn fetch_existing_modified(
-    store: &store::Store,
-    account_id: u32,
-    document_id: u32,
-) -> trc::Result<i64> {
-    Ok(store
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-            account_id,
-            Collection::FileNode,
-            document_id,
-        ))
-        .await?
-        .map(|arch| {
-            arch.unarchive::<FileNode>()
-                .map(|node| node.modified.to_native())
-                .unwrap_or(0)
-        })
-        .unwrap_or(0))
-}
-
-pub(super) fn names_equal(a: &str, b: &str, case_insensitive: bool) -> bool {
-    if case_insensitive {
-        a.eq_ignore_ascii_case(b)
-    } else {
-        a == b
-    }
-}
-
-pub(super) fn pending_key(
-    parent: ParentRef,
-    node: &FileNode,
-    case_insensitive: bool,
-) -> (ParentRef, String) {
-    (
-        parent,
-        if case_insensitive {
-            node.name.to_lowercase()
-        } else {
-            node.name.clone()
-        },
-    )
-}
-
-pub(super) fn find_sibling_collision(
-    document_id: Option<u32>,
-    parent: ParentRef,
-    node: &FileNode,
-    cache: &GroupwareResources,
-    pending: &AHashMap<(ParentRef, String), Option<u32>>,
-    case_insensitive: bool,
-) -> Collision {
-    if let Some(node_parent_id) = parent.cache_id() {
-        for resource in cache.resources.iter() {
-            if document_id.is_none_or(|id| id != resource.document_id())
-                && resource.parent_id() == node_parent_id
-                && resource
-                    .container_name()
-                    .is_some_and(|name| names_equal(&node.name, name, case_insensitive))
-            {
-                return Collision::Existing(resource.document_id());
-            }
-        }
-    }
-    if pending.contains_key(&pending_key(parent, node, case_insensitive)) {
-        return Collision::Pending;
-    }
-    Collision::None
-}
-
-pub(super) fn pick_unique_rename(
-    base: &str,
-    document_id: Option<u32>,
-    parent: ParentRef,
-    cache: &GroupwareResources,
-    pending: &AHashMap<(ParentRef, String), Option<u32>>,
-    case_insensitive: bool,
-) -> String {
-    let (stem, ext) = match base.rfind('.') {
-        Some(i) if i > 0 && i < base.len() - 1 => (&base[..i], &base[i..]),
-        _ => (base, ""),
-    };
-    let fold = |s: &str| {
-        if case_insensitive {
-            s.to_lowercase()
-        } else {
-            s.to_string()
-        }
-    };
-    // Collect all sibling names once, instead of rescanning per probe.
-    let mut taken: AHashSet<String> = AHashSet::new();
-    if let Some(node_parent_id) = parent.cache_id() {
-        for resource in cache.resources.iter() {
-            if document_id.is_none_or(|id| id != resource.document_id())
-                && resource.parent_id() == node_parent_id
-                && let Some(name) = resource.container_name()
-            {
-                taken.insert(fold(name));
-            }
-        }
-    }
-    for ((pending_parent, pending_name), _) in pending {
-        if *pending_parent == parent {
-            taken.insert(fold(pending_name));
-        }
-    }
-
-    for n in 2u32.. {
-        let candidate = format!("{stem} ({n}){ext}");
-        if !taken.contains(&fold(&candidate)) {
-            return candidate;
-        }
-    }
-    unreachable!()
 }

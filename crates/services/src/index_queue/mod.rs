@@ -13,6 +13,7 @@ use store::{
 use tokio::sync::{mpsc, oneshot};
 
 pub mod document;
+pub mod file;
 pub mod index;
 pub mod manager;
 pub mod reindex;

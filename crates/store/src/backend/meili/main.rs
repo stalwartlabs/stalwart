@@ -8,8 +8,8 @@ use crate::{
     SearchStore,
     backend::meili::{MeiliSearchStore, Task, TaskStatus, TaskUid},
     search::{
-        CalendarSearchField, ContactSearchField, EmailSearchField, SearchField, SearchableField,
-        TracingSearchField,
+        CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField, SearchField,
+        SearchableField, TracingSearchField,
     },
     write::now,
 };
@@ -60,6 +60,7 @@ impl MeiliSearchStore {
         self.create_index::<EmailSearchField>().await?;
         self.create_index::<CalendarSearchField>().await?;
         self.create_index::<ContactSearchField>().await?;
+        self.create_index::<FileSearchField>().await?;
         self.create_index::<TracingSearchField>().await?;
         Ok(())
     }
@@ -208,6 +209,7 @@ impl MeiliSearchStore {
             SearchIndex::Email,
             SearchIndex::Calendar,
             SearchIndex::Contacts,
+            SearchIndex::File,
             SearchIndex::Tracing,
         ] {
             let response = self

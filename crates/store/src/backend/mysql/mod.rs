@@ -144,14 +144,12 @@ impl MysqlSearchField for ContactSearchField {
 impl MysqlSearchField for FileSearchField {
     fn column(&self) -> &'static str {
         match self {
-            FileSearchField::Name => "name",
             FileSearchField::Content => "body",
         }
     }
 
     fn column_type(&self) -> &'static str {
         match self {
-            FileSearchField::Name => "TEXT",
             FileSearchField::Content => "MEDIUMTEXT",
         }
     }

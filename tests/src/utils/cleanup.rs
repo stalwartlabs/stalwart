@@ -103,6 +103,7 @@ async fn store_destroy_sql_indexes(store: &Store) {
                 SearchIndex::Email,
                 SearchIndex::Calendar,
                 SearchIndex::Contacts,
+                SearchIndex::File,
                 SearchIndex::Tracing,
             ] {
                 #[cfg(feature = "postgres")]

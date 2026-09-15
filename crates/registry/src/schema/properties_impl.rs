@@ -829,6 +829,8 @@ impl EnumImpl for Property {
             b"indexCountry" => Property::IndexCountry,
             b"indexEmail" => Property::IndexEmail,
             b"indexEmailFields" => Property::IndexEmailFields,
+            b"indexFileFields" => Property::IndexFileFields,
+            b"indexFiles" => Property::IndexFiles,
             b"indexKey" => Property::IndexKey,
             b"indexTelemetry" => Property::IndexTelemetry,
             b"indexTracingFields" => Property::IndexTracingFields,
@@ -914,6 +916,9 @@ impl EnumImpl for Property {
             b"maxEntrySize" => Property::MaxEntrySize,
             b"maxEventNotifications" => Property::MaxEventNotifications,
             b"maxEvents" => Property::MaxEvents,
+            b"maxExtractDecompressedSize" => Property::MaxExtractDecompressedSize,
+            b"maxExtractDocumentSize" => Property::MaxExtractDocumentSize,
+            b"maxExtractTextSize" => Property::MaxExtractTextSize,
             b"maxFailures" => Property::MaxFailures,
             b"maxFiles" => Property::MaxFiles,
             b"maxFlagLength" => Property::MaxFlagLength,
@@ -1787,6 +1792,8 @@ impl EnumImpl for Property {
             Property::IndexCountry => "indexCountry",
             Property::IndexEmail => "indexEmail",
             Property::IndexEmailFields => "indexEmailFields",
+            Property::IndexFileFields => "indexFileFields",
+            Property::IndexFiles => "indexFiles",
             Property::IndexKey => "indexKey",
             Property::IndexTelemetry => "indexTelemetry",
             Property::IndexTracingFields => "indexTracingFields",
@@ -1872,6 +1879,9 @@ impl EnumImpl for Property {
             Property::MaxEntrySize => "maxEntrySize",
             Property::MaxEventNotifications => "maxEventNotifications",
             Property::MaxEvents => "maxEvents",
+            Property::MaxExtractDecompressedSize => "maxExtractDecompressedSize",
+            Property::MaxExtractDocumentSize => "maxExtractDocumentSize",
+            Property::MaxExtractTextSize => "maxExtractTextSize",
             Property::MaxFailures => "maxFailures",
             Property::MaxFiles => "maxFiles",
             Property::MaxFlagLength => "maxFlagLength",
@@ -2749,6 +2759,8 @@ impl EnumImpl for Property {
             96 => Some(Property::IndexCountry),
             671 => Some(Property::IndexEmail),
             672 => Some(Property::IndexEmailFields),
+            954 => Some(Property::IndexFileFields),
+            953 => Some(Property::IndexFiles),
             421 => Some(Property::IndexKey),
             673 => Some(Property::IndexTelemetry),
             674 => Some(Property::IndexTracingFields),
@@ -2834,6 +2846,9 @@ impl EnumImpl for Property {
             418 => Some(Property::MaxEntrySize),
             163 => Some(Property::MaxEventNotifications),
             161 => Some(Property::MaxEvents),
+            957 => Some(Property::MaxExtractDecompressedSize),
+            955 => Some(Property::MaxExtractDocumentSize),
+            956 => Some(Property::MaxExtractTextSize),
             547 => Some(Property::MaxFailures),
             378 => Some(Property::MaxFiles),
             952 => Some(Property::MaxFlagLength),
@@ -3287,7 +3302,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 953;
+    const COUNT: usize = 958;
 }
 
 impl serde::Serialize for Property {

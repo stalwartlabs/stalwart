@@ -139,6 +139,7 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         SearchIndex::Email,
         SearchIndex::Contacts,
         SearchIndex::Calendar,
+        SearchIndex::File,
     ] {
         if let Some(store) = server.search_store().internal_fts() {
             store.unindex_account(index, account_id).await?;
@@ -208,7 +209,7 @@ pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Res
                         ));
                     }
                     Collection::FileNode => {
-                        if let Some(file) = archive.unarchive::<FileNode>()?.file.as_ref() {
+                        if let Some(file) = archive.unarchive::<FileNode>()?.file() {
                             delete_keys.push((
                                 collection,
                                 document_id,

@@ -78,7 +78,6 @@ pub enum ContactSearchField {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileSearchField {
-    Name,
     Content,
 }
 
@@ -329,7 +328,6 @@ impl SearchField {
                 ContactSearchField::Note => 12,
             },
             SearchField::File(field) => match field {
-                FileSearchField::Name => 3,
                 FileSearchField::Content => 4,
             },
             SearchField::Tracing(field) => match field {
@@ -377,7 +375,6 @@ impl SearchField {
                 ContactSearchField::Note => "note",
             },
             SearchField::File(field) => match field {
-                FileSearchField::Name => "name",
                 FileSearchField::Content => "content",
             },
             SearchField::Tracing(field) => match field {

@@ -9,11 +9,12 @@ use crate::{
     common::{
         ETag, ExtractETag,
         lock::{LockRequestHandler, ResourceState},
+        propfind::requested_href,
         uri::DavUriResource,
     },
-    file::DavFileResource,
+    file::{DavFileResource, FileItemId},
 };
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders, Return,
     schema::{
@@ -65,7 +66,7 @@ impl FilePropPatchRequestHandler for Server {
             .validate_uri(access_token, headers.uri)
             .await?
             .into_owned_uri()?;
-        let uri = headers.uri;
+        let uri = headers.raw_uri;
         let account_id = resource_.account_id;
         let files = self
             .fetch_groupware_resources(
@@ -75,7 +76,19 @@ impl FilePropPatchRequestHandler for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let resource = files.map_resource(&resource_)?;
+        if !access_token.is_member(account_id)
+            && let Some(path) = resource_.resource
+        {
+            files.hide_undiscoverable(
+                &files.file_access(access_token).discoverable,
+                path,
+                StatusCode::NOT_FOUND,
+                StatusCode::NOT_FOUND,
+            )?;
+        }
+        let resource = files.map_resource::<FileItemId>(&resource_)?;
+        let document_id = resource.resource.document_id;
+        let href = requested_href(uri, resource.resource.is_container);
 
         if !request.has_changes() {
             return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
@@ -87,7 +100,7 @@ impl FilePropPatchRequestHandler for Server {
             .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
                 Collection::FileNode,
-                resource.resource,
+                document_id,
             ))
             .await
             .caused_by(trc::location!())?
@@ -97,14 +110,29 @@ impl FilePropPatchRequestHandler for Server {
             .caused_by(trc::location!())?;
 
         // Validate ACL
-        if !access_token.is_member(account_id)
-            && !node
-                .inner
-                .acls
-                .effective_acl(access_token)
-                .contains(Acl::Modify)
-        {
-            return Err(DavError::Code(StatusCode::FORBIDDEN));
+        if !access_token.is_member(account_id) {
+            let acl = files.file_acl(access_token, document_id);
+            let (mut content, mut properties) = (false, false);
+            for property in request
+                .set
+                .iter()
+                .map(|value| &value.property)
+                .chain(request.remove.iter())
+            {
+                if matches!(
+                    property,
+                    DavProperty::WebDav(WebDavProperty::GetContentType)
+                ) {
+                    content = true;
+                } else {
+                    properties = true;
+                }
+            }
+            if (content && !acl.contains(Acl::ModifyItems))
+                || (properties && !acl.contains(Acl::Modify))
+            {
+                return Err(DavError::Code(StatusCode::FORBIDDEN));
+            }
         }
 
         // Validate headers
@@ -114,7 +142,7 @@ impl FilePropPatchRequestHandler for Server {
             vec![ResourceState {
                 account_id,
                 collection: resource.collection,
-                document_id: resource.resource.into(),
+                document_id: document_id.into(),
                 etag: node_.etag().into(),
                 path: resource_.resource.unwrap(),
                 ..Default::default()
@@ -152,7 +180,7 @@ impl FilePropPatchRequestHandler for Server {
                     access_token.account_tenant_ids(),
                     node,
                     account_id,
-                    resource.resource,
+                    document_id,
                     true,
                     &mut batch,
                 )
@@ -167,7 +195,7 @@ impl FilePropPatchRequestHandler for Server {
         if headers.ret != Return::Minimal || !is_success {
             Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
                 .with_xml_body(
-                    MultiStatus::new(vec![Response::new_propstat(uri, items.build())]).to_string(),
+                    MultiStatus::new(vec![Response::new_propstat(href, items.build())]).to_string(),
                 )
                 .with_etag_opt(etag))
         } else {
@@ -205,10 +233,12 @@ impl FilePropPatchRequestHandler for Server {
                     items.insert_ok(property.property);
                 }
                 (DavProperty::WebDav(WebDavProperty::GetContentType), DavValue::String(name))
-                    if file.file.is_some() =>
+                    if file.file().is_some() =>
                 {
                     if name.len() <= self.core.groupware.live_property_size {
-                        file.file.as_mut().unwrap().media_type = Some(name);
+                        if let Some(file) = file.file_mut() {
+                            file.media_type = Some(name);
+                        }
                         items.insert_ok(property.property);
                     } else {
                         items.insert_error_with_description(
@@ -222,7 +252,7 @@ impl FilePropPatchRequestHandler for Server {
                 (
                     DavProperty::WebDav(WebDavProperty::ResourceType),
                     DavValue::ResourceTypes(types),
-                ) if file.file.is_none() => {
+                ) if file.is_directory() => {
                     if types.0.len() != 1 || types.0.first() != Some(&ResourceType::Collection) {
                         items.insert_precondition_failed(
                             property.property,
@@ -284,8 +314,10 @@ fn remove_file_properties(
                 node.display_name = None;
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
-            DavProperty::WebDav(WebDavProperty::GetContentType) if node.file.is_some() => {
-                node.file.as_mut().unwrap().media_type = None;
+            DavProperty::WebDav(WebDavProperty::GetContentType) if node.file().is_some() => {
+                if let Some(file) = node.file_mut() {
+                    file.media_type = None;
+                }
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             DavProperty::DeadProperty(dead) => {

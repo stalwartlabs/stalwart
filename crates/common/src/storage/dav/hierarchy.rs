@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{CONTAINER_FLAG, encode_path_segment};
+use super::{CONTAINER_FLAG, canonical_path_segment, encode_path_segment};
 use crate::{
     ArenaRef, DavPath, GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID,
     PathChunk, PathIndex, ResourceChunk, ResourceStore,
@@ -136,7 +136,7 @@ impl GroupwareResources {
                             format!(
                                 "{}/{}",
                                 parent_chunk.path_str(parent),
-                                encode_path_segment(resource.container_name()?)
+                                canonical_path_segment(resource.container_name()?)
                             ),
                             parent_id,
                             Some(parent.hierarchy_seq & !CONTAINER_FLAG),
@@ -235,7 +235,7 @@ impl GroupwareResources {
         chain
             .iter()
             .rev()
-            .map(|node| node.container_name().map(encode_path_segment))
+            .map(|node| node.container_name().map(canonical_path_segment))
             .collect::<Option<Vec<_>>>()
             .map(|segments| segments.join("/"))
     }

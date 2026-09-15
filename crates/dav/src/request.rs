@@ -33,11 +33,11 @@ use crate::{
     },
     principal::{matching::PrincipalMatching, propsearch::PrincipalPropSearch},
 };
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, storage::dav::canonical_dav_resource_uri};
 use compact_str::{CompactString, ToCompactString};
 use dav_proto::{
     RequestHeaders,
-    parser::{DavParser, tokenizer::Tokenizer},
+    parser::{DavParser, header::strip_query_and_fragment, tokenizer::Tokenizer},
     schema::{
         Namespace,
         property::WebDavProperty,
@@ -629,9 +629,33 @@ impl DavRequestHandler for Server {
         };
 
         // Parse headers
-        let mut headers = RequestHeaders::new(request.uri().path());
+        let mut destinations = request.headers().get_all("destination").iter();
+        let destination = destinations.next().and_then(|value| value.to_str().ok());
+        if destinations.next().is_some() {
+            return HttpResponse::new(StatusCode::BAD_REQUEST);
+        }
+        let raw_uri = request.uri().path();
+        let is_file = resource == DavResourceName::File;
+        let (file_uri, file_destination) = if is_file {
+            match (
+                canonical_dav_resource_uri(raw_uri),
+                destination
+                    .map(|value| canonical_dav_resource_uri(strip_query_and_fragment(value)))
+                    .transpose(),
+            ) {
+                (Ok(uri), Ok(destination)) => (Some(uri), destination),
+                _ => return HttpResponse::new(StatusCode::BAD_REQUEST),
+            }
+        } else {
+            (None, None)
+        };
+        let mut headers = RequestHeaders::new(file_uri.as_deref().unwrap_or(raw_uri));
+        headers.raw_uri = raw_uri;
         for (key, value) in request.headers() {
             headers.parse(key.as_str(), value.to_str().unwrap_or_default());
+        }
+        if let Some(destination) = file_destination.as_deref() {
+            headers.destination = Some(destination);
         }
 
         let start_time = Instant::now();

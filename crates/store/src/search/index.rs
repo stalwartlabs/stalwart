@@ -65,17 +65,22 @@ impl Store {
 
             account_indexer.insert(document, document_id);
 
-            if matches!(index, SearchIndex::Calendar | SearchIndex::Contacts)
-                && let Some(current_document) = self
-                    .get_value::<RawValue>(ValueKey::from(ValueClass::SearchIndex(
-                        SearchIndexClass::Document {
-                            index,
-                            account_id,
-                            document_id,
-                        },
-                    )))
-                    .await
-                    .caused_by(trc::location!())?
+            if matches!(
+                index,
+                SearchIndex::Email
+                    | SearchIndex::Calendar
+                    | SearchIndex::Contacts
+                    | SearchIndex::File
+            ) && let Some(current_document) = self
+                .get_value::<RawValue>(ValueKey::from(ValueClass::SearchIndex(
+                    SearchIndexClass::Document {
+                        index,
+                        account_id,
+                        document_id,
+                    },
+                )))
+                .await
+                .caused_by(trc::location!())?
             {
                 account_indexer
                     .diff(&current_document.0, document_id)

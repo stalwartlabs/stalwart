@@ -5,7 +5,7 @@
  */
 
 use crate::index_queue::REINDEX_CHUNK_SIZE;
-use common::Server;
+use common::{Server, storage::dav::FILE_KIND_FILE};
 use email::cache::MessageCacheFetch;
 use groupware::cache::GroupwareCache;
 use store::{
@@ -73,6 +73,7 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
         SearchIndex::Email,
         SearchIndex::Calendar,
         SearchIndex::Contacts,
+        SearchIndex::File,
     ] {
         clear_queued_updates(server, index, account_id).await?;
     }
@@ -111,6 +112,31 @@ pub(crate) async fn reindex_account(server: &Server, account_id: u32) -> trc::Re
 
         for document_id in cache.document_ids(false) {
             batch.queue_document_index(document_type, account_id, document_id);
+
+            if batch.is_large_batch() {
+                server.commit_batch(batch).await?;
+                batch = BatchBuilder::new();
+            }
+        }
+    }
+
+    if server
+        .core
+        .email
+        .index_fields
+        .contains_key(&SearchIndex::File)
+    {
+        let cache = server
+            .fetch_groupware_resources(account_id, account_id, SyncCollection::FileNode)
+            .await
+            .caused_by(trc::location!())?;
+        for document_id in cache
+            .resources
+            .iter()
+            .filter(|resource| resource.file_kind() == Some(FILE_KIND_FILE))
+            .map(|resource| resource.document_id())
+        {
+            batch.queue_document_index(SearchIndex::File, account_id, document_id);
 
             if batch.is_large_batch() {
                 server.commit_batch(batch).await?;

@@ -12,6 +12,7 @@ pub mod dead_property;
 pub mod field;
 pub mod id;
 pub mod keyword;
+pub mod media_type;
 pub mod semver;
 pub mod special_use;
 pub mod type_state;

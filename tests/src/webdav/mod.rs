@@ -31,6 +31,7 @@ pub mod cal_itip;
 pub mod cal_query;
 pub mod cal_scheduling;
 pub mod card_query;
+pub mod compliance;
 pub mod copy_move;
 pub mod lock;
 pub mod mkcol;

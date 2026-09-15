@@ -24,7 +24,9 @@ use registry::{
 use std::time::Duration;
 use store::{
     registry::bootstrap::Bootstrap,
-    search::{CalendarSearchField, ContactSearchField, EmailSearchField, SearchField},
+    search::{
+        CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField, SearchField,
+    },
     write::SearchIndex,
 };
 use types::special_use::SpecialUse;
@@ -59,6 +61,7 @@ pub struct EmailConfig {
     pub index_batch_size: usize,
     pub index_concurrency: usize,
     pub index_fields: AHashMap<SearchIndex, AHashSet<SearchField>>,
+    pub extract_limits: ExtractLimits,
 
     pub max_objects: ObjectQuota,
     pub compression: CompressionAlgo,
@@ -66,6 +69,13 @@ pub struct EmailConfig {
     pub account_purge_frequency: SimpleCron,
     pub data_purge_frequency: SimpleCron,
     pub blob_purge_frequency: SimpleCron,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtractLimits {
+    pub max_document_size: usize,
+    pub max_text_size: usize,
+    pub max_decompressed_size: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -241,6 +251,12 @@ impl EmailConfig {
                     .collect(),
             );
         }
+        if search.index_files {
+            index_fields.insert(
+                SearchIndex::File,
+                AHashSet::from_iter([SearchField::File(FileSearchField::Content)]),
+            );
+        }
         if search.index_calendar {
             index_fields.insert(
                 SearchIndex::Calendar,
@@ -284,6 +300,11 @@ impl EmailConfig {
             index_batch_size: std::cmp::max(search.index_batch_size as usize, 1),
             index_concurrency: std::cmp::max(search.index_concurrency as usize, 1),
             index_fields,
+            extract_limits: ExtractLimits {
+                max_document_size: search.max_extract_document_size as usize,
+                max_text_size: search.max_extract_text_size as usize,
+                max_decompressed_size: search.max_extract_decompressed_size,
+            },
             max_objects,
             default_folders,
             shared_folder,

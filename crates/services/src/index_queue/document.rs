@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::Server;
+use common::{Core, Server};
 use email::message::metadata::MessageMetadata;
 use groupware::{calendar::CalendarEventContent, contact::ContactCardContent};
 use store::{
@@ -23,11 +23,16 @@ pub(crate) async fn build_email_document(
     account_id: u32,
     document_id: u32,
 ) -> trc::Result<Option<IndexDocument>> {
-    let Some(index_fields) = server.core.email.index_fields.get(&SearchIndex::Email) else {
+    if !server
+        .core
+        .email
+        .index_fields
+        .contains_key(&SearchIndex::Email)
+    {
         return Ok(None);
-    };
+    }
 
-    match server
+    let Some(archive) = server
         .store()
         .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
             account_id,
@@ -36,33 +41,72 @@ pub(crate) async fn build_email_document(
             EmailField::Metadata,
         ))
         .await?
-    {
-        Some(metadata_) => {
-            let metadata = metadata_
-                .unarchive::<MessageMetadata>()
-                .caused_by(trc::location!())?;
+    else {
+        return Ok(None);
+    };
 
-            let raw_message = server
-                .blob_store()
-                .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
-                .await
-                .caused_by(trc::location!())?
-                .ok_or_else(|| {
-                    trc::StoreEvent::NotFound
-                        .into_err()
-                        .details("Blob not found")
-                })?;
+    let metadata = archive
+        .unarchive::<MessageMetadata>()
+        .caused_by(trc::location!())?;
+    let raw_message = server
+        .blob_store()
+        .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
+        .await
+        .caused_by(trc::location!())?
+        .ok_or_else(|| {
+            trc::StoreEvent::NotFound
+                .into_err()
+                .details("Blob not found")
+        })?;
 
-            Ok(Some(metadata.index_document(
-                account_id,
-                document_id,
-                &raw_message,
-                index_fields,
-                server.core.email.default_language,
-            )))
-        }
-        None => Ok(None),
+    if !metadata.has_extractable_attachments() {
+        return email_document(
+            &server.core,
+            &archive,
+            account_id,
+            document_id,
+            &raw_message,
+        )
+        .map(Some);
     }
+
+    let core = server.core.clone();
+    tokio::task::spawn_blocking(move || {
+        email_document(&core, &archive, account_id, document_id, &raw_message)
+    })
+    .await
+    .map_err(|err| {
+        trc::EventType::Server(trc::ServerEvent::ThreadError)
+            .reason(err)
+            .details("Email indexing task failed")
+            .caused_by(trc::location!())
+    })?
+    .map(Some)
+}
+
+fn email_document(
+    core: &Core,
+    archive: &Archive<ArchiveBytes>,
+    account_id: u32,
+    document_id: u32,
+    raw_message: &[u8],
+) -> trc::Result<IndexDocument> {
+    let index_fields = core
+        .email
+        .index_fields
+        .get(&SearchIndex::Email)
+        .ok_or_else(|| trc::StoreEvent::UnexpectedError.into_err())?;
+    Ok(archive
+        .unarchive::<MessageMetadata>()
+        .caused_by(trc::location!())?
+        .index_document(
+            account_id,
+            document_id,
+            raw_message,
+            index_fields,
+            core.email.default_language,
+            &core.email.extract_limits,
+        ))
 }
 
 pub(crate) async fn build_calendar_document(

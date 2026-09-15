@@ -294,3 +294,37 @@ impl BlobPurgeState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use registry::schema::prelude::ObjectType;
+
+    fn temporary_link_key(account_id: u32, until: u64) -> Vec<u8> {
+        let mut key = vec![7u8; BLOB_HASH_LEN];
+        key.extend_from_slice(&account_id.to_be_bytes());
+        key.extend_from_slice(&until.to_be_bytes());
+        key
+    }
+
+    #[test]
+    fn expired_temporary_links_only_release_registry_objects() {
+        let mut state = BlobPurgeState::new();
+        state.update_hash(BlobHash([7u8; BLOB_HASH_LEN]));
+        let expired = state.now.saturating_sub(10);
+
+        let object_id = ObjectId::new(ObjectType::ArchivedItem, 42u64.into());
+        state
+            .process_key(&temporary_link_key(1, expired), &object_id.serialize())
+            .expect("registry object link");
+        state
+            .process_key(&temporary_link_key(2, expired), &1024u64.serialize())
+            .expect("sized temporary link");
+        state
+            .process_key(&temporary_link_key(3, expired), &[])
+            .expect("empty temporary link");
+
+        assert_eq!(state.delete_keys.len(), 3);
+        assert_eq!(state.delete_registry, vec![(1, object_id)]);
+    }
+}

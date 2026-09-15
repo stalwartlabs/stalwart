@@ -2410,6 +2410,7 @@ dependencies = [
  "sequoia-openpgp",
  "sieve-rs",
  "store",
+ "text-extract",
  "tinyvec",
  "tokio",
  "trc",
@@ -3043,6 +3044,7 @@ dependencies = [
  "serde",
  "serde_json",
  "store",
+ "text-extract",
  "tokio",
  "trc",
  "types",
@@ -7736,6 +7738,7 @@ dependencies = [
  "mail-builder 0.5.0",
  "mail-parser",
  "memory-stats",
+ "nlp",
  "p256",
  "psl",
  "registry",
@@ -7746,6 +7749,7 @@ dependencies = [
  "smtp-proto",
  "spam-filter",
  "store",
+ "text-extract",
  "tokio",
  "trc",
  "types",
@@ -8605,6 +8609,19 @@ dependencies = [
  "types",
  "utils",
  "x509-parser",
+]
+
+[[package]]
+name = "text-extract"
+version = "0.16.21"
+dependencies = [
+ "encoding_rs",
+ "flate2",
+ "hashify",
+ "mail-parser",
+ "memchr",
+ "quick-xml 0.41.0",
+ "zip",
 ]
 
 [[package]]

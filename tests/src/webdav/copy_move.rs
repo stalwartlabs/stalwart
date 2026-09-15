@@ -147,7 +147,11 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                 ["D:getetag"],
             )
             .await
-            .with_href_count(2)
+            .with_href_count(if resource_type == DavResourceName::File {
+                hierarchy.len() + 1
+            } else {
+                2
+            })
             .into_propfind_response(None);
         changes
             .properties(&hierarchy_root)

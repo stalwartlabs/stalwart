@@ -13,7 +13,7 @@ use crate::{
     },
     file::DavFileResource,
 };
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
@@ -58,6 +58,16 @@ impl FileGetRequestHandler for Server {
             )
             .await
             .caused_by(trc::location!())?;
+        if !access_token.is_member(account_id)
+            && let Some(path) = resource_.resource
+        {
+            files.hide_undiscoverable(
+                &files.file_access(access_token).discoverable,
+                path,
+                StatusCode::NOT_FOUND,
+                StatusCode::NOT_FOUND,
+            )?;
+        }
         let resource = files.map_resource(&resource_)?;
 
         // Fetch node
@@ -75,12 +85,14 @@ impl FileGetRequestHandler for Server {
 
         // Validate ACL
         if !access_token.is_member(account_id)
-            && !node.acls.effective_acl(access_token).contains(Acl::Read)
+            && !files
+                .file_acl(access_token, resource.resource)
+                .contains(Acl::Read)
         {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
 
-        let (hash, size, content_type) = if let Some(file) = node.file.as_ref() {
+        let (hash, size, content_type) = if let Some(file) = node.file() {
             (
                 file.blob_hash.0.as_ref(),
                 u32::from(file.size) as usize,

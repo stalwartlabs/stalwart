@@ -117,10 +117,7 @@ impl SearchableField for FileSearchField {
     }
 
     fn all_fields() -> &'static [SearchField] {
-        &[
-            SearchField::File(FileSearchField::Name),
-            SearchField::File(FileSearchField::Content),
-        ]
+        &[SearchField::File(FileSearchField::Content)]
     }
 
     fn is_indexed(&self) -> bool {

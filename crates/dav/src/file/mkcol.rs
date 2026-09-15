@@ -6,16 +6,19 @@
 
 use super::proppatch::FilePropPatchRequestHandler;
 use crate::{
-    DavMethod, PropStatBuilder,
+    DavError, DavMethod, PropStatBuilder,
     common::{
         ExtractETag,
-        acl::ResourceAcl,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
-    file::DavFileResource,
+    file::{DavFileResource, file_name_from_uri, is_symlink, validate_file_parent_acl},
 };
-use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
+use common::{
+    Server,
+    auth::AccessToken,
+    storage::{dav::MAX_FILE_NODE_DEPTH, index::ObjectIndexBuilder},
+};
 use dav_proto::{
     RequestHeaders, Return,
     schema::{Namespace, request::MkCol, response::MkColResponse},
@@ -61,15 +64,38 @@ impl FileMkColRequestHandler for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let resource = resources.map_parent_resource(&resource_)?;
+        let path = resource_
+            .resource
+            .ok_or(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))?;
+        if !access_token.is_member(account_id) {
+            resources.hide_undiscoverable(
+                &resources.file_access(access_token).discoverable,
+                path,
+                StatusCode::FORBIDDEN,
+                StatusCode::CONFLICT,
+            )?;
+        }
+        if let Some(existing) = resources.by_path(path) {
+            return Err(DavError::Code(if is_symlink(&existing) {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::METHOD_NOT_ALLOWED
+            }));
+        }
+        let parent = resources.map_directory_parent(path)?;
 
         // Validate and map parent ACL
-        let parent_id = resources.validate_and_map_parent_acl(
+        let parent_id = validate_file_parent_acl(
+            &resources,
             access_token,
             access_token.is_member(account_id),
-            resource.resource.0,
+            parent.map(|parent| parent.document_id()),
             Acl::AddItems,
         )?;
+        let name = file_name_from_uri(headers.uri)?;
+        if path.split('/').count() > MAX_FILE_NODE_DEPTH {
+            return Err(DavError::Code(StatusCode::FORBIDDEN));
+        }
 
         // Validate quota
         self.assert_object_quota(
@@ -85,9 +111,9 @@ impl FileMkColRequestHandler for Server {
             headers,
             vec![ResourceState {
                 account_id,
-                collection: resource.collection,
+                collection: resource_.collection,
                 document_id: Some(u32::MAX),
-                path: resource_.resource.unwrap(),
+                path,
                 ..Default::default()
             }],
             Default::default(),
@@ -99,13 +125,12 @@ impl FileMkColRequestHandler for Server {
         let now = now();
         let mut node = FileNode {
             parent_id,
-            name: resource.resource.1.to_string(),
-            display_name: None,
-            file: None,
+            name,
             created: now as i64,
             modified: now as i64,
-            dead_properties: Default::default(),
-            acls: Default::default(),
+            accessed: now as i64,
+            changed: now as i64,
+            ..Default::default()
         };
 
         // Apply MKCOL properties

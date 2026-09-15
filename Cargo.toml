@@ -28,6 +28,7 @@ members = [
     "crates/utils",
     "crates/common",
     "crates/trc",
+    "crates/text-extract",
     "crates/migration",
     "tests",
 ]

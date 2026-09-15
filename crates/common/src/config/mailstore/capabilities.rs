@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::config::mailstore::jmap::JmapConfig;
+use crate::{
+    config::mailstore::jmap::JmapConfig,
+    storage::dav::{
+        FORBIDDEN_FILE_NAME_CHARS, FORBIDDEN_FILE_NODE_NAMES, MAX_DAV_FILE_NAME_LEN,
+        MAX_FILE_NODE_DEPTH,
+    },
+};
 use ahash::AHashSet;
 use calcard::icalendar::ICalendarDuration;
 use jmap_proto::{
@@ -152,23 +158,23 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::FileNode,
             Capabilities::FileNode(FileNodeCapabilities {
-                max_file_node_depth: None,
-                max_size_file_node_name: 255,
-                forbidden_name_chars: Some("/<>:\"\\|?*".to_string()),
+                max_file_node_depth: Some(MAX_FILE_NODE_DEPTH as u64),
+                max_size_file_node_name: MAX_DAV_FILE_NAME_LEN as u64,
+                forbidden_name_chars: Some(FORBIDDEN_FILE_NAME_CHARS.to_string()),
                 forbidden_node_names: Some(
-                    [
-                        ".", "..", "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3",
-                        "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT0", "LPT1", "LPT2",
-                        "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-                    ]
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
+                    FORBIDDEN_FILE_NODE_NAMES
+                        .iter()
+                        .map(|name| name.to_string())
+                        .collect(),
                 ),
                 file_node_query_sort_options: vec![
                     FileNodeComparator::Name,
                     FileNodeComparator::Size,
+                    FileNodeComparator::Created,
+                    FileNodeComparator::Modified,
+                    FileNodeComparator::Type,
                     FileNodeComparator::NodeType,
+                    FileNodeComparator::Tree,
                 ],
                 may_create_top_level_file_node: true,
                 case_insensitive_names: false,

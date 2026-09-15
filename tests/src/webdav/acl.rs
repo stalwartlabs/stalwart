@@ -280,16 +280,20 @@ pub async fn test(test: &TestServer) {
                 [DavProperty::WebDav(WebDavProperty::CurrentUserPrivilegeSet)],
             )
             .await;
+        let mut expected_privileges = vec![
+            "D:privilege.D:read",
+            "D:privilege.D:read-current-user-privilege-set",
+            "D:privilege.D:write-content",
+            "D:privilege.D:write-properties",
+        ];
+        if is_file {
+            expected_privileges.push("D:privilege.D:bind");
+        }
         for href in [owner_folder.as_str(), owner_file.as_str()] {
             response
                 .properties(href)
                 .get(DavProperty::WebDav(WebDavProperty::CurrentUserPrivilegeSet))
-                .with_values([
-                    "D:privilege.D:read",
-                    "D:privilege.D:read-current-user-privilege-set",
-                    "D:privilege.D:write-content",
-                    "D:privilege.D:write-properties",
-                ]);
+                .with_values(expected_privileges.iter().copied());
         }
 
         // Test 10: Delete operations should fail
