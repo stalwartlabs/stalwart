@@ -29,7 +29,7 @@ use groupware::{
     calendar::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ArchivedDefaultAlert, Calendar, CalendarEvent,
         CalendarEventContent, CalendarEventData, EVENT_DRAFT, EVENT_HIDE_ATTENDEES,
-        EVENT_INVITE_OTHERS, EVENT_INVITE_SELF,
+        EVENT_INVITE_OTHERS, EVENT_INVITE_SELF, PREF_USE_DEFAULT_ALERTS,
         expand::{CalendarEventExpansion, ComponentRecurrenceId, RecurrenceKey, resolve_local},
         itip::ItipSendStatus,
     },
@@ -335,10 +335,11 @@ impl CalendarEventSet for Server {
 
             // Process changes
             if let Err(err) = update_calendar_event(
-                access_token,
+                access_token.personal_id(account_id, Collection::Calendar),
                 update.base_id,
                 update.base_patch.take().unwrap_or_default(),
                 &mut new_calendar_event,
+                &mut new_content,
                 &mut js_calendar_group,
             ) {
                 update.fail(&mut response, err);
@@ -764,10 +765,11 @@ impl CalendarEventSet for Server {
         let mut event = CalendarEvent::default();
         let mut content = CalendarEventContent::default();
         let use_default_alerts = match update_calendar_event(
-            access_token,
+            access_token.personal_id(account_id, Collection::Calendar),
             None,
             updates,
             &mut event,
+            &mut content,
             &mut js_calendar_group,
         ) {
             Ok(use_default_alerts) => use_default_alerts,
@@ -1013,10 +1015,11 @@ fn too_many_calendars(max: usize) -> SetError<JSCalendarProperty<Id>> {
 }
 
 fn update_calendar_event<'x>(
-    _access_token: &AccessToken,
+    personal_id: u32,
     expected_id: Option<Id>,
     updates: Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
     event: &mut CalendarEvent,
+    content: &mut CalendarEventContent,
     js_calendar_group: &mut JSCalendar<'x, Id, BlobId>,
 ) -> Result<Option<bool>, SetError<JSCalendarProperty<Id>>> {
     // Extract event
@@ -1080,6 +1083,15 @@ fn update_calendar_event<'x>(
             }
             (JSCalendarProperty::UseDefaultAlerts, Value::Bool(set)) => {
                 use_default_alerts = set;
+                if set {
+                    content.preferences_mut(personal_id).flags |= PREF_USE_DEFAULT_ALERTS;
+                } else if let Some(preferences) = content
+                    .preferences
+                    .iter_mut()
+                    .find(|p| p.account_id == personal_id)
+                {
+                    preferences.flags &= !PREF_USE_DEFAULT_ALERTS;
+                }
             }
             (JSCalendarProperty::UtcStart, Value::Element(JSCalendarValue::DateTime(start))) => {
                 utc_start = Some(start.timestamp);

@@ -5,7 +5,7 @@
  */
 
 use super::{
-    Listener, Listeners, ServerProtocol, TcpListener,
+    DEFAULT_TLS_TIMEOUT, Listener, Listeners, ServerProtocol, TcpListener,
     tls::{TLS12_VERSION, TLS13_VERSION},
 };
 use crate::{
@@ -211,6 +211,9 @@ impl Listeners {
 
         self.servers.push(Listener {
             max_connections: listener.max_connections.unwrap_or(system.max_connections),
+            tls_timeout: listener
+                .tls_timeout
+                .map_or(DEFAULT_TLS_TIMEOUT, |timeout| timeout.into_inner()),
             id: listener.name.clone(),
             registry_id: id,
             protocol,

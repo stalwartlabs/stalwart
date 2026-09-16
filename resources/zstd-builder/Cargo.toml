@@ -17,7 +17,7 @@ store = { path = "../../crates/store", features = ["test_mode"] }
 types = { path = "../../crates/types" }
 utils = { path = "../../crates/utils" }
 calcard = { version = "0.3", features = ["rkyv"] }
-mail-builder = { version = "0.5" }
+mail-builder = { version = "1.0" }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }
 serde_json = "1.0"

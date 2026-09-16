@@ -415,13 +415,13 @@ pub async fn build_itip_template(
         }
     };
 
-    let mut has_rrule = false;
-    let mut details = Vec::with_capacity(4);
+    let mut when_detail: Option<(usize, &ItipValue)> = None;
+    let mut details: Vec<AHashMap<CalendarTemplateVariable, String>> = Vec::with_capacity(4);
     for field in [
         ICalendarProperty::Summary,
         ICalendarProperty::Description,
-        ICalendarProperty::Rrule,
         ICalendarProperty::Dtstart,
+        ICalendarProperty::Rrule,
         ICalendarProperty::Location,
         ICalendarProperty::Conference,
     ] {
@@ -431,11 +431,7 @@ pub async fn build_itip_template(
             let field_name = match &field {
                 ICalendarProperty::Summary => locale.calendar_summary,
                 ICalendarProperty::Description => locale.calendar_description,
-                ICalendarProperty::Rrule => {
-                    has_rrule = true;
-                    locale.calendar_when
-                }
-                ICalendarProperty::Dtstart if !has_rrule => locale.calendar_when,
+                ICalendarProperty::Dtstart | ICalendarProperty::Rrule => locale.calendar_when,
                 ICalendarProperty::Location => locale.calendar_location,
                 ICalendarProperty::Conference => locale.calendar_conference,
                 _ => continue,
@@ -448,7 +444,11 @@ pub async fn build_itip_template(
                 ICalendarProperty::Summary => {
                     subject.push_str(&value);
                 }
-                ICalendarProperty::Dtstart | ICalendarProperty::Rrule => {
+                ICalendarProperty::Dtstart => {
+                    subject.push_str(" @ ");
+                    subject.push_str(&value);
+                }
+                ICalendarProperty::Rrule if when_detail.is_none() => {
                     subject.push_str(" @ ");
                     subject.push_str(&value);
                 }
@@ -469,6 +469,33 @@ pub async fn build_itip_template(
                 variables.insert_single(variable, value.clone());
             }
 
+            if matches!(field, ICalendarProperty::Rrule)
+                && let Some((index, start_value)) = when_detail
+                && let Some(detail) = details.get_mut(index)
+            {
+                if let Some(when_value) = detail.get_mut(&CalendarTemplateVariable::Value) {
+                    when_value.push_str(", ");
+                    when_value.push_str(&value);
+                }
+
+                if let Some(old_entry) = old_entry {
+                    detail.insert(
+                        CalendarTemplateVariable::Changed,
+                        locale.calendar_changed.to_string(),
+                    );
+                    let old_value = detail
+                        .entry(CalendarTemplateVariable::OldValue)
+                        .or_insert_with(|| {
+                            formatter.field_to_string(start_value, DateStyle::Short)
+                        });
+                    old_value.push_str(", ");
+                    old_value
+                        .push_str(&formatter.field_to_string(&old_entry.value, DateStyle::Short));
+                }
+
+                continue;
+            }
+
             let mut detail = AHashMap::with_capacity(4);
             detail.insert(CalendarTemplateVariable::Key, field_name.to_string());
             if matches!(field, ICalendarProperty::Conference)
@@ -486,6 +513,9 @@ pub async fn build_itip_template(
                     CalendarTemplateVariable::OldValue,
                     formatter.field_to_string(&old_entry.value, DateStyle::Short),
                 );
+            }
+            if matches!(field, ICalendarProperty::Dtstart) && when_detail.is_none() {
+                when_detail = Some((details.len(), &entry.value));
             }
             details.push(detail);
         }

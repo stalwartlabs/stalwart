@@ -11,7 +11,7 @@ use common::{
 };
 use compact_str::ToCompactString;
 use queue::QueueQuota;
-use registry::schema::{enums::ExpressionVariable, prelude::Property, structs::Rate};
+use registry::schema::{enums::ExpressionVariable, structs::Rate};
 use trc::SmtpEvent;
 
 pub trait NewKey: Sized {
@@ -183,7 +183,7 @@ impl<T: SessionStream> Session<T> {
             if t.expr.is_empty()
                 || self
                     .server
-                    .eval_expr(&t.expr, self, t.id, Property::Match, self.data.session_id)
+                    .eval_if(&t.expr, self, self.data.session_id)
                     .await
                     .unwrap_or(false)
             {

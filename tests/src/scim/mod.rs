@@ -12,7 +12,7 @@ use registry::{
     schema::{
         enums::{Permission, StorageQuota},
         prelude::{ObjectType, Property},
-        structs::Action,
+        structs::{Action, Imap},
     },
     types::EnumImpl,
 };
@@ -42,6 +42,11 @@ pub async fn scim_tests() {
     let mut test = TestServerBuilder::new("scim_tests")
         .await
         .with_default_listeners()
+        .await
+        .with_object(Imap {
+            allow_plain_text_auth: true,
+            ..Default::default()
+        })
         .await
         .build()
         .await;

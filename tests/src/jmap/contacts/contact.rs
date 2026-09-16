@@ -135,6 +135,20 @@ pub async fn test(test: &TestServer) {
         acme_contact.with_property(JSContactProperty::<Id>::Id, acme_contact_id.as_str()),
     );
 
+    let response = account
+        .jmap_method_calls(json!([[
+            "ContactCard/get",
+            {
+                "accountId": account.id_string(),
+                "properties": [],
+                "ids": [&sarah_contact_id, &carlos_contact_id],
+            },
+            "0"
+        ]]))
+        .await;
+    response.list()[0].assert_is_equal(json!({ "id": &sarah_contact_id }));
+    response.list()[1].assert_is_equal(json!({ "id": &carlos_contact_id }));
+
     // Creating a contact without address book should fail
     assert_eq!(
         account

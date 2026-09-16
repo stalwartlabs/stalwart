@@ -106,6 +106,24 @@ pub async fn test(test: &TestServer) {
         "2007-03-07T12:00:00"
     );
 
+    // Synthetic instances return null recurrence properties when requested
+    for start in [
+        "2007-03-05T12:00:00",
+        "2007-03-06T12:00:00",
+        "2007-03-07T15:00:00",
+        "2007-03-08T12:00:00",
+        "2007-03-09T12:00:00",
+    ] {
+        let instance = instance(&instances, start);
+        for property in ["recurrenceRule", "recurrenceOverrides"] {
+            assert_eq!(
+                instance.get(property),
+                Some(&Value::Null),
+                "{property} on {start}: {instance:?}"
+            );
+        }
+    }
+
     // Unknown instances are reported as not found
     let unknown_id =
         Id::from_parts(1000, Id::from_str(&recurring_id).unwrap().document_id()).to_string();
@@ -916,6 +934,8 @@ async fn expand_instances(account: &Account, calendar_id: &str) -> Vec<Value> {
                 "title",
                 "recurrenceId",
                 "locations",
+                "recurrenceRule",
+                "recurrenceOverrides",
             ],
             ids,
         )

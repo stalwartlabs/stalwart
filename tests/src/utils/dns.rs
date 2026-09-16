@@ -46,10 +46,11 @@ pub trait DnsCache {
 
 impl DnsCache for Server {
     fn txt_add(&self, name: impl ToFqdn, value: impl Into<Txt>, valid_until: std::time::Instant) {
-        self.inner
-            .cache
-            .dns_txt
-            .insert_with_expiry(name.to_fqdn(), value.into(), valid_until);
+        self.inner.cache.dns_txt.insert_with_expiry(
+            name.to_fqdn().into_owned().into_boxed_str(),
+            value.into(),
+            valid_until,
+        );
     }
 
     fn ipv4_add(&self, name: impl ToFqdn, value: Vec<Ipv4Addr>, valid_until: std::time::Instant) {
@@ -64,7 +65,7 @@ impl DnsCache for Server {
         valid_until: std::time::Instant,
     ) {
         self.inner.cache.dns_ipv4.insert_with_expiry(
-            name.to_fqdn(),
+            name.to_fqdn().into_owned().into_boxed_str(),
             RecordSet {
                 rrset: Arc::from(value),
                 dnssec_status,
@@ -100,7 +101,7 @@ impl DnsCache for Server {
         valid_until: std::time::Instant,
     ) {
         self.inner.cache.dns_ipv6.insert_with_expiry(
-            name.to_fqdn(),
+            name.to_fqdn().into_owned().into_boxed_str(),
             RecordSet {
                 rrset: Arc::from(value),
                 dnssec_status,
@@ -128,7 +129,7 @@ impl DnsCache for Server {
         valid_until: std::time::Instant,
     ) {
         self.inner.cache.dns_mx.insert_with_expiry(
-            name.to_fqdn(),
+            name.to_fqdn().into_owned().into_boxed_str(),
             RecordSet {
                 rrset: Arc::from(value),
                 dnssec_status,
@@ -138,9 +139,10 @@ impl DnsCache for Server {
     }
 
     fn tlsa_add(&self, name: impl ToFqdn, value: Arc<Tlsa>, valid_until: std::time::Instant) {
-        self.inner
-            .cache
-            .dns_tlsa
-            .insert_with_expiry(name.to_fqdn(), Some(value), valid_until);
+        self.inner.cache.dns_tlsa.insert_with_expiry(
+            name.to_fqdn().into_owned().into_boxed_str(),
+            Some(value),
+            valid_until,
+        );
     }
 }

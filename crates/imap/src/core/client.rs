@@ -360,7 +360,15 @@ impl<T: SessionStream> Session<T> {
             }
             Command::Authenticate => {
                 if let State::NotAuthenticated { .. } = state {
-                    Ok(request)
+                    if self.is_tls || self.server.core.imap.allow_plain_auth {
+                        Ok(request)
+                    } else {
+                        Err(trc::ImapEvent::Error
+                            .into_err()
+                            .details("Cannot authenticate over plain-text.")
+                            .code(ResponseCode::PrivacyRequired)
+                            .id(request.tag))
+                    }
                 } else {
                     Err(trc::ImapEvent::Error
                         .into_err()

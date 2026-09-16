@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    Directories,
+    Directories, Directory, UnavailableDirectory,
     backend::{ldap::LdapDirectory, oidc::OpenIdDirectory, sql::SqlDirectory},
 };
 use registry::schema::{
@@ -21,6 +21,7 @@ impl Directories {
 
         for directory in bp.list_infallible::<structs::Directory>().await {
             let id = directory.id;
+            let directory_type = directory.object.object_type();
             let result = match directory.object {
                 structs::Directory::Ldap(directory) => LdapDirectory::open(directory).await,
                 structs::Directory::Sql(directory) => {
@@ -29,14 +30,14 @@ impl Directories {
                 structs::Directory::Oidc(directory) => OpenIdDirectory::open(directory).await,
             };
 
-            match result {
-                Ok(directory) => {
-                    directories.insert(id.id().id() as u32, Arc::new(directory));
-                }
+            let directory = match result {
+                Ok(directory) => directory,
                 Err(err) => {
-                    bp.build_error(id, err);
+                    bp.build_error(id, err.clone());
+                    Directory::Unavailable(UnavailableDirectory::new(directory_type, err))
                 }
-            }
+            };
+            directories.insert(id.id().id() as u32, Arc::new(directory));
         }
 
         let auth = bp.setting_infallible::<Authentication>().await;

@@ -1041,6 +1041,17 @@ pub async fn test_build_itip_templates(test: &TestServer) {
                 }),
             },
             ItipField {
+                name: ICalendarProperty::Rrule,
+                value: ItipValue::Rrule(Box::new(ICalendarRecurrenceRule {
+                    freq: ICalendarFrequency::Weekly,
+                    byday: vec![ICalendarDay {
+                        ordwk: None,
+                        weekday: ICalendarWeekday::Tuesday,
+                    }],
+                    ..Default::default()
+                })),
+            },
+            ItipField {
                 name: ICalendarProperty::Attendee,
                 value: ItipValue::Participants(vec![
                     ItipParticipant {
@@ -1173,6 +1184,17 @@ pub async fn test_build_itip_templates(test: &TestServer) {
                     }),
                 },
                 ItipField {
+                    name: ICalendarProperty::Rrule,
+                    value: ItipValue::Rrule(Box::new(ICalendarRecurrenceRule {
+                        freq: ICalendarFrequency::Weekly,
+                        byday: vec![ICalendarDay {
+                            ordwk: None,
+                            weekday: ICalendarWeekday::Tuesday,
+                        }],
+                        ..Default::default()
+                    })),
+                },
+                ItipField {
                     name: ICalendarProperty::Attendee,
                     value: ItipValue::Participants(vec![
                         ItipParticipant {
@@ -1208,7 +1230,48 @@ pub async fn test_build_itip_templates(test: &TestServer) {
                         tz_id: Tz::from_str("New Zealand").unwrap().as_id(),
                     }),
                 },
+                ItipField {
+                    name: ICalendarProperty::Rrule,
+                    value: ItipValue::Rrule(Box::new(ICalendarRecurrenceRule {
+                        freq: ICalendarFrequency::Daily,
+                        ..Default::default()
+                    })),
+                },
             ],
+        },
+        ItipSummary::Update {
+            method: ICalendarMethod::Request,
+            current: vec![
+                ItipField {
+                    name: ICalendarProperty::Summary,
+                    value: ItipValue::Text("Standup".to_string()),
+                },
+                ItipField {
+                    name: ICalendarProperty::Dtstart,
+                    value: ItipValue::Time(ItipTime {
+                        start: 1750616068,
+                        tz_id: Tz::from_str("New Zealand").unwrap().as_id(),
+                    }),
+                },
+                ItipField {
+                    name: ICalendarProperty::Rrule,
+                    value: ItipValue::Rrule(Box::new(ICalendarRecurrenceRule {
+                        freq: ICalendarFrequency::Weekly,
+                        byday: vec![ICalendarDay {
+                            ordwk: None,
+                            weekday: ICalendarWeekday::Tuesday,
+                        }],
+                        ..Default::default()
+                    })),
+                },
+            ],
+            previous: vec![ItipField {
+                name: ICalendarProperty::Rrule,
+                value: ItipValue::Rrule(Box::new(ICalendarRecurrenceRule {
+                    freq: ICalendarFrequency::Daily,
+                    ..Default::default()
+                })),
+            }],
         },
     ]
     .into_iter()

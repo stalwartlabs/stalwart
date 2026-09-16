@@ -11,7 +11,6 @@ use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::contact,
-    request::reference::MaybeResultReference,
 };
 use jmap_tools::{Map, Value};
 use store::{
@@ -43,10 +42,7 @@ impl ContactCardGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<contact::ContactCard>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let return_all_properties = request
-            .properties
-            .as_ref()
-            .is_none_or(|v| matches!(v, MaybeResultReference::Value(v) if v.is_empty()));
+        let return_all_properties = request.properties.is_none();
         let properties =
             request.unwrap_properties(&[JSContactProperty::Id, JSContactProperty::AddressBookIds]);
         let account_id = request.account_id.document_id();

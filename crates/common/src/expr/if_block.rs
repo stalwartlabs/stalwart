@@ -221,6 +221,13 @@ impl IfBlock {
         }
     }
 
+    pub fn all_items(&self) -> impl Iterator<Item = &ExpressionItem> {
+        self.if_then
+            .iter()
+            .flat_map(|if_then| if_then.expr.items().iter().chain(if_then.then.items()))
+            .chain(self.default.items())
+    }
+
     pub fn default_string(&self) -> Option<&str> {
         for expr_item in &self.default.items {
             if let ExpressionItem::Constant(Constant::String(value)) = expr_item {

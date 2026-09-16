@@ -16,12 +16,13 @@ use compact_str::{ToCompactString, format_compact};
 use proxy_header::io::ProxiedStream;
 use rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256;
 use std::{
+    io,
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
 use store::registry::bootstrap::Bootstrap;
-use tokio::{net::TcpStream, sync::watch};
+use tokio::{net::TcpStream, sync::watch, time::timeout};
 use tokio_rustls::server::TlsStream;
 use trc::{EventType, HttpEvent, ImapEvent, ManageSieveEvent, Pop3Event, SmtpEvent};
 use utils::UnwrapFailure;
@@ -40,6 +41,7 @@ impl Listener {
             protocol: self.protocol,
             proxy_networks: self.proxy_networks,
             limiter: ConcurrencyLimiter::new(self.max_connections),
+            tls_timeout: self.tls_timeout,
             acceptor,
             shutdown_rx,
             span_id_gen: self.span_id_gen,
@@ -386,41 +388,46 @@ impl ServerInstance {
         session_id: u64,
     ) -> Result<TlsStream<T>, ()> {
         match &self.acceptor {
-            TcpAcceptor::Tls { acceptor, .. } => match acceptor.accept(stream).await {
-                Ok(stream) => {
-                    trc::event!(
-                        Tls(trc::TlsEvent::Handshake),
-                        ListenerId = self.id.clone(),
-                        SpanId = session_id,
-                        Version = format_compact!(
-                            "{:?}",
-                            stream
-                                .get_ref()
-                                .1
-                                .protocol_version()
-                                .unwrap_or(rustls::ProtocolVersion::TLSv1_3)
-                        ),
-                        Details = format_compact!(
-                            "{:?}",
-                            stream
-                                .get_ref()
-                                .1
-                                .negotiated_cipher_suite()
-                                .unwrap_or(TLS13_AES_128_GCM_SHA256)
-                        )
-                    );
-                    Ok(stream)
+            TcpAcceptor::Tls { acceptor, .. } => {
+                match timeout(self.tls_timeout, acceptor.accept(stream))
+                    .await
+                    .unwrap_or_else(|_| Err(io::Error::from(io::ErrorKind::TimedOut)))
+                {
+                    Ok(stream) => {
+                        trc::event!(
+                            Tls(trc::TlsEvent::Handshake),
+                            ListenerId = self.id.clone(),
+                            SpanId = session_id,
+                            Version = format_compact!(
+                                "{:?}",
+                                stream
+                                    .get_ref()
+                                    .1
+                                    .protocol_version()
+                                    .unwrap_or(rustls::ProtocolVersion::TLSv1_3)
+                            ),
+                            Details = format_compact!(
+                                "{:?}",
+                                stream
+                                    .get_ref()
+                                    .1
+                                    .negotiated_cipher_suite()
+                                    .unwrap_or(TLS13_AES_128_GCM_SHA256)
+                            )
+                        );
+                        Ok(stream)
+                    }
+                    Err(err) => {
+                        trc::event!(
+                            Tls(trc::TlsEvent::HandshakeError),
+                            ListenerId = self.id.clone(),
+                            SpanId = session_id,
+                            Reason = err.to_compact_string(),
+                        );
+                        Err(())
+                    }
                 }
-                Err(err) => {
-                    trc::event!(
-                        Tls(trc::TlsEvent::HandshakeError),
-                        ListenerId = self.id.clone(),
-                        SpanId = session_id,
-                        Reason = err.to_compact_string(),
-                    );
-                    Err(())
-                }
-            },
+            }
             TcpAcceptor::Plain => {
                 trc::event!(
                     Tls(trc::TlsEvent::NotConfigured),

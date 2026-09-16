@@ -1,6 +1,6 @@
 [package]
 name = "http"
-version = "0.16.21"
+version = "0.16.23"
 edition = "2024"
 
 [dependencies]
@@ -21,8 +21,8 @@ directory = { path =  "../directory" }
 services = { path =  "../services" }
 registry = { path =  "../registry" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-builder = { version = "0.5" }
-mail-auth = { version = "0.12", features = ["generate", "arc"] }
+mail-builder = { version = "1.0" }
+mail-auth = { version = "0.13", features = ["generate", "arc"] }
 tokio = { version = "1.53", features = ["rt"] }
 hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }

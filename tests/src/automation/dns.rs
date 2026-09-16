@@ -178,6 +178,25 @@ pub async fn test(test: &TestServer) {
 
     records.sort_unstable_by_key(|r| format!("{:?}-{}-{:?}", r.record.as_type(), r.name, r.record));
 
+    for record in &records {
+        let target = match &record.record {
+            dns_update::DnsRecord::CNAME(target) | dns_update::DnsRecord::NS(target) => {
+                Some(target.as_str())
+            }
+            dns_update::DnsRecord::MX(mx) => Some(mx.exchange.as_str()),
+            dns_update::DnsRecord::SRV(srv) => Some(srv.target.as_str()),
+            _ => None,
+        };
+
+        if let Some(target) = target {
+            assert!(
+                target.ends_with('.'),
+                "Published target {target:?} for {} is not fully qualified",
+                record.name
+            );
+        }
+    }
+
     assert_eq!(BindSerializer::serialize(&records), EXPECTED_ZONE);
 
     // Cleanup

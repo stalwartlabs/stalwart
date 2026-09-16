@@ -57,15 +57,18 @@ impl LdapFilter {
                 LdapFilterItem::Full => result.push_str(ldap_escape(value).as_ref()),
                 LdapFilterItem::LocalPart => {
                     result.push_str(
-                        value
-                            .rsplit_once('@')
-                            .map(|(local, _)| local)
-                            .unwrap_or(value),
+                        ldap_escape(
+                            value
+                                .rsplit_once('@')
+                                .map(|(local, _)| local)
+                                .unwrap_or(value),
+                        )
+                        .as_ref(),
                     );
                 }
                 LdapFilterItem::DomainPart => {
                     if let Some((_, domain)) = value.rsplit_once('@') {
-                        result.push_str(domain);
+                        result.push_str(ldap_escape(domain).as_ref());
                     }
                 }
             }
@@ -99,5 +102,24 @@ impl LdapConnectionManager {
 impl Bind {
     pub fn new(dn: String, password: String) -> Self {
         Self { dn, password }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LdapFilter;
+
+    #[test]
+    fn filter_placeholders_are_escaped() {
+        let filter = LdapFilter::new("(&(uid={local})(dc={domain})(mail=?))").unwrap();
+
+        assert_eq!(
+            filter.build("*)(uid=*@ex)(dc=*"),
+            "(&(uid=\\2a\\29\\28uid=\\2a)(dc=ex\\29\\28dc=\\2a)(mail=\\2a\\29\\28uid=\\2a@ex\\29\\28dc=\\2a))"
+        );
+        assert_eq!(
+            filter.build("john@example.com"),
+            "(&(uid=john)(dc=example.com)(mail=john@example.com))"
+        );
     }
 }

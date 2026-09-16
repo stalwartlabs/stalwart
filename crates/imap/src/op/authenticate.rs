@@ -125,6 +125,7 @@ impl<T: SessionStream> Session<T> {
                     capabilities: Capability::all_capabilities(
                         true,
                         !self.is_tls && self.instance.acceptor.is_tls(),
+                        true,
                         self.server.core.imap.max_messages_per_command,
                         self.server.core.imap.max_messages_per_save,
                     ),

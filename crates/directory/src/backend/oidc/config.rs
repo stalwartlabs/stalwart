@@ -7,13 +7,19 @@
 use crate::Directory;
 use crate::backend::oidc::lookup::fetch_jwks_keys;
 use crate::backend::oidc::{
-    DiscoveryDocument, JwksCache, OidcConfig, OidcDiscovery, OidcError, OpenIdDirectory,
+    CachedKey, DiscoveryDocument, JwksCache, OidcConfig, OidcDiscovery, OidcError, OpenIdDirectory,
 };
+use ahash::AHashMap;
 use compact_str::{CompactString, format_compact};
 use registry::schema::structs;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use trc::AuthEvent;
+use utils::Client;
+
+const DISCOVERY_RETRY_FOR: Duration = Duration::from_secs(30);
+const DISCOVERY_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 
 impl OpenIdDirectory {
     pub async fn open(config: structs::OidcDirectory) -> Result<Directory, String> {
@@ -37,6 +43,44 @@ impl OpenIdDirectory {
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| OidcError::Network(format!("HTTP client build failed: {e}")))?;
+
+        let started_at = Instant::now();
+        let (document, keys) = loop {
+            match Self::discover(&http, &config).await {
+                Ok(discovery) => break discovery,
+                Err(err) if err.is_transient() && started_at.elapsed() < DISCOVERY_RETRY_FOR => {
+                    trc::event!(
+                        Auth(AuthEvent::Warning),
+                        Url = CompactString::from(&config.issue_url),
+                        Reason = format_compact!(
+                            "{err}, retrying in {} seconds",
+                            DISCOVERY_RETRY_INTERVAL.as_secs()
+                        )
+                    );
+                    tokio::time::sleep(DISCOVERY_RETRY_INTERVAL).await;
+                }
+                Err(err) => return Err(err),
+            }
+        };
+
+        Ok(Self {
+            discovery: OidcDiscovery {
+                url: config.issue_url.clone(),
+                document,
+            },
+            config,
+            http,
+            cache: RwLock::new(JwksCache {
+                keys,
+                last_updated: Instant::now(),
+            }),
+        })
+    }
+
+    async fn discover(
+        http: &Client,
+        config: &OidcConfig,
+    ) -> Result<(DiscoveryDocument, AHashMap<String, Arc<CachedKey>>), OidcError> {
         let discovery_url = format!(
             "{}/.well-known/openid-configuration",
             config.issue_url.trim_end_matches('/')
@@ -57,7 +101,7 @@ impl OpenIdDirectory {
         let normalised_issue = config.issue_url.trim_end_matches('/');
         let normalised_issuer = discovery.issuer.trim_end_matches('/');
         if normalised_issuer != normalised_issue {
-            return Err(OidcError::Provider(format!(
+            return Err(OidcError::Config(format!(
                 "Issuer mismatch: discovery document says '{}' but configured issue_url is '{}'",
                 discovery.issuer, config.issue_url,
             )));
@@ -128,19 +172,8 @@ impl OpenIdDirectory {
             });
         }*/
 
-        let cache = RwLock::new(JwksCache {
-            keys: fetch_jwks_keys(&http, &discovery.jwks_uri).await?,
-            last_updated: Instant::now(),
-        });
+        let keys = fetch_jwks_keys(http, &discovery.jwks_uri).await?;
 
-        Ok(Self {
-            discovery: OidcDiscovery {
-                url: config.issue_url.clone(),
-                document: discovery,
-            },
-            config,
-            http,
-            cache,
-        })
+        Ok((discovery, keys))
     }
 }

@@ -7,7 +7,7 @@
 use base64::{Engine, engine::general_purpose};
 use common::{
     Server,
-    config::server::ServerProtocol,
+    config::server::{DEFAULT_TLS_TIMEOUT, ServerProtocol},
     network::{ServerInstance, SessionStream, TcpAcceptor, limiter::ConcurrencyLimiter},
 };
 use rustls::{ServerConfig, server::ResolvesServerCert};
@@ -370,6 +370,7 @@ impl TestServerInstance for ServerInstance {
                 implicit: false,
             },
             limiter: ConcurrencyLimiter::new(100),
+            tls_timeout: DEFAULT_TLS_TIMEOUT,
             shutdown_rx,
             proxy_networks: vec![],
             span_id_gen: Arc::new(SnowflakeIdGenerator::new()),

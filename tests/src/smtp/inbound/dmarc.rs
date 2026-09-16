@@ -97,6 +97,10 @@ async fn dmarc() {
                         if_: "sender_domain = 'xn--eebajf.xn--9dbq2a'".into(),
                         then: "relaxed".into(),
                     },
+                    ExpressionMatch {
+                        if_: "sender_domain = 'tmp._dns_error.test'".into(),
+                        then: "relaxed".into(),
+                    },
                 ]),
                 else_: "strict".into(),
             },
@@ -315,7 +319,7 @@ async fn dmarc() {
         .assert_contains("To: dmarc-failures@example.com")
         .assert_contains("Feedback-Type: auth-failure")
         .assert_contains("Auth-Failure: dmarc")
-        .assert_contains("dmarc=3Dnone");
+        .assert_contains("dmarc=3Dfail");
 
     // Expect DMARC aggregate report
     let report = test.read_report().await.unwrap_dmarc();
@@ -460,4 +464,20 @@ async fn dmarc() {
         report.report_record.envelope_from(),
         "xn--eebajf.xn--9dbq2a"
     );
+
+    // An aligned SPF temperror under p=reject is temporarily rejected in strict mode
+    test.server.txt_add(
+        "_dmarc.tmp._dns_error.test",
+        Dmarc::parse(b"v=DMARC1; p=reject; psd=n").unwrap(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    session
+        .send_message(
+            "joe@tmp._dns_error.test",
+            &["jdoe@localdomain.org"],
+            "From: joe@tmp._dns_error.test\r\nTo: jdoe@localdomain.org\r\nSubject: test\r\n\r\ntest",
+            "451 4.7.1",
+        )
+        .await;
+    test.assert_no_events();
 }

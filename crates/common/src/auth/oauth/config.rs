@@ -18,6 +18,7 @@ use jsonwebtoken::{
     },
 };
 use registry::schema::{enums::JwtSignatureAlgorithm, prelude::ObjectType, structs::OidcProvider};
+use std::borrow::Cow;
 use store::{
     rand::{RngExt, distr::Alphanumeric, rng},
     registry::bootstrap::Bootstrap,
@@ -64,8 +65,7 @@ impl OAuthConfig {
             .sample_iter(Alphanumeric)
             .take(64)
             .map(char::from)
-            .collect::<String>()
-            .into_bytes();
+            .collect::<String>();
 
         let signature_key = auth
             .signature_key
@@ -74,11 +74,11 @@ impl OAuthConfig {
             .map_err(|err| {
                 bp.build_error(ObjectType::OidcProvider.singleton(), err);
             })
-            .unwrap_or_default();
+            .unwrap_or(Cow::Borrowed(rand_key.as_str()));
 
         let fallback_key = || {
             (
-                EncodingKey::from_secret(&rand_key),
+                EncodingKey::from_secret(rand_key.as_bytes()),
                 AlgorithmParameters::OctetKey(OctetKeyParameters {
                     key_type: OctetKeyType::Octet,
                     value: URL_SAFE_NO_PAD.encode(&rand_key),
@@ -145,8 +145,7 @@ impl OAuthConfig {
                 .secret()
                 .await
                 .map_err(|err| bp.build_error(ObjectType::OidcProvider.singleton(), err))
-                .unwrap_or_default()
-                .into_owned(),
+                .map_or_else(|_| rand_key.clone(), Cow::into_owned),
             oauth_expiry_user_code: auth.user_code_expiry.as_secs(),
             oauth_expiry_auth_code: auth.auth_code_expiry.as_secs(),
             oauth_expiry_token: auth.access_token_expiry.as_secs(),

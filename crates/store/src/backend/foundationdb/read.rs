@@ -474,6 +474,10 @@ impl FdbStore {
 
         Ok(trx)
     }
+
+    pub(crate) fn invalidate_read_snapshot(&self) {
+        self.version.expire();
+    }
 }
 
 fn streaming_mode(expected_rows: Option<usize>) -> options::StreamingMode {

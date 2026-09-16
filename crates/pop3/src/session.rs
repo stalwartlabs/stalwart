@@ -141,7 +141,7 @@ impl<T: SessionStream> Session<T> {
                 .await?,
             server: self.server,
             instance: self.instance,
-            receiver: self.receiver,
+            receiver: Parser::default(),
             state: self.state,
             session_id: self.session_id,
             in_flight: self.in_flight,

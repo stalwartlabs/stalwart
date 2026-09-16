@@ -21,7 +21,7 @@ use store::{
     write::{BatchBuilder, BlobLink, BlobOp, now},
 };
 use trc::{AddContext, Key};
-use types::blob_hash::BlobHash;
+use types::{blob_hash::BlobHash, id::Id};
 
 const APP_BLOB_PREFIX: &str = "STALWART_APP_";
 const MAX_APP_SIZE: usize = 100 * 1024 * 1024;
@@ -341,6 +341,16 @@ impl WebApplicationManager {
         server
             .blob_store()
             .delete_blob(self.blob_key.as_slice())
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn delete_bundle(server: &Server, app_id: Id) -> trc::Result<()> {
+        let blob_key = BlobHash::generate(format!("{APP_BLOB_PREFIX}{app_id}").as_bytes());
+
+        server
+            .blob_store()
+            .delete_blob(blob_key.as_slice())
             .await
             .map(|_| ())
     }

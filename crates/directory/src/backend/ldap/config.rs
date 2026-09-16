@@ -129,7 +129,7 @@ impl LdapDirectory {
 }
 
 impl LdapFilter {
-    fn new(value: &str) -> Result<Self, String> {
+    pub(super) fn new(value: &str) -> Result<Self, String> {
         let mut filter = Vec::new();
         let mut token = String::new();
         let mut value = value.chars();

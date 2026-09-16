@@ -16,13 +16,15 @@ use rustls::ServerConfig;
 use std::fmt::Debug;
 use std::{
     borrow::Cow,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::watch,
+    time::timeout,
 };
 use tokio_rustls::{Accept, TlsAcceptor};
 use trc::{Event, EventType, Key};
@@ -57,6 +59,7 @@ pub struct ServerInstance {
     pub acceptor: TcpAcceptor,
     pub limiter: ConcurrencyLimiter,
     pub proxy_networks: Vec<IpAddrOrMask>,
+    pub tls_timeout: Duration,
     pub shutdown_rx: watch::Receiver<bool>,
     pub span_id_gen: Arc<SnowflakeIdGenerator>,
 }
@@ -123,59 +126,68 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
             let session_id;
 
             if is_tls {
-                match session
-                    .instance
-                    .acceptor
-                    .accept(session.stream, acme_core, &session.instance)
-                    .await
+                let tls_timeout = session.instance.tls_timeout;
+                match timeout(
+                    tls_timeout,
+                    session
+                        .instance
+                        .acceptor
+                        .accept(session.stream, acme_core, &session.instance),
+                )
+                .await
                 {
-                    TcpAcceptorResult::Tls(accept) => match accept.await {
-                        Ok(stream) => {
-                            // Generate sessionId
-                            session.session_id = session.instance.span_id_gen.generate();
-                            session_id = session.session_id;
+                    Ok(TcpAcceptorResult::Tls(accept)) => {
+                        match timeout(tls_timeout.saturating_sub(start_time.elapsed()), accept)
+                            .await
+                            .unwrap_or_else(|_| Err(io::Error::from(io::ErrorKind::TimedOut)))
+                        {
+                            Ok(stream) => {
+                                // Generate sessionId
+                                session.session_id = session.instance.span_id_gen.generate();
+                                session_id = session.session_id;
 
-                            // Send span
-                            Event::with_keys(
-                                span_start,
-                                vec![
-                                    (Key::ListenerId, session.instance.id.clone().into()),
-                                    (Key::LocalPort, session.local_port.into()),
-                                    (Key::RemoteIp, session.remote_ip.into()),
-                                    (Key::RemotePort, session.remote_port.into()),
-                                    (Key::SpanId, session.session_id.into()),
-                                ],
-                            )
-                            .send_with_metrics();
+                                // Send span
+                                Event::with_keys(
+                                    span_start,
+                                    vec![
+                                        (Key::ListenerId, session.instance.id.clone().into()),
+                                        (Key::LocalPort, session.local_port.into()),
+                                        (Key::RemoteIp, session.remote_ip.into()),
+                                        (Key::RemotePort, session.remote_port.into()),
+                                        (Key::SpanId, session.session_id.into()),
+                                    ],
+                                )
+                                .send_with_metrics();
 
-                            manager
-                                .handle(SessionData {
-                                    stream,
-                                    local_ip: session.local_ip,
-                                    local_port: session.local_port,
-                                    remote_ip: session.remote_ip,
-                                    remote_port: session.remote_port,
-                                    protocol: session.protocol,
-                                    session_id: session.session_id,
-                                    in_flight: session.in_flight,
-                                    instance: session.instance,
-                                })
-                                .await;
+                                manager
+                                    .handle(SessionData {
+                                        stream,
+                                        local_ip: session.local_ip,
+                                        local_port: session.local_port,
+                                        remote_ip: session.remote_ip,
+                                        remote_port: session.remote_port,
+                                        protocol: session.protocol,
+                                        session_id: session.session_id,
+                                        in_flight: session.in_flight,
+                                        instance: session.instance,
+                                    })
+                                    .await;
+                            }
+                            Err(err) => {
+                                trc::event!(
+                                    Tls(trc::TlsEvent::HandshakeError),
+                                    ListenerId = session.instance.id.clone(),
+                                    LocalPort = local_port,
+                                    RemoteIp = session.remote_ip,
+                                    RemotePort = session.remote_port,
+                                    Reason = err.to_compact_string(),
+                                );
+
+                                return;
+                            }
                         }
-                        Err(err) => {
-                            trc::event!(
-                                Tls(trc::TlsEvent::HandshakeError),
-                                ListenerId = session.instance.id.clone(),
-                                LocalPort = local_port,
-                                RemoteIp = session.remote_ip,
-                                RemotePort = session.remote_port,
-                                Reason = err.to_compact_string(),
-                            );
-
-                            return;
-                        }
-                    },
-                    TcpAcceptorResult::Plain(stream) => {
+                    }
+                    Ok(TcpAcceptorResult::Plain(stream)) => {
                         // Generate sessionId
                         session.session_id = session.instance.span_id_gen.generate();
                         session_id = session.session_id;
@@ -196,7 +208,19 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
                         session.stream = stream;
                         manager.handle(session).await;
                     }
-                    TcpAcceptorResult::Close => return,
+                    Ok(TcpAcceptorResult::Close) => return,
+                    Err(_) => {
+                        trc::event!(
+                            Tls(trc::TlsEvent::HandshakeError),
+                            ListenerId = session.instance.id.clone(),
+                            LocalPort = local_port,
+                            RemoteIp = session.remote_ip,
+                            RemotePort = session.remote_port,
+                            Reason = io::Error::from(io::ErrorKind::TimedOut).to_compact_string(),
+                        );
+
+                        return;
+                    }
                 }
             } else {
                 // Generate sessionId

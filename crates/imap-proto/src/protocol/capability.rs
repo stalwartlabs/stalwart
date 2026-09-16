@@ -144,6 +144,7 @@ impl Capability {
     pub fn all_capabilities(
         is_authenticated: bool,
         offer_tls: bool,
+        allow_auth: bool,
         message_limit: u32,
         save_limit: u32,
     ) -> Vec<Capability> {
@@ -194,12 +195,14 @@ impl Capability {
                 Capability::MessageLimit(message_limit),
                 Capability::SaveLimit(save_limit),
             ]);
-        } else {
+        } else if allow_auth {
             capabilities.extend([
                 Capability::Auth(Mechanism::Plain),
                 Capability::Auth(Mechanism::OAuthBearer),
                 Capability::Auth(Mechanism::XOauth2),
             ]);
+        } else {
+            capabilities.push(Capability::LoginDisabled);
         }
         if offer_tls {
             capabilities.push(Capability::StartTLS);

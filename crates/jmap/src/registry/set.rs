@@ -31,6 +31,7 @@ use crate::registry::{
 use common::{
     Server, auth::AccessToken, cache::invalidate::CacheInvalidationBuilder,
     expr::if_block::BootstrapExprExt, ipc::CacheInvalidation,
+    manager::application::WebApplicationManager,
 };
 use directory::core::secret::{hash_secret, is_password_hash};
 use http_proto::HttpSessionData;
@@ -604,6 +605,18 @@ impl RegistrySet for Server {
                     let object_id = match (modification, result) {
                         (Modification::Update { id, object }, RegistryWriteResult::Success(_)) => {
                             cache_invalidator.process_update(id, &object, &new_object);
+                            if let (
+                                ObjectInner::Application(previous),
+                                ObjectInner::Application(updated),
+                            ) = (&object.inner, &new_object.inner)
+                                && previous.resource_url != updated.resource_url
+                                && let Err(err) =
+                                    WebApplicationManager::delete_bundle(self, id).await
+                            {
+                                trc::error!(
+                                    err.details("Failed to delete cached application bundle")
+                                );
+                            }
                             set.response.updated.append(
                                 id,
                                 if !response.object.is_empty() {
@@ -697,6 +710,15 @@ impl RegistrySet for Server {
                                     }
 
                                     schedule_account_destruction(set.server, id, account).await?;
+                                }
+
+                                if matches!(object.inner, ObjectInner::Application(_))
+                                    && let Err(err) =
+                                        WebApplicationManager::delete_bundle(self, id).await
+                                {
+                                    trc::error!(
+                                        err.details("Failed to delete cached application bundle")
+                                    );
                                 }
 
                                 cache_invalidator.process_delete(id, &object);

@@ -10,6 +10,7 @@ use crate::backend::oidc::OpenIdDirectory;
 use backend::{ldap::LdapDirectory, sql::SqlDirectory};
 use deadpool::managed::PoolError;
 use ldap3::LdapError;
+use registry::schema::enums::DirectoryType;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 pub mod backend;
@@ -33,6 +34,32 @@ pub enum Directory {
     Ldap(LdapDirectory),
     Sql(SqlDirectory),
     OpenId(OpenIdDirectory),
+    Unavailable(UnavailableDirectory),
+}
+
+pub struct UnavailableDirectory {
+    directory_type: DirectoryType,
+    error: String,
+}
+
+impl UnavailableDirectory {
+    pub fn new(directory_type: DirectoryType, error: impl Into<String>) -> Self {
+        Self {
+            directory_type,
+            error: error.into(),
+        }
+    }
+
+    pub fn directory_type(&self) -> DirectoryType {
+        self.directory_type
+    }
+
+    pub fn error(&self) -> trc::Error {
+        trc::StoreEvent::NotConfigured
+            .into_err()
+            .details("Directory is unavailable because it failed to initialize")
+            .reason(&self.error)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

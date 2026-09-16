@@ -22,7 +22,7 @@ use crate::task_manager::{
 };
 use common::BuildServer;
 use common::config::network::ClusterRoles;
-use common::config::server::ServerProtocol;
+use common::config::server::{DEFAULT_TLS_TIMEOUT, ServerProtocol};
 use common::network::limiter::ConcurrencyLimiter;
 use common::network::{ServerInstance, TcpAcceptor};
 use common::{Inner, Server};
@@ -82,6 +82,7 @@ pub fn spawn_task_manager(inner: Arc<Inner>) {
         protocol: ServerProtocol::Smtp,
         acceptor: TcpAcceptor::Plain,
         limiter: ConcurrencyLimiter::new(100),
+        tls_timeout: DEFAULT_TLS_TIMEOUT,
         shutdown_rx: watch::channel(false).1,
         proxy_networks: vec![],
         span_id_gen: Arc::new(SnowflakeIdGenerator::new()),

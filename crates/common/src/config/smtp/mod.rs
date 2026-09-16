@@ -14,7 +14,7 @@ use self::{
     auth::MailAuthConfig, queue::QueueConfig, report::ReportConfig, resolver::Resolvers,
     session::SessionConfig,
 };
-use crate::{config::smtp::queue::RequireOptional, expr::Expression};
+use crate::{config::smtp::queue::RequireOptional, expr::if_block::IfBlock};
 use registry::{
     schema::{properties::ObjectType, structs::Rate},
     types::id::ObjectId,
@@ -32,11 +32,11 @@ pub struct SmtpConfig {
     pub tls_report_client: reqwest::Client,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 //#[cfg_attr(feature = "test_mode", derive(PartialEq, Eq))]
 pub struct QueueRateLimiter {
     pub id: ObjectId,
-    pub expr: Expression,
+    pub expr: IfBlock,
     pub keys: u16,
     pub rate: Rate,
 }

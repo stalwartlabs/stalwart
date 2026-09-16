@@ -348,17 +348,7 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
             spf_output: &spf_mail_from_result,
         }))
         .await;
-    let dmarc_pass = matches!(dmarc_output.spf_result(), DmarcResult::Pass)
-        || matches!(dmarc_output.dkim_result(), DmarcResult::Pass);
-    let dmarc_result = if dmarc_pass {
-        DmarcResult::Pass
-    } else if dmarc_output.spf_result() != &DmarcResult::None {
-        dmarc_output.spf_result().clone()
-    } else if dmarc_output.dkim_result() != &DmarcResult::None {
-        dmarc_output.dkim_result().clone()
-    } else {
-        DmarcResult::None
-    };
+    let dmarc_result = dmarc_output.result();
     let dmarc_policy = dmarc_output.policy();
 
     let asn_geo = server.lookup_asn_country(remote_ip).await;
@@ -550,17 +540,8 @@ async fn dmarc_troubleshoot(
             spf_output: &mail_spf_output,
         }))
         .await;
-    let dmarc_pass = matches!(dmarc_output.spf_result(), DmarcResult::Pass)
-        || matches!(dmarc_output.dkim_result(), DmarcResult::Pass);
-    let dmarc_result = if dmarc_pass {
-        DmarcResult::Pass
-    } else if dmarc_output.spf_result() != &DmarcResult::None {
-        dmarc_output.spf_result().clone()
-    } else if dmarc_output.dkim_result() != &DmarcResult::None {
-        dmarc_output.dkim_result().clone()
-    } else {
-        DmarcResult::None
-    };
+    let dmarc_result = dmarc_output.result();
+    let dmarc_pass = dmarc_result == DmarcResult::Pass;
 
     request.spf_ehlo_domain = ehlo_spf_output.domain().to_string();
     request.spf_ehlo_result = (&ehlo_spf_output).into();

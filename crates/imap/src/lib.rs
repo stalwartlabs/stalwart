@@ -15,20 +15,24 @@ pub mod op;
 
 static SERVER_GREETING: &str = "Stalwart IMAP4rev2 at your service.";
 
-pub(crate) static GREETING_WITH_TLS: LazyLock<Vec<u8>> = LazyLock::new(|| {
-    StatusResponse::ok(SERVER_GREETING)
-        .with_code(ResponseCode::Capability {
-            capabilities: Capability::all_capabilities(false, true, 0, 0),
-        })
-        .into_bytes()
-});
+pub(crate) static GREETING_WITH_TLS: LazyLock<Vec<u8>> =
+    LazyLock::new(|| build_greeting(true, true));
 
-pub(crate) static GREETING_WITHOUT_TLS: LazyLock<Vec<u8>> = LazyLock::new(|| {
+pub(crate) static GREETING_WITH_TLS_LOGIN_DISABLED: LazyLock<Vec<u8>> =
+    LazyLock::new(|| build_greeting(true, false));
+
+pub(crate) static GREETING_WITHOUT_TLS: LazyLock<Vec<u8>> =
+    LazyLock::new(|| build_greeting(false, true));
+
+pub(crate) static GREETING_WITHOUT_TLS_LOGIN_DISABLED: LazyLock<Vec<u8>> =
+    LazyLock::new(|| build_greeting(false, false));
+
+fn build_greeting(offer_tls: bool, allow_auth: bool) -> Vec<u8> {
     StatusResponse::ok(SERVER_GREETING)
         .with_code(ResponseCode::Capability {
-            capabilities: Capability::all_capabilities(false, false, 0, 0),
+            capabilities: Capability::all_capabilities(false, offer_tls, allow_auth, 0, 0),
         })
         .into_bytes()
-});
+}
 
 pub struct ImapError;

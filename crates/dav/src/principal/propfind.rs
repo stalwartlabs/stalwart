@@ -69,6 +69,9 @@ impl PrincipalPropFind for Server {
         let properties = match request {
             PropFind::PropName => {
                 let props = all_props(collection, None);
+                for property in &props {
+                    response.set_namespace(property.namespace());
+                }
                 for account_id in account_ids {
                     response.add_response(Response::new_propstat(
                         self.owner_href(&access_account_info, account_id)
@@ -84,6 +87,9 @@ impl PrincipalPropFind for Server {
             PropFind::AllProp(items) => Cow::Owned(all_props(collection, items.as_slice().into())),
             PropFind::Prop(items) => Cow::Borrowed(items),
         };
+        for property in properties.as_slice() {
+            response.set_namespace(property.namespace());
+        }
         let is_principal = match collection {
             Collection::AddressBook | Collection::ContactCard => {
                 response.set_namespace(Namespace::CardDav);
@@ -235,7 +241,6 @@ impl PrincipalPropFind for Server {
                             ));
                         }
                         _ => {
-                            response.set_namespace(property.namespace());
                             fields_not_found.push(DavPropertyValue::empty(property.clone()));
                         }
                     },
@@ -267,7 +272,6 @@ impl PrincipalPropFind for Server {
                             .caused_by(trc::location!())?;
 
                             fields.push(DavPropertyValue::new(property.clone(), hrefs));
-                            response.set_namespace(Namespace::CalDav);
                         }
                         PrincipalProperty::AddressbookHomeSet => {
                             let hrefs = build_home_set(
@@ -281,19 +285,16 @@ impl PrincipalPropFind for Server {
                             .caused_by(trc::location!())?;
 
                             fields.push(DavPropertyValue::new(property.clone(), hrefs));
-                            response.set_namespace(Namespace::CardDav);
                         }
 
                         PrincipalProperty::PrincipalAddress => {
                             fields_not_found.push(DavPropertyValue::empty(property.clone()));
-                            response.set_namespace(Namespace::CardDav);
                         }
                         PrincipalProperty::CalendarUserAddressSet => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
                                 vec![Href(format!("mailto:{}", account.name()))],
                             ));
-                            response.set_namespace(Namespace::CalDav);
                         }
                         PrincipalProperty::CalendarUserType => {
                             fields.push(DavPropertyValue::new(
@@ -304,7 +305,6 @@ impl PrincipalPropFind for Server {
                                     DavValue::String("GROUP".to_string())
                                 },
                             ));
-                            response.set_namespace(Namespace::CalDav);
                         }
                         PrincipalProperty::ScheduleInboxURL => {
                             fields.push(DavPropertyValue::new(
@@ -315,7 +315,6 @@ impl PrincipalPropFind for Server {
                                     percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                                 ))],
                             ));
-                            response.set_namespace(Namespace::CalDav);
                         }
                         PrincipalProperty::ScheduleOutboxURL => {
                             fields.push(DavPropertyValue::new(
@@ -326,11 +325,9 @@ impl PrincipalPropFind for Server {
                                     percent_encoding::utf8_percent_encode(account.name(), RFC_3986),
                                 ))],
                             ));
-                            response.set_namespace(Namespace::CalDav);
                         }
                     },
                     _ => {
-                        response.set_namespace(property.namespace());
                         fields_not_found.push(DavPropertyValue::empty(property.clone()));
                     }
                 }

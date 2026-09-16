@@ -228,7 +228,9 @@ impl DavProperty {
         match self {
             DavProperty::WebDav(WebDavProperty::GetCTag) => Namespace::CalendarServer,
             DavProperty::CardDav(_)
-            | DavProperty::Principal(PrincipalProperty::AddressbookHomeSet) => Namespace::CardDav,
+            | DavProperty::Principal(
+                PrincipalProperty::AddressbookHomeSet | PrincipalProperty::PrincipalAddress,
+            ) => Namespace::CardDav,
             DavProperty::CalDav(_)
             | DavProperty::Principal(
                 PrincipalProperty::CalendarHomeSet

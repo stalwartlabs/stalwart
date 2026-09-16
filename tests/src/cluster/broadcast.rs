@@ -18,7 +18,7 @@ use registry::{
         prelude::{ObjectType, Property, SocketAddr},
         structs::{
             ClusterListenerGroup, ClusterListenerGroupProperties, ClusterRole, ClusterTaskGroup,
-            Coordinator, NatsCoordinator, NetworkListener, RedisStore,
+            Coordinator, Imap, NatsCoordinator, NetworkListener, RedisStore,
         },
     },
     types::map::Map,
@@ -62,6 +62,11 @@ pub async fn cluster_tests() {
     let test = TestServerBuilder::new("cluster_test_0")
         .await
         .with_object(coordinator)
+        .await
+        .with_object(Imap {
+            allow_plain_text_auth: true,
+            ..Default::default()
+        })
         .await
         .with_listener(NetworkListenerProtocol::Http, "http_0", 11000, true)
         .await

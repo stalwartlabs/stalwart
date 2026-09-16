@@ -39,6 +39,7 @@ impl<T: SessionStream> Session<T> {
                     capabilities: Capability::all_capabilities(
                         self.state.is_authenticated(),
                         !self.is_tls && self.instance.acceptor.is_tls(),
+                        self.is_tls || self.server.core.imap.allow_plain_auth,
                         self.server.core.imap.max_messages_per_command,
                         self.server.core.imap.max_messages_per_save,
                     ),

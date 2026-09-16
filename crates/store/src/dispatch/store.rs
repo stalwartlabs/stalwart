@@ -370,4 +370,11 @@ impl Store {
             _ => Ok(()),
         }
     }
+
+    pub fn invalidate_read_snapshot(&self) {
+        #[cfg(feature = "foundation")]
+        if let Self::FoundationDb(store) = self {
+            store.invalidate_read_snapshot();
+        }
+    }
 }

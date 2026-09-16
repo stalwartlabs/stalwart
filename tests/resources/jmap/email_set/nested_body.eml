@@ -3,8 +3,8 @@ From: "Joe Bloggs" <joe@example.com>
 Message-ID: <my-message-id>
 Subject: RFC 8621 Section 4.1.4 test
 MIME-Version: 1.0
-Content-Type: multipart/mixed; 
-	boundary="boundary_0"
+Content-Type: multipart/mixed;
+ boundary="boundary_0"
 
 
 --boundary_0
@@ -14,18 +14,18 @@ Content-Transfer-Encoding: 7bit
 
 Part A
 --boundary_0
-Content-Type: multipart/mixed; 
-	boundary="boundary_1"
+Content-Type: multipart/mixed;
+ boundary="boundary_1"
 
 
 --boundary_1
-Content-Type: multipart/alternative; 
-	boundary="boundary_2"
+Content-Type: multipart/alternative;
+ boundary="boundary_2"
 
 
 --boundary_2
-Content-Type: multipart/mixed; 
-	boundary="boundary_3"
+Content-Type: multipart/mixed;
+ boundary="boundary_3"
 
 
 --boundary_3
@@ -50,8 +50,8 @@ Part D
 --boundary_3--
 
 --boundary_2
-Content-Type: multipart/related; 
-	boundary="boundary_4"
+Content-Type: multipart/related;
+ boundary="boundary_4"
 
 
 --boundary_4

@@ -3,8 +3,8 @@ To: sender@foobar.org
 Auto-Submitted: auto-generated
 Subject: Partially delivered message
 MIME-Version: 1.0
-Content-Type: multipart/report; report-type="delivery-status"; 
-	boundary="mime_boundary"
+Content-Type: multipart/report; report-type="delivery-status";
+ boundary="mime_boundary"
 
 
 --mime_boundary
@@ -14,16 +14,16 @@ Content-Transfer-Encoding: quoted-printable
 Your message has been partially delivered:
 
     ----- Delivery to the following addresses was successful -----
-<jane@example.org> (delivered to 'mx2.example.org' with code 250 (2.1.5) 'Me=
-ssage accepted for delivery')
+<jane@example.org> (delivered to 'mx2.example.org' with code 250 (2.1.5) 'M=
+essage accepted for delivery')
 
     ----- There was a temporary problem delivering to these addresses -----
-<john.doe@example.org> (connection to 'mx.domain.org' failed: Connection tim=
-eout)
+<john.doe@example.org> (connection to 'mx.domain.org' failed: Connection ti=
+meout)
 
     ----- Delivery to the following addresses failed -----
-<foobar@example.org> (host 'mx.example.org' rejected command 'RCPT TO:<fooba=
-r@example.org>' with code 550 (5.1.2) 'User does not exist')
+<foobar@example.org> (host 'mx.example.org' rejected command 'RCPT TO:<foob=
+ar@example.org>' with code 550 (5.1.2) 'User does not exist')
 
 
 --mime_boundary

@@ -67,6 +67,7 @@ impl RegistryGet for Server {
         let is_account_filtered = (object_flags & OBJ_FILTER_ACCOUNT) != 0
             && !access_token.has_permission(Permission::Impersonate);
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let has_properties = request.properties.is_some();
         let mut get = RegistryGetResponse {
             access_token,
             server: self,
@@ -91,7 +92,7 @@ impl RegistryGet for Server {
             is_tenant_filtered,
             is_account_filtered,
         };
-        if !get.properties.is_empty() {
+        if has_properties {
             get.properties.insert(Property::Id);
         }
 

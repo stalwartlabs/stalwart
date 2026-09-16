@@ -71,7 +71,7 @@ impl TlsaLookup for Server {
                 .await;
         }
 
-        let key = key.to_fqdn();
+        let key = key.to_fqdn().into_owned().into_boxed_str();
         if let Some(value) = self.inner.cache.dns_mx.get::<str>(key.as_ref())
             && value.dnssec_status != DnssecStatus::Indeterminate
         {
@@ -156,7 +156,7 @@ impl TlsaLookup for Server {
     }
 
     async fn tlsa_lookup(&self, key: impl ToFqdn + Sync + Send) -> mail_auth::Result<TlsaResult> {
-        let key = key.to_fqdn();
+        let key = key.to_fqdn().into_owned().into_boxed_str();
         if let Some(value) = self.inner.cache.dns_tlsa.get(key.as_ref()) {
             return Ok(match value {
                 Some(tlsa) => TlsaResult::Secure(tlsa),
@@ -278,7 +278,7 @@ impl TlsaLookup for Server {
                 .await;
         }
 
-        let key = key.to_fqdn();
+        let key = key.to_fqdn().into_owned().into_boxed_str();
         if let Some(value) = self.inner.cache.dns_ipv4.get::<str>(key.as_ref())
             && value.dnssec_status != DnssecStatus::Indeterminate
         {
@@ -356,7 +356,7 @@ impl TlsaLookup for Server {
                 .await;
         }
 
-        let key = key.to_fqdn();
+        let key = key.to_fqdn().into_owned().into_boxed_str();
         if let Some(value) = self.inner.cache.dns_ipv6.get::<str>(key.as_ref())
             && value.dnssec_status != DnssecStatus::Indeterminate
         {

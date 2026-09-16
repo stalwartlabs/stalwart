@@ -1,6 +1,6 @@
 [package]
 name = "spam-filter"
-version = "0.16.21"
+version = "0.16.23"
 edition = "2024"
 
 [dependencies]
@@ -13,7 +13,7 @@ common = { path =  "../common" }
 registry = { path =  "../registry" }
 smtp-proto = { version = "0.2", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-auth = { version = "0.12" }
+mail-auth = { version = "0.13" }
 tokio = { version = "1.53", features = ["net", "macros"] }
 psl = "2"
 hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }

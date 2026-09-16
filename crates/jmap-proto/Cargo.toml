@@ -1,6 +1,6 @@
 [package]
 name = "jmap_proto"
-version = "0.16.21"
+version = "0.16.23"
 edition = "2024"
 
 [dependencies]

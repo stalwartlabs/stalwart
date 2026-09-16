@@ -131,6 +131,9 @@ impl<T: SessionStream> Session<T> {
     }
 
     pub async fn into_tls(self) -> Result<Session<TlsStream<T>>, ()> {
+        let receiver = Receiver::with_max_request_size(self.server.core.imap.max_request_size)
+            .with_start_state(receiver::State::Command { is_uid: false });
+
         Ok(Session {
             stream: self
                 .instance
@@ -141,7 +144,7 @@ impl<T: SessionStream> Session<T> {
             in_flight: self.in_flight,
             session_id: self.session_id,
             server: self.server,
-            receiver: self.receiver,
+            receiver,
             remote_addr: self.remote_addr,
         })
     }

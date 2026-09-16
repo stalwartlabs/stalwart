@@ -9,7 +9,6 @@ use crate::{core::throttle::NewKey, queue::MessageWrapper};
 use ahash::AHashSet;
 use common::{Server, config::smtp::queue::QueueQuota, expr::functions::ResolveVariable};
 use compact_str::ToCompactString;
-use registry::schema::prelude::Property;
 use std::future::Future;
 use store::{
     ValueKey,
@@ -131,7 +130,7 @@ impl HasQueueQuota for Server {
     ) -> bool {
         if !quota.expr.is_empty()
             && self
-                .eval_expr(&quota.expr, envelope, quota.id, Property::Match, session_id)
+                .eval_if(&quota.expr, envelope, session_id)
                 .await
                 .unwrap_or(false)
         {

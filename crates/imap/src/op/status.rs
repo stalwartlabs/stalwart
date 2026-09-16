@@ -23,7 +23,8 @@ use imap_proto::{
 use registry::schema::enums::Permission;
 use std::time::Instant;
 use tokio::sync::OwnedSemaphorePermit;
-use types::id::Id;
+use trc::AddContext;
+use types::{acl::Acl, id::Id};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_status(
@@ -183,6 +184,22 @@ impl<T: SessionStream> SessionData<T> {
         mailbox_name: CompactString,
         items: &[Status],
     ) -> trc::Result<StatusItem> {
+        if !self
+            .check_mailbox_acl(
+                Some(cache),
+                mailbox.account_id,
+                mailbox.mailbox_id,
+                Acl::ReadItems,
+            )
+            .await
+            .caused_by(trc::location!())?
+        {
+            return Err(trc::ImapEvent::Error
+                .into_err()
+                .details("You do not have the required permissions to read this mailbox.")
+                .code(ResponseCode::NoPerm));
+        }
+
         let uid_next = if items.contains(&Status::UidNext) {
             Some(self.uid_next(cache, &mailbox).await?)
         } else {

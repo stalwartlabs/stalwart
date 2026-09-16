@@ -62,11 +62,10 @@ impl Server {
                         records.push(NamedDnsRecord {
                             name: format!("{domain_name}."),
                             record: DnsRecord::MX(MXRecord {
-                                exchange: mx
-                                    .hostname
-                                    .as_deref()
-                                    .unwrap_or(default_host)
-                                    .to_string(),
+                                exchange: format!(
+                                    "{}.",
+                                    mx.hostname.as_deref().unwrap_or(default_host)
+                                ),
                                 priority: mx.priority as u16,
                             }),
                         });

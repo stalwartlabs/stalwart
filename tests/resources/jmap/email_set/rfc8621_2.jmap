@@ -53,7 +53,7 @@
       },
       {
         "name": "Content-Type",
-        "value": " multipart/alternative; \r\n\tboundary=\"boundary_0\""
+        "value": " multipart/alternative;\r\n boundary=\"boundary_0\""
       }
     ],
     "type": "multipart/alternative",

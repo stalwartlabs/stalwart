@@ -69,6 +69,13 @@ pub enum OidcError {
     AuthorizationFailed(String),
     Network(String),
     Provider(String),
+    Config(String),
+}
+
+impl OidcError {
+    pub fn is_transient(&self) -> bool {
+        matches!(self, OidcError::Network(_) | OidcError::Provider(_))
+    }
 }
 
 impl fmt::Display for OidcError {
@@ -78,6 +85,7 @@ impl fmt::Display for OidcError {
             OidcError::AuthorizationFailed(msg) => write!(f, "Authorization failed: {msg}"),
             OidcError::Network(msg) => write!(f, "Network error: {msg}"),
             OidcError::Provider(msg) => write!(f, "Provider error: {msg}"),
+            OidcError::Config(msg) => write!(f, "Configuration error: {msg}"),
         }
     }
 }

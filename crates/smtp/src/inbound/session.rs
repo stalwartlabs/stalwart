@@ -177,6 +177,7 @@ impl<T: SessionStream> Session<T> {
                                             return Err(());
                                         }
                                         self.state = State::default();
+                                        self.reset_tls();
                                         return Ok(false);
                                     } else {
                                         trc::event!(
@@ -491,6 +492,13 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
         self.data.delivery_by = 0;
         self.data.future_release = 0;
         self.data.rcpt_oks = 0;
+    }
+
+    pub fn reset_tls(&mut self) {
+        self.reset();
+        self.data.helo_domain.clear();
+        self.data.spf_ehlo = None;
+        self.data.authenticated_as = None;
     }
 
     #[inline(always)]

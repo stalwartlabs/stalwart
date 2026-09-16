@@ -13,7 +13,7 @@ use dav_proto::{
 };
 use groupware::DavResourceName;
 use hyper::{HeaderMap, Method, StatusCode, header::AUTHORIZATION};
-use quick_xml::{Reader, XmlVersion, events::Event};
+use quick_xml::{NsReader, Reader, XmlVersion, events::Event, name::ResolveResult};
 use std::{borrow::Cow, time::Duration};
 use store::rand::{RngExt, distr::Alphanumeric, rng};
 
@@ -135,7 +135,15 @@ impl DummyWebDavClient {
             .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
             .map_err(|err| err.to_string());
         let xml = match &body {
-            Ok(body) if body.starts_with("<?xml") => flatten_xml(body),
+            Ok(body) if body.starts_with("<?xml") => {
+                if let Some(prefix) = undeclared_xml_prefix(body) {
+                    panic!(
+                        "Response uses undeclared namespace prefix {prefix:?}: {}",
+                        xml_pretty_print(body)
+                    );
+                }
+                flatten_xml(body)
+            }
             _ => vec![],
         };
 
@@ -1116,6 +1124,29 @@ impl Default for DavItem {
             error: Vec::new(),
             description: None,
         }
+    }
+}
+
+fn undeclared_xml_prefix(xml: &str) -> Option<String> {
+    let mut reader = NsReader::from_str(xml);
+    let mut buf = Vec::new();
+
+    loop {
+        let (resolved, event) = reader.read_resolved_event_into(&mut buf).unwrap();
+        let name = match &event {
+            Event::Start(e) | Event::Empty(e) => e.name(),
+            Event::Eof => return None,
+            _ => {
+                buf.clear();
+                continue;
+            }
+        };
+
+        if matches!(resolved, ResolveResult::Unknown(_)) {
+            return Some(String::from_utf8_lossy(name.as_ref()).into_owned());
+        }
+
+        buf.clear();
     }
 }
 

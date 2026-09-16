@@ -19,7 +19,7 @@ use imap_proto::{
 use registry::schema::enums::Permission;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::OwnedSemaphorePermit;
-use types::id::Id;
+use types::{acl::Acl, id::Id};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_select(
@@ -76,6 +76,22 @@ impl<T: SessionStream> Session<T> {
                 .fetch(&data.server, mailbox.account_id)
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?;
+            if !data
+                .check_mailbox_acl(
+                    Some(&cache),
+                    mailbox.account_id,
+                    mailbox.mailbox_id,
+                    Acl::ReadItems,
+                )
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?
+            {
+                return Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details("You do not have the required permissions to read this mailbox.")
+                    .code(ResponseCode::NoPerm)
+                    .id(arguments.tag));
+            }
             let view = MailboxView::build(&cache, mailbox.mailbox_id);
             let uid_validity = data.uid_validity(&mailbox);
             let uid_next = data

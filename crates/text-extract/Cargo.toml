@@ -1,6 +1,6 @@
 [package]
 name = "text-extract"
-version = "0.16.21"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]

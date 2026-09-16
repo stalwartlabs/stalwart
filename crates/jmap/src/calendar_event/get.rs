@@ -29,7 +29,7 @@ use groupware::{
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::{JmapObjectId, calendar_event},
-    request::{IntoValid, reference::MaybeResultReference},
+    request::IntoValid,
 };
 use jmap_tools::{Key, Map, Value};
 use std::{borrow::Cow, str::FromStr};
@@ -62,10 +62,7 @@ impl CalendarEventGet for Server {
         mut request: GetRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<calendar_event::CalendarEvent>> {
-        let return_all_properties = request
-            .properties
-            .as_ref()
-            .is_none_or(|v| matches!(v, MaybeResultReference::Value(v) if v.is_empty()));
+        let return_all_properties = request.properties.is_none();
         let properties = request.unwrap_properties(&[]);
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Calendar);
@@ -277,7 +274,11 @@ impl CalendarEventGet for Server {
                         JSCalendarProperty::BaseEventId => {
                             result.insert_unchecked(
                                 JSCalendarProperty::BaseEventId,
-                                Value::Element(JSCalendarValue::Id(id.document_id().into())),
+                                if id.is_synthetic() {
+                                    Value::Element(JSCalendarValue::Id(id.document_id().into()))
+                                } else {
+                                    Value::Null
+                                },
                             );
                         }
                         JSCalendarProperty::CalendarIds => {
@@ -599,10 +600,28 @@ impl CalendarEventGet for Server {
                 let mut result = if return_all_properties {
                     jscal.into_object().unwrap()
                 } else {
-                    Map::from_iter(jscal.into_expanded_object().filter(|(k, _)| {
-                        k.as_property()
-                            .is_some_and(|p| jscal_properties.contains(p))
-                    }))
+                    let is_synthetic = id.is_synthetic();
+                    let is_null_for_synthetic = |property: &JSCalendarProperty<Id>| {
+                        is_synthetic
+                            && matches!(
+                                property,
+                                JSCalendarProperty::RecurrenceRule
+                                    | JSCalendarProperty::RecurrenceOverrides
+                            )
+                    };
+                    let mut result =
+                        Map::from_iter(jscal.into_expanded_object().filter(|(k, _)| {
+                            k.as_property().is_some_and(|p| {
+                                jscal_properties.contains(p) && !is_null_for_synthetic(p)
+                            })
+                        }));
+                    for property in jscal_properties
+                        .iter()
+                        .filter(|property| is_null_for_synthetic(property))
+                    {
+                        result.insert_unchecked(property.clone(), Value::Null);
+                    }
+                    result
                 };
 
                 for property in &jmap_properties {
@@ -616,7 +635,11 @@ impl CalendarEventGet for Server {
                         JSCalendarProperty::BaseEventId => {
                             result.insert_unchecked(
                                 JSCalendarProperty::BaseEventId,
-                                Value::Element(JSCalendarValue::Id(id.document_id().into())),
+                                if id.is_synthetic() {
+                                    Value::Element(JSCalendarValue::Id(id.document_id().into()))
+                                } else {
+                                    Value::Null
+                                },
                             );
                         }
                         JSCalendarProperty::CalendarIds => {
@@ -687,7 +710,7 @@ impl CalendarEventGet for Server {
                                 Value::Bool(
                                     content
                                         .preferences(personal_id)
-                                        .is_none_or(|v| v.flags & PREF_USE_DEFAULT_ALERTS != 0),
+                                        .is_some_and(|v| v.flags & PREF_USE_DEFAULT_ALERTS != 0),
                                 ),
                             );
                         }

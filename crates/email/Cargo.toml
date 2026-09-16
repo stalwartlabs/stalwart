@@ -1,6 +1,6 @@
 [package]
 name = "email"
-version = "0.16.21"
+version = "0.16.23"
 edition = "2024"
 
 [dependencies]
@@ -16,7 +16,7 @@ groupware = { path =  "../groupware" }
 registry = { path =  "../registry" }
 text-extract = { path = "../text-extract" }
 mail-parser = { version = "0.11", features = ["full_encoding"] } 
-mail-builder = { version = "0.5" }
+mail-builder = { version = "1.0" }
 sieve-rs = { version = "1.0" }
 tokio = { version = "1.53", features = ["net", "macros"] }
 aes = "0.9"
