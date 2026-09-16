@@ -12,7 +12,7 @@ pub mod enums;
 pub mod enums_impl;
 
 use compact_str::ToCompactString;
-use std::fmt::Display;
+use std::{fmt::Display, mem};
 
 use crate::{
     ipc::{USIZE_BITS, USIZE_BITS_MASK, bitset::Bitset},
@@ -53,13 +53,9 @@ impl<T> Event<T> {
     }
 
     pub fn take_value(&mut self, key: Key) -> Option<Value> {
-        self.keys.iter_mut().find_map(|(k, v)| {
-            if *k == key {
-                Some(std::mem::take(v))
-            } else {
-                None
-            }
-        })
+        self.keys
+            .iter_mut()
+            .find_map(|(k, v)| if *k == key { Some(mem::take(v)) } else { None })
     }
 
     pub fn into_boxed(self) -> Box<Self> {
@@ -69,6 +65,24 @@ impl<T> Event<T> {
 
 const ERROR_KEYS_CAPACITY: usize = 5;
 
+#[inline(never)]
+fn push_key_at_capacity(keys: &mut Vec<(Key, Value)>, key: Key, value: Value) {
+    if keys.capacity() == 0 {
+        let mut first = Vec::with_capacity(ERROR_KEYS_CAPACITY);
+        first.push((key, value));
+        mem::forget(mem::replace(keys, first));
+    } else {
+        push_key_slow(keys, key, value);
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn push_key_slow(keys: &mut Vec<(Key, Value)>, key: Key, value: Value) {
+    keys.reserve(ERROR_KEYS_CAPACITY);
+    keys.push((key, value));
+}
+
 impl Error {
     #[inline(always)]
     pub fn new(inner: EventType) -> Self {
@@ -77,10 +91,12 @@ impl Error {
 
     #[inline(always)]
     fn push_key(&mut self, key: Key, value: Value) {
-        if self.0.keys.capacity() == 0 {
-            self.0.keys = Vec::with_capacity(ERROR_KEYS_CAPACITY);
+        let keys = &mut self.0.keys;
+        if keys.len() == keys.capacity() {
+            push_key_at_capacity(keys, key, value);
+        } else {
+            keys.push((key, value));
         }
-        self.0.keys.push((key, value));
     }
 
     #[inline(always)]
@@ -366,6 +382,30 @@ impl EventType {
     #[inline(always)]
     pub fn is_span_end(&self) -> bool {
         SPAN_END_EVENTS.get(self.to_id() as usize)
+    }
+
+    pub const fn span_end(&self) -> Option<EventType> {
+        match self {
+            EventType::Smtp(SmtpEvent::ConnectionStart) => {
+                Some(EventType::Smtp(SmtpEvent::ConnectionEnd))
+            }
+            EventType::Imap(ImapEvent::ConnectionStart) => {
+                Some(EventType::Imap(ImapEvent::ConnectionEnd))
+            }
+            EventType::ManageSieve(ManageSieveEvent::ConnectionStart) => {
+                Some(EventType::ManageSieve(ManageSieveEvent::ConnectionEnd))
+            }
+            EventType::Pop3(Pop3Event::ConnectionStart) => {
+                Some(EventType::Pop3(Pop3Event::ConnectionEnd))
+            }
+            EventType::Http(HttpEvent::ConnectionStart) => {
+                Some(EventType::Http(HttpEvent::ConnectionEnd))
+            }
+            EventType::Delivery(DeliveryEvent::AttemptStart) => {
+                Some(EventType::Delivery(DeliveryEvent::AttemptEnd))
+            }
+            _ => None,
+        }
     }
 
     #[inline(always)]

@@ -10,7 +10,10 @@
 
 use crate::{
     config::telemetry::StoreTracer,
-    telemetry::tracers::{TraceEvents, spans::SpanTracker},
+    telemetry::tracers::{
+        TraceEvents,
+        spans::{SpanTracker, report_discarded_spans, tracks_span},
+    },
 };
 use registry::{
     schema::structs::{
@@ -32,7 +35,7 @@ use trc::{
 use utils::snowflake::SnowflakeIdGenerator;
 
 pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTracer) {
-    let (_, mut rx) = builder.register();
+    let (_, mut rx, interests) = builder.register();
     tokio::spawn(async move {
         let mut active_spans = SpanTracker::default();
         let store = settings.store;
@@ -45,11 +48,17 @@ pub(crate) fn spawn_store_tracer(builder: SubscriberBuilder, settings: StoreTrac
             if let Some(event) = events.last() {
                 active_spans.sweep(event.inner.timestamp);
             }
+            if let Some((events, spans)) = active_spans.take_discarded() {
+                report_discarded_spans(events, spans);
+            }
 
             for event in events {
                 if let Some(span) = &event.inner.span {
                     let span_id = span.span_id().unwrap();
                     if !event.inner.typ.is_span_end() {
+                        if !tracks_span(&interests, span) {
+                            continue;
+                        }
                         active_spans.track(span_id, event);
                     } else if let Some(events) = active_spans.finish(span_id)
                         && events

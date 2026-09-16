@@ -12,7 +12,7 @@ use compact_str::{CompactString, format_compact};
 use reqwest::header::HeaderValue;
 use std::{sync::Arc, time::Instant};
 use store::write::now;
-use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use trc::{
     TelemetryEvent,
     ipc::subscriber::{EventBatch, SubscriberBuilder},
@@ -36,21 +36,22 @@ const MAX_PENDING_EVENTS: usize = 1 << 16;
 type DeliveryResult = Result<(), (Option<Box<Payload>>, CompactString)>;
 
 pub(crate) fn spawn_webhook_tracer(builder: SubscriberBuilder, settings: WebhookTracer) {
-    let (_, mut rx) = builder.register();
+    let (_, mut rx, _) = builder.register();
     tokio::spawn(async move {
         let settings = Arc::new(settings);
         let discard_after = settings.discard_after.as_secs();
-        let (result_tx, mut result_rx) = mpsc::channel::<DeliveryResult>(1);
         let mut pending_events = Vec::new();
         let mut failed_payload = None;
         let mut next_delivery = Instant::now();
-        let mut in_flight = false;
+        let mut in_flight: Option<JoinHandle<DeliveryResult>> = None;
+        let mut in_flight_events = 0;
         let mut is_failing = false;
+        let mut last_error = CompactString::const_new("");
         let mut overflowed_events = 0;
 
         loop {
             let has_work = !pending_events.is_empty() || failed_payload.is_some();
-            let wakeup_time = if has_work && !in_flight {
+            let wakeup_time = if has_work && in_flight.is_none() {
                 next_delivery.saturating_duration_since(Instant::now())
             } else {
                 LONG_1Y_SLUMBER
@@ -74,35 +75,35 @@ pub(crate) fn spawn_webhook_tracer(builder: SubscriberBuilder, settings: Webhook
                     }
                     None => break,
                 },
-                result = result_rx.recv() => {
-                    in_flight = false;
+                result = wait_for_delivery(&mut in_flight, in_flight_events) => {
                     match result {
-                        Some(Ok(())) => {
+                        Ok(()) => {
                             if is_failing {
                                 is_failing = false;
+                                last_error = CompactString::const_new("");
                                 trc::event!(
                                     Telemetry(TelemetryEvent::WebhookError),
                                     Details = "Resumed webhook deliveries",
                                 );
                             }
                         }
-                        Some(Err((payload, error))) => {
+                        Err((payload, error)) => {
                             failed_payload = payload.map(|payload| *payload);
-                            if !is_failing {
+                            if !is_failing || last_error != error {
                                 is_failing = true;
+                                last_error = error.clone();
                                 trc::event!(
                                     Telemetry(TelemetryEvent::WebhookError),
                                     Details = error,
                                 );
                             }
                         }
-                        None => {}
                     }
                 }
                 _ = tokio::time::sleep(wakeup_time) => {}
             }
 
-            if in_flight || Instant::now() < next_delivery {
+            if in_flight.is_some() || Instant::now() < next_delivery {
                 continue;
             }
 
@@ -139,9 +140,9 @@ pub(crate) fn spawn_webhook_tracer(builder: SubscriberBuilder, settings: Webhook
             }
 
             if let Some(delivery) = delivery {
-                in_flight = true;
+                in_flight_events = delivery.num_events();
                 next_delivery = Instant::now() + settings.throttle;
-                spawn_webhook_handler(settings.clone(), delivery, result_tx.clone());
+                in_flight = Some(spawn_webhook_handler(settings.clone(), delivery));
             }
         }
     });
@@ -157,36 +158,71 @@ fn report_discarded(discarded: usize) {
     }
 }
 
+async fn wait_for_delivery(
+    in_flight: &mut Option<JoinHandle<DeliveryResult>>,
+    num_events: usize,
+) -> DeliveryResult {
+    match in_flight {
+        Some(handle) => {
+            let result = handle.await;
+            *in_flight = None;
+            result.unwrap_or_else(|err| {
+                Err((
+                    None,
+                    format_compact!(
+                        "Webhook delivery task failed, discarded {num_events} events: {err}"
+                    ),
+                ))
+            })
+        }
+        None => std::future::pending().await,
+    }
+}
+
+impl Delivery {
+    fn num_events(&self) -> usize {
+        match self {
+            Delivery::Events(events) => events.len(),
+            Delivery::Retry(payload) => payload.events.len(),
+        }
+    }
+}
+
 fn spawn_webhook_handler(
     settings: Arc<WebhookTracer>,
     delivery: Delivery,
-    result_tx: mpsc::Sender<DeliveryResult>,
-) {
+) -> JoinHandle<DeliveryResult> {
     tokio::spawn(async move {
-        let result = match delivery {
+        match delivery {
             Delivery::Events(events) => match Payload::build(&settings, events) {
                 Ok(payload) => post_webhook_events(&settings, payload).await,
-                Err(err) => Err((None, err)),
+                Err((err, discarded)) => {
+                    report_discarded(discarded);
+                    Err((None, err))
+                }
             },
             Delivery::Retry(payload) => post_webhook_events(&settings, payload).await,
-        };
-
-        let _ = result_tx.send(result).await;
-    });
+        }
+    })
 }
 
 impl Payload {
-    fn build(settings: &WebhookTracer, events: EventBatch) -> Result<Self, CompactString> {
+    fn build(settings: &WebhookTracer, events: EventBatch) -> Result<Self, (CompactString, usize)> {
         let oldest_event = events
             .iter()
             .map(|event| event.inner.timestamp)
             .min()
             .unwrap_or_default();
+        let num_events = events.len();
         let wrapper = EventWrapper {
             events: JsonEventSerializer::new(events).with_id().with_spans(),
         };
-        let body = serde_json::to_vec(&wrapper)
-            .map_err(|err| format_compact!("Failed to serialize events: {err}"))?;
+        let body = serde_json::to_vec(&wrapper).map_err(|err| {
+            (
+                format_compact!("Failed to serialize events: {err}"),
+                num_events,
+            )
+        })?;
 
         let signature = if !settings.key.is_empty() {
             let key = hmac::Key::new(hmac::HMAC_SHA256, settings.key.as_bytes());

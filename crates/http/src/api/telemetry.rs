@@ -61,7 +61,7 @@ impl TelemetryApi for Server {
                 }
             }
 
-            let (_, mut rx) = SubscriberBuilder::new("live-tracer".to_string())
+            let (_, mut rx, _) = SubscriberBuilder::new("live-tracer".to_string())
                 .with_interests(Box::new(Bitset::all()))
                 .with_lossy(false)
                 .register();

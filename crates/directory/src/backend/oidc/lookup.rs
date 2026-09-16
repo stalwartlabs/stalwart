@@ -348,7 +348,7 @@ pub(super) async fn fetch_jwks_keys(
                     Auth(AuthEvent::Warning),
                     Url = CompactString::from(jwks_uri),
                     Reason = format_compact!(
-                        "Symmetric (HMAC) key found in JWKS (kid={:?}), skipping — HMAC is not accepted",
+                        "Symmetric (HMAC) key found in JWKS (kid={:?}), skipping, HMAC is not accepted",
                         key.common.key_id
                     )
                 );

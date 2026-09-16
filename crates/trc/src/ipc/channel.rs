@@ -93,7 +93,7 @@ impl Sender {
 
     #[cold]
     fn spill(&mut self, event: Event<EventType>) -> Result<(), ChannelError> {
-        if self.overflow.len() <= OVERFLOW_SIZE {
+        if self.overflow.len() < OVERFLOW_SIZE {
             self.overflow.push_back(event);
             Ok(())
         } else {
@@ -109,7 +109,6 @@ impl Drop for Sender {
             return;
         }
 
-        let pending = self.overflow.len();
         while let Some(event) = self.overflow.pop_front() {
             if self.tx.push(event).is_err() {
                 self.dropped
@@ -117,7 +116,7 @@ impl Drop for Sender {
                 break;
             }
         }
-        CHANNEL_FLAGS.fetch_add(pending as u64, Ordering::Relaxed);
+        CHANNEL_FLAGS.fetch_or(1, Ordering::Release);
         self.collector.thread().unpark();
     }
 }
@@ -150,8 +149,7 @@ impl Event<EventType> {
         // SAFETY: EVENT_TX is thread-local.
         let _ = EVENT_TX.try_with(|tx| unsafe {
             let tx = &mut *tx.get();
-            if tx.send(self).is_ok() {
-                CHANNEL_FLAGS.fetch_add(1, Ordering::Relaxed);
+            if tx.send(self).is_ok() && CHANNEL_FLAGS.fetch_or(1, Ordering::Release) == 0 {
                 tx.collector.thread().unpark();
             }
         });

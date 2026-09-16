@@ -6,7 +6,10 @@
 
 use ahash::AHashMap;
 use std::sync::Arc;
-use trc::{Event, EventDetails, ipc::collector::SPAN_MAX_HOLD};
+use trc::{
+    Event, EventDetails, TelemetryEvent,
+    ipc::{collector::SPAN_MAX_HOLD, subscriber::SharedInterests},
+};
 
 const MAX_SPAN_EVENTS: usize = 2048;
 const MAX_TRACKED_EVENTS: usize = 1 << 17;
@@ -20,6 +23,8 @@ type SpanEvents = Vec<Arc<Event<EventDetails>>>;
 pub(crate) struct SpanTracker {
     spans: AHashMap<u64, SpanEvents>,
     tracked_events: usize,
+    discarded_events: usize,
+    discarded_spans: usize,
     next_sweep: u64,
     next_pressure_sweep: u64,
 }
@@ -29,11 +34,13 @@ impl SpanTracker {
         if self.tracked_events >= MAX_TRACKED_EVENTS {
             let timestamp = event.inner.timestamp;
             if timestamp < self.next_pressure_sweep {
+                self.discarded_events += 1;
                 return;
             }
             self.next_pressure_sweep = timestamp + PRESSURE_SWEEP_INTERVAL;
             self.retain_younger_than(PRESSURE_MAX_HOLD, timestamp);
             if self.tracked_events >= MAX_TRACKED_EVENTS {
+                self.discarded_events += 1;
                 return;
             }
         }
@@ -42,6 +49,19 @@ impl SpanTracker {
         if events.len() < MAX_SPAN_EVENTS {
             events.push(event);
             self.tracked_events += 1;
+        } else {
+            self.discarded_events += 1;
+        }
+    }
+
+    pub fn take_discarded(&mut self) -> Option<(usize, usize)> {
+        if self.discarded_events > 0 || self.discarded_spans > 0 {
+            Some((
+                std::mem::take(&mut self.discarded_events),
+                std::mem::take(&mut self.discarded_spans),
+            ))
+        } else {
+            None
         }
     }
 
@@ -60,6 +80,7 @@ impl SpanTracker {
 
     fn retain_younger_than(&mut self, max_age: u64, timestamp: u64) {
         let mut tracked_events = 0;
+        let mut discarded_spans = 0;
         self.spans.retain(|_, events| {
             let keep = events
                 .first()
@@ -67,10 +88,37 @@ impl SpanTracker {
                 .is_some_and(|span| timestamp.saturating_sub(span.inner.timestamp) < max_age);
             if keep {
                 tracked_events += events.len();
+            } else {
+                discarded_spans += 1;
             }
             keep
         });
         self.tracked_events = tracked_events;
+        self.discarded_spans += discarded_spans;
+    }
+}
+
+pub(crate) fn tracks_span(interests: &SharedInterests, span: &Event<EventDetails>) -> bool {
+    span.inner
+        .typ
+        .span_end()
+        .is_some_and(|span_end| interests.get(span_end.to_id() as usize))
+}
+
+pub(crate) fn report_discarded_spans(events: usize, spans: usize) {
+    if events > 0 {
+        trc::event!(
+            Telemetry(TelemetryEvent::EventsDropped),
+            Details = "Span tracker full, discarded span events",
+            Total = events,
+        );
+    }
+    if spans > 0 {
+        trc::event!(
+            Telemetry(TelemetryEvent::EventsDropped),
+            Details = "Span tracker evicted incomplete spans",
+            Total = spans,
+        );
     }
 }
 

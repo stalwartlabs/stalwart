@@ -12,7 +12,7 @@ use trc::ipc::subscriber::SubscriberBuilder;
 use trc::{Event, EventDetails, Level, TelemetryEvent, event::KeySet};
 
 pub(crate) fn spawn_journald_tracer(builder: SubscriberBuilder, subscriber: Subscriber) {
-    let (_, mut rx) = builder.register();
+    let (_, mut rx, _) = builder.register();
     if let Err(err) = Builder::new()
         .name("stalwart-journald".to_string())
         .spawn(move || {

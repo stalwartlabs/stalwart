@@ -23,13 +23,13 @@ use trc::{
     Event, EventDetails, Level, TelemetryEvent, event::KeySet, ipc::subscriber::SubscriberBuilder,
 };
 
-use super::spans::SpanTracker;
+use super::spans::{SpanTracker, report_discarded_spans, tracks_span};
 
 const MAX_PENDING_LOGS: usize = 1 << 16;
 const MAX_PENDING_SPANS: usize = 1 << 14;
 
 pub(crate) fn spawn_otel_tracer(builder: SubscriberBuilder, mut otel: OtelTracer) {
-    let (_, mut rx) = builder.register();
+    let (_, mut rx, interests) = builder.register();
     tokio::spawn(async move {
         let resource = Resource::builder()
             .with_service_name("stalwart")
@@ -80,6 +80,9 @@ pub(crate) fn spawn_otel_tracer(builder: SubscriberBuilder, mut otel: OtelTracer
                         {
                             let span_id = span.span_id().unwrap();
                             if !event.inner.typ.is_span_end() {
+                                if !tracks_span(&interests, span) {
+                                    continue;
+                                }
                                 active_spans.track(span_id, event);
                             } else if let Some(events) = active_spans.finish(span_id) {
                                 if pending_spans.len() < MAX_PENDING_SPANS {
@@ -94,6 +97,10 @@ pub(crate) fn spawn_otel_tracer(builder: SubscriberBuilder, mut otel: OtelTracer
                                 }
                             }
                         }
+                    }
+
+                    if let Some((events, spans)) = active_spans.take_discarded() {
+                        report_discarded_spans(events, spans);
                     }
                 }
                 Ok(None) => {
@@ -124,17 +131,19 @@ pub(crate) fn spawn_otel_tracer(builder: SubscriberBuilder, mut otel: OtelTracer
                         );
                     }
 
-                    if !pending_spans.is_empty()
-                        && let Err(err) = otel
-                            .span_exporter
-                            .export(std::mem::take(&mut pending_spans))
-                            .await
-                    {
-                        trc::event!(
-                            Telemetry(TelemetryEvent::OtelExporterError),
-                            Details = "Failed to export spans",
-                            Reason = err.to_compact_string()
-                        );
+                    if !pending_spans.is_empty() {
+                        match otel.span_exporter.export(pending_spans.clone()).await {
+                            Ok(_) => {
+                                pending_spans.clear();
+                            }
+                            Err(err) => {
+                                trc::event!(
+                                    Telemetry(TelemetryEvent::OtelExporterError),
+                                    Details = "Failed to export spans, will retry",
+                                    Reason = err.to_compact_string()
+                                );
+                            }
+                        }
                     }
 
                     if !pending_logs.is_empty() {
@@ -143,14 +152,25 @@ pub(crate) fn spawn_otel_tracer(builder: SubscriberBuilder, mut otel: OtelTracer
                             .map(|log| (log, &instrumentation))
                             .collect::<Vec<_>>();
 
-                        if let Err(err) = otel.log_exporter.export(LogBatch::new(&logs)).await {
-                            trc::event!(
-                                Telemetry(TelemetryEvent::OtelExporterError),
-                                Details = "Failed to export logs",
-                                Reason = err.to_compact_string()
-                            );
+                        let result = otel.log_exporter.export(LogBatch::new(&logs)).await;
+                        drop(logs);
+
+                        match result {
+                            Ok(_) => {
+                                pending_logs.clear();
+                            }
+                            Err(err) => {
+                                trc::event!(
+                                    Telemetry(TelemetryEvent::OtelExporterError),
+                                    Details = "Failed to export logs, will retry",
+                                    Reason = err.to_compact_string()
+                                );
+                            }
                         }
-                        pending_logs.clear();
+                    }
+
+                    if !pending_spans.is_empty() || !pending_logs.is_empty() {
+                        next_retry = Some(next_delivery.saturating_duration_since(Instant::now()));
                     }
                 }
             } else if !pending_logs.is_empty() || !pending_spans.is_empty() {
@@ -297,7 +317,7 @@ fn build_any_value(value: &trc::Value) -> AnyValue {
             AnyValue::String(DateTime::from_timestamp(*v as i64).to_rfc3339().into())
         }
         trc::Value::Duration(v) => AnyValue::Int(*v as i64),
-        trc::Value::Bytes(v) => AnyValue::Bytes(Box::new(v.clone())),
+        trc::Value::Bytes(_) => AnyValue::String("[binary data]".into()),
         trc::Value::Bool(v) => AnyValue::Boolean(*v),
         trc::Value::Ipv4(v) => AnyValue::String(v.to_string().into()),
         trc::Value::Ipv6(v) => AnyValue::String(v.to_string().into()),

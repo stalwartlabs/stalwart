@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc::{self, error::TrySendError};
 
-use crate::{Event, EventDetails, EventType, Level, TOTAL_EVENT_COUNT};
+use crate::{Event, EventDetails, Level, TOTAL_EVENT_COUNT};
+
+use crate::atomics::bitset::AtomicBitset;
 
 use super::{
     USIZE_BITS,
@@ -21,12 +23,13 @@ const MAX_BATCH_SIZE: usize = 32768;
 const MAX_LOSSLESS_BATCH_SIZE: usize = MAX_BATCH_SIZE * 16;
 
 pub type Interests = Box<Bitset<{ TOTAL_EVENT_COUNT.div_ceil(USIZE_BITS) }>>;
+pub type SharedInterests = Arc<AtomicBitset<{ TOTAL_EVENT_COUNT.div_ceil(USIZE_BITS) }>>;
 pub type EventBatch = Vec<Arc<Event<EventDetails>>>;
 
-#[derive(Debug)]
 pub(crate) struct Subscriber {
     pub id: String,
     pub interests: Interests,
+    pub shared_interests: SharedInterests,
     pub tx: mpsc::Sender<EventBatch>,
     pub lossy: bool,
     pub batch: EventBatch,
@@ -84,15 +87,6 @@ impl SubscriberBuilder {
         }
     }
 
-    pub fn with_default_interests(mut self, level: Level) -> Self {
-        for event in EventType::variants() {
-            if level.is_contained(event.level()) {
-                self.interests.set(*event);
-            }
-        }
-        self
-    }
-
     pub fn with_interests(mut self, interests: Interests) -> Self {
         self.interests = interests;
         self
@@ -110,13 +104,22 @@ impl SubscriberBuilder {
         self
     }
 
-    pub fn register(self) -> (mpsc::Sender<EventBatch>, mpsc::Receiver<EventBatch>) {
+    pub fn register(
+        self,
+    ) -> (
+        mpsc::Sender<EventBatch>,
+        mpsc::Receiver<EventBatch>,
+        SharedInterests,
+    ) {
         let (tx, rx) = mpsc::channel(8192);
+        let shared_interests = SharedInterests::new(AtomicBitset::new());
+        shared_interests.update(&self.interests);
 
         COLLECTOR_UPDATES.lock().push(Update::RegisterSubscriber {
             subscriber: Subscriber {
                 id: self.id,
                 interests: self.interests,
+                shared_interests: shared_interests.clone(),
                 tx: tx.clone(),
                 lossy: self.lossy,
                 batch: Vec::new(),
@@ -126,6 +129,6 @@ impl SubscriberBuilder {
         // Notify collector
         Collector::reload();
 
-        (tx, rx)
+        (tx, rx, shared_interests)
     }
 }

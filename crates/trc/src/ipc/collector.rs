@@ -64,6 +64,8 @@ struct Dispatcher {
     subscribers: Vec<Subscriber>,
     levels: [Level; TOTAL_EVENT_COUNT],
     active_spans: AHashMap<u64, Arc<Event<EventDetails>>>,
+    discarded_spans: u64,
+    next_span_pressure_sweep: u64,
 }
 
 const HTTP_CONN_START: usize = EventType::Http(HttpEvent::ConnectionStart).to_id() as usize;
@@ -84,7 +86,11 @@ const EV_ATTEMPT_END: usize = EventType::Delivery(DeliveryEvent::AttemptEnd).to_
 const EVENTS_DROPPED: EventType = EventType::Telemetry(TelemetryEvent::EventsDropped);
 
 pub const SPAN_MAX_HOLD: u64 = 60 * 60 * 24;
+const SPAN_PRESSURE_HOLD: u64 = 60 * 60;
+const MAX_ACTIVE_SPANS: usize = 1 << 17;
 const MAINTENANCE_INTERVAL: u64 = 60;
+const FLUSH_BATCH_SIZE: usize = 1024;
+const MAX_COALESCED_PASSES: u32 = 64;
 
 pub(crate) static COLLECTOR_THREAD: LazyLock<Arc<CollectorThread>> = LazyLock::new(|| {
     Arc::new(
@@ -100,10 +106,11 @@ pub(crate) static COLLECTOR_THREAD: LazyLock<Arc<CollectorThread>> = LazyLock::n
 impl Collector {
     fn collect(&mut self) {
         let mut do_continue = self.update();
+        let mut coalesced_passes = 0u32;
 
         while do_continue {
-            match CHANNEL_FLAGS.swap(0, Ordering::Relaxed) {
-                0 => {
+            match CHANNEL_FLAGS.swap(0, Ordering::Acquire) {
+                0 if coalesced_passes == 0 => {
                     park_timeout(Duration::from_secs(MAINTENANCE_INTERVAL));
                 }
                 CHANNEL_UPDATE_MARKER..=u64::MAX => {
@@ -117,10 +124,14 @@ impl Collector {
                 .map_or(0, |d| d.as_secs());
 
             let mut has_closed = false;
+            let mut drained = false;
             for rx in self.receivers.iter_mut() {
                 loop {
                     match rx.try_recv() {
-                        Ok(Some(event)) => self.dispatcher.dispatch(event, timestamp),
+                        Ok(Some(event)) => {
+                            drained = true;
+                            self.dispatcher.dispatch(event, timestamp);
+                        }
                         Ok(None) => break,
                         Err(_) => {
                             has_closed = true;
@@ -147,6 +158,19 @@ impl Collector {
                     self.maintenance(timestamp);
                 }
 
+                if drained
+                    && coalesced_passes < MAX_COALESCED_PASSES
+                    && self
+                        .dispatcher
+                        .subscribers
+                        .iter()
+                        .all(|subscriber| subscriber.batch.len() < FLUSH_BATCH_SIZE)
+                {
+                    coalesced_passes += 1;
+                    continue;
+                }
+                coalesced_passes = 0;
+
                 let dropped = &mut self.dropped;
                 self.dispatcher.subscribers.retain_mut(|subscriber| {
                     match subscriber.send_batch() {
@@ -168,9 +192,8 @@ impl Collector {
     fn maintenance(&mut self, timestamp: u64) {
         self.next_maintenance = timestamp + MAINTENANCE_INTERVAL;
 
-        self.dispatcher
-            .active_spans
-            .retain(|_, span| timestamp.saturating_sub(span.inner.timestamp) < SPAN_MAX_HOLD);
+        self.dispatcher.retain_spans(SPAN_MAX_HOLD, timestamp);
+        let discarded_spans = std::mem::take(&mut self.dispatcher.discarded_spans);
 
         let dropped = self
             .receivers
@@ -178,8 +201,9 @@ impl Collector {
             .map(Receiver::take_dropped)
             .sum::<u64>()
             + std::mem::take(&mut self.dropped);
-        if dropped > 0 {
-            self.dispatcher.report_dropped(dropped, timestamp);
+        if dropped > 0 || discarded_spans > 0 {
+            self.dispatcher
+                .report_dropped(dropped + discarded_spans, timestamp);
         }
     }
 
@@ -208,6 +232,7 @@ impl Collector {
                         .iter_mut()
                         .find(|subscriber| subscriber.id == id)
                     {
+                        subscriber.shared_interests.update(&interests);
                         subscriber.interests = interests;
                         subscriber.lossy = lossy;
                     }
@@ -304,9 +329,7 @@ impl Dispatcher {
             | EV_ATTEMPT_START => {
                 let event = Arc::new(event);
                 match event.span_id() {
-                    Some(span_id) => {
-                        self.active_spans.insert(span_id, event.clone());
-                    }
+                    Some(span_id) => self.track_span(span_id, &event, timestamp),
                     None => missing_span_id(&event),
                 }
                 event
@@ -340,6 +363,32 @@ impl Dispatcher {
         for subscriber in self.subscribers.iter_mut() {
             subscriber.push_event(event_id, &event);
         }
+    }
+
+    fn track_span(&mut self, span_id: u64, event: &Arc<Event<EventDetails>>, timestamp: u64) {
+        if self.active_spans.len() >= MAX_ACTIVE_SPANS {
+            if timestamp < self.next_span_pressure_sweep {
+                self.discarded_spans += 1;
+                return;
+            }
+            self.next_span_pressure_sweep = timestamp + MAINTENANCE_INTERVAL;
+            self.retain_spans(SPAN_PRESSURE_HOLD, timestamp);
+            if self.active_spans.len() >= MAX_ACTIVE_SPANS {
+                self.discarded_spans += 1;
+                return;
+            }
+        }
+
+        self.active_spans.insert(span_id, event.clone());
+    }
+
+    fn retain_spans(&mut self, max_age: u64, timestamp: u64) {
+        let discarded = &mut self.discarded_spans;
+        self.active_spans.retain(|_, span| {
+            let keep = timestamp.saturating_sub(span.inner.timestamp) < max_age;
+            *discarded += u64::from(!keep);
+            keep
+        });
     }
 
     fn report_dropped(&mut self, dropped: u64, timestamp: u64) {
@@ -386,6 +435,8 @@ impl Default for Collector {
                 subscribers: Vec::new(),
                 levels,
                 active_spans: AHashMap::new(),
+                discarded_spans: 0,
+                next_span_pressure_sweep: 0,
             },
             dropped: 0,
             next_maintenance: 0,

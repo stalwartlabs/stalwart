@@ -6,7 +6,7 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::{ErrorKind, Write},
     path::PathBuf,
     thread::Builder,
     time::SystemTime,
@@ -26,7 +26,7 @@ use trc::{
 const FLUSH_THRESHOLD: usize = 1 << 16;
 
 pub(crate) fn spawn_log_tracer(builder: SubscriberBuilder, settings: LogTracer) {
-    let (_, rx) = builder.register();
+    let (_, rx, _) = builder.register();
     if let Err(err) = Builder::new()
         .name("stalwart-log".to_string())
         .spawn(move || LogWriter::new(settings).run(rx))
@@ -49,6 +49,7 @@ struct LogWriter {
     lost_events: u64,
     pending_events: u64,
     is_failing: bool,
+    failure_kind: Option<ErrorKind>,
     is_torn: bool,
 }
 
@@ -70,6 +71,7 @@ impl LogWriter {
             lost_events: 0,
             pending_events: 0,
             is_failing: false,
+            failure_kind: None,
             is_torn: false,
         }
     }
@@ -116,11 +118,14 @@ impl LogWriter {
 
         match result {
             Ok(()) => {
-                self.is_torn = false;
+                if !self.buf.is_empty() {
+                    self.is_torn = false;
+                }
                 self.buf.clear();
                 self.pending_events = 0;
                 if self.is_failing {
                     self.is_failing = false;
+                    self.failure_kind = None;
                     trc::event!(
                         Telemetry(TelemetryEvent::LogError),
                         Details = "Resumed writing to log file",
@@ -139,14 +144,24 @@ impl LogWriter {
     fn failed(&mut self, err: std::io::Error, details: &'static str, path: Option<CompactString>) {
         self.buf.clear();
         self.lost_events += std::mem::take(&mut self.pending_events);
-        if !self.is_failing {
-            self.is_failing = true;
-            trc::event!(
+        if self.is_failing && self.failure_kind == Some(err.kind()) {
+            return;
+        }
+        self.is_failing = true;
+        self.failure_kind = Some(err.kind());
+
+        match path {
+            Some(path) => trc::event!(
                 Telemetry(TelemetryEvent::LogError),
                 Details = details,
                 Path = path,
                 Reason = err.to_compact_string(),
-            );
+            ),
+            None => trc::event!(
+                Telemetry(TelemetryEvent::LogError),
+                Details = details,
+                Reason = err.to_compact_string(),
+            ),
         }
     }
 }

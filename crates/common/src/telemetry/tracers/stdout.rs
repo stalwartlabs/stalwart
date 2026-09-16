@@ -16,7 +16,7 @@ use trc::{TelemetryEvent, ipc::subscriber::SubscriberBuilder, serializers::text:
 const FLUSH_THRESHOLD: usize = 1 << 16;
 
 pub(crate) fn spawn_console_tracer(builder: SubscriberBuilder, settings: ConsoleTracer) {
-    let (_, mut rx) = builder.register();
+    let (_, mut rx, _) = builder.register();
     if let Err(err) = Builder::new()
         .name("stalwart-console".to_string())
         .spawn(move || {
