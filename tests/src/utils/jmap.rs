@@ -274,7 +274,7 @@ impl Account {
         from_account: &Account,
         to_account: &Account,
         object: impl Display,
-        items: impl IntoIterator<Item = (impl Display, Value)>,
+        items: impl IntoIterator<Item = (impl Display, impl Display, Value)>,
         on_success_destroy: bool,
     ) -> JmapResponse {
         self.jmap_method_calls(json!([[
@@ -285,7 +285,13 @@ impl Account {
                 "onSuccessDestroyOriginal": on_success_destroy,
                 "create": items
                         .into_iter()
-                        .map(|(i, item)| (i.to_string(), item)).collect::<serde_json::Map<_, _>>()
+                        .map(|(create_id, source_id, mut item)| {
+                            item.as_object_mut()
+                                .expect("copy create object")
+                                .insert("id".to_string(), Value::String(source_id.to_string()));
+                            (create_id.to_string(), item)
+                        })
+                        .collect::<serde_json::Map<_, _>>()
             },
             "0"
         ]]))
@@ -742,7 +748,7 @@ impl JmapResponse {
             .chain(self.changes_by_type("destroyed").map(ChangeType::Destroyed))
     }
 
-    fn changes_by_type(&self, typ: &str) -> impl Iterator<Item = &str> {
+    pub fn changes_by_type(&self, typ: &str) -> impl Iterator<Item = &str> {
         self.0
             .pointer(&format!("/methodResponses/0/1/{typ}"))
             .and_then(|v| v.as_array())

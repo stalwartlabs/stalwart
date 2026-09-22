@@ -252,7 +252,7 @@ async fn blob_copy_not_found(ctx: &CompCtx<'_>) -> TestOutcome {
     check(!nc.is_null(), "Invalid blob should be in notCopied")?;
     check_eq(
         nc["type"].as_str().unwrap_or(""),
-        "blobNotFound",
+        "notFound",
         "notCopied type",
     )
 }

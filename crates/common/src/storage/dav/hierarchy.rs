@@ -284,6 +284,7 @@ mod tests {
                 modified_at: 0,
                 uid,
                 etag: 0,
+                flags: 0,
             },
         });
     }

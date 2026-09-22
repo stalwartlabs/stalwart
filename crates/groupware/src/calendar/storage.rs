@@ -9,24 +9,36 @@ use super::{
     alarm::CalendarAlarm,
 };
 use crate::{
-    DavResourceName, DestroyArchive, RFC_3986,
+    DavResourceName, DestroyArchive, RFC_3986, SizeWriter,
+    cache::GroupwareCache,
     calendar::{
         ArchivedCalendarEventContent, ArchivedCalendarEventNotification, CalendarEventContent,
-        CalendarEventNotification, CalendarEventNotificationContent, EVENT_HAS_ALARMS,
-        alarm::CalendarAlarmType,
+        CalendarEventNotification, CalendarEventNotificationContent, ChangedBy, EVENT_DRAFT,
+        EVENT_HAS_ALARMS, EVENT_NOTIFICATION_IS_CHANGE, EVENT_NOTIFICATION_IS_DESTROY,
+        EVENT_NOTIFICATION_IS_DIRECT, EVENT_NOTIFICATION_IS_DRAFT, EVENT_NOTIFICATION_OWNER_ONLY,
+        alarm::{AlarmTarget, CalendarAlarmType},
+        alerts::DefaultAlertsResolver,
+        notification::{
+            AccountViewers, CalendarNotificationReap, CalendarNotificationViewers, has_viewers,
+            hides_details, may_have_viewers,
+        },
+        privacy::ICalendarPrivacy,
+        schedule::{EventAlarmScheduler, EventAlarmUsers, EventAlarms},
     },
-    scheduling::{ItipMessages, event_cancel::itip_cancel},
+    scheduling::{ItipMessages, event_cancel::itip_cancel, recipient::RecipientPolicy},
 };
-use calcard::common::timezone::Tz;
+use calcard::icalendar::ICalendar;
 use common::{
-    Server,
-    auth::{AccountInfo, AccountTenantIds},
+    DavName, GroupwareResources, Server,
+    auth::{AccessToken, AccountCache, AccountInfo, AccountTenantIds},
     storage::index::{GroupwareWrite, ObjectIndexBuilder, SplitCurrent, SplitUpdate},
 };
 use registry::{
+    schema::enums::StorageQuota,
     schema::structs::{Task, TaskCalendarAlarmEmail, TaskCalendarAlarmNotification, TaskStatus},
     types::{EnumImpl, ObjectImpl, datetime::UTCDateTime},
 };
+use std::sync::Arc;
 use store::{
     IndexKey, IterateParams, SerializeInfallible, U32_LEN, ValueKey,
     roaring::RoaringBitmap,
@@ -191,7 +203,7 @@ impl CalendarEvent {
         account_id: u32,
         document_id: impl Into<PendingId>,
         parent_id: Option<Slot>,
-        next_alarm: Option<CalendarAlarm>,
+        next_alarms: EventAlarms,
         batch: &mut BatchBuilder,
     ) -> trc::Result<String> {
         let mut event = self;
@@ -213,7 +225,7 @@ impl CalendarEvent {
                     .with_pending_id_opt(parent_id),
             )?;
 
-        if let Some(next_alarm) = next_alarm {
+        for next_alarm in next_alarms {
             next_alarm.write_task(batch);
         }
         batch.commit_point();
@@ -285,6 +297,27 @@ impl Calendar {
 }
 
 impl CalendarEventNotification {
+    pub fn update_meta(
+        self,
+        changed_by: AccountTenantIds,
+        notification: Archive<&ArchivedCalendarEventNotification>,
+        account_id: u32,
+        document_id: u32,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        let mut updated = self;
+        updated.modified = now() as i64;
+
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::CalendarEventNotification)
+            .with_document(document_id)
+            .custom(SplitUpdate::meta_only(notification, updated).into_builder(changed_by, None))?
+            .commit_point();
+
+        Ok(())
+    }
+
     pub fn insert(
         self,
         content: CalendarEventNotificationContent,
@@ -320,6 +353,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
     pub async fn delete_with_events(
         self,
         server: &Server,
+        access_token: &AccessToken,
         account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
@@ -330,6 +364,20 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
     ) -> trc::Result<()> {
         // Process deletions
         let calendar_id = document_id;
+        let mut resolver = DefaultAlertsResolver::default();
+        let mut quota = NotificationQuota::default();
+        server
+            .reap_calendar_notifications(access_token, account_id, &[calendar_id], batch)
+            .await
+            .caused_by(trc::location!())?;
+        let calendars = if !access_token.is_member(account_id) {
+            server
+                .calendars_if_any(access_token, account_id)
+                .await
+                .caused_by(trc::location!())?
+        } else {
+            None
+        };
         for document_id in children_ids {
             if let Some(event_) = server
                 .store()
@@ -340,22 +388,56 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
                 ))
                 .await?
             {
-                DestroyArchive(
-                    event_
-                        .to_unarchived::<CalendarEvent>()
-                        .caused_by(trc::location!())?,
-                )
-                .delete(
-                    server,
-                    account_info,
-                    account_id,
-                    document_id,
-                    calendar_id,
-                    None,
-                    send_itip,
-                    batch,
-                )
-                .await?;
+                let event = event_
+                    .to_unarchived::<CalendarEvent>()
+                    .caused_by(trc::location!())?;
+                let event_flags = event.inner.flags.to_native();
+                let mut content = None;
+                if let Some(calendars) = calendars.as_ref()
+                    && let Some(previous) = server
+                        .stored_event_if_notifiable(
+                            access_token,
+                            account_id,
+                            calendars,
+                            &[calendar_id],
+                            event_flags,
+                            (account_id, document_id),
+                        )
+                        .await
+                        .caused_by(trc::location!())?
+                {
+                    content = previous.content;
+                    server
+                        .notify_direct_change(
+                            access_token,
+                            account_id,
+                            DirectChange::Destroyed {
+                                event_id: document_id,
+                                previous: previous.event,
+                                calendar_ids: vec![calendar_id],
+                                event_flags,
+                            },
+                            Some(calendars),
+                            &mut quota,
+                            batch,
+                        )
+                        .await
+                        .caused_by(trc::location!())?;
+                }
+                DestroyArchive(event)
+                    .delete_from_calendar(
+                        server,
+                        account_info,
+                        account_id,
+                        document_id,
+                        calendar_id,
+                        content,
+                        None,
+                        send_itip,
+                        &mut resolver,
+                        batch,
+                    )
+                    .await?;
             }
         }
 
@@ -406,8 +488,38 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         account_id: u32,
         document_id: u32,
         calendar_id: u32,
+        content: Option<Archive<ArchiveBytes>>,
         delete_path: Option<String>,
         send_itip: bool,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        self.delete_from_calendar(
+            server,
+            account_info,
+            account_id,
+            document_id,
+            calendar_id,
+            content,
+            delete_path,
+            send_itip,
+            &mut DefaultAlertsResolver::default(),
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn delete_from_calendar(
+        self,
+        server: &Server,
+        account_info: &AccountInfo,
+        account_id: u32,
+        document_id: u32,
+        calendar_id: u32,
+        content: Option<Archive<ArchiveBytes>>,
+        delete_path: Option<String>,
+        send_itip: bool,
+        resolver: &mut DefaultAlertsResolver,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         if let Some(delete_idx) = self
@@ -424,6 +536,21 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     .deserialize::<CalendarEvent>()
                     .caused_by(trc::location!())?;
                 new_event.names.swap_remove(delete_idx);
+                server
+                    .reschedule_event_alarms(
+                        account_id,
+                        document_id,
+                        event.inner,
+                        &new_event
+                            .names
+                            .iter()
+                            .map(DavName::parent_id)
+                            .collect::<Vec<_>>(),
+                        resolver,
+                        batch,
+                    )
+                    .await
+                    .caused_by(trc::location!())?;
                 let update = SplitUpdate::meta_only(event, new_event);
                 batch
                     .with_account_id(account_id)
@@ -437,6 +564,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     account_info,
                     account_id,
                     document_id,
+                    content,
                     send_itip,
                     batch,
                 )
@@ -453,12 +581,14 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn delete_all(
         self,
         server: &Server,
         account_info: &AccountInfo,
         account_id: u32,
         document_id: u32,
+        content: Option<Archive<ArchiveBytes>>,
         send_itip: bool,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
@@ -469,8 +599,9 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         let send_itip =
             send_itip && event.inner.schedule_tag.is_some() && event.inner.event_range_end() > now;
 
-        let content_ = if has_alarms || send_itip {
-            server
+        let content_ = match content {
+            Some(content) => Some(content),
+            None if send_itip || has_alarms => server
                 .store()
                 .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                     account_id,
@@ -479,38 +610,45 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     CalendarEventField::Content,
                 ))
                 .await
-                .caused_by(trc::location!())?
-        } else {
-            None
+                .caused_by(trc::location!())?,
+            None => None,
         };
 
+        let content = content_
+            .as_ref()
+            .map(|content_| content_.to_unarchived::<CalendarEventContent>())
+            .transpose()
+            .caused_by(trc::location!())?;
+
+        if has_alarms {
+            let targets = match &content {
+                Some(content) => EventAlarmUsers::targets(account_id, content.inner).collect(),
+                None => vec![AlarmTarget::Owner],
+            };
+            server
+                .clear_event_alarms(account_id, document_id, targets, batch)
+                .await
+                .caused_by(trc::location!())?;
+        }
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)
             .with_document(document_id);
 
-        if let Some(content_) = &content_ {
-            let content = content_
-                .to_unarchived::<CalendarEventContent>()
+        if send_itip && let Some(content) = content {
+            let content = content
+                .deserialize::<CalendarEventContent>()
                 .caused_by(trc::location!())?;
 
-            if has_alarms && let Some(next_alarm) = content.inner.data.next_alarm(now, Tz::Floating)
-            {
-                next_alarm.delete_task(batch);
-            }
-
-            if send_itip {
-                let content = content
-                    .deserialize::<CalendarEventContent>()
+            if let Ok(messages) = itip_cancel(
+                &content.data.event,
+                account_info.addresses(),
+                true,
+                RecipientPolicy::new(&server.core.groupware, event.inner.flags.to_native()),
+            ) {
+                ItipMessages::new(messages)
+                    .queue(batch)
                     .caused_by(trc::location!())?;
-
-                if let Ok(messages) =
-                    itip_cancel(&content.data.event, account_info.addresses(), true)
-                {
-                    ItipMessages::new(vec![messages])
-                        .queue(batch)
-                        .caused_by(trc::location!())?;
-                }
             }
         }
 
@@ -565,21 +703,23 @@ impl CalendarAlarm {
             } => Task::CalendarAlarmEmail(TaskCalendarAlarmEmail {
                 account_id: account_id.into(),
                 document_id: Id::default(),
-                alarm_id: self.alarm_id.into(),
+                alarm_id: self.alarm_id.to_task_id(),
                 event_id: self.event_id.into(),
                 event_end: UTCDateTime::from_timestamp(*event_end),
                 event_end_tz: (*event_end_tz).into(),
                 event_start: UTCDateTime::from_timestamp(*event_start),
                 event_start_tz: (*event_start_tz).into(),
+                target_account_id: self.target.sharee_id().map(Id::from),
                 status: TaskStatus::at(self.alarm_time),
             }),
             CalendarAlarmType::Display { recurrence_id } => {
                 Task::CalendarAlarmNotification(TaskCalendarAlarmNotification {
                     account_id: account_id.into(),
                     document_id: Id::default(),
-                    alarm_id: self.alarm_id.into(),
+                    alarm_id: self.alarm_id.to_task_id(),
                     event_id: self.event_id.into(),
                     recurrence_id: *recurrence_id,
+                    target_account_id: self.target.sharee_id().map(Id::from),
                     status: TaskStatus::at(self.alarm_time),
                 })
             }
@@ -589,7 +729,7 @@ impl CalendarAlarm {
     pub fn build_write_ops(&self, account_id: u32, document_id: u32) -> [Operation; 2] {
         let mut task = self.task(account_id);
         task.set_document_id(Id::from(document_id));
-        let id = TaskId::Assigned(Id::from_parts(account_id, document_id).id());
+        let id = TaskId::Assigned(self.target.task_id().resolve(account_id, document_id));
         [
             Operation::Value {
                 class: ValueClass::TaskQueue(TaskQueueClass::Due {
@@ -607,11 +747,11 @@ impl CalendarAlarm {
 
     pub fn write_task(&self, batch: &mut BatchBuilder) {
         let account_id = batch.last_account_id().unwrap();
-        batch.schedule_document_task(self.task(account_id));
+        batch.schedule_document_task(self.target.task_id(), self.task(account_id));
     }
 
     pub fn delete_task(&self, batch: &mut BatchBuilder) {
-        batch.clear_document_task(self.alarm_time as u64);
+        batch.clear_document_task(self.target.task_id(), self.alarm_time as u64);
     }
 }
 
@@ -649,5 +789,566 @@ impl ArchivedCalendarEvent {
         Err(trc::StoreEvent::UnexpectedError
             .into_err()
             .details("Event is not linked to any calendar"))
+    }
+}
+
+pub struct NotifiableEvent {
+    pub event: ICalendar,
+    pub content: Option<Archive<ArchiveBytes>>,
+}
+
+pub enum DirectChange {
+    Created {
+        event_id: PendingId,
+        current: ICalendar,
+        calendar_ids: Vec<u32>,
+        event_flags: u16,
+    },
+    Updated {
+        event_id: u32,
+        previous: ICalendar,
+        current: ICalendar,
+        calendar_ids: Vec<u32>,
+        event_flags: u16,
+    },
+    Destroyed {
+        event_id: u32,
+        previous: ICalendar,
+        calendar_ids: Vec<u32>,
+        event_flags: u16,
+    },
+}
+
+fn draft_flag(event_flags: u16) -> u16 {
+    if event_flags & EVENT_DRAFT != 0 {
+        EVENT_NOTIFICATION_IS_DRAFT
+    } else {
+        0
+    }
+}
+
+impl DirectChange {
+    fn into_notification(
+        self,
+        changed_by: u32,
+    ) -> (
+        CalendarEventNotification,
+        CalendarEventNotificationContent,
+        Option<Slot>,
+    ) {
+        let (flags, event_id, pending_event_id, previous, current, calendar_ids, event_flags) =
+            match self {
+                DirectChange::Created {
+                    event_id,
+                    current,
+                    calendar_ids,
+                    event_flags,
+                } => {
+                    let (assigned_id, pending_id) = match event_id {
+                        PendingId::Assigned(event_id) => (Some(event_id), None),
+                        PendingId::Slot(slot) => (None, Some(slot)),
+                    };
+
+                    (
+                        draft_flag(event_flags),
+                        assigned_id,
+                        pending_id,
+                        None,
+                        Some(current),
+                        calendar_ids,
+                        event_flags,
+                    )
+                }
+                DirectChange::Updated {
+                    event_id,
+                    previous,
+                    current,
+                    calendar_ids,
+                    event_flags,
+                } => (
+                    EVENT_NOTIFICATION_IS_CHANGE | draft_flag(event_flags),
+                    Some(event_id),
+                    None,
+                    Some(previous),
+                    Some(current),
+                    calendar_ids,
+                    event_flags,
+                ),
+                DirectChange::Destroyed {
+                    event_id,
+                    previous,
+                    calendar_ids,
+                    event_flags,
+                } => (
+                    EVENT_NOTIFICATION_IS_DESTROY,
+                    Some(event_id),
+                    None,
+                    Some(previous),
+                    None,
+                    calendar_ids,
+                    event_flags,
+                ),
+            };
+        let flags = if hides_details(event_flags)
+            || [previous.as_ref(), current.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|snapshot| !snapshot.privacy().is_public())
+        {
+            flags | EVENT_NOTIFICATION_OWNER_ONLY
+        } else {
+            flags
+        };
+
+        (
+            CalendarEventNotification {
+                event_id,
+                changed_by: ChangedBy::PrincipalId(changed_by),
+                calendar_ids,
+                flags: flags | EVENT_NOTIFICATION_IS_DIRECT,
+                ..Default::default()
+            },
+            CalendarEventNotificationContent::Direct { previous, current },
+            pending_event_id,
+        )
+    }
+}
+
+#[derive(Default)]
+pub struct NotificationQuota {
+    usage: Option<NotificationUsage>,
+}
+
+struct NotificationUsage {
+    account: Arc<AccountCache>,
+    limit: Option<usize>,
+    stored: usize,
+    created: usize,
+    expired: Vec<u32>,
+}
+
+impl NotificationQuota {
+    pub(crate) async fn reserve(
+        &mut self,
+        server: &Server,
+        account_id: u32,
+        size: u64,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<bool> {
+        let usage = match &mut self.usage {
+            Some(usage) => usage,
+            usage @ None => usage.insert(NotificationUsage::load(server, account_id).await?),
+        };
+
+        match server.has_available_quota(&usage.account, size).await {
+            Ok(()) => {}
+            Err(err)
+                if err.matches(trc::EventType::Limit(trc::LimitEvent::Quota))
+                    || err.matches(trc::EventType::Limit(trc::LimitEvent::TenantQuota)) =>
+            {
+                return Ok(false);
+            }
+            Err(err) => return Err(err.caused_by(trc::location!())),
+        }
+
+        if let Some(limit) = usage.limit
+            && usage.stored + usage.created >= limit + usage.expired.len()
+        {
+            if limit == 0 {
+                return Ok(false);
+            }
+            let Some(document_id) = server
+                .oldest_notification(account_id, &usage.expired)
+                .await?
+            else {
+                return Ok(false);
+            };
+            if let Some(notification) = server
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::CalendarEventNotification,
+                    document_id,
+                ))
+                .await
+                .caused_by(trc::location!())?
+            {
+                DestroyArchive(
+                    notification
+                        .to_unarchived::<CalendarEventNotification>()
+                        .caused_by(trc::location!())?,
+                )
+                .delete(
+                    usage.account.account_tenant_ids(),
+                    account_id,
+                    document_id,
+                    batch,
+                )
+                .caused_by(trc::location!())?;
+            }
+            usage.expired.push(document_id);
+        }
+
+        usage.created += 1;
+        Ok(true)
+    }
+}
+
+impl NotificationUsage {
+    async fn load(server: &Server, account_id: u32) -> trc::Result<Self> {
+        let account = server
+            .account(account_id)
+            .await
+            .caused_by(trc::location!())?;
+        let limit =
+            server.object_quota_limit(&account, StorageQuota::MaxCalendarEventNotifications);
+        let stored = match limit {
+            Some(limit) => server
+                .count_documents(account_id, Collection::CalendarEventNotification, limit)
+                .await
+                .caused_by(trc::location!())?,
+            None => 0,
+        };
+        Ok(NotificationUsage {
+            account,
+            limit,
+            stored,
+            created: 0,
+            expired: Vec::new(),
+        })
+    }
+}
+
+pub trait DirectChangeNotification: Sync + Send {
+    fn notify_direct_change(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        change: DirectChange,
+        calendars: Option<&GroupwareResources>,
+        quota: &mut NotificationQuota,
+        batch: &mut BatchBuilder,
+    ) -> impl Future<Output = trc::Result<()>> + Send;
+
+    fn oldest_notification(
+        &self,
+        account_id: u32,
+        expired: &[u32],
+    ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
+
+    fn may_have_notification_viewers(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        notification: &CalendarEventNotification,
+        calendars: Option<&GroupwareResources>,
+    ) -> impl Future<Output = trc::Result<bool>> + Send;
+
+    #[allow(clippy::too_many_arguments)]
+    fn notify_calendar_removal(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        document_id: u32,
+        calendar_id: u32,
+        event_flags: u16,
+        quota: &mut NotificationQuota,
+        batch: &mut BatchBuilder,
+    ) -> impl Future<Output = trc::Result<()>> + Send;
+
+    #[allow(clippy::too_many_arguments)]
+    fn notify_calendar_addition(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        event_id: PendingId,
+        calendar_id: u32,
+        event_flags: u16,
+        source: (u32, u32),
+        quota: &mut NotificationQuota,
+        batch: &mut BatchBuilder,
+    ) -> impl Future<Output = trc::Result<()>> + Send;
+
+    #[allow(clippy::too_many_arguments)]
+    fn stored_event_if_notifiable(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        calendars: &GroupwareResources,
+        calendar_ids: &[u32],
+        event_flags: u16,
+        source: (u32, u32),
+    ) -> impl Future<Output = trc::Result<Option<NotifiableEvent>>> + Send;
+}
+
+impl DirectChangeNotification for Server {
+    async fn notify_direct_change(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        change: DirectChange,
+        calendars: Option<&GroupwareResources>,
+        quota: &mut NotificationQuota,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        let (notification, content, pending_event_id) =
+            change.into_notification(access_token.account_id());
+        if !self
+            .may_have_notification_viewers(access_token, account_id, &notification, calendars)
+            .await
+            .caused_by(trc::location!())?
+        {
+            return Ok(());
+        }
+        let size = content
+            .snapshots()
+            .into_iter()
+            .flatten()
+            .map(SizeWriter::ical)
+            .sum::<usize>();
+        if !quota
+            .reserve(self, account_id, size as u64, batch)
+            .await
+            .caused_by(trc::location!())?
+        {
+            return Ok(());
+        }
+
+        let document_id =
+            batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
+        notification
+            .insert(
+                content,
+                access_token.account_tenant_ids(),
+                account_id,
+                document_id,
+                pending_event_id,
+                batch,
+            )
+            .caused_by(trc::location!())?;
+
+        Ok(())
+    }
+
+    async fn notify_calendar_removal(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        document_id: u32,
+        calendar_id: u32,
+        event_flags: u16,
+        quota: &mut NotificationQuota,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        let Some(calendars) = self
+            .calendars_if_any(access_token, account_id)
+            .await
+            .caused_by(trc::location!())?
+        else {
+            return Ok(());
+        };
+        let Some(previous) = self
+            .stored_event_if_notifiable(
+                access_token,
+                account_id,
+                &calendars,
+                &[calendar_id],
+                event_flags,
+                (account_id, document_id),
+            )
+            .await
+            .caused_by(trc::location!())?
+            .map(|notifiable| notifiable.event)
+        else {
+            return Ok(());
+        };
+
+        self.notify_direct_change(
+            access_token,
+            account_id,
+            DirectChange::Destroyed {
+                event_id: document_id,
+                previous,
+                calendar_ids: vec![calendar_id],
+                event_flags,
+            },
+            Some(&calendars),
+            quota,
+            batch,
+        )
+        .await
+        .caused_by(trc::location!())
+    }
+
+    async fn notify_calendar_addition(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        event_id: PendingId,
+        calendar_id: u32,
+        event_flags: u16,
+        source: (u32, u32),
+        quota: &mut NotificationQuota,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        let Some(calendars) = self
+            .calendars_if_any(access_token, account_id)
+            .await
+            .caused_by(trc::location!())?
+        else {
+            return Ok(());
+        };
+        let Some(current) = self
+            .stored_event_if_notifiable(
+                access_token,
+                account_id,
+                &calendars,
+                &[calendar_id],
+                event_flags,
+                source,
+            )
+            .await
+            .caused_by(trc::location!())?
+            .map(|notifiable| notifiable.event)
+        else {
+            return Ok(());
+        };
+
+        self.notify_direct_change(
+            access_token,
+            account_id,
+            DirectChange::Created {
+                event_id,
+                current,
+                calendar_ids: vec![calendar_id],
+                event_flags,
+            },
+            Some(&calendars),
+            quota,
+            batch,
+        )
+        .await
+        .caused_by(trc::location!())
+    }
+
+    async fn stored_event_if_notifiable(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        calendars: &GroupwareResources,
+        calendar_ids: &[u32],
+        event_flags: u16,
+        source: (u32, u32),
+    ) -> trc::Result<Option<NotifiableEvent>> {
+        if !may_have_viewers(
+            access_token,
+            account_id,
+            calendars,
+            calendar_ids,
+            hides_details(event_flags),
+        ) {
+            return Ok(None);
+        }
+
+        let (source_account_id, source_document_id) = source;
+        let Some(content) = self
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                source_account_id,
+                Collection::CalendarEvent,
+                source_document_id,
+                CalendarEventField::Content,
+            ))
+            .await
+            .caused_by(trc::location!())?
+        else {
+            return Ok(None);
+        };
+
+        content
+            .deserialize::<CalendarEventContent>()
+            .map(|event| {
+                Some(NotifiableEvent {
+                    event: event.data.event,
+                    content: Some(content),
+                })
+            })
+            .caused_by(trc::location!())
+    }
+
+    async fn may_have_notification_viewers(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+        notification: &CalendarEventNotification,
+        calendars: Option<&GroupwareResources>,
+    ) -> trc::Result<bool> {
+        let is_owner_only = notification.flags & EVENT_NOTIFICATION_OWNER_ONLY != 0;
+        let account_viewers = AccountViewers::of(
+            self.account(account_id)
+                .await
+                .caused_by(trc::location!())?
+                .as_ref(),
+        );
+        let viewers = |calendars: &GroupwareResources| {
+            has_viewers(
+                access_token,
+                account_id,
+                calendars,
+                &notification.calendar_ids,
+                is_owner_only,
+                account_viewers,
+            )
+        };
+
+        match calendars {
+            Some(calendars) => Ok(viewers(calendars)),
+            None => Ok(self
+                .calendars_if_any(access_token, account_id)
+                .await
+                .caused_by(trc::location!())?
+                .is_some_and(|calendars| viewers(&calendars))),
+        }
+    }
+
+    async fn oldest_notification(
+        &self,
+        account_id: u32,
+        expired: &[u32],
+    ) -> trc::Result<Option<u32>> {
+        let mut oldest = None;
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    IndexKey {
+                        account_id,
+                        collection: Collection::CalendarEventNotification.into(),
+                        document_id: 0,
+                        field: CalendarNotificationField::Created.into(),
+                        key: &[][..],
+                    },
+                    IndexKey {
+                        account_id,
+                        collection: Collection::CalendarEventNotification.into(),
+                        document_id: u32::MAX,
+                        field: CalendarNotificationField::Created.into(),
+                        key: &u64::MAX.to_be_bytes()[..],
+                    },
+                )
+                .no_values()
+                .ascending(),
+                |key, _| {
+                    let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
+                    if expired.contains(&document_id) {
+                        Ok(true)
+                    } else {
+                        oldest = Some(document_id);
+                        Ok(false)
+                    }
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+        Ok(oldest)
     }
 }

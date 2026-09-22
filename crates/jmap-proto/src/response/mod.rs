@@ -137,6 +137,7 @@ pub enum ChangesResponseMethod {
     CalendarEvent(Box<ChangesResponse<CalendarEvent>>),
     CalendarEventNotification(Box<ChangesResponse<CalendarEventNotification>>),
     ShareNotification(Box<ChangesResponse<ShareNotification>>),
+    ParticipantIdentity(Box<ChangesResponse<ParticipantIdentity>>),
 }
 
 #[derive(Debug, serde::Serialize)]

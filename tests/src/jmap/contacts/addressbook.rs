@@ -156,6 +156,33 @@ pub async fn test(test: &TestServer) {
         ]
     );
 
+    // Sort orders outside 0 <= sortOrder < 2^31 are rejected
+    for sort_order in [json!(-1), json!(2147483648u64), json!(1.5)] {
+        assert_eq!(
+            account
+                .jmap_update(
+                    MethodObject::AddressBook,
+                    [(addressbook_id.as_str(), json!({ "sortOrder": sort_order }))],
+                    Vec::<(&str, &str)>::new(),
+                )
+                .await
+                .not_updated(&addressbook_id)
+                .typ(),
+            "invalidProperties"
+        );
+    }
+    assert_eq!(
+        account
+            .jmap_get(
+                MethodObject::AddressBook,
+                [AddressBookProperty::SortOrder],
+                [&addressbook_id],
+            )
+            .await
+            .list()[0]["sortOrder"],
+        json!(2)
+    );
+
     // Create a contact
     let _ = account
         .jmap_create(

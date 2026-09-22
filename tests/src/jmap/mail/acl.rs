@@ -226,12 +226,16 @@ pub async fn test(test: &TestServer) {
         .unwrap()
         .unwrap()
         .take_blob_id();
-    assert_forbidden(
+    assert!(matches!(
         john_client
             .set_default_account_id(john.id_string())
             .blob_copy(jane.id_string(), &blob_id)
             .await,
-    );
+        Err(jmap_client::Error::Set(SetError {
+            type_: SetErrorType::NotFound,
+            ..
+        }))
+    ));
 
     // John only has ReadItems access to Inbox
     jane_client

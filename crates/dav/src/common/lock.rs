@@ -16,7 +16,7 @@ use dav_proto::schema::request::DavPropertyValue;
 use dav_proto::schema::response::{BaseCondition, List, PropResponse};
 use dav_proto::{Condition, Depth, Timeout};
 use dav_proto::{RequestHeaders, schema::request::LockInfo};
-use groupware::cache::GroupwareCache;
+use groupware::{cache::GroupwareCache, calendar::privacy::EventPrivacy};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::borrow::Cow;
@@ -574,7 +574,14 @@ impl LockRequestHandler for Server {
                             _ => resources.resources.find_any(document_id),
                         };
 
-                        if let Some(resource) = resource {
+                        let is_owner = access_token.is_member(resource_state.account_id);
+                        if let Some(resource) = resource.filter(|resource| {
+                            is_owner
+                                || EventPrivacy::from_flags(
+                                    resource.event_flags().unwrap_or_default(),
+                                )
+                                .is_public()
+                        }) {
                             resource_state.etag = format!("\"{}\"", resource.etag()).into();
                         }
                     }

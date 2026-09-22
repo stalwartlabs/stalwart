@@ -240,6 +240,28 @@ pub async fn jmap_tests() {
         calendar::alarm::test(&test).await;
         calendar::identity::test(&test).await;
         calendar::acl::test(&test).await;
+        calendar::privacy::test(&test).await;
+        calendar::personal::test(&test).await;
+        calendar::default_alerts::test(&test).await;
+        calendar::conformance::test(&test).await;
+        calendar::rsvp::test(&test).await;
+        calendar::attachments::test(&test).await;
+    } else {
+        if enabled("calendar_attachments") {
+            calendar::attachments::test(&test).await;
+        }
+        if enabled("calendar_rsvp") {
+            calendar::rsvp::test(&test).await;
+        }
+        if enabled("calendar_privacy") {
+            calendar::privacy::test(&test).await;
+        }
+        if enabled("calendar_personal") {
+            calendar::personal::test(&test).await;
+        }
+        if enabled("calendar_default_alerts") {
+            calendar::default_alerts::test(&test).await;
+        }
     }
 
     if enabled("principal") {

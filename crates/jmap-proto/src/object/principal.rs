@@ -57,7 +57,7 @@ impl Property for PrincipalProperty {
             PrincipalProperty::Email => "email",
             PrincipalProperty::Id => "id",
             PrincipalProperty::Name => "name",
-            PrincipalProperty::Timezone => "timezone",
+            PrincipalProperty::Timezone => "timeZone",
             PrincipalProperty::Type => "type",
             PrincipalProperty::Accounts => "accounts",
             PrincipalProperty::Capability(cap) => cap.as_str(),
@@ -182,6 +182,7 @@ pub enum PrincipalFilter {
     Text(String),
     Type(PrincipalType),
     Timezone(String),
+    CalendarAddress(String),
     _T(String),
 }
 
@@ -216,6 +217,9 @@ impl<'de> DeserializeArguments<'de> for PrincipalFilter {
             },
             b"timeZone" => {
                 *self = PrincipalFilter::Timezone(map.next_value()?);
+            },
+            b"calendarAddress" => {
+                *self = PrincipalFilter::CalendarAddress(map.next_value()?);
             },
             _ => {
                 *self = PrincipalFilter::_T(key.to_string());
@@ -323,7 +327,8 @@ impl Display for PrincipalFilter {
             PrincipalFilter::Name(_) => "name",
             PrincipalFilter::Text(_) => "text",
             PrincipalFilter::Type(_) => "type",
-            PrincipalFilter::Timezone(_) => "timezone",
+            PrincipalFilter::Timezone(_) => "timeZone",
+            PrincipalFilter::CalendarAddress(_) => "calendarAddress",
             PrincipalFilter::_T(other) => other,
         })
     }

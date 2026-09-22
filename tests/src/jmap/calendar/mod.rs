@@ -6,8 +6,14 @@
 
 pub mod acl;
 pub mod alarm;
+pub mod attachments;
 pub mod calendars;
+pub mod conformance;
+pub mod default_alerts;
 pub mod event;
 pub mod identity;
 pub mod instance;
 pub mod notification;
+pub mod personal;
+pub mod privacy;
+pub mod rsvp;

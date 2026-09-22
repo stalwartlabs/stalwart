@@ -103,6 +103,15 @@ impl MethodName {
         }
     }
 
+    pub fn capability(&self) -> Capability {
+        match (self.obj, self.fnc) {
+            (MethodObject::Principal, MethodFunction::GetAvailability) => {
+                Capability::PrincipalsAvailability
+            }
+            (obj, _) => obj.capability(),
+        }
+    }
+
     pub fn as_str(&self) -> Cow<'static, str> {
         match (self.fnc, self.obj) {
             (MethodFunction::Get, MethodObject::PushSubscription) => "PushSubscription/get",

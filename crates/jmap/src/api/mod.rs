@@ -248,7 +248,7 @@ pub(crate) fn notifications_into_push_objects(
 impl IntoPushObject for CalendarAlert {
     fn into_push_object(self) -> PushObject {
         PushObject::CalendarAlert {
-            account_id: self.account_id.into(),
+            account_id: self.event_account_id.into(),
             calendar_event_id: self.event_id.into(),
             uid: self.uid,
             recurrence_id: self

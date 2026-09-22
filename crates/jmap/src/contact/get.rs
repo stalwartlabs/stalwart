@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::blob::embedded::{EmbeddedBlobIds, import_error};
 use crate::changes::state::JmapCacheState;
-use calcard::jscontact::{JSContactProperty, JSContactValue, import::ConversionOptions};
+use calcard::jscontact::{JSContactProperty, JSContactValue, import::ImportOptions};
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use jmap_proto::{
@@ -76,6 +77,7 @@ impl ContactCardGet for Server {
         let mut return_id = return_all_properties;
         let mut return_address_book_ids = return_all_properties;
         let mut return_converted_props = !return_all_properties;
+        let mut return_blob_ids = return_all_properties;
         let mut needs_content = return_all_properties;
 
         if !return_all_properties {
@@ -89,6 +91,11 @@ impl ContactCardGet for Server {
                     }
                     JSContactProperty::VCard => {
                         return_converted_props = true;
+                        return_blob_ids = true;
+                        needs_content = true;
+                    }
+                    JSContactProperty::Media | JSContactProperty::Localizations => {
+                        return_blob_ids = true;
                         needs_content = true;
                     }
                     _ => {
@@ -111,43 +118,51 @@ impl ContactCardGet for Server {
                 continue;
             };
 
-            let mut result =
-                if needs_content {
-                    let Some(_content) = self
-                        .store()
-                        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+            let mut result = if needs_content {
+                let Some(_content) = self
+                    .store()
+                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                        account_id,
+                        Collection::ContactCard,
+                        document_id,
+                        ContactField::Content,
+                    ))
+                    .await?
+                else {
+                    response.push_not_found(id);
+                    continue;
+                };
+                let content = _content
+                    .deserialize::<ContactCardContent>()
+                    .caused_by(trc::location!())?;
+
+                let options = ImportOptions::new().include_vcard_parameters(return_converted_props);
+                let jscontact = if return_blob_ids {
+                    content.card.into_jscontact_with::<Id, BlobId, _>(
+                        options.with_blob_id_generator(EmbeddedBlobIds::new(
                             account_id,
                             Collection::ContactCard,
                             document_id,
-                            ContactField::Content,
-                        ))
-                        .await?
-                    else {
-                        response.push_not_found(id);
-                        continue;
-                    };
-                    let content = _content
-                        .deserialize::<ContactCardContent>()
-                        .caused_by(trc::location!())?;
-
-                    let jscontact = content
-                        .card
-                        .into_jscontact_with_options::<Id, BlobId>(
-                            ConversionOptions::default()
-                                .include_vcard_parameters(return_converted_props),
-                        )
-                        .into_inner();
-
-                    if return_all_properties {
-                        jscontact.into_object().unwrap()
-                    } else {
-                        Map::from_iter(jscontact.into_expanded_object().filter(|(k, _)| {
-                            k.as_property().is_some_and(|p| properties.contains(p))
-                        }))
-                    }
+                        )),
+                    )
                 } else {
-                    Map::with_capacity(2)
-                };
+                    content.card.into_jscontact_with::<Id, BlobId, _>(options)
+                }
+                .map_err(import_error)?
+                .into_inner();
+
+                if return_all_properties {
+                    jscontact.into_object().unwrap()
+                } else {
+                    Map::from_iter(
+                        jscontact.into_expanded_object().filter(|(k, _)| {
+                            k.as_property().is_some_and(|p| properties.contains(p))
+                        }),
+                    )
+                }
+            } else {
+                Map::with_capacity(2)
+            };
 
             if return_id {
                 result.insert_unchecked(

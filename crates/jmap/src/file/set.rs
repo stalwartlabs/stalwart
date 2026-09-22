@@ -416,7 +416,13 @@ async fn prepare_create<R: ResolveCreatedReference<FileNodeProperty, FileNodeVal
         )));
     }
     if !node.acls.is_empty()
-        && let Err(err) = writer.validate_acls(&node.acls, None).await?
+        && let Err(err) = writer
+            .validate_acls(
+                &node.acls,
+                writer.inherited_rights(parent),
+                &[] as &[AclGrant],
+            )
+            .await
     {
         return Ok(Err((create_id, err)));
     }
@@ -559,19 +565,16 @@ async fn prepare_update(
     if let Err(err) = writer.validate_update_rights(document_id, old_parent, parent, &effects) {
         return Ok(Err(err));
     }
-    if effects.acls {
-        let previous_acls = current
-            .inner
-            .acls
-            .iter()
-            .map(AclGrant::from)
-            .collect::<Vec<_>>();
-        if let Err(err) = writer
-            .validate_acls(&node.acls, Some(&previous_acls))
-            .await?
-        {
-            return Ok(Err(err));
-        }
+    if effects.acls
+        && let Err(err) = writer
+            .validate_acls(
+                &node.acls,
+                writer.rights_of(document_id),
+                &current.inner.acls,
+            )
+            .await
+    {
+        return Ok(Err(err));
     }
 
     Ok(Ok(PreparedUpdate {

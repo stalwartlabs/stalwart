@@ -10,7 +10,12 @@ use crate::{
     calendar::{
         CalendarEvent, CalendarEventContent, CalendarEventData, CalendarEventNotification,
         CalendarEventNotificationContent, ChangedBy, EVENT_HIDE_ATTENDEES,
-        EVENT_NOTIFICATION_IS_CHANGE,
+        EVENT_NOTIFICATION_IS_CHANGE, EVENT_NOTIFICATION_OWNER_ONLY,
+        alerts::DefaultAlertsResolver,
+        notification::hides_details,
+        privacy::{EventPrivacy, ICalendarPrivacy},
+        schedule::{EventAlarmScheduler, EventAlarmUsers},
+        storage::NotificationQuota,
     },
     scheduling::{
         InstanceId, ItipError, ItipMessage, ItipSnapshots,
@@ -20,6 +25,7 @@ use crate::{
             itip_process_message,
         },
         itip::itip_build_envelope,
+        recipient::RecipientPolicy,
         snapshot::itip_snapshot,
     },
 };
@@ -220,6 +226,7 @@ impl ItipIngest for Server {
                     &itip,
                     itip_snapshots,
                     sender.to_string(),
+                    RecipientPolicy::new(&self.core.groupware, event.flags),
                 )? {
                     MergeResult::Actions(changes) => {
                         commit_itip_merge(
@@ -286,18 +293,10 @@ impl ItipIngest for Server {
             {
                 return Err(ItipIngestError::Message(ItipError::QuotaExceeded));
             }
-            let has_notification_quota = self
-                .has_document_quota(
-                    &account,
-                    StorageQuota::MaxCalendarEventNotifications,
-                    Collection::CalendarEventNotification,
-                )
-                .await
-                .caused_by(trc::location!())?;
 
             // Obtain parent calendar
             let Some(parent_id) = self
-                .get_or_create_default_calendar(account_id, account_id)
+                .get_or_create_default_calendar(account_info.account(), account_info.account())
                 .await
                 .caused_by(trc::location!())?
             else {
@@ -305,7 +304,6 @@ impl ItipIngest for Server {
             };
 
             // Build event
-            let mut next_email_alarm = None;
             let now = now() as i64;
             let event = CalendarEvent {
                 names: vec![DavName {
@@ -315,22 +313,44 @@ impl ItipIngest for Server {
                 schedule_tag: Some(1),
                 ..Default::default()
             };
+            let current = ical.clone();
             let event_content = CalendarEventContent {
                 data: CalendarEventData::new(
                     ical,
                     Tz::Floating,
                     self.core.groupware.max_ical_instances,
-                    &mut next_email_alarm,
                 ),
                 ..Default::default()
             };
+            let next_email_alarms = self
+                .next_event_alarms(
+                    account_id,
+                    &EventAlarmUsers::new(account_id, &event_content)?
+                        .with_event_flags(event.flags),
+                    &event_content.data,
+                    &[parent_id],
+                    now,
+                    &mut DefaultAlertsResolver::default(),
+                )
+                .await
+                .caused_by(trc::location!())?;
 
             let notification = CalendarEventNotification {
                 event_id: None,
                 changed_by,
+                calendar_ids: vec![parent_id],
+                flags: if hides_details(event.flags) || !current.privacy().is_public() {
+                    EVENT_NOTIFICATION_OWNER_ONLY
+                } else {
+                    0
+                },
                 ..Default::default()
             };
-            let notification_content = CalendarEventNotificationContent { event: itip };
+            let notification_content = CalendarEventNotificationContent::Itip {
+                message: itip,
+                previous: None,
+                current: Some(current),
+            };
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();
@@ -342,11 +362,20 @@ impl ItipIngest for Server {
                     account_id,
                     document_id,
                     None,
-                    next_email_alarm,
+                    next_email_alarms,
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
-            if has_notification_quota {
+            if NotificationQuota::default()
+                .reserve(
+                    self,
+                    account_id,
+                    notification_content.stored_size(),
+                    &mut batch,
+                )
+                .await
+                .caused_by(trc::location!())?
+            {
                 let itip_document_id =
                     batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
                 notification
@@ -530,6 +559,7 @@ impl ItipIngest for Server {
                     &reply,
                     reply_snapshots,
                     rsvp.attendee.clone(),
+                    RecipientPolicy::new(&self.core.groupware, event.flags),
                 )
             });
         let changes = match merge {
@@ -838,7 +868,30 @@ async fn commit_itip_merge(
         .caused_by(trc::location!())?;
 
     // Merge changes
-    itip_merge_changes(&mut content.data.event, changes);
+    let privacy = EventPrivacy::from_flags(event_.inner.flags.to_native());
+    let previous = content.data.event.clone();
+    itip_merge_changes(&mut content.data.event, changes)?;
+    if content
+        .data
+        .event
+        .components
+        .iter()
+        .filter(|component| component.component_type.is_scheduling_object())
+        .any(|component| {
+            component
+                .entries
+                .iter()
+                .filter(|entry| entry.name == ICalendarProperty::Class)
+                .filter_map(|entry| entry.values.first())
+                .map(EventPrivacy::from_value)
+                .max()
+                .unwrap_or_default()
+                != privacy
+        })
+    {
+        content.data.event.set_privacy(privacy);
+    }
+    let current = content.data.event.clone();
 
     // Calculate the new ical size
     let new_size = SizeWriter::ical(&content.data.event) as u32;
@@ -857,25 +910,51 @@ async fn commit_itip_merge(
     {
         return Err(ItipIngestError::Message(ItipError::QuotaExceeded));
     }
-    let has_notification_quota = server
-        .has_document_quota(
-            &account,
-            StorageQuota::MaxCalendarEventNotifications,
-            Collection::CalendarEventNotification,
-        )
-        .await
-        .caused_by(trc::location!())?;
 
     // Build event
     let now = now() as i64;
-    let prev_email_alarm = content_.inner.data.next_alarm(now, Tz::Floating);
-    let mut next_email_alarm = None;
-    content.data = CalendarEventData::new(
+    let mut resolver = DefaultAlertsResolver::default();
+    let default_alerts = resolver
+        .resolve_for_content(
+            server,
+            account_id,
+            account_id,
+            &content,
+            event.names.iter().map(DavName::parent_id),
+        )
+        .await?;
+    let calendar_ids = event
+        .names
+        .iter()
+        .map(DavName::parent_id)
+        .collect::<Vec<_>>();
+    let prev_email_alarms = server
+        .next_event_alarms(
+            account_id,
+            &EventAlarmUsers::new(account_id, content_.inner)?
+                .with_event_flags(event_.inner.flags.to_native()),
+            &content_.inner.data,
+            &calendar_ids,
+            now,
+            &mut resolver,
+        )
+        .await?;
+    content.data = CalendarEventData::new_with_default_alerts(
         content.data.event,
         Tz::Floating,
         server.core.groupware.max_ical_instances,
-        &mut next_email_alarm,
+        &default_alerts,
     );
+    let next_email_alarms = server
+        .next_event_alarms(
+            account_id,
+            &EventAlarmUsers::new(account_id, &content)?.with_event_flags(event.flags),
+            &content.data,
+            &calendar_ids,
+            now,
+            &mut resolver,
+        )
+        .await?;
     if is_organizer_update {
         if let Some(schedule_tag) = &mut event.schedule_tag {
             *schedule_tag += 1;
@@ -888,10 +967,21 @@ async fn commit_itip_merge(
     let notification = CalendarEventNotification {
         changed_by,
         event_id: Some(document_id),
-        flags: EVENT_NOTIFICATION_IS_CHANGE,
+        calendar_ids: calendar_ids.clone(),
+        flags: if hides_details(event.flags | event_.inner.flags.to_native())
+            || !privacy.is_public()
+        {
+            EVENT_NOTIFICATION_IS_CHANGE | EVENT_NOTIFICATION_OWNER_ONLY
+        } else {
+            EVENT_NOTIFICATION_IS_CHANGE
+        },
         ..Default::default()
     };
-    let notification_content = CalendarEventNotificationContent { event: itip };
+    let notification_content = CalendarEventNotificationContent::Itip {
+        message: itip,
+        previous: Some(previous),
+        current: Some(current),
+    };
 
     // Prepare write batch
     let mut batch = BatchBuilder::new();
@@ -907,15 +997,25 @@ async fn commit_itip_merge(
             &mut batch,
         )
         .caused_by(trc::location!())?;
-    if prev_email_alarm != next_email_alarm {
-        if let Some(prev_alarm) = prev_email_alarm {
-            prev_alarm.delete_task(&mut batch);
-        }
-        if let Some(next_alarm) = next_email_alarm {
-            next_alarm.write_task(&mut batch);
-        }
-    }
-    if has_notification_quota {
+    server
+        .replace_event_alarms(
+            account_id,
+            document_id,
+            prev_email_alarms,
+            next_email_alarms,
+            &mut batch,
+        )
+        .await?;
+    if NotificationQuota::default()
+        .reserve(
+            server,
+            account_id,
+            notification_content.stored_size(),
+            &mut batch,
+        )
+        .await
+        .caused_by(trc::location!())?
+    {
         let itip_document_id =
             batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
         notification
@@ -1404,5 +1504,15 @@ impl From<ItipError> for ItipIngestError {
 impl From<trc::Error> for ItipIngestError {
     fn from(err: trc::Error) -> Self {
         ItipIngestError::Internal(err)
+    }
+}
+
+impl CalendarEventNotificationContent {
+    fn stored_size(&self) -> u64 {
+        self.snapshots()
+            .into_iter()
+            .flatten()
+            .map(|ical| SizeWriter::ical(ical) as u64)
+            .sum()
     }
 }

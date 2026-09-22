@@ -6,6 +6,8 @@
 
 use crate::utils::{jmap::JmapUtils, server::TestServer};
 use calcard::jscalendar::JSCalendarProperty;
+use dav_proto::schema::property::{DavProperty, WebDavProperty};
+use groupware::DavResourceName;
 use jmap_proto::{
     object::{calendar::CalendarProperty, share_notification::ShareNotificationProperty},
     request::method::MethodObject,
@@ -284,7 +286,7 @@ pub async fn test(test: &TestServer) {
         jane.jmap_update_account(
             john,
             MethodObject::Calendar,
-            [(&john_calendar_id, json!({}))],
+            [(&john_calendar_id, json!({"description": "Not allowed"}))],
             Vec::<(&str, &str)>::new(),
         )
         .await
@@ -314,7 +316,7 @@ pub async fn test(test: &TestServer) {
         .await
         .not_updated(&john_event_id)
         .description()
-        .contains("You are not allowed to modify calendar"),
+        .contains("You are not allowed to modify"),
     );
     assert!(
         jane.jmap_destroy_account(
@@ -363,10 +365,10 @@ pub async fn test(test: &TestServer) {
             "mayWriteAll": true,
             "mayDelete": true,
             "mayShare": false,
-            "mayWriteOwn": false,
+            "mayWriteOwn": true,
             "mayReadFreeBusy": false,
-            "mayUpdatePrivate": false,
-            "mayRSVP": false
+            "mayUpdatePrivate": true,
+            "mayRSVP": true
         }
         }));
 
@@ -419,10 +421,10 @@ pub async fn test(test: &TestServer) {
             "mayWriteAll": true,
             "mayDelete": true,
             "mayShare": false,
-            "mayWriteOwn": false,
+            "mayWriteOwn": true,
             "mayReadFreeBusy": false,
-            "mayUpdatePrivate": false,
-            "mayRSVP": false
+            "mayUpdatePrivate": true,
+            "mayRSVP": true
           },
           "name": null
         }));
@@ -450,6 +452,7 @@ pub async fn test(test: &TestServer) {
             john,
             MethodObject::CalendarEvent,
             [(
+                "k1",
                 &jane_event_id,
                 json!({
                     "calendarIds": {
@@ -460,7 +463,7 @@ pub async fn test(test: &TestServer) {
             false,
         )
         .await
-        .copied(&jane_event_id)
+        .copied("k1")
         .id()
         .to_string();
     jane.jmap_get_account(
@@ -657,10 +660,10 @@ pub async fn test(test: &TestServer) {
             "mayWriteAll": true,
             "mayDelete": true,
             "mayShare": false,
-            "mayWriteOwn": false,
+            "mayWriteOwn": true,
             "mayReadFreeBusy": false,
-            "mayUpdatePrivate": false,
-            "mayRSVP": false
+            "mayUpdatePrivate": true,
+            "mayRSVP": true
           },
           "newRights": {
             "mayReadItems": false,
@@ -690,6 +693,101 @@ pub async fn test(test: &TestServer) {
     .await
     .updated(&john_calendar_id);
 
+    // A JMAP-only right renders no WebDAV privilege and produces no empty ACE
+    let jane_dav = jane.webdav_client();
+    let calendar_home = format!("{}/jdoe%40example.com/", DavResourceName::Cal.base_path());
+    let shared = jane_dav
+        .propfind_with_headers(
+            &calendar_home,
+            [DavProperty::WebDav(WebDavProperty::GetETag)],
+            [("prefer", "depth-noroot")],
+        )
+        .await;
+    assert_eq!(shared.hrefs.len(), 1, "{:?}", shared.hrefs);
+    let calendar_path = shared
+        .hrefs
+        .keys()
+        .next()
+        .cloned()
+        .expect("shared calendar is visible over WebDAV");
+    jane_dav
+        .propfind(
+            &calendar_path,
+            [DavProperty::WebDav(WebDavProperty::CurrentUserPrivilegeSet)],
+        )
+        .await
+        .properties(&calendar_path)
+        .get(DavProperty::WebDav(WebDavProperty::CurrentUserPrivilegeSet))
+        .with_values([
+            "D:privilege.D:read",
+            "D:privilege.D:read-current-user-privilege-set",
+        ]);
+    john.webdav_client()
+        .propfind(&calendar_path, [DavProperty::WebDav(WebDavProperty::Acl)])
+        .await
+        .properties(&calendar_path)
+        .get(DavProperty::WebDav(WebDavProperty::Acl))
+        .with_values([
+            format!(
+                "D:ace.D:principal.D:href:{}/jane.smith%40example.com/",
+                DavResourceName::Principal.base_path()
+            )
+            .as_str(),
+            "D:ace.D:grant.D:privilege.D:read",
+            "D:ace.D:grant.D:privilege.D:read-current-user-privilege-set",
+        ]);
+
+    // mayDelete alone does not allow removing events from the calendar
+    let john_calendar_2_id = john
+        .jmap_create(
+            MethodObject::Calendar,
+            [json!({
+                "name": "Test #2",
+                "shareWith": {
+                    &jane_id: {
+                        "mayReadItems": true,
+                        "mayWriteAll": true
+                    }
+                }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    assert!(
+        jane.jmap_destroy_account(
+            john,
+            MethodObject::CalendarEvent,
+            [&john_event_id],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_destroyed(&john_event_id)
+        .description()
+        .contains("You are not allowed to remove events from calendar"),
+    );
+    assert_eq!(
+        jane.jmap_update_account(
+            john,
+            MethodObject::CalendarEvent,
+            [(
+                &john_event_id,
+                json!({
+                    "calendarIds": {
+                        &john_calendar_2_id: true
+                    }
+                }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_updated(&john_event_id)
+        .typ(),
+        "forbidden"
+    );
+
     // Verify Jane can delete the calendar
     assert_eq!(
         jane.jmap_destroy_account(
@@ -704,8 +802,29 @@ pub async fn test(test: &TestServer) {
         [john_calendar_id.as_str()]
     );
 
+    // Changes made by Jane in John's calendars are notified to John
+    let notifications = john
+        .jmap_method_call(
+            "CalendarEventNotification/get",
+            json!({
+                "accountId": john.id_string(),
+                "ids": null,
+                "properties": ["type", "changedBy"]
+            }),
+        )
+        .await;
+    assert!(
+        notifications.list().iter().any(|notification| {
+            notification["changedBy"]["principalId"] == json!(jane.id_string())
+                && notification["type"] == json!("created")
+        }),
+        "{notifications:?}"
+    );
+
     // Destroy all mailboxes
     john.destroy_all_calendars().await;
     jane.destroy_all_calendars().await;
+    john.destroy_all_event_notifications().await;
+    jane.destroy_all_event_notifications().await;
     test.assert_is_empty().await;
 }

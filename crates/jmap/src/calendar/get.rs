@@ -5,7 +5,10 @@
  */
 
 use crate::{api::acl::JmapRights, calendar::Availability, changes::state::JmapCacheState};
-use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
+use calcard::{
+    icalendar::ICalendarDuration,
+    jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType},
+};
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{
     cache::GroupwareCache,
@@ -129,6 +132,8 @@ impl CalendarGet for Server {
             let calendar = _calendar
                 .unarchive::<Calendar>()
                 .caused_by(trc::location!())?;
+            let personal_preferences = calendar.personal_preferences(personal_id);
+            let personal_flags = calendar.personal_flags(personal_id, is_owner);
             let mut result = Map::with_capacity(properties.len());
             for property in &properties {
                 match property {
@@ -138,7 +143,11 @@ impl CalendarGet for Server {
                     CalendarProperty::Name => {
                         result.insert_unchecked(
                             CalendarProperty::Name,
-                            calendar.preferences(personal_id).name.to_string(),
+                            calendar
+                                .preferences(personal_id)
+                                .map_or_else(String::new, |preferences| {
+                                    preferences.name.to_string()
+                                }),
                         );
                     }
                     CalendarProperty::Description => {
@@ -146,15 +155,14 @@ impl CalendarGet for Server {
                             CalendarProperty::Description,
                             calendar
                                 .preferences(personal_id)
-                                .description
-                                .as_ref()
-                                .map(|v| v.to_string()),
+                                .and_then(|preferences| preferences.description.as_ref())
+                                .map(|description| description.to_string()),
                         );
                     }
                     CalendarProperty::SortOrder => {
                         result.insert_unchecked(
                             CalendarProperty::SortOrder,
-                            calendar.preferences(personal_id).sort_order.to_native(),
+                            personal_preferences.map_or(0, |p| p.sort_order.to_native()),
                         );
                     }
                     CalendarProperty::IsDefault => {
@@ -166,9 +174,7 @@ impl CalendarGet for Server {
                     CalendarProperty::IsSubscribed => {
                         result.insert_unchecked(
                             CalendarProperty::IsSubscribed,
-                            Value::Bool(
-                                calendar.preferences(personal_id).flags & CALENDAR_SUBSCRIBED != 0,
-                            ),
+                            Value::Bool(personal_flags & CALENDAR_SUBSCRIBED != 0),
                         );
                     }
                     CalendarProperty::Color => {
@@ -176,31 +182,27 @@ impl CalendarGet for Server {
                             CalendarProperty::Color,
                             calendar
                                 .preferences(personal_id)
-                                .color
-                                .as_ref()
-                                .map(|c| c.to_string()),
+                                .and_then(|preferences| preferences.color.as_ref())
+                                .map(|color| color.to_string()),
                         );
                     }
                     CalendarProperty::IsVisible => {
                         result.insert_unchecked(
                             CalendarProperty::IsVisible,
-                            Value::Bool(
-                                calendar.preferences(personal_id).flags & CALENDAR_INVISIBLE == 0,
-                            ),
+                            Value::Bool(personal_flags & CALENDAR_INVISIBLE == 0),
                         );
                     }
                     CalendarProperty::IncludeInAvailability => {
                         result.insert_unchecked(
                             CalendarProperty::IncludeInAvailability,
                             Value::Element(CalendarValue::IncludeInAvailability(
-                                IncludeInAvailability::from_flags(
-                                    calendar.preferences(personal_id).flags.to_native(),
-                                )
-                                .unwrap_or(if is_owner {
-                                    IncludeInAvailability::All
-                                } else {
-                                    IncludeInAvailability::None
-                                }),
+                                IncludeInAvailability::from_flags(personal_flags).unwrap_or(
+                                    if is_owner {
+                                        IncludeInAvailability::All
+                                    } else {
+                                        IncludeInAvailability::None
+                                    },
+                                ),
                             )),
                         );
                     }
@@ -229,8 +231,7 @@ impl CalendarGet for Server {
                             CalendarProperty::TimeZone,
                             calendar
                                 .preferences(personal_id)
-                                .time_zone
-                                .tz()
+                                .and_then(|preferences| preferences.time_zone.tz())
                                 .map(|tz| Value::Element(CalendarValue::Timezone(tz)))
                                 .unwrap_or(Value::Null),
                         );
@@ -275,8 +276,23 @@ fn default_alarm_to_value(
     Key<'static, CalendarProperty>,
     Value<'static, CalendarProperty, CalendarValue>,
 ) {
+    default_alert_value(
+        alarm.id.as_str(),
+        alarm.offset.to_native(),
+        alarm.flags.to_native(),
+    )
+}
+
+pub(crate) fn default_alert_value(
+    id: &str,
+    offset: ICalendarDuration,
+    flags: u16,
+) -> (
+    Key<'static, CalendarProperty>,
+    Value<'static, CalendarProperty, CalendarValue>,
+) {
     (
-        Key::Owned(alarm.id.to_string()),
+        Key::Owned(id.to_string()),
         Value::Object(Map::from(vec![
             (
                 Key::Property(CalendarProperty::Type),
@@ -284,7 +300,7 @@ fn default_alarm_to_value(
             ),
             (
                 Key::Property(CalendarProperty::Action),
-                Value::Element(CalendarValue::Action(if alarm.flags & ALERT_EMAIL != 0 {
+                Value::Element(CalendarValue::Action(if flags & ALERT_EMAIL != 0 {
                     JSCalendarAlertAction::Email
                 } else {
                     JSCalendarAlertAction::Display
@@ -299,12 +315,12 @@ fn default_alarm_to_value(
                     ),
                     (
                         Key::Property(CalendarProperty::Offset),
-                        Value::Element(CalendarValue::Duration(alarm.offset.to_native())),
+                        Value::Element(CalendarValue::Duration(offset)),
                     ),
                     (
                         Key::Property(CalendarProperty::RelativeTo),
                         Value::Element(CalendarValue::RelativeTo(
-                            if alarm.flags & ALERT_RELATIVE_TO_END != 0 {
+                            if flags & ALERT_RELATIVE_TO_END != 0 {
                                 JSCalendarRelativeTo::End
                             } else {
                                 JSCalendarRelativeTo::Start

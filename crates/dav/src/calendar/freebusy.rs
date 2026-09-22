@@ -18,7 +18,10 @@ use calcard::{
 };
 use common::{DavResourcePath, GroupwareResources, PROD_ID, Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::request::FreeBusyQuery};
-use groupware::{cache::GroupwareCache, calendar::CalendarEventContent};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{CalendarEventContent, privacy::EventPrivacy},
+};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::str::FromStr;
@@ -106,7 +109,8 @@ impl CalendarFreebusyRequestHandler for Server {
         resource: DavResourcePath<'_>,
     ) -> crate::Result<ICalendar> {
         // Obtain shared ids
-        let shared_ids = if !access_token.is_member(account_id) {
+        let is_owner = access_token.is_member(account_id);
+        let shared_ids = if !is_owner {
             resources
                 .shared_items(
                     access_token,
@@ -150,13 +154,21 @@ impl CalendarFreebusyRequestHandler for Server {
 
             let document_ids = resources
                 .children(resource.document_id())
-                .filter(|resource| {
-                    shared_ids
-                        .as_ref()
-                        .is_none_or(|ids| ids.contains(resource.document_id()))
-                        && is_resource_in_time_range(resource.resource.resource, &range)
+                .filter_map(|resource| {
+                    let privacy = if is_owner {
+                        EventPrivacy::Public
+                    } else {
+                        EventPrivacy::from_flags(
+                            resource.resource.event_flags().unwrap_or_default(),
+                        )
+                    };
+                    (privacy != EventPrivacy::Secret
+                        && shared_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(resource.document_id()))
+                        && is_resource_in_time_range(resource.resource.resource, &range))
+                    .then_some((resource.document_id(), privacy))
                 })
-                .map(|resource| resource.document_id())
                 .collect::<Vec<_>>();
 
             let mut fb_entries: AHashMap<ICalendarFreeBusyType, Vec<(i64, i64)>> =
@@ -164,7 +176,7 @@ impl CalendarFreebusyRequestHandler for Server {
             let max_instances = self.core.groupware.max_ical_instances;
             let mut total_instances: usize = 0;
 
-            for document_id in document_ids {
+            for (document_id, privacy) in document_ids {
                 let Some(archive) = self
                     .store()
                     .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
@@ -227,7 +239,7 @@ impl CalendarFreebusyRequestHandler for Server {
                         ArchivedICalendarComponentType::VEvent => {
                             let fbtype = match component.status() {
                                 Some(ArchivedICalendarStatus::Cancelled) => continue,
-                                Some(ArchivedICalendarStatus::Tentative) => {
+                                Some(ArchivedICalendarStatus::Tentative) if privacy.is_public() => {
                                     ICalendarFreeBusyType::BusyTentative
                                 }
                                 _ => ICalendarFreeBusyType::Busy,
@@ -268,6 +280,10 @@ impl CalendarFreebusyRequestHandler for Server {
                                                 } else {
                                                     None
                                                 }
+                                            })
+                                            .filter(|fb_type| {
+                                                privacy.is_public()
+                                                    || *fb_type == ICalendarFreeBusyType::Free
                                             })
                                             .unwrap_or(ICalendarFreeBusyType::Busy);
 

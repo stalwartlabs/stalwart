@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::embedded::EmbeddedBlobs;
 use common::{Server, auth::AccessToken};
 use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
@@ -42,7 +43,11 @@ impl BlobDownload for Server {
         access_token: &AccessToken,
     ) -> trc::Result<Option<Vec<u8>>> {
         if self.has_access_blob(blob_id, access_token).await? {
-            if let Some(section) = &blob_id.section {
+            if matches!(blob_id.class, BlobClass::Embedded { .. }) {
+                self.embedded_blob(blob_id)
+                    .await
+                    .caused_by(trc::location!())
+            } else if let Some(section) = &blob_id.section {
                 self.get_blob_section(&blob_id.hash, section)
                     .await
                     .caused_by(trc::location!())
@@ -101,6 +106,17 @@ impl BlobDownload for Server {
         blob_id: &BlobId,
         access_token: &AccessToken,
     ) -> trc::Result<bool> {
+        if let BlobClass::Embedded {
+            account_id,
+            collection,
+            document_id,
+        } = &blob_id.class
+        {
+            return self
+                .has_access_embedded_blob(access_token, *account_id, *collection, *document_id)
+                .await;
+        }
+
         Ok(
             (blob_id.class.is_superuser() && access_token.has_permission(Permission::FetchAnyBlob))
                 || (self
@@ -152,6 +168,7 @@ impl BlobDownload for Server {
                         BlobClass::Reserved { account_id, .. } => {
                             access_token.is_member(*account_id)
                         }
+                        BlobClass::Embedded { .. } => false,
                     }),
         )
     }

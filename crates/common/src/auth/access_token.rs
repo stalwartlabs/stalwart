@@ -106,15 +106,18 @@ impl Server {
                             }
 
                             if !collections.is_empty() {
-                                if let Some(idx) = access_to
-                                    .iter()
-                                    .position(|a| a.account_id == acl_item.to_account_id)
+                                let is_writable = acl.intersects(&Acl::WRITE);
+                                if let Some(entry) = access_to
+                                    .iter_mut()
+                                    .find(|a| a.account_id == acl_item.to_account_id)
                                 {
-                                    access_to[idx].collections.union(&collections);
+                                    entry.collections.union(&collections);
+                                    entry.is_writable |= is_writable;
                                 } else {
                                     access_to.push(AccessTo {
                                         account_id: acl_item.to_account_id,
                                         collections,
+                                        is_writable,
                                     });
                                 }
                             }
@@ -702,6 +705,15 @@ impl AccessToken {
                 .access_to
                 .iter()
                 .any(|a| a.account_id == to_account_id && a.collections.contains(to_collection))
+    }
+
+    pub fn is_read_only(&self, to_account_id: u32) -> bool {
+        !self.is_member(to_account_id)
+            && !self
+                .inner
+                .access_to
+                .iter()
+                .any(|a| a.account_id == to_account_id && a.is_writable)
     }
 
     pub fn has_account_access(&self, to_account_id: u32) -> bool {

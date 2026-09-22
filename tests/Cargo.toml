@@ -30,7 +30,7 @@ imap_proto = { path = "../crates/imap-proto" }
 types = { path = "../crates/types" }
 dav = { path = "../crates/dav", features = ["test_mode"] }
 dav-proto = { path = "../crates/dav-proto", features = ["test_mode"] }
-calcard = { version = "0.3", features = ["rkyv"] }
+calcard = { version = "0.4", features = ["rkyv"] }
 groupware = { path = "../crates/groupware", features = ["test_mode"] }
 http = { path = "../crates/http", features = ["test_mode", "enterprise"] }
 http_proto = { path = "../crates/http-proto", features = ["test_mode"]  }
@@ -78,7 +78,7 @@ rkyv.workspace = true
 compact_str = "0.10.0"
 tinyvec = { version = "1.12.0", features = ["alloc"] }
 quick-xml = "0.41"
-jmap-tools = { version = "0.1" }
+jmap-tools = { version = "0.1.9" }
 dns-update = { version = "0.5", features = ["test_provider"] }
 x509-parser = "0.18"
 rcgen = "0.14"

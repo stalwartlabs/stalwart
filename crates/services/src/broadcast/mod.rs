@@ -68,6 +68,7 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                     PushNotification::CalendarAlert(calendar_alert) => {
                         serialized.push(1u8);
                         let _ = serialized.write_leb128(calendar_alert.account_id);
+                        let _ = serialized.write_leb128(calendar_alert.event_account_id);
                         let _ = serialized.write_leb128(calendar_alert.event_id);
                         let _ = serialized
                             .write_leb128(calendar_alert.recurrence_id.unwrap_or_default() as u64);
@@ -189,6 +190,7 @@ where
 
                 1 => {
                     let account_id = self.messages.next_leb128().ok_or(())?;
+                    let event_account_id = self.messages.next_leb128().ok_or(())?;
                     let event_id = self.messages.next_leb128().ok_or(())?;
                     let recurrence_id = self.messages.next_leb128::<u64>().ok_or(())? as i64;
                     let uid_len = self.messages.next_leb128::<usize>().ok_or(())?;
@@ -206,6 +208,7 @@ where
                     Ok(Some(BroadcastEvent::PushNotification(
                         PushNotification::CalendarAlert(CalendarAlert {
                             account_id,
+                            event_account_id,
                             event_id,
                             recurrence_id: if recurrence_id == 0 {
                                 None

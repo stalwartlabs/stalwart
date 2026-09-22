@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::server::TestServerBuilder;
+use crate::utils::{
+    account::Account,
+    server::{TestServer, TestServerBuilder},
+};
 use ahash::AHashMap;
 use common::GroupwareResources;
 use groupware::DavResourceName;
@@ -14,8 +17,8 @@ use registry::{
         enums::{Permission, StorageQuota},
         prelude::{ObjectType, Property},
         structs::{
-            CalendarAlarm, CalendarScheduling, Expression, MtaStageAuth, Sharing, SystemSettings,
-            WebDav,
+            AddressBook as AddressBookSettings, Calendar as CalendarSettings, CalendarAlarm,
+            CalendarScheduling, Expression, MtaStageAuth, Sharing, SystemSettings, WebDav,
         },
     },
     types::EnumImpl,
@@ -28,6 +31,8 @@ pub mod acl;
 pub mod basic;
 pub mod cal_alarm;
 pub mod cal_itip;
+pub mod cal_personal;
+pub mod cal_privacy;
 pub mod cal_query;
 pub mod cal_scheduling;
 pub mod card_query;
@@ -185,6 +190,8 @@ pub async fn webdav_tests() {
     }
     basic::test(&test).await;
     put_get::test(&test).await;
+    embedded_size_limits(&test).await;
+    supported_calendar_components(&test).await;
     mkcol::test(&test).await;
     copy_move::test(&test, assisted_discovery).await;
     prop::test(&test, assisted_discovery).await;
@@ -193,6 +200,8 @@ pub async fn webdav_tests() {
     lock::test(&test).await;
     principals::test(&test, assisted_discovery).await;
     acl::test(&test).await;
+    cal_privacy::test(&test).await;
+    cal_personal::test(&test).await;
     card_query::test(&test).await;
     cal_query::test(&test).await;
     cal_alarm::test(&test).await;
@@ -213,6 +222,176 @@ pub async fn webdav_tests() {
         test.temp_dir.delete();
     }
 }
+
+async fn embedded_size_limits(test: &TestServer) {
+    println!("Running embedded size limit tests...");
+    const LIMIT: u64 = 64;
+    let admin = test.account("admin@example.com");
+    let client = test.account("john@example.com").webdav_client();
+    let data = "AAAA".repeat(32);
+
+    update_embedded_limits(admin, LIMIT, LIMIT).await;
+    for (path, contents, precondition) in [
+        (
+            "/dav/cal/john%40example.com/default/attachment.ics",
+            ICAL_WITH_ATTACHMENT.replace("$DATA", &data),
+            "A:max-resource-size",
+        ),
+        (
+            "/dav/card/john%40example.com/default/media.vcf",
+            VCARD_WITH_MEDIA.replace("$DATA", &data),
+            "B:max-resource-size",
+        ),
+    ] {
+        client
+            .request("PUT", path, contents)
+            .await
+            .with_status(StatusCode::PRECONDITION_FAILED)
+            .with_failed_precondition(precondition, &LIMIT.to_string());
+    }
+    update_embedded_limits(
+        admin,
+        CalendarSettings::default().max_attachments_size,
+        AddressBookSettings::default().max_media_size,
+    )
+    .await;
+
+    client.delete_default_containers().await;
+    test.assert_is_empty().await;
+}
+
+async fn update_embedded_limits(admin: &Account, attachments_size: u64, media_size: u64) {
+    admin
+        .registry_update_setting(
+            CalendarSettings {
+                max_attachments_size: attachments_size,
+                ..Default::default()
+            },
+            &[Property::MaxAttachmentsSize],
+        )
+        .await;
+    admin
+        .registry_update_setting(
+            AddressBookSettings {
+                max_media_size: media_size,
+                ..Default::default()
+            },
+            &[Property::MaxMediaSize],
+        )
+        .await;
+    admin.reload_settings().await;
+}
+
+async fn supported_calendar_components(test: &TestServer) {
+    println!("Running supported calendar component tests...");
+    let client = test.account("john@example.com").webdav_client();
+    let calendar = "/dav/cal/john%40example.com/tasks-only";
+
+    client
+        .mkcol(
+            "MKCALENDAR",
+            calendar,
+            [],
+            [(
+                "A:supported-calendar-component-set",
+                "<A:comp name=\"VTODO\"/>",
+            )],
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request(
+            "PUT",
+            &format!("{calendar}/event.ics"),
+            ICAL_WITH_ATTACHMENT.replace("$DATA", "AAAA"),
+        )
+        .await
+        .with_status(StatusCode::FORBIDDEN)
+        .with_failed_precondition("A:supported-calendar-component", "");
+    client
+        .request("PUT", &format!("{calendar}/task.ics"), ICAL_TODO)
+        .await
+        .with_status(StatusCode::CREATED);
+
+    let default_event = "/dav/cal/john%40example.com/default/component-event.ics";
+    let default_task = "/dav/cal/john%40example.com/default/component-task.ics";
+    for (path, contents) in [
+        (default_event, ICAL_WITH_ATTACHMENT.replace("$DATA", "AAAA")),
+        (
+            default_task,
+            ICAL_TODO.replace("dav-supported-component", "dav-supported-component-moved"),
+        ),
+    ] {
+        client
+            .request("PUT", path, contents)
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    for method in ["COPY", "MOVE"] {
+        client
+            .request_with_headers(
+                method,
+                default_event,
+                [("destination", format!("{calendar}/event.ics").as_str())],
+                "",
+            )
+            .await
+            .with_status(StatusCode::FORBIDDEN)
+            .with_failed_precondition("A:supported-calendar-component", "");
+    }
+    client
+        .request_with_headers(
+            "MOVE",
+            default_task,
+            [("destination", format!("{calendar}/moved-task.ics").as_str())],
+            "",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+
+    client
+        .request("DELETE", calendar, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+    client.delete_default_containers().await;
+    test.assert_is_empty().await;
+}
+
+const ICAL_TODO: &str = concat!(
+    "BEGIN:VCALENDAR\r\n",
+    "VERSION:2.0\r\n",
+    "PRODID:-//Stalwart//Test//EN\r\n",
+    "BEGIN:VTODO\r\n",
+    "UID:dav-supported-component\r\n",
+    "DTSTAMP:20240101T000000Z\r\n",
+    "SUMMARY:Task only\r\n",
+    "END:VTODO\r\n",
+    "END:VCALENDAR\r\n"
+);
+
+const ICAL_WITH_ATTACHMENT: &str = concat!(
+    "BEGIN:VCALENDAR\r\n",
+    "VERSION:2.0\r\n",
+    "PRODID:-//Stalwart//Test//EN\r\n",
+    "BEGIN:VEVENT\r\n",
+    "UID:dav-attachment-limit\r\n",
+    "DTSTAMP:20240101T000000Z\r\n",
+    "DTSTART:20240301T100000Z\r\n",
+    "DURATION:PT1H\r\n",
+    "SUMMARY:Attachment limit\r\n",
+    "ATTACH;ENCODING=BASE64;VALUE=BINARY:$DATA\r\n",
+    "END:VEVENT\r\n",
+    "END:VCALENDAR\r\n"
+);
+
+const VCARD_WITH_MEDIA: &str = concat!(
+    "BEGIN:VCARD\r\n",
+    "VERSION:4.0\r\n",
+    "UID:dav-media-limit\r\n",
+    "FN:Media Limit\r\n",
+    "PHOTO:data:image/png;base64,$DATA\r\n",
+    "END:VCARD\r\n"
+);
 
 pub trait GroupwareResourcesTest {
     fn items(&self) -> Vec<u32>;

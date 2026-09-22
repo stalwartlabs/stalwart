@@ -294,10 +294,15 @@ impl JmapObjectId for AddressBookValue {
 impl JmapRight for AddressBookRight {
     fn to_acl(&self) -> &'static [Acl] {
         match self {
-            AddressBookRight::MayDelete => &[Acl::Delete, Acl::RemoveItems],
+            AddressBookRight::MayDelete => &[Acl::Delete],
             AddressBookRight::MayShare => &[Acl::Share],
             AddressBookRight::MayRead => &[Acl::Read, Acl::ReadItems],
-            AddressBookRight::MayWrite => &[Acl::Modify, Acl::AddItems, Acl::ModifyItems],
+            AddressBookRight::MayWrite => &[
+                Acl::Modify,
+                Acl::AddItems,
+                Acl::ModifyItems,
+                Acl::RemoveItems,
+            ],
         }
     }
 

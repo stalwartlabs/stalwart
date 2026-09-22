@@ -20,7 +20,7 @@ use dav_proto::{
 };
 use groupware::{
     cache::GroupwareCache,
-    calendar::{Calendar, CalendarPreferences},
+    calendar::{CALENDAR_SUBSCRIBED, Calendar, CalendarPreferences},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -99,19 +99,22 @@ impl CalendarMkColRequestHandler for Server {
             preferences: vec![CalendarPreferences {
                 account_id,
                 name: name.to_string(),
+                flags: CALENDAR_SUBSCRIBED,
                 ..Default::default()
             }],
             ..Default::default()
         };
 
         // Apply MKCOL properties
+        let personal_id = access_token.personal_id(account_id, Collection::Calendar);
+        calendar.preferences_mut(personal_id).flags |= CALENDAR_SUBSCRIBED;
         let mut return_prop_stat = None;
         let mut is_mkcalendar = false;
         if let Some(mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
             is_mkcalendar = mkcol.is_mkcalendar;
             if !self.apply_calendar_properties(
-                access_token.personal_id(account_id, Collection::Calendar),
+                personal_id,
                 &mut calendar,
                 false,
                 mkcol.props,
@@ -130,6 +133,7 @@ impl CalendarMkColRequestHandler for Server {
         }
 
         // Prepare write batch
+        calendar.sync_owner_preferences(account_id, personal_id);
         let mut batch = BatchBuilder::new();
         let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
         calendar

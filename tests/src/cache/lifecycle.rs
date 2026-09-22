@@ -19,7 +19,7 @@ use email::{
     mailbox::INBOX_ID,
     message::ingest::{EmailIngest, IngestEmail, IngestSource},
 };
-use groupware::{cache::GroupwareCache, file::FileNode};
+use groupware::{DavResourceName, cache::GroupwareCache, file::FileNode};
 use mail_parser::MessageParser;
 use store::write::BatchBuilder;
 use types::collection::{Collection, SyncCollection};
@@ -492,16 +492,14 @@ async fn a_snapshot_with_a_stale_base_path_is_discarded(test: &TestServer, accou
     server.inner.cache.swap.flush().await;
 
     let account_name = server.account(account_id).await.unwrap().name().to_string();
-    assert!(
-        expected.base_path.contains(&account_name),
-        "the base path {:?} does not carry the account name {account_name:?}",
-        expected.base_path
+    assert_eq!(
+        expected.base_path,
+        DavResourceName::Cal.account_base_path(&account_name),
+        "the base path does not carry the account name {account_name:?}"
     );
 
     let mut renamed = GroupwareResources::clone(&expected);
-    renamed.base_path = expected
-        .base_path
-        .replace(&account_name, "renamed-before-the-restore");
+    renamed.base_path = DavResourceName::Cal.account_base_path("renamed-before-the-restore");
     assert_ne!(renamed.base_path, expected.base_path);
     let snapshot = renamed
         .to_snapshot()

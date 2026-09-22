@@ -82,3 +82,7 @@ incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
+
+[patch.crates-io]
+calcard = { path = "../calcard" }
+jmap-tools = { path = "../jmap-tools" }

@@ -181,6 +181,7 @@ to: cyrus@example.com
 summary: rsvp ACCEPTED
 summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
 summary.dtstart: Time(ItipTime { start: 1243882800, tz_id: 167 })
+summary.dtstart: Time(ItipTime { start: 1243969200, tz_id: 167 })
 summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
 summary.summary: Text("Review Internet-Draft")
 BEGIN:VCALENDAR
@@ -338,8 +339,7 @@ from: bernard@example.net
 to: cyrus@example.com
 summary: rsvp DECLINED
 summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
-summary.dtstart: Time(ItipTime { start: 1243882800, tz_id: 167 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(5), interval: Some(1), bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.dtstart: Time(ItipTime { start: 1244055600, tz_id: 167 })
 summary.summary: Text("Review Internet-Draft")
 BEGIN:VCALENDAR
 METHOD:REPLY
@@ -436,4 +436,158 @@ END:VCALENDAR
 
 
 
+
+# Organizer invites a participant to a daily series
+> put cyrus@example.com daily-standup@example.com
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:daily-standup@example.com
+SEQUENCE:0
+DTSTAMP:20260531T080000Z
+DTSTART:20260601T090000Z
+DTEND:20260601T091500Z
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Daily standup
+LOCATION:Room A
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: cyrus@example.com
+to: bernard@example.net
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780304400, tz_id: 32768 })
+summary.location: Text("Room A")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(3), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Daily standup")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room A
+SUMMARY:Daily standup
+DTEND:20260601T091500Z
+DTSTART:20260601T090000Z
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE;PARTSTAT=
+ NEEDS-ACTION:mailto:bernard@example.net
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+UID:daily-standup@example.com
+RRULE:FREQ=DAILY;COUNT=3
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+> send
+
+# Cancelling one occurrence describes that occurrence, not the series
+> put cyrus@example.com daily-standup@example.com
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:daily-standup@example.com
+SEQUENCE:0
+DTSTAMP:20260531T080000Z
+DTSTART:20260601T090000Z
+DTEND:20260601T091500Z
+RRULE:FREQ=DAILY;COUNT=3
+EXDATE:20260602T090000Z
+SUMMARY:Daily standup
+LOCATION:Room A
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: cyrus@example.com
+to: bernard@example.net
+summary: cancel
+summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780390800, tz_id: 32768 })
+summary.location: Text("Room A")
+summary.summary: Text("Daily standup")
+BEGIN:VCALENDAR
+METHOD:CANCEL
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room A
+STATUS:CANCELLED
+SUMMARY:Daily standup
+DTSTART:20260602T090000Z
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:be
+ rnard@example.net
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+RECURRENCE-ID:20260602T090000Z
+UID:daily-standup@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+
+> send
+
+# A THISANDFUTURE cancellation keeps the recurrence rule of the series
+> put cyrus@example.com daily-standup@example.com
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:daily-standup@example.com
+SEQUENCE:0
+DTSTAMP:20260531T080000Z
+DTSTART:20260601T090000Z
+DTEND:20260601T091500Z
+RRULE:FREQ=DAILY;COUNT=3
+EXDATE:20260602T090000Z
+SUMMARY:Daily standup
+LOCATION:Room A
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
+END:VEVENT
+BEGIN:VEVENT
+UID:daily-standup@example.com
+SEQUENCE:0
+DTSTAMP:20260531T080000Z
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260603T090000Z
+STATUS:CANCELLED
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:bernard@example.net
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: cyrus@example.com
+to: bernard@example.net
+summary: cancel
+summary.attendee: Participants([ItipParticipant { email: "cyrus@example.com", name: Some("Cyrus Daboo"), is_organizer: true }, ItipParticipant { email: "bernard@example.net", name: Some("Bernard Desruisseaux"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780477200, tz_id: 32768 })
+summary.location: Text("Room A")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(3), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Daily standup")
+BEGIN:VCALENDAR
+METHOD:CANCEL
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+STATUS:CANCELLED
+ATTENDEE;CN="Bernard Desruisseaux";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:be
+ rnard@example.net
+ORGANIZER;CN="Cyrus Daboo":mailto:cyrus@example.com
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260603T090000Z
+UID:daily-standup@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+
+> send
 

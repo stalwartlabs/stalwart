@@ -6,16 +6,29 @@
 
 use crate::api::acl::{JmapAcl, JmapRights};
 use crate::api::pending_creates::PendingCreates;
+use crate::calendar::{Availability, get::default_alert_value};
 use crate::changes::state::JmapCacheState;
 use calcard::jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType};
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl, storage::quota::ObjectQuotaUsage};
+use common::{
+    GroupwareResources, Server,
+    auth::AccessToken,
+    sharing::{EffectiveAcl, grants::ShareUpdate},
+    storage::quota::ObjectQuotaUsage,
+};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
     calendar::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ALL,
         CALENDAR_AVAILABILITY_ATTENDING, CALENDAR_AVAILABILITY_NONE, CALENDAR_INVISIBLE,
-        CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert, Timezone,
+        CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarPreferences, DefaultAlert,
+        MAX_USER_ALERTS, Timezone,
+        alerts::{CalendarAlarmsReschedule, CalendarSettings, DefaultAlertsResolver},
+        color::CssColor,
+        notification::CalendarNotificationReap,
+        privacy::EventPrivacy,
+        schedule::EventAlarmScheduler,
+        storage::{DirectChangeNotification, NotificationQuota},
     },
 };
 use http_proto::HttpSessionData;
@@ -32,11 +45,11 @@ use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
 };
 use trc::AddContext;
 use types::{
-    acl::Acl,
+    acl::{Acl, AclGrant},
     collection::{Collection, SyncCollection},
     field::PrincipalField,
     id::Id,
@@ -70,8 +83,11 @@ impl CalendarSet for Server {
             .with_state(cache.assert_state(true, &request.if_in_state)?);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
+        let personal_id = access_token.personal_id(account_id, Collection::Calendar);
         let mut set_default: Option<PendingId> = None;
         let mut created_slots = PendingCreates::new();
+        let mut created_server_set = Vec::new();
+        let mut request_alerts = RequestDefaultAlerts::default();
 
         // Obtain quota
         let quota = if request.has_creates() && !is_shared {
@@ -121,7 +137,36 @@ impl CalendarSet for Server {
             };
 
             // Process changes
-            if let Err(err) = update_calendar(None, object, &mut calendar, access_token, account_id)
+            let client_properties = object
+                .as_object()
+                .map(|object| {
+                    object
+                        .keys()
+                        .filter_map(|key| key.as_property().cloned())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            calendar.preferences_mut(personal_id).flags |= CALENDAR_SUBSCRIBED;
+            let changes =
+                match update_calendar(None, object, &mut calendar, access_token, account_id) {
+                    Ok(changes) => changes,
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                };
+            calendar.sync_owner_preferences(account_id, personal_id);
+            if changes.default_alerts
+                && let Err(err) = self
+                    .assert_unique_default_alerts(
+                        &cache,
+                        account_id,
+                        personal_id,
+                        None,
+                        &calendar,
+                        &request_alerts,
+                    )
+                    .await?
             {
                 response.not_created.append(id, err);
                 continue 'create;
@@ -129,17 +174,28 @@ impl CalendarSet for Server {
 
             // Validate ACLs
             if !calendar.acls.is_empty() {
+                if let Err(err) = JmapRights::validate_shares::<calendar::Calendar, _>(
+                    ShareUpdate {
+                        collection: Collection::Calendar,
+                        owner_id: account_id,
+                        actor: None,
+                        current: &[] as &[AclGrant],
+                        max_shares: self.core.groupware.max_shares_per_item,
+                    },
+                    &calendar.acls,
+                ) {
+                    response.not_created.append(id, err);
+                    continue 'create;
+                }
                 if let Err(err) = self.acl_validate(&calendar.acls).await {
                     response.not_created.append(id, err.into());
                     continue 'create;
                 }
-
-                self.refresh_acls(&calendar.acls, None)
-                    .await
-                    .caused_by(trc::location!())?;
             }
 
             // Insert record
+            let server_set = calendar.server_set_values(personal_id, &client_properties);
+            request_alerts.accept(None, &calendar, personal_id);
             let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
             calendar
                 .insert(
@@ -157,6 +213,7 @@ impl CalendarSet for Server {
                 set_default = Some(PendingId::Slot(document_id));
             }
 
+            created_server_set.push((id.clone(), document_id, server_set));
             created_slots.push(id, document_id);
         }
 
@@ -198,42 +255,91 @@ impl CalendarSet for Server {
                 .deserialize::<Calendar>()
                 .caused_by(trc::location!())?;
 
+            let acl = calendar.inner.acls.effective_acl(access_token);
+            if is_shared && !acl.contains_any([Acl::Read, Acl::ReadItems].into_iter()) {
+                response.not_updated.append(id, SetError::not_found());
+                continue 'update;
+            }
+
             // Apply changes
-            let has_acl_changes = match update_calendar(
+            if !is_shared {
+                new_calendar.inherit_owner_preferences(account_id, personal_id);
+            }
+            let changes = match update_calendar(
                 Some(id),
                 object,
                 &mut new_calendar,
                 access_token,
                 account_id,
             ) {
-                Ok(has_acl_changes_) => has_acl_changes_,
+                Ok(changes) => changes,
                 Err(err) => {
                     response.not_updated.append(id, err);
                     continue 'update;
                 }
             };
+            if !is_shared {
+                new_calendar.sync_owner_preferences(account_id, personal_id);
+            }
 
             // Validate ACL
-            if is_shared {
-                let acl = calendar.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Share)) {
-                    response.not_updated.append(
-                        id,
-                        SetError::forbidden()
-                            .with_description("You are not allowed to modify this calendar."),
-                    );
+            if is_shared
+                && ((changes.shared_properties && !acl.contains(Acl::Modify))
+                    || (changes.acls && !acl.contains(Acl::Share)))
+            {
+                response.not_updated.append(
+                    id,
+                    SetError::forbidden()
+                        .with_description("You are not allowed to modify this calendar."),
+                );
+                continue 'update;
+            }
+            if changes.default_alerts
+                && let Err(err) = self
+                    .assert_unique_default_alerts(
+                        &cache,
+                        account_id,
+                        personal_id,
+                        Some(document_id),
+                        &new_calendar,
+                        &request_alerts,
+                    )
+                    .await?
+            {
+                response.not_updated.append(id, err);
+                continue 'update;
+            }
+            if changes.acls {
+                if let Err(err) = JmapRights::validate_shares::<calendar::Calendar, _>(
+                    ShareUpdate {
+                        collection: Collection::Calendar,
+                        owner_id: account_id,
+                        actor: is_shared.then_some(acl),
+                        current: &calendar.inner.acls,
+                        max_shares: self.core.groupware.max_shares_per_item,
+                    },
+                    &new_calendar.acls,
+                ) {
+                    response.not_updated.append(id, err);
                     continue 'update;
                 }
-            }
-            if has_acl_changes {
                 if let Err(err) = self.acl_validate(&new_calendar.acls).await {
                     response.not_updated.append(id, err.into());
                     continue 'update;
                 }
-                self.refresh_archived_acls(&new_calendar.acls, calendar.inner.acls.as_slice())
-                    .await
-                    .caused_by(trc::location!())?;
             }
+
+            self.reschedule_calendar_alarms(
+                &cache,
+                account_id,
+                document_id,
+                CalendarSettings::from(calendar.inner),
+                CalendarSettings::from(&new_calendar),
+                &mut batch,
+            )
+            .await
+            .caused_by(trc::location!())?;
+            request_alerts.accept(Some(document_id), &new_calendar, personal_id);
 
             // Update record
             new_calendar
@@ -287,7 +393,7 @@ impl CalendarSet for Server {
                         .inner
                         .acls
                         .effective_acl(access_token)
-                        .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
+                        .contains(Acl::Delete)
                 {
                     response.not_destroyed.append(
                         id,
@@ -298,14 +404,39 @@ impl CalendarSet for Server {
                 }
 
                 // Obtain children ids
-                let children_ids = cache.children_ids(document_id).collect::<Vec<_>>();
-                if !children_ids.is_empty() && !on_destroy_remove_events {
+                let mut has_visible_children = false;
+                let mut has_restricted_children = false;
+                for flags in cache
+                    .children(document_id)
+                    .map(|child| child.resource.event_flags().unwrap_or_default())
+                {
+                    match EventPrivacy::from_flags(flags) {
+                        EventPrivacy::Public => has_visible_children = true,
+                        EventPrivacy::Private => {
+                            has_visible_children = true;
+                            has_restricted_children = true;
+                        }
+                        EventPrivacy::Secret => {
+                            has_visible_children |= !is_shared;
+                            has_restricted_children = true;
+                        }
+                    }
+                }
+                if has_visible_children && !on_destroy_remove_events {
                     response
                         .not_destroyed
                         .append(id, SetError::calendar_has_event());
                     continue;
                 }
-                destroy_children.extend(children_ids.iter().copied());
+                if is_shared && has_restricted_children {
+                    response.not_destroyed.append(
+                        id,
+                        SetError::forbidden()
+                            .with_description("You are not allowed to delete this calendar."),
+                    );
+                    continue;
+                }
+                destroy_children.extend(cache.children_ids(document_id));
                 destroy_parents.insert(document_id);
 
                 // Delete record
@@ -327,12 +458,27 @@ impl CalendarSet for Server {
                 response.destroyed.push(id);
             }
 
+            if !destroy_parents.is_empty() {
+                let destroyed_calendar_ids = destroy_parents.iter().copied().collect::<Vec<_>>();
+                self.reap_calendar_notifications(
+                    access_token,
+                    account_id,
+                    &destroyed_calendar_ids,
+                    &mut batch,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            }
+
             // Delete children
             if !destroy_children.is_empty() {
                 let account_info = self
                     .account_info(access_token.account_id())
                     .await
                     .caused_by(trc::location!())?;
+                let mut resolver = DefaultAlertsResolver::with_resources(account_id, cache.clone());
+                let mut quota = NotificationQuota::default();
+                let notify_children = !access_token.is_member(account_id);
                 for document_id in destroy_children {
                     if let Some(event_) = self
                         .store()
@@ -347,6 +493,25 @@ impl CalendarSet for Server {
                             .to_unarchived::<CalendarEvent>()
                             .caused_by(trc::location!())?;
 
+                        for calendar_id in event
+                            .inner
+                            .calendar_ids()
+                            .filter(|_| notify_children)
+                            .filter(|calendar_id| destroy_parents.contains(calendar_id))
+                        {
+                            self.notify_calendar_removal(
+                                access_token,
+                                account_id,
+                                document_id,
+                                calendar_id,
+                                event.inner.flags.to_native(),
+                                &mut quota,
+                                &mut batch,
+                            )
+                            .await
+                            .caused_by(trc::location!())?;
+                        }
+
                         if event
                             .inner
                             .names
@@ -360,6 +525,7 @@ impl CalendarSet for Server {
                                     &account_info,
                                     account_id,
                                     document_id,
+                                    None,
                                     false,
                                     &mut batch,
                                 )
@@ -372,6 +538,20 @@ impl CalendarSet for Server {
                             new_event
                                 .names
                                 .retain(|n| !destroy_parents.contains(&n.parent_id));
+                            self.reschedule_event_alarms(
+                                account_id,
+                                document_id,
+                                event.inner,
+                                &new_event
+                                    .names
+                                    .iter()
+                                    .map(|name| name.parent_id)
+                                    .collect::<Vec<_>>(),
+                                &mut resolver,
+                                &mut batch,
+                            )
+                            .await
+                            .caused_by(trc::location!())?;
                             new_event.update_meta(
                                 access_token.account_tenant_ids(),
                                 event,
@@ -388,25 +568,51 @@ impl CalendarSet for Server {
 
         // Set default calendar
         if let Some(MaybeIdReference::Id(id)) = &request.arguments.on_success_set_is_default {
-            set_default = Some(PendingId::Assigned(id.document_id()));
+            let document_id = id.document_id();
+            let is_visible = if is_shared {
+                cache
+                    .shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
+                    .contains(document_id)
+            } else {
+                cache.has_container_id(&document_id)
+            };
+            if is_visible && !destroyed_calendars.contains(&document_id) {
+                set_default = Some(PendingId::Assigned(document_id));
+            }
         }
-        if let Some(default_calendar_id) = set_default {
+        let mut changed_default = None;
+        if let Some(default_calendar_id) = set_default.filter(|_| !is_shared) {
             if response.not_created.is_empty()
                 && response.not_updated.is_empty()
                 && response.not_destroyed.is_empty()
             {
-                batch
-                    .with_account_id(account_id)
-                    .with_collection(Collection::Principal)
-                    .with_document(0)
-                    .set(PrincipalField::DefaultCalendarId, default_calendar_id);
+                let previous_default_id = self
+                    .store()
+                    .get_value::<u32>(ValueKey {
+                        account_id,
+                        collection: Collection::Principal.into(),
+                        document_id: 0,
+                        class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+                    })
+                    .await
+                    .caused_by(trc::location!())?
+                    .or_else(|| cache.document_ids(true).min());
+                if !matches!(default_calendar_id, PendingId::Assigned(id) if Some(id) == previous_default_id)
+                {
+                    batch
+                        .with_account_id(account_id)
+                        .with_collection(Collection::Principal)
+                        .with_document(0)
+                        .set(PrincipalField::DefaultCalendarId, default_calendar_id);
+                    changed_default = Some((default_calendar_id, previous_default_id));
+                }
             }
         } else if !destroyed_calendars.is_empty() {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Principal)
                 .with_document(0);
-            for document_id in destroyed_calendars {
+            for &document_id in &destroyed_calendars {
                 batch.clear_if_equals(PrincipalField::DefaultCalendarId, document_id);
             }
         }
@@ -416,6 +622,58 @@ impl CalendarSet for Server {
             let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
 
             created_slots.resolve(&mut response, &assigned_ids);
+            let default_calendar_id = if created_server_set.is_empty() {
+                None
+            } else {
+                self.store()
+                    .get_value::<u32>(ValueKey {
+                        account_id,
+                        collection: Collection::Principal.into(),
+                        document_id: 0,
+                        class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+                    })
+                    .await
+                    .caused_by(trc::location!())?
+                    .or_else(|| {
+                        cache
+                            .document_ids(true)
+                            .filter(|id| !destroyed_calendars.contains(id))
+                            .chain(
+                                created_server_set
+                                    .iter()
+                                    .map(|(_, slot, _)| assigned_ids.slot(*slot)),
+                            )
+                            .min()
+                    })
+            };
+            for (create_id, slot, mut server_set) in created_server_set {
+                server_set.push((
+                    CalendarProperty::IsDefault,
+                    Value::Bool(default_calendar_id == Some(assigned_ids.slot(slot))),
+                ));
+                response.add_created_properties(&create_id, server_set);
+            }
+
+            if let Some((default_calendar_id, previous_default_id)) = changed_default {
+                let default_calendar_id = match default_calendar_id {
+                    PendingId::Assigned(id) => id,
+                    PendingId::Slot(slot) => assigned_ids.slot(slot),
+                };
+                response.add_server_set_property(
+                    Id::from(default_calendar_id),
+                    CalendarProperty::IsDefault,
+                    true,
+                );
+                if let Some(previous_default_id) = previous_default_id
+                    .filter(|id| *id != default_calendar_id && !destroyed_calendars.contains(id))
+                {
+                    response.add_server_set_property(
+                        Id::from(previous_default_id),
+                        CalendarProperty::IsDefault,
+                        false,
+                    );
+                }
+            }
 
             if let Some(change_id) = assigned_ids.change_id(account_id, SyncCollection::Calendar) {
                 response.new_state = State::Exact(change_id).into();
@@ -426,15 +684,131 @@ impl CalendarSet for Server {
     }
 }
 
+#[derive(Debug, Default)]
+struct CalendarChanges {
+    acls: bool,
+    shared_properties: bool,
+    default_alerts: bool,
+}
+
+#[derive(Debug, Default)]
+struct RequestDefaultAlerts {
+    updated_calendars: AHashSet<u32>,
+    alert_ids: AHashSet<String>,
+}
+
+impl RequestDefaultAlerts {
+    fn accept(&mut self, document_id: Option<u32>, calendar: &Calendar, personal_id: u32) {
+        if let Some(document_id) = document_id {
+            self.updated_calendars.insert(document_id);
+        }
+        self.alert_ids.extend(
+            calendar
+                .preferences
+                .iter()
+                .filter(|preferences| preferences.account_id == personal_id)
+                .flat_map(|preferences| preferences.default_alerts.iter())
+                .map(|alert| alert.id.clone()),
+        );
+    }
+}
+
+trait DefaultAlertValidator {
+    fn assert_unique_default_alerts(
+        &self,
+        cache: &GroupwareResources,
+        account_id: u32,
+        personal_id: u32,
+        document_id: Option<u32>,
+        calendar: &Calendar,
+        request_alerts: &RequestDefaultAlerts,
+    ) -> impl Future<Output = trc::Result<Result<(), SetError<CalendarProperty>>>> + Send;
+}
+
+impl DefaultAlertValidator for Server {
+    async fn assert_unique_default_alerts(
+        &self,
+        cache: &GroupwareResources,
+        account_id: u32,
+        personal_id: u32,
+        document_id: Option<u32>,
+        calendar: &Calendar,
+        request_alerts: &RequestDefaultAlerts,
+    ) -> trc::Result<Result<(), SetError<CalendarProperty>>> {
+        let alerts = &calendar.preferences(personal_id).default_alerts;
+        let mut alert_ids = AHashSet::with_capacity(alerts.len());
+        if !alerts.iter().all(|alert| {
+            alert_ids.insert(alert.id.as_str()) && !request_alerts.alert_ids.contains(&alert.id)
+        }) {
+            return Ok(Err(duplicate_default_alert_id()));
+        }
+        if alert_ids.is_empty() {
+            return Ok(Ok(()));
+        }
+
+        for other_id in cache.document_ids(true).filter(|other_id| {
+            Some(*other_id) != document_id
+                && !request_alerts.updated_calendars.contains(other_id)
+                && cache
+                    .container_resource_by_id(*other_id)
+                    .is_some_and(|calendar| {
+                        calendar
+                            .personal_calendar_preferences(personal_id)
+                            .is_some()
+                    })
+        }) {
+            let Some(other) = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::Calendar,
+                    other_id,
+                ))
+                .await
+                .caused_by(trc::location!())?
+            else {
+                continue;
+            };
+            if other
+                .unarchive::<Calendar>()
+                .caused_by(trc::location!())?
+                .personal_preferences(personal_id)
+                .is_some_and(|preferences| {
+                    preferences
+                        .default_alerts
+                        .iter()
+                        .any(|alert| alert_ids.contains(alert.id.as_str()))
+                })
+            {
+                return Ok(Err(duplicate_default_alert_id()));
+            }
+        }
+
+        Ok(Ok(()))
+    }
+}
+
+fn duplicate_default_alert_id() -> SetError<CalendarProperty> {
+    SetError::invalid_properties()
+        .with_properties([
+            CalendarProperty::DefaultAlertsWithTime,
+            CalendarProperty::DefaultAlertsWithoutTime,
+        ])
+        .with_description("Default alert ids must be unique across all calendars in the account.")
+}
+
 fn update_calendar(
     expected_id: Option<Id>,
     updates: Value<'_, CalendarProperty, CalendarValue>,
     calendar: &mut Calendar,
     access_token: &AccessToken,
     account_id: u32,
-) -> Result<bool, SetError<CalendarProperty>> {
+) -> Result<CalendarChanges, SetError<CalendarProperty>> {
     let personal_id = access_token.personal_id(account_id, Collection::Calendar);
-    let mut has_acl_changes = false;
+    if access_token.is_member(account_id) {
+        calendar.subscribe_member(personal_id);
+    }
+    let mut changes = CalendarChanges::default();
 
     for (property, value) in updates.into_expanded_object() {
         let Key::Property(property) = property else {
@@ -442,6 +816,24 @@ fn update_calendar(
                 .with_property(property.to_owned())
                 .with_description("Invalid property."));
         };
+
+        if !matches!(
+            property,
+            CalendarProperty::Id
+                | CalendarProperty::Name
+                | CalendarProperty::Color
+                | CalendarProperty::SortOrder
+                | CalendarProperty::IsSubscribed
+                | CalendarProperty::IsVisible
+                | CalendarProperty::TimeZone
+                | CalendarProperty::IncludeInAvailability
+                | CalendarProperty::DefaultAlertsWithTime
+                | CalendarProperty::DefaultAlertsWithoutTime
+                | CalendarProperty::ShareWith
+                | CalendarProperty::Pointer(_)
+        ) {
+            changes.shared_properties = true;
+        }
 
         match (property, value) {
             (CalendarProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
@@ -453,7 +845,9 @@ fn update_calendar(
             (CalendarProperty::Description, Value::Null) => {
                 calendar.preferences_mut(personal_id).description = None;
             }
-            (CalendarProperty::Color, Value::Str(value)) if value.len() < 16 => {
+            (CalendarProperty::Color, Value::Str(value))
+                if CssColor::parse(&value).is_some_and(|color| color.is_standard()) =>
+            {
                 calendar.preferences_mut(personal_id).color = value.into_owned().into();
             }
             (CalendarProperty::Color, Value::Null) => {
@@ -465,7 +859,9 @@ fn update_calendar(
             (CalendarProperty::TimeZone, Value::Null) => {
                 calendar.preferences_mut(personal_id).time_zone = Timezone::Default;
             }
-            (CalendarProperty::SortOrder, Value::Number(value)) => {
+            (CalendarProperty::SortOrder, Value::Number(value))
+                if value.is_u64() && value.cast_to_u64() < 1 << 31 =>
+            {
                 calendar.preferences_mut(personal_id).sort_order = value.cast_to_u64() as u32;
             }
             (CalendarProperty::IsSubscribed, Value::Bool(subscribe)) => {
@@ -506,26 +902,29 @@ fn update_calendar(
             (
                 property @ (CalendarProperty::DefaultAlertsWithTime
                 | CalendarProperty::DefaultAlertsWithoutTime),
-                Value::Object(value),
+                value @ (Value::Object(_) | Value::Null),
             ) => {
                 let with_time = matches!(property, CalendarProperty::DefaultAlertsWithTime);
                 let alerts = &mut calendar.preferences_mut(personal_id).default_alerts;
+                changes.default_alerts = true;
 
                 alerts.retain(|alert| (alert.flags & ALERT_WITH_TIME != 0) != with_time);
 
-                for (key, value) in value.into_vec() {
-                    if let Value::Object(value) = value {
-                        alerts.push(value_to_default_alert(
-                            key.to_string().into_owned(),
-                            value,
-                            with_time,
-                        )?);
+                if let Value::Object(value) = value {
+                    for (key, value) in value.into_vec() {
+                        if let Value::Object(value) = value {
+                            alerts.push(value_to_default_alert(
+                                key.to_string().into_owned(),
+                                value,
+                                with_time,
+                            )?);
+                        }
                     }
                 }
             }
             (CalendarProperty::ShareWith, value) => {
                 calendar.acls = JmapRights::acl_set::<calendar::Calendar>(value)?;
-                has_acl_changes = true;
+                changes.acls = true;
             }
             (CalendarProperty::Pointer(pointer), value) => {
                 let mut ptr_iter = pointer.iter();
@@ -537,7 +936,7 @@ fn update_calendar(
                             ptr_iter,
                             value,
                         )?;
-                        has_acl_changes = true;
+                        changes.acls = true;
                     }
                     Some(JsonPointerItem::Key(Key::Property(
                         property @ (CalendarProperty::DefaultAlertsWithTime
@@ -555,6 +954,7 @@ fn update_calendar(
                             let with_time =
                                 matches!(property, CalendarProperty::DefaultAlertsWithTime);
                             let alerts = &mut calendar.preferences_mut(personal_id).default_alerts;
+                            changes.default_alerts = true;
                             alerts.retain(|alert| {
                                 (alert.flags & ALERT_WITH_TIME != 0) != with_time || alert.id != id
                             });
@@ -564,13 +964,13 @@ fn update_calendar(
                             }
                         }
                         _ => {
-                            return Err(SetError::invalid_properties()
+                            return Err(SetError::invalid_patch()
                                 .with_property(CalendarProperty::Pointer(pointer))
                                 .with_description("Field could not be patched."));
                         }
                     },
                     _ => {
-                        return Err(SetError::invalid_properties()
+                        return Err(SetError::invalid_patch()
                             .with_property(CalendarProperty::Pointer(pointer))
                             .with_description("Field could not be patched."));
                     }
@@ -592,13 +992,37 @@ fn update_calendar(
     }
 
     // Validate name
-    if calendar.preferences(personal_id).name.is_empty() {
+    let preferences = calendar.preferences(personal_id);
+    if preferences.name.is_empty() {
         return Err(SetError::invalid_properties()
             .with_property(CalendarProperty::Name)
             .with_description("Missing name."));
     }
 
-    Ok(has_acl_changes)
+    if changes.default_alerts {
+        let with_time = preferences
+            .default_alerts
+            .iter()
+            .filter(|alert| alert.flags & ALERT_WITH_TIME != 0)
+            .count();
+        for (property, count) in [
+            (CalendarProperty::DefaultAlertsWithTime, with_time),
+            (
+                CalendarProperty::DefaultAlertsWithoutTime,
+                preferences.default_alerts.len() - with_time,
+            ),
+        ] {
+            if count > MAX_USER_ALERTS {
+                return Err(SetError::invalid_properties()
+                    .with_property(property)
+                    .with_description(format!(
+                        "A calendar cannot have more than {MAX_USER_ALERTS} default alerts of each kind."
+                    )));
+            }
+        }
+    }
+
+    Ok(changes)
 }
 
 fn value_to_default_alert(
@@ -651,12 +1075,12 @@ fn value_to_default_alert(
                             alert.offset = value;
                             has_offset = true;
                         }
-                        (CalendarProperty::Offset, Value::Element(CalendarValue::Type(value)))
+                        (CalendarProperty::Type, Value::Element(CalendarValue::Type(value)))
                             if value != JSCalendarType::OffsetTrigger =>
                         {
                             return Err(SetError::invalid_properties()
                                 .with_property(CalendarProperty::Trigger)
-                                .with_description("Invalid alert trigger type."));
+                                .with_description("Default alerts must use an OffsetTrigger."));
                         }
                         _ => {}
                     }
@@ -676,5 +1100,74 @@ fn value_to_default_alert(
         Err(SetError::invalid_properties()
             .with_property(CalendarProperty::Trigger)
             .with_description("Missing alert offset."))
+    }
+}
+
+trait CalendarServerSet {
+    fn server_set_values(
+        &self,
+        personal_id: u32,
+        client_properties: &[CalendarProperty],
+    ) -> Vec<(
+        CalendarProperty,
+        Value<'static, CalendarProperty, CalendarValue>,
+    )>;
+}
+
+impl CalendarServerSet for Calendar {
+    fn server_set_values(
+        &self,
+        personal_id: u32,
+        client_properties: &[CalendarProperty],
+    ) -> Vec<(
+        CalendarProperty,
+        Value<'static, CalendarProperty, CalendarValue>,
+    )> {
+        let preferences = self.preferences(personal_id);
+        let default_alerts = |with_time: bool| {
+            Value::Object(Map::from_iter(
+                preferences
+                    .default_alerts
+                    .iter()
+                    .filter(|alert| (alert.flags & ALERT_WITH_TIME != 0) == with_time)
+                    .map(|alert| default_alert_value(&alert.id, alert.offset.clone(), alert.flags)),
+            ))
+        };
+        [
+            (
+                CalendarProperty::SortOrder,
+                Value::Number(preferences.sort_order.into()),
+            ),
+            (
+                CalendarProperty::IsSubscribed,
+                Value::Bool(preferences.flags & CALENDAR_SUBSCRIBED != 0),
+            ),
+            (
+                CalendarProperty::IsVisible,
+                Value::Bool(preferences.flags & CALENDAR_INVISIBLE == 0),
+            ),
+            (
+                CalendarProperty::IncludeInAvailability,
+                Value::Element(CalendarValue::IncludeInAvailability(
+                    IncludeInAvailability::from_flags(preferences.flags)
+                        .unwrap_or(IncludeInAvailability::All),
+                )),
+            ),
+            (
+                CalendarProperty::DefaultAlertsWithTime,
+                default_alerts(true),
+            ),
+            (
+                CalendarProperty::DefaultAlertsWithoutTime,
+                default_alerts(false),
+            ),
+            (
+                CalendarProperty::MyRights,
+                JmapRights::all_rights::<calendar::Calendar>(),
+            ),
+        ]
+        .into_iter()
+        .filter(|(property, _)| !client_properties.contains(property))
+        .collect()
     }
 }

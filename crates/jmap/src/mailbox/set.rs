@@ -485,8 +485,13 @@ impl MailboxSet for Server {
                 (Key::Property(MailboxProperty::Role), Value::Null) => {
                     changes.role = SpecialUse::None;
                 }
-                (Key::Property(MailboxProperty::SortOrder), Value::Number(value)) => {
-                    changes.sort_order = Some(value.cast_to_u64() as u32);
+                (Key::Property(MailboxProperty::SortOrder), Value::Number(value))
+                    if let Some(sort_order) = value
+                        .as_u64()
+                        .and_then(|sort_order| u32::try_from(sort_order).ok())
+                        .filter(|sort_order| *sort_order < 1 << 31) =>
+                {
+                    changes.sort_order = Some(sort_order);
                 }
                 (Key::Property(MailboxProperty::ShareWith), value) => {
                     match JmapRights::acl_set::<mailbox::Mailbox>(value) {
@@ -671,21 +676,13 @@ impl MailboxSet for Server {
                 .with_description("Mailbox name cannot be empty.")));
         }
 
-        // Refresh ACLs
+        // Validate ACLs
         let current = update.map(|(_, current)| current);
-        if has_acl_changes {
-            if !changes.acls.is_empty()
-                && let Err(err) = self.acl_validate(&changes.acls).await
-            {
-                return Ok(Err(err.into()));
-            }
-
-            self.refresh_acls(
-                &changes.acls,
-                current.as_ref().map(|m| m.inner.acls.as_slice()),
-            )
-            .await
-            .caused_by(trc::location!())?;
+        if has_acl_changes
+            && !changes.acls.is_empty()
+            && let Err(err) = self.acl_validate(&changes.acls).await
+        {
+            return Ok(Err(err.into()));
         }
 
         // Validate

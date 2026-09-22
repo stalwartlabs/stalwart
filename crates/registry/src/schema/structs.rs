@@ -96,6 +96,8 @@ pub struct AddressBook {
     pub v_card_version: VCardVersion,
     #[serde(rename = "maxAddressBooksPerCard")]
     pub max_address_books_per_card: u64,
+    #[serde(rename = "maxMediaSize")]
+    pub max_media_size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +699,14 @@ pub struct Calendar {
     pub max_event_notifications: Option<u64>,
     #[serde(rename = "maxCalendarsPerEvent")]
     pub max_calendars_per_event: u64,
+    #[serde(rename = "maxExpandedQueryDuration")]
+    pub max_expanded_query_duration: Duration,
+    #[serde(rename = "maxAvailabilityDuration")]
+    pub max_availability_duration: Duration,
+    #[serde(rename = "availabilityRateLimit")]
+    pub availability_rate_limit: Option<Rate>,
+    #[serde(rename = "maxAttachmentsSize")]
+    pub max_attachments_size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5668,6 +5678,8 @@ pub struct TaskCalendarAlarmEmail {
     pub event_start_tz: u64,
     #[serde(rename = "eventEndTz")]
     pub event_end_tz: u64,
+    #[serde(rename = "targetAccountId")]
+    pub target_account_id: Option<Id>,
     #[serde(rename = "accountId")]
     pub account_id: Id,
     #[serde(rename = "documentId")]
@@ -5685,6 +5697,8 @@ pub struct TaskCalendarAlarmNotification {
     pub event_id: u64,
     #[serde(rename = "recurrenceId")]
     pub recurrence_id: Option<i64>,
+    #[serde(rename = "targetAccountId")]
+    pub target_account_id: Option<Id>,
     #[serde(rename = "accountId")]
     pub account_id: Id,
     #[serde(rename = "documentId")]

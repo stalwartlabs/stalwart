@@ -8,7 +8,7 @@ use super::assert_is_unique_uid;
 use crate::{
     DavError, DavMethod,
     common::{
-        assert_parent_limit,
+        ContainerOperation, assert_parent_limit,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -188,15 +188,11 @@ impl CardCopyMoveRequestHandler for Server {
                     // Validate ACLs
                     if !access_token.is_member(to_account_id)
                         || (!access_token.is_member(from_account_id)
-                            && !from_resources.has_access_to_container(
-                                access_token,
-                                from_resource.document_id(),
-                                if is_move {
-                                    Acl::RemoveItems
-                                } else {
-                                    Acl::ReadItems
-                                },
-                            ))
+                            && !from_resources
+                                .container_acl(access_token, from_resource.document_id())
+                                .contains_all(
+                                    ContainerOperation::from_move(is_move).required_acls(),
+                                ))
                     {
                         return Err(DavError::Code(StatusCode::FORBIDDEN));
                     }
@@ -362,15 +358,9 @@ impl CardCopyMoveRequestHandler for Server {
 
                 // Validate ACLs
                 if !access_token.is_member(from_account_id)
-                    && !from_resources.has_access_to_container(
-                        access_token,
-                        from_resource.document_id(),
-                        if is_move {
-                            Acl::RemoveItems
-                        } else {
-                            Acl::ReadItems
-                        },
-                    )
+                    && !from_resources
+                        .container_acl(access_token, from_resource.document_id())
+                        .contains_all(ContainerOperation::from_move(is_move).required_acls())
                 {
                     return Err(DavError::Code(StatusCode::FORBIDDEN));
                 }
@@ -922,25 +912,6 @@ async fn copy_container(
     // Prepare write batch
     let mut batch = BatchBuilder::new();
 
-    if remove_source {
-        DestroyArchive(old_book)
-            .delete(
-                access_token.account_tenant_ids(),
-                from_account_id,
-                from_document_id,
-                from_resource_path.into(),
-                &mut batch,
-            )
-            .caused_by(trc::location!())?;
-
-        // Reset default address book id
-        batch
-            .with_account_id(from_account_id)
-            .with_collection(Collection::Principal)
-            .with_document(0)
-            .clear_if_equals(PrincipalField::DefaultAddressBookId, from_document_id);
-    }
-
     let preference = book.preferences.into_iter().next().unwrap();
     book.name = new_name.to_string();
     book.subscribers.clear();
@@ -1129,6 +1100,24 @@ async fn copy_container(
         server
             .has_available_quota(&to_account, required_space)
             .await?;
+    }
+
+    if remove_source {
+        DestroyArchive(old_book)
+            .delete(
+                access_token.account_tenant_ids(),
+                from_account_id,
+                from_document_id,
+                from_resource_path.into(),
+                &mut batch,
+            )
+            .caused_by(trc::location!())?;
+
+        batch
+            .with_account_id(from_account_id)
+            .with_collection(Collection::Principal)
+            .with_document(0)
+            .clear_if_equals(PrincipalField::DefaultAddressBookId, from_document_id);
     }
 
     server

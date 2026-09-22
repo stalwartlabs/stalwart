@@ -63,6 +63,7 @@ pub struct EmailPush {
 #[derive(Debug, Clone)]
 pub struct CalendarAlert {
     pub account_id: u32,
+    pub event_account_id: u32,
     pub event_id: u32,
     pub recurrence_id: Option<i64>,
     pub uid: String,

@@ -20,7 +20,7 @@ mail-builder = { version = "1.0" }
 mail-auth = { version = "0.13", features = ["generate", "arc"] }
 smtp-proto = { version = "0.2.3", features = ["rkyv"] }
 dns-update = { version = "0.5" }
-calcard = { version = "0.3", features = ["rkyv"] }
+calcard = { version = "0.4", features = ["rkyv"] }
 ahash = { version = "0.8.12", features = ["serde"] }
 parking_lot = "0.12.5"
 regex = "1.13.1"

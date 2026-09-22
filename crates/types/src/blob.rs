@@ -15,6 +15,7 @@ use crate::blob_hash::BlobHash;
 
 const B_LINKED: u8 = 0x10;
 const B_RESERVED: u8 = 0x20;
+const B_EMBEDDED: u8 = 0x40;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BlobClass {
@@ -23,6 +24,11 @@ pub enum BlobClass {
         expires: u64,
     },
     Linked {
+        account_id: u32,
+        collection: u8,
+        document_id: u32,
+    },
+    Embedded {
         account_id: u32,
         collection: u8,
         document_id: u32,
@@ -47,9 +53,9 @@ impl AsRef<BlobClass> for BlobClass {
 impl BlobClass {
     pub fn account_id(&self) -> u32 {
         match self {
-            BlobClass::Reserved { account_id, .. } | BlobClass::Linked { account_id, .. } => {
-                *account_id
-            }
+            BlobClass::Reserved { account_id, .. }
+            | BlobClass::Linked { account_id, .. }
+            | BlobClass::Embedded { account_id, .. } => *account_id,
         }
     }
 
@@ -61,7 +67,7 @@ impl BlobClass {
                         .duration_since(SystemTime::UNIX_EPOCH)
                         .map_or(0, |d| d.as_secs())
             }
-            BlobClass::Linked { .. } => true,
+            BlobClass::Linked { .. } | BlobClass::Embedded { .. } => true,
         }
     }
 
@@ -148,7 +154,13 @@ impl BlobId {
 
         BlobId {
             hash,
-            class: if (class & B_LINKED) != 0 {
+            class: if (class & B_EMBEDDED) != 0 {
+                BlobClass::Embedded {
+                    account_id,
+                    collection: *it.next()?.borrow(),
+                    document_id: it.next_leb128()?,
+                }
+            } else if (class & B_LINKED) != 0 {
                 BlobClass::Linked {
                     account_id,
                     collection: *it.next()?.borrow(),
@@ -179,16 +191,10 @@ impl BlobId {
             .section
             .as_ref()
             .map_or(0, |section| section.encoding + 1)
-            | if matches!(
-                self,
-                BlobId {
-                    class: BlobClass::Linked { .. },
-                    ..
-                }
-            ) {
-                B_LINKED
-            } else {
-                B_RESERVED
+            | match self.class {
+                BlobClass::Linked { .. } => B_LINKED,
+                BlobClass::Embedded { .. } => B_EMBEDDED,
+                BlobClass::Reserved { .. } => B_RESERVED,
             };
 
         let _ = writer.write(&[marker]);
@@ -203,6 +209,11 @@ impl BlobId {
                 let _ = writer.write_leb128(*expires);
             }
             BlobClass::Linked {
+                account_id,
+                collection,
+                document_id,
+            }
+            | BlobClass::Embedded {
                 account_id,
                 collection,
                 document_id,
@@ -263,5 +274,37 @@ impl std::fmt::Display for BlobId {
 impl<'x, P: Property, E: Element + From<BlobId>> From<BlobId> for Value<'x, P, E> {
     fn from(id: BlobId) -> Self {
         Value::Element(E::from(id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blob_id_round_trip() {
+        let hash = BlobHash::generate(b"embedded");
+        for class in [
+            BlobClass::Reserved {
+                account_id: 7,
+                expires: 1_900_000_000,
+            },
+            BlobClass::Linked {
+                account_id: 7,
+                collection: 3,
+                document_id: 42,
+            },
+            BlobClass::Embedded {
+                account_id: 7,
+                collection: 3,
+                document_id: 42,
+            },
+        ] {
+            let blob_id = BlobId::new(hash.clone(), class);
+            assert_eq!(BlobId::from_str(&blob_id.to_string()), Ok(blob_id.clone()));
+
+            let section = BlobId::new_section(hash.clone(), blob_id.class.clone(), 5, 17, 2u8);
+            assert_eq!(BlobId::from_str(&section.to_string()), Ok(section));
+        }
     }
 }

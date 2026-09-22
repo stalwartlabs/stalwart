@@ -76,7 +76,7 @@ pub async fn test(test: &TestServer) {
               "calendarIds": ([calendar_id.as_str()].into_jmap_set()),
               "description": "What mirror where?!",
               "timeZone": "Etc/UTC",
-              "start": DateTime::from_timestamp(now() as i64 + 5)
+              "start": DateTime::from_timestamp(now() as i64 + 12)
                         .to_rfc3339().trim_end_matches("Z").to_string(),
               "title": "See the pretty girl in that mirror there",
               "alerts": {
@@ -84,14 +84,14 @@ pub async fn test(test: &TestServer) {
                   "@type": "Alert",
                   "trigger": {
                     "@type": "OffsetTrigger",
-                    "offset": "-PT2S"
+                    "offset": "-PT4S"
                   },
                   "action": "display"
                 },
                 "k2": {
                   "trigger": {
                     "@type": "OffsetTrigger",
-                    "offset": "-PT4S"
+                    "offset": "-PT8S"
                   },
                   "action": "display",
                   "@type": "Alert"
@@ -116,7 +116,7 @@ pub async fn test(test: &TestServer) {
     let mut ws_events = Vec::new();
     let mut es_events = Vec::new();
 
-    while start.elapsed().as_secs() < 7 && (ws_events.len() < 2 || es_events.len() < 2) {
+    while start.elapsed().as_secs() < 20 && (ws_events.len() < 2 || es_events.len() < 2) {
         tokio::select! {
             Some(notification) = event_rx.recv() => {
                 if let PushNotification::CalendarAlert(alert) = notification {
@@ -140,7 +140,7 @@ pub async fn test(test: &TestServer) {
                     _ => {}
                 }
             }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(6)) => {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(20)) => {
                 break;
             }
         }

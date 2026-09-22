@@ -284,7 +284,7 @@ pub async fn test(test: &TestServer) {
 
     // Obtain state
     let state = client
-        .mailbox_changes(State::Initial.to_string(), 0)
+        .mailbox_changes(State::Initial.to_string(), usize::MAX)
         .await
         .unwrap()
         .new_state()
@@ -307,7 +307,7 @@ pub async fn test(test: &TestServer) {
     );
 
     // Verify changes
-    let state = client.mailbox_changes(state, 0).await.unwrap();
+    let state = client.mailbox_changes(state, usize::MAX).await.unwrap();
     assert_eq!(state.created().len(), 0);
     assert_eq!(state.updated().len(), 1);
     assert_eq!(state.destroyed().len(), 0);
@@ -372,7 +372,7 @@ pub async fn test(test: &TestServer) {
 
     // Only email properties must have changed
     let prev_state = state.clone();
-    let state = client.mailbox_changes(state, 0).await.unwrap();
+    let state = client.mailbox_changes(state, usize::MAX).await.unwrap();
     assert_eq!(state.created().len(), 0);
     assert_eq!(
         state
@@ -398,7 +398,7 @@ pub async fn test(test: &TestServer) {
 
     // Use updatedProperties in a query
     let mut request = client.build();
-    let changes_request = request.changes_mailbox(prev_state).max_changes(0);
+    let changes_request = request.changes_mailbox(prev_state);
     let properties_ref = changes_request.updated_properties_reference();
     let updated_ref = changes_request.updated_reference();
     request
@@ -432,7 +432,7 @@ pub async fn test(test: &TestServer) {
         .unwrap();
 
     // E-mail properties of both Inbox and Trash must have changed
-    let state = client.mailbox_changes(state, 0).await.unwrap();
+    let state = client.mailbox_changes(state, usize::MAX).await.unwrap();
     assert_eq!(state.created().len(), 0);
     assert_eq!(state.updated().len(), 2);
     assert_eq!(state.destroyed().len(), 0);

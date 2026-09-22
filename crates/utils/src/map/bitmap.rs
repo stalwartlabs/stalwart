@@ -46,6 +46,14 @@ impl<T: BitmapItem> Bitmap<T> {
     }
 
     #[inline(always)]
+    pub const fn from_bits(bitmap: u64) -> Self {
+        Self {
+            bitmap,
+            _state: std::marker::PhantomData,
+        }
+    }
+
+    #[inline(always)]
     pub fn all() -> Self {
         Self {
             bitmap: u64::MAX >> (64 - T::max()),
@@ -66,6 +74,11 @@ impl<T: BitmapItem> Bitmap<T> {
     #[inline(always)]
     pub fn intersection(&mut self, items: &Bitmap<T>) {
         self.bitmap &= items.bitmap;
+    }
+
+    #[inline(always)]
+    pub fn intersects(&self, items: &Bitmap<T>) -> bool {
+        self.bitmap & items.bitmap != 0
     }
 
     #[inline(always)]

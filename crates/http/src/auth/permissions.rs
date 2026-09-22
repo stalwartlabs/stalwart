@@ -91,7 +91,6 @@ impl AccountApiHandler for Server {
                 for p in [
                     Permission::JmapPrincipalQuery,
                     Permission::JmapPrincipalQueryChanges,
-                    Permission::JmapPrincipalGet,
                     Permission::JmapPrincipalGetAvailability,
                     Permission::JmapPrincipalChanges,
                 ] {

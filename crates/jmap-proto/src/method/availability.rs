@@ -13,14 +13,14 @@ use crate::{
 };
 use calcard::jscalendar::{JSCalendar, JSCalendarProperty};
 use serde::{Deserialize, Deserializer, Serialize};
-use types::{blob::BlobId, id::Id};
+use types::{TimeRange, blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
 pub struct GetAvailabilityRequest {
     pub account_id: Id,
     pub id: Id,
-    pub utc_start: UTCDate,
-    pub utc_end: UTCDate,
+    pub utc_start: Option<UTCDate>,
+    pub utc_end: Option<UTCDate>,
     pub show_details: bool,
     pub event_properties: Option<Vec<MaybeInvalid<JSCalendarProperty<Id>>>>,
 }
@@ -38,14 +38,24 @@ pub struct BusyPeriod {
     pub utc_end: UTCDate,
     pub busy_status: Option<BusyStatus>,
     pub event: Option<JSCalendar<'static, Id, BlobId>>,
+    pub account_id: Option<Id>,
 }
 
-#[derive(Debug, Serialize, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum BusyStatus {
-    Confirmed,
     Tentative,
     Unavailable,
+    Confirmed,
+}
+
+impl GetAvailabilityRequest {
+    pub fn time_range(&self) -> Option<TimeRange> {
+        let start = self.utc_start.as_ref().filter(|date| date.is_valid())?;
+        let end = self.utc_end.as_ref().filter(|date| date.is_valid())?;
+        Some(TimeRange::new(start.timestamp(), end.timestamp()))
+            .filter(|range| range.end > range.start)
+    }
 }
 
 impl<'de> DeserializeArguments<'de> for GetAvailabilityRequest {
@@ -87,5 +97,49 @@ impl<'de> Deserialize<'de> for GetAvailabilityRequest {
         D: Deserializer<'de>,
     {
         deserialize_request(deserializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BusyStatus, GetAvailabilityRequest};
+    use crate::types::date::UTCDate;
+    use std::str::FromStr;
+    use types::TimeRange;
+
+    fn request(utc_start: Option<&str>, utc_end: Option<&str>) -> GetAvailabilityRequest {
+        GetAvailabilityRequest {
+            utc_start: utc_start.map(|date| UTCDate::from_str(date).expect("parsable date")),
+            utc_end: utc_end.map(|date| UTCDate::from_str(date).expect("parsable date")),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn time_range_requires_valid_increasing_dates() {
+        assert_eq!(
+            request(Some("2026-03-11T01:00:00Z"), Some("2026-03-11T06:00:00Z")).time_range(),
+            Some(TimeRange::new(1773190800, 1773208800))
+        );
+        for (utc_start, utc_end) in [
+            (None, Some("2026-03-11T06:00:00Z")),
+            (Some("2026-03-11T01:00:00Z"), None),
+            (None, None),
+            (Some("2026-13-45T99:99:99Z"), Some("2026-03-11T06:00:00Z")),
+            (Some("2026-03-11T01:00:00Z"), Some("2026-03-11T01:00:00Z")),
+            (Some("2026-03-11T06:00:00Z"), Some("2026-03-11T01:00:00Z")),
+        ] {
+            assert_eq!(
+                request(utc_start, utc_end).time_range(),
+                None,
+                "{utc_start:?} {utc_end:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn busy_status_precedence() {
+        assert!(BusyStatus::Confirmed > BusyStatus::Unavailable);
+        assert!(BusyStatus::Unavailable > BusyStatus::Tentative);
     }
 }

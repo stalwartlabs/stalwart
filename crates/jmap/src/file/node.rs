@@ -147,8 +147,10 @@ impl NodePatch {
                 (FileNodeProperty::Target, Value::Null) => {
                     patch.target = Some(None);
                 }
-                (FileNodeProperty::Size, Value::Number(value)) => {
-                    patch.size = Some(value.cast_to_u64());
+                (FileNodeProperty::Size, Value::Number(value))
+                    if let Some(size) = value.as_u64() =>
+                {
+                    patch.size = Some(size);
                 }
                 (FileNodeProperty::Size, Value::Null) => {}
                 (FileNodeProperty::Type, Value::Str(value)) => {
@@ -548,5 +550,21 @@ mod tests {
         assert!(validate_name("a\u{1}b").is_err());
         assert!(validate_name(&"a".repeat(256)).is_err());
         assert!(validate_name("ok name (1).txt").is_ok());
+    }
+
+    #[test]
+    fn size_is_an_unsigned_int() {
+        let node = FileNode::default();
+        for (size, expected) in [("5", Some(5)), ("-5", None), ("5.5", None)] {
+            let json = format!(r#"{{"size": {size}}}"#);
+            let updates = Value::parse_json(&json).expect("valid JSON");
+            assert_eq!(
+                NodePatch::parse(None, updates, &node, true, &NoResolver)
+                    .ok()
+                    .and_then(|patch| patch.size),
+                expected,
+                "{size}"
+            );
+        }
     }
 }

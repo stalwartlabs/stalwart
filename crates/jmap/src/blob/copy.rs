@@ -5,10 +5,12 @@
  */
 
 use super::download::BlobDownload;
+use super::embedded::EmbeddedBlobs;
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
-    error::set::{SetError, SetErrorType},
+    error::set::SetError,
     method::copy::{CopyBlobRequest, CopyBlobResponse},
+    object::blob::BlobProperty,
     request::MaybeInvalid,
 };
 use registry::schema::enums::Permission;
@@ -47,12 +49,7 @@ impl BlobCopy for Server {
             let blob_id = match blob_id {
                 MaybeInvalid::Value(blob_id) => blob_id,
                 invalid => {
-                    response.not_copied.append(
-                        invalid,
-                        SetError::new(SetErrorType::BlobNotFound).with_description(
-                            "blobId does not exist or not enough permissions to access it.",
-                        ),
-                    );
+                    response.not_copied.append(invalid, not_found());
                     continue;
                 }
             };
@@ -76,6 +73,26 @@ impl BlobCopy for Server {
                     continue;
                 }
 
+                if matches!(blob_id.class, BlobClass::Embedded { .. }) {
+                    match self
+                        .embedded_blob(&blob_id)
+                        .await
+                        .caused_by(trc::location!())?
+                    {
+                        Some(data) => {
+                            let dest_blob_id = self
+                                .put_jmap_blob(account_id, &data)
+                                .await
+                                .caused_by(trc::location!())?;
+                            response.copied.append(blob_id, dest_blob_id);
+                        }
+                        None => {
+                            response.not_copied.append(blob_id, not_found());
+                        }
+                    }
+                    continue;
+                }
+
                 let link_value = match &blob_id.class {
                     BlobClass::Reserved {
                         account_id: from_account_id,
@@ -96,7 +113,7 @@ impl BlobCopy for Server {
                         .map(|value| value.0)
                         .filter(|value| value.len() == U64_LEN)
                         .unwrap_or_default(),
-                    BlobClass::Linked { .. } => Vec::new(),
+                    BlobClass::Linked { .. } | BlobClass::Embedded { .. } => Vec::new(),
                 };
                 let mut batch = BatchBuilder::new();
                 let until = now() + self.core.jmap.upload_tmp_ttl;
@@ -123,15 +140,15 @@ impl BlobCopy for Server {
 
                 response.copied.append(blob_id, dest_blob_id);
             } else {
-                response.not_copied.append(
-                    blob_id,
-                    SetError::new(SetErrorType::BlobNotFound).with_description(
-                        "blobId does not exist or not enough permissions to access it.",
-                    ),
-                );
+                response.not_copied.append(blob_id, not_found());
             }
         }
 
         Ok(response)
     }
+}
+
+fn not_found() -> SetError<BlobProperty> {
+    SetError::not_found()
+        .with_description("blobId does not exist or not enough permissions to access it.")
 }

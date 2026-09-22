@@ -212,13 +212,12 @@ pub(crate) fn serialize_vcard_with_props(
     let mut vcard = String::with_capacity(128);
     if !props.is_empty() {
         let _ = write!(&mut vcard, "BEGIN:VCARD\r\n");
-        let is_v4 = matches!(version, VCardVersion::V4_0);
 
         for entry in card.entries.iter() {
             for item in props {
                 if entry.name == item.name && entry.group == item.group {
                     if item.name != VCardProperty::Version {
-                        let _ = entry.write_to(&mut vcard, !item.no_value, is_v4);
+                        let _ = entry.write_with_version(&mut vcard, !item.no_value, version);
                     } else {
                         let _ = write!(&mut vcard, "VERSION:{version}\r\n");
                     }

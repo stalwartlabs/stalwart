@@ -8,6 +8,7 @@ use crate::{
     ArenaRef, CachedName, DAV_CHUNK, DavName, GroupwareResource, GroupwareResourceMetadata,
     GroupwareResourceRef, NO_ID, ResourceChunk, ResourceStore, TinyCalendarPreferences,
 };
+use ahash::AHashMap;
 use std::{ops::Range, sync::Arc};
 use types::acl::AclGrant;
 
@@ -32,12 +33,18 @@ impl ResourceChunk {
         &self.prefs[r.range()]
     }
 
+    #[inline(always)]
+    pub fn principals_at(&self, r: ArenaRef) -> &[u32] {
+        &self.principals[r.range()]
+    }
+
     pub fn heap_size(&self) -> u64 {
         (self.records.len() * std::mem::size_of::<GroupwareResource>()
             + self.bytes.len()
             + self.names.len() * std::mem::size_of::<CachedName>()
             + self.acls.len() * std::mem::size_of::<AclGrant>()
             + self.prefs.len() * std::mem::size_of::<TinyCalendarPreferences>()
+            + self.principals.len() * std::mem::size_of::<u32>()
             + std::mem::size_of::<ResourceChunk>()) as u64
     }
 }
@@ -49,6 +56,8 @@ pub struct ResourceChunkBuilder {
     pub names: Vec<CachedName>,
     pub acls: Vec<AclGrant>,
     pub prefs: Vec<TinyCalendarPreferences>,
+    pub principals: Vec<u32>,
+    principal_runs: AHashMap<Box<[u32]>, ArenaRef>,
 }
 
 impl ResourceChunkBuilder {
@@ -59,6 +68,8 @@ impl ResourceChunkBuilder {
             names: Vec::with_capacity(n),
             acls: Vec::with_capacity(8),
             prefs: Vec::with_capacity(8),
+            principals: Vec::new(),
+            principal_runs: AHashMap::new(),
         }
     }
 
@@ -87,6 +98,27 @@ impl ResourceChunkBuilder {
             off,
             len: prefs.len() as u32,
         }
+    }
+
+    pub fn push_principals(&mut self, principals: impl IntoIterator<Item = u32>) -> ArenaRef {
+        let off = self.principals.len();
+        self.principals.extend(principals);
+        if self.principals.len() == off {
+            return ArenaRef::default();
+        }
+
+        if let Some(interned) = self.principal_runs.get(&self.principals[off..]).copied() {
+            self.principals.truncate(off);
+            return interned;
+        }
+
+        let arena = ArenaRef {
+            off: off as u32,
+            len: (self.principals.len() - off) as u32,
+        };
+        self.principal_runs
+            .insert(Box::from(&self.principals[off..]), arena);
+        arena
     }
 
     pub fn push_names(&mut self, names: &[DavName]) -> ArenaRef {
@@ -151,6 +183,7 @@ impl ResourceChunkBuilder {
                 modified_at,
                 uid,
                 etag,
+                flags,
             } => GroupwareResourceMetadata::CalendarEvent {
                 names: self.push_cached_names(src.chunk, *names),
                 start: *start,
@@ -159,6 +192,7 @@ impl ResourceChunkBuilder {
                 modified_at: *modified_at,
                 uid: self.push_str(src.chunk.str_at(*uid)),
                 etag: *etag,
+                flags: *flags,
             },
             GroupwareResourceMetadata::ContactCard {
                 names,
@@ -178,11 +212,20 @@ impl ResourceChunkBuilder {
                 created_at,
                 event_id,
                 etag,
+                changed_by,
+                principals,
+                calendar_ids_len,
+                flags,
             } => GroupwareResourceMetadata::CalendarEventNotification {
                 names: self.push_cached_names(src.chunk, *names),
                 created_at: *created_at,
                 event_id: *event_id,
                 etag: *etag,
+                changed_by: *changed_by,
+                principals: self
+                    .push_principals(src.chunk.principals_at(*principals).iter().copied()),
+                calendar_ids_len: *calendar_ids_len,
+                flags: *flags,
             },
         };
         self.records.push(GroupwareResource {
@@ -222,6 +265,7 @@ impl ResourceChunkBuilder {
             names: self.names.into_boxed_slice(),
             acls: self.acls.into_boxed_slice(),
             prefs: self.prefs.into_boxed_slice(),
+            principals: self.principals.into_boxed_slice(),
             min_id,
             max_id,
         }
@@ -528,6 +572,7 @@ mod tests {
                 modified_at: 0,
                 uid,
                 etag: document_id,
+                flags: 0,
             },
         });
     }

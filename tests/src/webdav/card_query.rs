@@ -120,7 +120,7 @@ END:VCARD
             properties: Default::default(),
             version: None,
         }))
-        .with_values([VCARD3.replace('\n', "\r\n").as_str()]);
+        .with_values([VCARD3.replace("\\n", "^n").replace('\n', "\r\n").as_str()]);
 
     // Test 4: Search using limit
     client

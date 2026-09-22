@@ -672,7 +672,7 @@ impl Action {
 
 impl ObjectImpl for AddressBook {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 2;
+    const VERSION: u8 = 3;
     const OBJECT: ObjectType = ObjectType::AddressBook;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -719,6 +719,7 @@ impl Pickle for AddressBook {
         self.max_contacts.pickle(out);
         self.v_card_version.pickle(out);
         self.max_address_books_per_card.pickle(out);
+        self.max_media_size.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -734,6 +735,9 @@ impl Pickle for AddressBook {
         if stream.version() >= 2 {
             this.max_address_books_per_card = Pickle::unpickle(stream)?;
         }
+        if stream.version() >= 3 {
+            this.max_media_size = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -748,13 +752,14 @@ impl Default for AddressBook {
             max_contacts: Default::default(),
             v_card_version: VCardVersion::V4,
             max_address_books_per_card: 10u64,
+            max_media_size: 2097152,
         }
     }
 }
 
 impl IntoValue for AddressBook {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(9);
+        let mut map = jmap_tools::Map::with_capacity(10);
         map.insert_unchecked(
             Property::DefaultDisplayName,
             self.default_display_name.into_value(),
@@ -774,6 +779,7 @@ impl IntoValue for AddressBook {
             Property::MaxAddressBooksPerCard,
             self.max_address_books_per_card.into_value(),
         );
+        map.insert_unchecked(Property::MaxMediaSize, self.max_media_size.into_value());
         JmapValue::Object(map)
     }
 }
@@ -798,6 +804,7 @@ impl RegistryJsonPropertyPatch for AddressBook {
             Some(Property::MaxAddressBooksPerCard) => {
                 self.max_address_books_per_card.patch(pointer, value)
             }
+            Some(Property::MaxMediaSize) => self.max_media_size.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -4943,7 +4950,7 @@ impl CacheSwap {
 
 impl ObjectImpl for Calendar {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 1;
+    const VERSION: u8 = 2;
     const OBJECT: ObjectType = ObjectType::Calendar;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -4995,6 +5002,9 @@ impl ObjectImpl for Calendar {
                 1,
             ));
         }
+        if let Some(value) = &self.availability_rate_limit {
+            value.validate(errors);
+        }
         errors.len() == neb
     }
 
@@ -5013,6 +5023,10 @@ impl Pickle for Calendar {
         self.max_participant_identities.pickle(out);
         self.max_event_notifications.pickle(out);
         self.max_calendars_per_event.pickle(out);
+        self.max_expanded_query_duration.pickle(out);
+        self.max_availability_duration.pickle(out);
+        self.availability_rate_limit.pickle(out);
+        self.max_attachments_size.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -5028,6 +5042,18 @@ impl Pickle for Calendar {
         this.max_event_notifications = Pickle::unpickle(stream)?;
         if stream.version() >= 1 {
             this.max_calendars_per_event = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_expanded_query_duration = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_availability_duration = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.availability_rate_limit = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_attachments_size = Pickle::unpickle(stream)?;
         }
         Some(this)
     }
@@ -5046,13 +5072,20 @@ impl Default for Calendar {
             max_participant_identities: Some(100u64),
             max_event_notifications: Default::default(),
             max_calendars_per_event: 10u64,
+            max_expanded_query_duration: Duration::from_millis(31536000000),
+            max_availability_duration: Duration::from_millis(31536000000),
+            availability_rate_limit: Some(Rate {
+                count: 100u64,
+                period: Duration::from_millis(60000),
+            }),
+            max_attachments_size: 5242880,
         }
     }
 }
 
 impl IntoValue for Calendar {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(12);
+        let mut map = jmap_tools::Map::with_capacity(16);
         map.insert_unchecked(
             Property::DefaultDisplayName,
             self.default_display_name.into_value(),
@@ -5083,6 +5116,22 @@ impl IntoValue for Calendar {
         map.insert_unchecked(
             Property::MaxCalendarsPerEvent,
             self.max_calendars_per_event.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExpandedQueryDuration,
+            self.max_expanded_query_duration.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxAvailabilityDuration,
+            self.max_availability_duration.into_value(),
+        );
+        map.insert_unchecked(
+            Property::AvailabilityRateLimit,
+            self.availability_rate_limit.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxAttachmentsSize,
+            self.max_attachments_size.into_value(),
         );
         JmapValue::Object(map)
     }
@@ -5117,6 +5166,16 @@ impl RegistryJsonPropertyPatch for Calendar {
             Some(Property::MaxCalendarsPerEvent) => {
                 self.max_calendars_per_event.patch(pointer, value)
             }
+            Some(Property::MaxExpandedQueryDuration) => {
+                self.max_expanded_query_duration.patch(pointer, value)
+            }
+            Some(Property::MaxAvailabilityDuration) => {
+                self.max_availability_duration.patch(pointer, value)
+            }
+            Some(Property::AvailabilityRateLimit) => {
+                self.availability_rate_limit.patch(pointer, value)
+            }
+            Some(Property::MaxAttachmentsSize) => self.max_attachments_size.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -42756,7 +42815,7 @@ impl RegistryJsonPropertyPatch for SystemSettings {
 
 impl ObjectImpl for Task {
     const FLAGS: u64 = 0;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Task;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -43204,6 +43263,11 @@ impl TaskCalendarAlarmEmail {
         if !value.is_valid() {
             errors.push(ValidationError::invalid(Property::EventEnd, value));
         }
+        if let Some(value) = &self.target_account_id {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::TargetAccountId));
+            }
+        }
         let value = &self.account_id;
         if !value.is_valid() {
             errors.push(ValidationError::required(Property::AccountId));
@@ -43218,6 +43282,7 @@ impl TaskCalendarAlarmEmail {
     }
 
     fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.foreign_key(ObjectType::Account, self.target_account_id, None);
         i.foreign_key(ObjectType::Account, self.account_id.into(), None);
     }
 }
@@ -43230,6 +43295,7 @@ impl Pickle for TaskCalendarAlarmEmail {
         self.event_end.pickle(out);
         self.event_start_tz.pickle(out);
         self.event_end_tz.pickle(out);
+        self.target_account_id.pickle(out);
         self.account_id.pickle(out);
         self.document_id.pickle(out);
         self.status.pickle(out);
@@ -43243,6 +43309,9 @@ impl Pickle for TaskCalendarAlarmEmail {
         this.event_end = Pickle::unpickle(stream)?;
         this.event_start_tz = Pickle::unpickle(stream)?;
         this.event_end_tz = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.target_account_id = Pickle::unpickle(stream)?;
+        }
         this.account_id = Pickle::unpickle(stream)?;
         this.document_id = Pickle::unpickle(stream)?;
         this.status = Pickle::unpickle(stream)?;
@@ -43259,6 +43328,7 @@ impl Default for TaskCalendarAlarmEmail {
             event_end: Default::default(),
             event_start_tz: 0u64,
             event_end_tz: 0u64,
+            target_account_id: Default::default(),
             account_id: Default::default(),
             document_id: Default::default(),
             status: Default::default(),
@@ -43268,13 +43338,17 @@ impl Default for TaskCalendarAlarmEmail {
 
 impl IntoValue for TaskCalendarAlarmEmail {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(11);
+        let mut map = jmap_tools::Map::with_capacity(12);
         map.insert_unchecked(Property::AlarmId, self.alarm_id.into_value());
         map.insert_unchecked(Property::EventId, self.event_id.into_value());
         map.insert_unchecked(Property::EventStart, self.event_start.into_value());
         map.insert_unchecked(Property::EventEnd, self.event_end.into_value());
         map.insert_unchecked(Property::EventStartTz, self.event_start_tz.into_value());
         map.insert_unchecked(Property::EventEndTz, self.event_end_tz.into_value());
+        map.insert_unchecked(
+            Property::TargetAccountId,
+            self.target_account_id.into_value(),
+        );
         map.insert_unchecked(Property::AccountId, self.account_id.into_value());
         map.insert_unchecked(Property::DocumentId, self.document_id.into_value());
         map.insert_unchecked(Property::Status, self.status.into_value());
@@ -43295,6 +43369,7 @@ impl RegistryJsonPropertyPatch for TaskCalendarAlarmEmail {
             Some(Property::EventEnd) => pointer.assert_server_set(),
             Some(Property::EventStartTz) => pointer.assert_server_set(),
             Some(Property::EventEndTz) => pointer.assert_server_set(),
+            Some(Property::TargetAccountId) => pointer.assert_server_set(),
             Some(Property::AccountId) => self
                 .account_id
                 .patch(pointer.assert_read_only()?.assert_can_set_account()?, value),
@@ -43315,6 +43390,11 @@ impl RegistryJsonPropertyPatch for TaskCalendarAlarmEmail {
 impl TaskCalendarAlarmNotification {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
+        if let Some(value) = &self.target_account_id {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::TargetAccountId));
+            }
+        }
         let value = &self.account_id;
         if !value.is_valid() {
             errors.push(ValidationError::required(Property::AccountId));
@@ -43329,6 +43409,7 @@ impl TaskCalendarAlarmNotification {
     }
 
     fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.foreign_key(ObjectType::Account, self.target_account_id, None);
         i.foreign_key(ObjectType::Account, self.account_id.into(), None);
     }
 }
@@ -43338,6 +43419,7 @@ impl Pickle for TaskCalendarAlarmNotification {
         self.alarm_id.pickle(out);
         self.event_id.pickle(out);
         self.recurrence_id.pickle(out);
+        self.target_account_id.pickle(out);
         self.account_id.pickle(out);
         self.document_id.pickle(out);
         self.status.pickle(out);
@@ -43348,6 +43430,9 @@ impl Pickle for TaskCalendarAlarmNotification {
         this.alarm_id = Pickle::unpickle(stream)?;
         this.event_id = Pickle::unpickle(stream)?;
         this.recurrence_id = Pickle::unpickle(stream)?;
+        if stream.version() >= 1 {
+            this.target_account_id = Pickle::unpickle(stream)?;
+        }
         this.account_id = Pickle::unpickle(stream)?;
         this.document_id = Pickle::unpickle(stream)?;
         this.status = Pickle::unpickle(stream)?;
@@ -43361,6 +43446,7 @@ impl Default for TaskCalendarAlarmNotification {
             alarm_id: 0u64,
             event_id: 0u64,
             recurrence_id: Default::default(),
+            target_account_id: Default::default(),
             account_id: Default::default(),
             document_id: Default::default(),
             status: Default::default(),
@@ -43370,10 +43456,14 @@ impl Default for TaskCalendarAlarmNotification {
 
 impl IntoValue for TaskCalendarAlarmNotification {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(8);
+        let mut map = jmap_tools::Map::with_capacity(9);
         map.insert_unchecked(Property::AlarmId, self.alarm_id.into_value());
         map.insert_unchecked(Property::EventId, self.event_id.into_value());
         map.insert_unchecked(Property::RecurrenceId, self.recurrence_id.into_value());
+        map.insert_unchecked(
+            Property::TargetAccountId,
+            self.target_account_id.into_value(),
+        );
         map.insert_unchecked(Property::AccountId, self.account_id.into_value());
         map.insert_unchecked(Property::DocumentId, self.document_id.into_value());
         map.insert_unchecked(Property::Status, self.status.into_value());
@@ -43391,6 +43481,7 @@ impl RegistryJsonPropertyPatch for TaskCalendarAlarmNotification {
             Some(Property::AlarmId) => pointer.assert_server_set(),
             Some(Property::EventId) => pointer.assert_server_set(),
             Some(Property::RecurrenceId) => pointer.assert_server_set(),
+            Some(Property::TargetAccountId) => pointer.assert_server_set(),
             Some(Property::AccountId) => self
                 .account_id
                 .patch(pointer.assert_read_only()?.assert_can_set_account()?, value),

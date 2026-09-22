@@ -186,7 +186,7 @@ impl FileCopyMoveRequestHandler for Server {
                 .map(|resource| resource.document_id())
                 .any(|document_id| {
                     !access.has_acl(document_id, Acl::Read)
-                        || (removes_source && !access.has_acl(document_id, Acl::Delete))
+                        || (removes_source && !access.has_acl(document_id, Acl::RemoveItems))
                 })
                 || (is_move
                     && (!access.has_acl(from_resource.resource.document_id, Acl::Modify)
@@ -209,7 +209,9 @@ impl FileCopyMoveRequestHandler for Server {
                 || (delete_destination.is_some()
                     && to_resources
                         .subtree(destination_resource_name)
-                        .any(|resource| !to_access.has_acl(resource.document_id(), Acl::Delete)))
+                        .any(|resource| {
+                            !to_access.has_acl(resource.document_id(), Acl::RemoveItems)
+                        }))
             {
                 return Err(DavError::Code(StatusCode::FORBIDDEN));
             }

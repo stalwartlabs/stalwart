@@ -6,6 +6,7 @@
 
 use crate::{
     DavError, DavMethod, PropStatBuilder,
+    calendar::assert_event_privacy_access,
     common::{
         ETag, ExtractETag,
         lock::{LockRequestHandler, ResourceState},
@@ -25,7 +26,11 @@ use dav_proto::{
 };
 use groupware::{
     cache::GroupwareCache,
-    calendar::{Calendar, CalendarEvent, CalendarEventContent, SupportedComponent, Timezone},
+    calendar::{
+        Calendar, CalendarEvent, CalendarEventContent, SupportedComponent, Timezone,
+        alerts::{CalendarAlarmsReschedule, CalendarSettings},
+        privacy::EventViewer,
+    },
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -108,11 +113,21 @@ impl CalendarPropPatchRequestHandler for Server {
         }
 
         // Verify ACL
-        if !access_token.is_member(account_id) {
+        let is_owner = access_token.is_member(account_id);
+        if !is_owner {
             let (acl, document_id) = if resource.is_container() {
                 (Acl::Modify, resource.document_id())
             } else {
-                (Acl::ModifyItems, resource.parent_id().unwrap())
+                assert_event_privacy_access(
+                    resource.resource.event_flags(),
+                    EventViewer::new(is_owner),
+                )?;
+                (
+                    Acl::ModifyItems,
+                    resource
+                        .parent_id()
+                        .ok_or(DavError::Code(StatusCode::NOT_FOUND))?,
+                )
             };
 
             if !resources.has_access_to_container(access_token, document_id, acl) {
@@ -174,6 +189,10 @@ impl CalendarPropPatchRequestHandler for Server {
                 .deserialize::<Calendar>()
                 .caused_by(trc::location!())?;
             let personal_id = access_token.personal_id(account_id, Collection::Calendar);
+            let is_member = access_token.is_member(account_id);
+            if is_member {
+                new_calendar.inherit_owner_preferences(account_id, personal_id);
+            }
 
             // Remove properties
             if !request.set_first && !request.remove.is_empty() {
@@ -205,6 +224,19 @@ impl CalendarPropPatchRequestHandler for Server {
             }
 
             if is_success {
+                if is_member {
+                    new_calendar.sync_owner_preferences(account_id, personal_id);
+                }
+                self.reschedule_calendar_alarms(
+                    &resources,
+                    account_id,
+                    document_id,
+                    CalendarSettings::from(calendar.inner),
+                    CalendarSettings::from(&new_calendar),
+                    &mut batch,
+                )
+                .await
+                .caused_by(trc::location!())?;
                 new_calendar
                     .update(
                         access_token.account_tenant_ids(),

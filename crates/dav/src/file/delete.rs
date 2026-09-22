@@ -72,16 +72,25 @@ impl FileDeleteRequestHandler for Server {
 
         // Sort ids descending from the deepest to the root
         ids.sort_unstable_by_key(|b| std::cmp::Reverse(b.hierarchy_seq()));
-        let (document_id, full_delete_path) = ids
+        let (document_id, parent_id, full_delete_path) = ids
             .last()
-            .map(|a| (a.document_id(), resources.format_resource(*a)))
+            .map(|a| {
+                (
+                    a.document_id(),
+                    a.parent_id(),
+                    resources.format_resource(*a),
+                )
+            })
             .unwrap();
         let mut sorted_ids = Vec::with_capacity(ids.len());
         sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
 
         // Validate ACLs
         if let Some(access) = &access
-            && !sorted_ids.iter().all(|id| access.has_acl(*id, Acl::Delete))
+            && (!parent_id.is_some_and(|parent_id| access.has_acl(parent_id, Acl::RemoveItems))
+                || !sorted_ids
+                    .iter()
+                    .all(|id| access.has_acl(*id, Acl::RemoveItems)))
         {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }

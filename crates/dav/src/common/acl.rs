@@ -11,7 +11,14 @@ use crate::{
     file::{DavFileResource, is_symlink},
     principal::propfind::PrincipalPropFind,
 };
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{
+    Server,
+    auth::AccessToken,
+    sharing::{
+        EffectiveAcl,
+        grants::{ShareUpdate, ShareViolation},
+    },
+};
 use dav_proto::{
     RequestHeaders,
     schema::{
@@ -29,7 +36,7 @@ use store::{
     ValueKey,
     write::{Archive, ArchiveBytes},
 };
-use store::{ahash::AHashSet, roaring::RoaringBitmap, write::BatchBuilder};
+use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use trc::AddContext;
 use types::{
     acl::{Acl, AclGrant, ArchivedAclGrant},
@@ -127,14 +134,14 @@ impl DavAclHandler for Server {
 
         // Validate ACL
         let acls = container.acls().unwrap();
-        if !access_token.is_member(account_id)
-            && !if collection == Collection::FileNode {
+        let actor = (!access_token.is_member(account_id)).then(|| {
+            if collection == Collection::FileNode {
                 resources.file_acl(access_token, resource.document_id())
             } else {
                 acls.effective_acl(access_token)
             }
-            .contains(Acl::Share)
-        {
+        });
+        if actor.is_some_and(|actor| !actor.contains(Acl::Share)) {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
 
@@ -142,13 +149,26 @@ impl DavAclHandler for Server {
         let grants = self
             .validate_and_map_aces(access_token, request, collection)
             .await?;
+        ShareUpdate {
+            collection,
+            owner_id: account_id,
+            actor,
+            current: acls,
+            max_shares: self.core.groupware.max_shares_per_item,
+        }
+        .validate(&grants)
+        .map_err(|violation| {
+            DavError::Condition(DavErrorCondition::new(
+                StatusCode::FORBIDDEN,
+                match violation {
+                    ShareViolation::TooManyShares(_) => BaseCondition::LimitedNumberOfAces,
+                    ShareViolation::OwnerShared => BaseCondition::AllowedPrincipal,
+                    ShareViolation::RightNotHeld => BaseCondition::NoAceConflict,
+                },
+            ))
+        })?;
 
         if grants.len() != acls.len() || acls.iter().zip(grants.iter()).any(|(a, b)| a != b) {
-            // Refresh ACLs
-            self.refresh_archived_acls(&grants, acls)
-                .await
-                .caused_by(trc::location!())?;
-
             let mut batch = BatchBuilder::new();
             match container {
                 ArchivedResource::Calendar(calendar) => {
@@ -337,23 +357,23 @@ impl DavAclHandler for Server {
                     }
                     Privilege::Write => {
                         acls.insert(Acl::Modify);
-                        acls.insert(Acl::Delete);
                         acls.insert(Acl::AddItems);
                         acls.insert(Acl::ModifyItems);
                         acls.insert(Acl::RemoveItems);
                     }
                     Privilege::WriteContent => {
-                        acls.insert(Acl::AddItems);
-                        acls.insert(Acl::Modify);
                         acls.insert(Acl::ModifyItems);
                     }
                     Privilege::WriteProperties => {
                         acls.insert(Acl::Modify);
                     }
-                    Privilege::ReadCurrentUserPrivilegeSet
-                    | Privilege::Unlock
-                    | Privilege::Bind
-                    | Privilege::Unbind => {}
+                    Privilege::Bind => {
+                        acls.insert(Acl::AddItems);
+                    }
+                    Privilege::Unbind => {
+                        acls.insert(Acl::RemoveItems);
+                    }
+                    Privilege::ReadCurrentUserPrivilegeSet | Privilege::Unlock => {}
                     Privilege::All => {
                         return Err(DavError::Condition(DavErrorCondition::new(
                             StatusCode::FORBIDDEN,
@@ -472,6 +492,10 @@ impl DavAclHandler for Server {
             || grants.effective_acl(access_token).contains(Acl::Share)
         {
             for grant in grants.iter() {
+                let privileges = current_user_privilege_set(Bitmap::<Acl>::from(&grant.grants));
+                if privileges.is_empty() {
+                    continue;
+                }
                 let grant_account_id = u32::from(grant.account_id);
                 let principal = if let Some(expand) = expand {
                     self.expand_principal(access_token, grant_account_id, expand)
@@ -496,12 +520,7 @@ impl DavAclHandler for Server {
                     )))
                 };
 
-                aces.push(Ace::new(
-                    principal,
-                    GrantDeny::grant(current_user_privilege_set(Bitmap::<Acl>::from(
-                        &grant.grants,
-                    ))),
-                ));
+                aces.push(Ace::new(principal, GrantDeny::grant(privileges)));
             }
         }
 
@@ -534,37 +553,7 @@ impl Privileges for AccessToken {
 }
 
 pub(crate) fn current_user_privilege_set(acl_bitmap: Bitmap<Acl>) -> Vec<Privilege> {
-    let mut acls = AHashSet::with_capacity(16);
-    for grant in acl_bitmap {
-        match grant {
-            Acl::Read | Acl::ReadItems => {
-                acls.insert(Privilege::Read);
-                acls.insert(Privilege::ReadCurrentUserPrivilegeSet);
-            }
-            Acl::Modify => {
-                acls.insert(Privilege::WriteProperties);
-            }
-            Acl::ModifyItems => {
-                acls.insert(Privilege::WriteContent);
-            }
-            Acl::Delete | Acl::RemoveItems => {
-                acls.insert(Privilege::Write);
-            }
-            Acl::Share => {
-                acls.insert(Privilege::ReadAcl);
-                acls.insert(Privilege::WriteAcl);
-            }
-            Acl::SchedulingReadFreeBusy => {
-                acls.insert(Privilege::ReadFreeBusy);
-            }
-            _ => {}
-        }
-    }
-    acls.into_iter().collect()
-}
-
-pub(crate) fn file_privilege_set(acl_bitmap: Bitmap<Acl>) -> Vec<Privilege> {
-    let mut privileges = Vec::with_capacity(8);
+    let mut privileges = Vec::with_capacity(13);
     if acl_bitmap.contains(Acl::Read) || acl_bitmap.contains(Acl::ReadItems) {
         privileges.push(Privilege::Read);
         privileges.push(Privilege::ReadCurrentUserPrivilegeSet);
@@ -582,12 +571,93 @@ pub(crate) fn file_privilege_set(acl_bitmap: Bitmap<Acl>) -> Vec<Privilege> {
             write = false;
         }
     }
-    if write && acl_bitmap.contains(Acl::Delete) {
+    if write {
         privileges.push(Privilege::Write);
     }
     if acl_bitmap.contains(Acl::Share) {
         privileges.push(Privilege::ReadAcl);
         privileges.push(Privilege::WriteAcl);
     }
+    let free_busy = acl_bitmap.contains(Acl::SchedulingReadFreeBusy);
+    let invite = acl_bitmap.contains(Acl::SchedulingInvite);
+    let reply = acl_bitmap.contains(Acl::SchedulingReply);
+    if free_busy {
+        privileges.push(Privilege::ReadFreeBusy);
+    }
+    if invite {
+        privileges.push(Privilege::ScheduleDeliverInvite);
+    }
+    if reply {
+        privileges.push(Privilege::ScheduleDeliverReply);
+    }
+    if free_busy && invite && reply {
+        privileges.push(Privilege::ScheduleDeliver);
+    }
     privileges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn privileges(acls: impl IntoIterator<Item = Acl>) -> Vec<Privilege> {
+        current_user_privilege_set(Bitmap::from_iter(acls))
+    }
+
+    #[test]
+    fn delete_has_no_webdav_privilege() {
+        assert_eq!(privileges([Acl::Delete]), Vec::<Privilege>::new());
+        assert_eq!(
+            privileges([Acl::Read, Acl::ReadItems, Acl::Delete]),
+            [Privilege::Read, Privilege::ReadCurrentUserPrivilegeSet]
+        );
+    }
+
+    #[test]
+    fn write_does_not_require_delete() {
+        assert_eq!(
+            privileges([
+                Acl::Modify,
+                Acl::ModifyItems,
+                Acl::AddItems,
+                Acl::RemoveItems
+            ]),
+            [
+                Privilege::WriteProperties,
+                Privilege::WriteContent,
+                Privilege::Bind,
+                Privilege::Unbind,
+                Privilege::Write
+            ]
+        );
+        assert_eq!(
+            privileges([Acl::Modify, Acl::ModifyItems, Acl::AddItems]),
+            [
+                Privilege::WriteProperties,
+                Privilege::WriteContent,
+                Privilege::Bind
+            ]
+        );
+    }
+
+    #[test]
+    fn scheduling_privileges_are_reported() {
+        assert_eq!(
+            privileges([Acl::SchedulingInvite]),
+            [Privilege::ScheduleDeliverInvite]
+        );
+        assert_eq!(
+            privileges([
+                Acl::SchedulingReadFreeBusy,
+                Acl::SchedulingInvite,
+                Acl::SchedulingReply
+            ]),
+            [
+                Privilege::ReadFreeBusy,
+                Privilege::ScheduleDeliverInvite,
+                Privilege::ScheduleDeliverReply,
+                Privilege::ScheduleDeliver
+            ]
+        );
+    }
 }

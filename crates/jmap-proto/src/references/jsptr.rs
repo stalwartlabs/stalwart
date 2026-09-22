@@ -105,6 +105,7 @@ where
                 }
                 _ => {}
             },
+            Some(JsonPointerItem::Invalid(_)) => return false,
             Some(JsonPointerItem::Root) | None => match self {
                 Value::Element(e) => {
                     if let Some(id) = e.as_any_id() {
@@ -244,13 +245,13 @@ impl ResponsePtr for CalendarEventNotificationObject {
                 true
             }
             Some("calendarEventId") => {
-                if let Some(id) = &self.calendar_event_id {
+                if let Some(id) = self.calendar_event_id.value() {
                     results.0.push(EvalResult::Id(AnyId::Id(*id)));
                 }
                 true
             }
             Some("event") => {
-                if let Some(event) = &self.event {
+                if let Some(event) = self.event.value() {
                     event.0.eval_jptr(pointer, results);
                 }
                 true

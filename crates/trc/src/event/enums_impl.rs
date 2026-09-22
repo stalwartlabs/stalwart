@@ -286,6 +286,11 @@ impl EventType {
             b"jmap.websocket-start" => EventType::Jmap(JmapEvent::WebsocketStart),
             b"jmap.websocket-stop" => EventType::Jmap(JmapEvent::WebsocketStop),
             b"jmap.websocket-error" => EventType::Jmap(JmapEvent::WebsocketError),
+            b"jmap.expand-duration-too-large" => EventType::Jmap(JmapEvent::ExpandDurationTooLarge),
+            b"jmap.cannot-calculate-occurrences" => EventType::Jmap(JmapEvent::CannotCalculateOccurrences),
+            b"jmap.too-large" => EventType::Jmap(JmapEvent::TooLarge),
+            b"jmap.rate-limit" => EventType::Jmap(JmapEvent::RateLimit),
+            b"jmap.object-not-found" => EventType::Jmap(JmapEvent::ObjectNotFound),
             b"limit.size-request" => EventType::Limit(LimitEvent::SizeRequest),
             b"limit.size-upload" => EventType::Limit(LimitEvent::SizeUpload),
             b"limit.calls-in" => EventType::Limit(LimitEvent::CallsIn),
@@ -991,6 +996,13 @@ impl EventType {
             EventType::Jmap(JmapEvent::WebsocketStart) => "jmap.websocket-start",
             EventType::Jmap(JmapEvent::WebsocketStop) => "jmap.websocket-stop",
             EventType::Jmap(JmapEvent::WebsocketError) => "jmap.websocket-error",
+            EventType::Jmap(JmapEvent::ExpandDurationTooLarge) => "jmap.expand-duration-too-large",
+            EventType::Jmap(JmapEvent::CannotCalculateOccurrences) => {
+                "jmap.cannot-calculate-occurrences"
+            }
+            EventType::Jmap(JmapEvent::TooLarge) => "jmap.too-large",
+            EventType::Jmap(JmapEvent::RateLimit) => "jmap.rate-limit",
+            EventType::Jmap(JmapEvent::ObjectNotFound) => "jmap.object-not-found",
             EventType::Limit(LimitEvent::SizeRequest) => "limit.size-request",
             EventType::Limit(LimitEvent::SizeUpload) => "limit.size-upload",
             EventType::Limit(LimitEvent::CallsIn) => "limit.calls-in",
@@ -1723,6 +1735,11 @@ impl EventType {
             EventType::Jmap(JmapEvent::WebsocketStart) => 235,
             EventType::Jmap(JmapEvent::WebsocketStop) => 236,
             EventType::Jmap(JmapEvent::WebsocketError) => 234,
+            EventType::Jmap(JmapEvent::ExpandDurationTooLarge) => 645,
+            EventType::Jmap(JmapEvent::CannotCalculateOccurrences) => 646,
+            EventType::Jmap(JmapEvent::TooLarge) => 647,
+            EventType::Jmap(JmapEvent::RateLimit) => 648,
+            EventType::Jmap(JmapEvent::ObjectNotFound) => 649,
             EventType::Limit(LimitEvent::SizeRequest) => 243,
             EventType::Limit(LimitEvent::SizeUpload) => 244,
             EventType::Limit(LimitEvent::CallsIn) => 238,
@@ -2391,6 +2408,11 @@ impl EventType {
             235 => Some(EventType::Jmap(JmapEvent::WebsocketStart)),
             236 => Some(EventType::Jmap(JmapEvent::WebsocketStop)),
             234 => Some(EventType::Jmap(JmapEvent::WebsocketError)),
+            645 => Some(EventType::Jmap(JmapEvent::ExpandDurationTooLarge)),
+            646 => Some(EventType::Jmap(JmapEvent::CannotCalculateOccurrences)),
+            647 => Some(EventType::Jmap(JmapEvent::TooLarge)),
+            648 => Some(EventType::Jmap(JmapEvent::RateLimit)),
+            649 => Some(EventType::Jmap(JmapEvent::ObjectNotFound)),
             243 => Some(EventType::Limit(LimitEvent::SizeRequest)),
             244 => Some(EventType::Limit(LimitEvent::SizeUpload)),
             238 => Some(EventType::Limit(LimitEvent::CallsIn)),
@@ -3476,6 +3498,15 @@ impl EventType {
             EventType::Jmap(JmapEvent::WebsocketStart) => "JMAP WebSocket connection started",
             EventType::Jmap(JmapEvent::WebsocketStop) => "JMAP WebSocket connection stopped",
             EventType::Jmap(JmapEvent::WebsocketError) => "JMAP WebSocket error",
+            EventType::Jmap(JmapEvent::ExpandDurationTooLarge) => {
+                "JMAP expansion duration too large"
+            }
+            EventType::Jmap(JmapEvent::CannotCalculateOccurrences) => {
+                "Cannot calculate JMAP occurrences"
+            }
+            EventType::Jmap(JmapEvent::TooLarge) => "JMAP time span too large",
+            EventType::Jmap(JmapEvent::RateLimit) => "JMAP rate limit exceeded",
+            EventType::Jmap(JmapEvent::ObjectNotFound) => "JMAP object not found",
             EventType::Limit(LimitEvent::SizeRequest) => "Request size limit reached",
             EventType::Limit(LimitEvent::SizeUpload) => "Upload size limit reached",
             EventType::Limit(LimitEvent::CallsIn) => "Incoming calls limit reached",
@@ -4032,6 +4063,13 @@ impl EventType {
             EventType::Jmap(JmapEvent::WebsocketStart) => "Other message",
             EventType::Jmap(JmapEvent::WebsocketStop) => "Other message",
             EventType::Jmap(JmapEvent::WebsocketError) => "Other message",
+            EventType::Jmap(JmapEvent::ExpandDurationTooLarge) => "Expand duration too large",
+            EventType::Jmap(JmapEvent::CannotCalculateOccurrences) => {
+                "Cannot calculate occurrences"
+            }
+            EventType::Jmap(JmapEvent::TooLarge) => "Too large",
+            EventType::Jmap(JmapEvent::RateLimit) => "Rate limit",
+            EventType::Jmap(JmapEvent::ObjectNotFound) => "Object not found",
             EventType::Limit(LimitEvent::SizeRequest) => "Request too large",
             EventType::Limit(LimitEvent::SizeUpload) => "Upload too large",
             EventType::Limit(LimitEvent::CallsIn) => "Too many calls in",
@@ -4503,6 +4541,11 @@ impl EventType {
             EventType::Jmap(JmapEvent::WebsocketStart),
             EventType::Jmap(JmapEvent::WebsocketStop),
             EventType::Jmap(JmapEvent::WebsocketError),
+            EventType::Jmap(JmapEvent::ExpandDurationTooLarge),
+            EventType::Jmap(JmapEvent::CannotCalculateOccurrences),
+            EventType::Jmap(JmapEvent::TooLarge),
+            EventType::Jmap(JmapEvent::RateLimit),
+            EventType::Jmap(JmapEvent::ObjectNotFound),
             EventType::Limit(LimitEvent::SizeRequest),
             EventType::Limit(LimitEvent::SizeUpload),
             EventType::Limit(LimitEvent::CallsIn),

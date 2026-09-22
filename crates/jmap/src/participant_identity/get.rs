@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::participant_identity::set::identity_state;
 use common::Server;
 use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::participant_identity::{self, ParticipantIdentityProperty, ParticipantIdentityValue},
+    types::state::State,
 };
 use jmap_tools::{Map, Value};
 use store::{
@@ -47,7 +49,7 @@ impl ParticipantIdentityGet for Server {
 
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: None,
+            state: Some(State::Initial),
             list: Vec::new(),
             not_found: not_found_ids,
         };
@@ -62,6 +64,7 @@ impl ParticipantIdentityGet for Server {
         let identities = identities
             .unarchive::<ParticipantIdentities>()
             .caused_by(trc::location!())?;
+        response.state = Some(identity_state(identities.change_id.to_native()));
 
         let ids = if let Some(ids) = ids {
             ids
@@ -150,6 +153,7 @@ impl ParticipantIdentityGet for Server {
                 .collect(),
             default: 0,
             default_name: name.to_string(),
+            ..Default::default()
         };
 
         let mut batch = BatchBuilder::new();

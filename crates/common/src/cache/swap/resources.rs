@@ -16,12 +16,12 @@ use std::sync::Arc;
 use types::acl::AclGrant;
 use utils::map::bitmap::Bitmap;
 
-const KIND_FILE: u32 = 1;
-const KIND_CALENDAR: u32 = 2;
-const KIND_CALENDAR_EVENT: u32 = 3;
-const KIND_CALENDAR_EVENT_NOTIFICATION: u32 = 4;
-const KIND_ADDRESS_BOOK: u32 = 5;
-const KIND_CONTACT_CARD: u32 = 6;
+const KIND_FILE: u16 = 1;
+const KIND_CALENDAR: u16 = 2;
+const KIND_CALENDAR_EVENT: u16 = 3;
+const KIND_CALENDAR_EVENT_NOTIFICATION: u16 = 4;
+const KIND_ADDRESS_BOOK: u16 = 5;
+const KIND_CONTACT_CARD: u16 = 6;
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
 pub struct FlatResource {
@@ -34,8 +34,9 @@ pub struct FlatResource {
     pub num_a: u32,
     pub num_b: u32,
     pub document_id: u32,
-    pub kind: u32,
     pub etag: u32,
+    pub kind: u16,
+    pub flags: u16,
 }
 
 impl FlatResource {
@@ -50,8 +51,9 @@ impl FlatResource {
             num_a: 0,
             num_b: 0,
             document_id: resource.document_id,
-            kind: 0,
             etag: resource.etag(),
+            kind: 0,
+            flags: 0,
         };
 
         match &resource.data {
@@ -92,9 +94,11 @@ impl FlatResource {
                 created_at,
                 modified_at,
                 uid,
+                flags,
                 ..
             } => {
                 flat.kind = KIND_CALENDAR_EVENT;
+                flat.flags = *flags;
                 flat.set_ref_a(names);
                 flat.set_ref_b(uid);
                 flat.start = *start;
@@ -106,12 +110,20 @@ impl FlatResource {
                 names,
                 created_at,
                 event_id,
+                changed_by,
+                principals,
+                calendar_ids_len,
+                flags,
                 ..
             } => {
                 flat.kind = KIND_CALENDAR_EVENT_NOTIFICATION;
+                flat.flags = *flags;
                 flat.set_ref_a(names);
+                flat.set_ref_b(principals);
                 flat.created_at = *created_at;
                 flat.num_a = *event_id;
+                flat.num_b = *changed_by;
+                flat.start = *calendar_ids_len as i64;
             }
             GroupwareResourceMetadata::AddressBook { name, acls, .. } => {
                 flat.kind = KIND_ADDRESS_BOOK;
@@ -194,6 +206,7 @@ impl ArchivedFlatResource {
                 modified_at: self.num_b.to_native() as i32,
                 uid: self.ref_b(),
                 etag: self.etag.to_native(),
+                flags: self.flags.to_native(),
             },
             KIND_CALENDAR_EVENT_NOTIFICATION => {
                 GroupwareResourceMetadata::CalendarEventNotification {
@@ -201,6 +214,10 @@ impl ArchivedFlatResource {
                     created_at: self.created_at.to_native(),
                     event_id: self.num_a.to_native(),
                     etag: self.etag.to_native(),
+                    changed_by: self.num_b.to_native(),
+                    principals: self.ref_b(),
+                    calendar_ids_len: u16::try_from(self.start.to_native()).ok()?,
+                    flags: self.flags.to_native(),
                 }
             }
             KIND_ADDRESS_BOOK => GroupwareResourceMetadata::AddressBook {
@@ -251,6 +268,8 @@ pub struct ArchivedResourceChunk<'x> {
     pub pref_accounts: Vec<u32>,
     pub pref_timezones: Vec<u16>,
     pub pref_flags: Vec<u16>,
+    #[rkyv(with = InlineAsBox)]
+    pub principals: &'x [u32],
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
@@ -271,7 +290,14 @@ fn fits_within(arena: ArenaRef, limit: usize) -> bool {
 }
 
 impl GroupwareResource {
-    fn fits_within(&self, bytes: usize, names: usize, acls: usize, prefs: usize) -> bool {
+    fn fits_within(
+        &self,
+        bytes: usize,
+        names: usize,
+        acls: usize,
+        prefs: usize,
+        principals_len: usize,
+    ) -> bool {
         match &self.data {
             GroupwareResourceMetadata::File {
                 name,
@@ -315,8 +341,15 @@ impl GroupwareResource {
                 ..
             } => fits_within(*name_refs, names) && fits_within(*uid, bytes),
             GroupwareResourceMetadata::CalendarEventNotification {
-                names: name_refs, ..
-            } => fits_within(*name_refs, names),
+                names: name_refs,
+                principals,
+                calendar_ids_len,
+                ..
+            } => {
+                fits_within(*name_refs, names)
+                    && fits_within(*principals, principals_len)
+                    && *calendar_ids_len as u32 <= principals.len
+            }
         }
     }
 }
@@ -367,6 +400,7 @@ impl GroupwareResources {
                 pref_accounts,
                 pref_timezones,
                 pref_flags,
+                principals: &chunk.principals,
             });
         }
 
@@ -493,6 +527,12 @@ impl GroupwareResources {
                 })
                 .collect();
 
+            let principals: Box<[u32]> = chunk
+                .principals
+                .iter()
+                .map(|principal| principal.to_native())
+                .collect();
+
             let prefs: Box<[TinyCalendarPreferences]> = chunk
                 .pref_accounts
                 .iter()
@@ -508,7 +548,13 @@ impl GroupwareResources {
             let mut records = Vec::with_capacity(chunk.records.len());
             for record in chunk.records.iter() {
                 let record = record.unpack()?;
-                if !record.fits_within(bytes.len(), names_len, acls_len, prefs_len) {
+                if !record.fits_within(
+                    bytes.len(),
+                    names_len,
+                    acls_len,
+                    prefs_len,
+                    principals.len(),
+                ) {
                     return None;
                 }
                 records.push(record);
@@ -528,6 +574,7 @@ impl GroupwareResources {
                 names,
                 acls,
                 prefs,
+                principals,
                 min_id,
                 max_id,
             }));
@@ -688,6 +735,7 @@ mod tests {
                     modified_at: -(document_id as i32) - 1,
                     etag: document_id + 800,
                     uid,
+                    flags: (document_id % 4) as u16 * 0x40,
                 },
             });
             entries.push((
@@ -709,6 +757,77 @@ mod tests {
             item_change_id: 42,
             container_change_id: 17,
             highest_change_id: 42,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
+        };
+        resources.recompute_size();
+        resources
+    }
+
+    fn notifications(count: usize) -> GroupwareResources {
+        let mut container = ResourceChunkBuilder::with_capacity(1);
+        container.records.push(GroupwareResource {
+            document_id: 0,
+            data: GroupwareResourceMetadata::CalendarEventNotification {
+                names: ArenaRef::default(),
+                created_at: 0,
+                event_id: crate::NO_ID,
+                etag: 0,
+                changed_by: crate::NO_ID,
+                principals: ArenaRef::default(),
+                calendar_ids_len: 0,
+                flags: 0,
+            },
+        });
+
+        let mut chunk = ResourceChunkBuilder::with_capacity(count);
+        let mut entries = Vec::new();
+        for document_id in 0..count as u32 {
+            let names = chunk.push_names(&[DavName {
+                name: format!("{document_id}.ics"),
+                parent_id: 0,
+            }]);
+            let calendar_ids = [100 + document_id % 3];
+            let dismissed_by: &[u32] = match document_id % 4 {
+                0 => &[],
+                1 => &[500],
+                2 => &[500, 501],
+                _ => &[501],
+            };
+            let principals =
+                chunk.push_principals(calendar_ids.iter().chain(dismissed_by.iter()).copied());
+            chunk.records.push(GroupwareResource {
+                document_id,
+                data: GroupwareResourceMetadata::CalendarEventNotification {
+                    names,
+                    created_at: 1_600_000_000 + document_id as i64,
+                    event_id: document_id + 400,
+                    etag: document_id + 800,
+                    changed_by: 600 + document_id % 5,
+                    principals,
+                    calendar_ids_len: calendar_ids.len() as u16,
+                    flags: (document_id % 4) as u16 * 0x40,
+                },
+            });
+            entries.push((
+                format!("inbox/{document_id}.ics"),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id: 0,
+                    hierarchy_seq: 0,
+                    document_id,
+                },
+            ));
+        }
+
+        let mut resources = GroupwareResources {
+            base_path: "/dav/cal/jane".to_string(),
+            paths: Arc::new(PathIndex::pack(entries)),
+            resources: ResourceStore::from_sorted(vec![container], vec![chunk], false),
+            item_change_id: 11,
+            container_change_id: 3,
+            highest_change_id: 11,
             size: 0,
             update_lock: Arc::new(UpdateLock::new()),
             verification: Default::default(),
@@ -817,11 +936,13 @@ mod tests {
             assert_eq!(a.created_at(), b.created_at());
             assert_eq!(a.modified_at(), b.modified_at());
             assert_eq!(a.uid(), b.uid());
+            assert_eq!(a.event_flags(), b.event_flags());
             assert_eq!(a.event_id(), b.event_id());
             assert_eq!(a.container_name(), b.container_name());
             assert_eq!(a.file_flags(), b.file_flags());
             assert_eq!(a.media_type(), b.media_type());
             assert_eq!(a.has_acls(), b.has_acls());
+            assert_eq!(a.notification(), b.notification());
             for account_id in [100u32, 101, 102, 300, 301, 302] {
                 let left_pref = a.calendar_preferences(account_id);
                 let right_pref = b.calendar_preferences(account_id);
@@ -933,6 +1054,30 @@ mod tests {
         let encoded = resources.to_snapshot().expect("encode");
         let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn notification_snapshot_round_trips() {
+        let resources = notifications(300);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn identical_principal_runs_are_interned() {
+        const DISTINCT_RUNS: usize = 24;
+        let resources = notifications(300);
+        let principals = resources
+            .resources
+            .chunks
+            .iter()
+            .map(|chunk| chunk.principals.len())
+            .sum::<usize>();
+        assert_eq!(
+            principals, DISTINCT_RUNS,
+            "the principal arena must hold one entry per distinct run, not per record"
+        );
     }
 
     #[test]

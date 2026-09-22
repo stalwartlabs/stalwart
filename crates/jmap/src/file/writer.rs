@@ -8,17 +8,24 @@ use super::{
     FileNodeQuota, ObjectCounts,
     node::{PatchEffects, ResolvedBlob, invalid, validate_name},
 };
-use crate::{api::acl::JmapAcl, api::parent_ref::ParentRef, blob::download::BlobDownload};
+use crate::{
+    api::acl::{JmapAcl, JmapRights},
+    api::parent_ref::ParentRef,
+    blob::{download::BlobDownload, embedded::EmbeddedBlobs},
+};
 use common::{
     GroupwareResources, Server,
     auth::AccessToken,
-    sharing::file::FileNodeAccess,
+    sharing::{
+        file::FileNodeAccess,
+        grants::{AclGrantLookup, ShareUpdate},
+    },
     storage::dav::{FILE_KIND_SYMLINK, MAX_FILE_NODE_DEPTH},
 };
 use groupware::{DestroyArchive, file::FileNode};
 use jmap_proto::{
     error::set::SetError,
-    object::file_node::{FileNodeProperty, OnExists},
+    object::file_node::{self, FileNodeProperty, OnExists},
 };
 use std::borrow::Cow;
 use store::{
@@ -485,19 +492,23 @@ impl<'x> FileNodeWriter<'x> {
         }
     }
 
-    pub async fn validate_acls(
+    pub async fn validate_acls<G: AclGrantLookup + ?Sized>(
         &self,
         acls: &[AclGrant],
-        previous: Option<&[AclGrant]>,
-    ) -> trc::Result<Result<(), SetError<FileNodeProperty>>> {
-        if let Err(err) = self.server.acl_validate(acls).await {
-            return Ok(Err(err.into()));
-        }
-        self.server
-            .refresh_acls(acls, previous)
-            .await
-            .caused_by(trc::location!())?;
-        Ok(Ok(()))
+        actor: Option<Bitmap<Acl>>,
+        current: &G,
+    ) -> Result<(), SetError<FileNodeProperty>> {
+        JmapRights::validate_shares::<file_node::FileNode, _>(
+            ShareUpdate {
+                collection: Collection::FileNode,
+                owner_id: self.account_id,
+                actor,
+                current,
+                max_shares: self.server.core.groupware.max_shares_per_item,
+            },
+            acls,
+        )?;
+        self.server.acl_validate(acls).await.map_err(Into::into)
     }
 
     pub async fn resolve_blob(
@@ -514,7 +525,22 @@ impl<'x> FileNodeWriter<'x> {
             ))));
         }
 
-        let (hash, size) = if let Some(section) = &blob_id.section {
+        let (hash, size) = if matches!(blob_id.class, BlobClass::Embedded { .. }) {
+            let Some(bytes) = self
+                .server
+                .embedded_blob(blob_id)
+                .await
+                .caused_by(trc::location!())?
+            else {
+                return Ok(Err(blob_not_found()));
+            };
+            let (hash, _) = self
+                .server
+                .put_temporary_blob(self.account_id, &bytes, 60)
+                .await
+                .caused_by(trc::location!())?;
+            (hash, bytes.len() as u64)
+        } else if let Some(section) = &blob_id.section {
             let Some(bytes) = self
                 .server
                 .get_blob_section(&blob_id.hash, section)
@@ -562,7 +588,7 @@ impl<'x> FileNodeWriter<'x> {
                         .and_then(|resource| resource.size())
                         .map(u64::from)
                 }
-                BlobClass::Linked { .. } => None,
+                BlobClass::Linked { .. } | BlobClass::Embedded { .. } => None,
             };
             match known_size {
                 Some(size) => (blob_id.hash.clone(), size),

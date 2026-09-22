@@ -46,7 +46,7 @@ impl PrincipalPropSearch for Server {
 
         let mut response = MultiStatus::new(Vec::with_capacity(16));
         if let Some(search_for) = search_for {
-            let ids = self
+            let mut ids = self
                 .registry()
                 .query::<RoaringBitmap>(
                     RegistryQuery::new(ObjectType::Account)
@@ -55,6 +55,10 @@ impl PrincipalPropSearch for Server {
                 )
                 .await
                 .caused_by(trc::location!())?;
+
+            if !self.core.groupware.allow_directory_query {
+                ids &= RoaringBitmap::from_iter(access_token.all_ids());
+            }
 
             if !ids.is_empty() {
                 if request.properties.is_empty() {

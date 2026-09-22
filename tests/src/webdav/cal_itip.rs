@@ -16,6 +16,7 @@ use groupware::scheduling::{
     event_update::itip_update,
     inbound::{MergeResult, itip_import_message, itip_merge_changes, itip_process_message},
     itip::itip_set_unreachable_status,
+    recipient::{AttendeeVisibility, RecipientPolicy},
     snapshot::itip_snapshot,
 };
 use std::{
@@ -23,6 +24,9 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+const HIDE_ATTENDEES: &str = "hide-attendees";
+const MAX_INSTANCES: usize = 3000;
 
 struct Test {
     test_name: String,
@@ -44,6 +48,7 @@ enum Command {
 }
 
 pub fn test() {
+    let mut failures = Vec::new();
     for entry in std::fs::read_dir(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
@@ -119,6 +124,7 @@ pub fn test() {
         println!("====== Running test: {} ======", file_name);
 
         let mut store: AHashMap<String, AHashMap<String, ICalendar>> = AHashMap::new();
+        let mut visibilities: AHashMap<(String, String), AttendeeVisibility> = AHashMap::new();
         let mut dtstamp_map: AHashMap<PartialDateTime, usize> = AHashMap::new();
         let mut last_itip = None;
 
@@ -138,6 +144,17 @@ pub fn test() {
                         .expect("Name parameter is required");
                     let mut ical = ICalendar::parse(&command.payload)
                         .expect("Failed to parse iCalendar payload");
+                    let visibility = if command
+                        .parameters
+                        .get(2)
+                        .is_some_and(|flag| flag == HIDE_ATTENDEES)
+                    {
+                        AttendeeVisibility::RecipientOnly
+                    } else {
+                        AttendeeVisibility::All
+                    };
+                    visibilities.insert((account.to_string(), name.to_string()), visibility);
+                    let policy = test_policy(visibility);
                     match store
                         .entry(account.to_string())
                         .or_default()
@@ -148,12 +165,17 @@ pub fn test() {
                                 &mut ical,
                                 entry.get_mut(),
                                 std::slice::from_ref(account),
+                                policy,
                             ));
                             itip_set_unreachable_status(&mut ical, std::slice::from_ref(account));
                             entry.insert(ical);
                         }
                         Entry::Vacant(entry) => {
-                            last_itip = Some(itip_create(&mut ical, std::slice::from_ref(account)));
+                            last_itip = Some(itip_create(
+                                &mut ical,
+                                std::slice::from_ref(account),
+                                policy,
+                            ));
                             itip_set_unreachable_status(&mut ical, std::slice::from_ref(account));
                             entry.insert(ical);
                         }
@@ -174,24 +196,22 @@ pub fn test() {
                         .expect("Failed to parse iCalendar payload")
                         .to_string()
                         .replace("\r\n", "\n");
-                    store
+                    let stored_ical = store
                         .get(account)
                         .and_then(|account_store| account_store.get(name))
-                        .map(|stored_ical| {
-                            let stored_ical = normalize_ical(stored_ical.clone(), &mut dtstamp_map);
-                            if stored_ical != ical {
-                                panic!(
-                                    "ICalendar mismatch for {}: expected {}, got {}",
-                                    command.test_name, ical, stored_ical
-                                );
-                            }
-                        })
+                        .map(|stored_ical| normalize_ical(stored_ical.clone(), &mut dtstamp_map))
                         .unwrap_or_else(|| {
                             panic!(
                                 "ICalendar not found for account: {}, name: {}",
                                 account, name
                             );
                         });
+                    if stored_ical != ical {
+                        failures.push(format!(
+                            "{file_name}: ICalendar mismatch for {} at line {}\nEXPECTED {}\n\nRECEIVED {}",
+                            command.test_name, command.line_num, ical, stored_ical
+                        ));
+                    }
                 }
                 Command::Delete(force_send) => {
                     let account = command
@@ -204,13 +224,20 @@ pub fn test() {
                         .get(1)
                         .expect("Name parameter is required")
                         .as_str();
+                    let policy = test_policy(
+                        visibilities
+                            .remove(&(account.to_string(), name.to_string()))
+                            .unwrap_or_default(),
+                    );
                     let store = store.get_mut(account).expect("Account not found in store");
 
                     if let Some(ical) = store.remove(name) {
-                        last_itip = Some(
-                            itip_cancel(&ical, &[account.to_string()], force_send)
-                                .map(|message| vec![message]),
-                        );
+                        last_itip = Some(itip_cancel(
+                            &ical,
+                            &[account.to_string()],
+                            force_send,
+                            policy,
+                        ));
                     } else {
                         panic!(
                             "ICalendar not found for account: {}, name: {}",
@@ -236,15 +263,15 @@ pub fn test() {
                         Err(e) => format!("{e:?}"),
                     };
 
-                    assert_eq!(
-                        command.payload.trim(),
-                        last_itip_str.trim(),
-                        "iTIP message mismatch for {} at line {}\nEXPECTED {}\n\nRECEIVED {}",
-                        command.test_name,
-                        command.line_num,
-                        command.payload,
-                        last_itip_str
-                    );
+                    if command.payload.trim() != last_itip_str.trim() {
+                        failures.push(format!(
+                            "{file_name}: iTIP message mismatch for {} at line {}\nEXPECTED {}\n\nRECEIVED {}",
+                            command.test_name,
+                            command.line_num,
+                            command.payload,
+                            last_itip_str
+                        ));
+                    }
                 }
                 Command::Send => {
                     let mut results = String::new();
@@ -258,11 +285,12 @@ pub fn test() {
                                         false,
                                     ) {
                                         Ok(itip_snapshots) => {
-                                            match store
-                                                .entry(rcpt.to_string())
-                                                .or_default()
-                                                .entry(itip_snapshots.uid.to_string())
-                                            {
+                                            let key =
+                                                (rcpt.to_string(), itip_snapshots.uid.to_string());
+                                            let policy = test_policy(
+                                                visibilities.get(&key).copied().unwrap_or_default(),
+                                            );
+                                            match store.entry(key.0).or_default().entry(key.1) {
                                                 Entry::Occupied(mut entry) => {
                                                     let ical = entry.get_mut();
                                                     let snapshots = itip_snapshot(
@@ -278,11 +306,12 @@ pub fn test() {
                                                         &message.message,
                                                         itip_snapshots,
                                                         message.from.clone(),
+                                                        policy,
                                                     ) {
                                                         Ok(result) => match result {
                                                             MergeResult::Actions(changes) => {
-                                                                itip_merge_changes(ical, changes);
-                                                                Ok(None)
+                                                                itip_merge_changes(ical, changes)
+                                                                    .map(|()| None)
                                                             }
                                                             MergeResult::Message(message) => {
                                                                 Ok(Some(message))
@@ -318,15 +347,15 @@ pub fn test() {
                                 }
                             }
 
-                            assert_eq!(
-                                results.trim(),
-                                command.payload.trim(),
-                                "iTIP send result mismatch for {} at line {}: expected {}, got {}",
-                                command.test_name,
-                                command.line_num,
-                                command.payload,
-                                results
-                            );
+                            if results.trim() != command.payload.trim() {
+                                failures.push(format!(
+                                    "{file_name}: iTIP send result mismatch for {} at line {}\nEXPECTED {}\n\nRECEIVED {}",
+                                    command.test_name,
+                                    command.line_num,
+                                    command.payload,
+                                    results
+                                ));
+                            }
                         }
                         Some(Err(e)) => {
                             panic!(
@@ -359,11 +388,27 @@ pub fn test() {
                 }
                 Command::Reset => {
                     store.clear();
+                    visibilities.clear();
                     dtstamp_map.clear();
                     last_itip = None;
                 }
             }
         }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} iTIP fixture mismatches\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+fn test_policy(visibility: AttendeeVisibility) -> RecipientPolicy {
+    RecipientPolicy {
+        visibility,
+        max_recipients: usize::MAX,
+        max_instances: MAX_INSTANCES,
     }
 }
 

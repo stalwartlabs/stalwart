@@ -79,7 +79,7 @@ impl PushRegistration {
                     }
                     PushNotification::CalendarAlert(calendar_alert) => {
                         let payload = PushObject::CalendarAlert {
-                            account_id: calendar_alert.account_id.into(),
+                            account_id: calendar_alert.event_account_id.into(),
                             calendar_event_id: calendar_alert.event_id.into(),
                             uid: calendar_alert.uid.clone(),
                             recurrence_id: calendar_alert.recurrence_id.map(|timestamp| {

@@ -4,19 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::icalendar::{
-    ArchivedICalendarParameterName, ArchivedICalendarProperty, ICalendarProperty,
+use calcard::{
+    common::timezone::Tz,
+    icalendar::{
+        ArchivedICalendarComponent, ArchivedICalendarEntry, ArchivedICalendarParameterName,
+        ArchivedICalendarProperty, ICalendar, ICalendarComponentType,
+    },
 };
 use common::{
-    DEFAULT_LOGO_BASE64, Server,
-    auth::{AccountInfo, BuildAccessToken},
+    ArchivedDavName, DEFAULT_LOGO_BASE64, GroupwareResources, Server,
+    auth::{AccessToken, AccountInfo, BuildAccessToken},
     config::groupware::CalendarTemplateVariable,
     ipc::{CalendarAlert, PushNotification},
     network::{ServerInstance, stream::NullIo},
 };
 use groupware::{
+    cache::GroupwareCache,
     calendar::{
         ArchivedCalendarEvent, ArchivedCalendarEventContent, CalendarEvent, CalendarEventContent,
+        EVENT_DRAFT, EVENT_HIDE_ATTENDEES,
+        alarm::{AlarmId, AlarmTarget, EventAlarmData, TriggeredAlarm},
+        alerts::{DefaultAlerts, DefaultAlertsResolver},
+        expand::RecurrenceKey,
+        identity::{CalendarAddresses, EventOwnership, ParticipantIdentityAddresses},
+        index::ICalendarObjectUid,
+        participants::ParticipantVisibility,
+        privacy::EventPrivacy,
+        schedule::{EventAlarmScheduler, EventAlarmUsers},
     },
     scheduling::{
         ItipTime, ItipValue,
@@ -33,7 +47,7 @@ use mail_parser::decoders::html::html_to_text;
 use registry::{
     schema::{
         enums::Permission,
-        structs::{TaskCalendarAlarmEmail, TaskCalendarAlarmNotification},
+        structs::{TaskCalendarAlarmEmail, TaskCalendarAlarmNotification, TaskStatus},
     },
     types::EnumImpl,
 };
@@ -42,10 +56,14 @@ use smtp_proto::{MailFrom, RcptTo};
 use std::{sync::Arc, time::Duration};
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes, now},
+    write::{Archive, ArchiveBytes, now, serialize::rkyv_deserialize},
 };
 use trc::{AddContext, TaskManagerEvent};
-use types::{collection::Collection, field::CalendarEventField};
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+    field::CalendarEventField,
+};
 use utils::{sanitize_email, template::Variables};
 
 use crate::task_manager::TaskResult;
@@ -106,29 +124,32 @@ async fn send_email_alarm(
     task: &TaskCalendarAlarmEmail,
     server_instance: Arc<ServerInstance>,
 ) -> trc::Result<TaskResult> {
-    // Obtain access token
     let account_id = task.account_id.document_id();
     let document_id = task.document_id.document_id();
-    let access_token = server
-        .access_token(account_id)
-        .await
-        .caused_by(trc::location!())?
-        .build();
-
-    if !access_token.has_permission(Permission::CalendarAlarmsSend) {
-        trc::event!(
-            Calendar(trc::CalendarEvent::AlarmSkipped),
-            Reason = "Account does not have permission to send calendar alarms",
-            AccountId = account_id,
-            DocumentId = document_id,
-        );
+    let target_id = task
+        .target_account_id
+        .map_or(account_id, |id| id.document_id());
+    let fired = FiredAlarm::new(&task.status);
+    let Some((meta_, event_)) = fetch_alarm_event(server, account_id, document_id).await? else {
         return Ok(TaskResult::Success(vec![]));
+    };
+    let meta = meta_
+        .unarchive::<CalendarEvent>()
+        .caused_by(trc::location!())?;
+    let event = event_
+        .unarchive::<CalendarEventContent>()
+        .caused_by(trc::location!())?;
+    let mut alarm = AlarmContext::new(server, account_id, document_id, target_id, meta).await?;
+    if let Some(reason) = alarm
+        .skip_reason(server, Some(Permission::CalendarAlarmsSend))
+        .await?
+    {
+        return alarm.skip(server, event, fired, reason).await;
     }
     let account_info = server
-        .account_info(account_id)
+        .account_info(target_id)
         .await
         .caused_by(trc::location!())?;
-
     if account_info.name().is_empty() {
         trc::event!(
             Calendar(trc::CalendarEvent::AlarmFailed),
@@ -136,66 +157,60 @@ async fn send_email_alarm(
             AccountId = account_id,
             DocumentId = document_id,
         );
-        return Ok(TaskResult::Success(vec![]));
+        return alarm.build_next(server, event, fired).await;
     }
-
-    // Fetch event
-    let Some(event_) = server
-        .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
-            account_id,
-            Collection::CalendarEvent,
-            document_id,
-            CalendarEventField::Content,
-        ))
-        .await
-        .caused_by(trc::location!())?
+    let recurrence_key = event
+        .data
+        .component_recurrence(
+            task.event_id as u16,
+            Tz::from_id(task.event_start_tz as u16).unwrap_or(Tz::Floating),
+        )
+        .recurrence_key(task.event_start.timestamp());
+    let alarm_id = AlarmId::from_task_id(task.alarm_id);
+    let defaults = alarm.defaults(server, event, alarm_id).await?;
+    let Some(triggered) =
+        alarm.triggered(event, &defaults, alarm_id, task.event_id, recurrence_key)
     else {
-        trc::event!(
-            TaskManager(TaskManagerEvent::MetadataNotFound),
-            Details = "Calendar Event metadata not found",
-            AccountId = account_id,
-            DocumentId = document_id,
-        );
-
-        return Ok(TaskResult::Success(vec![]));
+        return alarm.build_next(server, event, fired).await;
     };
-
-    let Some(meta_) = server
-        .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-            account_id,
-            Collection::CalendarEvent,
-            document_id,
-        ))
-        .await
-        .caused_by(trc::location!())?
-    else {
-        trc::event!(
-            TaskManager(TaskManagerEvent::MetadataNotFound),
-            Details = "Calendar Event metadata not found",
-            AccountId = account_id,
-            DocumentId = document_id,
-        );
-
-        return Ok(TaskResult::Success(vec![]));
+    if triggered
+        .acknowledged()
+        .is_some_and(|acknowledged| acknowledged >= fired.alarm_time)
+    {
+        return alarm
+            .skip(server, event, fired, "Alarm was acknowledged")
+            .await;
+    }
+    let event_account_info = if target_id == account_id {
+        None
+    } else {
+        Some(
+            server
+                .account_info(account_id)
+                .await
+                .caused_by(trc::location!())?,
+        )
     };
-
-    // Unarchive event
-    let meta = meta_
-        .unarchive::<CalendarEvent>()
-        .caused_by(trc::location!())?;
-    let event = event_
-        .unarchive::<CalendarEventContent>()
-        .caused_by(trc::location!())?;
+    let attendees = alarm.attendee_list(server, &account_info, event).await?;
 
     // Build message body
     let account_main_email = account_info.name();
     let account_main_domain = account_main_email.rsplit('@').next().unwrap_or("localhost");
     let logo_cid = format!("logo.{}@{account_main_domain}", now());
-    let Some(tpl) = build_template(server, &account_info, task, meta, event, &logo_cid).await?
+    let Some(tpl) = build_template(
+        server,
+        &account_info,
+        event_account_info.as_ref().unwrap_or(&account_info),
+        task,
+        meta,
+        event,
+        triggered.component(),
+        &attendees,
+        &logo_cid,
+    )
+    .await?
     else {
-        return Ok(TaskResult::Success(vec![]));
+        return alarm.build_next(server, event, fired).await;
     };
     let txt_body = html_to_text(&tpl.body);
 
@@ -340,111 +355,388 @@ async fn send_email_alarm(
         }
     }
 
-    build_next_alarm(server, account_id, document_id, event)
+    alarm.build_next(server, event, fired).await
 }
 
 async fn send_display_alarm(
     server: &Server,
     task: &TaskCalendarAlarmNotification,
 ) -> trc::Result<TaskResult> {
-    // Fetch event
     let account_id = task.account_id.document_id();
     let document_id = task.document_id.document_id();
-    let Some(event_) = server
-        .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
-            account_id,
-            Collection::CalendarEvent,
-            document_id,
-            CalendarEventField::Content,
-        ))
-        .await
-        .caused_by(trc::location!())?
+    let target_id = task
+        .target_account_id
+        .map_or(account_id, |id| id.document_id());
+    let fired = FiredAlarm::new(&task.status);
+    let Some((meta_, event_)) = fetch_alarm_event(server, account_id, document_id).await? else {
+        return Ok(TaskResult::Success(vec![]));
+    };
+    let meta = meta_
+        .unarchive::<CalendarEvent>()
+        .caused_by(trc::location!())?;
+    let event = event_
+        .unarchive::<CalendarEventContent>()
+        .caused_by(trc::location!())?;
+    let mut alarm = AlarmContext::new(server, account_id, document_id, target_id, meta).await?;
+    if let Some(reason) = alarm.skip_reason(server, None).await? {
+        return alarm.skip(server, event, fired, reason).await;
+    }
+    let recurrence_key = task
+        .recurrence_id
+        .and_then(RecurrenceKey::from_recurrence_id)
+        .map(RecurrenceKey::prefix);
+    let alarm_id = AlarmId::from_task_id(task.alarm_id);
+    let defaults = alarm.defaults(server, event, alarm_id).await?;
+    let Some(triggered) =
+        alarm.triggered(event, &defaults, alarm_id, task.event_id, recurrence_key)
     else {
+        return alarm.build_next(server, event, fired).await;
+    };
+    if triggered
+        .acknowledged()
+        .is_some_and(|acknowledged| acknowledged >= fired.alarm_time)
+    {
+        return alarm
+            .skip(server, event, fired, "Alarm was acknowledged")
+            .await;
+    }
+
+    let alert_id = match triggered.alert_id() {
+        Some(alert_id) => alert_id.to_string(),
+        None => format!("k{}", alarm.alarm_position(event, task) + 1),
+    };
+    server
+        .broadcast_push_notification(PushNotification::CalendarAlert(CalendarAlert {
+            account_id: target_id,
+            event_account_id: account_id,
+            event_id: document_id,
+            recurrence_id: task.recurrence_id,
+            uid: event
+                .data
+                .event
+                .object_uid()
+                .unwrap_or_default()
+                .to_string(),
+            alert_id,
+        }))
+        .await;
+
+    alarm.build_next(server, event, fired).await
+}
+
+struct AlarmContext<'x> {
+    account_id: u32,
+    document_id: u32,
+    target_id: u32,
+    target: AlarmTarget,
+    meta: &'x ArchivedCalendarEvent,
+    calendar_ids: Vec<u32>,
+    access_token: AccessToken,
+    shared_resources: Option<Arc<GroupwareResources>>,
+    resolver: DefaultAlertsResolver,
+}
+
+impl<'x> AlarmContext<'x> {
+    async fn new(
+        server: &Server,
+        account_id: u32,
+        document_id: u32,
+        target_id: u32,
+        meta: &'x ArchivedCalendarEvent,
+    ) -> trc::Result<Self> {
+        let access_token = server
+            .access_token(target_id)
+            .await
+            .caused_by(trc::location!())?
+            .build();
+        let shared_resources = if access_token.is_member(account_id) {
+            None
+        } else {
+            Some(
+                server
+                    .fetch_groupware_resources(target_id, account_id, SyncCollection::Calendar)
+                    .await
+                    .caused_by(trc::location!())?,
+            )
+        };
+        let resolver = shared_resources
+            .as_ref()
+            .map_or_else(DefaultAlertsResolver::default, |resources| {
+                DefaultAlertsResolver::with_resources(account_id, resources.clone())
+            });
+        Ok(AlarmContext {
+            account_id,
+            document_id,
+            target_id,
+            target: AlarmTarget::for_account(account_id, target_id),
+            meta,
+            calendar_ids: meta.names.iter().map(ArchivedDavName::parent_id).collect(),
+            access_token,
+            shared_resources,
+            resolver,
+        })
+    }
+
+    async fn skip_reason(
+        &mut self,
+        server: &Server,
+        permission: Option<Permission>,
+    ) -> trc::Result<Option<&'static str>> {
+        if !server.core.groupware.alarms_enabled {
+            return Ok(Some("Calendar alarms are disabled"));
+        }
+        if self.meta.flags & EVENT_DRAFT != 0 {
+            return Ok(Some("Calendar event is a draft"));
+        }
+        if !self
+            .resolver
+            .is_subscribed(
+                server,
+                self.account_id,
+                self.target_id,
+                self.calendar_ids.iter().copied(),
+            )
+            .await
+            .caused_by(trc::location!())?
+        {
+            return Ok(Some("User is not subscribed to the calendar"));
+        }
+        if permission.is_some_and(|permission| !self.access_token.has_permission(permission)) {
+            return Ok(Some(
+                "Account does not have permission to send calendar alarms",
+            ));
+        }
+        let Some(resources) = &self.shared_resources else {
+            return Ok(None);
+        };
+        if EventPrivacy::from_flags(self.meta.flags.to_native()) != EventPrivacy::Public {
+            return Ok(Some("Calendar event is not public"));
+        }
+        if self.calendar_ids.iter().any(|calendar_id| {
+            resources.has_access_to_container(&self.access_token, *calendar_id, Acl::ReadItems)
+        }) {
+            Ok(None)
+        } else {
+            Ok(Some("User no longer has access to the calendar"))
+        }
+    }
+
+    async fn skip(
+        &mut self,
+        server: &Server,
+        event: &ArchivedCalendarEventContent,
+        fired: FiredAlarm,
+        reason: &'static str,
+    ) -> trc::Result<TaskResult> {
+        trc::event!(
+            Calendar(trc::CalendarEvent::AlarmSkipped),
+            Reason = reason,
+            AccountId = self.account_id,
+            DocumentId = self.document_id,
+        );
+        self.build_next(server, event, fired).await
+    }
+
+    async fn defaults(
+        &mut self,
+        server: &Server,
+        event: &ArchivedCalendarEventContent,
+        alarm_id: Option<AlarmId>,
+    ) -> trc::Result<DefaultAlerts> {
+        if alarm_id.is_some_and(AlarmId::is_default) {
+            self.resolver
+                .resolve_for_content(
+                    server,
+                    self.account_id,
+                    self.target_id,
+                    event,
+                    self.calendar_ids.iter().copied(),
+                )
+                .await
+                .caused_by(trc::location!())
+        } else {
+            Ok(DefaultAlerts::disabled())
+        }
+    }
+
+    fn triggered<'y>(
+        &self,
+        event: &'y ArchivedCalendarEventContent,
+        defaults: &'y DefaultAlerts,
+        alarm_id: Option<AlarmId>,
+        event_id: u64,
+        recurrence_key: Option<u32>,
+    ) -> Option<TriggeredAlarm<'y>> {
+        let triggered = alarm_id.and_then(|alarm_id| {
+            event.triggered_alarm(
+                self.target,
+                alarm_id,
+                event_id as u16,
+                recurrence_key,
+                defaults,
+            )
+        });
+        if triggered.is_none() {
+            trc::event!(
+                TaskManager(TaskManagerEvent::MetadataNotFound),
+                Details = "Calendar Alarm component not found",
+                AccountId = self.account_id,
+                DocumentId = self.document_id,
+            );
+        }
+        triggered
+    }
+
+    fn alarm_position(
+        &self,
+        event: &ArchivedCalendarEventContent,
+        task: &TaskCalendarAlarmNotification,
+    ) -> usize {
+        match AlarmId::from_task_id(task.alarm_id) {
+            Some(AlarmId::Stored(alarm_id)) => {
+                let components = &event.data.event.components;
+                components
+                    .get(task.event_id as usize)
+                    .into_iter()
+                    .flat_map(|component| component.component_ids.iter())
+                    .map(|id| id.to_native())
+                    .filter(|id| {
+                        components
+                            .get(*id as usize)
+                            .is_some_and(|c| c.component_type == ICalendarComponentType::VAlarm)
+                    })
+                    .position(|id| id == alarm_id as u32)
+                    .unwrap_or_default()
+            }
+            Some(AlarmId::Personal(index)) => index as usize,
+            Some(AlarmId::Default(_)) | None => 0,
+        }
+    }
+
+    async fn attendee_list(
+        &self,
+        server: &Server,
+        account_info: &AccountInfo,
+        event: &ArchivedCalendarEventContent,
+    ) -> trc::Result<AttendeeList> {
+        if self.shared_resources.is_none()
+            || self.meta.flags.to_native() & EVENT_HIDE_ATTENDEES == 0
+        {
+            return Ok(AttendeeList::All);
+        }
+        let identities = server
+            .identity_addresses(self.target_id, account_info)
+            .await
+            .caused_by(trc::location!())?;
+        let ical =
+            rkyv_deserialize::<_, ICalendar>(&event.data.event).caused_by(trc::location!())?;
+        Ok(
+            if identities.event_ownership(&ical) == EventOwnership::Owner {
+                AttendeeList::All
+            } else {
+                AttendeeList::OwnersAndSelf(identities)
+            },
+        )
+    }
+
+    async fn build_next(
+        &mut self,
+        server: &Server,
+        event: &ArchivedCalendarEventContent,
+        fired: FiredAlarm,
+    ) -> trc::Result<TaskResult> {
+        let users = EventAlarmUsers::for_target(self.account_id, event, self.target)?
+            .with_event_flags(self.meta.flags.to_native());
+        let now = now() as i64;
+        let start_time = fired
+            .alarm_time
+            .min(now)
+            .max(now + server.core.groupware.alarms_minimum_interval);
+        let next_alarm = server
+            .next_event_alarms(
+                self.account_id,
+                &users,
+                &event.data,
+                &self.calendar_ids,
+                start_time,
+                &mut self.resolver,
+            )
+            .await?
+            .into_alarm();
+
+        Ok(match next_alarm {
+            Some(next_alarm) => {
+                TaskResult::Update(next_alarm.build_write_ops(self.account_id, self.document_id))
+            }
+            None => TaskResult::Success(vec![]),
+        })
+    }
+}
+
+enum AttendeeList {
+    All,
+    OwnersAndSelf(CalendarAddresses),
+}
+
+impl AttendeeList {
+    fn includes(&self, entry: &ArchivedICalendarEntry) -> bool {
+        match self {
+            AttendeeList::All => true,
+            AttendeeList::OwnersAndSelf(identities) => entry.is_visible_participant(identities),
+        }
+    }
+}
+
+async fn fetch_alarm_event(
+    server: &Server,
+    account_id: u32,
+    document_id: u32,
+) -> trc::Result<Option<(Archive<ArchiveBytes>, Archive<ArchiveBytes>)>> {
+    let (Some(meta), Some(event)) = (
+        server
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                account_id,
+                Collection::CalendarEvent,
+                document_id,
+            ))
+            .await
+            .caused_by(trc::location!())?,
+        server
+            .store()
+            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                account_id,
+                Collection::CalendarEvent,
+                document_id,
+                CalendarEventField::Content,
+            ))
+            .await
+            .caused_by(trc::location!())?,
+    ) else {
         trc::event!(
             TaskManager(TaskManagerEvent::MetadataNotFound),
             Details = "Calendar Event metadata not found",
             AccountId = account_id,
             DocumentId = document_id,
         );
-
-        return Ok(TaskResult::Success(vec![]));
+        return Ok(None);
     };
-
-    // Unarchive event
-    let event = event_
-        .unarchive::<CalendarEventContent>()
-        .caused_by(trc::location!())?;
-
-    let recurrence_id = task.recurrence_id;
-
-    let ical = &event.data.event;
-    server
-        .broadcast_push_notification(PushNotification::CalendarAlert(CalendarAlert {
-            account_id,
-            event_id: document_id,
-            recurrence_id,
-            uid: ical.uids().next().unwrap_or_default().to_string(),
-            alert_id: ical
-                .components
-                .get(task.alarm_id as usize)
-                .and_then(|c| c.property(&ICalendarProperty::Jsid))
-                .and_then(|v| v.values.first())
-                .and_then(|v| v.as_text())
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| {
-                    format!(
-                        "k{}",
-                        ical.components
-                            .get(task.event_id as usize)
-                            .and_then(|c| c
-                                .component_ids
-                                .iter()
-                                .position(|id| id.to_native() == task.alarm_id as u32))
-                            .unwrap_or_default()
-                            + 1
-                    )
-                }),
-        }))
-        .await;
-
-    build_next_alarm(server, account_id, document_id, event)
+    Ok(Some((meta, event)))
 }
 
-fn build_next_alarm(
-    server: &Server,
-    account_id: u32,
-    document_id: u32,
-    event: &ArchivedCalendarEventContent,
-) -> trc::Result<TaskResult> {
-    // Find next alarm time and write to task queue
-    let now = now() as i64;
-    if let Some(next_alarm) =
-        event
-            .data
-            .next_alarm(now, Default::default())
-            .and_then(|next_alarm| {
-                // Verify minimum interval
-                let max_next_alarm = now + server.core.groupware.alarms_minimum_interval;
-                if next_alarm.alarm_time < max_next_alarm {
-                    trc::event!(
-                        Calendar(trc::CalendarEvent::AlarmSkipped),
-                        Reason = "Next alarm skipped due to minimum interval",
-                        Details = next_alarm.alarm_time - now,
-                        AccountId = account_id,
-                        DocumentId = document_id,
-                    );
-                    event.data.next_alarm(max_next_alarm, Default::default())
-                } else {
-                    Some(next_alarm)
-                }
-            })
-    {
-        Ok(TaskResult::Update(
-            next_alarm.build_write_ops(account_id, document_id),
-        ))
-    } else {
-        Ok(TaskResult::Success(vec![]))
+#[derive(Debug, Clone, Copy)]
+struct FiredAlarm {
+    alarm_time: i64,
+}
+
+impl FiredAlarm {
+    fn new(status: &TaskStatus) -> Self {
+        FiredAlarm {
+            alarm_time: match status {
+                TaskStatus::Pending(pending) => pending.due.timestamp(),
+                _ => now() as i64,
+            },
+        }
     }
 }
 
@@ -454,20 +746,21 @@ struct Details {
     body: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_template(
     server: &Server,
     account_info: &AccountInfo,
+    event_account_info: &AccountInfo,
     alarm: &TaskCalendarAlarmEmail,
     meta: &ArchivedCalendarEvent,
     event: &ArchivedCalendarEventContent,
+    alarm_component: Option<&ArchivedICalendarComponent>,
+    attendees: &AttendeeList,
     logo_cid: &str,
 ) -> trc::Result<Option<Details>> {
     let account_id = alarm.account_id.document_id();
     let document_id = alarm.document_id.document_id();
-    let (Some(event_component), Some(alarm_component)) = (
-        event.data.event.components.get(alarm.event_id as usize),
-        event.data.event.components.get(alarm.alarm_id as usize),
-    ) else {
+    let Some(event_component) = event.data.event.components.get(alarm.event_id as usize) else {
         trc::event!(
             TaskManager(TaskManagerEvent::MetadataNotFound),
             Details = "Calendar Alarm component not found",
@@ -478,7 +771,7 @@ async fn build_template(
     };
 
     // Build webcal URI
-    let webcal_uri = match meta.webcal_uri(server, account_info).await {
+    let webcal_uri = match meta.webcal_uri(server, event_account_info).await {
         Ok(uri) => uri,
         Err(err) => {
             trc::error!(
@@ -500,7 +793,10 @@ async fn build_template(
     let mut organizer = None;
     let mut guests = vec![];
 
-    for entry in alarm_component.entries.iter() {
+    for entry in alarm_component
+        .into_iter()
+        .flat_map(|alarm_component| alarm_component.entries.iter())
+    {
         match &entry.name {
             ArchivedICalendarProperty::Summary => {
                 summary = entry.values.first().and_then(|v| v.as_text());
@@ -534,6 +830,7 @@ async fn build_template(
             ArchivedICalendarProperty::Conference if conference.is_none() => {
                 conference = entry.values.first().and_then(|v| v.as_text());
             }
+            ArchivedICalendarProperty::Attendee if !attendees.includes(entry) => {}
             ArchivedICalendarProperty::Organizer | ArchivedICalendarProperty::Attendee => {
                 let email = entry
                     .values

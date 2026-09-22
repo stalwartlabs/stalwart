@@ -10,7 +10,7 @@ use ahash::AHashSet;
 use calcard::{common::timezone::Tz, icalendar::ICalendar};
 use groupware::{
     DavResourceName,
-    calendar::{CalendarEventData, alarm::ExpandAlarm, expand::CalendarEventExpansion},
+    calendar::{CalendarEventData, expand::CalendarEventExpansion},
 };
 use hyper::StatusCode;
 use std::str::FromStr;
@@ -208,6 +208,21 @@ pub async fn test(test: &TestServer) {
         .calendar_data()
         .is_not_empty();
 
+    // Test 14: Recurring UTC events expand in UTC whatever the request time zone
+    client
+        .request("PUT", &rfc_file_name(11), ICAL_UTC_RECURRING_ICS)
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request("REPORT", &cal_path, REPORT_14)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([rfc_file_name(11).as_str()])
+        .into_propfind_response(None)
+        .properties(&rfc_file_name(11))
+        .calendar_data()
+        .with_values([REPORT_14_EXPECTED.replace('\n', "\r\n").as_str()]);
+
     client.delete_default_containers().await;
     test.assert_is_empty().await;
 }
@@ -256,23 +271,8 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             let e = e.try_into_date_time().unwrap();
             let start = e.start.timestamp();
             let end = e.end.timestamp();
-            let mut min = std::cmp::min(start, end);
-            let mut max = std::cmp::max(start, end);
-
-            for alarm in ical.alarms_for_id(e.comp_id) {
-                if let Some(alarm_time) = alarm
-                    .expand_alarm(0, 0)
-                    .and_then(|alarm| alarm.delta.to_timestamp(start, end, Tz::UTC))
-                {
-                    if alarm_time < min {
-                        min = alarm_time;
-                    }
-
-                    if alarm_time > max {
-                        max = alarm_time;
-                    }
-                }
-            }
+            let min = std::cmp::min(start, end);
+            let max = std::cmp::max(start, end);
 
             if min < min_utc {
                 min_utc = min;
@@ -283,6 +283,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
             CalendarEventExpansion {
                 comp_id: e.comp_id,
                 own_recurrence_id: None,
+                series_recurrence_id: None,
                 start,
                 end,
                 start_naive: 0,
@@ -291,7 +292,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
         .collect::<Vec<_>>();
 
     // Verify min/max UTC timestamps
-    let event_data = CalendarEventData::new(ical, Tz::UTC, 100, &mut None);
+    let event_data = CalendarEventData::new(ical, Tz::UTC, 100);
     let from_time = event_data.base_time_utc as i64 + event_data.base_offset;
     let to_time = from_time + event_data.duration as i64;
 
@@ -353,6 +354,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
     });
     for event in events.iter_mut().chain(events_archive.iter_mut()) {
         event.own_recurrence_id = None;
+        event.series_recurrence_id = None;
         event.start_naive = 0;
     }
 
@@ -363,7 +365,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
 fn calendar_expand_dst_fallback() {
     let akl = Tz::from_str("Pacific/Auckland").unwrap();
     let ical = ICalendar::parse(ICAL_DST_FALLBACK_ICS).unwrap();
-    let event_data = CalendarEventData::new(ical, akl, 1000, &mut None);
+    let event_data = CalendarEventData::new(ical, akl, 1000);
     let expanded_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event_data).unwrap();
     let archive = rkyv_unarchive::<CalendarEventData>(&expanded_bytes).unwrap();
 
@@ -400,7 +402,7 @@ fn calendar_expand_dst_fallback() {
 #[test]
 fn calendar_expand_beyond_indexable_span() {
     let ical = ICalendar::parse(ICAL_UNBOUNDED_YEARLY_ICS).unwrap();
-    let event_data = CalendarEventData::new(ical, Tz::UTC, 3000, &mut None);
+    let event_data = CalendarEventData::new(ical, Tz::UTC, 3000);
     let expanded_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event_data).unwrap();
     let archive = rkyv_unarchive::<CalendarEventData>(&expanded_bytes).unwrap();
 
@@ -936,6 +938,58 @@ FREEBUSY;FBTYPE=BUSY:20060102T150000Z/20060102T160000Z,20060102T170000Z/200
  60102T180000Z,20060103T100000Z/20060103T120000Z,20060103T170000Z/20060103T
  180000Z,20060104T100000Z/20060104T120000Z
 END:VFREEBUSY
+END:VCALENDAR
+"#;
+
+const ICAL_UTC_RECURRING_ICS: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+DTSTAMP:20060206T001121Z
+DTSTART:20060110T090000Z
+DURATION:PT1H
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:UTC daily
+UID:UTC-RECURRING@example.com
+END:VEVENT
+END:VCALENDAR
+"#;
+
+const REPORT_14: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:comp name="VCALENDAR">
+           <C:comp name="VEVENT"/>
+         </C:comp>
+         <C:expand start="20060110T093000Z"
+                   end="20060111T083000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20060110T093000Z"
+                         end="20060111T083000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+     <C:timezone-id>Europe/Berlin</C:timezone-id>
+   </C:calendar-query>
+"#;
+
+const REPORT_14_EXPECTED: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+DTSTART:20060110T090000Z
+RECURRENCE-ID:20060110T090000Z
+DTSTAMP:20060206T001121Z
+DURATION:PT1H
+SUMMARY:UTC daily
+UID:UTC-RECURRING@example.com
+END:VEVENT
 END:VCALENDAR
 "#;
 

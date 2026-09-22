@@ -13,18 +13,14 @@ use super::{
 use crate::{
     DavError, DavErrorCondition,
     calendar::{
-        CALENDAR_CONTAINER_PROPS, CALENDAR_ITEM_PROPS,
+        CALENDAR_CONTAINER_PROPS, CALENDAR_ITEM_PROPS, CalendarEventView,
         query::{CalendarQueryHandler, try_parse_tz},
     },
     card::{
         CARD_CONTAINER_PROPS, CARD_ITEM_PROPS,
         query::{serialize_vcard_with_props, vcard_query},
     },
-    common::{
-        DavQueryResource,
-        acl::{current_user_privilege_set, file_privilege_set},
-        uri::DavUriResource,
-    },
+    common::{DavQueryResource, acl::current_user_privilege_set, uri::DavUriResource},
     file::{FILE_CONTAINER_PROPS, FILE_ITEM_PROPS, is_symlink},
     principal::{
         CurrentUserPrincipal,
@@ -60,7 +56,10 @@ use groupware::calendar::{SCHEDULE_INBOX_ID, SupportedComponent};
 use groupware::{
     DavCalendarResource, DavResourceName,
     cache::GroupwareCache,
-    calendar::{ArchivedTimezone, CalendarEvent, EVENT_HAS_DEAD_PROPERTIES},
+    calendar::{
+        ArchivedTimezone, CalendarEvent, EVENT_HAS_ALARMS, EVENT_HAS_DEAD_PROPERTIES,
+        EVENT_PRIVATE, EVENT_SECRET, alerts::DefaultAlertsResolver, privacy::EventPrivacy,
+    },
     contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard},
 };
 use http_proto::HttpResponse;
@@ -118,18 +117,40 @@ fn content_field(collection: Collection) -> Option<Field> {
     }
 }
 
-fn has_dead_properties(
-    archive: &Archive<ArchiveBytes>,
-    collection: Collection,
-) -> trc::Result<bool> {
-    match collection {
-        Collection::CalendarEvent => Ok(archive.unarchive::<CalendarEvent>()?.flags.to_native()
-            & EVENT_HAS_DEAD_PROPERTIES
-            != 0),
-        Collection::ContactCard => Ok(archive.unarchive::<ContactCard>()?.flags.to_native()
-            & CARD_HAS_DEAD_PROPERTIES
-            != 0),
-        _ => Ok(false),
+struct ContentDemand {
+    dead_properties: bool,
+    event_content_length: bool,
+    is_owner: bool,
+}
+
+impl ContentDemand {
+    fn view_flags(&self) -> u16 {
+        if self.is_owner {
+            EVENT_HAS_ALARMS
+        } else {
+            EVENT_HAS_ALARMS | EVENT_PRIVATE | EVENT_SECRET
+        }
+    }
+
+    fn is_met_by(
+        &self,
+        archive: &Archive<ArchiveBytes>,
+        collection: Collection,
+    ) -> trc::Result<bool> {
+        match collection {
+            Collection::CalendarEvent => {
+                let flags = archive.unarchive::<CalendarEvent>()?.flags.to_native();
+                Ok(
+                    (self.dead_properties && flags & EVENT_HAS_DEAD_PROPERTIES != 0)
+                        || (self.event_content_length && flags & self.view_flags() != 0),
+                )
+            }
+            Collection::ContactCard => Ok(self.dead_properties
+                && archive.unarchive::<ContactCard>()?.flags.to_native()
+                    & CARD_HAS_DEAD_PROPERTIES
+                    != 0),
+            _ => Ok(false),
+        }
     }
 }
 
@@ -473,6 +494,13 @@ impl PropFindRequestHandler for Server {
             || properties
                 .iter()
                 .any(|property| matches!(property, DavProperty::DeadProperty(_)));
+        let needs_content_length = collection_children == Collection::CalendarEvent
+            && properties.iter().any(|property| {
+                matches!(
+                    property,
+                    DavProperty::WebDav(WebDavProperty::GetContentLength)
+                )
+            });
 
         let mut paths = paths;
         if query_filter.is_none() && paths.len() > limit {
@@ -496,13 +524,20 @@ impl PropFindRequestHandler for Server {
         }
 
         let content_field = content_field(collection_children);
-        let track_carriers = content_field.is_some() && needs_dead_properties && !needs_content;
+        let track_carriers = content_field.is_some()
+            && (needs_dead_properties || needs_content_length)
+            && !needs_content;
 
         let mut metadata: AHashMap<(u32, u8, u32), Archive<ArchiveBytes>> =
             AHashMap::with_capacity(paths.len());
         let mut carriers: AHashMap<(u32, Collection), RoaringBitmap> = AHashMap::new();
         for ((account_id, collection), documents) in &groups {
             let (account_id, collection) = (*account_id, *collection);
+            let content_demand = ContentDemand {
+                dead_properties: needs_dead_properties,
+                event_content_length: needs_content_length,
+                is_owner: access_token.is_member(account_id),
+            };
             let mut group_carriers = RoaringBitmap::new();
             self.archives(
                 account_id,
@@ -512,7 +547,9 @@ impl PropFindRequestHandler for Server {
                 |document_id, archive| {
                     if track_carriers
                         && collection == collection_children
-                        && has_dead_properties(&archive, collection).caused_by(trc::location!())?
+                        && content_demand
+                            .is_met_by(&archive, collection)
+                            .caused_by(trc::location!())?
                     {
                         group_carriers.insert(document_id);
                     }
@@ -530,7 +567,7 @@ impl PropFindRequestHandler for Server {
 
         let mut contents: AHashMap<(u32, u8, u32), Archive<ArchiveBytes>> = AHashMap::new();
         if let Some(content_field) = content_field
-            && (needs_content || needs_dead_properties)
+            && (needs_content || needs_dead_properties || needs_content_length)
         {
             for ((account_id, collection), documents) in &groups {
                 let (account_id, collection) = (*account_id, *collection);
@@ -565,6 +602,10 @@ impl PropFindRequestHandler for Server {
             }
         }
 
+        let needs_event_view = collection_children == Collection::CalendarEvent
+            && (needs_content || needs_content_length);
+        let mut default_alerts = DefaultAlertsResolver::default();
+
         'outer: for item in paths {
             let account_id = item.account_id;
             let personal_id = access_token.personal_id(account_id, collection_container);
@@ -583,12 +624,29 @@ impl PropFindRequestHandler for Server {
             } else if let Some(archive_) =
                 metadata.get(&(account_id, collection.into(), document_id))
             {
-                ArchivedResource::from_archive(
+                let mut archive = ArchivedResource::from_archive(
                     archive_,
                     contents.get(&(account_id, collection.into(), document_id)),
                     collection,
                 )
-                .caused_by(trc::location!())?
+                .caused_by(trc::location!())?;
+
+                if needs_event_view
+                    && let ArchivedResource::CalendarEvent(event, Some(content)) = &mut archive
+                    && let Some((view, merged_overrides)) = self
+                        .calendar_event_view(
+                            access_token,
+                            account_id,
+                            event.inner,
+                            content.stored(),
+                            &mut default_alerts,
+                        )
+                        .await?
+                {
+                    content.attach_view(view, merged_overrides);
+                }
+
+                archive
             } else {
                 response.add_response(Response::new_status([item.name], StatusCode::NOT_FOUND));
                 continue;
@@ -624,8 +682,8 @@ impl PropFindRequestHandler for Server {
                             Tz::UTC
                         };
                         let mut query_handler =
-                            CalendarQueryHandler::new(content, *max_time_range, default_tz);
-                        if !query_handler.filter(content, filter) {
+                            CalendarQueryHandler::for_content(content, *max_time_range, default_tz);
+                        if !query_handler.filter_content(content, filter) {
                             continue;
                         }
                         calendar_filter = Some(query_handler);
@@ -635,7 +693,13 @@ impl PropFindRequestHandler for Server {
             }
 
             // Fill properties
-            let dead_properties = archive.dead_properties();
+            let is_private_view = matches!(
+                &archive,
+                ArchivedResource::CalendarEvent(event, _)
+                    if !access_token.is_member(account_id)
+                        && !EventPrivacy::from_flags(event.inner.flags.to_native()).is_public()
+            );
+            let dead_properties = archive.dead_properties().filter(|_| !is_private_view);
             let mut fields = Vec::with_capacity(properties.len());
             let mut fields_not_found = Vec::new();
             for property in &properties {
@@ -668,7 +732,10 @@ impl PropFindRequestHandler for Server {
                             ));
                         }
                         WebDavProperty::DisplayName => {
-                            if let Some(name) = archive.display_name(personal_id) {
+                            if let Some(name) = archive
+                                .display_name(personal_id)
+                                .filter(|_| !is_private_view)
+                            {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
                                     DavValue::String(name.to_string()),
@@ -901,7 +968,7 @@ impl PropFindRequestHandler for Server {
                                         .caused_by(trc::location!())?
                                         .file_acl(access_token, item.document_id),
                                 };
-                                file_privilege_set(acl)
+                                current_user_privilege_set(acl)
                             } else if let Some(acls) = archive.acls() {
                                 access_token.current_privilege_set(
                                     account_id,
@@ -1051,8 +1118,7 @@ impl PropFindRequestHandler for Server {
                             if let Some(desc) = calendar
                                 .inner
                                 .preferences(personal_id)
-                                .description
-                                .as_deref()
+                                .and_then(|preferences| preferences.description.as_deref())
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -1066,8 +1132,10 @@ impl PropFindRequestHandler for Server {
                             CalDavProperty::CalendarTimezone,
                             ArchivedResource::Calendar(calendar),
                         ) => {
-                            if let ArchivedTimezone::Custom(tz) =
-                                &calendar.inner.preferences(personal_id).time_zone
+                            if let Some(ArchivedTimezone::Custom(tz)) = calendar
+                                .inner
+                                .preferences(personal_id)
+                                .map(|preferences| &preferences.time_zone)
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -1078,8 +1146,10 @@ impl PropFindRequestHandler for Server {
                             }
                         }
                         (CalDavProperty::TimezoneId, ArchivedResource::Calendar(calendar)) => {
-                            if let ArchivedTimezone::IANA(tz) =
-                                &calendar.inner.preferences(personal_id).time_zone
+                            if let Some(ArchivedTimezone::IANA(tz)) = calendar
+                                .inner
+                                .preferences(personal_id)
+                                .map(|preferences| &preferences.time_zone)
                             {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
@@ -1171,9 +1241,9 @@ impl PropFindRequestHandler for Server {
                             if calendar_filter.is_some() || !data.properties.is_empty() {
                                 if let Some(ical) = calendar_filter
                                     .get_or_insert_with(|| {
-                                        CalendarQueryHandler::new(content, None, Tz::UTC)
+                                        CalendarQueryHandler::for_content(content, None, Tz::UTC)
                                     })
-                                    .serialize_ical(
+                                    .serialize_content(
                                         content,
                                         event.inner.size.to_native(),
                                         data,
@@ -1191,7 +1261,7 @@ impl PropFindRequestHandler for Server {
                             } else {
                                 fields.push(DavPropertyValue::new(
                                     property.clone(),
-                                    DavValue::CData(content.data.event.to_string()),
+                                    DavValue::CData(content.to_ical_string()),
                                 ));
                             }
                         }
@@ -1201,7 +1271,12 @@ impl PropFindRequestHandler for Server {
                         ) => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::CData(content.event.to_string()),
+                                DavValue::CData(
+                                    content
+                                        .calendar_data()
+                                        .map(|ical| ical.to_string())
+                                        .unwrap_or_default(),
+                                ),
                             ));
                         }
                         (
@@ -1393,24 +1468,29 @@ async fn get(
     } else {
         None
     };
-    let file_discoverable = display_containers
+    let visible_containers = display_containers
         .as_ref()
-        .filter(|_| is_file && matches!(query.sync_type, SyncType::From { .. }))
+        .filter(|_| matches!(query.sync_type, SyncType::From { .. }))
         .cloned();
     let mut display_children = display_containers
         .as_ref()
         .filter(|_| container_has_children)
         .map(|containers| {
-            RoaringBitmap::from_iter(resources.resources.iter().filter_map(|r| {
-                if r.child_names()
-                    .iter()
-                    .any(|n| containers.contains(n.parent_id))
-                {
-                    Some(r.document_id())
-                } else {
-                    None
-                }
-            }))
+            let mut children =
+                RoaringBitmap::from_iter(resources.resources.iter().filter_map(|r| {
+                    if r.child_names()
+                        .iter()
+                        .any(|n| containers.contains(n.parent_id))
+                    {
+                        Some(r.document_id())
+                    } else {
+                        None
+                    }
+                }));
+            if sync_collection == SyncCollection::Calendar {
+                children -= resources.event_ids_with_flags(EVENT_SECRET);
+            }
+            children
         });
 
     // Filter by changelog
@@ -1426,9 +1506,12 @@ async fn get(
             // Merge changes
             let mut total_changes = 0;
             let mut maybe_has_vanished = false;
+            let mut hidden_hrefs: Vec<String> = Vec::new();
             if container_has_children {
                 let mut container_changes = RoaringBitmap::new();
                 let mut item_changes = RoaringBitmap::new();
+                let mut item_updates = RoaringBitmap::new();
+                let track_hidden_items = display_children.is_some();
 
                 for change in changes.changes {
                     match change {
@@ -1438,6 +1521,9 @@ async fn get(
                         Change::UpdateItem(id) => {
                             maybe_has_vanished = true;
                             item_changes.insert(id as u32);
+                            if track_hidden_items {
+                                item_updates.insert(id as u32);
+                            }
                         }
                         Change::InsertContainer(id) => {
                             container_changes.insert(id as u32);
@@ -1453,6 +1539,20 @@ async fn get(
                     }
                 }
 
+                if let (Some(children), Some(containers)) = (&display_children, &display_containers)
+                {
+                    item_updates -= children;
+                    hidden_hrefs.extend(item_updates.iter().filter_map(|document_id| {
+                        let parent_id = resources
+                            .item_by_id(document_id)?
+                            .child_names()
+                            .iter()
+                            .map(|name| name.parent_id)
+                            .find(|parent_id| containers.contains(*parent_id))?;
+                        resources.format_resource_path_by_parent(document_id, parent_id)
+                    }));
+                }
+
                 for (document_ids, changes) in [
                     (&mut display_containers, container_changes),
                     (&mut display_children, item_changes),
@@ -1466,11 +1566,16 @@ async fn get(
                     }
                 }
             } else {
+                let mut updates = RoaringBitmap::new();
+                let track_hidden_items = is_file && display_containers.is_some();
                 let changes = RoaringBitmap::from_iter(changes.changes.iter().filter_map(
                     |change| match change {
                         Change::InsertItem(id) | Change::InsertContainer(id) => Some(*id as u32),
                         Change::UpdateItem(id) | Change::UpdateContainer(id) => {
                             maybe_has_vanished = true;
+                            if track_hidden_items {
+                                updates.insert(*id as u32);
+                            }
                             Some(*id as u32)
                         }
                         Change::DeleteContainer(_) | Change::DeleteItem(_) => {
@@ -1480,6 +1585,18 @@ async fn get(
                         _ => None,
                     },
                 ));
+
+                if let Some(discoverable) = &display_containers {
+                    updates -= discoverable;
+                    hidden_hrefs.extend(updates.iter().filter_map(|document_id| {
+                        let resource = resources.any_resource_path_by_id(document_id)?;
+                        match resource.parent_id() {
+                            Some(parent_id) if !discoverable.contains(parent_id) => None,
+                            _ => Some(resources.format_resource(resource)),
+                        }
+                    }));
+                }
+
                 if let Some(document_ids) = &mut display_containers {
                     *document_ids &= changes;
                     total_changes += document_ids.len() as usize;
@@ -1497,27 +1614,29 @@ async fn get(
                     .vanished(account_id, vanished_collection.into(), Query::Since(id))
                     .await
                     .caused_by(trc::location!())?;
-                if is_file {
-                    let scope = resource.resource.map_or_else(
-                        || resources.base_path.clone(),
-                        |path| resources.format_collection(path),
-                    );
-                    vanished.retain(|href| {
-                        href.starts_with(scope.as_str())
-                            && href
-                                .strip_prefix(resources.base_path.as_str())
-                                .is_some_and(|path| {
-                                    file_discoverable.as_ref().is_none_or(|discoverable| {
-                                        path.trim_end_matches('/')
-                                            .rsplit_once('/')
-                                            .and_then(|(parent, _)| resources.by_path(parent))
-                                            .is_some_and(|parent| {
-                                                discoverable.contains(parent.document_id())
-                                            })
+            }
+            vanished.append(&mut hidden_hrefs);
+            if !vanished.is_empty() {
+                let scope = resource.resource.map_or_else(
+                    || resources.base_path.clone(),
+                    |path| resources.format_collection(path),
+                );
+                vanished.retain(|href| {
+                    href.starts_with(scope.as_str())
+                        && visible_containers.as_ref().is_none_or(|containers| {
+                            let Some(path) = href.strip_prefix(resources.base_path.as_str()) else {
+                                return false;
+                            };
+                            match path.trim_end_matches('/').rsplit_once('/') {
+                                Some((parent, _)) => {
+                                    resources.by_path(parent).is_some_and(|parent| {
+                                        containers.contains(parent.document_id())
                                     })
-                                })
-                    });
-                }
+                                }
+                                None => true,
+                            }
+                        })
+                });
                 total_changes += vanished.len();
             }
 
@@ -1769,7 +1888,17 @@ async fn multiget(
             None
         };
 
-        if let Some(resource) = resource.resource.and_then(|name| resources.by_path(name)) {
+        if let Some(resource) = resource
+            .resource
+            .and_then(|name| resources.by_path(name))
+            .filter(|resource| {
+                access_token.is_member(account_id)
+                    || resource
+                        .resource
+                        .event_flags()
+                        .is_none_or(|flags| flags & EVENT_SECRET == 0)
+            })
+        {
             if !resource.is_container() {
                 if document_ids
                     .as_ref()

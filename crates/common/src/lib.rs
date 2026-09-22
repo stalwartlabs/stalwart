@@ -123,6 +123,7 @@ pub const KV_RATE_LIMIT_HTTP_AUTHENTICATED: u8 = 8;
 pub const KV_RATE_LIMIT_HTTP_ANONYMOUS: u8 = 9;
 pub const KV_RATE_LIMIT_IMAP: u8 = 10;
 pub const KV_QUOTA_BLOB: u8 = 11;
+pub const KV_RATE_LIMIT_AVAILABILITY: u8 = 12;
 pub const KV_GREYLIST: u8 = 16;
 pub const KV_LOCK_QUEUE_MESSAGE: u8 = 21;
 pub const KV_LOCK_TASK: u8 = 23;
@@ -392,6 +393,7 @@ pub struct ResourceChunk {
     pub names: Box<[CachedName]>,
     pub acls: Box<[AclGrant]>,
     pub prefs: Box<[TinyCalendarPreferences]>,
+    pub principals: Box<[u32]>,
     pub min_id: u32,
     pub max_id: u32,
 }
@@ -467,12 +469,17 @@ pub enum GroupwareResourceMetadata {
         modified_at: i32,
         uid: ArenaRef,
         etag: u32,
+        flags: u16,
     },
     CalendarEventNotification {
         names: ArenaRef,
         created_at: i64,
         event_id: u32,
         etag: u32,
+        changed_by: u32,
+        principals: ArenaRef,
+        calendar_ids_len: u16,
+        flags: u16,
     },
     AddressBook {
         name: ArenaRef,

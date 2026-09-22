@@ -178,6 +178,10 @@ impl QueryChanges for Server {
                     .await?;
             }
             QueryChangesRequestMethod::CalendarEvent(mut request) => {
+                if request.arguments.expand_recurrences.unwrap_or(false) {
+                    return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
+                }
+
                 // Query changes
                 resolve_account_id(
                     &mut request.account_id,

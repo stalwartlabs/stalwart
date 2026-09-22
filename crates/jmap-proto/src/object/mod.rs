@@ -9,6 +9,7 @@ use jmap_tools::{Element, Null, Property};
 use serde::Serialize;
 use std::{fmt::Debug, str::FromStr};
 use types::{acl::Acl, blob::BlobId, id::Id};
+use utils::map::bitmap::Bitmap;
 
 pub mod addressbook;
 pub mod blob;
@@ -58,6 +59,14 @@ pub trait JmapSharedObject: JmapObject {
 pub trait JmapRight: Clone + Copy + Sized + 'static {
     fn all_rights() -> &'static [Self];
     fn to_acl(&self) -> &'static [Acl];
+    fn implied_by_acl(&self) -> &'static [Acl] {
+        &[]
+    }
+    fn is_granted(&self, acls: &Bitmap<Acl>) -> bool {
+        let is_granted = |required: &[Acl]| required.iter().all(|acl| acls.contains(*acl));
+        is_granted(self.to_acl())
+            || (!self.implied_by_acl().is_empty() && is_granted(self.implied_by_acl()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::changes::state::JmapCacheState;
 use common::{Server, auth::AccessToken};
-use groupware::{DestroyArchive, cache::GroupwareCache, calendar::CalendarEventNotification};
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{
+        CalendarEventNotification,
+        notification::{CalendarNotificationDismiss, CalendarNotificationViewers},
+    },
+};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
@@ -47,7 +54,13 @@ impl CalendarEventNotificationSet for Server {
                 SyncCollection::CalendarEventNotification,
             )
             .await?;
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(cache.assert_state(false, &request.if_in_state)?);
+
+        let viewer = self
+            .notification_viewer(access_token, account_id)
+            .await
+            .caused_by(trc::location!())?;
 
         let mut batch = BatchBuilder::new();
         for (id, _) in request.unwrap_create() {
@@ -69,7 +82,11 @@ impl CalendarEventNotificationSet for Server {
         for id in request.unwrap_destroy().into_valid() {
             let document_id = id.document_id();
 
-            if !cache.has_item_id(&document_id) {
+            if !cache.item_by_id(document_id).is_some_and(|resource| {
+                resource
+                    .notification()
+                    .is_some_and(|notification| viewer.can_view(&notification))
+            }) {
                 response.not_destroyed.append(id, SetError::not_found());
                 continue;
             };
@@ -92,13 +109,8 @@ impl CalendarEventNotificationSet for Server {
                 .to_unarchived::<CalendarEventNotification>()
                 .caused_by(trc::location!())?;
 
-            DestroyArchive(event)
-                .delete(
-                    access_token.account_tenant_ids(),
-                    account_id,
-                    document_id,
-                    &mut batch,
-                )
+            self.dismiss_notification(access_token, account_id, document_id, event, &mut batch)
+                .await
                 .caused_by(trc::location!())?;
 
             response.destroyed.push(id);

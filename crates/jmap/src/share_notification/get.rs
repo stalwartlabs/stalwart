@@ -252,7 +252,7 @@ fn map_rights(
             for right in CalendarRight::all_rights() {
                 obj.insert_unchecked(
                     Key::Borrowed(right.as_str()),
-                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                    Value::Bool(right.is_granted(&rights)),
                 );
             }
         }
@@ -260,7 +260,7 @@ fn map_rights(
             for right in AddressBookRight::all_rights() {
                 obj.insert_unchecked(
                     Key::Borrowed(right.as_str()),
-                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                    Value::Bool(right.is_granted(&rights)),
                 );
             }
         }
@@ -268,7 +268,7 @@ fn map_rights(
             for right in FileNodeRight::all_rights() {
                 obj.insert_unchecked(
                     Key::Borrowed(right.as_str()),
-                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                    Value::Bool(right.is_granted(&rights)),
                 );
             }
         }
@@ -276,7 +276,7 @@ fn map_rights(
             for right in MailboxRight::all_rights() {
                 obj.insert_unchecked(
                     Key::Borrowed(right.as_str()),
-                    Value::Bool(right.to_acl().iter().all(|acl| rights.contains(*acl))),
+                    Value::Bool(right.is_granted(&rights)),
                 );
             }
         }

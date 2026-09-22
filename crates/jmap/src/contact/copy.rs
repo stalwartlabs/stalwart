@@ -8,18 +8,19 @@ use crate::{
     changes::state::JmapCacheState,
     contact::set::{ContactCardSet, too_many_contacts},
 };
+use calcard::jscontact::JSContactProperty;
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::{
-        copy::{CopyRequest, CopyResponse},
+        copy::{CopyRequest, CopyResponse, CopySourceId},
         set::SetRequest,
     },
     object::contact,
     request::{
-        Call, IntoValid, MaybeInvalid, RequestMethod, SetRequestMethod,
+        Call, MaybeInvalid, RequestMethod, SetRequestMethod,
         method::{MethodFunction, MethodName, MethodObject},
         reference::MaybeResultReference,
     },
@@ -36,7 +37,6 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
     field::ContactField,
-    id::Id,
 };
 use utils::map::vec_map::VecMap;
 
@@ -108,7 +108,7 @@ impl JmapContactCardCopy for Server {
         };
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
-        let mut created_slots: Vec<(Id, Slot)> = Vec::new();
+        let mut created_slots: Vec<(String, Slot)> = Vec::new();
 
         // Obtain quota
         let quota = self.object_quota_usage(&account, StorageQuota::MaxContactCards, || {
@@ -116,19 +116,26 @@ impl JmapContactCardCopy for Server {
         });
         let mut batch = BatchBuilder::new();
 
-        'create: for (id, create) in request.create.into_valid() {
+        'create: for (create_id, mut create) in request.create {
             if !quota.has_room(created_slots.len()) {
-                response.not_created.append(id, too_many_contacts());
+                response.not_created.append(create_id, too_many_contacts());
                 continue;
             }
 
-            let from_contact_id = id.document_id();
+            let source_id = match create.take_source_id(JSContactProperty::Id) {
+                Ok(source_id) => source_id,
+                Err(err) => {
+                    response.not_created.append(create_id, err);
+                    continue;
+                }
+            };
+            let from_contact_id = source_id.document_id();
             if !from_contact_ids.contains(from_contact_id) {
                 response.not_created.append(
-                    id,
+                    create_id,
                     SetError::not_found().with_description(format!(
                         "Item {} not found in account {}.",
-                        id, response.from_account_id
+                        source_id, response.from_account_id
                     )),
                 );
                 continue;
@@ -145,10 +152,10 @@ impl JmapContactCardCopy for Server {
                 .await?
             else {
                 response.not_created.append(
-                    id,
+                    create_id,
                     SetError::not_found().with_description(format!(
                         "Item {} not found in account {}.",
-                        id, response.from_account_id
+                        source_id, response.from_account_id
                     )),
                 );
                 continue;
@@ -172,15 +179,15 @@ impl JmapContactCardCopy for Server {
                 .await?
             {
                 Ok(document_id) => {
-                    created_slots.push((id, document_id));
+                    created_slots.push((create_id, document_id));
 
                     // Add to destroy list
                     if on_success_delete {
-                        destroy_ids.push(MaybeInvalid::Value(id));
+                        destroy_ids.push(MaybeInvalid::Value(source_id));
                     }
                 }
                 Err(err) => {
-                    response.not_created.append(id, err);
+                    response.not_created.append(create_id, err);
                     continue 'create;
                 }
             }

@@ -120,6 +120,16 @@ impl Serialize for MethodErrorWrapper {
                     ("invalidResultReference", description.unwrap_or_default())
                 }
                 trc::JmapEvent::Forbidden => ("forbidden", description.unwrap_or_default()),
+                trc::JmapEvent::ObjectNotFound => ("notFound", description.unwrap_or_default()),
+                trc::JmapEvent::ExpandDurationTooLarge => {
+                    ("expandDurationTooLarge", description.unwrap_or_default())
+                }
+                trc::JmapEvent::CannotCalculateOccurrences => (
+                    "cannotCalculateOccurrences",
+                    description.unwrap_or_default(),
+                ),
+                trc::JmapEvent::TooLarge => ("tooLarge", description.unwrap_or_default()),
+                trc::JmapEvent::RateLimit => ("rateLimit", description.unwrap_or_default()),
                 trc::JmapEvent::AccountNotFound => (
                     "accountNotFound",
                     "The accountId does not correspond to a valid account",

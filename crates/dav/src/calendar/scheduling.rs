@@ -164,7 +164,12 @@ impl CalendarEventNotificationHandler for Server {
             .unarchive::<CalendarEventNotificationContent>()
             .caused_by(trc::location!())?;
 
-        Ok(response.with_binary_body(content.event.to_string()))
+        Ok(response.with_binary_body(
+            content
+                .calendar_data()
+                .map(|ical| ical.to_string())
+                .unwrap_or_default(),
+        ))
     }
 
     async fn handle_scheduling_delete_request(

@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 utils = { path = "../utils" }
 trc = { path = "../trc" }
-jmap-tools = { version = "0.1" }
+jmap-tools = { version = "0.1.9" }
 hashify = "0.2"
 serde = { version = "1.0", features = ["derive"]}
 rkyv.workspace = true

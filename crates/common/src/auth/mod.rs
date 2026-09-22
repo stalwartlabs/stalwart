@@ -164,6 +164,7 @@ pub struct AccessScope {
 pub(crate) struct AccessTo {
     pub account_id: u32,
     pub collections: Bitmap<Collection>,
+    pub is_writable: bool,
 }
 
 #[derive(Clone)]

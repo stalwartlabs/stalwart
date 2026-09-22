@@ -12,16 +12,12 @@ use nlp::{
 use std::borrow::Cow;
 use utils::cheeky_hash::CheekyHash;
 
-pub(crate) struct QueryToken<'x> {
+pub struct QueryToken<'x> {
     pub word: Cow<'x, str>,
     pub stem: Option<Cow<'x, str>>,
 }
 
-pub(crate) fn tokenize<'x>(
-    text: &'x str,
-    language: Language,
-    mut cb: impl FnMut(QueryToken<'x>) -> bool,
-) {
+pub fn tokenize<'x>(text: &'x str, language: Language, mut cb: impl FnMut(QueryToken<'x>) -> bool) {
     match language {
         Language::None => {
             for word in SpaceTokenizer::new(text, MAX_TOKEN_LENGTH) {

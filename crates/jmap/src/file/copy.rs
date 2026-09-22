@@ -16,12 +16,12 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::{
-        copy::{CopyRequest, CopyResponse},
+        copy::{CopyRequest, CopyResponse, CopySourceId},
         set::SetRequest,
     },
     object::file_node::{self, FileNodeProperty, FileNodeValue},
     request::{
-        Call, IntoValid, MaybeInvalid, RequestMethod, SetRequestMethod,
+        Call, MaybeInvalid, RequestMethod, SetRequestMethod,
         method::{MethodFunction, MethodName, MethodObject},
         reference::MaybeResultReference,
     },
@@ -107,8 +107,15 @@ impl FileNodeCopy for Server {
         let mut awaiting_existing = Vec::new();
         let mut destroy_ids = Vec::new();
 
-        for (id, create) in request.create.into_valid() {
-            let from_document_id = id.document_id();
+        for (create_id, mut create) in request.create {
+            let source_id = match create.take_source_id(FileNodeProperty::Id) {
+                Ok(source_id) => source_id,
+                Err(err) => {
+                    response.not_created.append(create_id, err);
+                    continue;
+                }
+            };
+            let from_document_id = source_id.document_id();
             let source = if from_cache.resources.find_any(from_document_id).is_some()
                 && from_readable
                     .as_ref()
@@ -120,10 +127,10 @@ impl FileNodeCopy for Server {
             };
             let Some(source) = source else {
                 response.not_created.append(
-                    id,
+                    create_id,
                     SetError::not_found().with_description(format!(
                         "Item {} not found in account {}.",
-                        id, response.from_account_id
+                        source_id, response.from_account_id
                     )),
                 );
                 continue;
@@ -138,14 +145,14 @@ impl FileNodeCopy for Server {
 
             match create_node(&mut writer, String::new(), node, create, &NoResolver).await? {
                 Ok(node) => {
-                    created.push((id, node));
+                    created.push((create_id, node));
                     if on_success_delete {
-                        destroy_ids.push(MaybeInvalid::Value(id));
+                        destroy_ids.push(MaybeInvalid::Value(source_id));
                     }
                 }
                 Err((_, rejection)) => match rejection.existing {
-                    Some(slot) => awaiting_existing.push((id, rejection.error, slot)),
-                    None => response.not_created.append(id, rejection.error),
+                    Some(slot) => awaiting_existing.push((create_id, rejection.error, slot)),
+                    None => response.not_created.append(create_id, rejection.error),
                 },
             }
         }

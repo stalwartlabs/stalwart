@@ -10,7 +10,7 @@ use crate::{
     spawn_op,
 };
 use common::{
-    auth::AccessToken, ipc::CacheInvalidation, network::SessionStream, sharing::EffectiveAcl,
+    auth::AccessToken, network::SessionStream, sharing::EffectiveAcl,
     storage::index::ObjectIndexBuilder,
 };
 use compact_str::ToCompactString;
@@ -383,12 +383,6 @@ impl<T: SessionStream> Session<T> {
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?;
         }
-
-        // Invalidate ACLs
-        data.server
-            .invalidate_caches(CacheInvalidation::AccessToken(acl_account_id).into())
-            .await
-            .imap_ctx(&arguments.tag, trc::location!())?;
 
         trc::event!(
             Imap(trc::ImapEvent::SetAcl),

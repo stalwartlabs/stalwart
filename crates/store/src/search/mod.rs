@@ -12,7 +12,7 @@ pub mod local;
 pub mod query;
 pub mod split;
 pub(crate) mod term;
-pub(crate) mod tokenize;
+pub mod tokenize;
 
 use crate::write::SearchIndex;
 use ahash::AHashMap;

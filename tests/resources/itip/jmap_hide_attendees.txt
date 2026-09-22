@@ -1,0 +1,336 @@
+# draft-ietf-jmap-calendars hideAttendees: each recipient is the only attendee in its messages
+
+# Weekly meeting with B and C, where D replaces C on the second occurrence
+> put a@example.com hidden@example.com hide-attendees
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+UID:hidden@example.com
+SEQUENCE:0
+DTSTAMP:20260501T090000Z
+DTSTART:20260601T090000Z
+DTEND:20260601T100000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+SUMMARY:Board meeting
+LOCATION:Room 1
+ORGANIZER;CN=Alice:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=Alice:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CN=Bob:mailto:b@example.com
+ATTENDEE;RSVP=TRUE;CN=Carol:mailto:c@example.com
+END:VEVENT
+BEGIN:VEVENT
+UID:hidden@example.com
+SEQUENCE:0
+DTSTAMP:20260501T090000Z
+RECURRENCE-ID:20260608T090000Z
+DTSTART:20260608T110000Z
+DTEND:20260608T120000Z
+SUMMARY:Board meeting
+LOCATION:Room 2
+ORGANIZER;CN=Alice:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=Alice:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CN=Bob:mailto:b@example.com
+ATTENDEE;RSVP=TRUE;CN=Dave:mailto:d@example.com
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }, ItipParticipant { email: "b@example.com", name: Some("Bob"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780304400, tz_id: 32768 })
+summary.location: Text("Room 1")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(4), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 1
+SUMMARY:Board meeting
+DTEND:20260601T100000Z
+DTSTART:20260601T090000Z
+ATTENDEE;RSVP=TRUE;CN=Bob;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+UID:hidden@example.com
+RRULE:FREQ=WEEKLY;COUNT=4
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+BEGIN:VEVENT
+LOCATION:Room 2
+SUMMARY:Board meeting
+DTEND:20260608T120000Z
+DTSTART:20260608T110000Z
+ATTENDEE;RSVP=TRUE;CN=Bob;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+RECURRENCE-ID:20260608T090000Z
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+================================
+from: a@example.com
+to: c@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }, ItipParticipant { email: "c@example.com", name: Some("Carol"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780304400, tz_id: 32768 })
+summary.location: Text("Room 1")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(4), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 1
+SUMMARY:Board meeting
+DTEND:20260601T100000Z
+DTSTART:20260601T090000Z
+ATTENDEE;RSVP=TRUE;CN=Carol;PARTSTAT=NEEDS-ACTION:mailto:c@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+UID:hidden@example.com
+EXDATE:20260608T090000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+================================
+from: a@example.com
+to: d@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }, ItipParticipant { email: "d@example.com", name: Some("Dave"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780916400, tz_id: 32768 })
+summary.location: Text("Room 2")
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 2
+SUMMARY:Board meeting
+DTEND:20260608T120000Z
+DTSTART:20260608T110000Z
+ATTENDEE;RSVP=TRUE;CN=Dave;PARTSTAT=NEEDS-ACTION:mailto:d@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+RECURRENCE-ID:20260608T090000Z
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+# Deliver the invitations
+> send
+
+# D's copy only holds the occurrence D was invited to
+> get d@example.com hidden@example.com
+BEGIN:VCALENDAR
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 2
+SUMMARY:Board meeting
+DTEND:20260608T120000Z
+DTSTART:20260608T110000Z
+ATTENDEE;RSVP=TRUE;CN=Dave;PARTSTAT=NEEDS-ACTION:mailto:d@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+RECURRENCE-ID:20260608T090000Z
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+# REFRESH from D only returns D's occurrence
+> itip d@example.com a@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+METHOD:REFRESH
+BEGIN:VEVENT
+UID:hidden@example.com
+ORGANIZER:mailto:a@example.com
+ATTENDEE:mailto:d@example.com
+DTSTAMP:20260502T090000Z
+END:VEVENT
+END:VCALENDAR
+
+> send
+from: a@example.com
+to: d@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }, ItipParticipant { email: "d@example.com", name: Some("Dave"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780916400, tz_id: 32768 })
+summary.location: Text("Room 2")
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 2
+SUMMARY:Board meeting
+DTEND:20260608T120000Z
+DTSTART:20260608T110000Z
+ATTENDEE;RSVP=TRUE;CN=Dave;PARTSTAT=NEEDS-ACTION:mailto:d@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+RECURRENCE-ID:20260608T090000Z
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+# Remove C from the series
+> put a@example.com hidden@example.com hide-attendees
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+UID:hidden@example.com
+SEQUENCE:1
+DTSTAMP:20260503T090000Z
+DTSTART:20260601T090000Z
+DTEND:20260601T100000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+SUMMARY:Board meeting
+LOCATION:Room 1
+ORGANIZER;CN=Alice:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=Alice:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CN=Bob:mailto:b@example.com
+END:VEVENT
+BEGIN:VEVENT
+UID:hidden@example.com
+SEQUENCE:0
+DTSTAMP:20260501T090000Z
+RECURRENCE-ID:20260608T090000Z
+DTSTART:20260608T110000Z
+DTEND:20260608T120000Z
+SUMMARY:Board meeting
+LOCATION:Room 2
+ORGANIZER;CN=Alice:mailto:a@example.com
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED;CN=Alice:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CN=Bob:mailto:b@example.com
+ATTENDEE;RSVP=TRUE;CN=Dave:mailto:d@example.com
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: update REQUEST
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }, ItipParticipant { email: "b@example.com", name: Some("Bob"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780304400, tz_id: 32768 })
+summary.location: Text("Room 1")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(4), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 1
+SUMMARY:Board meeting
+DTEND:20260601T100000Z
+DTSTART:20260601T090000Z
+ATTENDEE;RSVP=TRUE;CN=Bob;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+UID:hidden@example.com
+RRULE:FREQ=WEEKLY;COUNT=4
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+BEGIN:VEVENT
+LOCATION:Room 2
+SUMMARY:Board meeting
+DTEND:20260608T120000Z
+DTSTART:20260608T110000Z
+ATTENDEE;RSVP=TRUE;CN=Bob;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+RECURRENCE-ID:20260608T090000Z
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+================================
+from: a@example.com
+to: d@example.com
+summary: update REQUEST
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }, ItipParticipant { email: "d@example.com", name: Some("Dave"), is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1780916400, tz_id: 32768 })
+summary.location: Text("Room 2")
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 2
+SUMMARY:Board meeting
+DTEND:20260608T120000Z
+DTSTART:20260608T110000Z
+ATTENDEE;RSVP=TRUE;CN=Dave;PARTSTAT=NEEDS-ACTION:mailto:d@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+RECURRENCE-ID:20260608T090000Z
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+================================
+from: a@example.com
+to: c@example.com
+summary: cancel
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: Some("Alice"), is_organizer: true }])
+summary.dtstart: Time(ItipTime { start: 1780304400, tz_id: 32768 })
+summary.location: Text("Room 1")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: Some(4), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Board meeting")
+BEGIN:VCALENDAR
+METHOD:CANCEL
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 1
+SUMMARY:Board meeting
+DTEND:20260601T100000Z
+DTSTART:20260601T090000Z
+ATTENDEE;RSVP=TRUE;CN=Carol:mailto:c@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+UID:hidden@example.com
+DTSTAMP:0
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR
+
+# Deliver the update and the cancellation
+> send
+
+# C's copy is cancelled
+> get c@example.com hidden@example.com
+BEGIN:VCALENDAR
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:Room 1
+STATUS:CANCELLED
+SUMMARY:Board meeting
+DTEND:20260601T100000Z
+DTSTART:20260601T090000Z
+ATTENDEE;RSVP=TRUE;CN=Carol:mailto:c@example.com
+ORGANIZER;CN=Alice:mailto:a@example.com
+UID:hidden@example.com
+EXDATE:20260608T090000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+DTSTAMP:0
+END:VEVENT
+END:VCALENDAR
+

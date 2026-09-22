@@ -6,7 +6,7 @@
 
 use common::{Server, auth::AccessToken};
 use jmap_proto::request::capability::{
-    Account, Capabilities, Capability, EmptyCapabilities, Session,
+    Account, Capabilities, Capability, EmptyCapabilities, PrincipalOwnerCapabilities, Session,
 };
 use registry::schema::enums::Permission;
 use std::future::Future;
@@ -22,6 +22,69 @@ pub trait SessionHandler: Sync + Send {
     ) -> impl Future<Output = trc::Result<Session>> + Send;
 }
 
+pub trait JmapAccount {
+    fn jmap_account(&self, access_token: &AccessToken, account_id: u32, name: String) -> Account;
+
+    fn jmap_account_capabilities(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+    ) -> impl Iterator<Item = (Capability, Capabilities)>;
+}
+
+impl JmapAccount for Server {
+    fn jmap_account(&self, access_token: &AccessToken, account_id: u32, name: String) -> Account {
+        let mut account_capabilities =
+            VecMap::with_capacity(self.core.jmap.capabilities.account.len() + 1);
+        account_capabilities.extend(self.jmap_account_capabilities(access_token, account_id));
+        account_capabilities.append(
+            Capability::PrincipalsOwner,
+            Capabilities::PrincipalsOwner(PrincipalOwnerCapabilities {
+                account_id_for_principal: Id::from(access_token.account_id()),
+                principal_id: Id::from(account_id),
+            }),
+        );
+        Account {
+            name,
+            is_personal: account_id == access_token.account_id(),
+            is_read_only: access_token.is_read_only(account_id),
+            account_capabilities,
+        }
+    }
+
+    fn jmap_account_capabilities(
+        &self,
+        access_token: &AccessToken,
+        account_id: u32,
+    ) -> impl Iterator<Item = (Capability, Capabilities)> {
+        let account_capabilities = &self.core.jmap.capabilities.account;
+        let is_owner = access_token.is_member(account_id);
+        let current_user_principal_id = Some(Id::from(access_token.account_id()));
+        access_token
+            .account_capabilities()
+            .filter(move |capability| {
+                is_owner
+                    || !matches!(
+                        capability,
+                        Capability::Submission
+                            | Capability::VacationResponse
+                            | Capability::Sieve
+                            | Capability::Quota
+                            | Capability::EmailPush
+                    )
+            })
+            .map(move |capability| {
+                (
+                    capability,
+                    account_capabilities
+                        .get(&capability)
+                        .map(|v| v.to_account_capabilities(current_user_principal_id, is_owner))
+                        .unwrap_or_else(|| Capabilities::Empty(EmptyCapabilities::default())),
+                )
+            })
+    }
+}
+
 impl SessionHandler for Server {
     async fn handle_session_resource(
         &self,
@@ -30,7 +93,6 @@ impl SessionHandler for Server {
     ) -> trc::Result<Session> {
         let mut session = Session::new(base_url, &self.core.jmap.capabilities);
         session.set_state(access_token.state());
-        let account_capabilities = &self.core.jmap.capabilities.account;
 
         // Set primary account
         let account = self
@@ -39,27 +101,20 @@ impl SessionHandler for Server {
             .caused_by(trc::location!())?;
         session.username = account.name().to_string();
         let account_id = Id::from(access_token.account_id());
-        let mut account = Account {
-            name: account.name().to_string(),
-            is_personal: true,
-            is_read_only: false,
-            account_capabilities: VecMap::with_capacity(account_capabilities.len()),
-        };
         for capability in access_token.account_capabilities() {
             session.primary_accounts.append(capability, account_id);
-            account.account_capabilities.append(
-                capability,
-                account_capabilities
-                    .get(&capability)
-                    .map(|v| v.to_account_capabilities(account_id.into(), true))
-                    .unwrap_or_else(|| Capabilities::Empty(EmptyCapabilities::default())),
-            );
         }
-        session.accounts.append(account_id, account);
+        session.accounts.append(
+            account_id,
+            self.jmap_account(
+                access_token,
+                access_token.account_id(),
+                account.name().to_string(),
+            ),
+        );
 
         // Add secondary accounts
         for &account_id in access_token.secondary_ids() {
-            let is_owner = access_token.is_member(account_id);
             let Some(account) = self
                 .try_account(account_id)
                 .await
@@ -72,24 +127,10 @@ impl SessionHandler for Server {
                 );
                 continue;
             };
-
-            let account_id = Id::from(account_id);
-            let mut account = Account {
-                name: account.name().to_string(),
-                is_personal: false,
-                is_read_only: false,
-                account_capabilities: VecMap::with_capacity(account_capabilities.len()),
-            };
-            for capability in access_token.account_capabilities() {
-                account.account_capabilities.append(
-                    capability,
-                    account_capabilities
-                        .get(&capability)
-                        .map(|v| v.to_account_capabilities(account_id.into(), is_owner))
-                        .unwrap_or_else(|| Capabilities::Empty(EmptyCapabilities::default())),
-                );
-            }
-            session.accounts.append(account_id, account);
+            session.accounts.append(
+                Id::from(account_id),
+                self.jmap_account(access_token, account_id, account.name().to_string()),
+            );
         }
 
         Ok(session)

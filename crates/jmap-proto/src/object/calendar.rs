@@ -414,7 +414,15 @@ impl JmapRight for CalendarRight {
             CalendarRight::MayUpdatePrivate => &[Acl::ModifyPrivateProperties],
             CalendarRight::MayRSVP => &[Acl::ModifyRSVP],
             CalendarRight::MayShare => &[Acl::Share],
-            CalendarRight::MayDelete => &[Acl::Delete, Acl::RemoveItems],
+            CalendarRight::MayDelete => &[Acl::Delete],
+        }
+    }
+
+    fn implied_by_acl(&self) -> &'static [Acl] {
+        match self {
+            CalendarRight::MayWriteOwn => &[Acl::AddItems, Acl::ModifyItems, Acl::RemoveItems],
+            CalendarRight::MayUpdatePrivate | CalendarRight::MayRSVP => &[Acl::ModifyItems],
+            _ => &[],
         }
     }
 

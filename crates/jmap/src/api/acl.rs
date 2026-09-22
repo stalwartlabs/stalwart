@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
+use common::{
+    Server,
+    auth::AccessToken,
+    sharing::{
+        EffectiveAcl,
+        grants::{AclGrantLookup, ShareUpdate, ShareViolation},
+    },
+};
 use jmap_proto::{
     error::set::SetError,
     object::{JmapRight, JmapSharedObject},
@@ -96,7 +103,7 @@ impl JmapRights {
                 }
             };
 
-            let acl = right
+            let right = right
                 .as_property_key()
                 .cloned()
                 .and_then(|p| T::Right::try_from(p).ok())
@@ -107,16 +114,17 @@ impl JmapRights {
                             "Invalid permission {:?}.",
                             right.to_cow().unwrap_or_default()
                         ))
-                })?
-                .to_acl()
-                .iter()
-                .copied();
+                })?;
+            let acl = right.to_acl().iter().copied();
 
             if let Some(acl_item) = grants.iter_mut().find(|item| item.account_id == account_id) {
                 if is_set {
                     acl_item.grants.insert_many(acl);
                 } else {
                     acl_item.grants.remove_many(acl);
+                    if right.is_implied_by(&acl_item.grants) {
+                        return Err(implied_right::<T>(right));
+                    }
                     if acl_item.grants.is_empty() {
                         grants.retain(|item| item.account_id != account_id);
                     }
@@ -155,23 +163,63 @@ impl JmapRights {
         T::Right: TryFrom<T::Property>,
     {
         let mut acls = Bitmap::new();
+        let mut denied = Vec::new();
 
-        for key in value.into_expanded_boolean_set() {
-            acls.insert_many(
-                key.as_property()
-                    .and_then(|p| T::Right::try_from(p.clone()).ok())
-                    .ok_or_else(|| {
-                        SetError::invalid_properties()
-                            .with_property(T::SHARE_WITH_PROPERTY)
-                            .with_description(format!("Invalid permission {:?}.", key.to_string()))
-                    })?
-                    .to_acl()
-                    .iter()
-                    .copied(),
-            );
+        for (key, value) in value.into_expanded_object() {
+            let right = key
+                .as_property()
+                .and_then(|p| T::Right::try_from(p.clone()).ok());
+            match (value.as_bool(), right) {
+                (Some(true), Some(right)) => {
+                    acls.insert_many(right.to_acl().iter().copied());
+                }
+                (Some(false), Some(right)) => {
+                    if !right.implied_by_acl().is_empty() {
+                        denied.push(right);
+                    }
+                }
+                (Some(_), None) => {
+                    return Err(SetError::invalid_properties()
+                        .with_property(T::SHARE_WITH_PROPERTY)
+                        .with_description(format!("Invalid permission {:?}.", key.to_string())));
+                }
+                (None, _) => {
+                    return Err(SetError::invalid_properties()
+                        .with_property(T::SHARE_WITH_PROPERTY)
+                        .with_description(format!(
+                            "Permission {:?} must be a boolean.",
+                            key.to_string()
+                        )));
+                }
+            }
         }
 
-        Ok(acls)
+        match denied.into_iter().find(|right| right.is_implied_by(&acls)) {
+            Some(right) => Err(implied_right::<T>(right)),
+            None => Ok(acls),
+        }
+    }
+
+    pub fn validate_shares<T: JmapSharedObject, G: AclGrantLookup + ?Sized>(
+        update: ShareUpdate<'_, G>,
+        grants: &[AclGrant],
+    ) -> Result<(), SetError<T::Property>> {
+        update
+            .validate(grants)
+            .map_err(|violation| match violation {
+                ShareViolation::TooManyShares(max) => SetError::invalid_properties()
+                    .with_property(T::SHARE_WITH_PROPERTY)
+                    .with_description(format!(
+                        "Maximum number of shares per item exceeded (max: {max})"
+                    )),
+                ShareViolation::OwnerShared => SetError::invalid_properties()
+                    .with_property(T::SHARE_WITH_PROPERTY)
+                    .with_description(
+                        "An object cannot be shared with the principal that owns it.",
+                    ),
+                ShareViolation::RightNotHeld => SetError::forbidden()
+                    .with_description("You cannot grant rights that you do not have yourself."),
+            })
     }
 
     pub fn all_rights<T: JmapSharedObject>() -> Value<'static, T::Property, T::Element> {
@@ -193,7 +241,7 @@ impl JmapRights {
         for right in T::Right::all_rights() {
             obj.insert_unchecked(
                 Key::Property((*right).into()),
-                Value::Bool(right.to_acl().iter().all(|acl| acls.contains(*acl))),
+                Value::Bool(right.is_granted(&acls)),
             );
         }
 
@@ -270,6 +318,26 @@ impl JmapAcl for Server {
 
         Ok(())
     }
+}
+
+trait ImpliedRight {
+    fn is_implied_by(&self, acls: &Bitmap<Acl>) -> bool;
+}
+
+impl<R: JmapRight> ImpliedRight for R {
+    fn is_implied_by(&self, acls: &Bitmap<Acl>) -> bool {
+        let implied_by = self.implied_by_acl();
+        !implied_by.is_empty() && implied_by.iter().all(|acl| acls.contains(*acl))
+    }
+}
+
+fn implied_right<T: JmapSharedObject>(right: T::Right) -> SetError<T::Property> {
+    SetError::invalid_properties()
+        .with_property(T::SHARE_WITH_PROPERTY)
+        .with_description(format!(
+            "Permission {} cannot be removed while other permissions imply it.",
+            Key::Property(right.into()).to_string()
+        ))
 }
 
 impl<T: Property> From<ShareValidationError> for SetError<T> {

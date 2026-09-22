@@ -7,7 +7,7 @@
 use crate::blob::download::BlobDownload;
 use calcard::{
     icalendar::ICalendar,
-    jscalendar::{JSCalendarProperty, import::ConversionOptions},
+    jscalendar::{JSCalendar, JSCalendarProperty, import::ImportOptions},
 };
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
@@ -36,11 +36,9 @@ impl CalendarEventParse for Server {
         if request.blob_ids.len() > self.core.jmap.calendar_parse_max_items {
             return Err(trc::JmapEvent::RequestTooLarge.into_err());
         }
-        let return_all_properties = request.properties.is_none();
         let properties = request
             .properties
-            .map(|v| v.into_valid().collect::<Vec<_>>())
-            .unwrap_or_default();
+            .map(|v| v.into_valid().collect::<Vec<_>>());
 
         let mut response = ParseResponse {
             account_id: request.account_id,
@@ -51,35 +49,50 @@ impl CalendarEventParse for Server {
 
         for blob_id in request.blob_ids.into_valid() {
             // Fetch raw message to parse
-            let raw_vcard = match self.blob_download(&blob_id, access_token).await? {
-                Some(raw_vcard) => raw_vcard,
+            let raw_ical = match self.blob_download(&blob_id, access_token).await? {
+                Some(raw_ical) => raw_ical,
                 None => {
                     response.not_found.push(MaybeInvalid::Value(blob_id));
                     continue;
                 }
             };
-            let Ok(vcard) = ICalendar::parse(std::str::from_utf8(&raw_vcard).unwrap_or_default())
+            let Ok(ical) = ICalendar::parse(std::str::from_utf8(&raw_ical).unwrap_or_default())
             else {
                 response.not_parsable.push(blob_id);
                 continue;
             };
-            let mut js_calendar_entries = vcard
-                .into_jscalendar_with_opt::<Id, BlobId>(ConversionOptions::default())
-                .into_inner()
-                .into_object()
-                .unwrap()
-                .remove(&Key::Property(JSCalendarProperty::Entries))
-                .unwrap()
-                .into_array()
-                .unwrap();
+            let Some(Value::Array(mut js_calendar_entries)) = ical
+                .into_jscalendar_with::<Id, BlobId, _>(ImportOptions::new())
+                .ok()
+                .map(JSCalendar::into_inner)
+                .and_then(Value::into_object)
+                .and_then(|mut group| group.remove(&Key::Property(JSCalendarProperty::Entries)))
+                .filter(|entries| {
+                    entries.as_array().is_some_and(|entries| {
+                        !entries.is_empty()
+                            && entries.iter().all(|entry| entry.as_object().is_some())
+                    })
+                })
+            else {
+                response.not_parsable.push(blob_id);
+                continue;
+            };
 
-            if !return_all_properties {
-                for entry in &mut js_calendar_entries {
+            for entry in js_calendar_entries
+                .iter_mut()
+                .filter_map(Value::as_object_mut)
+            {
+                if let Some(properties) = &properties {
                     entry
-                        .as_object_mut()
-                        .unwrap()
                         .as_mut_vec()
                         .retain(|(k, _)| k.as_property().is_some_and(|k| properties.contains(k)));
+                }
+                for property in METADATA_PROPERTIES.iter().filter(|property| {
+                    properties
+                        .as_ref()
+                        .is_none_or(|properties| properties.contains(property))
+                }) {
+                    entry.insert(Key::Property(property.clone()), Value::Null);
                 }
             }
 
@@ -91,3 +104,11 @@ impl CalendarEventParse for Server {
         Ok(response)
     }
 }
+
+const METADATA_PROPERTIES: [JSCalendarProperty<Id>; 5] = [
+    JSCalendarProperty::Id,
+    JSCalendarProperty::BaseEventId,
+    JSCalendarProperty::CalendarIds,
+    JSCalendarProperty::IsDraft,
+    JSCalendarProperty::IsOrigin,
+];

@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    jmap::calendar::event::assert_eq_ignoring_updated,
+    jmap::calendar::event::assert_eq_ignoring_timestamps,
     utils::{account::Account, jmap::JmapUtils, server::TestServer},
 };
 use common::NO_ID;
@@ -186,7 +186,7 @@ pub async fn test(test: &TestServer) {
         .updated(&id);
     test.wait_for_tasks().await;
 
-    assert_eq_ignoring_updated(
+    assert_eq_ignoring_timestamps(
         &base_event(account, &recurring_id).await,
         json!({
             "id": &recurring_id,
@@ -200,19 +200,11 @@ pub async fn test(test: &TestServer) {
             "recurrenceOverrides": {
                 "2007-03-06T12:00:00": {
                     "title": "Standup with guests",
-                    "start": "2007-03-06T12:00:00",
-                    "duration": "PT1H",
-                    "locations": {
-                        "loc1": {
-                            "@type": "Location",
-                            "name": "Room B"
-                        }
-                    }
+                    "locations/loc1/name": "Room B"
                 },
                 "2007-03-07T12:00:00": {
                     "title": "Moved standup, renamed",
-                    "start": "2007-03-07T15:00:00",
-                    "duration": "PT1H"
+                    "start": "2007-03-07T15:00:00"
                 }
             }
         }),
@@ -371,6 +363,19 @@ pub async fn test(test: &TestServer) {
         ["2007-03-06T12:00:00", "2007-03-12T09:00:00"]
     );
 
+    // The UTC start of the base event is still derived from its start
+    let base = account
+        .jmap_get(
+            MethodObject::CalendarEvent,
+            ["id", "start", "utcStart", "utcEnd"],
+            [&recurring_id],
+        )
+        .await;
+    let base = &base.list()[0];
+    assert_eq!(base.text_field("start"), "2007-03-05T12:00:00");
+    assert_eq!(base.text_field("utcStart"), "2007-03-05T17:00:00Z");
+    assert_eq!(base.text_field("utcEnd"), "2007-03-05T18:00:00Z");
+
     // A base event and its instances cannot be modified in the same request
     let id = instance_id(&instances, "2007-03-06T12:00:00");
     let response = account
@@ -391,9 +396,71 @@ pub async fn test(test: &TestServer) {
         );
     }
 
+    // A third operation on the same event does not escape the rejection
+    let mixed_id = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [json!({
+                "calendarIds": { &calendar_id: true },
+                "title": "Mixed ops",
+                "start": "2007-04-02T09:00:00",
+                "timeZone": "US/Eastern",
+                "duration": "PT1H",
+                "recurrenceRule": { "@type": "RecurrenceRule", "frequency": "daily", "count": 3 }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    test.wait_for_tasks().await;
+    let mixed_instances = expand_instances(account, &calendar_id).await;
+    let mixed_update_id = instance_id(&mixed_instances, "2007-04-03T09:00:00");
+    let mixed_destroy_id = instance_id(&mixed_instances, "2007-04-04T09:00:00");
+    let response = account
+        .jmap_method_call(
+            "CalendarEvent/set",
+            json!({
+                "accountId": account.id_string(),
+                "update": {
+                    &mixed_id: { "title": "Renamed series" },
+                    &mixed_update_id: { "title": "Renamed occurrence" }
+                },
+                "destroy": [&mixed_destroy_id]
+            }),
+        )
+        .await;
+    for id in [&mixed_id, &mixed_update_id] {
+        assert_eq!(
+            response.not_updated(id).typ(),
+            "invalidProperties",
+            "{response:?}"
+        );
+    }
+    assert_eq!(
+        response.not_destroyed(&mixed_destroy_id).description(),
+        "A base event and its instances cannot be modified in the same request."
+    );
+    test.wait_for_tasks().await;
+    assert!(
+        starts(&expand_instances(account, &calendar_id).await).contains(&"2007-04-04T09:00:00"),
+        "the instance must not have been destroyed"
+    );
+    account
+        .jmap_destroy(
+            MethodObject::CalendarEvent,
+            [&mixed_id],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .destroyed()
+        .for_each(drop);
+    test.wait_for_tasks().await;
+
     // Properties that are not per-occurrence are rejected
     for property in [
-        json!({"calendarIds": {&calendar_id: true}}),
+        json!({"calendarIds": {}}),
         json!({"isDraft": true}),
         json!({"utcStart": "2007-03-06T17:00:00Z"}),
         json!({"utcEnd": "2007-03-06T18:00:00Z"}),
@@ -414,7 +481,27 @@ pub async fn test(test: &TestServer) {
         );
     }
 
-    // Properties an occurrence inherits from the base event are ignored, not rejected
+    // Properties an occurrence inherits from the base event are rejected unless unchanged
+    for property in [
+        json!({"uid": "somebody-elses-uid@example.com"}),
+        json!({"recurrenceRule": {"frequency": "weekly"}}),
+        json!({"privacy": "private"}),
+        json!({"participants/xyz/calendarAddress": "mailto:nobody@example.com"}),
+        json!({"method": "request"}),
+    ] {
+        let response = account
+            .jmap_update(
+                MethodObject::CalendarEvent,
+                [(&id, property.clone())],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await;
+        assert_eq!(
+            response.not_updated(&id).typ(),
+            "invalidProperties",
+            "{property}"
+        );
+    }
     account
         .jmap_update(
             MethodObject::CalendarEvent,
@@ -423,10 +510,13 @@ pub async fn test(test: &TestServer) {
                 json!({
                     "@type": "Event",
                     "title": "Ignoring inherited properties",
-                    "uid": "somebody-elses-uid@example.com",
-                    "recurrenceRule": {"frequency": "weekly"},
-                    "privacy": "private",
-                    "participants/xyz/calendarAddress": "mailto:nobody@example.com"
+                    "uid": "recurring-instances@example.com",
+                    "recurrenceRule": null,
+                    "privacy": null,
+                    "calendarIds": {&calendar_id: true},
+                    "isDraft": false,
+                    "isOrigin": true,
+                    "baseEventId": &recurring_id
                 }),
             )],
             Vec::<(&str, &str)>::new(),
@@ -483,10 +573,14 @@ pub async fn test(test: &TestServer) {
     );
     test.wait_for_tasks().await;
 
-    // A synthetic id of a non-recurring event refers to the event itself
+    // A non-recurring event is returned with its own id
     let instances = expand_instances(account, &calendar_id).await;
     let id = instance_id(&instances, "2007-03-12T09:00:00");
-    assert_ne!(id, single_id);
+    assert_eq!(id, single_id);
+    assert_eq!(
+        instance(&instances, "2007-03-12T09:00:00").get("baseEventId"),
+        Some(&Value::Null)
+    );
     account
         .jmap_update(
             MethodObject::CalendarEvent,
@@ -497,7 +591,7 @@ pub async fn test(test: &TestServer) {
         .updated(&id);
     test.wait_for_tasks().await;
 
-    assert_eq_ignoring_updated(
+    assert_eq_ignoring_timestamps(
         &base_event(account, &single_id).await,
         json!({
             "id": &single_id,
@@ -592,6 +686,29 @@ pub async fn test(test: &TestServer) {
     let updated = instance(&instances, "2007-04-03T00:00:00");
     assert_eq!(updated.text_field("title"), "Spring break, day two");
     assert_eq!(updated.text_field("duration"), "P1D");
+    for time_zone in ["Etc/UTC", "Asia/Tokyo"] {
+        let response = account
+            .jmap_method_call(
+                "CalendarEvent/get",
+                json!({
+                    "accountId": account.id_string(),
+                    "ids": instances.iter().map(|instance| instance.id()).collect::<Vec<_>>(),
+                    "properties": ["start", "timeZone", "recurrenceId", "showWithoutTime"],
+                    "timeZone": time_zone
+                }),
+            )
+            .await;
+        for (instance, start) in response
+            .list()
+            .iter()
+            .zip(["2007-04-02T00:00:00", "2007-04-03T00:00:00"])
+        {
+            assert_eq!(instance.text_field("start"), start, "{instance}");
+            assert_eq!(instance.text_field("recurrenceId"), start, "{instance}");
+            assert_eq!(instance["showWithoutTime"], json!(true), "{instance}");
+            assert_eq!(instance.get("timeZone"), None, "{instance}");
+        }
+    }
 
     account
         .jmap_destroy(
@@ -652,10 +769,13 @@ pub async fn test(test: &TestServer) {
         instance(&instances, "2007-03-07T14:00:00").text_field("recurrenceId"),
         "2007-03-07T12:00:00"
     );
-    for start in ["2007-03-08T14:00:00", "2007-03-09T14:00:00"] {
+    for (start, recurrence_id) in [
+        ("2007-03-08T14:00:00", "2007-03-08T12:00:00"),
+        ("2007-03-09T14:00:00", "2007-03-09T12:00:00"),
+    ] {
         assert_eq!(
             instance(&instances, start).text_field("recurrenceId"),
-            start
+            recurrence_id
         );
         let id = instance_id(&instances, start);
         let response = account
@@ -738,6 +858,10 @@ pub async fn test(test: &TestServer) {
         instance(&instances, "2007-03-10T23:00:00").text_field("duration"),
         "PT5H"
     );
+    assert_eq!(
+        instance(&instances, "2007-03-11T23:00:00").text_field("duration"),
+        "PT6H"
+    );
 
     let id = instance_id(&instances, "2007-03-10T23:00:00");
     account
@@ -751,6 +875,10 @@ pub async fn test(test: &TestServer) {
     test.wait_for_tasks().await;
 
     let updated = expand_instances(account, &calendar_id).await;
+    assert_eq!(
+        instance(&updated, "2007-03-11T23:00:00").text_field("duration"),
+        "PT6H"
+    );
     let updated = instance(&updated, "2007-03-10T23:00:00");
     assert_eq!(updated.text_field("title"), "Night shift, renamed");
     assert_eq!(updated.text_field("duration"), "PT5H");
@@ -759,6 +887,79 @@ pub async fn test(test: &TestServer) {
         .request("DELETE", &format!("{calendar_path}/night-shift.ics"), "")
         .await
         .with_status(StatusCode::NO_CONTENT);
+
+    // Instances keep the form of the original start, the timeZone argument only affects UTC times
+    for (name, ical) in [
+        ("instance-forms-floating.ics", FLOATING_INSTANCES_ICAL),
+        ("instance-forms-utc.ics", UTC_INSTANCES_ICAL),
+    ] {
+        dav_client
+            .request("PUT", &format!("{calendar_path}/{name}"), ical)
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    test.wait_for_tasks().await;
+    let instances = expand_instances(account, &calendar_id).await;
+    assert_eq!(
+        starts(&instances),
+        [
+            "2007-04-10T09:00:00",
+            "2007-04-11T09:00:00",
+            "2007-04-12T09:00:00",
+            "2007-04-13T09:00:00"
+        ]
+    );
+    let ids = instances
+        .iter()
+        .map(|instance| instance.id())
+        .collect::<Vec<_>>();
+    for (properties, time_zone, expected) in [
+        (
+            json!(["start", "timeZone", "recurrenceId"]),
+            "Europe/Berlin",
+            json!([
+                {"start": "2007-04-10T09:00:00", "recurrenceId": "2007-04-10T09:00:00"},
+                {"start": "2007-04-11T09:00:00", "recurrenceId": "2007-04-11T09:00:00"},
+                {"start": "2007-04-12T09:00:00", "timeZone": "Etc/UTC", "recurrenceId": "2007-04-12T09:00:00"},
+                {"start": "2007-04-13T09:00:00", "timeZone": "Etc/UTC", "recurrenceId": "2007-04-13T09:00:00"}
+            ]),
+        ),
+        (
+            json!(["start", "utcStart"]),
+            "Europe/Berlin",
+            json!([
+                {"start": "2007-04-10T09:00:00", "utcStart": "2007-04-10T07:00:00Z"},
+                {"start": "2007-04-11T09:00:00", "utcStart": "2007-04-11T07:00:00Z"},
+                {"start": "2007-04-12T09:00:00", "utcStart": "2007-04-12T09:00:00Z"},
+                {"start": "2007-04-13T09:00:00", "utcStart": "2007-04-13T09:00:00Z"}
+            ]),
+        ),
+    ] {
+        let response = account
+            .jmap_method_call(
+                "CalendarEvent/get",
+                json!({
+                    "accountId": account.id_string(),
+                    "ids": &ids,
+                    "properties": properties,
+                    "timeZone": time_zone
+                }),
+            )
+            .await;
+        let mut list = response.list().to_vec();
+        for (event, id) in list.iter_mut().zip(&ids) {
+            assert_eq!(event.id(), *id);
+            event.as_object_mut().unwrap().remove("id");
+        }
+        assert_eq!(Value::Array(list), expected, "{properties}");
+    }
+
+    for name in ["instance-forms-floating.ics", "instance-forms-utc.ics"] {
+        dav_client
+            .request("DELETE", &format!("{calendar_path}/{name}"), "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
 
     // Synthetic ids keep identifying the same occurrence across writes
     let series_calendar_id = account
@@ -983,6 +1184,22 @@ const THIS_AND_FUTURE_ICAL: &str = concat!(
     "SUMMARY:Standup moved\r\n",
     "RECURRENCE-ID;TZID=US/Eastern;RANGE=THISANDFUTURE:20070307T120000\r\n",
     "DTSTART;TZID=US/Eastern:20070307T140000\r\nDURATION:PT1H\r\nEND:VEVENT\r\n",
+    "END:VCALENDAR\r\n"
+);
+
+const FLOATING_INSTANCES_ICAL: &str = concat!(
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+    "BEGIN:VEVENT\r\nUID:instance-forms-floating@example.com\r\nDTSTAMP:20070206T001121Z\r\n",
+    "SUMMARY:Floating\r\nDTSTART:20070410T090000\r\nDURATION:PT1H\r\n",
+    "RRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\n",
+    "END:VCALENDAR\r\n"
+);
+
+const UTC_INSTANCES_ICAL: &str = concat!(
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+    "BEGIN:VEVENT\r\nUID:instance-forms-utc@example.com\r\nDTSTAMP:20070206T001121Z\r\n",
+    "SUMMARY:UTC\r\nDTSTART:20070412T090000Z\r\nDURATION:PT1H\r\n",
+    "RRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\n",
     "END:VCALENDAR\r\n"
 );
 

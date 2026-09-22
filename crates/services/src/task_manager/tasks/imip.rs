@@ -444,7 +444,7 @@ pub async fn build_itip_template(
                 ICalendarProperty::Summary => {
                     subject.push_str(&value);
                 }
-                ICalendarProperty::Dtstart => {
+                ICalendarProperty::Dtstart if when_detail.is_none() => {
                     subject.push_str(" @ ");
                     subject.push_str(&value);
                 }

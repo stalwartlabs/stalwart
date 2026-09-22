@@ -10,9 +10,16 @@ use crate::utils::{
 };
 use ahash::AHashSet;
 use dav_proto::Depth;
-use groupware::DavResourceName;
+use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
-use registry::schema::structs::Action;
+use mail_parser::DateTime;
+use registry::schema::structs::{Action, Task};
+use serde_json::json;
+use store::{
+    ValueKey,
+    write::{TaskId, TaskQueueClass, ValueClass, now},
+};
+use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(test: &TestServer, assisted_discovery: bool) {
     let admin = test.account("admin@example.com");
@@ -802,6 +809,8 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
         }
     }
 
+    alarms_follow_calendars(test).await;
+
     client.delete_default_containers().await;
     client
         .delete_default_containers_by_account("support@example.com")
@@ -809,6 +818,141 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
     mike_noquota.delete_default_containers().await;
     test.assert_is_empty().await;
 }
+
+async fn alarms_follow_calendars(test: &TestServer) {
+    println!("Running COPY/MOVE alarm rescheduling tests...");
+    let account = test.account("bill@example.com");
+    let client = account.webdav_client();
+    let account_id = account.id().document_id();
+    let base_path = format!("{}/bill%40example.com/", DavResourceName::Cal.base_path());
+    let muted = format!("{base_path}alarm-muted/");
+    let active = format!("{base_path}alarm-active/");
+    let muted_event = format!("{muted}event.ics");
+    let active_event = format!("{active}event.ics");
+    for folder in [&muted, &active] {
+        client
+            .request("MKCOL", folder, "")
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    let muted_id = Id::from(
+        test.server
+            .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
+            .await
+            .expect("calendar resources")
+            .by_path("alarm-muted")
+            .expect("muted calendar")
+            .document_id(),
+    )
+    .to_string();
+    account
+        .jmap_method_call(
+            "Calendar/set",
+            json!({
+                "accountId": account.id_string(),
+                "update": { &muted_id: { "isSubscribed": false } }
+            }),
+        )
+        .await
+        .updated(&muted_id);
+
+    let start = now() as i64 + 2 * 86400;
+    client
+        .request(
+            "PUT",
+            &muted_event,
+            ALARM_EVENT.replace(
+                "$START",
+                &DateTime::from_timestamp(start)
+                    .to_rfc3339()
+                    .replace(['-', ':'], ""),
+            ),
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    let document_id = test
+        .server
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
+        .await
+        .expect("calendar resources")
+        .by_path("alarm-muted/event.ics")
+        .expect("event")
+        .document_id();
+    assert_eq!(alarm_due(test, account_id, document_id).await, None);
+
+    client
+        .request_with_headers(
+            "MOVE",
+            &muted_event,
+            [("destination", active_event.as_str())],
+            "",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    assert_eq!(
+        alarm_due(test, account_id, document_id).await,
+        Some(start as u64 - 3600)
+    );
+
+    client
+        .request_with_headers(
+            "COPY",
+            &active_event,
+            [("destination", muted_event.as_str())],
+            "",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    assert_eq!(
+        alarm_due(test, account_id, document_id).await,
+        Some(start as u64 - 3600)
+    );
+
+    client
+        .request("DELETE", &active_event, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+    assert_eq!(alarm_due(test, account_id, document_id).await, None);
+
+    for folder in [&muted, &active, &format!("{base_path}default/")] {
+        client
+            .request("DELETE", folder, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
+}
+
+async fn alarm_due(test: &TestServer, account_id: u32, document_id: u32) -> Option<u64> {
+    test.server
+        .store()
+        .get_value::<Task>(ValueKey::from(ValueClass::TaskQueue(
+            TaskQueueClass::Task {
+                id: TaskId::Assigned(Id::from_parts(account_id, document_id).id()),
+            },
+        )))
+        .await
+        .expect("task lookup")
+        .map(|task| task.due_timestamp())
+}
+
+const ALARM_EVENT: &str = concat!(
+    "BEGIN:VCALENDAR\r\n",
+    "VERSION:2.0\r\n",
+    "PRODID:-//Stalwart//Test//EN\r\n",
+    "BEGIN:VEVENT\r\n",
+    "UID:dav-alarm-follows-calendars\r\n",
+    "DTSTAMP:20240101T000000Z\r\n",
+    "DTSTART:$START\r\n",
+    "DURATION:PT1H\r\n",
+    "SUMMARY:Alarm follows calendars\r\n",
+    "BEGIN:VALARM\r\n",
+    "ACTION:DISPLAY\r\n",
+    "DESCRIPTION:Reminder\r\n",
+    "TRIGGER:-PT1H\r\n",
+    "END:VALARM\r\n",
+    "END:VEVENT\r\n",
+    "END:VCALENDAR\r\n"
+);
 
 fn assert_result(response: &DavResponse, hierarchy: &[(String, String)]) {
     assert!(!hierarchy.is_empty());

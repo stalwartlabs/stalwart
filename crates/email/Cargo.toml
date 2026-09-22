@@ -10,7 +10,7 @@ store = { path = "../store" }
 trc = { path = "../trc" }
 types = { path = "../types" }
 jmap_proto = { path = "../jmap-proto" }
-jmap-tools = { version = "0.1" }
+jmap-tools = { version = "0.1.9" }
 common = { path =  "../common" }
 groupware = { path =  "../groupware" }
 registry = { path =  "../registry" }

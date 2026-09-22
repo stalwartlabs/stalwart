@@ -6,6 +6,7 @@
 
 use crate::{
     DavError, DavMethod,
+    calendar::CalendarEventView,
     common::{
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
@@ -14,8 +15,12 @@ use crate::{
 use common::{Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
 use groupware::{
+    SizeWriter,
     cache::GroupwareCache,
-    calendar::{CalendarEvent, CalendarEventContent},
+    calendar::{
+        CalendarEvent, CalendarEventContent, EVENT_HAS_ALARMS, alerts::DefaultAlertsResolver,
+        privacy::EventPrivacy,
+    },
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -72,10 +77,19 @@ impl CalendarGetRequestHandler for Server {
         }
 
         // Validate ACL
-        if !access_token.is_member(account_id)
+        let is_owner = access_token.is_member(account_id);
+        if !is_owner
+            && EventPrivacy::from_flags(resource.resource.event_flags().unwrap_or_default())
+                == EventPrivacy::Secret
+        {
+            return Err(DavError::Code(StatusCode::NOT_FOUND));
+        }
+        if !is_owner
             && !resources.has_access_to_container(
                 access_token,
-                resource.parent_id().unwrap(),
+                resource
+                    .parent_id()
+                    .ok_or(DavError::Code(StatusCode::NOT_FOUND))?,
                 Acl::ReadItems,
             )
         {
@@ -122,7 +136,8 @@ impl CalendarGetRequestHandler for Server {
             .with_schedule_tag_opt(schedule_tag)
             .with_last_modified(Rfc1123DateTime::new(i64::from(event.modified)).to_string());
 
-        if is_head {
+        let has_alarms = event.flags.to_native() & EVENT_HAS_ALARMS != 0;
+        if is_head && is_owner && !has_alarms {
             return Ok(response.with_content_length(event.size.to_native() as usize));
         }
 
@@ -138,9 +153,25 @@ impl CalendarGetRequestHandler for Server {
             .caused_by(trc::location!())?
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         let content = content_
-            .unarchive::<CalendarEventContent>()
+            .to_unarchived::<CalendarEventContent>()
             .caused_by(trc::location!())?;
+        let view = self
+            .calendar_event_view(
+                access_token,
+                account_id,
+                event,
+                content.inner,
+                &mut DefaultAlertsResolver::default(),
+            )
+            .await?;
 
-        Ok(response.with_binary_body(content.data.event.to_string()))
+        Ok(match (view, is_head) {
+            (Some((view, _)), true) => {
+                response.with_content_length(SizeWriter::ical(&view.data.event))
+            }
+            (None, true) => response.with_content_length(event.size.to_native() as usize),
+            (Some((view, _)), false) => response.with_binary_body(view.data.event.to_string()),
+            (None, false) => response.with_binary_body(content.inner.data.event.to_string()),
+        })
     }
 }

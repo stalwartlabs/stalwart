@@ -7,15 +7,17 @@
 use crate::api::query::QueryResponseBuilder;
 use common::{Server, auth::AccessToken};
 use compact_str::ToCompactString;
+use groupware::decode_mailto_address;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::principal::{Principal, PrincipalFilter, PrincipalType},
+    request::capability::{Capability, CapabilityIds},
     types::state::State,
 };
 use registry::{
     schema::{
         enums::AccountType,
-        prelude::{ObjectType, Permission, Property},
+        prelude::{ObjectType, Property},
     },
     types::EnumImpl,
 };
@@ -27,12 +29,14 @@ use store::{
     write::SearchIndex,
 };
 use trc::AddContext;
+use utils::sanitize_email;
 
 pub trait PrincipalQuery: Sync + Send {
     fn principal_query(
         &self,
         request: QueryRequest<Principal>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
@@ -41,10 +45,9 @@ impl PrincipalQuery for Server {
         &self,
         mut request: QueryRequest<Principal>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
-        if !self.core.groupware.allow_directory_query
-            && !access_token.has_permission(Permission::JmapPrincipalQuery)
-        {
+        if !self.core.groupware.allow_directory_query {
             return Err(trc::JmapEvent::Forbidden
                 .into_err()
                 .details("The administrator has disabled directory queries."));
@@ -63,14 +66,23 @@ impl PrincipalQuery for Server {
             match cond {
                 Filter::Property(cond) => match cond {
                     PrincipalFilter::Name(name) | PrincipalFilter::Email(name) => {
-                        filters.push(SearchFilter::is_in_set(
-                            match self.account_id_from_email(&name, false).await? {
-                                Some(account_id) => {
-                                    RoaringBitmap::from_sorted_iter([account_id]).unwrap()
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            self.account_id_from_email(&name, false).await?,
+                        )));
+                    }
+                    PrincipalFilter::CalendarAddress(address)
+                        if using.contains(Capability::PrincipalsAvailability) =>
+                    {
+                        let account_id =
+                            match sanitize_email(decode_mailto_address(&address).as_ref()) {
+                                Some(address) => {
+                                    self.account_id_from_email(&address, false).await?
                                 }
-                                None => RoaringBitmap::new(),
-                            },
-                        ));
+                                None => None,
+                            };
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            account_id,
+                        )));
                     }
                     PrincipalFilter::AccountIds(ids) => {
                         filters.push(SearchFilter::is_in_set(

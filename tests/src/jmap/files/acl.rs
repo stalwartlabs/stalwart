@@ -481,6 +481,25 @@ pub async fn test(test: &TestServer) {
     .await
     .updated(&john_folder_id);
 
+    // A sharee without mayShare cannot share a node they create
+    let bill_id = test.account("bill@example.com").id_string().to_string();
+    assert_eq!(
+        jane.jmap_create_account(
+            john,
+            MethodObject::FileNode,
+            [json!({
+                "name": "jane-shared",
+                "parentId": &john_folder_id,
+                "shareWith": { &bill_id: {"mayRead": true} }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_created(0)
+        .description(),
+        "You are not allowed to share this file node."
+    );
+
     // FileNode/copy: Jane copies a node from her own account into John's shared folder
     let jane_folder_id = jane
         .jmap_create(
@@ -498,13 +517,14 @@ pub async fn test(test: &TestServer) {
             john,
             MethodObject::FileNode,
             [(
+                "k1",
                 &jane_folder_id,
                 json!({ "parentId": &john_folder_id, "name": "copied-here" }),
             )],
             false,
         )
         .await;
-    let copied_id = copied.copied(&jane_folder_id).id().to_string();
+    let copied_id = copied.copied("k1").id().to_string();
     assert_ne!(copied_id, jane_folder_id);
     jane.jmap_get_account(
         john,
@@ -542,13 +562,17 @@ pub async fn test(test: &TestServer) {
                 "accountId": john.id_string(),
                 "onExists": "rename",
                 "create": {
-                    &jane_folder_id: { "parentId": &john_folder_id, "name": "copied-here" }
+                    "k2": {
+                        "id": &jane_folder_id,
+                        "parentId": &john_folder_id,
+                        "name": "copied-here"
+                    }
                 }
             },
             "0"
         ]]))
         .await;
-    let renamed_entry = renamed_copy.copied(&jane_folder_id);
+    let renamed_entry = renamed_copy.copied("k2");
     let renamed_copy_id = renamed_entry.id().to_string();
     assert_eq!(renamed_entry.text_field("name"), "copied-here (2)");
 
@@ -580,6 +604,123 @@ pub async fn test(test: &TestServer) {
         .into_iter()
         .collect::<std::collections::HashSet<_>>()
     );
+
+    // The owner of a node cannot be in its shareWith
+    assert_eq!(
+        john.jmap_create(
+            MethodObject::FileNode,
+            [json!({
+                "name": "Owner share",
+                "shareWith": { &john_id: {"mayRead": true} }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_created(0)
+        .typ(),
+        "invalidProperties"
+    );
+    let owner_folder_id = john
+        .jmap_create(
+            MethodObject::FileNode,
+            [json!({"name": "Owner share"})],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    assert_eq!(
+        john.jmap_update(
+            MethodObject::FileNode,
+            [(
+                &owner_folder_id,
+                json!({ format!("shareWith/{john_id}"): {"mayRead": true} }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_updated(&owner_folder_id)
+        .typ(),
+        "invalidProperties"
+    );
+    john.jmap_destroy(
+        MethodObject::FileNode,
+        [&owner_folder_id],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .destroyed()
+    .for_each(drop);
+
+    // Sharees cannot grant rights that neither they nor the grantee hold
+    let shared_folder_id = john
+        .jmap_create(
+            MethodObject::FileNode,
+            [json!({
+                "name": "Share rules",
+                "shareWith": {
+                    &jane_id: {"mayRead": true, "mayRename": true, "mayShare": true},
+                    &bill_id: {"mayRead": true, "mayDelete": true}
+                }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    for update in [
+        json!({ format!("shareWith/{jane_id}/mayDelete"): true }),
+        json!({ format!("shareWith/{bill_id}/mayAddChildren"): true }),
+    ] {
+        assert_eq!(
+            jane.jmap_update_account(
+                john,
+                MethodObject::FileNode,
+                [(&shared_folder_id, update)],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .not_updated(&shared_folder_id)
+            .typ(),
+            "forbidden"
+        );
+    }
+    jane.jmap_update_account(
+        john,
+        MethodObject::FileNode,
+        [(
+            &shared_folder_id,
+            json!({ format!("shareWith/{bill_id}/mayRename"): true }),
+        )],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .updated(&shared_folder_id);
+    john.jmap_get(
+        MethodObject::FileNode,
+        [FileNodeProperty::ShareWith],
+        [shared_folder_id.as_str()],
+    )
+    .await
+    .list()[0]["shareWith"][&bill_id]
+        .assert_is_equal(json!({
+            "mayRead": true,
+            "mayAddChildren": false,
+            "mayRename": true,
+            "mayDelete": true,
+            "mayModifyContent": false,
+            "mayShare": false
+        }));
+    john.jmap_destroy(
+        MethodObject::FileNode,
+        [&shared_folder_id],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .destroyed()
+    .for_each(drop);
 
     // Destroy all mailboxes
     test.assert_is_empty().await;

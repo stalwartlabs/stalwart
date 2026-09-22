@@ -20,6 +20,7 @@ use dav_proto::{
     },
 };
 use groupware::{
+    SizeWriter,
     calendar::{
         ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarEventContent,
         ArchivedCalendarEventNotification, ArchivedCalendarEventNotificationContent, Calendar,
@@ -37,7 +38,10 @@ use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
 use store::write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder};
 use types::{
-    TimeRange, acl::ArchivedAclGrant, collection::Collection, dead_property::ArchivedDeadProperty,
+    TimeRange,
+    acl::{Acl, ArchivedAclGrant},
+    collection::Collection,
+    dead_property::ArchivedDeadProperty,
 };
 use uri::{OwnedUri, Urn};
 
@@ -45,6 +49,30 @@ pub mod acl;
 pub mod lock;
 pub mod propfind;
 pub mod uri;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContainerOperation {
+    Copy,
+    Remove,
+}
+
+impl ContainerOperation {
+    pub(crate) fn from_move(is_move: bool) -> Self {
+        if is_move {
+            ContainerOperation::Remove
+        } else {
+            ContainerOperation::Copy
+        }
+    }
+
+    pub(crate) fn required_acls(self) -> impl Iterator<Item = Acl> {
+        let acls: &'static [Acl] = match self {
+            ContainerOperation::Copy => &[Acl::ReadItems],
+            ContainerOperation::Remove => &[Acl::Delete],
+        };
+        acls.iter().copied()
+    }
+}
 
 pub(crate) fn assert_parent_limit(
     prev_count: usize,
@@ -318,10 +346,7 @@ impl<'x> DavQuery<'x> {
 
 pub(crate) enum ArchivedResource<'x> {
     Calendar(Archive<&'x ArchivedCalendar>),
-    CalendarEvent(
-        Archive<&'x ArchivedCalendarEvent>,
-        Option<&'x ArchivedCalendarEventContent>,
-    ),
+    CalendarEvent(Archive<&'x ArchivedCalendarEvent>, Option<EventContent<'x>>),
     CalendarEventNotification(
         Archive<&'x ArchivedCalendarEventNotification>,
         Option<&'x ArchivedCalendarEventNotificationContent>,
@@ -333,6 +358,80 @@ pub(crate) enum ArchivedResource<'x> {
         Option<&'x ArchivedContactCardContent>,
     ),
     FileNode(Archive<&'x ArchivedFileNode>),
+}
+
+pub(crate) enum EventContent<'x> {
+    Stored(&'x ArchivedCalendarEventContent),
+    View {
+        stored: &'x ArchivedCalendarEventContent,
+        view: CalendarEventContent,
+        merged_overrides: MergedOverrides,
+    },
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct MergedOverrides {
+    base_id: Option<u32>,
+    ids: Vec<u32>,
+}
+
+impl MergedOverrides {
+    pub fn push(&mut self, component_id: u32) {
+        self.ids.push(component_id);
+    }
+
+    pub fn set_base(&mut self, base_id: Option<u32>) {
+        self.base_id = base_id;
+        self.ids.sort_unstable();
+    }
+
+    pub fn base_of(&self, component_id: u32) -> Option<u32> {
+        self.base_id
+            .filter(|_| self.ids.binary_search(&component_id).is_ok())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty() || self.base_id.is_none()
+    }
+}
+
+impl<'x> EventContent<'x> {
+    pub fn attach_view(&mut self, view: CalendarEventContent, merged_overrides: MergedOverrides) {
+        *self = EventContent::View {
+            stored: self.stored(),
+            view,
+            merged_overrides,
+        };
+    }
+
+    pub fn stored(&self) -> &'x ArchivedCalendarEventContent {
+        match self {
+            EventContent::Stored(stored) | EventContent::View { stored, .. } => stored,
+        }
+    }
+
+    pub fn view(&self) -> Option<&CalendarEventContent> {
+        match self {
+            EventContent::Stored(_) => None,
+            EventContent::View { view, .. } => Some(view),
+        }
+    }
+
+    pub fn merged_overrides(&self) -> Option<&MergedOverrides> {
+        match self {
+            EventContent::Stored(_) => None,
+            EventContent::View {
+                merged_overrides, ..
+            } => Some(merged_overrides),
+        }
+    }
+
+    pub fn to_ical_string(&self) -> String {
+        match self {
+            EventContent::Stored(stored) => stored.data.event.to_string(),
+            EventContent::View { view, .. } => view.data.event.to_string(),
+        }
+    }
 }
 
 impl<'x> ArchivedResource<'x> {
@@ -348,7 +447,8 @@ impl<'x> ArchivedResource<'x> {
             Collection::CalendarEvent => {
                 let content = content
                     .map(|content| content.unarchive::<CalendarEventContent>())
-                    .transpose()?;
+                    .transpose()?
+                    .map(EventContent::Stored);
                 archive
                     .to_unarchived::<CalendarEvent>()
                     .map(|meta| ArchivedResource::CalendarEvent(meta, content))
@@ -435,9 +535,9 @@ impl<'x> ArchivedResource<'x> {
     pub fn dead_properties(&self) -> Option<&ArchivedDeadProperty> {
         match self {
             ArchivedResource::Calendar(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::CalendarEvent(_, content) => {
-                content.map(|content| &content.dead_properties)
-            }
+            ArchivedResource::CalendarEvent(_, content) => content
+                .as_ref()
+                .map(|content| &content.stored().dead_properties),
             ArchivedResource::AddressBook(archive) => Some(&archive.inner.dead_properties),
             ArchivedResource::ContactCard(_, content) => {
                 content.map(|content| &content.dead_properties)
@@ -451,7 +551,11 @@ impl<'x> ArchivedResource<'x> {
     pub fn content_length(&self) -> Option<u32> {
         match self {
             ArchivedResource::FileNode(archive) => archive.inner.file().map(|f| f.size.to_native()),
-            ArchivedResource::CalendarEvent(archive, _) => archive.inner.size.to_native().into(),
+            ArchivedResource::CalendarEvent(archive, content) => content
+                .as_ref()
+                .and_then(EventContent::view)
+                .map(|view| SizeWriter::ical(&view.data.event) as u32)
+                .or_else(|| archive.inner.size.to_native().into()),
             ArchivedResource::CalendarEventNotification(archive, _) => {
                 archive.inner.size.to_native().into()
             }
@@ -478,9 +582,10 @@ impl<'x> ArchivedResource<'x> {
 
     pub fn display_name(&self, account_id: u32) -> Option<&str> {
         match self {
-            ArchivedResource::Calendar(archive) => {
-                Some(archive.inner.preferences(account_id).name.as_str())
-            }
+            ArchivedResource::Calendar(archive) => archive
+                .inner
+                .preferences(account_id)
+                .map(|preferences| preferences.name.as_str()),
             ArchivedResource::CalendarEvent(archive, _) => archive.inner.display_name.as_deref(),
             ArchivedResource::AddressBook(archive) => {
                 Some(archive.inner.preferences(account_id).name.as_str())

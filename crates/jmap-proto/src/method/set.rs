@@ -296,4 +296,47 @@ impl<T: JmapObject> SetResponse<T> {
     pub fn has_changes(&self) -> bool {
         !self.created.is_empty() || !self.updated.is_empty() || !self.destroyed.is_empty()
     }
+
+    pub fn add_created_properties(
+        &mut self,
+        create_id: &str,
+        properties: impl IntoIterator<Item = (T::Property, Value<'static, T::Property, T::Element>)>,
+    ) {
+        if let Some(Value::Object(object)) = self.created.get_mut(create_id) {
+            for (property, value) in properties {
+                object.insert(property, value);
+            }
+        }
+    }
+
+    pub fn add_server_set_property(
+        &mut self,
+        id: Id,
+        property: T::Property,
+        value: impl Into<Value<'static, T::Property, T::Element>>,
+    ) {
+        self.add_server_set_properties(id, [(property, value.into())]);
+    }
+
+    pub fn add_server_set_properties(
+        &mut self,
+        id: Id,
+        properties: impl IntoIterator<Item = (T::Property, Value<'static, T::Property, T::Element>)>,
+    ) {
+        let mut properties = properties.into_iter().peekable();
+        if properties.peek().is_none() {
+            return;
+        }
+        if let Some(Value::Object(object)) = self.get_object_by_id(id) {
+            for (property, value) in properties {
+                object.insert(property, value);
+            }
+        } else {
+            let mut object = Map::with_capacity(properties.size_hint().0);
+            for (property, value) in properties {
+                object.insert(property, value);
+            }
+            self.updated.append(id, Some(Value::Object(object)));
+        }
+    }
 }

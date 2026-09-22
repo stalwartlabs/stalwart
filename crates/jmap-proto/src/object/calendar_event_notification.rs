@@ -11,7 +11,7 @@ use crate::{
 };
 use calcard::jscalendar::JSCalendar;
 use jmap_tools::{Element, Key, Property};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
@@ -23,41 +23,73 @@ pub struct CalendarEventNotification;
 pub struct CalendarEventNotificationObject {
     pub id: Id,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<UTCDate>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub created: ResponseProperty<UTCDate>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub changed_by: Option<PersonObject>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub changed_by: ResponseProperty<PersonObject>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub comment: ResponseProperty<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
     #[serde(rename = "type")]
-    pub notification_type: Option<CalendarEventNotificationType>,
+    pub notification_type: ResponseProperty<CalendarEventNotificationType>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub calendar_event_id: Option<Id>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub calendar_event_id: ResponseProperty<Id>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_draft: Option<bool>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub is_draft: ResponseProperty<bool>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event: Option<JSCalendar<'static, Id, BlobId>>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub event: ResponseProperty<JSCalendar<'static, Id, BlobId>>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event_patch: Option<JSCalendar<'static, Id, BlobId>>,
+    #[serde(skip_serializing_if = "ResponseProperty::is_not_requested")]
+    pub event_patch: ResponseProperty<JSCalendar<'static, Id, BlobId>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ResponseProperty<T> {
+    #[default]
+    NotRequested,
+    Requested(Option<T>),
+}
+
+impl<T> ResponseProperty<T> {
+    pub fn is_not_requested(&self) -> bool {
+        matches!(self, ResponseProperty::NotRequested)
+    }
+
+    pub fn value(&self) -> Option<&T> {
+        match self {
+            ResponseProperty::Requested(Some(value)) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T> From<Option<T>> for ResponseProperty<T> {
+    fn from(value: Option<T>) -> Self {
+        ResponseProperty::Requested(value)
+    }
+}
+
+impl<T: Serialize> Serialize for ResponseProperty<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.value() {
+            Some(value) => value.serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonObject {
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub principal_id: Option<Id>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar_address: Option<String>,
 }
 

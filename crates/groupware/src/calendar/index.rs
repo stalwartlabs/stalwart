@@ -12,15 +12,17 @@ use crate::{
     MetaHasher, SizeWriter,
     calendar::{
         ArchivedCalendarEventContent, ArchivedCalendarEventNotification,
-        ArchivedCalendarEventNotificationContent, ArchivedChangedBy, ArchivedEventPreferences,
-        CalendarEventContent, CalendarEventNotification, CalendarEventNotificationContent,
-        ChangedBy, EVENT_HAS_ALARMS, EVENT_HAS_DEAD_PROPERTIES, EventPreferences,
+        ArchivedCalendarEventNotificationContent, ArchivedChangedBy, CalendarEventContent,
+        CalendarEventNotification, CalendarEventNotificationContent, ChangedBy, EVENT_HAS_ALARMS,
+        EVENT_HAS_DEAD_PROPERTIES, EVENT_USES_DEFAULT_ALERTS, EventPreferences, PREF_HAS_ALERTS,
+        privacy::ICalendarPrivacy,
     },
     strip_mailto_scheme,
 };
 use ahash::AHashSet;
 use calcard::icalendar::{
-    ArchivedICalendarParameterValue, ArchivedICalendarProperty, ArchivedICalendarValue,
+    ArchivedICalendar, ArchivedICalendarComponentType, ArchivedICalendarParameterValue,
+    ArchivedICalendarProperty, ArchivedICalendarValue, ICalendar, ICalendarComponentType,
     ICalendarParameterValue, ICalendarProperty, ICalendarValue,
 };
 use common::storage::index::{
@@ -177,8 +179,7 @@ impl SplitObject for CalendarEvent {
         self.uid = content
             .data
             .event
-            .uids()
-            .next()
+            .object_uid()
             .unwrap_or_default()
             .to_string();
         let (start, duration) = content.data.event_range().unwrap_or_default();
@@ -190,11 +191,25 @@ impl SplitObject for CalendarEvent {
         } else {
             self.flags |= EVENT_HAS_DEAD_PROPERTIES;
         }
-        if content.data.alarms.is_empty() {
-            self.flags &= !EVENT_HAS_ALARMS;
+        let alarm_flags = if content
+            .preferences
+            .iter()
+            .any(EventPreferences::use_default_alerts)
+        {
+            EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS
+        } else if !content.data.alarms.is_empty()
+            || content.preferences.iter().any(|preferences| {
+                preferences.instances.iter().any(|instance| {
+                    instance.flags & PREF_HAS_ALERTS != 0 && !instance.alerts.is_empty()
+                })
+            })
+        {
+            EVENT_HAS_ALARMS
         } else {
-            self.flags |= EVENT_HAS_ALARMS;
-        }
+            0
+        };
+        self.flags = (self.flags & !(EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS)) | alarm_flags;
+        self.flags = content.data.event.privacy().apply_to_flags(self.flags);
     }
 
     fn full_index_values<'x>(&'x self, content: &'x CalendarEventContent) -> Vec<IndexValue<'x>> {
@@ -349,12 +364,16 @@ impl SplitObject for CalendarEventNotification {
                 hasher.u16(1).str(address);
             }
         }
+        for calendar_id in &self.calendar_ids {
+            hasher.u32(*calendar_id);
+        }
         hasher
             .opt_u32(self.event_id)
             .i64(self.created)
             .i64(self.modified)
             .u32(self.size)
             .u16(self.flags)
+            .u32(self.calendar_ids.len() as u32)
             .finish()
     }
 
@@ -367,7 +386,13 @@ impl SplitObject for CalendarEventNotification {
     }
 
     fn refresh_from_content(&mut self, content: &CalendarEventNotificationContent, _ctx: ()) {
-        self.size = SizeWriter::ical(&content.event) as u32;
+        self.size = content
+            .snapshots()
+            .into_iter()
+            .flatten()
+            .filter(|snapshot| !snapshot.components.is_empty())
+            .map(SizeWriter::ical)
+            .sum::<usize>() as u32;
     }
 
     fn full_index_values<'x>(
@@ -393,12 +418,16 @@ impl ArchivedSplitObject for ArchivedCalendarEventNotification {
                 hasher.u16(1).str(address);
             }
         }
+        for calendar_id in self.calendar_ids.iter() {
+            hasher.u32(calendar_id.to_native());
+        }
         hasher
             .opt_u32(self.event_id.as_ref().map(|id| id.to_native()))
             .i64(self.created.to_native())
             .i64(self.modified.to_native())
             .u32(self.size.to_native())
             .u16(self.flags.to_native())
+            .u32(self.calendar_ids.len() as u32)
             .finish()
     }
 
@@ -427,6 +456,46 @@ impl ArchivedSplitObject for ArchivedCalendarEventNotification {
         _content: &'x ArchivedCalendarEventNotificationContent,
     ) -> Vec<IndexValue<'x>> {
         self.meta_index_values()
+    }
+}
+
+pub trait ICalendarObjectUid {
+    fn object_uid(&self) -> Option<&str>;
+}
+
+impl ICalendarObjectUid for ICalendar {
+    fn object_uid(&self) -> Option<&str> {
+        self.components
+            .iter()
+            .filter(|component| {
+                matches!(
+                    component.component_type,
+                    ICalendarComponentType::VEvent
+                        | ICalendarComponentType::VTodo
+                        | ICalendarComponentType::VJournal
+                        | ICalendarComponentType::VFreebusy
+                        | ICalendarComponentType::VAvailability
+                )
+            })
+            .find_map(|component| component.uid())
+    }
+}
+
+impl ICalendarObjectUid for ArchivedICalendar {
+    fn object_uid(&self) -> Option<&str> {
+        self.components
+            .iter()
+            .filter(|component| {
+                matches!(
+                    component.component_type,
+                    ArchivedICalendarComponentType::VEvent
+                        | ArchivedICalendarComponentType::VTodo
+                        | ArchivedICalendarComponentType::VJournal
+                        | ArchivedICalendarComponentType::VFreebusy
+                        | ArchivedICalendarComponentType::VAvailability
+                )
+            })
+            .find_map(|component| component.uid())
     }
 }
 
@@ -475,7 +544,8 @@ impl CalendarEventNotification {
         (match &self.changed_by {
             ChangedBy::PrincipalId(_) => U32_LEN,
             ChangedBy::CalendarAddress(v) => v.len(),
-        }) + std::mem::size_of::<CalendarEventNotification>()
+        }) + ((self.calendar_ids.len() + self.dismissed_by.len()) * U32_LEN)
+            + std::mem::size_of::<CalendarEventNotification>()
     }
 }
 
@@ -484,7 +554,8 @@ impl ArchivedCalendarEventNotification {
         (match &self.changed_by {
             ArchivedChangedBy::PrincipalId(_) => U32_LEN,
             ArchivedChangedBy::CalendarAddress(v) => v.len(),
-        }) + std::mem::size_of::<CalendarEventNotification>()
+        }) + ((self.calendar_ids.len() + self.dismissed_by.len()) * U32_LEN)
+            + std::mem::size_of::<CalendarEventNotification>()
     }
 }
 
@@ -507,22 +578,6 @@ impl ArchivedCalendarPreferences {
             + self.color.as_ref().map_or(0, |n| n.len())
             + self.time_zone.size()
             + std::mem::size_of::<CalendarPreferences>()
-    }
-}
-
-impl EventPreferences {
-    pub fn size(&self) -> usize {
-        self.alerts.iter().map(|a| a.size()).sum::<usize>()
-            + self.properties.iter().map(|p| p.size()).sum::<usize>()
-            + std::mem::size_of::<EventPreferences>()
-    }
-}
-
-impl ArchivedEventPreferences {
-    pub fn size(&self) -> usize {
-        self.alerts.iter().map(|a| a.size()).sum::<usize>()
-            + self.properties.iter().map(|p| p.size()).sum::<usize>()
-            + std::mem::size_of::<EventPreferences>()
     }
 }
 
@@ -738,4 +793,118 @@ impl ArchiveCompression for CalendarEventNotification {
 
 impl ArchiveCompression for CalendarEventNotificationContent {
     const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Calendar));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calendar::{
+        CalendarEventData, EventUserData, PREF_USE_DEFAULT_ALERTS, alerts::DefaultAlerts,
+    };
+    use calcard::common::timezone::Tz;
+
+    const EVENT_WITH_ALARM: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:flags\r\n",
+        "DTSTART:20300101T100000Z\r\n",
+        "DTEND:20300101T110000Z\r\n",
+        "BEGIN:VALARM\r\n",
+        "ACTION:DISPLAY\r\n",
+        "TRIGGER:-PT5M\r\n",
+        "END:VALARM\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    fn content(ical: &str, preferences: Vec<EventPreferences>) -> CalendarEventContent {
+        CalendarEventContent {
+            data: CalendarEventData::new_with_default_alerts(
+                ICalendar::parse(ical).expect("valid iCalendar"),
+                Tz::UTC,
+                100,
+                &DefaultAlerts::disabled(),
+            ),
+            preferences,
+            ..Default::default()
+        }
+    }
+
+    fn flags_of(content: &CalendarEventContent) -> u16 {
+        let mut event = CalendarEvent::default();
+        event.refresh_from_content(content, ());
+        event.flags
+    }
+
+    fn uses_defaults(account_id: u32) -> EventPreferences {
+        EventPreferences {
+            account_id,
+            instances: vec![EventUserData {
+                flags: PREF_USE_DEFAULT_ALERTS,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn default_alert_flag_clears_when_no_entry_uses_defaults() {
+        let no_alarms = EVENT_WITH_ALARM.replace(
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n",
+            "",
+        );
+        let mut event = CalendarEvent::default();
+
+        event.refresh_from_content(
+            &content(EVENT_WITH_ALARM, vec![uses_defaults(1), uses_defaults(2)]),
+            (),
+        );
+        assert_ne!(event.flags & EVENT_USES_DEFAULT_ALERTS, 0);
+
+        event.refresh_from_content(&content(EVENT_WITH_ALARM, vec![uses_defaults(2)]), ());
+        assert_ne!(event.flags & EVENT_USES_DEFAULT_ALERTS, 0);
+
+        event.refresh_from_content(&content(EVENT_WITH_ALARM, vec![]), ());
+        assert_eq!(event.flags & EVENT_USES_DEFAULT_ALERTS, 0);
+        assert_eq!(event.flags & EVENT_HAS_ALARMS, EVENT_HAS_ALARMS);
+
+        event.refresh_from_content(&content(&no_alarms, vec![uses_defaults(1)]), ());
+        assert_eq!(
+            event.flags & (EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS),
+            EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS
+        );
+
+        event.refresh_from_content(&content(&no_alarms, vec![]), ());
+        assert_eq!(
+            event.flags & (EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS),
+            0
+        );
+    }
+
+    #[test]
+    fn default_alert_flag_follows_the_preferences() {
+        let own_alarms = flags_of(&content(EVENT_WITH_ALARM, vec![]));
+        assert_eq!(own_alarms & EVENT_HAS_ALARMS, EVENT_HAS_ALARMS);
+        assert_eq!(own_alarms & EVENT_USES_DEFAULT_ALERTS, 0);
+
+        let no_alarms = flags_of(&content(
+            &EVENT_WITH_ALARM.replace(
+                "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n",
+                "",
+            ),
+            vec![],
+        ));
+        assert_eq!(
+            no_alarms & (EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS),
+            0
+        );
+
+        for preferences in [vec![uses_defaults(2)], vec![uses_defaults(1)]] {
+            let flags = flags_of(&content(EVENT_WITH_ALARM, preferences));
+            assert_eq!(
+                flags & (EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS),
+                EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS
+            );
+        }
+    }
 }

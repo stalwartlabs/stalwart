@@ -7,7 +7,12 @@
 use crate::api::acl::{JmapAcl, JmapRights};
 use crate::api::pending_creates::PendingCreates;
 use crate::changes::state::JmapCacheState;
-use common::{Server, auth::AccessToken, sharing::EffectiveAcl, storage::quota::ObjectQuotaUsage};
+use common::{
+    Server,
+    auth::AccessToken,
+    sharing::{EffectiveAcl, grants::ShareUpdate},
+    storage::quota::ObjectQuotaUsage,
+};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -31,7 +36,7 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    acl::Acl,
+    acl::{Acl, AclGrant},
     collection::{Collection, SyncCollection},
     field::PrincipalField,
     id::Id,
@@ -125,14 +130,23 @@ impl AddressBookSet for Server {
 
             // Validate ACLs
             if !address_book.acls.is_empty() {
+                if let Err(err) = JmapRights::validate_shares::<addressbook::AddressBook, _>(
+                    ShareUpdate {
+                        collection: Collection::AddressBook,
+                        owner_id: account_id,
+                        actor: None,
+                        current: &[] as &[AclGrant],
+                        max_shares: self.core.groupware.max_shares_per_item,
+                    },
+                    &address_book.acls,
+                ) {
+                    response.not_created.append(id, err);
+                    continue 'create;
+                }
                 if let Err(err) = self.acl_validate(&address_book.acls).await {
                     response.not_created.append(id, err.into());
                     continue 'create;
                 }
-
-                self.refresh_acls(&address_book.acls, None)
-                    .await
-                    .caused_by(trc::location!())?;
             }
 
             // Insert record
@@ -190,6 +204,13 @@ impl AddressBookSet for Server {
             let address_book = address_book_
                 .to_unarchived::<AddressBook>()
                 .caused_by(trc::location!())?;
+
+            let acl = is_shared.then(|| address_book.inner.acls.effective_acl(access_token));
+            if acl.is_some_and(|acl| !acl.contains_any([Acl::Read, Acl::ReadItems].into_iter())) {
+                response.not_updated.append(id, SetError::not_found());
+                continue 'update;
+            }
+
             let mut new_address_book = address_book
                 .deserialize::<AddressBook>()
                 .caused_by(trc::location!())?;
@@ -210,28 +231,32 @@ impl AddressBookSet for Server {
             };
 
             // Validate ACL
-            if is_shared {
-                let acl = address_book.inner.acls.effective_acl(access_token);
-                if !acl.contains(Acl::Modify) || (has_acl_changes && !acl.contains(Acl::Share)) {
-                    response.not_updated.append(
-                        id,
-                        SetError::forbidden()
-                            .with_description("You are not allowed to modify this address book."),
-                    );
-                    continue 'update;
-                }
+            if acl.is_some_and(|acl| has_acl_changes && !acl.contains(Acl::Share)) {
+                response.not_updated.append(
+                    id,
+                    SetError::forbidden()
+                        .with_description("You are not allowed to share this address book."),
+                );
+                continue 'update;
             }
             if has_acl_changes {
+                if let Err(err) = JmapRights::validate_shares::<addressbook::AddressBook, _>(
+                    ShareUpdate {
+                        collection: Collection::AddressBook,
+                        owner_id: account_id,
+                        actor: acl,
+                        current: &address_book.inner.acls,
+                        max_shares: self.core.groupware.max_shares_per_item,
+                    },
+                    &new_address_book.acls,
+                ) {
+                    response.not_updated.append(id, err);
+                    continue 'update;
+                }
                 if let Err(err) = self.acl_validate(&new_address_book.acls).await {
                     response.not_updated.append(id, err.into());
                     continue 'update;
                 }
-                self.refresh_archived_acls(
-                    &new_address_book.acls,
-                    address_book.inner.acls.as_slice(),
-                )
-                .await
-                .caused_by(trc::location!())?;
             }
 
             // Update record
@@ -290,7 +315,7 @@ impl AddressBookSet for Server {
                         .inner
                         .acls
                         .effective_acl(access_token)
-                        .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
+                        .contains(Acl::Delete)
                 {
                     response.not_destroyed.append(
                         id,
@@ -455,8 +480,13 @@ fn update_address_book(
             (AddressBookProperty::Description, Value::Null) => {
                 address_book.preferences_mut(personal_id).description = None;
             }
-            (AddressBookProperty::SortOrder, Value::Number(value)) => {
-                address_book.preferences_mut(personal_id).sort_order = value.cast_to_u64() as u32;
+            (AddressBookProperty::SortOrder, Value::Number(value))
+                if let Some(sort_order) = value
+                    .as_u64()
+                    .and_then(|sort_order| u32::try_from(sort_order).ok())
+                    .filter(|sort_order| *sort_order < 1 << 31) =>
+            {
+                address_book.preferences_mut(personal_id).sort_order = sort_order;
             }
             (AddressBookProperty::IsSubscribed, Value::Bool(subscribe)) => {
                 if subscribe {

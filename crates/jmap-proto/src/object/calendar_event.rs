@@ -14,7 +14,7 @@ use calcard::{
 };
 use jmap_tools::{JsonPointerItem, Key};
 use mail_parser::DateTime;
-use std::{borrow::Cow, str::FromStr};
+use std::borrow::Cow;
 use types::{blob::BlobId, id::Id};
 
 #[derive(Debug, Clone, Default)]
@@ -69,12 +69,11 @@ impl JmapObjectId for JSCalendarValue<Id, BlobId> {
     }
 
     fn try_set_id(&mut self, new_id: AnyId) -> bool {
-        if let AnyId::Id(id) = new_id {
-            *self = JSCalendarValue::Id(id);
-            true
-        } else {
-            false
-        }
+        *self = match new_id {
+            AnyId::Id(id) => JSCalendarValue::Id(id),
+            AnyId::BlobId(id) => JSCalendarValue::BlobId(id),
+        };
+        true
     }
 }
 
@@ -108,7 +107,7 @@ pub struct CalendarEventGetArguments {
     pub recurrence_overrides_before: Option<JSCalendarDateTime>,
     pub recurrence_overrides_after: Option<JSCalendarDateTime>,
     pub reduce_participants: Option<bool>,
-    pub time_zone: Option<Tz>,
+    pub time_zone: Option<MaybeInvalid<Tz>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -119,7 +118,34 @@ pub struct CalendarEventSetArguments {
 #[derive(Debug, Clone, Default)]
 pub struct CalendarEventQueryArguments {
     pub expand_recurrences: Option<bool>,
-    pub time_zone: Option<Tz>,
+    pub time_zone: Option<MaybeInvalid<Tz>>,
+}
+
+impl CalendarEventGetArguments {
+    pub fn resolved_time_zone(&self) -> trc::Result<Tz> {
+        self.time_zone
+            .as_ref()
+            .map_or(Ok(Tz::UTC), MaybeInvalid::to_time_zone)
+    }
+}
+
+impl CalendarEventQueryArguments {
+    pub fn resolved_time_zone(&self) -> trc::Result<Tz> {
+        self.time_zone
+            .as_ref()
+            .map_or(Ok(Tz::UTC), MaybeInvalid::to_time_zone)
+    }
+}
+
+impl MaybeInvalid<Tz> {
+    fn to_time_zone(&self) -> trc::Result<Tz> {
+        match self {
+            MaybeInvalid::Value(tz) => Ok(*tz),
+            MaybeInvalid::Invalid(tz) => Err(trc::JmapEvent::InvalidArguments
+                .into_err()
+                .details(format!("Invalid timeZone {tz:?}"))),
+        }
+    }
 }
 
 impl<'de> DeserializeArguments<'de> for CalendarEventFilter {
@@ -217,7 +243,7 @@ impl<'de> DeserializeArguments<'de> for CalendarEventGetArguments {
                 self.reduce_participants = map.next_value()?;
             },
             b"timeZone" => {
-                self.time_zone = map.next_value::<Option<&str>>()?.and_then(|s| Tz::from_str(s).ok());
+                self.time_zone = map.next_value()?;
             },
             _ => {
                 let _ = map.next_value::<serde::de::IgnoredAny>()?;
@@ -254,7 +280,7 @@ impl<'de> DeserializeArguments<'de> for CalendarEventQueryArguments {
                 self.expand_recurrences = map.next_value()?;
             },
             b"timeZone" => {
-                self.time_zone = map.next_value::<Option<&str>>()?.and_then(|s| Tz::from_str(s).ok());
+                self.time_zone = map.next_value()?;
             },
             _ => {
                 let _ = map.next_value::<serde::de::IgnoredAny>()?;

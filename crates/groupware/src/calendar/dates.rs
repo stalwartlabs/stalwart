@@ -5,10 +5,11 @@
  */
 
 use super::{
-    ArchivedCalendarEventData, ArchivedTimezone, CalendarEventData, Timezone,
-    alarm::{CalendarAlarm, ExpandAlarm},
+    Alarm, ArchivedCalendarEventData, ArchivedTimezone, CalendarEventData, Timezone,
+    alarm::ExpandAlarm,
+    alerts::{DefaultAlerts, ICalendarDefaultAlerts},
 };
-use crate::calendar::{ComponentTimeRange, alarm::CalendarAlarmType};
+use crate::calendar::ComponentTimeRange;
 use calcard::{
     common::timezone::Tz,
     icalendar::{ICalendar, ICalendarComponentType, dates::TimeOrDelta},
@@ -17,7 +18,7 @@ use compact_str::ToCompactString;
 use indexmap::IndexMap;
 use store::{
     ahash::{AHashMap, RandomState},
-    write::{key::KeySerializer, now},
+    write::key::KeySerializer,
 };
 #[cfg(test)]
 use utils::codec::leb128::Leb128Reader;
@@ -25,21 +26,27 @@ use utils::codec::leb128::Leb128Reader;
 const MAX_TIME_SPAN: i64 = u32::MAX as i64;
 
 impl CalendarEventData {
-    pub fn new(
+    pub fn new(ical: ICalendar, default_tz: Tz, max_expansions: usize) -> Self {
+        Self::new_with_default_alerts(ical, default_tz, max_expansions, &DefaultAlerts::disabled())
+    }
+
+    pub fn new_with_default_alerts(
         ical: ICalendar,
         default_tz: Tz,
         max_expansions: usize,
-        next_email_alarm: &mut Option<CalendarAlarm>,
+        default_alerts: &DefaultAlerts,
     ) -> Self {
         let mut ranges = TimeRanges::default();
-        let now = now() as i64;
 
         let expanded = ical.expand_dates(default_tz, max_expansions);
         let mut groups: IndexMap<(u16, u16, u16, i32), Vec<i64>, RandomState> =
             IndexMap::with_capacity_and_hasher(16, RandomState::default());
-        let mut alarms = AHashMap::with_capacity(16);
+        let mut alarms: AHashMap<u16, Vec<Alarm>> = AHashMap::with_capacity(16);
 
         for event in expanded.events {
+            let Ok(comp_id) = u16::try_from(event.comp_id) else {
+                continue;
+            };
             let start_naive = event.start.naive_local();
             let start_tz = event.start.timezone().as_id();
             let start_timestamp_utc = event.start.timestamp();
@@ -66,73 +73,36 @@ impl CalendarEventData {
             };
 
             // Expand alarms
-            let mut min = std::cmp::min(start_timestamp_utc, end_timestamp_utc);
-            let mut max = std::cmp::max(start_timestamp_utc, end_timestamp_utc);
-            for alarm in alarms.entry(event.comp_id).or_insert_with(|| {
+            alarms.entry(comp_id).or_insert_with(|| {
                 ical.component_by_id(event.comp_id)
                     .map_or(&[][..], |c| c.component_ids.as_slice())
                     .iter()
                     .filter_map(|alarm_id| {
+                        let id = u16::try_from(*alarm_id).ok()?;
                         ical.component_by_id(*alarm_id).and_then(|alarm| {
-                            if alarm.component_type == ICalendarComponentType::VAlarm {
-                                alarm.expand_alarm(*alarm_id as u16, event.comp_id as u16)
+                            if alarm.component_type == ICalendarComponentType::VAlarm
+                                && (!default_alerts.is_enabled()
+                                    || ical.is_kept_with_default_alerts(alarm, default_alerts))
+                            {
+                                alarm.expand_alarm(id, comp_id)
                             } else {
                                 None
                             }
                         })
                     })
                     .collect::<Vec<_>>()
-            }) {
-                if let Some(alarm_time) =
-                    alarm
-                        .delta
-                        .to_timestamp(start_timestamp_utc, end_timestamp_utc, default_tz)
-                {
-                    if alarm_time < min {
-                        min = alarm_time;
-                    }
-                    if alarm_time > max {
-                        max = alarm_time;
-                    }
-                    if alarm_time > now
-                        && next_email_alarm
-                            .as_ref()
-                            .is_none_or(|next| alarm_time < next.alarm_time)
-                    {
-                        *next_email_alarm = Some(CalendarAlarm {
-                            alarm_id: alarm.id,
-                            event_id: alarm.parent_id,
-                            alarm_time,
-                            typ: if alarm.is_email_alert {
-                                CalendarAlarmType::Email {
-                                    event_start: start_timestamp_naive,
-                                    event_end: end_timestamp_naive,
-                                    event_start_tz: start_tz,
-                                    event_end_tz: end_tz,
-                                }
-                            } else {
-                                CalendarAlarmType::Display {
-                                    recurrence_id: if ical.components[alarm.parent_id as usize]
-                                        .is_recurrent_or_override()
-                                    {
-                                        start_timestamp_naive.into()
-                                    } else {
-                                        None
-                                    },
-                                }
-                            },
-                        });
-                    }
-                }
-            }
+            });
 
             ranges.update_base_offset(start_timestamp_naive, end_timestamp_naive);
-            ranges.update_utc_min_max(min, max);
+            ranges.update_utc_min_max(
+                std::cmp::min(start_timestamp_utc, end_timestamp_utc),
+                std::cmp::max(start_timestamp_utc, end_timestamp_utc),
+            );
             groups
                 .entry((
                     start_tz,
                     end_tz,
-                    event.comp_id as u16,
+                    comp_id,
                     (end_timestamp_naive - start_timestamp_naive)
                         .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
                 ))
@@ -303,7 +273,74 @@ impl ArchivedTimezone {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calendar::CalendarEventData;
+    use crate::calendar::{
+        ALERT_WITH_TIME, CALENDAR_SUBSCRIBED, Calendar, CalendarEventData, CalendarPreferences,
+        DefaultAlert, alerts::CalendarSettings,
+    };
+    use calcard::icalendar::ICalendarDuration;
+    use chrono::NaiveDate;
+
+    const ALARMED_EVENT: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:long-alarm\r\n",
+        "DTSTART:20300310T100000Z\r\n",
+        "DTEND:20300310T110000Z\r\n",
+        "BEGIN:VALARM\r\n",
+        "ACTION:DISPLAY\r\n",
+        "TRIGGER:-P1D\r\n",
+        "END:VALARM\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    fn utc(day: u32, hour: u32) -> i64 {
+        NaiveDate::from_ymd_opt(2030, 3, day)
+            .and_then(|date| date.and_hms_opt(hour, 0, 0))
+            .map(|date_time| date_time.and_utc().timestamp())
+            .expect("valid date")
+    }
+
+    fn default_alerts(offset: i64) -> DefaultAlerts {
+        let calendar = Calendar {
+            preferences: vec![CalendarPreferences {
+                account_id: 1,
+                flags: CALENDAR_SUBSCRIBED,
+                default_alerts: vec![DefaultAlert {
+                    id: "d".to_string(),
+                    offset: ICalendarDuration::from_seconds(offset),
+                    flags: ALERT_WITH_TIME,
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        DefaultAlerts::merge(
+            std::iter::once(&CalendarSettings::from(&calendar)),
+            1,
+            None,
+            true,
+        )
+    }
+
+    #[test]
+    fn alarm_times_do_not_widen_the_event_range() {
+        let parse = || ICalendar::parse(ALARMED_EVENT).expect("failed to parse fixture");
+
+        let data = CalendarEventData::new(parse(), Tz::UTC, 100);
+        assert_eq!(data.event_range_start(), utc(10, 10));
+        assert_eq!(data.event_range_end(), utc(10, 11));
+        assert_eq!(data.alarms.len(), 1);
+
+        let data = CalendarEventData::new_with_default_alerts(
+            parse(),
+            Tz::UTC,
+            100,
+            &default_alerts(-172800),
+        );
+        assert_eq!(data.event_range_start(), utc(10, 10));
+        assert_eq!(data.event_range_end(), utc(10, 11));
+    }
 
     #[test]
     fn duplicate_expansion_offsets_round_trip() {
@@ -321,8 +358,7 @@ mod tests {
         ))
         .expect("failed to parse fixture");
 
-        let mut next_alarm = None;
-        let data = CalendarEventData::new(ical, Tz::UTC, 100, &mut next_alarm);
+        let data = CalendarEventData::new(ical, Tz::UTC, 100);
 
         for range in data.time_ranges.iter() {
             let instances = range.instances.as_ref();

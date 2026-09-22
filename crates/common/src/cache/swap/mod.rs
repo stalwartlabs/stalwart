@@ -376,7 +376,7 @@ impl SwapTier {
         match &self.backend {
             SwapBackend::Disabled => Ok(None),
             SwapBackend::File(store) => store.load(key).await,
-            SwapBackend::Blob(store) => store.load(key).await,
+            SwapBackend::Blob(store) => Box::pin(store.load(key)).await,
             #[cfg(feature = "redis")]
             SwapBackend::Redis(store) => Box::pin(store.load(key)).await,
         }
@@ -386,7 +386,7 @@ impl SwapTier {
         match &self.backend {
             SwapBackend::Disabled => Ok(()),
             SwapBackend::File(store) => store.store(key, data).await,
-            SwapBackend::Blob(store) => store.store(key, data).await,
+            SwapBackend::Blob(store) => Box::pin(store.store(key, data)).await,
             #[cfg(feature = "redis")]
             SwapBackend::Redis(store) => Box::pin(store.store(key, data)).await,
         }
@@ -396,7 +396,7 @@ impl SwapTier {
         match &self.backend {
             SwapBackend::Disabled => Ok(()),
             SwapBackend::File(store) => store.remove(key).await,
-            SwapBackend::Blob(store) => store.remove(key).await,
+            SwapBackend::Blob(store) => Box::pin(store.remove(key)).await,
             #[cfg(feature = "redis")]
             SwapBackend::Redis(store) => Box::pin(store.remove(key)).await,
         }

@@ -316,6 +316,7 @@ fn sample_resources(items: usize) -> GroupwareResources {
                 modified_at: -(document_id as i32),
                 uid,
                 etag: document_id,
+                flags: (document_id % 4) as u16 * 0x40,
             },
         });
         entries.push((
@@ -409,6 +410,7 @@ fn assert_resources_match(backend: &str, left: &GroupwareResources, right: &Grou
             "{backend}: is container"
         );
         assert_eq!(a.uid(), b.uid(), "{backend}: uid");
+        assert_eq!(a.event_flags(), b.event_flags(), "{backend}: event flags");
         assert_eq!(
             a.event_time_range(),
             b.event_time_range(),

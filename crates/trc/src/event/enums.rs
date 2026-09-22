@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 645;
+pub const TOTAL_EVENT_COUNT: usize = 650;
 pub const TOTAL_METRIC_COUNT: usize = 370;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -417,6 +417,11 @@ pub enum JmapEvent {
     WebsocketStart = 235,
     WebsocketStop = 236,
     WebsocketError = 234,
+    ExpandDurationTooLarge = 645,
+    CannotCalculateOccurrences = 646,
+    TooLarge = 647,
+    RateLimit = 648,
+    ObjectNotFound = 649,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

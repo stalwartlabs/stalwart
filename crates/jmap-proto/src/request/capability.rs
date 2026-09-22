@@ -120,6 +120,7 @@ pub enum Capabilities {
     Blob(BlobCapabilities),
     Contacts(ContactsCapabilities),
     Principals(PrincipalCapabilities),
+    PrincipalsOwner(PrincipalOwnerCapabilities),
     PrincipalsAvailability(PrincipalAvailabilityCapabilities),
     Calendar(CalendarCapabilities),
     FileNode(FileNodeCapabilities),
@@ -251,26 +252,13 @@ pub struct PrincipalCapabilities {
     pub current_user_principal_id: Option<Id>,
 }
 
-/*#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PrincipalOwnerCapabilities {
     #[serde(rename(serialize = "accountIdForPrincipal"))]
     pub account_id_for_principal: Id,
-
     #[serde(rename(serialize = "principalId"))]
     pub principal_id: Id,
 }
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct PrincipalCalendarCapabilities {
-    #[serde(rename(serialize = "accountIdForPrincipal"))]
-    pub account_id_for_principal: Option<Id>,
-    #[serde(rename(serialize = "mayGetAvailability"))]
-    pub may_get_availability: bool,
-    #[serde(rename(serialize = "mayShareWith"))]
-    pub may_share_with: bool,
-    #[serde(rename(serialize = "calendarAddress"))]
-    pub calendar_address: String,
-}*/
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileNodeCapabilities {

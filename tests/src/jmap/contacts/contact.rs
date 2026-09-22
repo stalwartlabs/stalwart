@@ -19,6 +19,8 @@ use serde_json::{Value, json};
 use std::str::FromStr;
 use types::{collection::SyncCollection, id::Id};
 
+const MAX_VCARD_SIZE: usize = 524_288;
+
 pub async fn test(test: &TestServer) {
     println!("Running Contact Card tests...");
     let account = test.account("jdoe@example.com");
@@ -233,6 +235,51 @@ pub async fn test(test: &TestServer) {
     response.updated(&sarah_contact_id);
     response.updated(&carlos_contact_id);
     response.updated(&acme_contact_id);
+
+    // Patches that cannot be applied are rejected as invalid patches
+    let response = account
+        .jmap_update(
+            MethodObject::ContactCard,
+            [(&sarah_contact_id, json!({"name/missing/value": "O'Connor"}))],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    assert_eq!(
+        response.not_updated(&sarah_contact_id).typ(),
+        "invalidPatch",
+        "{response:?}"
+    );
+
+    // Contacts that exceed the maximum vCard size are too large
+    let large_notes = json!({"large": {"@type": "Note", "note": "x".repeat(MAX_VCARD_SIZE)}});
+    assert_eq!(
+        account
+            .jmap_update(
+                MethodObject::ContactCard,
+                [(&sarah_contact_id, json!({"notes": &large_notes}))],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .not_updated(&sarah_contact_id)
+            .typ(),
+        "tooLarge"
+    );
+    assert_eq!(
+        account
+            .jmap_create(
+                MethodObject::ContactCard,
+                [json!({
+                    "addressBookIds": { &book1_id: true },
+                    "name": {"full": "Large Contact"},
+                    "notes": &large_notes
+                })],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .not_created(0)
+            .typ(),
+        "tooLarge"
+    );
 
     // Verify patches
     let response = account
@@ -613,6 +660,70 @@ END:VCARD"#
         .into_propfind_response(None)
         .properties(&href_in_book2)
         .with_status(StatusCode::NOT_FOUND);
+
+    // Converted vCard parameters of media do not depend on whether media is requested
+    let (book2_path, _) = href_in_book2.rsplit_once('/').expect("address book path");
+    dav_client
+        .request(
+            "PUT",
+            &format!("{book2_path}/photo.vcf"),
+            concat!(
+                "BEGIN:VCARD\r\n",
+                "VERSION:4.0\r\n",
+                "UID:urn:uuid:5a3e0c1d-7f4b-4d0e-9d38-2c61f0b8e4a7\r\n",
+                "FN:Photo Media\r\n",
+                "PHOTO;ALTID=1;LANGUAGE=en:data:image/png;base64,iVBORw0KGgoA/w==\r\n",
+                "END:VCARD\r\n"
+            ),
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    let photo_contact_id = account
+        .jmap_get(
+            MethodObject::ContactCard,
+            [JSContactProperty::<Id>::Id, JSContactProperty::Name],
+            Vec::<&str>::new(),
+        )
+        .await
+        .list()
+        .iter()
+        .find(|contact| contact["name"]["full"] == "Photo Media")
+        .expect("contact created over CardDAV")
+        .id()
+        .to_string();
+    let vcard_only = account
+        .jmap_get(
+            MethodObject::ContactCard,
+            [JSContactProperty::<Id>::VCard],
+            [&photo_contact_id],
+        )
+        .await
+        .list()[0]["vCard"]
+        .clone();
+    let with_media = account
+        .jmap_get(
+            MethodObject::ContactCard,
+            [JSContactProperty::<Id>::VCard, JSContactProperty::Media],
+            [&photo_contact_id],
+        )
+        .await
+        .list()[0]
+        .clone();
+    let media_id = with_media["media"]
+        .as_object()
+        .and_then(|media| media.keys().next())
+        .expect("photo media");
+    assert!(
+        with_media["media"][media_id]["blobId"].is_string(),
+        "{with_media}"
+    );
+    assert!(
+        vcard_only["convertedProperties"]
+            .get(format!("media/{media_id}/blobId"))
+            .is_some(),
+        "{vcard_only}"
+    );
+    assert_eq!(vcard_only, with_media["vCard"]);
 
     // Clean up
     test.wait_for_tasks().await;
@@ -1349,14 +1460,14 @@ EMAIL;TYPE=HOME,PREF;PROP-ID=k2:sarahjpersonal@example.com
 TEL;TYPE=PREF,CELL,VOICE;PROP-ID=k1:+1-555-123-4567
 TEL;TYPE=WORK,VOICE;PROP-ID=k2:+1-555-987-6543
 TEL;TYPE=HOME,VOICE;PROP-ID=k3:+1-555-456-7890
-ADR;TYPE=WORK;LABEL="123 Business Ave\nSuite 400\nNew York, NY 10001\nUSA";
+ADR;TYPE=WORK;LABEL="123 Business Ave^nSuite 400^nNew York, NY 10001^nUSA";
  TZ=Etc/GMT+5;GEO="40.7128;-74.0060";PROP-ID=k1;JSCOMPS=";11;3;4;5;6":;;123
   Business Ave;New York;NY;10001;USA;;;;;123 Business Ave;;;;;;
-ADR;TYPE=HOME,PREF;LABEL="456 Residential St\nApt 7B\nBrooklyn, NY 11201\nU
+ADR;TYPE=HOME,PREF;LABEL="456 Residential St^nApt 7B^nBrooklyn, NY 11201^nU
  SA";PROP-ID=k2;JSCOMPS=";11;3;4;5;6":;;456 Residential St;Brooklyn;NY;1120
  1;USA;;;;;456 Residential St;;;;;;
 TITLE;PROP-ID=k1:Senior Research Scientist
-JSPROP;JSPTR=titles/k2/organizationId:"k1"
+JSPROP;JSPTR="titles/k2/organizationId":"k1"
 ROLE;PROP-ID=k2:Team Lead
 NICKNAME;PROP-ID=k1:Sadie
 NOTE;PROP-ID=k1:Sarah prefers video calls over phone calls. Available Mon-T

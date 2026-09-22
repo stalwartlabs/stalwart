@@ -7,7 +7,7 @@
 use crate::{
     DavError, DavMethod,
     common::{
-        ETag,
+        ContainerOperation, ETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -96,7 +96,7 @@ impl CardDeleteRequestHandler for Server {
                     .inner
                     .acls
                     .effective_acl(access_token)
-                    .contains_all([Acl::Delete, Acl::RemoveItems].into_iter())
+                    .contains_all(ContainerOperation::Remove.required_acls())
             {
                 return Err(DavError::Code(StatusCode::FORBIDDEN));
             }

@@ -5,6 +5,7 @@
  */
 
 use crate::api::pending_creates::PendingCreates;
+use crate::blob::embedded::EmbeddedExport;
 use crate::changes::state::JmapCacheState;
 use crate::contact::assert_is_unique_uid;
 use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
@@ -214,15 +215,14 @@ impl ContactCardSet for Server {
             }
 
             // Convert JSContact to vCard
-            if let Some(vcard) = js_contact.into_vcard() {
-                new_content.card = vcard;
-            } else {
-                response.not_updated.append(
-                    id,
-                    SetError::invalid_properties()
-                        .with_description("Failed to convert contact to vCard."),
-                );
-                continue 'update;
+            match self.export_vcard(access_token, js_contact).await? {
+                Ok(vcard) => {
+                    new_content.card = vcard;
+                }
+                Err(err) => {
+                    response.not_updated.append(id, err);
+                    continue 'update;
+                }
             }
 
             // Validate UID
@@ -313,18 +313,16 @@ impl ContactCardSet for Server {
             }
 
             // Check size and quota
-            if new_contact_card.size as usize > self.core.groupware.max_vcard_size {
+            let size = SizeWriter::vcard(&new_content.card, self.core.groupware.vcard_version);
+            if size > self.core.groupware.max_vcard_size {
                 response.not_updated.append(
                     id,
-                    SetError::invalid_properties().with_description(format!(
-                        "Contact size {} exceeds the maximum allowed size of {} bytes.",
-                        new_contact_card.size, self.core.groupware.max_vcard_size
-                    )),
+                    contact_too_large(size, self.core.groupware.max_vcard_size),
                 );
                 continue 'update;
             }
-            let extra_bytes = (new_contact_card.size as u64)
-                .saturating_sub(u32::from(contact_card.inner.size) as u64);
+            let extra_bytes =
+                (size as u64).saturating_sub(u32::from(contact_card.inner.size) as u64);
             if extra_bytes > 0 {
                 match self.has_available_quota(&account, extra_bytes).await {
                     Ok(_) => {}
@@ -482,9 +480,9 @@ impl ContactCardSet for Server {
         }
 
         // Convert JSContact to vCard
-        let Some(card) = js_contact.into_vcard() else {
-            return Ok(Err(SetError::invalid_properties()
-                .with_description("Failed to convert contact to vCard.")));
+        let card = match self.export_vcard(access_token, js_contact).await? {
+            Ok(card) => card,
+            Err(err) => return Ok(Err(err)),
         };
 
         // Validate UID
@@ -495,11 +493,9 @@ impl ContactCardSet for Server {
         // Check size and quota
         let size = SizeWriter::vcard(&card, self.core.groupware.vcard_version);
         if size > self.core.groupware.max_vcard_size {
-            return Ok(Err(SetError::invalid_properties().with_description(
-                format!(
-                    "Contact size {} exceeds the maximum allowed size of {} bytes.",
-                    size, self.core.groupware.max_vcard_size
-                ),
+            return Ok(Err(contact_too_large(
+                size,
+                self.core.groupware.max_vcard_size,
             )));
         }
         match self.has_available_quota(account, size as u64).await {
@@ -537,6 +533,12 @@ pub(crate) fn too_many_contacts() -> SetError<JSContactProperty<Id>> {
     SetError::over_quota().with_description(concat!(
         "There are too many contact cards, ",
         "please delete some before adding a new one."
+    ))
+}
+
+fn contact_too_large(size: usize, max_size: usize) -> SetError<JSContactProperty<Id>> {
+    SetError::too_large().with_description(format!(
+        "Contact size {size} exceeds the maximum allowed size of {max_size} bytes."
     ))
 }
 
@@ -578,24 +580,16 @@ fn update_contact_card<'x>(
                     pointer.next();
                     patch_parent_ids(addressbooks, pointer.next(), value)?;
                 } else if !js_contact.0.patch_jptr(pointer.iter(), value) {
-                    return Err(SetError::invalid_properties()
+                    let error = if expected_id.is_some() {
+                        SetError::invalid_patch()
+                    } else {
+                        SetError::invalid_properties()
+                    };
+                    return Err(error
                         .with_property(JSContactProperty::Pointer(pointer))
                         .with_description("Patch operation failed."));
                 }
                 entries = js_contact.0.as_object_mut().unwrap();
-            }
-            (JSContactProperty::Media, Value::Object(media)) => {
-                for (_, value) in media.iter() {
-                    if value.as_object().is_some_and(|v| {
-                        v.keys()
-                            .any(|k| matches!(k, Key::Property(JSContactProperty::BlobId)))
-                    }) {
-                        return Err(SetError::invalid_properties()
-                            .with_property(JSContactProperty::Media)
-                            .with_description("blobIds in media is not supported."));
-                    }
-                }
-                entries.insert(JSContactProperty::Media, Value::Object(media));
             }
             (JSContactProperty::Id, value) => {
                 if !expected_id.is_some_and(|expected| crate::matches_id(&value, expected)) {

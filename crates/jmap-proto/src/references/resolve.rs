@@ -29,6 +29,8 @@ use jmap_tools::{Element, Key, Property, Value};
 use std::collections::HashMap;
 use types::id::Id;
 
+const EMBEDDED_BLOB_REFERENCE_DEPTH: usize = 8;
+
 impl Response<'_> {
     pub fn resolve_references(&self, request: &mut RequestMethod) -> trc::Result<()> {
         match request {
@@ -79,7 +81,7 @@ impl Response<'_> {
                     request.resolve_references(self, 1, false)?
                 }
                 SetRequestMethod::ContactCard(request) => {
-                    request.resolve_references(self, 1, false)?
+                    request.resolve_references(self, EMBEDDED_BLOB_REFERENCE_DEPTH, false)?
                 }
                 SetRequestMethod::FileNode(request) => {
                     request.resolve_references(self, 1, false)?
@@ -91,7 +93,7 @@ impl Response<'_> {
                     request.resolve_references(self, 1, false)?
                 }
                 SetRequestMethod::CalendarEvent(request) => {
-                    request.resolve_references(self, 1, false)?
+                    request.resolve_references(self, EMBEDDED_BLOB_REFERENCE_DEPTH, false)?
                 }
                 SetRequestMethod::CalendarEventNotification(request) => {
                     request.resolve_references(self, 1, false)?
@@ -102,15 +104,15 @@ impl Response<'_> {
                 SetRequestMethod::Registry(request) => request.resolve_references(self, 5, true)?,
             },
             RequestMethod::Copy(request) => match request {
-                CopyRequestMethod::Email(request) => request.resolve_references(self, 1, false)?,
+                CopyRequestMethod::Email(request) => request.resolve_references(self, 2, false)?,
                 CopyRequestMethod::CalendarEvent(request) => {
-                    request.resolve_references(self, 1, false)?
+                    request.resolve_references(self, EMBEDDED_BLOB_REFERENCE_DEPTH, false)?
                 }
                 CopyRequestMethod::ContactCard(request) => {
-                    request.resolve_references(self, 1, false)?
+                    request.resolve_references(self, EMBEDDED_BLOB_REFERENCE_DEPTH, false)?
                 }
                 CopyRequestMethod::FileNode(request) => {
-                    request.resolve_references(self, 1, false)?
+                    request.resolve_references(self, 2, false)?
                 }
                 CopyRequestMethod::Blob(_) => (),
             },
@@ -309,12 +311,8 @@ impl<'x, T: JmapObject> ResolveSetReference for CopyRequest<'x, T> {
         eval_strings: bool,
     ) -> trc::Result<()> {
         // Resolve create references
-        for (id, obj) in self.create.iter_mut() {
+        for obj in self.create.values_mut() {
             obj.eval_object_references(response, &mut Graph::None, 0, max_depth, eval_strings)?;
-
-            if let MaybeIdReference::Reference(ir) = id {
-                *id = MaybeIdReference::Id(response.eval_id_reference(ir)?);
-            }
         }
 
         Ok(())

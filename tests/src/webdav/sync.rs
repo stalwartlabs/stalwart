@@ -8,8 +8,10 @@ use crate::utils::{server::TestServer, webdav::GenerateTestDavResource};
 
 use ahash::AHashSet;
 use dav_proto::Depth;
-use groupware::DavResourceName;
+use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
+use serde_json::json;
+use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(test: &TestServer) {
     let client = test.account("john@example.com").webdav_client();
@@ -287,6 +289,135 @@ pub async fn test(test: &TestServer) {
             );
     }
 
+    // Sharees are told when a shared collection is deleted
+    let owner_client = test.account("jane@example.com").webdav_client();
+    let sharee_principal = format!(
+        "{}/john%40example.com/",
+        DavResourceName::Principal.base_path()
+    );
+    let owner_base_path = format!("{}/jane%40example.com/", DavResourceName::Cal.base_path());
+    let shared_folder = format!("{owner_base_path}shared-sync/");
+    let kept_folder = format!("{owner_base_path}kept-sync/");
+    for folder in [&shared_folder, &kept_folder] {
+        owner_client
+            .mkcol("MKCOL", folder, [], [])
+            .await
+            .with_status(StatusCode::CREATED);
+        owner_client
+            .acl(folder, sharee_principal.as_str(), ["read"])
+            .await
+            .with_status(StatusCode::OK);
+    }
+    let sync_token = client
+        .sync_collection(&owner_base_path, "", Depth::Infinity, None, ["D:getetag"])
+        .await
+        .sync_token()
+        .to_string();
+    owner_client
+        .request("DELETE", &shared_folder, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+    client
+        .sync_collection(
+            &owner_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(1)
+        .with_value("D:multistatus.D:response.D:href", &shared_folder)
+        .with_value(
+            "D:multistatus.D:response.D:status",
+            "HTTP/1.1 404 Not Found",
+        );
+    owner_client
+        .request("DELETE", &kept_folder, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
+    // Sharees are told when a shared file node stops being visible to them
+    let owner = test.account("jane@example.com");
+    let sharee = test.account("john@example.com");
+    let file_base_path = format!("{}/jane%40example.com/", DavResourceName::File.base_path());
+    let shared_dir = format!("{file_base_path}shared-dir/");
+    let kept_dir = format!("{file_base_path}kept-dir/");
+    for folder in [&shared_dir, &kept_dir] {
+        owner_client
+            .mkcol("MKCOL", folder, [], [])
+            .await
+            .with_status(StatusCode::CREATED);
+        owner_client
+            .acl(folder, sharee_principal.as_str(), ["read"])
+            .await
+            .with_status(StatusCode::OK);
+    }
+    let sync_token = client
+        .sync_collection(&file_base_path, "", Depth::Infinity, None, ["D:getetag"])
+        .await
+        .sync_token()
+        .to_string();
+    let since_state = sharee
+        .jmap_method_call(
+            "FileNode/get",
+            json!({ "accountId": owner.id_string(), "ids": [] }),
+        )
+        .await
+        .state()
+        .to_string();
+    let shared_dir_id = Id::from(
+        test.server
+            .fetch_groupware_resources(
+                owner.id().document_id(),
+                owner.id().document_id(),
+                SyncCollection::FileNode,
+            )
+            .await
+            .expect("file resources")
+            .by_path("shared-dir")
+            .expect("shared directory")
+            .document_id(),
+    )
+    .to_string();
+    owner_client
+        .acl(&shared_dir, sharee_principal.as_str(), [])
+        .await
+        .with_status(StatusCode::OK);
+    client
+        .sync_collection(
+            &file_base_path,
+            &sync_token,
+            Depth::Infinity,
+            None,
+            ["D:getetag"],
+        )
+        .await
+        .with_href_count(1)
+        .with_value("D:multistatus.D:response.D:href", &shared_dir)
+        .with_value(
+            "D:multistatus.D:response.D:status",
+            "HTTP/1.1 404 Not Found",
+        );
+    let changes = sharee
+        .jmap_method_call(
+            "FileNode/changes",
+            json!({ "accountId": owner.id_string(), "sinceState": &since_state }),
+        )
+        .await;
+    assert_eq!(
+        changes.changes_by_type("destroyed").collect::<Vec<_>>(),
+        [shared_dir_id.as_str()],
+        "{changes:?}"
+    );
+    for folder in [&shared_dir, &kept_dir] {
+        owner_client
+            .request("DELETE", folder, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
+
     client.delete_default_containers().await;
+    owner_client.delete_default_containers().await;
     test.assert_is_empty().await;
 }

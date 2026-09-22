@@ -9,7 +9,8 @@ use crate::{
     DavResourceName,
     calendar::{
         ArchivedCalendar, ArchivedCalendarEvent, ArchivedCalendarEventNotification, Calendar,
-        CalendarEvent, CalendarEventNotification, SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID,
+        CalendarEvent, CalendarEventNotification, DIRECT_NOTIFICATION_PARENT_ID,
+        EVENT_NOTIFICATION_IS_DIRECT, SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID,
     },
     contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
     encode_path_segment,
@@ -89,14 +90,19 @@ pub(super) async fn build_calcard_resources(
 
         if containers.is_empty() {
             if is_first_check {
-                if is_calendar {
+                let created = if is_calendar {
                     server
                         .create_default_calendar(&access_account_info, &owner_account_info)
-                        .await?;
+                        .await
                 } else {
                     server
                         .create_default_addressbook(&access_account_info, &owner_account_info)
-                        .await?;
+                        .await
+                };
+                if let Err(err) = created
+                    && !err.is_assertion_failure()
+                {
+                    return Err(err);
                 }
                 is_first_check = false;
                 continue;
@@ -280,7 +286,11 @@ pub(super) fn build_scheduling_paths(resources: &ResourceStore) -> PathIndex {
                     document_id: resource.document_id(),
                 },
             ));
-        } else {
+        } else if resource
+            .child_names()
+            .iter()
+            .all(|name| name.parent_id == SCHEDULE_INBOX_ID)
+        {
             entries.push((
                 format!("inbox/{}.ics", resource.document_id()),
                 DavPath {
@@ -388,6 +398,7 @@ pub(super) fn push_event(
                 .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
             uid,
             etag: event.etag.to_native(),
+            flags: event.flags.to_native(),
         },
     });
 }
@@ -440,8 +451,14 @@ pub(super) fn push_scheduling(
 ) {
     let names = builder.push_names(&[DavName {
         name: format!("{document_id}.ics"),
-        parent_id: SCHEDULE_INBOX_ID,
+        parent_id: if event.flags.to_native() & EVENT_NOTIFICATION_IS_DIRECT == 0 {
+            SCHEDULE_INBOX_ID
+        } else {
+            DIRECT_NOTIFICATION_PARENT_ID
+        },
     }]);
+    let calendar_ids_len = event.calendar_ids.len() as u16;
+    let principals = builder.push_principals(event.calendar_ids().chain(event.dismissed_ids()));
     builder.records.push(GroupwareResource {
         document_id,
         data: GroupwareResourceMetadata::CalendarEventNotification {
@@ -453,6 +470,10 @@ pub(super) fn push_scheduling(
                 .map(|v| v.to_native())
                 .unwrap_or(u32::MAX),
             etag: event.etag.to_native(),
+            changed_by: event.changed_by_id(),
+            principals,
+            calendar_ids_len,
+            flags: event.flags.to_native(),
         },
     });
 }
@@ -465,6 +486,10 @@ pub(super) fn push_scheduling_container(builder: &mut ResourceChunkBuilder, docu
             created_at: 0,
             event_id: u32::MAX,
             etag: 0,
+            changed_by: NO_ID,
+            principals: ArenaRef::default(),
+            calendar_ids_len: 0,
+            flags: 0,
         },
     });
 }

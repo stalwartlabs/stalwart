@@ -4,12 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Server, ipc::PushNotification};
+use crate::{
+    Server,
+    cache::invalidate::CacheInvalidationBuilder,
+    ipc::{CacheInvalidation, PushNotification},
+};
 use std::time::Duration;
 use store::{
     IterateParams, Key, LogKey, Subspace, U64_LEN,
     write::{
-        AnyClass, AssignedIds, BatchBuilder, QueueNotify, ValueClass, key::DeserializeBigEndian,
+        AnyClass, AssignedIds, BatchBuilder, ChangedCollection, QueueNotify, ValueClass,
+        key::DeserializeBigEndian,
     },
 };
 use trc::AddContext;
@@ -17,11 +22,22 @@ use types::{
     collection::{ChangeGroup, SyncCollection},
     type_state::{DataType, StateChange},
 };
-use utils::{map::bitmap::Bitmap, snowflake::SnowflakeIdGenerator};
+use utils::{
+    map::{bitmap::Bitmap, vec_map::VecMap},
+    snowflake::SnowflakeIdGenerator,
+};
 
 impl Server {
     pub async fn commit_batch(&self, mut builder: BatchBuilder) -> trc::Result<AssignedIds> {
-        let mut assigned_ids = self.store().write_batch(&mut builder).await?;
+        let mut assigned_ids = match self.store().write_batch(&mut builder).await {
+            Ok(assigned_ids) => assigned_ids,
+            Err(err) => {
+                if let Some(changes) = builder.changes() {
+                    self.invalidate_share_grantees(&changes).await;
+                }
+                return Err(err);
+            }
+        };
         self.inner.mark_caches_stale_from(&assigned_ids);
 
         if let Some(hash) = builder.last_archive_hash() {
@@ -34,6 +50,7 @@ impl Server {
         }
 
         if let Some(changes) = builder.changes() {
+            self.invalidate_share_grantees(&changes).await;
             let mut group_types =
                 [Bitmap::<DataType>::default(); SyncCollection::MAX_CHANGE_GROUP as usize + 1];
 
@@ -85,6 +102,19 @@ impl Server {
         }
 
         Ok(assigned_ids)
+    }
+
+    async fn invalidate_share_grantees(&self, changes: &VecMap<u32, ChangedCollection>) {
+        let mut acl_changes = CacheInvalidationBuilder::default();
+        for (account_id, _) in changes
+            .iter()
+            .filter(|(_, changed)| changed.share_notification_id.is_some())
+        {
+            acl_changes.invalidate(CacheInvalidation::AccessToken(*account_id));
+        }
+        if let Err(err) = self.invalidate_caches(acl_changes).await {
+            trc::error!(err.caused_by(trc::location!()));
+        }
     }
 
     pub async fn delete_changes(

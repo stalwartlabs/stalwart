@@ -691,6 +691,7 @@ pub enum TaskQueueClass {
 pub enum TaskId {
     Assigned(u64),
     Document,
+    DocumentTarget(u32),
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
@@ -1114,7 +1115,26 @@ impl TaskId {
         match self {
             TaskId::Assigned(id) => id,
             TaskId::Document => Id::from_parts(account_id, document_id).id(),
+            TaskId::DocumentTarget(target_id) => {
+                TaskId::document_target(account_id, document_id, target_id)
+            }
         }
+    }
+
+    pub fn document_target(account_id: u32, document_id: u32, target_id: u32) -> u64 {
+        const GOLDEN_RATIO: u64 = 0x9E37_79B9_7F4A_7C15;
+        const MIX_LOW: u64 = 0xBF58_476D_1CE4_E5B9;
+        const MIX_HIGH: u64 = 0x94D0_49BB_1331_11EB;
+        const TARGET_MARKER: u64 = 1 << 63;
+
+        let mut hash = Id::from_parts(account_id, document_id).id().rotate_left(17)
+            ^ (target_id as u64).wrapping_mul(GOLDEN_RATIO);
+        hash ^= hash >> 30;
+        hash = hash.wrapping_mul(MIX_LOW);
+        hash ^= hash >> 27;
+        hash = hash.wrapping_mul(MIX_HIGH);
+        hash ^= hash >> 31;
+        hash | TARGET_MARKER
     }
 }
 

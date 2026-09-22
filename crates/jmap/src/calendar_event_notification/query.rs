@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
+use crate::{
+    api::query::QueryResponseBuilder, calendar_event_notification::NotificationTypeFlags,
+    changes::state::JmapCacheState,
+};
 use common::{Server, auth::AccessToken};
-use groupware::cache::GroupwareCache;
+use groupware::{cache::GroupwareCache, calendar::notification::CalendarNotificationViewers};
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::calendar_event_notification::{
         CalendarEventNotification, CalendarEventNotificationComparator,
-        CalendarEventNotificationFilter,
+        CalendarEventNotificationFilter, CalendarEventNotificationType as NotificationType,
     },
     request::IntoValid,
 };
@@ -21,6 +24,7 @@ use store::{
     search::{SearchFilter, SearchQuery},
     write::SearchIndex,
 };
+use trc::AddContext;
 use types::collection::SyncCollection;
 
 pub trait CalendarEventNotificationQuery: Sync + Send {
@@ -47,6 +51,12 @@ impl CalendarEventNotificationQuery for Server {
             )
             .await?;
 
+        let visible_ids = self
+            .notification_viewer(access_token, account_id)
+            .await
+            .caused_by(trc::location!())?
+            .visible_notifications(&cache);
+
         for cond in std::mem::take(&mut request.filter) {
             match cond {
                 Filter::Property(cond) => match cond {
@@ -65,10 +75,24 @@ impl CalendarEventNotificationQuery for Server {
                         filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
                             cache.resources.iter().filter_map(|r| {
                                 r.created_at()
-                                    .filter(|created_at| !r.is_container() && *created_at > after)
+                                    .filter(|created_at| !r.is_container() && *created_at >= after)
                                     .map(|_| r.document_id())
                             }),
                         )))
+                    }
+                    CalendarEventNotificationFilter::Type(notification_type) => {
+                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
+                            cache.resources.iter().filter_map(|resource| {
+                                resource
+                                    .notification()
+                                    .filter(|notification| {
+                                        !resource.is_container()
+                                            && NotificationType::from_flags(notification.flags)
+                                                == notification_type
+                                    })
+                                    .map(|_| resource.document_id())
+                            }),
+                        )));
                     }
                     CalendarEventNotificationFilter::CalendarEventIds(ids) => {
                         let ids = ids
@@ -120,7 +144,7 @@ impl CalendarEventNotificationQuery for Server {
         }
         let results = SearchQuery::new(SearchIndex::InMemory)
             .with_filters(filters)
-            .with_mask(cache.document_ids(false).collect())
+            .with_mask(visible_ids)
             .filter()
             .into_bitmap();
 

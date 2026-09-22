@@ -341,16 +341,15 @@ END:VCALENDAR
 from: a@example.com
 to: c@example.com
 summary: cancel
-summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }, ItipParticipant { email: "d@example.com", name: None, is_organizer: false }])
-summary.dtstart: Time(ItipTime { start: 867776400, tz_id: 32768 })
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }, ItipParticipant { email: "d@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 883648800, tz_id: 32768 })
 summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Monthly, until: None, count: Some(10), interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: Some(1), weekday: Friday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
-summary.summary: Text("Create the requirements document")
+summary.summary: Text("Send Status Reports to Area Managers")
 BEGIN:VCALENDAR
 METHOD:CANCEL
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
 VERSION:2.0
 BEGIN:VTODO
-STATUS:CANCELLED
 SUMMARY:Create the requirements document
 DUE:19970722T170000Z
 DTSTART:19970701T170000Z
@@ -445,9 +444,8 @@ END:VCALENDAR
 from: b@example.com
 to: a@example.com
 summary: rsvp NEEDS-ACTION
-summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }, ItipParticipant { email: "d@example.com", name: None, is_organizer: false }])
-summary.dtstart: Time(ItipTime { start: 883648800, tz_id: 32768 })
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Monthly, until: None, count: Some(10), interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: Some(1), weekday: Friday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 883674000, tz_id: 32768 })
 summary.summary: Text("Send Status Reports to Area Managers")
 BEGIN:VCALENDAR
 METHOD:REPLY

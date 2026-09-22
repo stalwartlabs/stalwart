@@ -31,10 +31,13 @@ use file::{build_file_resources, build_nested_hierarchy, push_file};
 use registry::schema::enums::StorageQuota;
 use std::{sync::Arc, time::Instant};
 use store::{
-    IterateParams, ValueKey,
+    IterateParams, U32_LEN, ValueKey,
     ahash::AHashMap,
     query::log::{Change, Query},
-    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
+    write::{
+        Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass, assert::AssertValue,
+        key::DeserializeBigEndian,
+    },
 };
 use trc::{AddContext, CacheEvent};
 use types::{
@@ -111,8 +114,8 @@ pub trait GroupwareCache: Sync + Send {
 
     fn get_or_create_default_calendar(
         &self,
-        access_account_id: u32,
-        account_id: u32,
+        account_info_access: &AccountCache,
+        account_info_owner: &AccountCache,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
     fn cached_groupware_resources(
@@ -411,6 +414,7 @@ impl GroupwareCache for Server {
             batch
                 .with_collection(Collection::Principal)
                 .with_document(0)
+                .assert_value(PrincipalField::DefaultAddressBookId, AssertValue::None)
                 .set(
                     PrincipalField::DefaultAddressBookId,
                     PendingId::Slot(document_id),
@@ -462,6 +466,7 @@ impl GroupwareCache for Server {
             batch
                 .with_collection(Collection::Principal)
                 .with_document(0)
+                .assert_value(PrincipalField::DefaultCalendarId, AssertValue::None)
                 .set(
                     PrincipalField::DefaultCalendarId,
                     PendingId::Slot(document_id),
@@ -476,25 +481,20 @@ impl GroupwareCache for Server {
 
     async fn get_or_create_default_calendar(
         &self,
-        access_account_id: u32,
-        account_id: u32,
+        account_info_access: &AccountCache,
+        account_info_owner: &AccountCache,
     ) -> trc::Result<Option<u32>> {
-        let default_calendar_id = self
-            .store()
-            .get_value::<u32>(ValueKey {
-                account_id,
-                collection: Collection::Principal.into(),
-                document_id: 0,
-                class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
-            })
+        let account_id = account_info_owner.account_id();
+        if let Some(calendar_id) = any_calendar_id(self, account_id).await? {
+            return Ok(Some(calendar_id));
+        }
+
+        match self
+            .create_default_calendar(account_info_access, account_info_owner)
             .await
-            .caused_by(trc::location!())?;
-        if default_calendar_id.is_some() {
-            Ok(default_calendar_id)
-        } else {
-            self.fetch_groupware_resources(access_account_id, account_id, SyncCollection::Calendar)
-                .await
-                .map(|c| c.document_ids(true).next())
+        {
+            Err(err) if err.is_assertion_failure() => any_calendar_id(self, account_id).await,
+            result => result,
         }
     }
 
@@ -578,6 +578,42 @@ impl GroupwareCache for Server {
         })
         .get(&account_id)
     }
+}
+
+async fn any_calendar_id(server: &Server, account_id: u32) -> trc::Result<Option<u32>> {
+    if let Some(calendar_id) = server
+        .store()
+        .get_value::<u32>(ValueKey {
+            account_id,
+            collection: Collection::Principal.into(),
+            document_id: 0,
+            class: ValueClass::Property(PrincipalField::DefaultCalendarId.into()),
+        })
+        .await
+        .caused_by(trc::location!())?
+    {
+        return Ok(Some(calendar_id));
+    }
+
+    let mut calendar_id = None;
+    server
+        .store()
+        .iterate(
+            IterateParams::new(
+                ValueKey::archive(account_id, Collection::Calendar, 0),
+                ValueKey::archive(account_id, Collection::Calendar, u32::MAX),
+            )
+            .no_values()
+            .ascending()
+            .only_first(),
+            |key, _| {
+                calendar_id = key.deserialize_be_u32(key.len() - U32_LEN).map(Some)?;
+                Ok(false)
+            },
+        )
+        .await
+        .caused_by(trc::location!())
+        .map(|_| calendar_id)
 }
 
 fn rebuild_cache(
@@ -1022,6 +1058,7 @@ mod tests {
                             modified_at: 0,
                             uid,
                             etag: *etag,
+                            flags: 0,
                         },
                     });
                 }
@@ -1074,6 +1111,10 @@ mod tests {
                             created_at: 0,
                             event_id: u32::MAX,
                             etag: 0,
+                            changed_by: NO_ID,
+                            principals: ArenaRef::default(),
+                            calendar_ids_len: 0,
+                            flags: 0,
                         },
                     });
                 }

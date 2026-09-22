@@ -698,12 +698,12 @@ impl BatchBuilder {
         self.push_task(TaskId::Assigned(id), task, None)
     }
 
-    pub fn schedule_document_task(&mut self, task: Task) -> &mut Self {
+    pub fn schedule_document_task(&mut self, id: TaskId, task: Task) -> &mut Self {
         let document_id = self
             .current_document_id
             .expect("no document is set for a document task");
 
-        self.push_task(TaskId::Document, task, Some(document_id))
+        self.push_task(id, task, Some(document_id))
     }
 
     pub fn schedule_task_with_document(&mut self, task: Task) -> &mut Self {
@@ -741,14 +741,9 @@ impl BatchBuilder {
             )
     }
 
-    pub fn clear_document_task(&mut self, due: u64) -> &mut Self {
-        self.clear(ValueClass::TaskQueue(TaskQueueClass::Task {
-            id: TaskId::Document,
-        }))
-        .clear(ValueClass::TaskQueue(TaskQueueClass::Due {
-            id: TaskId::Document,
-            due,
-        }))
+    pub fn clear_document_task(&mut self, id: TaskId, due: u64) -> &mut Self {
+        self.clear(ValueClass::TaskQueue(TaskQueueClass::Task { id }))
+            .clear(ValueClass::TaskQueue(TaskQueueClass::Due { id, due }))
     }
 
     pub fn queue_document_index(

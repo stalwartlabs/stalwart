@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::download::BlobDownload;
+use super::{download::BlobDownload, embedded::EmbeddedBlobs};
 use common::{Server, auth::AccessToken};
 use email::message::messagedata::MessageData;
 use jmap_proto::{
@@ -21,6 +21,7 @@ use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
 use std::future::Future;
 use store::ValueKey;
+use trc::AddContext;
 use types::{blob::BlobClass, collection::Collection, id::Id, type_state::DataType};
 use utils::map::vec_map::VecMap;
 
@@ -164,33 +165,15 @@ impl BlobOperations for Server {
     }
 
     async fn blob_lookup(&self, request: BlobLookupRequest) -> trc::Result<BlobLookupResponse> {
-        let mut include_email = false;
-        let mut include_mailbox = false;
-        let mut include_thread = false;
-
-        let type_names = request
-            .type_names
-            .into_iter()
-            .map(|tn| match tn {
-                MaybeInvalid::Value(value) => {
-                    match &value {
-                        DataType::Email => {
-                            include_email = true;
-                        }
-                        DataType::Mailbox => {
-                            include_mailbox = true;
-                        }
-                        DataType::Thread => {
-                            include_thread = true;
-                        }
-                        _ => (),
-                    }
-
-                    Ok(value)
-                }
-                MaybeInvalid::Invalid(_) => Err(trc::JmapEvent::UnknownDataType.into_err()),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut type_names = Vec::with_capacity(request.type_names.len());
+        for type_name in request.type_names {
+            let MaybeInvalid::Value(type_name) = type_name else {
+                return Err(trc::JmapEvent::UnknownDataType.into_err());
+            };
+            if !type_names.contains(&type_name) {
+                type_names.push(type_name);
+            }
+        }
         let req_account_id = request.account_id.document_id();
         let mut response = BlobLookupResponse {
             account_id: request.account_id,
@@ -199,55 +182,72 @@ impl BlobOperations for Server {
         };
 
         for id in request.ids.into_valid() {
-            let mut matched_ids = VecMap::new();
+            let mut matched_ids = type_names
+                .iter()
+                .map(|type_name| (*type_name, Vec::new()))
+                .collect::<VecMap<_, _>>();
 
             match &id.class {
                 BlobClass::Linked {
                     account_id,
                     collection,
                     document_id,
-                } if *account_id == req_account_id => {
-                    let collection = Collection::from(*collection);
-                    if collection == Collection::Email {
-                        if let Some(data) = self
-                            .store()
-                            .get_value::<MessageData>(ValueKey::archive(
-                                req_account_id,
-                                Collection::Email,
-                                *document_id,
-                            ))
-                            .await?
-                        {
-                            if include_email {
-                                matched_ids.append(
-                                    DataType::Email,
-                                    vec![Id::from_parts(data.thread_id, *document_id)],
-                                );
-                            }
-                            if include_thread {
-                                matched_ids
-                                    .append(DataType::Thread, vec![Id::from(data.thread_id)]);
-                            }
-                            if include_mailbox {
-                                matched_ids.append(
-                                    DataType::Mailbox,
-                                    data.mailboxes
-                                        .iter()
-                                        .map(|m| {
-                                            debug_assert!(m.uid != 0);
-                                            Id::from(m.mailbox_id)
-                                        })
-                                        .collect::<Vec<_>>(),
-                                );
+                } if *account_id == req_account_id
+                    && self
+                        .store()
+                        .blob_has_access(&id.hash, &id.class)
+                        .await
+                        .caused_by(trc::location!())? =>
+                {
+                    match Collection::from(*collection) {
+                        Collection::Email => {
+                            if let Some(data) = self
+                                .store()
+                                .get_value::<MessageData>(ValueKey::archive(
+                                    req_account_id,
+                                    Collection::Email,
+                                    *document_id,
+                                ))
+                                .await?
+                            {
+                                if let Some(ids) = matched_ids.get_mut(&DataType::Email) {
+                                    ids.push(Id::from_parts(data.thread_id, *document_id));
+                                }
+                                if let Some(ids) = matched_ids.get_mut(&DataType::Thread) {
+                                    ids.push(Id::from(data.thread_id));
+                                }
+                                if let Some(ids) = matched_ids.get_mut(&DataType::Mailbox) {
+                                    ids.extend(data.mailboxes.iter().map(|m| {
+                                        debug_assert!(m.uid != 0);
+                                        Id::from(m.mailbox_id)
+                                    }));
+                                }
                             }
                         }
-                    } else {
-                        match DataType::try_from(collection) {
-                            Ok(data_type) if type_names.contains(&data_type) => {
-                                matched_ids.append(data_type, vec![Id::from(*document_id)]);
+                        collection => {
+                            if let Ok(data_type) = DataType::try_from(collection)
+                                && let Some(ids) = matched_ids.get_mut(&data_type)
+                            {
+                                ids.push(Id::from(*document_id));
                             }
-                            _ => (),
                         }
+                    }
+                }
+                BlobClass::Embedded {
+                    account_id,
+                    collection,
+                    document_id,
+                } if *account_id == req_account_id
+                    && self
+                        .embedded_blob(&id)
+                        .await
+                        .caused_by(trc::location!())?
+                        .is_some() =>
+                {
+                    if let Ok(data_type) = DataType::try_from(Collection::from(*collection))
+                        && let Some(ids) = matched_ids.get_mut(&data_type)
+                    {
+                        ids.push(Id::from(*document_id));
                     }
                 }
                 BlobClass::Reserved { account_id, .. } if *account_id == req_account_id => {}

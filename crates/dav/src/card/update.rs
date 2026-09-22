@@ -106,6 +106,21 @@ impl CardUpdateRequestHandler for Server {
                 ));
             }
         };
+        let media_size = vcard.embedded_size();
+        if self.core.groupware.max_media_size != 0
+            && media_size > self.core.groupware.max_media_size
+        {
+            return Err(DavError::Condition(
+                DavErrorCondition::new(
+                    StatusCode::PRECONDITION_FAILED,
+                    CardCondition::MaxResourceSize(self.core.groupware.max_media_size as u32),
+                )
+                .with_details(format!(
+                    "The size of the embedded media ({media_size} bytes) exceeds the maximum of {} bytes.",
+                    self.core.groupware.max_media_size
+                )),
+            ));
+        }
 
         if let Some(resource) = resources.by_path(resource_name.as_ref()) {
             if resource.is_container() {

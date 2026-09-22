@@ -8,6 +8,7 @@ use types::{blob::BlobId, id::Id};
 
 pub mod copy;
 pub mod download;
+pub mod embedded;
 pub mod get;
 pub mod upload;
 

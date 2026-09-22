@@ -112,8 +112,10 @@ impl JmapConfig {
                     tz_hour: 0,
                     tz_minute: 0,
                 },
-                max_expanded_query_duration: ICalendarDuration::from_seconds(86400 * 365)
-                    .to_string(),
+                max_expanded_query_duration: ICalendarDuration::from_seconds(
+                    calendar.max_expanded_query_duration.into_inner().as_secs() as i64,
+                )
+                .to_string(),
                 max_participants_per_event: calendar.max_attendees.into(),
                 may_create_calendar: true,
             }),
@@ -202,7 +204,10 @@ impl JmapConfig {
         self.capabilities.account.insert(
             Capability::PrincipalsAvailability,
             Capabilities::PrincipalsAvailability(PrincipalAvailabilityCapabilities {
-                max_availability_duration: ICalendarDuration::from_seconds(86400 * 365).to_string(),
+                max_availability_duration: ICalendarDuration::from_seconds(
+                    calendar.max_availability_duration.into_inner().as_secs() as i64,
+                )
+                .to_string(),
             }),
         );
 
@@ -285,6 +290,8 @@ impl JmapConfig {
                     DataType::Email,
                     DataType::Thread,
                     DataType::SieveScript,
+                    DataType::CalendarEvent,
+                    DataType::ContactCard,
                 ],
                 supported_digest_algorithms: vec!["sha", "sha-256", "sha-512"],
             }),

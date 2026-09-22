@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    ArenaRef, CachedName, DavName, DavPath, DavResourcePath, GroupwareResource,
+    ArchivedDavName, ArenaRef, CachedName, DavName, DavPath, DavResourcePath, GroupwareResource,
     GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID, PathChunk,
     TinyCalendarPreferences,
 };
@@ -46,6 +46,11 @@ impl<'x> GroupwareResourceRef<'x> {
     }
 
     #[inline(always)]
+    pub fn event_flags(&self) -> Option<u16> {
+        self.resource.event_flags()
+    }
+
+    #[inline(always)]
     pub fn created_at(&self) -> Option<i64> {
         self.resource.created_at()
     }
@@ -66,7 +71,7 @@ impl<'x> GroupwareResourceRef<'x> {
     }
 
     #[inline(always)]
-    pub fn uid(&self) -> Option<&str> {
+    pub fn uid(&self) -> Option<&'x str> {
         match &self.resource.data {
             GroupwareResourceMetadata::CalendarEvent { uid, .. }
             | GroupwareResourceMetadata::ContactCard { uid, .. } => Some(self.chunk.str_at(*uid)),
@@ -107,7 +112,7 @@ impl<'x> GroupwareResourceRef<'x> {
     }
 
     #[inline(always)]
-    pub fn acls(&self) -> &[AclGrant] {
+    pub fn acls(&self) -> &'x [AclGrant] {
         match self.resource.acls_ref() {
             Some(acls) => self.chunk.acls_at(acls),
             None => &[],
@@ -119,6 +124,52 @@ impl<'x> GroupwareResourceRef<'x> {
         self.resource
             .acls_ref()
             .is_some_and(|acls| !acls.is_empty())
+    }
+
+    pub fn notification(&self) -> Option<NotificationRef<'_>> {
+        match &self.resource.data {
+            GroupwareResourceMetadata::CalendarEventNotification {
+                changed_by,
+                principals,
+                calendar_ids_len,
+                flags,
+                ..
+            } => {
+                let ids = self.chunk.principals_at(*principals);
+                let (calendar_ids, dismissed_by) =
+                    ids.split_at((*calendar_ids_len as usize).min(ids.len()));
+                Some(NotificationRef {
+                    changed_by: *changed_by,
+                    calendar_ids,
+                    dismissed_by,
+                    flags: *flags,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn personal_calendar_preferences(
+        &self,
+        account_id: u32,
+    ) -> Option<&TinyCalendarPreferences> {
+        match &self.resource.data {
+            GroupwareResourceMetadata::Calendar { preferences, .. } => self
+                .chunk
+                .prefs_at(*preferences)
+                .iter()
+                .find(|pref| pref.account_id == account_id),
+            _ => None,
+        }
+    }
+
+    pub fn all_calendar_preferences(&self) -> &'x [TinyCalendarPreferences] {
+        match &self.resource.data {
+            GroupwareResourceMetadata::Calendar { preferences, .. } => {
+                self.chunk.prefs_at(*preferences)
+            }
+            _ => &[],
+        }
     }
 
     pub fn calendar_preferences(&self, account_id: u32) -> Option<&TinyCalendarPreferences> {
@@ -167,6 +218,14 @@ impl<'x> GroupwareResourceRef<'x> {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotificationRef<'x> {
+    pub changed_by: u32,
+    pub calendar_ids: &'x [u32],
+    pub dismissed_by: &'x [u32],
+    pub flags: u16,
 }
 
 impl GroupwareResource {
@@ -234,6 +293,14 @@ impl GroupwareResource {
             GroupwareResourceMetadata::CalendarEvent {
                 start, duration, ..
             } => Some((*start, *start + *duration as i64)),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn event_flags(&self) -> Option<u16> {
+        match &self.data {
+            GroupwareResourceMetadata::CalendarEvent { flags, .. } => Some(*flags),
             _ => None,
         }
     }
@@ -352,6 +419,18 @@ impl DavName {
                 .collect::<String>(),
             parent_id,
         }
+    }
+
+    #[inline(always)]
+    pub fn parent_id(&self) -> u32 {
+        self.parent_id
+    }
+}
+
+impl ArchivedDavName {
+    #[inline(always)]
+    pub fn parent_id(&self) -> u32 {
+        self.parent_id.to_native()
     }
 }
 

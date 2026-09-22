@@ -111,10 +111,10 @@ to: b@example.com, c@example.com, d@example.com
 summary: update REQUEST
 summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }, ItipParticipant { email: "d@example.com", name: None, is_organizer: false }])
 summary.description: Text("IETF-C&S Conference Call")
-summary.dtstart: Time(ItipTime { start: 865198800, tz_id: 32768 })
+summary.dtstart: Time(ItipTime { start: 867963600, tz_id: 32768 })
 summary.location: Text("Conference Call")
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Monthly, until: Some(PartialDateTime { year: Some(1998), month: Some(9), day: Some(1), hour: Some(21), minute: Some(0), second: Some(0), tz_hour: Some(0), tz_minute: Some(0), tz_minus: false }), count: None, interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [1], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
 summary.summary: Text("IETF Calendaring Working Group Meeting")
+~summary.dtstart: Time(ItipTime { start: 867790800, tz_id: 32768 })
 BEGIN:VCALENDAR
 METHOD:REQUEST
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
@@ -135,7 +135,7 @@ ORGANIZER:mailto:a@example.com
 RECURRENCE-ID:19970701T210000Z
 UID:guid-1@example.com
 DTSTAMP:0
-SEQUENCE:2
+SEQUENCE:1
 END:VEVENT
 END:VCALENDAR
 
@@ -199,11 +199,10 @@ END:VCALENDAR
 from: a@example.com
 to: b@example.com
 summary: cancel
-summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }, ItipParticipant { email: "d@example.com", name: None, is_organizer: false }])
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
 summary.description: Text("IETF-C&S Conference Call")
-summary.dtstart: Time(ItipTime { start: 865198800, tz_id: 32768 })
+summary.dtstart: Time(ItipTime { start: 870469200, tz_id: 32768 })
 summary.location: Text("Conference Call")
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Monthly, until: Some(PartialDateTime { year: Some(1998), month: Some(9), day: Some(1), hour: Some(21), minute: Some(0), second: Some(0), tz_hour: Some(0), tz_minute: Some(0), tz_minus: false }), count: None, interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [1], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
 summary.summary: Text("IETF Calendaring Working Group Meeting")
 BEGIN:VCALENDAR
 METHOD:CANCEL
@@ -262,7 +261,7 @@ ORGANIZER:mailto:a@example.com
 RECURRENCE-ID:19970701T210000Z
 UID:guid-1@example.com
 DTSTAMP:0
-SEQUENCE:2
+SEQUENCE:1
 END:VEVENT
 BEGIN:VEVENT
 STATUS:CANCELLED
@@ -351,11 +350,12 @@ from: a@example.com
 to: b@example.com, c@example.com, d@example.com
 summary: update REQUEST
 summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }, ItipParticipant { email: "d@example.com", name: None, is_organizer: false }])
-summary.description: Text("IETF-C&S Conference Call")
-summary.dtstart: Time(ItipTime { start: 865198800, tz_id: 32768 })
-summary.location: Text("Conference Call")
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Monthly, until: Some(PartialDateTime { year: Some(1998), month: Some(9), day: Some(1), hour: Some(21), minute: Some(0), second: Some(0), tz_hour: Some(0), tz_minute: Some(0), tz_minus: false }), count: None, interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [1], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.description: Text("IETF-C&S Discussion")
+summary.dtstart: Time(ItipTime { start: 873147600, tz_id: 32768 })
+summary.location: Text("Building 32, Microsoft, Seattle, WA")
 summary.summary: Text("IETF Calendaring Working Group Meeting")
+~summary.description: Text("IETF-C&S Conference Call")
+~summary.location: Text("Conference Call")
 BEGIN:VCALENDAR
 METHOD:REQUEST
 PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
@@ -422,7 +422,7 @@ ORGANIZER:mailto:a@example.com
 RECURRENCE-ID:19970701T210000Z
 UID:guid-1@example.com
 DTSTAMP:0
-SEQUENCE:2
+SEQUENCE:1
 END:VEVENT
 BEGIN:VEVENT
 STATUS:CANCELLED
@@ -599,7 +599,7 @@ ORGANIZER:mailto:a@example.com
 RECURRENCE-ID:19970701T210000Z
 UID:guid-1@example.com
 DTSTAMP:0
-SEQUENCE:2
+SEQUENCE:1
 END:VEVENT
 BEGIN:VEVENT
 STATUS:CANCELLED
@@ -668,7 +668,7 @@ END:VCALENDAR
 
 > expect
 from: a@example.com
-to: b@example.com, c@example.com
+to: b@example.com
 summary: invite
 summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
 summary.dtstart: Time(ItipTime { start: 888958800, tz_id: 32768 })
@@ -693,10 +693,24 @@ RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU
 DTSTAMP:0
 SEQUENCE:0
 END:VEVENT
+END:VCALENDAR
+================================
+from: a@example.com
+to: c@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 873147600, tz_id: 32768 })
+summary.location: Text("The Red Room")
+summary.summary: Text("Review Accounts")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
 BEGIN:VEVENT
 LOCATION:The Red Room
 STATUS:CONFIRMED
 SUMMARY:Review Accounts
+DTSTART:19970901T210000Z
 ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
 ATTENDEE;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:c@example.com
 ORGANIZER:mailto:a@example.com
@@ -709,6 +723,107 @@ END:VCALENDAR
 
 # Send iTIP request to B and C
 > send
+
+# REFRESH from an attendee of a single instance only returns that instance
+> itip c@example.com a@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+METHOD:REFRESH
+BEGIN:VEVENT
+UID:123456789@example.com
+ORGANIZER:mailto:a@example.com
+ATTENDEE:mailto:c@example.com
+DTSTAMP:19980303T200000Z
+END:VEVENT
+END:VCALENDAR
+
+> send
+from: a@example.com
+to: c@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 873147600, tz_id: 32768 })
+summary.location: Text("The Red Room")
+summary.summary: Text("Review Accounts")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:The Red Room
+STATUS:CONFIRMED
+SUMMARY:Review Accounts
+DTSTART:19970901T210000Z
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:c@example.com
+ORGANIZER:mailto:a@example.com
+RECURRENCE-ID;THISANDFUTURE:19970901T210000Z
+UID:123456789@example.com
+DTSTAMP:0
+SEQUENCE:2
+END:VEVENT
+END:VCALENDAR
+
+# REFRESH from an attendee removed from an instance does not return that instance
+> itip b@example.com a@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+METHOD:REFRESH
+BEGIN:VEVENT
+UID:123456789@example.com
+ORGANIZER:mailto:a@example.com
+ATTENDEE:mailto:b@example.com
+DTSTAMP:19980303T200000Z
+END:VEVENT
+END:VCALENDAR
+
+> send
+from: a@example.com
+to: b@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 888958800, tz_id: 32768 })
+summary.location: Text("The White Room")
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: None, interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Tuesday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: Some(Sunday), rscale: None, skip: None })
+summary.summary: Text("Review Accounts")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+LOCATION:The White Room
+STATUS:CONFIRMED
+SUMMARY:Review Accounts
+DTEND:19980303T220000Z
+DTSTART:19980303T210000Z
+ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ORGANIZER:mailto:a@example.com
+UID:123456789@example.com
+RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+# REFRESH from a calendar user who is not an attendee is rejected
+> itip x@example.com a@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+METHOD:REFRESH
+BEGIN:VEVENT
+UID:123456789@example.com
+ORGANIZER:mailto:a@example.com
+ATTENDEE:mailto:x@example.com
+DTSTAMP:19980303T200000Z
+END:VEVENT
+END:VCALENDAR
+
+> send
+SenderIsNotParticipant("x@example.com")
 
 # Add a new series of instances to the recurring event (update)
 > put a@example.com 123456789@example.com
@@ -756,17 +871,16 @@ ORGANIZER:mailto:a@example.com
 UID:123456789@example.com
 RRULE:FREQ=WEEKLY;BYDAY=TU,TH;WKST=SU
 DTSTAMP:0
-SEQUENCE:3
+SEQUENCE:2
 END:VEVENT
 END:VCALENDAR
 ================================
 from: a@example.com
 to: c@example.com
 summary: cancel
-summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
-summary.dtstart: Time(ItipTime { start: 888958800, tz_id: 32768 })
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "c@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 873147600, tz_id: 32768 })
 summary.location: Text("The White Room")
-summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Weekly, until: None, count: None, interval: None, bysecond: [], byminute: [], byhour: [], byday: [ICalendarDay { ordwk: None, weekday: Tuesday }], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: Some(Sunday), rscale: None, skip: None })
 summary.summary: Text("Review Accounts")
 BEGIN:VCALENDAR
 METHOD:CANCEL
@@ -805,7 +919,7 @@ ORGANIZER:mailto:a@example.com
 UID:123456789@example.com
 RRULE:FREQ=WEEKLY;BYDAY=TU,TH;WKST=SU
 DTSTAMP:0
-SEQUENCE:3
+SEQUENCE:2
 END:VEVENT
 END:VCALENDAR
 
@@ -818,25 +932,12 @@ BEGIN:VEVENT
 LOCATION:The Red Room
 STATUS:CANCELLED
 SUMMARY:Review Accounts
+DTSTART:19970901T210000Z
 ATTENDEE;RSVP=TRUE:mailto:c@example.com
 ORGANIZER:mailto:a@example.com
 RECURRENCE-ID;THISANDFUTURE:19970901T210000Z
 UID:123456789@example.com
 DTSTAMP:0
-END:VEVENT
-BEGIN:VEVENT
-LOCATION:The White Room
-STATUS:CONFIRMED
-SUMMARY:Review Accounts
-DTEND:19980303T220000Z
-DTSTART:19980303T210000Z
-ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:mailto:a@example.com
-ATTENDEE;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
-ORGANIZER:mailto:a@example.com
-UID:123456789@example.com
-RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU
-DTSTAMP:0
-SEQUENCE:0
 END:VEVENT
 END:VCALENDAR
 
@@ -863,7 +964,7 @@ ATTENDEE;PARTSTAT=DECLINED:mailto:b@example.com
 ORGANIZER:mailto:a@example.com
 UID:123456789@example.com
 DTSTAMP:0
-SEQUENCE:3
+SEQUENCE:2
 END:VEVENT
 END:VCALENDAR
 
@@ -886,7 +987,7 @@ ORGANIZER:mailto:a@example.com
 UID:123456789@example.com
 RRULE:FREQ=WEEKLY;BYDAY=TU,TH;WKST=SU
 DTSTAMP:1
-SEQUENCE:3
+SEQUENCE:2
 END:VEVENT
 END:VCALENDAR
 

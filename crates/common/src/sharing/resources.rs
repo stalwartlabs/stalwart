@@ -85,19 +85,9 @@ impl GroupwareResources {
         document_id: u32,
         check_acls: impl Into<Bitmap<Acl>>,
     ) -> bool {
-        let check_acls = check_acls.into();
-
-        if let Some(resource) = self.resources.find_any(document_id) {
-            for acl in resource.acls() {
-                if access_token.is_member(acl.account_id) {
-                    let mut grants = acl.grants;
-                    grants.intersection(&check_acls);
-                    return !grants.is_empty();
-                }
-            }
-        }
-
-        false
+        let mut grants = self.container_acl(access_token, document_id);
+        grants.intersection(&check_acls.into());
+        !grants.is_empty()
     }
 
     pub fn container_acl(&self, access_token: &AccessToken, document_id: u32) -> Bitmap<Acl> {
@@ -120,6 +110,26 @@ impl GroupwareResources {
             .filter(|&resource| resource.uid() == Some(uid))
             .map(|resource| resource.document_id())
             .collect()
+    }
+
+    pub fn event_ids_with_flags(&self, mask: u16) -> RoaringBitmap {
+        let [document_ids] = self.event_ids_with_flag_masks([mask]);
+        document_ids
+    }
+
+    pub fn event_ids_with_flag_masks<const N: usize>(&self, masks: [u16; N]) -> [RoaringBitmap; N] {
+        let mut document_ids = std::array::from_fn(|_| RoaringBitmap::new());
+        for resource in self.resources.iter() {
+            if let Some(flags) = resource.event_flags() {
+                let document_id = resource.document_id();
+                for (mask, document_ids) in masks.iter().zip(document_ids.iter_mut()) {
+                    if flags & *mask != 0 {
+                        document_ids.insert(document_id);
+                    }
+                }
+            }
+        }
+        document_ids
     }
 
     pub fn document_ids(&self, is_container: bool) -> impl Iterator<Item = u32> {
@@ -146,7 +156,7 @@ mod tests {
     use crate::{
         ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata,
         GroupwareResources, NO_ID, PathIndex, ResourceStore, UpdateLock,
-        auth::AccessToken,
+        auth::{AccessToken, AccessTokenInner},
         storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
     };
     use std::sync::Arc;
@@ -213,6 +223,7 @@ mod tests {
                 modified_at: 0,
                 uid,
                 etag: 0,
+                flags: 0,
             },
         });
         entries.push((
@@ -251,5 +262,65 @@ mod tests {
             shared_items.is_empty(),
             "an event in an unshared calendar was admitted by numeric id collision: {shared_items:?}"
         );
+    }
+
+    #[test]
+    fn container_access_unites_matching_grants() {
+        const GROUP: u32 = 7;
+        const MEMBER: u32 = 8;
+        const OUTSIDER: u32 = 9;
+
+        let mut containers = ResourceChunkBuilder::with_capacity(1);
+        let name = containers.push_str("team");
+        let acls = containers.push_acls(&[
+            AclGrant {
+                account_id: GROUP,
+                grants: Bitmap::from_iter([Acl::Read, Acl::SchedulingReadFreeBusy]),
+            },
+            AclGrant {
+                account_id: MEMBER,
+                grants: Bitmap::from_iter([Acl::Read, Acl::ReadItems, Acl::ModifyItems]),
+            },
+        ]);
+        let preferences = containers.push_prefs(&[]);
+        containers.records.push(GroupwareResource {
+            document_id: 0,
+            data: GroupwareResourceMetadata::Calendar {
+                name,
+                acls,
+                preferences,
+                etag: 0,
+            },
+        });
+        let resources = GroupwareResources {
+            base_path: "/dav/cal/sharer/".to_string(),
+            paths: Arc::new(PathIndex::pack(vec![(
+                "team".to_string(),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id: NO_ID,
+                    hierarchy_seq: 1 | CONTAINER_FLAG,
+                    document_id: 0,
+                },
+            )])),
+            resources: ResourceStore::from_sorted(vec![containers], vec![], false),
+            item_change_id: 0,
+            container_change_id: 0,
+            highest_change_id: 0,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
+        };
+
+        let member = AccessToken::new_maybe_invalid(Arc::new(AccessTokenInner {
+            account_id: MEMBER,
+            member_of: [GROUP].into_iter().collect(),
+            ..Default::default()
+        }));
+        assert!(resources.has_access_to_container(&member, 0, Acl::ModifyItems));
+        assert!(resources.has_access_to_container(&member, 0, Acl::SchedulingReadFreeBusy));
+
+        let outsider = AccessToken::from_id_maybe_invalid(OUTSIDER);
+        assert!(!resources.has_access_to_container(&outsider, 0, Acl::Read));
     }
 }

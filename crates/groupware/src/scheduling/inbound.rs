@@ -5,7 +5,9 @@
  */
 
 use crate::scheduling::{
-    InstanceId, ItipError, ItipMessage, ItipSnapshots, organizer::organizer_request_full,
+    InstanceId, ItipError, ItipMessage, ItipSnapshots,
+    organizer::organizer_request_full,
+    recipient::{RecipientPolicy, itip_messages_per_recipient},
 };
 use ahash::AHashSet;
 use calcard::icalendar::{
@@ -54,6 +56,7 @@ pub fn itip_process_message(
     itip: &ICalendar,
     itip_snapshots: ItipSnapshots<'_>,
     sender: String,
+    policy: RecipientPolicy,
 ) -> Result<MergeResult, ItipError> {
     if snapshots.organizer.email != itip_snapshots.organizer.email {
         return Err(ItipError::OrganizerMismatch);
@@ -72,18 +75,28 @@ pub fn itip_process_message(
                 handle_reply(&snapshots, &itip_snapshots, &sender, &mut merge_actions)?;
             }
             ICalendarMethod::Refresh => {
-                return organizer_request_full(ical, &snapshots, None, false).and_then(
-                    |messages| {
-                        messages
-                            .into_iter()
-                            .next()
-                            .map(|mut message| {
-                                message.to = vec![sender];
-                                MergeResult::Message(message)
-                            })
-                            .ok_or(ItipError::NothingToSend)
-                    },
-                );
+                if !snapshots
+                    .components
+                    .values()
+                    .any(|instance| instance.attendee_by_email(&sender).is_some())
+                {
+                    return Err(ItipError::SenderIsNotParticipant(sender));
+                }
+                let message = organizer_request_full(ical, &snapshots, None, false)?
+                    .into_iter()
+                    .next()
+                    .ok_or(ItipError::NothingToSend)?;
+                return itip_messages_per_recipient(
+                    vec![ItipMessage {
+                        to: vec![sender],
+                        ..message
+                    }],
+                    policy,
+                )?
+                .into_iter()
+                .next()
+                .map(MergeResult::Message)
+                .ok_or(ItipError::NothingToSend);
             }
             _ => return Err(ItipError::UnsupportedMethod(method.clone())),
         }
@@ -542,7 +555,10 @@ fn handle_reply(
     Ok(())
 }
 
-pub fn itip_merge_changes(ical: &mut ICalendar, changes: Vec<MergeAction>) {
+pub fn itip_merge_changes(
+    ical: &mut ICalendar,
+    changes: Vec<MergeAction>,
+) -> Result<(), ItipError> {
     let mut remove_component_ids: Vec<u32> = Vec::new();
     for action in changes {
         match action {
@@ -597,8 +613,10 @@ pub fn itip_merge_changes(ical: &mut ICalendar, changes: Vec<MergeAction>) {
         }
     }
 
-    if !remove_component_ids.is_empty() {
-        ical.remove_component_ids(&remove_component_ids);
+    if remove_component_ids.is_empty() || ical.remove_component_ids(&remove_component_ids) {
+        Ok(())
+    } else {
+        Err(ItipError::CannotModifyInstance)
     }
 }
 

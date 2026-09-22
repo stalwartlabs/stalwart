@@ -216,6 +216,7 @@ pub(crate) fn itip_export_component(
     export_as: ItipExportAs<'_>,
 ) -> ICalendarComponent {
     let is_todo = component.component_type == ICalendarComponentType::VTodo;
+    let is_event = component.component_type == ICalendarComponentType::VEvent;
     let mut comp = ICalendarComponent {
         component_type: component.component_type.clone(),
         entries: Vec::with_capacity(component.entries.len() + 1),
@@ -328,18 +329,51 @@ pub(crate) fn itip_export_component(
         }
     }
 
-    if matches!(export_as, ItipExportAs::Attendee(_)) {
-        comp.entries.push(ICalendarEntry {
-            name: ICalendarProperty::RequestStatus,
-            params: vec![],
-            values: vec![
-                ICalendarValue::Text("2.0".to_string()),
-                ICalendarValue::Text("Success".to_string()),
-            ],
-        });
+    match export_as {
+        ItipExportAs::Attendee(_) => {
+            comp.entries.push(ICalendarEntry {
+                name: ICalendarProperty::RequestStatus,
+                params: vec![],
+                values: vec![
+                    ICalendarValue::Text("2.0".to_string()),
+                    ICalendarValue::Text("Success".to_string()),
+                ],
+            });
+        }
+        ItipExportAs::Organizer(_) => {
+            if is_event
+                && !component.has_property(&ICalendarProperty::Dtstart)
+                && let Some(recurrence_id) = component.property(&ICalendarProperty::RecurrenceId)
+            {
+                comp.entries
+                    .push(itip_date_entry(ICalendarProperty::Dtstart, recurrence_id));
+            }
+        }
     }
 
     comp
+}
+
+pub(crate) fn itip_date_entry(name: ICalendarProperty, source: &ICalendarEntry) -> ICalendarEntry {
+    ICalendarEntry {
+        name,
+        params: itip_date_params(source),
+        values: source.values.clone(),
+    }
+}
+
+pub(crate) fn itip_date_params(source: &ICalendarEntry) -> Vec<ICalendarParameter> {
+    source
+        .params
+        .iter()
+        .filter(|param| {
+            matches!(
+                param.name,
+                ICalendarParameterName::Tzid | ICalendarParameterName::Value
+            )
+        })
+        .cloned()
+        .collect()
 }
 
 pub(crate) fn itip_finalize(ical: &mut ICalendar, scheduling_object_ids: &[u16]) {

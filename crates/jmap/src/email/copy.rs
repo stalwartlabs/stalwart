@@ -22,7 +22,7 @@ use jmap_proto::{
     },
     object::email::{Email, EmailProperty, EmailValue},
     request::{
-        Call, IntoValid, MaybeInvalid, RequestMethod, SetRequestMethod,
+        Call, MaybeInvalid, RequestMethod, SetRequestMethod,
         method::{MethodFunction, MethodName, MethodObject},
         reference::MaybeResultReference,
     },
@@ -89,7 +89,7 @@ impl JmapEmailCopy for Server {
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
 
-        'create: for (id, create) in request.create.into_valid() {
+        'create: for (id, create) in request.create {
             let mut from_message_id = None;
             let mut mailboxes = Vec::new();
             let mut keywords = Vec::new();
@@ -133,7 +133,7 @@ impl JmapEmailCopy for Server {
                                 mailboxes.retain(|mid| mid != &id);
                             }
                             PatchResult::Invalid(set_error) => {
-                                response.not_created.append(id, set_error);
+                                response.not_created.append(id.clone(), set_error);
                                 continue 'create;
                             }
                         }
@@ -147,7 +147,7 @@ impl JmapEmailCopy for Server {
                     }
                     (property, _) => {
                         response.not_created.append(
-                            id,
+                            id.clone(),
                             SetError::invalid_properties()
                                 .with_property(property.into_owned())
                                 .with_description("Invalid property or value.".to_string()),
@@ -171,7 +171,7 @@ impl JmapEmailCopy for Server {
                     id,
                     SetError::not_found().with_description(format!(
                         "Item {} not found in account {}.",
-                        id, response.from_account_id
+                        from_message_id, response.from_account_id
                     )),
                 );
                 continue 'create;
@@ -180,7 +180,7 @@ impl JmapEmailCopy for Server {
             // Make sure message belongs to at least one mailbox
             if mailboxes.is_empty() {
                 response.not_created.append(
-                    id,
+                    id.clone(),
                     SetError::invalid_properties()
                         .with_property(EmailProperty::MailboxIds)
                         .with_description("Message has to belong to at least one mailbox."),
@@ -192,7 +192,7 @@ impl JmapEmailCopy for Server {
             for mailbox_id in &mailboxes {
                 if !cache.has_mailbox_id(mailbox_id) {
                     response.not_created.append(
-                        id,
+                        id.clone(),
                         SetError::invalid_properties()
                             .with_property(EmailProperty::MailboxIds)
                             .with_description(format!("mailboxId {mailbox_id} does not exist.")),
@@ -200,7 +200,7 @@ impl JmapEmailCopy for Server {
                     continue 'create;
                 } else if matches!(&can_add_mailbox_ids, Some(ids) if !ids.contains(*mailbox_id)) {
                     response.not_created.append(
-                        id,
+                        id.clone(),
                         SetError::forbidden().with_description(format!(
                             "You are not allowed to add messages to mailbox {mailbox_id}."
                         )),
@@ -216,7 +216,7 @@ impl JmapEmailCopy for Server {
                 .limits
                 .validate_email(mailboxes.len(), &keywords)
             {
-                response.not_created.append(id, err.into());
+                response.not_created.append(id.clone(), err.into());
                 continue 'create;
             }
 

@@ -256,19 +256,51 @@ pub async fn test(test: &TestServer) {
           "name": null
         }));
 
-    // Updating and deleting should fail
+    // Per-user properties can be changed without mayWrite
+    jane.jmap_update_account(
+        john,
+        MethodObject::AddressBook,
+        [(&john_book_id, json!({"isSubscribed": true, "sortOrder": 7}))],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .updated(&john_book_id);
+    jane.jmap_get_account(
+        john,
+        MethodObject::AddressBook,
+        [
+            AddressBookProperty::Id,
+            AddressBookProperty::IsSubscribed,
+            AddressBookProperty::SortOrder,
+        ],
+        [john_book_id.as_str()],
+    )
+    .await
+    .list()[0]
+        .assert_is_equal(json!({
+        "id": john_book_id,
+        "isSubscribed": true,
+        "sortOrder": 7
+        }));
+
+    // Changing shareWith requires mayShare
     assert_eq!(
         jane.jmap_update_account(
             john,
             MethodObject::AddressBook,
-            [(&john_book_id, json!({}))],
+            [(
+                &john_book_id,
+                json!({ format!("shareWith/{jane_id}/mayWrite"): true }),
+            )],
             Vec::<(&str, &str)>::new(),
         )
         .await
         .not_updated(&john_book_id)
         .description(),
-        "You are not allowed to modify this address book."
+        "You are not allowed to share this address book."
     );
+
+    // Deleting should fail
     assert_eq!(
         jane.jmap_destroy_account(
             john,
@@ -415,6 +447,7 @@ pub async fn test(test: &TestServer) {
             john,
             MethodObject::ContactCard,
             [(
+                "k1",
                 &jane_contact_id,
                 json!({
                     "addressBookIds": {
@@ -425,7 +458,7 @@ pub async fn test(test: &TestServer) {
             false,
         )
         .await
-        .copied(&jane_contact_id)
+        .copied("k1")
         .id()
         .to_string();
     jane.jmap_get_account(
@@ -653,6 +686,57 @@ pub async fn test(test: &TestServer) {
     .await
     .updated(&john_book_id);
 
+    // mayDelete alone does not allow removing cards from the address book
+    let john_book_2_id = john
+        .jmap_create(
+            MethodObject::AddressBook,
+            [json!({
+                "name": "Test #2",
+                "shareWith": {
+                    &jane_id: {
+                        "mayRead": true,
+                        "mayWrite": true
+                    }
+                }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    assert!(
+        jane.jmap_destroy_account(
+            john,
+            MethodObject::ContactCard,
+            [&john_contact_id],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_destroyed(&john_contact_id)
+        .description()
+        .contains("You are not allowed to remove contacts from address book"),
+    );
+    assert_eq!(
+        jane.jmap_update_account(
+            john,
+            MethodObject::ContactCard,
+            [(
+                &john_contact_id,
+                json!({
+                    "addressBookIds": {
+                        &john_book_2_id: true
+                    }
+                }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_updated(&john_contact_id)
+        .typ(),
+        "forbidden"
+    );
+
     // Verify Jane can delete the address book
     assert_eq!(
         jane.jmap_destroy_account(
@@ -666,6 +750,97 @@ pub async fn test(test: &TestServer) {
         .collect::<Vec<_>>(),
         [john_book_id.as_str()]
     );
+
+    // The owner cannot be in shareWith
+    let bill_id = test.account("bill@example.com").id_string().to_string();
+    let robert_id = test.account("robert@example.com").id_string().to_string();
+    assert_eq!(
+        john.jmap_create(
+            MethodObject::AddressBook,
+            [json!({
+                "name": "Owner share",
+                "shareWith": { &john_id: {"mayRead": true} }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_created(0)
+        .typ(),
+        "invalidProperties"
+    );
+    let shared_book_id = john
+        .jmap_create(
+            MethodObject::AddressBook,
+            [json!({
+                "name": "Share rules",
+                "shareWith": {
+                    &jane_id: {"mayRead": true, "mayWrite": true, "mayShare": true},
+                    &bill_id: {"mayRead": true, "mayDelete": true}
+                }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    assert_eq!(
+        john.jmap_update(
+            MethodObject::AddressBook,
+            [(
+                &shared_book_id,
+                json!({ format!("shareWith/{john_id}"): {"mayRead": true} }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .not_updated(&shared_book_id)
+        .typ(),
+        "invalidProperties"
+    );
+
+    // Sharees cannot grant rights that neither they nor the grantee hold
+    for update in [
+        json!({ format!("shareWith/{jane_id}/mayDelete"): true }),
+        json!({ format!("shareWith/{robert_id}"): {"mayRead": true, "mayDelete": true} }),
+    ] {
+        assert_eq!(
+            jane.jmap_update_account(
+                john,
+                MethodObject::AddressBook,
+                [(&shared_book_id, update)],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .not_updated(&shared_book_id)
+            .typ(),
+            "forbidden"
+        );
+    }
+    jane.jmap_update_account(
+        john,
+        MethodObject::AddressBook,
+        [(
+            &shared_book_id,
+            json!({ format!("shareWith/{bill_id}/mayWrite"): true }),
+        )],
+        Vec::<(&str, &str)>::new(),
+    )
+    .await
+    .updated(&shared_book_id);
+    john.jmap_get(
+        MethodObject::AddressBook,
+        [AddressBookProperty::ShareWith],
+        [shared_book_id.as_str()],
+    )
+    .await
+    .list()[0]["shareWith"][&bill_id]
+        .assert_is_equal(json!({
+            "mayRead": true,
+            "mayWrite": true,
+            "mayDelete": true,
+            "mayShare": false
+        }));
 
     // Destroy all mailboxes
     john.destroy_all_addressbooks().await;

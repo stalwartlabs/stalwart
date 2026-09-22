@@ -1036,9 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "calcard"
-version = "0.3.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c601473ec15a875626bce73db1a1f0fc81e9c949ca25f1463b714947c0a70a1f"
+version = "0.4.0"
 dependencies = [
  "ahash",
  "chrono",
@@ -3032,6 +3030,7 @@ dependencies = [
  "icu_plurals",
  "icu_provider",
  "indexmap 2.14.2",
+ "jmap-tools",
  "nlp",
  "percent-encoding",
  "registry",
@@ -4239,9 +4238,7 @@ dependencies = [
 
 [[package]]
 name = "jmap-tools"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bdcd368dcd58a5efaac10c142fb8cddb4d2949af1297b624df3ff0db4cbff54"
+version = "0.1.9"
 dependencies = [
  "hashify",
  "rkyv",

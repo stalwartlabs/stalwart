@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::auth::JmapAuthorization, changes::state::JmapCacheState};
+use crate::{
+    api::auth::JmapAuthorization, changes::state::JmapCacheState,
+    participant_identity::changes::ParticipantIdentityChanges,
+};
 use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess};
-use groupware::cache::GroupwareCache;
+use groupware::{
+    cache::GroupwareCache,
+    calendar::{EVENT_SECRET, notification::CalendarNotificationViewers},
+};
 use jmap_proto::{
     method::changes::{ChangesRequest, ChangesResponse},
     object::{JmapObject, NullObject, mailbox::MailboxProperty},
@@ -39,6 +45,41 @@ pub struct IntermediateChangesResponse {
     pub response: ChangesResponse<NullObject>,
     pub object: MethodObject,
     pub only_container_changes: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HiddenChanges {
+    Drop,
+    ReportAsDestroyed,
+}
+
+impl HiddenChanges {
+    fn for_object(object: MethodObject) -> Self {
+        match object {
+            MethodObject::CalendarEvent
+            | MethodObject::Calendar
+            | MethodObject::AddressBook
+            | MethodObject::ContactCard
+            | MethodObject::FileNode
+            | MethodObject::Mailbox
+            | MethodObject::CalendarEventNotification => HiddenChanges::ReportAsDestroyed,
+            _ => HiddenChanges::Drop,
+        }
+    }
+
+    fn rewrite(self, change: Change, id: u64) -> Option<Change> {
+        match self {
+            HiddenChanges::Drop => None,
+            HiddenChanges::ReportAsDestroyed => match change {
+                Change::DeleteItem(_) | Change::DeleteContainer(_) => Some(change),
+                Change::UpdateItem(_) => Some(Change::DeleteItem(id)),
+                Change::UpdateContainer(_) => Some(Change::DeleteContainer(id)),
+                Change::InsertItem(_)
+                | Change::InsertContainer(_)
+                | Change::UpdateContainerProperty(_) => None,
+            },
+        }
+    }
 }
 
 impl ChangesLookup for Server {
@@ -100,7 +141,7 @@ impl ChangesLookup for Server {
                 (SyncCollection::Calendar, false)
             }
             MethodObject::CalendarEventNotification => {
-                access_token.assert_is_member(request.account_id)?;
+                access_token.assert_has_access(request.account_id, Collection::CalendarEvent)?;
 
                 (SyncCollection::CalendarEventNotification, false)
             }
@@ -109,17 +150,24 @@ impl ChangesLookup for Server {
 
                 (SyncCollection::ShareNotification, false)
             }
+            MethodObject::ParticipantIdentity => {
+                access_token.assert_is_member(request.account_id)?;
+
+                return self.participant_identity_changes(request).await;
+            }
             _ => {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
             }
         };
-        let max_changes = std::cmp::min(
-            request
-                .max_changes
-                .filter(|n| *n != 0)
-                .unwrap_or(usize::MAX),
-            self.core.jmap.changes_max_results,
-        );
+        let max_changes = match request.max_changes {
+            Some(0) => {
+                return Err(trc::JmapEvent::InvalidArguments
+                    .into_err()
+                    .details("maxChanges must be greater than 0."));
+            }
+            Some(max_changes) => max_changes.min(self.core.jmap.changes_max_results),
+            None => self.core.jmap.changes_max_results,
+        };
         let mut response: ChangesResponse<NullObject> = ChangesResponse {
             account_id: request.account_id,
             old_state: request.since_state.clone(),
@@ -231,7 +279,24 @@ impl ChangesLookup for Server {
             ));
         }
 
-        let allowed_ids: Option<RoaringBitmap> = if access_token.is_member(account_id) {
+        let allowed_ids: Option<RoaringBitmap> = if object
+            == MethodObject::CalendarEventNotification
+        {
+            let cache = self
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    account_id,
+                    SyncCollection::CalendarEventNotification,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            Some(
+                self.notification_viewer(access_token, account_id)
+                    .await
+                    .caused_by(trc::location!())?
+                    .visible_notifications(&cache),
+            )
+        } else if access_token.is_member(account_id) {
             None
         } else {
             Some(match object {
@@ -278,14 +343,18 @@ impl ChangesLookup for Server {
                     )
                     .await?
                     .shared_containers(access_token, [Acl::Read, Acl::ReadItems], true),
-                MethodObject::CalendarEvent => self
-                    .fetch_groupware_resources(
-                        access_token.account_id(),
-                        account_id,
-                        SyncCollection::Calendar,
-                    )
-                    .await?
-                    .shared_items(access_token, [Acl::ReadItems], true),
+                MethodObject::CalendarEvent => {
+                    let cache = self
+                        .fetch_groupware_resources(
+                            access_token.account_id(),
+                            account_id,
+                            SyncCollection::Calendar,
+                        )
+                        .await?;
+                    let mut shared_ids = cache.shared_items(access_token, [Acl::ReadItems], true);
+                    shared_ids -= cache.event_ids_with_flags(EVENT_SECRET);
+                    shared_ids
+                }
                 MethodObject::FileNode => {
                     self.fetch_groupware_resources(
                         access_token.account_id(),
@@ -300,6 +369,7 @@ impl ChangesLookup for Server {
             })
         };
 
+        let hidden_changes = HiddenChanges::for_object(object);
         let mut changes = changelog
             .changes
             .into_iter()
@@ -307,18 +377,21 @@ impl ChangesLookup for Server {
                 (is_container && change.is_container_change())
                     || (!is_container && change.is_item_change())
             })
-            .filter(|change| {
-                allowed_ids.as_ref().is_none_or(|allowed| {
-                    if object == MethodObject::FileNode && matches!(change, Change::DeleteItem(_)) {
-                        return true;
-                    }
-                    let id = if is_container {
-                        change.container_id()
-                    } else {
-                        change.item_id()
-                    };
-                    id.is_some_and(|id| allowed.contains(id as u32))
-                })
+            .filter_map(|change| {
+                let Some(allowed) = allowed_ids.as_ref() else {
+                    return Some(change);
+                };
+                let id = if is_container {
+                    change.container_id()
+                } else {
+                    change.item_id()
+                }?;
+
+                if allowed.contains(id as u32) {
+                    Some(change)
+                } else {
+                    hidden_changes.rewrite(change, id)
+                }
             })
             .skip(items_sent)
             .peekable();
@@ -415,8 +488,10 @@ impl IntermediateChangesResponse {
             MethodObject::ShareNotification => {
                 ChangesResponseMethod::ShareNotification(transmute_response(self.response))
             }
-            MethodObject::ParticipantIdentity
-            | MethodObject::Core
+            MethodObject::ParticipantIdentity => {
+                ChangesResponseMethod::ParticipantIdentity(transmute_response(self.response))
+            }
+            MethodObject::Core
             | MethodObject::Blob
             | MethodObject::PushSubscription
             | MethodObject::SearchSnippet
