@@ -8,7 +8,7 @@ use super::{SwapPart, frame::SwapFrame};
 use crate::{
     ArenaRef, CachedName, DavPath, FileFlags, GroupwareResource, GroupwareResourceMetadata,
     GroupwareResources, PathChunk, PathIndex, ResourceChunk, ResourceStore,
-    TinyCalendarPreferences, UpdateLock,
+    TinyCalendarPreferences, UpdateLock, storage::dav::CONTAINER_FLAG,
 };
 use calcard::common::timezone::Tz;
 use rkyv::with::InlineAsBox;
@@ -25,34 +25,102 @@ const KIND_CONTACT_CARD: u16 = 6;
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
 pub struct FlatResource {
-    pub start: i64,
-    pub created_at: i64,
     pub ref_a_off: u32,
-    pub ref_a_len: u32,
     pub ref_b_off: u32,
-    pub ref_b_len: u32,
-    pub num_a: u32,
-    pub num_b: u32,
-    pub document_id: u32,
+    pub v0: u32,
+    pub v1: u32,
+    pub v2: u32,
+    pub v3: u32,
+    pub v4: u32,
     pub etag: u32,
-    pub kind: u16,
+    pub document_id: u32,
+    pub ref_a_len: u16,
+    pub ref_b_len: u16,
     pub flags: u16,
 }
 
+struct ChunkTimes {
+    epoch: i64,
+    wide: Vec<i64>,
+}
+
+impl ChunkTimes {
+    fn for_records(records: &[GroupwareResource]) -> Self {
+        Self {
+            epoch: records
+                .iter()
+                .flat_map(|record| record.data.absolute_times())
+                .min()
+                .unwrap_or_default(),
+            wide: Vec::new(),
+        }
+    }
+
+    fn encode(&mut self, time: i64) -> u32 {
+        match time.checked_sub(self.epoch) {
+            Some(delta) if (0..=i32::MAX as i64).contains(&delta) => delta as u32,
+            _ => {
+                self.wide.push(time);
+                -(self.wide.len() as i32) as u32
+            }
+        }
+    }
+
+    fn decode(&self, raw: u32) -> Option<i64> {
+        let delta = raw as i32;
+        if delta >= 0 {
+            self.epoch.checked_add(delta as i64)
+        } else {
+            self.wide.get((-(delta as i64) - 1) as usize).copied()
+        }
+    }
+}
+
+impl GroupwareResourceMetadata {
+    fn absolute_times(&self) -> impl Iterator<Item = i64> {
+        let (start, created_at) = match self {
+            GroupwareResourceMetadata::File { modified, .. } => (Some(*modified), None),
+            GroupwareResourceMetadata::CalendarEvent {
+                start, created_at, ..
+            } => (Some(*start), Some(*created_at)),
+            GroupwareResourceMetadata::CalendarEventNotification { created_at, .. }
+            | GroupwareResourceMetadata::ContactCard { created_at, .. } => {
+                (Some(*created_at), None)
+            }
+            GroupwareResourceMetadata::Calendar { .. }
+            | GroupwareResourceMetadata::AddressBook { .. } => (None, None),
+        };
+        start.into_iter().chain(created_at)
+    }
+
+    fn kind(&self) -> u16 {
+        match self {
+            GroupwareResourceMetadata::File { .. } => KIND_FILE,
+            GroupwareResourceMetadata::Calendar { .. } => KIND_CALENDAR,
+            GroupwareResourceMetadata::CalendarEvent { .. } => KIND_CALENDAR_EVENT,
+            GroupwareResourceMetadata::CalendarEventNotification { .. } => {
+                KIND_CALENDAR_EVENT_NOTIFICATION
+            }
+            GroupwareResourceMetadata::AddressBook { .. } => KIND_ADDRESS_BOOK,
+            GroupwareResourceMetadata::ContactCard { .. } => KIND_CONTACT_CARD,
+        }
+    }
+}
+
 impl FlatResource {
-    fn pack(resource: &GroupwareResource) -> Self {
+    fn pack(resource: &GroupwareResource, times: &mut ChunkTimes) -> Option<Self> {
         let mut flat = FlatResource {
-            start: 0,
-            created_at: 0,
             ref_a_off: 0,
-            ref_a_len: 0,
             ref_b_off: 0,
-            ref_b_len: 0,
-            num_a: 0,
-            num_b: 0,
-            document_id: resource.document_id,
+            v0: 0,
+            v1: 0,
+            v2: 0,
+            v3: 0,
+            v4: 0,
             etag: resource.etag(),
-            kind: 0,
+            document_id: resource.document_id,
+            ref_a_len: 0,
+            ref_b_len: 0,
             flags: 0,
         };
 
@@ -67,13 +135,13 @@ impl FlatResource {
                 flags,
                 ..
             } => {
-                flat.kind = KIND_FILE;
-                flat.set_ref_a(name);
-                flat.set_ref_b(acls);
-                flat.num_a = *size;
-                flat.num_b = *parent_id;
-                flat.created_at = *modified;
-                flat.start = ((flags.0 as u64) << 32 | *created_delta as u32 as u64) as i64;
+                flat.set_ref_a(name)?;
+                flat.set_ref_b(acls)?;
+                flat.v0 = *size;
+                flat.v1 = *parent_id;
+                flat.v2 = times.encode(*modified);
+                flat.v3 = *created_delta as u32;
+                flat.v4 = flags.0;
             }
             GroupwareResourceMetadata::Calendar {
                 name,
@@ -81,11 +149,10 @@ impl FlatResource {
                 preferences,
                 ..
             } => {
-                flat.kind = KIND_CALENDAR;
-                flat.set_ref_a(name);
-                flat.set_ref_b(acls);
-                flat.num_a = preferences.off;
-                flat.num_b = preferences.len;
+                flat.set_ref_a(name)?;
+                flat.set_ref_b(acls)?;
+                flat.v0 = preferences.off;
+                flat.v1 = preferences.len;
             }
             GroupwareResourceMetadata::CalendarEvent {
                 names,
@@ -97,14 +164,13 @@ impl FlatResource {
                 flags,
                 ..
             } => {
-                flat.kind = KIND_CALENDAR_EVENT;
                 flat.flags = *flags;
-                flat.set_ref_a(names);
-                flat.set_ref_b(uid);
-                flat.start = *start;
-                flat.created_at = *created_at;
-                flat.num_a = *duration;
-                flat.num_b = *modified_at as u32;
+                flat.set_ref_a(names)?;
+                flat.set_ref_b(uid)?;
+                flat.v0 = times.encode(*start);
+                flat.v1 = times.encode(*created_at);
+                flat.v2 = *duration;
+                flat.v3 = *modified_at as u32;
             }
             GroupwareResourceMetadata::CalendarEventNotification {
                 names,
@@ -116,19 +182,17 @@ impl FlatResource {
                 flags,
                 ..
             } => {
-                flat.kind = KIND_CALENDAR_EVENT_NOTIFICATION;
                 flat.flags = *flags;
-                flat.set_ref_a(names);
-                flat.set_ref_b(principals);
-                flat.created_at = *created_at;
-                flat.num_a = *event_id;
-                flat.num_b = *changed_by;
-                flat.start = *calendar_ids_len as i64;
+                flat.set_ref_a(names)?;
+                flat.set_ref_b(principals)?;
+                flat.v0 = times.encode(*created_at);
+                flat.v1 = *event_id;
+                flat.v2 = *changed_by;
+                flat.v3 = *calendar_ids_len as u32;
             }
             GroupwareResourceMetadata::AddressBook { name, acls, .. } => {
-                flat.kind = KIND_ADDRESS_BOOK;
-                flat.set_ref_a(name);
-                flat.set_ref_b(acls);
+                flat.set_ref_a(name)?;
+                flat.set_ref_b(acls)?;
             }
             GroupwareResourceMetadata::ContactCard {
                 names,
@@ -137,25 +201,26 @@ impl FlatResource {
                 uid,
                 ..
             } => {
-                flat.kind = KIND_CONTACT_CARD;
-                flat.set_ref_a(names);
-                flat.set_ref_b(uid);
-                flat.created_at = *created_at;
-                flat.num_b = *modified_at as u32;
+                flat.set_ref_a(names)?;
+                flat.set_ref_b(uid)?;
+                flat.v0 = times.encode(*created_at);
+                flat.v1 = *modified_at as u32;
             }
         }
 
-        flat
+        Some(flat)
     }
 
-    fn set_ref_a(&mut self, arena: &ArenaRef) {
+    fn set_ref_a(&mut self, arena: &ArenaRef) -> Option<()> {
         self.ref_a_off = arena.off;
-        self.ref_a_len = arena.len;
+        self.ref_a_len = u16::try_from(arena.len).ok()?;
+        Some(())
     }
 
-    fn set_ref_b(&mut self, arena: &ArenaRef) {
+    fn set_ref_b(&mut self, arena: &ArenaRef) -> Option<()> {
         self.ref_b_off = arena.off;
-        self.ref_b_len = arena.len;
+        self.ref_b_len = u16::try_from(arena.len).ok()?;
+        Some(())
     }
 }
 
@@ -163,47 +228,44 @@ impl ArchivedFlatResource {
     fn ref_a(&self) -> ArenaRef {
         ArenaRef {
             off: self.ref_a_off.to_native(),
-            len: self.ref_a_len.to_native(),
+            len: self.ref_a_len.to_native() as u32,
         }
     }
 
     fn ref_b(&self) -> ArenaRef {
         ArenaRef {
             off: self.ref_b_off.to_native(),
-            len: self.ref_b_len.to_native(),
+            len: self.ref_b_len.to_native() as u32,
         }
     }
 
-    fn unpack(&self) -> Option<GroupwareResource> {
-        let data = match self.kind.to_native() {
-            KIND_FILE => {
-                let packed = self.start.to_native() as u64;
-                GroupwareResourceMetadata::File {
-                    name: self.ref_a(),
-                    size: self.num_a.to_native(),
-                    parent_id: self.num_b.to_native(),
-                    acls: self.ref_b(),
-                    etag: self.etag.to_native(),
-                    modified: self.created_at.to_native(),
-                    created_delta: packed as u32 as i32,
-                    flags: FileFlags((packed >> 32) as u32),
-                }
-            }
+    fn unpack(&self, kind: u16, times: &ChunkTimes) -> Option<GroupwareResource> {
+        let data = match kind {
+            KIND_FILE => GroupwareResourceMetadata::File {
+                name: self.ref_a(),
+                size: self.v0.to_native(),
+                parent_id: self.v1.to_native(),
+                acls: self.ref_b(),
+                etag: self.etag.to_native(),
+                modified: times.decode(self.v2.to_native())?,
+                created_delta: self.v3.to_native() as i32,
+                flags: FileFlags(self.v4.to_native()),
+            },
             KIND_CALENDAR => GroupwareResourceMetadata::Calendar {
                 name: self.ref_a(),
                 acls: self.ref_b(),
                 preferences: ArenaRef {
-                    off: self.num_a.to_native(),
-                    len: self.num_b.to_native(),
+                    off: self.v0.to_native(),
+                    len: self.v1.to_native(),
                 },
                 etag: self.etag.to_native(),
             },
             KIND_CALENDAR_EVENT => GroupwareResourceMetadata::CalendarEvent {
                 names: self.ref_a(),
-                start: self.start.to_native(),
-                duration: self.num_a.to_native(),
-                created_at: self.created_at.to_native(),
-                modified_at: self.num_b.to_native() as i32,
+                start: times.decode(self.v0.to_native())?,
+                duration: self.v2.to_native(),
+                created_at: times.decode(self.v1.to_native())?,
+                modified_at: self.v3.to_native() as i32,
                 uid: self.ref_b(),
                 etag: self.etag.to_native(),
                 flags: self.flags.to_native(),
@@ -211,12 +273,12 @@ impl ArchivedFlatResource {
             KIND_CALENDAR_EVENT_NOTIFICATION => {
                 GroupwareResourceMetadata::CalendarEventNotification {
                     names: self.ref_a(),
-                    created_at: self.created_at.to_native(),
-                    event_id: self.num_a.to_native(),
+                    created_at: times.decode(self.v0.to_native())?,
+                    event_id: self.v1.to_native(),
                     etag: self.etag.to_native(),
-                    changed_by: self.num_b.to_native(),
+                    changed_by: self.v2.to_native(),
                     principals: self.ref_b(),
-                    calendar_ids_len: u16::try_from(self.start.to_native()).ok()?,
+                    calendar_ids_len: u16::try_from(self.v3.to_native()).ok()?,
                     flags: self.flags.to_native(),
                 }
             }
@@ -227,8 +289,8 @@ impl ArchivedFlatResource {
             },
             KIND_CONTACT_CARD => GroupwareResourceMetadata::ContactCard {
                 names: self.ref_a(),
-                created_at: self.created_at.to_native(),
-                modified_at: self.num_b.to_native() as i32,
+                created_at: times.decode(self.v0.to_native())?,
+                modified_at: self.v1.to_native() as i32,
                 uid: self.ref_b(),
                 etag: self.etag.to_native(),
             },
@@ -261,7 +323,7 @@ pub struct ArchivedResourceChunk<'x> {
     #[rkyv(with = InlineAsBox)]
     pub bytes: &'x [u8],
     pub name_offsets: Vec<u32>,
-    pub name_lengths: Vec<u32>,
+    pub name_lengths: Vec<u16>,
     pub name_parents: Vec<u32>,
     pub acl_accounts: Vec<u32>,
     pub acl_grants: Vec<u64>,
@@ -270,18 +332,22 @@ pub struct ArchivedResourceChunk<'x> {
     pub pref_flags: Vec<u16>,
     #[rkyv(with = InlineAsBox)]
     pub principals: &'x [u32],
+    pub kind: u16,
+    pub epoch: i64,
+    pub wide_times: Vec<i64>,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize)]
 pub struct ArchivedPathChunk<'x> {
     #[rkyv(with = InlineAsBox)]
     pub bytes: &'x [u8],
-    pub path_offsets: Vec<u32>,
-    pub path_lengths: Vec<u32>,
+    pub path_lengths: Vec<u16>,
+    pub hierarchy_seqs: Vec<u16>,
     pub parent_ids: Vec<u32>,
-    pub hierarchy_seqs: Vec<u32>,
     pub document_ids: Vec<u32>,
 }
+
+const WIRE_CONTAINER_FLAG: u16 = 1 << 15;
 
 fn fits_within(arena: ArenaRef, limit: usize) -> bool {
     (arena.off as usize)
@@ -356,12 +422,12 @@ impl GroupwareResource {
 
 impl GroupwareResources {
     pub fn to_snapshot(&self) -> Option<Vec<u8>> {
-        let (chunks, path_chunks) = self.pack();
+        let (chunks, path_chunks) = self.pack()?;
         self.seal_snapshot(chunks, path_chunks)
     }
 
     #[allow(clippy::type_complexity)]
-    fn pack(&self) -> (Vec<ArchivedResourceChunk<'_>>, Vec<ArchivedPathChunk<'_>>) {
+    fn pack(&self) -> Option<(Vec<ArchivedResourceChunk<'_>>, Vec<ArchivedPathChunk<'_>>)> {
         let mut chunks = Vec::with_capacity(self.resources.chunks.len());
         for chunk in &self.resources.chunks {
             let mut name_offsets = Vec::with_capacity(chunk.names.len());
@@ -369,7 +435,7 @@ impl GroupwareResources {
             let mut name_parents = Vec::with_capacity(chunk.names.len());
             for name in chunk.names.iter() {
                 name_offsets.push(name.name.off);
-                name_lengths.push(name.name.len);
+                name_lengths.push(u16::try_from(name.name.len).ok()?);
                 name_parents.push(name.parent_id);
             }
 
@@ -389,8 +455,23 @@ impl GroupwareResources {
                 pref_flags.push(pref.flags);
             }
 
+            let kind = chunk.records.first().map_or(0, |record| record.data.kind());
+            if chunk
+                .records
+                .iter()
+                .any(|record| record.data.kind() != kind)
+            {
+                return None;
+            }
+
+            let mut times = ChunkTimes::for_records(&chunk.records);
+            let mut records = Vec::with_capacity(chunk.records.len());
+            for record in chunk.records.iter() {
+                records.push(FlatResource::pack(record, &mut times)?);
+            }
+
             chunks.push(ArchivedResourceChunk {
-                records: chunk.records.iter().map(FlatResource::pack).collect(),
+                records,
                 bytes: &chunk.bytes,
                 name_offsets,
                 name_lengths,
@@ -401,35 +482,51 @@ impl GroupwareResources {
                 pref_timezones,
                 pref_flags,
                 principals: &chunk.principals,
+                kind,
+                epoch: times.epoch,
+                wide_times: times.wide,
             });
         }
 
         let mut path_chunks = Vec::with_capacity(self.paths.chunks.len());
         for chunk in &self.paths.chunks {
-            let mut path_offsets = Vec::with_capacity(chunk.paths.len());
             let mut path_lengths = Vec::with_capacity(chunk.paths.len());
             let mut parent_ids = Vec::with_capacity(chunk.paths.len());
             let mut hierarchy_seqs = Vec::with_capacity(chunk.paths.len());
             let mut document_ids = Vec::with_capacity(chunk.paths.len());
+            let mut next_off = 0u32;
             for path in chunk.paths.iter() {
-                path_offsets.push(path.path.off);
-                path_lengths.push(path.path.len);
+                if path.path.off != next_off {
+                    return None;
+                }
+                next_off += path.path.len;
+                path_lengths.push(u16::try_from(path.path.len).ok()?);
                 parent_ids.push(path.parent_id);
-                hierarchy_seqs.push(path.hierarchy_seq);
+                let depth = u16::try_from(path.hierarchy_seq & !CONTAINER_FLAG).ok()?;
+                if depth >= WIRE_CONTAINER_FLAG {
+                    return None;
+                }
+                hierarchy_seqs.push(if path.hierarchy_seq & CONTAINER_FLAG != 0 {
+                    depth | WIRE_CONTAINER_FLAG
+                } else {
+                    depth
+                });
                 document_ids.push(path.document_id);
+            }
+            if next_off as usize != chunk.bytes.len() {
+                return None;
             }
 
             path_chunks.push(ArchivedPathChunk {
                 bytes: &chunk.bytes,
-                path_offsets,
                 path_lengths,
-                parent_ids,
                 hierarchy_seqs,
+                parent_ids,
                 document_ids,
             });
         }
 
-        (chunks, path_chunks)
+        Some((chunks, path_chunks))
     }
 
     fn seal_snapshot(
@@ -505,7 +602,7 @@ impl GroupwareResources {
                 .map(|((off, len), parent_id)| CachedName {
                     name: ArenaRef {
                         off: off.to_native(),
-                        len: len.to_native(),
+                        len: len.to_native() as u32,
                     },
                     parent_id: parent_id.to_native(),
                 })
@@ -545,9 +642,19 @@ impl GroupwareResources {
                 })
                 .collect();
 
+            let times = ChunkTimes {
+                epoch: chunk.epoch.to_native(),
+                wide: chunk
+                    .wide_times
+                    .iter()
+                    .map(|time| time.to_native())
+                    .collect(),
+            };
+            let kind = chunk.kind.to_native();
+
             let mut records = Vec::with_capacity(chunk.records.len());
             for record in chunk.records.iter() {
-                let record = record.unpack()?;
+                let record = record.unpack(kind, &times)?;
                 if !record.fits_within(
                     bytes.len(),
                     names_len,
@@ -587,9 +694,8 @@ impl GroupwareResources {
         let mut path_chunks = Vec::with_capacity(archived.path_chunks.len());
         let mut path_total = 0usize;
         for chunk in archived.path_chunks.iter() {
-            let paths_len = chunk.path_offsets.len();
-            if chunk.path_lengths.len() != paths_len
-                || chunk.parent_ids.len() != paths_len
+            let paths_len = chunk.path_lengths.len();
+            if chunk.parent_ids.len() != paths_len
                 || chunk.hierarchy_seqs.len() != paths_len
                 || chunk.document_ids.len() != paths_len
             {
@@ -597,30 +703,32 @@ impl GroupwareResources {
             }
 
             let bytes: Box<[u8]> = (&*chunk.bytes).into();
+            let mut off = 0u32;
             let paths: Box<[DavPath]> = chunk
-                .path_offsets
+                .path_lengths
                 .iter()
-                .zip(chunk.path_lengths.iter())
                 .zip(chunk.parent_ids.iter())
                 .zip(chunk.hierarchy_seqs.iter())
                 .zip(chunk.document_ids.iter())
-                .map(
-                    |((((off, len), parent_id), hierarchy_seq), document_id)| DavPath {
-                        path: ArenaRef {
-                            off: off.to_native(),
-                            len: len.to_native(),
-                        },
+                .map(|(((len, parent_id), hierarchy_seq), document_id)| {
+                    let len = len.to_native() as u32;
+                    let path = ArenaRef { off, len };
+                    off += len;
+                    let hierarchy_seq = hierarchy_seq.to_native();
+                    DavPath {
+                        path,
                         parent_id: parent_id.to_native(),
-                        hierarchy_seq: hierarchy_seq.to_native(),
+                        hierarchy_seq: (hierarchy_seq & !WIRE_CONTAINER_FLAG) as u32
+                            | if hierarchy_seq & WIRE_CONTAINER_FLAG != 0 {
+                                CONTAINER_FLAG
+                            } else {
+                                0
+                            },
                         document_id: document_id.to_native(),
-                    },
-                )
+                    }
+                })
                 .collect();
-            if paths.is_empty()
-                || paths
-                    .iter()
-                    .any(|path| !fits_within(path.path, bytes.len()))
-            {
+            if paths.is_empty() || off as usize != bytes.len() {
                 return None;
             }
 
@@ -984,6 +1092,194 @@ mod tests {
         }
     }
 
+    fn uuid(seed: u32) -> String {
+        let mut h = 0xcbf29ce484222325u64;
+        for byte in seed.to_le_bytes() {
+            h = (h ^ byte as u64).wrapping_mul(0x100000001b3);
+        }
+        let lo = h.wrapping_mul(0x9e3779b97f4a7c15);
+        format!(
+            "{:08X}-{:04X}-4{:03X}-8{:03X}-{:012X}",
+            h as u32,
+            (h >> 32) as u16,
+            (h >> 48) & 0xfff,
+            lo & 0xfff,
+            lo >> 16
+        )
+    }
+
+    fn calcard_uuid(items: usize) -> GroupwareResources {
+        const CALENDARS: [&str; 3] = ["Personal", "Work", "Family"];
+        let mut containers = Vec::new();
+        let mut chunk = ResourceChunkBuilder::with_capacity(4);
+        let mut entries = Vec::new();
+
+        for (document_id, calendar) in CALENDARS.iter().enumerate() {
+            let document_id = document_id as u32;
+            let name = chunk.push_str(calendar);
+            let acls = chunk.push_acls(&[grants(document_id + 100)]);
+            let preferences = chunk.push_prefs(&[TinyCalendarPreferences {
+                account_id: document_id + 300,
+                tz: Tz::UTC,
+                flags: 0b101,
+            }]);
+            chunk.records.push(GroupwareResource {
+                document_id,
+                data: GroupwareResourceMetadata::Calendar {
+                    name,
+                    acls,
+                    preferences,
+                    etag: document_id + 700,
+                },
+            });
+            entries.push((
+                calendar.to_string(),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id: crate::NO_ID,
+                    hierarchy_seq: crate::storage::dav::CONTAINER_FLAG,
+                    document_id,
+                },
+            ));
+        }
+        containers.push(chunk);
+
+        let mut items_chunks = Vec::new();
+        let mut chunk = ResourceChunkBuilder::with_capacity(items);
+        for document_id in 0..items as u32 {
+            if chunk.len() == DAV_CHUNK {
+                items_chunks.push(std::mem::replace(
+                    &mut chunk,
+                    ResourceChunkBuilder::with_capacity(DAV_CHUNK),
+                ));
+            }
+            let parent_id = document_id % 3;
+            let id = uuid(document_id);
+            let names = chunk.push_names(&[DavName {
+                name: format!("{id}.ics"),
+                parent_id,
+            }]);
+            let uid = chunk.push_uid(&id, names);
+            chunk.records.push(GroupwareResource {
+                document_id,
+                data: GroupwareResourceMetadata::CalendarEvent {
+                    names,
+                    start: 1_700_000_000 + document_id as i64 * 900,
+                    duration: 3600,
+                    created_at: 1_600_000_000 + document_id as i64,
+                    modified_at: -(document_id as i32) - 1,
+                    etag: document_id + 800,
+                    uid,
+                    flags: (document_id % 4) as u16 * 0x40,
+                },
+            });
+            entries.push((
+                format!("{}/{id}.ics", CALENDARS[parent_id as usize]),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id,
+                    hierarchy_seq: 0,
+                    document_id,
+                },
+            ));
+        }
+        items_chunks.push(chunk);
+
+        let mut resources = GroupwareResources {
+            base_path: "/dav/cal/jane".to_string(),
+            paths: Arc::new(PathIndex::pack(entries)),
+            resources: ResourceStore::from_sorted(containers, items_chunks, false),
+            item_change_id: 42,
+            container_change_id: 17,
+            highest_change_id: 42,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
+        };
+        resources.recompute_size();
+        resources
+    }
+
+    fn contacts(items: usize) -> GroupwareResources {
+        let mut containers = Vec::new();
+        let mut chunk = ResourceChunkBuilder::with_capacity(4);
+        let mut entries = Vec::new();
+
+        for document_id in 0..3u32 {
+            let name = chunk.push_str(&format!("addressbook-{document_id}"));
+            let acls = chunk.push_acls(&[grants(document_id + 100), grants(document_id + 200)]);
+            chunk.records.push(GroupwareResource {
+                document_id,
+                data: GroupwareResourceMetadata::AddressBook {
+                    name,
+                    acls,
+                    etag: document_id + 700,
+                },
+            });
+            entries.push((
+                format!("addressbook-{document_id}"),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id: crate::NO_ID,
+                    hierarchy_seq: crate::storage::dav::CONTAINER_FLAG,
+                    document_id,
+                },
+            ));
+        }
+        containers.push(chunk);
+
+        let mut items_chunks = Vec::new();
+        let mut chunk = ResourceChunkBuilder::with_capacity(items);
+        for document_id in 0..items as u32 {
+            if chunk.len() == DAV_CHUNK {
+                items_chunks.push(std::mem::replace(
+                    &mut chunk,
+                    ResourceChunkBuilder::with_capacity(DAV_CHUNK),
+                ));
+            }
+            let parent_id = document_id % 3;
+            let names = chunk.push_names(&[DavName {
+                name: format!("card-{document_id}.vcf"),
+                parent_id,
+            }]);
+            let uid = chunk.push_str(&format!("uid-{document_id}@example.org"));
+            chunk.records.push(GroupwareResource {
+                document_id,
+                data: GroupwareResourceMetadata::ContactCard {
+                    names,
+                    created_at: 1_600_000_000 + document_id as i64,
+                    modified_at: -(document_id as i32) - 1,
+                    uid,
+                    etag: document_id + 800,
+                },
+            });
+            entries.push((
+                format!("addressbook-{parent_id}/card-{document_id}.vcf"),
+                DavPath {
+                    path: ArenaRef::default(),
+                    parent_id,
+                    hierarchy_seq: 0,
+                    document_id,
+                },
+            ));
+        }
+        items_chunks.push(chunk);
+
+        let mut resources = GroupwareResources {
+            base_path: "/dav/card/jane".to_string(),
+            paths: Arc::new(PathIndex::pack(entries)),
+            resources: ResourceStore::from_sorted(containers, items_chunks, false),
+            item_change_id: 42,
+            container_change_id: 17,
+            highest_change_id: 42,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
+        };
+        resources.recompute_size();
+        resources
+    }
+
     #[test]
     fn perf_probe() {
         if std::env::var("SWAP_PERF").is_err() {
@@ -992,43 +1288,112 @@ mod tests {
         use std::time::Instant;
 
         fn p50(mut v: Vec<f64>) -> f64 {
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v.sort_by(f64::total_cmp);
             v[v.len() / 2]
         }
 
-        for n in [50_000usize, 500_000] {
-            let resources = calcard(n);
-            let encoded = resources.to_snapshot().expect("encode");
-            println!("--- calcard {n} ---");
-            println!("chunks         = {}", resources.resources.chunks.len());
-            println!("snapshot bytes = {}", encoded.len());
-            println!(
-                "bytes/resource = {:.2}",
-                encoded.len() as f64 / resources.resources.len() as f64
-            );
-
-            for _ in 0..2 {
-                std::hint::black_box(GroupwareResources::from_snapshot(&encoded));
-            }
-
-            let mut decode = Vec::new();
-            for _ in 0..15 {
-                let t = Instant::now();
-                let out = GroupwareResources::from_snapshot(&encoded).expect("decode");
-                decode.push(t.elapsed().as_secs_f64() * 1000.0);
-                std::hint::black_box(out.resources.len());
-            }
-            println!("decode p50 ms  = {:.4}", p50(decode));
-
-            let mut encode = Vec::new();
-            for _ in 0..10 {
-                let t = Instant::now();
-                let out = resources.to_snapshot().expect("encode");
-                encode.push(t.elapsed().as_secs_f64() * 1000.0);
-                std::hint::black_box(out.len());
-            }
-            println!("encode p50 ms  = {:.4}", p50(encode));
+        fn min(v: &[f64]) -> f64 {
+            v.iter().copied().fold(f64::INFINITY, f64::min)
         }
+
+        type Fixture = (&'static str, fn(usize) -> GroupwareResources);
+
+        let fixtures: [Fixture; 5] = [
+            ("calcard", calcard),
+            ("calcard_uuid", calcard_uuid),
+            ("contacts", contacts),
+            ("files", files),
+            ("notifications", notifications),
+        ];
+
+        println!(
+            "{:<14} {:>8} {:>7} {:>12} {:>9} {:>12} {:>9} {:>10} {:>10} {:>10} {:>10}",
+            "fixture",
+            "n",
+            "chunks",
+            "snap_bytes",
+            "snap/res",
+            "mem_bytes",
+            "mem/res",
+            "dec_p50",
+            "dec_min",
+            "enc_p50",
+            "enc_min"
+        );
+
+        for (name, build) in fixtures {
+            for n in [50_000usize, 500_000] {
+                let resources = build(n);
+                let encoded = resources.to_snapshot().expect("encode");
+                let len = resources.resources.len() as f64;
+
+                for _ in 0..3 {
+                    std::hint::black_box(GroupwareResources::from_snapshot(&encoded));
+                }
+
+                let mut decode = Vec::new();
+                let mut frame = Vec::new();
+                let mut access = Vec::new();
+                for _ in 0..15 {
+                    let t = Instant::now();
+                    let out = GroupwareResources::from_snapshot(&encoded).expect("decode");
+                    decode.push(t.elapsed().as_secs_f64() * 1000.0);
+                    std::hint::black_box(out.resources.len());
+
+                    let t = Instant::now();
+                    let f = SwapFrame::parse(&encoded).expect("frame");
+                    frame.push(t.elapsed().as_secs_f64() * 1000.0);
+                    std::hint::black_box(f.payload().len());
+
+                    let t = Instant::now();
+                    let a = rkyv::access::<ArchivedArchivedResources, rkyv::rancor::Error>(
+                        SwapFrame::parse(&encoded).unwrap().payload(),
+                    )
+                    .unwrap();
+                    access.push(t.elapsed().as_secs_f64() * 1000.0);
+                    std::hint::black_box(a.chunks.len());
+                }
+                if std::env::var("SWAP_PERF_BREAKDOWN").is_ok() {
+                    println!(
+                        "    [{name} {n}] frame(xxh3) p50 = {:.3} ms, rkyv access p50 = {:.3} ms, total decode p50 = {:.3} ms",
+                        p50(frame.clone()),
+                        p50(access.clone()),
+                        p50(decode.clone())
+                    );
+                }
+
+                let mut encode = Vec::new();
+                for _ in 0..15 {
+                    let t = Instant::now();
+                    let out = resources.to_snapshot().expect("encode");
+                    encode.push(t.elapsed().as_secs_f64() * 1000.0);
+                    std::hint::black_box(out.len());
+                }
+
+                println!(
+                    "{:<14} {:>8} {:>7} {:>12} {:>9.2} {:>12} {:>9.2} {:>10.3} {:>10.3} {:>10.3} {:>10.3}",
+                    name,
+                    n,
+                    resources.resources.chunks.len(),
+                    encoded.len(),
+                    encoded.len() as f64 / len,
+                    resources.size,
+                    resources.size as f64 / len,
+                    p50(decode.clone()),
+                    min(&decode),
+                    p50(encode.clone()),
+                    min(&encode),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn calcard_uuid_snapshot_round_trips() {
+        let resources = calcard_uuid(DAV_CHUNK + 100);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
     }
 
     #[test]
@@ -1065,6 +1430,113 @@ mod tests {
     }
 
     #[test]
+    fn a_uid_that_prefixes_its_name_is_not_stored_twice() {
+        const EVENTS: usize = 1000;
+        let shared = calcard_uuid(EVENTS);
+        let arena = shared.resources.chunks[shared.resources.containers_end..]
+            .iter()
+            .map(|chunk| chunk.bytes.len())
+            .sum::<usize>();
+        let names = shared.resources.chunks[shared.resources.containers_end..]
+            .iter()
+            .flat_map(|chunk| chunk.names.iter())
+            .map(|name| name.name.len as usize)
+            .sum::<usize>();
+        assert_eq!(
+            arena, names,
+            "a `<uid>.ics` name must share its bytes with the uid"
+        );
+        assert_eq!(
+            names,
+            EVENTS * "00000000-0000-4000-8000-000000000000.ics".len()
+        );
+        let encoded = shared.to_snapshot().expect("encode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&shared, &decoded);
+        assert_eq!(decoded.size, shared.size);
+    }
+
+    #[test]
+    fn timestamps_far_from_the_chunk_epoch_round_trip() {
+        let mut chunk = ResourceChunkBuilder::with_capacity(4);
+        let mut containers = ResourceChunkBuilder::with_capacity(1);
+        let name = containers.push_str("work");
+        let acls = containers.push_acls(&[]);
+        let preferences = containers.push_prefs(&[]);
+        containers.records.push(GroupwareResource {
+            document_id: 0,
+            data: GroupwareResourceMetadata::Calendar {
+                name,
+                acls,
+                preferences,
+                etag: 0,
+            },
+        });
+
+        let starts = [i64::MIN, -1, 0, 1_700_000_000, i64::MAX];
+        for (document_id, start) in starts.iter().enumerate() {
+            let document_id = document_id as u32;
+            let names = chunk.push_names(&[DavName {
+                name: format!("{document_id}.ics"),
+                parent_id: 0,
+            }]);
+            let uid = chunk.push_uid(&format!("{document_id}"), names);
+            chunk.records.push(GroupwareResource {
+                document_id,
+                data: GroupwareResourceMetadata::CalendarEvent {
+                    names,
+                    start: *start,
+                    duration: 3600,
+                    created_at: 1_600_000_000,
+                    modified_at: 0,
+                    etag: document_id,
+                    uid,
+                    flags: 0,
+                },
+            });
+        }
+
+        let mut resources = GroupwareResources {
+            base_path: "/dav/cal/jane".to_string(),
+            paths: Arc::new(PathIndex::pack(
+                starts
+                    .iter()
+                    .enumerate()
+                    .map(|(document_id, _)| {
+                        (
+                            format!("work/{document_id}.ics"),
+                            DavPath {
+                                path: ArenaRef::default(),
+                                parent_id: 0,
+                                hierarchy_seq: 0,
+                                document_id: document_id as u32,
+                            },
+                        )
+                    })
+                    .collect(),
+            )),
+            resources: ResourceStore::from_sorted(vec![containers], vec![chunk], false),
+            item_change_id: 1,
+            container_change_id: 1,
+            highest_change_id: 1,
+            size: 0,
+            update_lock: Arc::new(UpdateLock::new()),
+            verification: Default::default(),
+        };
+        resources.recompute_size();
+
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+        for (resource, start) in decoded.resources.iter().skip(1).zip(starts.iter()) {
+            assert_eq!(
+                resource.event_time_range().map(|range| range.0),
+                Some(*start)
+            );
+        }
+    }
+
+    #[test]
     fn identical_principal_runs_are_interned() {
         const DISTINCT_RUNS: usize = 24;
         let resources = notifications(300);
@@ -1092,7 +1564,7 @@ mod tests {
     fn an_inconsistent_payload_with_a_valid_checksum_is_rejected() {
         let resources = calcard(200);
 
-        let (mut chunks, path_chunks) = resources.pack();
+        let (mut chunks, path_chunks) = resources.pack().unwrap();
         chunks[0].records[0].ref_a_off = u32::MAX - 1;
         assert!(
             GroupwareResources::from_snapshot(
@@ -1102,8 +1574,8 @@ mod tests {
             "an arena offset past the end of the chunk was accepted"
         );
 
-        let (mut chunks, path_chunks) = resources.pack();
-        chunks[0].records[0].ref_b_len = u32::MAX;
+        let (mut chunks, path_chunks) = resources.pack().unwrap();
+        chunks[0].records[0].ref_b_len = u16::MAX;
         assert!(
             GroupwareResources::from_snapshot(
                 &resources.seal_snapshot(chunks, path_chunks).unwrap()
@@ -1112,8 +1584,8 @@ mod tests {
             "an arena length past the end of the chunk was accepted"
         );
 
-        let (chunks, mut path_chunks) = resources.pack();
-        path_chunks[0].path_lengths[0] = u32::MAX;
+        let (chunks, mut path_chunks) = resources.pack().unwrap();
+        path_chunks[0].path_lengths[0] = u16::MAX;
         assert!(
             GroupwareResources::from_snapshot(
                 &resources.seal_snapshot(chunks, path_chunks).unwrap()

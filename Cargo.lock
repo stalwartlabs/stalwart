@@ -1039,9 +1039,8 @@ name = "calcard"
 version = "0.4.0"
 dependencies = [
  "ahash",
- "chrono",
- "chrono-tz",
  "hashify",
+ "jiff",
  "jmap-tools",
  "mail-builder",
  "mail-parser",

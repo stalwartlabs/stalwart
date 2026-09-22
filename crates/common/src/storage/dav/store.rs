@@ -82,6 +82,22 @@ impl ResourceChunkBuilder {
         }
     }
 
+    pub fn push_uid(&mut self, uid: &str, names: ArenaRef) -> ArenaRef {
+        for name in self.names.get(names.range()).unwrap_or_default() {
+            if self
+                .bytes
+                .get(name.name.range())
+                .is_some_and(|bytes| bytes.starts_with(uid.as_bytes()))
+            {
+                return ArenaRef {
+                    off: name.name.off,
+                    len: uid.len() as u32,
+                };
+            }
+        }
+        self.push_str(uid)
+    }
+
     pub fn push_acls(&mut self, acls: &[AclGrant]) -> ArenaRef {
         let off = self.acls.len() as u32;
         self.acls.extend_from_slice(acls);
@@ -184,29 +200,35 @@ impl ResourceChunkBuilder {
                 uid,
                 etag,
                 flags,
-            } => GroupwareResourceMetadata::CalendarEvent {
-                names: self.push_cached_names(src.chunk, *names),
-                start: *start,
-                duration: *duration,
-                created_at: *created_at,
-                modified_at: *modified_at,
-                uid: self.push_str(src.chunk.str_at(*uid)),
-                etag: *etag,
-                flags: *flags,
-            },
+            } => {
+                let names = self.push_cached_names(src.chunk, *names);
+                GroupwareResourceMetadata::CalendarEvent {
+                    names,
+                    start: *start,
+                    duration: *duration,
+                    created_at: *created_at,
+                    modified_at: *modified_at,
+                    uid: self.push_uid(src.chunk.str_at(*uid), names),
+                    etag: *etag,
+                    flags: *flags,
+                }
+            }
             GroupwareResourceMetadata::ContactCard {
                 names,
                 created_at,
                 modified_at,
                 uid,
                 etag,
-            } => GroupwareResourceMetadata::ContactCard {
-                names: self.push_cached_names(src.chunk, *names),
-                created_at: *created_at,
-                modified_at: *modified_at,
-                uid: self.push_str(src.chunk.str_at(*uid)),
-                etag: *etag,
-            },
+            } => {
+                let names = self.push_cached_names(src.chunk, *names);
+                GroupwareResourceMetadata::ContactCard {
+                    names,
+                    created_at: *created_at,
+                    modified_at: *modified_at,
+                    uid: self.push_uid(src.chunk.str_at(*uid), names),
+                    etag: *etag,
+                }
+            }
             GroupwareResourceMetadata::CalendarEventNotification {
                 names,
                 created_at,
