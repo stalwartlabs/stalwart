@@ -49,13 +49,14 @@ impl Namespaces {
 
 impl Namespace {
     pub fn try_parse(value: &[u8]) -> Option<Self> {
-        hashify::tiny_map!(value,
+        hashify::map!(value, Namespace,
             "DAV:" => Namespace::Dav,
             "urn:ietf:params:xml:ns:caldav" => Namespace::CalDav,
             "urn:ietf:params:xml:ns:carddav" => Namespace::CardDav,
             "http://calendarserver.org/ns/" => Namespace::CalendarServer,
             "http://calendarserver.org/ns" => Namespace::CalendarServer
         )
+        .copied()
     }
 
     pub fn prefix(&self) -> &str {
@@ -1357,11 +1358,12 @@ pub enum Collation {
 
 impl Collation {
     pub fn try_parse(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
-            "i;ascii-numeric" => Collation::AsciiNumeric,
-            "i;ascii-casemap" => Collation::AsciiCasemap,
-            "i;octet" => Collation::Octet,
-            "i;unicode-casemap" => Collation::UnicodeCasemap,
+        hashify::fnc_map!(s.as_bytes(),
+            "i;ascii-numeric" => Some(Collation::AsciiNumeric),
+            "i;ascii-casemap" => Some(Collation::AsciiCasemap),
+            "i;octet" => Some(Collation::Octet),
+            "i;unicode-casemap" => Some(Collation::UnicodeCasemap),
+            _ => None,
         )
     }
 
@@ -1386,11 +1388,12 @@ pub enum MatchType {
 
 impl MatchType {
     pub fn try_parse(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
-            "equals" => MatchType::Equals,
-            "contains" => MatchType::Contains,
-            "starts-with" => MatchType::StartsWith,
-            "ends-with" => MatchType::EndsWith,
+        hashify::fnc_map!(s.as_bytes(),
+            "equals" => Some(MatchType::Equals),
+            "contains" => Some(MatchType::Contains),
+            "starts-with" => Some(MatchType::StartsWith),
+            "ends-with" => Some(MatchType::EndsWith),
+            _ => None,
         )
     }
 }
@@ -1421,26 +1424,27 @@ pub enum XsiType {
 
 impl XsiType {
     fn from_str(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
-            "xs:string" => XsiType::String,
-            "xs:boolean" => XsiType::Boolean,
-            "xs:decimal" => XsiType::Decimal,
-            "xs:float" => XsiType::Float,
-            "xs:double" => XsiType::Double,
-            "xs:duration" => XsiType::Duration,
-            "xs:dateTime" => XsiType::DateTime,
-            "xs:time" => XsiType::Time,
-            "xs:date" => XsiType::Date,
-            "xs:gYearMonth" => XsiType::GYearMonth,
-            "xs:gYear" => XsiType::GYear,
-            "xs:gMonthDay" => XsiType::GMonthDay,
-            "xs:gDay" => XsiType::GDay,
-            "xs:gMonth" => XsiType::GMonth,
-            "xs:hexBinary" => XsiType::HexBinary,
-            "xs:base64Binary" => XsiType::Base64Binary,
-            "xs:anyURI" => XsiType::AnyUri,
-            "xs:QName" => XsiType::QName,
-            "xs:NOTATION" => XsiType::Notation,
+        hashify::fnc_map!(s.as_bytes(),
+            "xs:string" => Some(XsiType::String),
+            "xs:boolean" => Some(XsiType::Boolean),
+            "xs:decimal" => Some(XsiType::Decimal),
+            "xs:float" => Some(XsiType::Float),
+            "xs:double" => Some(XsiType::Double),
+            "xs:duration" => Some(XsiType::Duration),
+            "xs:dateTime" => Some(XsiType::DateTime),
+            "xs:time" => Some(XsiType::Time),
+            "xs:date" => Some(XsiType::Date),
+            "xs:gYearMonth" => Some(XsiType::GYearMonth),
+            "xs:gYear" => Some(XsiType::GYear),
+            "xs:gMonthDay" => Some(XsiType::GMonthDay),
+            "xs:gDay" => Some(XsiType::GDay),
+            "xs:gMonth" => Some(XsiType::GMonth),
+            "xs:hexBinary" => Some(XsiType::HexBinary),
+            "xs:base64Binary" => Some(XsiType::Base64Binary),
+            "xs:anyURI" => Some(XsiType::AnyUri),
+            "xs:QName" => Some(XsiType::QName),
+            "xs:NOTATION" => Some(XsiType::Notation),
+            _ => None,
         )
     }
 }
@@ -1449,10 +1453,11 @@ struct YesNo;
 
 impl YesNo {
     fn from_str(s: &str) -> Option<bool> {
-        hashify::tiny_map!(s.as_bytes(),
+        hashify::map!(s.as_bytes(), bool,
             "yes" => true,
             "no" => false,
         )
+        .copied()
     }
 }
 

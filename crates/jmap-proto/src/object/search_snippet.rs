@@ -63,10 +63,11 @@ impl Element for SearchSnippetValue {
 
 impl SearchSnippetProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"emailId" => SearchSnippetProperty::EmailId,
-            b"subject" => SearchSnippetProperty::Subject,
-            b"preview" => SearchSnippetProperty::Preview,
+        hashify::fnc_map!(value.as_bytes(),
+            b"emailId" => Some(SearchSnippetProperty::EmailId),
+            b"subject" => Some(SearchSnippetProperty::Subject),
+            b"preview" => Some(SearchSnippetProperty::Preview),
+            _ => None,
         )
     }
 }

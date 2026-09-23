@@ -536,14 +536,15 @@ pub fn decode_argument(
 
 impl ResultOption {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(
+        hashify::fnc_map_ignore_case!(
             value,
-            "min" => Self::Min,
-            "max" => Self::Max,
-            "all" => Self::All,
-            "count" => Self::Count,
-            "save" => Self::Save,
-            "context" => Self::Context,
+            "min" => Some(Self::Min),
+            "max" => Some(Self::Max),
+            "all" => Some(Self::All),
+            "count" => Some(Self::Count),
+            "save" => Some(Self::Save),
+            "context" => Some(Self::Context),
+            _ => None,
         )
         .ok_or_else(|| {
             format!(

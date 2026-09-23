@@ -13,7 +13,7 @@ jieba-rs = "0.10" # Chinese stemmer
 psl = "2"
 memchr = "2.8"
 maplit = "1.0.2"
-hashify = "0.2.9"
+hashify = "0.3"
 rand = "0.10.2"
 rkyv.workspace = true
 

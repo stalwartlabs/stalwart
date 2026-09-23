@@ -67,17 +67,18 @@ impl Property for PushSubscriptionProperty {
 
 impl PushSubscriptionProperty {
     fn parse(value: &str, allow_patch: bool) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => PushSubscriptionProperty::Id,
-            b"deviceClientId" => PushSubscriptionProperty::DeviceClientId,
-            b"url" => PushSubscriptionProperty::Url,
-            b"keys" => PushSubscriptionProperty::Keys,
-            b"p256dh" => PushSubscriptionProperty::P256dh,
-            b"auth" => PushSubscriptionProperty::Auth,
-            b"verificationCode" => PushSubscriptionProperty::VerificationCode,
-            b"expires" => PushSubscriptionProperty::Expires,
-            b"types" => PushSubscriptionProperty::Types,
-            b"emailPush" => PushSubscriptionProperty::EmailPush,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(PushSubscriptionProperty::Id),
+            b"deviceClientId" => Some(PushSubscriptionProperty::DeviceClientId),
+            b"url" => Some(PushSubscriptionProperty::Url),
+            b"keys" => Some(PushSubscriptionProperty::Keys),
+            b"p256dh" => Some(PushSubscriptionProperty::P256dh),
+            b"auth" => Some(PushSubscriptionProperty::Auth),
+            b"verificationCode" => Some(PushSubscriptionProperty::VerificationCode),
+            b"expires" => Some(PushSubscriptionProperty::Expires),
+            b"types" => Some(PushSubscriptionProperty::Types),
+            b"emailPush" => Some(PushSubscriptionProperty::EmailPush),
+            _ => None,
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {

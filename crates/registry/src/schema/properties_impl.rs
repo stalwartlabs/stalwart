@@ -10,8 +10,9 @@ use crate::schema::prelude::*;
 
 impl EnumImpl for ObjectType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ObjectType,
             b"Account" => ObjectType::Account,
             b"AccountPassword" => ObjectType::AccountPassword,
             b"AccountSettings" => ObjectType::AccountSettings,
@@ -131,6 +132,7 @@ impl EnumImpl for ObjectType {
             b"WebDav" => ObjectType::WebDav,
             b"WebHook" => ObjectType::WebHook,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -408,8 +410,9 @@ impl<'de> serde::Deserialize<'de> for ObjectType {
 
 impl EnumImpl for Property {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            Property,
             b"@type" => Property::Type,
             b"abuseBanPeriod" => Property::AbuseBanPeriod,
             b"abuseBanRate" => Property::AbuseBanRate,
@@ -1375,6 +1378,7 @@ impl EnumImpl for Property {
             b"zoneIpV4" => Property::ZoneIpV4,
             b"zoneIpV6" => Property::ZoneIpV6,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {

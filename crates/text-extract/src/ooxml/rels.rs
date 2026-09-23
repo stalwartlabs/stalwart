@@ -31,7 +31,7 @@ impl RelKind {
         let suffix = memrchr(b'/', relationship_type)
             .and_then(|slash| relationship_type.get(slash + 1..))
             .unwrap_or(relationship_type);
-        hashify::tiny_map!(suffix,
+        hashify::map!(suffix, RelKind,
             b"officeDocument" => RelKind::OfficeDocument,
             b"header" => RelKind::Header,
             b"footer" => RelKind::Footer,
@@ -44,6 +44,7 @@ impl RelKind {
             b"slide" => RelKind::Slide,
             b"notesSlide" => RelKind::NotesSlide,
         )
+        .copied()
     }
 }
 
@@ -63,7 +64,7 @@ pub(crate) struct RelsHandler<'x> {
 
 impl Handler for RelsHandler<'_> {
     fn start(&mut self, tag: &Tag<'_>, _out: &mut Output<'_>) {
-        if !hashify::tiny_set!(tag.local(), b"Relationship") || self.rels.len() >= self.limit {
+        if !hashify::set!(tag.local(), b"Relationship") || self.rels.len() >= self.limit {
             return;
         }
         let (mut id, mut kind, mut target, mut external) = (None, None, None, false);
@@ -72,7 +73,7 @@ impl Handler for RelsHandler<'_> {
                 b"Id" => { id = Some(value); },
                 b"Type" => { kind = RelKind::parse(value); },
                 b"Target" => { target = Some(value); },
-                b"TargetMode" => { external = hashify::tiny_set_ignore_case!(value, b"External"); },
+                b"TargetMode" => { external = hashify::set_ignore_case!(value, b"External"); },
                 _ => {}
             );
         }

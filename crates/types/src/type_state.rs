@@ -171,7 +171,7 @@ impl DataType {
 
 impl DataType {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), DataType,
             b"Email" => DataType::Email,
             b"EmailDelivery" => DataType::EmailDelivery,
             b"EmailSubmission" => DataType::EmailSubmission,
@@ -196,6 +196,7 @@ impl DataType {
             b"ParticipantIdentity" => DataType::ParticipantIdentity,
             b"CalendarAlert" => DataType::CalendarAlert,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {

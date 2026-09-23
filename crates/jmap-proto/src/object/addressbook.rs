@@ -122,19 +122,20 @@ impl Element for AddressBookValue {
 
 impl AddressBookProperty {
     fn parse(value: &str, allow_patch: bool) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => AddressBookProperty::Id,
-            b"name" => AddressBookProperty::Name,
-            b"description" => AddressBookProperty::Description,
-            b"sortOrder" => AddressBookProperty::SortOrder,
-            b"isDefault" => AddressBookProperty::IsDefault,
-            b"isSubscribed" => AddressBookProperty::IsSubscribed,
-            b"shareWith" => AddressBookProperty::ShareWith,
-            b"myRights" => AddressBookProperty::MyRights,
-            b"mayRead" => AddressBookProperty::Rights(AddressBookRight::MayRead),
-            b"mayWrite" => AddressBookProperty::Rights(AddressBookRight::MayWrite),
-            b"mayShare" => AddressBookProperty::Rights(AddressBookRight::MayShare),
-            b"mayDelete" => AddressBookProperty::Rights(AddressBookRight::MayDelete)
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(AddressBookProperty::Id),
+            b"name" => Some(AddressBookProperty::Name),
+            b"description" => Some(AddressBookProperty::Description),
+            b"sortOrder" => Some(AddressBookProperty::SortOrder),
+            b"isDefault" => Some(AddressBookProperty::IsDefault),
+            b"isSubscribed" => Some(AddressBookProperty::IsSubscribed),
+            b"shareWith" => Some(AddressBookProperty::ShareWith),
+            b"myRights" => Some(AddressBookProperty::MyRights),
+            b"mayRead" => Some(AddressBookProperty::Rights(AddressBookRight::MayRead)),
+            b"mayWrite" => Some(AddressBookProperty::Rights(AddressBookRight::MayWrite)),
+            b"mayShare" => Some(AddressBookProperty::Rights(AddressBookRight::MayShare)),
+            b"mayDelete" => Some(AddressBookProperty::Rights(AddressBookRight::MayDelete)),
+            _ => None
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {

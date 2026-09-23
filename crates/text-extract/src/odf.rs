@@ -18,7 +18,7 @@ pub(crate) const CONTENT: &[u8] = b"content.xml";
 const STYLES: &[u8] = b"styles.xml";
 
 pub(crate) fn format_from_mimetype(mimetype: &[u8]) -> Option<Format> {
-    hashify::tiny_map!(mimetype.trim_ascii(),
+    hashify::map!(mimetype.trim_ascii(), Format,
         b"application/vnd.oasis.opendocument.text" => Format::Odt,
         b"application/vnd.oasis.opendocument.text-template" => Format::Odt,
         b"application/vnd.oasis.opendocument.text-master" => Format::Odt,
@@ -29,6 +29,7 @@ pub(crate) fn format_from_mimetype(mimetype: &[u8]) -> Option<Format> {
         b"application/vnd.oasis.opendocument.presentation" => Format::Odp,
         b"application/vnd.oasis.opendocument.presentation-template" => Format::Odp,
     )
+    .copied()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +61,7 @@ impl Element {
         match Element::parse(local) {
             Some(Element::Ignored(Ignored::Metadata)) => {
                 let prefix = name.get(..name.len() - local.len()).unwrap_or_default();
-                hashify::tiny_set!(prefix, b"dc:", b"meta:")
+                hashify::set!(prefix, b"dc:", b"meta:")
                     .then_some(Element::Ignored(Ignored::Metadata))
             }
             element => element,
@@ -68,7 +69,7 @@ impl Element {
     }
 
     fn parse(local: &[u8]) -> Option<Element> {
-        hashify::tiny_map!(local,
+        hashify::map!(local, Element,
             b"body" => Element::Body,
             b"header" => Element::HeaderFooter,
             b"footer" => Element::HeaderFooter,
@@ -110,6 +111,7 @@ impl Element {
             b"covered-table-cell" => Element::Cell,
             b"table" => Element::Table,
         )
+        .copied()
     }
 }
 
@@ -140,7 +142,7 @@ impl OdfText {
 fn table_name<'a>(tag: &Tag<'a>) -> Option<&'a [u8]> {
     tag.attributes()
         .find_map(|(name, value)| match split_prefix(name) {
-            (true, local) if hashify::tiny_set!(local, b"name") => Some(value),
+            (true, local) if hashify::set!(local, b"name") => Some(value),
             _ => None,
         })
 }

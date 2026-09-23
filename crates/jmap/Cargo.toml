@@ -44,7 +44,7 @@ tungstenite = "0.30"
 jiff = "0.2.37"
 rand = "0.10.2"
 rkyv.workspace = true
-hashify = "0.2"
+hashify = "0.3"
 compact_str = "0.10.0"
 
 [features]

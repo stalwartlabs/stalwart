@@ -93,16 +93,17 @@ impl Request<Command> {
 
 impl Sort {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "ARRIVAL" => Self::Arrival,
-            "CC" => Self::Cc,
-            "DATE" => Self::Date,
-            "FROM" => Self::From,
-            "SIZE" => Self::Size,
-            "SUBJECT" => Self::Subject,
-            "TO" => Self::To,
-            "DISPLAYFROM" => Self::DisplayFrom,
-            "DISPLAYTO" => Self::DisplayTo,
+        hashify::fnc_map_ignore_case!(value,
+            "ARRIVAL" => Some(Self::Arrival),
+            "CC" => Some(Self::Cc),
+            "DATE" => Some(Self::Date),
+            "FROM" => Some(Self::From),
+            "SIZE" => Some(Self::Size),
+            "SUBJECT" => Some(Self::Subject),
+            "TO" => Some(Self::To),
+            "DISPLAYFROM" => Some(Self::DisplayFrom),
+            "DISPLAYTO" => Some(Self::DisplayTo),
+            _ => None,
         )
         .ok_or_else(|| format!("Invalid sort criteria {:?}", String::from_utf8_lossy(value)).into())
     }

@@ -35,7 +35,7 @@ enum Run {
 
 impl Run {
     fn parse(local: &[u8]) -> Option<Run> {
-        hashify::tiny_map!(local,
+        hashify::map!(local, Run,
             b"t" => Run::Text,
             b"text" => Run::Text,
             b"delText" => Run::DeletedText,
@@ -59,6 +59,7 @@ impl Run {
             b"endnote" => Run::Block,
             b"noBreakHyphen" => Run::NoBreakHyphen,
         )
+        .copied()
     }
 }
 
@@ -140,7 +141,7 @@ pub(crate) struct SheetText {
 
 impl SheetElement {
     fn parse(local: &[u8]) -> Option<SheetElement> {
-        hashify::tiny_map!(local,
+        hashify::map!(local, SheetElement,
             b"c" => SheetElement::Cell,
             b"v" => SheetElement::Value,
             b"t" => SheetElement::InlineText,
@@ -148,6 +149,7 @@ impl SheetElement {
             b"extLst" => SheetElement::Extension,
             b"row" => SheetElement::Row,
         )
+        .copied()
     }
 }
 
@@ -157,13 +159,14 @@ fn cell_kind(tag: &Tag<'_>) -> Cell {
     }
     let mut kind = Cell::Value;
     for (name, value) in tag.attributes() {
-        if hashify::tiny_set!(name, b"t") {
-            kind = hashify::tiny_map!(value,
+        if hashify::set!(name, b"t") {
+            kind = hashify::map!(value, Cell,
                 b"n" => Cell::Value,
                 b"str" => Cell::Value,
                 b"d" => Cell::Value,
                 b"inlineStr" => Cell::Inline,
             )
+            .copied()
             .unwrap_or(Cell::Ignored);
         }
     }
@@ -221,13 +224,14 @@ enum RootElement {
 
 impl RootElement {
     fn parse(local: &[u8]) -> Option<RootElement> {
-        hashify::tiny_map!(local,
+        hashify::map!(local, RootElement,
             b"document" => RootElement::Document,
             b"workbook" => RootElement::Workbook,
             b"presentation" => RootElement::Presentation,
             b"sheet" => RootElement::Sheet,
             b"sldId" => RootElement::SlideId,
         )
+        .copied()
     }
 }
 
@@ -270,8 +274,8 @@ impl<'x> MainPart<'x> {
         let mut sheet_name = None;
         for (name, value) in tag.attributes() {
             match split_prefix(name) {
-                (true, local) if hashify::tiny_set!(local, b"id") => reference = Some(value),
-                (false, local) if hashify::tiny_set!(local, b"name") => sheet_name = Some(value),
+                (true, local) if hashify::set!(local, b"id") => reference = Some(value),
+                (false, local) if hashify::set!(local, b"name") => sheet_name = Some(value),
                 _ => {}
             }
         }

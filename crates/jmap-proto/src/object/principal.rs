@@ -92,15 +92,16 @@ impl Element for PrincipalValue {
 
 impl PrincipalProperty {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => PrincipalProperty::Id,
-            b"type" => PrincipalProperty::Type,
-            b"name" => PrincipalProperty::Name,
-            b"description" => PrincipalProperty::Description,
-            b"email" => PrincipalProperty::Email,
-            b"timeZone" => PrincipalProperty::Timezone,
-            b"capabilities" => PrincipalProperty::Capabilities,
-            b"accounts" => PrincipalProperty::Accounts,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(PrincipalProperty::Id),
+            b"type" => Some(PrincipalProperty::Type),
+            b"name" => Some(PrincipalProperty::Name),
+            b"description" => Some(PrincipalProperty::Description),
+            b"email" => Some(PrincipalProperty::Email),
+            b"timeZone" => Some(PrincipalProperty::Timezone),
+            b"capabilities" => Some(PrincipalProperty::Capabilities),
+            b"accounts" => Some(PrincipalProperty::Accounts),
+            _ => None,
         )
     }
 
@@ -122,12 +123,13 @@ impl PrincipalProperty {
 
 impl PrincipalType {
     pub fn parse(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
-            b"individual" => PrincipalType::Individual,
-            b"group" => PrincipalType::Group,
-            b"resource" => PrincipalType::Resource,
-            b"location" => PrincipalType::Location,
-            b"other" => PrincipalType::Other,
+        hashify::fnc_map!(s.as_bytes(),
+            b"individual" => Some(PrincipalType::Individual),
+            b"group" => Some(PrincipalType::Group),
+            b"resource" => Some(PrincipalType::Resource),
+            b"location" => Some(PrincipalType::Location),
+            b"other" => Some(PrincipalType::Other),
+            _ => None,
         )
     }
 

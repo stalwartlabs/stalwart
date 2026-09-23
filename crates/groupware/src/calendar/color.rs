@@ -22,12 +22,11 @@ macro_rules! css_colors {
 
         impl CssColor {
             fn named(value: &str) -> Option<Self> {
-                hashify::map_ignore_case!(
+                hashify::fnc_map_ignore_case!(
                     value.as_bytes(),
-                    CssColor,
-                    $($name => CssColor::$variant,)*
+                    $($name => Some(CssColor::$variant),)*
+                    _ => None
                 )
-                .cloned()
             }
 
             fn as_named_str(&self) -> Option<&'static str> {

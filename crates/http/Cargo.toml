@@ -36,7 +36,7 @@ rkyv.workspace = true
 form-data = { version = "0.6.0", features = ["sync"], default-features = false }
 mime = "0.3.17"
 percent-encoding = "2.3.2"
-hashify = { version = "0.2" }
+hashify = { version = "0.3" }
 compact_str = "0.10.0"
 
 [dev-dependencies]

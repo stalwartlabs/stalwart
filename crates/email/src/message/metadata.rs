@@ -70,8 +70,9 @@ macro_rules! metadata_header_names {
 
         impl MetadataHeaderName {
             pub fn parse(name: &[u8]) -> Option<MetadataHeaderName> {
-                hashify::tiny_map_ignore_case!(name,
-                    $($name => MetadataHeaderName::$variant,)+
+                hashify::fnc_map_ignore_case!(name,
+                    $($name => Some(MetadataHeaderName::$variant),)+
+                    _ => None
                 )
             }
         }

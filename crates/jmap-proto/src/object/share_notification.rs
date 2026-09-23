@@ -96,18 +96,19 @@ impl Element for ShareNotificationValue {
 
 impl ShareNotificationProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => ShareNotificationProperty::Id,
-            b"created" => ShareNotificationProperty::Created,
-            b"changedBy" => ShareNotificationProperty::ChangedBy,
-            b"name" => ShareNotificationProperty::ChangedByName,
-            b"email" => ShareNotificationProperty::ChangedByEmail,
-            b"principalId" => ShareNotificationProperty::ChangedByPrincipalId,
-            b"objectType" => ShareNotificationProperty::ObjectType,
-            b"objectAccountId" => ShareNotificationProperty::ObjectAccountId,
-            b"objectId" => ShareNotificationProperty::ObjectId,
-            b"oldRights" => ShareNotificationProperty::OldRights,
-            b"newRights" => ShareNotificationProperty::NewRights
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(ShareNotificationProperty::Id),
+            b"created" => Some(ShareNotificationProperty::Created),
+            b"changedBy" => Some(ShareNotificationProperty::ChangedBy),
+            b"name" => Some(ShareNotificationProperty::ChangedByName),
+            b"email" => Some(ShareNotificationProperty::ChangedByEmail),
+            b"principalId" => Some(ShareNotificationProperty::ChangedByPrincipalId),
+            b"objectType" => Some(ShareNotificationProperty::ObjectType),
+            b"objectAccountId" => Some(ShareNotificationProperty::ObjectAccountId),
+            b"objectId" => Some(ShareNotificationProperty::ObjectId),
+            b"oldRights" => Some(ShareNotificationProperty::OldRights),
+            b"newRights" => Some(ShareNotificationProperty::NewRights),
+            _ => None
         )
     }
 }

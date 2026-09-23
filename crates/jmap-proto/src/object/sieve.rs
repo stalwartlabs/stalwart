@@ -80,11 +80,12 @@ impl Element for SieveValue {
 
 impl SieveProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => SieveProperty::Id,
-            b"name" => SieveProperty::Name,
-            b"blobId" => SieveProperty::BlobId,
-            b"isActive" => SieveProperty::IsActive,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(SieveProperty::Id),
+            b"name" => Some(SieveProperty::Name),
+            b"blobId" => Some(SieveProperty::BlobId),
+            b"isActive" => Some(SieveProperty::IsActive),
+            _ => None,
         )
     }
 }

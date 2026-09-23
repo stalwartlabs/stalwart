@@ -70,11 +70,12 @@ pub enum UndoStatus {
 
 impl UndoStatus {
     pub fn parse(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
-            "pending" => UndoStatus::Pending,
-            "final" => UndoStatus::Final,
-            "canceled" => UndoStatus::Canceled,
-            "cancelled" => UndoStatus::Canceled,
+        hashify::fnc_map!(s.as_bytes(),
+            "pending" => Some(UndoStatus::Pending),
+            "final" => Some(UndoStatus::Final),
+            "canceled" => Some(UndoStatus::Canceled),
+            "cancelled" => Some(UndoStatus::Canceled),
+            _ => None,
         )
     }
 

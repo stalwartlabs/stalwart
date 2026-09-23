@@ -33,10 +33,11 @@ pub enum SortOrder {
 
 impl SortOrder {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map_ignore_case!(value.as_bytes(),
+        hashify::map_ignore_case!(value.as_bytes(), SortOrder,
             "ascending" => SortOrder::Ascending,
             "descending" => SortOrder::Descending,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -69,15 +70,16 @@ impl<'x> SearchRequest<'x> {
                 None => (parameter, Cow::Borrowed("")),
             };
 
-            match hashify::tiny_map_ignore_case!(name.as_bytes(),
-                "attributes" => Parameter::Attributes,
-                "excludedAttributes" => Parameter::ExcludedAttributes,
-                "filter" => Parameter::Filter,
-                "sortBy" => Parameter::SortBy,
-                "sortOrder" => Parameter::SortOrder,
-                "startIndex" => Parameter::StartIndex,
-                "count" => Parameter::Count,
-                "cursor" => Parameter::Cursor,
+            match hashify::fnc_map_ignore_case!(name.as_bytes(),
+                "attributes" => Some(Parameter::Attributes),
+                "excludedAttributes" => Some(Parameter::ExcludedAttributes),
+                "filter" => Some(Parameter::Filter),
+                "sortBy" => Some(Parameter::SortBy),
+                "sortOrder" => Some(Parameter::SortOrder),
+                "startIndex" => Some(Parameter::StartIndex),
+                "count" => Some(Parameter::Count),
+                "cursor" => Some(Parameter::Cursor),
+                _ => None,
             ) {
                 Some(Parameter::Attributes) => {
                     request.attributes = Some(split_list(value));

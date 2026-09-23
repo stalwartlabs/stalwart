@@ -520,12 +520,13 @@ fn parse_urgency(
     value
         .as_str()
         .and_then(|value| {
-            hashify::tiny_map!(value.as_bytes(),
+            hashify::map!(value.as_bytes(), Urgency,
                 "very-low" => Urgency::VeryLow,
                 "low" => Urgency::Low,
                 "normal" => Urgency::Normal,
                 "high" => Urgency::High,
             )
+            .copied()
         })
         .ok_or_else(|| email_push_error("Invalid urgency value."))
 }

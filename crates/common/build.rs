@@ -200,7 +200,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
     code.push_str("];\n\n");
 
     code.push_str("pub fn locale(name: &str) -> Option<&'static Locale> {\n");
-    code.push_str("    hashify::tiny_map_ignore_case!(name.as_bytes(),\n");
+    code.push_str("    hashify::map_ignore_case!(name.as_bytes(), &'static Locale,\n");
     for lang in &languages {
         code.push_str(&format!(
             "        \"{}\" => &{}_LOCALES,\n",
@@ -208,7 +208,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
             const_name(lang)
         ));
     }
-    code.push_str("    )\n");
+    code.push_str("    )\n    .copied()\n");
     code.push_str("}\n\n");
 
     // Maps a bare language tag onto the regional locale shipped for it
@@ -220,7 +220,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
     by_language.dedup_by_key(|(language, _)| *language);
 
     code.push_str("pub fn locale_by_language(language: &str) -> Option<&'static Locale> {\n");
-    code.push_str("    hashify::tiny_map_ignore_case!(language.as_bytes(),\n");
+    code.push_str("    hashify::map_ignore_case!(language.as_bytes(), &'static Locale,\n");
     for (language, lang) in by_language {
         code.push_str(&format!(
             "        \"{}\" => &{}_LOCALES,\n",
@@ -228,7 +228,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
             const_name(lang)
         ));
     }
-    code.push_str("    )\n");
+    code.push_str("    )\n    .copied()\n");
     code.push_str("}\n");
     code
 }

@@ -30,7 +30,7 @@ pub(crate) enum Word {
 
 impl Word {
     pub(crate) fn parse(name: &[u8]) -> Option<Word> {
-        hashify::tiny_map!(name,
+        hashify::map!(name, Word,
             b"ansi" => Word::Ansi,
             b"ansicpg" => Word::AnsiCodePage,
             b"mac" => Word::Mac,
@@ -123,5 +123,6 @@ impl Word {
             b"xe" => Word::Destination,
             b"xmlnstbl" => Word::Destination,
         )
+        .copied()
     }
 }

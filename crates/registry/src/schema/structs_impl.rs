@@ -42815,7 +42815,7 @@ impl RegistryJsonPropertyPatch for SystemSettings {
 
 impl ObjectImpl for Task {
     const FLAGS: u64 = 0;
-    const VERSION: u8 = 2;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::Task;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -43313,7 +43313,7 @@ impl Pickle for TaskCalendarAlarmEmail {
         if stream.version() >= 1 {
             this.target_account_id = Pickle::unpickle(stream)?;
         }
-        if stream.version() >= 2 {
+        if stream.version() >= 1 {
             this.recurrence_id = Pickle::unpickle(stream)?;
         }
         this.account_id = Pickle::unpickle(stream)?;

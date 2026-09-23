@@ -253,7 +253,7 @@ impl MethodName {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
+        hashify::map!(s.as_bytes(), (MethodObject, MethodFunction),
             "PushSubscription/get" => (MethodObject::PushSubscription, MethodFunction::Get),
             "PushSubscription/set" => (MethodObject::PushSubscription, MethodFunction::Set),
 
@@ -363,14 +363,14 @@ impl MethodName {
 
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
-        ).or_else(|| {
+        ).copied().or_else(|| {
             let (obj, fnc) = s.strip_prefix("x:")?.split_once('/')?;
             let obj = ObjectType::parse(obj)?;
-            let fnc = hashify::tiny_map!(fnc.as_bytes(),
+            let fnc = hashify::map!(fnc.as_bytes(), MethodFunction,
                 "get" => MethodFunction::Get,
                 "set" => MethodFunction::Set,
                 "query" => MethodFunction::Query,
-            )?;
+            ).copied()?;
 
             if obj.flags() & OBJ_SINGLETON == 0 || fnc != MethodFunction::Query {
                 (MethodObject::Registry(obj), fnc).into()

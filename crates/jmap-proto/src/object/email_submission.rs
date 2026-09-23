@@ -163,24 +163,25 @@ impl Element for EmailSubmissionValue {
 
 impl EmailSubmissionProperty {
     fn parse(value: &str, allow_patch: bool) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            "id" => EmailSubmissionProperty::Id,
-            "identityId" => EmailSubmissionProperty::IdentityId,
-            "threadId" => EmailSubmissionProperty::ThreadId,
-            "emailId" => EmailSubmissionProperty::EmailId,
-            "envelope" => EmailSubmissionProperty::Envelope,
-            "mailFrom" => EmailSubmissionProperty::MailFrom,
-            "rcptTo" => EmailSubmissionProperty::RcptTo,
-            "email" => EmailSubmissionProperty::Email,
-            "parameters" => EmailSubmissionProperty::Parameters,
-            "sendAt" => EmailSubmissionProperty::SendAt,
-            "undoStatus" => EmailSubmissionProperty::UndoStatus,
-            "deliveryStatus" => EmailSubmissionProperty::DeliveryStatus,
-            "smtpReply" => EmailSubmissionProperty::SmtpReply,
-            "delivered" => EmailSubmissionProperty::Delivered,
-            "displayed" => EmailSubmissionProperty::Displayed,
-            "dsnBlobIds" => EmailSubmissionProperty::DsnBlobIds,
-            "mdnBlobIds" => EmailSubmissionProperty::MdnBlobIds,
+        hashify::fnc_map!(value.as_bytes(),
+            "id" => Some(EmailSubmissionProperty::Id),
+            "identityId" => Some(EmailSubmissionProperty::IdentityId),
+            "threadId" => Some(EmailSubmissionProperty::ThreadId),
+            "emailId" => Some(EmailSubmissionProperty::EmailId),
+            "envelope" => Some(EmailSubmissionProperty::Envelope),
+            "mailFrom" => Some(EmailSubmissionProperty::MailFrom),
+            "rcptTo" => Some(EmailSubmissionProperty::RcptTo),
+            "email" => Some(EmailSubmissionProperty::Email),
+            "parameters" => Some(EmailSubmissionProperty::Parameters),
+            "sendAt" => Some(EmailSubmissionProperty::SendAt),
+            "undoStatus" => Some(EmailSubmissionProperty::UndoStatus),
+            "deliveryStatus" => Some(EmailSubmissionProperty::DeliveryStatus),
+            "smtpReply" => Some(EmailSubmissionProperty::SmtpReply),
+            "delivered" => Some(EmailSubmissionProperty::Delivered),
+            "displayed" => Some(EmailSubmissionProperty::Displayed),
+            "dsnBlobIds" => Some(EmailSubmissionProperty::DsnBlobIds),
+            "mdnBlobIds" => Some(EmailSubmissionProperty::MdnBlobIds),
+            _ => None,
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {
@@ -204,10 +205,11 @@ impl EmailSubmissionProperty {
 
 impl UndoStatus {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"pending" => UndoStatus::Pending,
-            b"final" => UndoStatus::Final,
-            b"canceled" => UndoStatus::Canceled,
+        hashify::fnc_map!(value.as_bytes(),
+            b"pending" => Some(UndoStatus::Pending),
+            b"final" => Some(UndoStatus::Final),
+            b"canceled" => Some(UndoStatus::Canceled),
+            _ => None,
         )
     }
 
@@ -222,11 +224,12 @@ impl UndoStatus {
 
 impl Delivered {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"queued" => Delivered::Queued,
-            b"yes" => Delivered::Yes,
-            b"no" => Delivered::No,
-            b"unknown" => Delivered::Unknown,
+        hashify::fnc_map!(value.as_bytes(),
+            b"queued" => Some(Delivered::Queued),
+            b"yes" => Some(Delivered::Yes),
+            b"no" => Some(Delivered::No),
+            b"unknown" => Some(Delivered::Unknown),
+            _ => None,
         )
     }
 
@@ -242,9 +245,10 @@ impl Delivered {
 
 impl Displayed {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"yes" => Displayed::Yes,
-            b"unknown" => Displayed::Unknown,
+        hashify::fnc_map!(value.as_bytes(),
+            b"yes" => Some(Displayed::Yes),
+            b"unknown" => Some(Displayed::Unknown),
+            _ => None,
         )
     }
 

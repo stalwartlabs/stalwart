@@ -429,7 +429,7 @@ impl UserDataEntry for ICalendarEntry {
                 .and_then(|pointer| pointer.as_text())
                 .and_then(|pointer| pointer.split('/').next())
                 .is_some_and(|property| {
-                    hashify::tiny_set!(
+                    hashify::set!(
                         property.as_bytes(),
                         "alerts",
                         "color",

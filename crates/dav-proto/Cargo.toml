@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 trc = { path = "../trc" }
 types = { path = "../types" }
-hashify = "0.2.9"
+hashify = "0.3"
 quick-xml = "0.41"
 calcard = { version = "0.4", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }

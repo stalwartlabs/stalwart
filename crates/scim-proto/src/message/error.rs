@@ -58,7 +58,7 @@ impl ScimType {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), ScimType,
             "invalidFilter" => ScimType::InvalidFilter,
             "tooMany" => ScimType::TooMany,
             "uniqueness" => ScimType::Uniqueness,
@@ -73,6 +73,7 @@ impl ScimType {
             "expiredCursor" => ScimType::ExpiredCursor,
             "invalidCount" => ScimType::InvalidCount,
         )
+        .copied()
     }
 }
 

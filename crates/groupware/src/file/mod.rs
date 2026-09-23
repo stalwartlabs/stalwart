@@ -200,7 +200,7 @@ impl FileNodeRole {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), FileNodeRole,
             b"root" => FileNodeRole::Root,
             b"home" => FileNodeRole::Home,
             b"temp" => FileNodeRole::Temp,
@@ -211,6 +211,7 @@ impl FileNodeRole {
             b"pictures" => FileNodeRole::Pictures,
             b"videos" => FileNodeRole::Videos,
         )
+        .copied()
     }
 
     #[inline(always)]

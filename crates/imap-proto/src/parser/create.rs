@@ -40,7 +40,7 @@ impl Request<Command> {
                 }
                 match tokens.next() {
                     Some(Token::Argument(value)) => {
-                        let r = hashify::tiny_map_ignore_case!(value.as_slice(),
+                        let r = hashify::map_ignore_case!(value.as_slice(), Option<Attribute>,
                             "\\Archive" => Some(Attribute::Archive),
                             "\\Drafts" => Some(Attribute::Drafts),
                             "\\Junk" => Some(Attribute::Junk),
@@ -51,7 +51,8 @@ impl Request<Command> {
                             "\\Scheduled" => Some(Attribute::Scheduled),
                             "\\Snoozed" => Some(Attribute::Snoozed),
                             "\\All" => None,
-                        );
+                        )
+                        .copied();
 
                         match r {
                             Some(Some(tag)) => Some(tag),

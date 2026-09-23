@@ -1461,12 +1461,13 @@ impl RsvpResponse {
 impl RsvpRequest {
     fn part_stat(&self) -> Result<Option<ICalendarParticipationStatus>, RsvpError> {
         match self.partstat.as_deref() {
-            Some(partstat) => hashify::tiny_map_ignore_case!(partstat.as_bytes(),
-                "ACCEPTED" => ICalendarParticipationStatus::Accepted,
-                "DECLINED" => ICalendarParticipationStatus::Declined,
-                "TENTATIVE" => ICalendarParticipationStatus::Tentative,
-                "COMPLETED" => ICalendarParticipationStatus::Completed,
-                "IN-PROCESS" => ICalendarParticipationStatus::InProcess,
+            Some(partstat) => hashify::fnc_map_ignore_case!(partstat.as_bytes(),
+                "ACCEPTED" => Some(ICalendarParticipationStatus::Accepted),
+                "DECLINED" => Some(ICalendarParticipationStatus::Declined),
+                "TENTATIVE" => Some(ICalendarParticipationStatus::Tentative),
+                "COMPLETED" => Some(ICalendarParticipationStatus::Completed),
+                "IN-PROCESS" => Some(ICalendarParticipationStatus::InProcess),
+                _ => None,
             )
             .map(Some)
             .ok_or(RsvpError::InvalidPartStat),

@@ -41,7 +41,7 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 rkyv.workspace = true
 compact_str = "0.10.0"
-hashify = { version = "0.2" }
+hashify = { version = "0.3" }
 base64 = "0.23"
 
 [features]

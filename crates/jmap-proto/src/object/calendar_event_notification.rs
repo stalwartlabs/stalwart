@@ -197,11 +197,12 @@ impl Element for CalendarEventNotificationValue {
 
 impl CalendarEventNotificationType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), CalendarEventNotificationType,
             b"created" => CalendarEventNotificationType::Created,
             b"updated" => CalendarEventNotificationType::Updated,
             b"destroyed" => CalendarEventNotificationType::Destroyed,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -215,16 +216,17 @@ impl CalendarEventNotificationType {
 
 impl CalendarEventNotificationProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => CalendarEventNotificationProperty::Id,
-            b"created" => CalendarEventNotificationProperty::Created,
-            b"changedBy" => CalendarEventNotificationProperty::ChangedBy,
-            b"comment" => CalendarEventNotificationProperty::Comment,
-            b"type" => CalendarEventNotificationProperty::Type,
-            b"calendarEventId" => CalendarEventNotificationProperty::CalendarEventId,
-            b"isDraft" => CalendarEventNotificationProperty::IsDraft,
-            b"event" => CalendarEventNotificationProperty::Event,
-            b"eventPatch" => CalendarEventNotificationProperty::EventPatch
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(CalendarEventNotificationProperty::Id),
+            b"created" => Some(CalendarEventNotificationProperty::Created),
+            b"changedBy" => Some(CalendarEventNotificationProperty::ChangedBy),
+            b"comment" => Some(CalendarEventNotificationProperty::Comment),
+            b"type" => Some(CalendarEventNotificationProperty::Type),
+            b"calendarEventId" => Some(CalendarEventNotificationProperty::CalendarEventId),
+            b"isDraft" => Some(CalendarEventNotificationProperty::IsDraft),
+            b"event" => Some(CalendarEventNotificationProperty::Event),
+            b"eventPatch" => Some(CalendarEventNotificationProperty::EventPatch),
+            _ => None
         )
     }
 }

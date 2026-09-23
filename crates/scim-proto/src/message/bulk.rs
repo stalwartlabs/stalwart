@@ -58,12 +58,13 @@ pub enum BulkMethod {
 
 impl BulkMethod {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map_ignore_case!(value.as_bytes(),
+        hashify::map_ignore_case!(value.as_bytes(), BulkMethod,
             "POST" => BulkMethod::Post,
             "PUT" => BulkMethod::Put,
             "PATCH" => BulkMethod::Patch,
             "DELETE" => BulkMethod::Delete,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {

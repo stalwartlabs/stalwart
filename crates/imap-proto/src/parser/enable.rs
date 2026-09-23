@@ -33,15 +33,16 @@ impl Request<Command> {
 
 impl Capability {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "IMAP4rev2" => Self::IMAP4rev2,
-            "STARTTLS" => Self::StartTLS,
-            "LOGINDISABLED" => Self::LoginDisabled,
-            "CONDSTORE" => Self::CondStore,
-            "QRESYNC" => Self::QResync,
-            "UTF8=ACCEPT" => Self::Utf8Accept,
-            "OBJECTID+" => Self::ObjectIdPlus,
-            "UIDONLY" => Self::UidOnly,
+        hashify::fnc_map_ignore_case!(value,
+            "IMAP4rev2" => Some(Self::IMAP4rev2),
+            "STARTTLS" => Some(Self::StartTLS),
+            "LOGINDISABLED" => Some(Self::LoginDisabled),
+            "CONDSTORE" => Some(Self::CondStore),
+            "QRESYNC" => Some(Self::QResync),
+            "UTF8=ACCEPT" => Some(Self::Utf8Accept),
+            "OBJECTID+" => Some(Self::ObjectIdPlus),
+            "UIDONLY" => Some(Self::UidOnly),
+            _ => None,
         )
         .ok_or_else(|| {
             format!(

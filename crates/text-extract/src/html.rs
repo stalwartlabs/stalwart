@@ -25,7 +25,7 @@ enum Element {
 
 impl Element {
     fn parse(local: &[u8]) -> Option<Element> {
-        hashify::tiny_map_ignore_case!(local,
+        hashify::map_ignore_case!(local, Element,
             b"head" => Element::Head,
             b"script" => Element::Script,
             b"style" => Element::Style,
@@ -68,6 +68,7 @@ impl Element {
             b"td" => Element::Cell,
             b"th" => Element::Cell,
         )
+        .copied()
     }
 }
 

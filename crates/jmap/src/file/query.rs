@@ -492,12 +492,13 @@ impl Collation {
     fn parse(collation: Option<&str>) -> Option<Self> {
         match collation {
             None => Some(Collation::UnicodeCasemap),
-            Some(collation) => hashify::tiny_map!(collation.as_bytes(),
+            Some(collation) => hashify::map!(collation.as_bytes(), Collation,
                 "i;octet" => Collation::Octet,
                 "i;ascii-casemap" => Collation::AsciiCasemap,
                 "i;unicode-casemap" => Collation::UnicodeCasemap,
                 "i;ascii-numeric" => Collation::AsciiNumeric,
-            ),
+            )
+            .copied(),
         }
     }
 

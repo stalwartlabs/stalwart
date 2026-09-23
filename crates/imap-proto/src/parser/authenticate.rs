@@ -30,19 +30,20 @@ impl Request<Command> {
 
 impl Mechanism {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "PLAIN" => Self::Plain,
-            "CRAM-MD5" => Self::CramMd5,
-            "DIGEST-MD5" => Self::DigestMd5,
-            "SCRAM-SHA-1" => Self::ScramSha1,
-            "SCRAM-SHA-256" => Self::ScramSha256,
-            "APOP" => Self::Apop,
-            "NTLM" => Self::Ntlm,
-            "GSSAPI" => Self::Gssapi,
-            "ANONYMOUS" => Self::Anonymous,
-            "EXTERNAL" => Self::External,
-            "OAUTHBEARER" => Self::OAuthBearer,
-            "XOAUTH2" => Self::XOauth2,
+        hashify::fnc_map_ignore_case!(value,
+            "PLAIN" => Some(Self::Plain),
+            "CRAM-MD5" => Some(Self::CramMd5),
+            "DIGEST-MD5" => Some(Self::DigestMd5),
+            "SCRAM-SHA-1" => Some(Self::ScramSha1),
+            "SCRAM-SHA-256" => Some(Self::ScramSha256),
+            "APOP" => Some(Self::Apop),
+            "NTLM" => Some(Self::Ntlm),
+            "GSSAPI" => Some(Self::Gssapi),
+            "ANONYMOUS" => Some(Self::Anonymous),
+            "EXTERNAL" => Some(Self::External),
+            "OAUTHBEARER" => Some(Self::OAuthBearer),
+            "XOAUTH2" => Some(Self::XOauth2),
+            _ => None,
         )
         .ok_or_else(|| {
             format!(

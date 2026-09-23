@@ -10,11 +10,13 @@ use crate::schema::prelude::*;
 
 impl EnumImpl for AccountType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AccountType,
             b"User" => AccountType::User,
             b"Group" => AccountType::Group,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -60,13 +62,15 @@ impl<'de> serde::Deserialize<'de> for AccountType {
 
 impl EnumImpl for AcmeChallengeType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AcmeChallengeType,
             b"TlsAlpn01" => AcmeChallengeType::TlsAlpn01,
             b"DnsPersist01" => AcmeChallengeType::DnsPersist01,
             b"Dns01" => AcmeChallengeType::Dns01,
             b"Http01" => AcmeChallengeType::Http01,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -116,13 +120,15 @@ impl<'de> serde::Deserialize<'de> for AcmeChallengeType {
 
 impl EnumImpl for AcmeRenewBefore {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AcmeRenewBefore,
             b"R12" => AcmeRenewBefore::R12,
             b"R23" => AcmeRenewBefore::R23,
             b"R34" => AcmeRenewBefore::R34,
             b"R45" => AcmeRenewBefore::R45,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -172,8 +178,9 @@ impl<'de> serde::Deserialize<'de> for AcmeRenewBefore {
 
 impl EnumImpl for ActionType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ActionType,
             b"ReloadSettings" => ActionType::ReloadSettings,
             b"ReloadTlsCertificates" => ActionType::ReloadTlsCertificates,
             b"ReloadLookupStores" => ActionType::ReloadLookupStores,
@@ -186,6 +193,7 @@ impl EnumImpl for ActionType {
             b"PauseMtaQueue" => ActionType::PauseMtaQueue,
             b"ResumeMtaQueue" => ActionType::ResumeMtaQueue,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -249,11 +257,13 @@ impl<'de> serde::Deserialize<'de> for ActionType {
 
 impl EnumImpl for AiModelType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AiModelType,
             b"Chat" => AiModelType::Chat,
             b"Text" => AiModelType::Text,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -299,11 +309,13 @@ impl<'de> serde::Deserialize<'de> for AiModelType {
 
 impl EnumImpl for AlertEmailType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AlertEmailType,
             b"Disabled" => AlertEmailType::Disabled,
             b"Enabled" => AlertEmailType::Enabled,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -349,11 +361,13 @@ impl<'de> serde::Deserialize<'de> for AlertEmailType {
 
 impl EnumImpl for AlertEventType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AlertEventType,
             b"Disabled" => AlertEventType::Disabled,
             b"Enabled" => AlertEventType::Enabled,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -399,11 +413,13 @@ impl<'de> serde::Deserialize<'de> for AlertEventType {
 
 impl EnumImpl for ArchivedItemStatus {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ArchivedItemStatus,
             b"archived" => ArchivedItemStatus::Archived,
             b"requestRestore" => ArchivedItemStatus::RequestRestore,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -449,14 +465,16 @@ impl<'de> serde::Deserialize<'de> for ArchivedItemStatus {
 
 impl EnumImpl for ArchivedItemType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ArchivedItemType,
             b"Email" => ArchivedItemType::Email,
             b"FileNode" => ArchivedItemType::FileNode,
             b"CalendarEvent" => ArchivedItemType::CalendarEvent,
             b"ContactCard" => ArchivedItemType::ContactCard,
             b"SieveScript" => ArchivedItemType::SieveScript,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -508,8 +526,9 @@ impl<'de> serde::Deserialize<'de> for ArchivedItemType {
 
 impl EnumImpl for ArfAuthFailureType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ArfAuthFailureType,
             b"adsp" => ArfAuthFailureType::Adsp,
             b"bodyHash" => ArfAuthFailureType::BodyHash,
             b"revoked" => ArfAuthFailureType::Revoked,
@@ -518,6 +537,7 @@ impl EnumImpl for ArfAuthFailureType {
             b"dmarc" => ArfAuthFailureType::Dmarc,
             b"unspecified" => ArfAuthFailureType::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -573,8 +593,9 @@ impl<'de> serde::Deserialize<'de> for ArfAuthFailureType {
 
 impl EnumImpl for ArfDeliveryResult {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ArfDeliveryResult,
             b"delivered" => ArfDeliveryResult::Delivered,
             b"spam" => ArfDeliveryResult::Spam,
             b"policy" => ArfDeliveryResult::Policy,
@@ -582,6 +603,7 @@ impl EnumImpl for ArfDeliveryResult {
             b"other" => ArfDeliveryResult::Other,
             b"unspecified" => ArfDeliveryResult::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -635,8 +657,9 @@ impl<'de> serde::Deserialize<'de> for ArfDeliveryResult {
 
 impl EnumImpl for ArfFeedbackType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ArfFeedbackType,
             b"abuse" => ArfFeedbackType::Abuse,
             b"authFailure" => ArfFeedbackType::AuthFailure,
             b"fraud" => ArfFeedbackType::Fraud,
@@ -644,6 +667,7 @@ impl EnumImpl for ArfFeedbackType {
             b"virus" => ArfFeedbackType::Virus,
             b"other" => ArfFeedbackType::Other,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -697,14 +721,16 @@ impl<'de> serde::Deserialize<'de> for ArfFeedbackType {
 
 impl EnumImpl for ArfIdentityAlignment {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ArfIdentityAlignment,
             b"none" => ArfIdentityAlignment::None,
             b"spf" => ArfIdentityAlignment::Spf,
             b"dkim" => ArfIdentityAlignment::Dkim,
             b"dkimSpf" => ArfIdentityAlignment::DkimSpf,
             b"unspecified" => ArfIdentityAlignment::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -756,12 +782,14 @@ impl<'de> serde::Deserialize<'de> for ArfIdentityAlignment {
 
 impl EnumImpl for AsnType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AsnType,
             b"Disabled" => AsnType::Disabled,
             b"Resource" => AsnType::Resource,
             b"Dns" => AsnType::Dns,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -809,12 +837,14 @@ impl<'de> serde::Deserialize<'de> for AsnType {
 
 impl EnumImpl for AzureEnvironment {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            AzureEnvironment,
             b"public" => AzureEnvironment::Public,
             b"china" => AzureEnvironment::China,
             b"us-government" => AzureEnvironment::UsGovernment,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -862,8 +892,9 @@ impl<'de> serde::Deserialize<'de> for AzureEnvironment {
 
 impl EnumImpl for BlobStoreBaseType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            BlobStoreBaseType,
             b"S3" => BlobStoreBaseType::S3,
             b"Azure" => BlobStoreBaseType::Azure,
             b"FileSystem" => BlobStoreBaseType::FileSystem,
@@ -871,6 +902,7 @@ impl EnumImpl for BlobStoreBaseType {
             b"PostgreSql" => BlobStoreBaseType::PostgreSql,
             b"MySql" => BlobStoreBaseType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -924,8 +956,9 @@ impl<'de> serde::Deserialize<'de> for BlobStoreBaseType {
 
 impl EnumImpl for BlobStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            BlobStoreType,
             b"Default" => BlobStoreType::Default,
             b"Sharded" => BlobStoreType::Sharded,
             b"S3" => BlobStoreType::S3,
@@ -935,6 +968,7 @@ impl EnumImpl for BlobStoreType {
             b"PostgreSql" => BlobStoreType::PostgreSql,
             b"MySql" => BlobStoreType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -992,8 +1026,9 @@ impl<'de> serde::Deserialize<'de> for BlobStoreType {
 
 impl EnumImpl for BlobSwapStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            BlobSwapStoreType,
             b"Default" => BlobSwapStoreType::Default,
             b"S3" => BlobSwapStoreType::S3,
             b"Azure" => BlobSwapStoreType::Azure,
@@ -1002,6 +1037,7 @@ impl EnumImpl for BlobSwapStoreType {
             b"PostgreSql" => BlobSwapStoreType::PostgreSql,
             b"MySql" => BlobSwapStoreType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1057,8 +1093,9 @@ impl<'de> serde::Deserialize<'de> for BlobSwapStoreType {
 
 impl EnumImpl for BlockReason {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            BlockReason,
             b"rcptToFailure" => BlockReason::RcptToFailure,
             b"authFailure" => BlockReason::AuthFailure,
             b"loitering" => BlockReason::Loitering,
@@ -1066,6 +1103,7 @@ impl EnumImpl for BlockReason {
             b"manual" => BlockReason::Manual,
             b"other" => BlockReason::Other,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1119,13 +1157,15 @@ impl<'de> serde::Deserialize<'de> for BlockReason {
 
 impl EnumImpl for CacheSwapType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CacheSwapType,
             b"Disabled" => CacheSwapType::Disabled,
             b"LocalFile" => CacheSwapType::LocalFile,
             b"Redis" => CacheSwapType::Redis,
             b"BlobStore" => CacheSwapType::BlobStore,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1175,11 +1215,13 @@ impl<'de> serde::Deserialize<'de> for CacheSwapType {
 
 impl EnumImpl for CertificateManagementType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CertificateManagementType,
             b"Manual" => CertificateManagementType::Manual,
             b"Automatic" => CertificateManagementType::Automatic,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1225,13 +1267,15 @@ impl<'de> serde::Deserialize<'de> for CertificateManagementType {
 
 impl EnumImpl for ClusterListenerGroupType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ClusterListenerGroupType,
             b"EnableAll" => ClusterListenerGroupType::EnableAll,
             b"DisableAll" => ClusterListenerGroupType::DisableAll,
             b"EnableSome" => ClusterListenerGroupType::EnableSome,
             b"DisableSome" => ClusterListenerGroupType::DisableSome,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1281,12 +1325,14 @@ impl<'de> serde::Deserialize<'de> for ClusterListenerGroupType {
 
 impl EnumImpl for ClusterNodeStatus {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ClusterNodeStatus,
             b"active" => ClusterNodeStatus::Active,
             b"stale" => ClusterNodeStatus::Stale,
             b"inactive" => ClusterNodeStatus::Inactive,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1334,13 +1380,15 @@ impl<'de> serde::Deserialize<'de> for ClusterNodeStatus {
 
 impl EnumImpl for ClusterTaskGroupType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ClusterTaskGroupType,
             b"EnableAll" => ClusterTaskGroupType::EnableAll,
             b"DisableAll" => ClusterTaskGroupType::DisableAll,
             b"EnableSome" => ClusterTaskGroupType::EnableSome,
             b"DisableSome" => ClusterTaskGroupType::DisableSome,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1390,8 +1438,9 @@ impl<'de> serde::Deserialize<'de> for ClusterTaskGroupType {
 
 impl EnumImpl for ClusterTaskType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ClusterTaskType,
             b"storeMaintenance" => ClusterTaskType::StoreMaintenance,
             b"accountMaintenance" => ClusterTaskType::AccountMaintenance,
             b"metricsCalculate" => ClusterTaskType::MetricsCalculate,
@@ -1403,6 +1452,7 @@ impl EnumImpl for ClusterTaskType {
             b"taskQueueProcessing" => ClusterTaskType::TaskQueueProcessing,
             b"taskScheduler" => ClusterTaskType::TaskScheduler,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1464,11 +1514,13 @@ impl<'de> serde::Deserialize<'de> for ClusterTaskType {
 
 impl EnumImpl for CompressionAlgo {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CompressionAlgo,
             b"lz4" => CompressionAlgo::Lz4,
             b"none" => CompressionAlgo::None,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1514,8 +1566,9 @@ impl<'de> serde::Deserialize<'de> for CompressionAlgo {
 
 impl EnumImpl for CoordinatorType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CoordinatorType,
             b"Disabled" => CoordinatorType::Disabled,
             b"Default" => CoordinatorType::Default,
             b"Kafka" => CoordinatorType::Kafka,
@@ -1525,6 +1578,7 @@ impl EnumImpl for CoordinatorType {
             b"RedisCluster" => CoordinatorType::RedisCluster,
             b"RedisSentinel" => CoordinatorType::RedisSentinel,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1582,12 +1636,14 @@ impl<'de> serde::Deserialize<'de> for CoordinatorType {
 
 impl EnumImpl for CredentialPermissionsType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CredentialPermissionsType,
             b"Inherit" => CredentialPermissionsType::Inherit,
             b"Disable" => CredentialPermissionsType::Disable,
             b"Replace" => CredentialPermissionsType::Replace,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1635,12 +1691,14 @@ impl<'de> serde::Deserialize<'de> for CredentialPermissionsType {
 
 impl EnumImpl for CredentialType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CredentialType,
             b"Password" => CredentialType::Password,
             b"AppPassword" => CredentialType::AppPassword,
             b"ApiKey" => CredentialType::ApiKey,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1688,12 +1746,14 @@ impl<'de> serde::Deserialize<'de> for CredentialType {
 
 impl EnumImpl for CronType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            CronType,
             b"Daily" => CronType::Daily,
             b"Weekly" => CronType::Weekly,
             b"Hourly" => CronType::Hourly,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1741,14 +1801,16 @@ impl<'de> serde::Deserialize<'de> for CronType {
 
 impl EnumImpl for DataStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DataStoreType,
             b"RocksDb" => DataStoreType::RocksDb,
             b"Sqlite" => DataStoreType::Sqlite,
             b"FoundationDb" => DataStoreType::FoundationDb,
             b"PostgreSql" => DataStoreType::PostgreSql,
             b"MySql" => DataStoreType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1800,8 +1862,9 @@ impl<'de> serde::Deserialize<'de> for DataStoreType {
 
 impl EnumImpl for DeliveryErrorType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DeliveryErrorType,
             b"dnsError" => DeliveryErrorType::DnsError,
             b"unexpectedResponse" => DeliveryErrorType::UnexpectedResponse,
             b"connectionError" => DeliveryErrorType::ConnectionError,
@@ -1812,6 +1875,7 @@ impl EnumImpl for DeliveryErrorType {
             b"concurrencyLimited" => DeliveryErrorType::ConcurrencyLimited,
             b"io" => DeliveryErrorType::Io,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1871,13 +1935,15 @@ impl<'de> serde::Deserialize<'de> for DeliveryErrorType {
 
 impl EnumImpl for DirectoryBootstrapType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DirectoryBootstrapType,
             b"Internal" => DirectoryBootstrapType::Internal,
             b"Ldap" => DirectoryBootstrapType::Ldap,
             b"Sql" => DirectoryBootstrapType::Sql,
             b"Oidc" => DirectoryBootstrapType::Oidc,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1927,12 +1993,14 @@ impl<'de> serde::Deserialize<'de> for DirectoryBootstrapType {
 
 impl EnumImpl for DirectoryType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DirectoryType,
             b"Ldap" => DirectoryType::Ldap,
             b"Sql" => DirectoryType::Sql,
             b"Oidc" => DirectoryType::Oidc,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -1980,12 +2048,14 @@ impl<'de> serde::Deserialize<'de> for DirectoryType {
 
 impl EnumImpl for Dkim2Flag {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            Dkim2Flag,
             b"donotmodify" => Dkim2Flag::Donotmodify,
             b"donotexplode" => Dkim2Flag::Donotexplode,
             b"feedback" => Dkim2Flag::Feedback,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2033,8 +2103,9 @@ impl<'de> serde::Deserialize<'de> for Dkim2Flag {
 
 impl EnumImpl for DkimAuthResult {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DkimAuthResult,
             b"none" => DkimAuthResult::None,
             b"pass" => DkimAuthResult::Pass,
             b"fail" => DkimAuthResult::Fail,
@@ -2043,6 +2114,7 @@ impl EnumImpl for DkimAuthResult {
             b"tempError" => DkimAuthResult::TempError,
             b"permError" => DkimAuthResult::PermError,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2098,13 +2170,15 @@ impl<'de> serde::Deserialize<'de> for DkimAuthResult {
 
 impl EnumImpl for DkimCanonicalization {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DkimCanonicalization,
             b"relaxed/relaxed" => DkimCanonicalization::RelaxedRelaxed,
             b"simple/simple" => DkimCanonicalization::SimpleSimple,
             b"relaxed/simple" => DkimCanonicalization::RelaxedSimple,
             b"simple/relaxed" => DkimCanonicalization::SimpleRelaxed,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2154,11 +2228,13 @@ impl<'de> serde::Deserialize<'de> for DkimCanonicalization {
 
 impl EnumImpl for DkimHash {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DkimHash,
             b"sha256" => DkimHash::Sha256,
             b"sha1" => DkimHash::Sha1,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2204,11 +2280,13 @@ impl<'de> serde::Deserialize<'de> for DkimHash {
 
 impl EnumImpl for DkimManagementType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DkimManagementType,
             b"Automatic" => DkimManagementType::Automatic,
             b"Manual" => DkimManagementType::Manual,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2254,13 +2332,15 @@ impl<'de> serde::Deserialize<'de> for DkimManagementType {
 
 impl EnumImpl for DkimRotationStage {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DkimRotationStage,
             b"active" => DkimRotationStage::Active,
             b"pending" => DkimRotationStage::Pending,
             b"retiring" => DkimRotationStage::Retiring,
             b"retired" => DkimRotationStage::Retired,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2310,13 +2390,15 @@ impl<'de> serde::Deserialize<'de> for DkimRotationStage {
 
 impl EnumImpl for DkimSignatureType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DkimSignatureType,
             b"Dkim1Ed25519Sha256" => DkimSignatureType::Dkim1Ed25519Sha256,
             b"Dkim1RsaSha256" => DkimSignatureType::Dkim1RsaSha256,
             b"Dkim2Ed25519Sha256" => DkimSignatureType::Dkim2Ed25519Sha256,
             b"Dkim2RsaSha256" => DkimSignatureType::Dkim2RsaSha256,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2366,14 +2448,16 @@ impl<'de> serde::Deserialize<'de> for DkimSignatureType {
 
 impl EnumImpl for DmarcActionDisposition {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcActionDisposition,
             b"none" => DmarcActionDisposition::None,
             b"pass" => DmarcActionDisposition::Pass,
             b"quarantine" => DmarcActionDisposition::Quarantine,
             b"reject" => DmarcActionDisposition::Reject,
             b"unspecified" => DmarcActionDisposition::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2425,12 +2509,14 @@ impl<'de> serde::Deserialize<'de> for DmarcActionDisposition {
 
 impl EnumImpl for DmarcAlignment {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcAlignment,
             b"relaxed" => DmarcAlignment::Relaxed,
             b"strict" => DmarcAlignment::Strict,
             b"unspecified" => DmarcAlignment::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2478,12 +2564,14 @@ impl<'de> serde::Deserialize<'de> for DmarcAlignment {
 
 impl EnumImpl for DmarcDiscovery {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcDiscovery,
             b"psl" => DmarcDiscovery::Psl,
             b"treewalk" => DmarcDiscovery::Treewalk,
             b"unspecified" => DmarcDiscovery::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2531,13 +2619,15 @@ impl<'de> serde::Deserialize<'de> for DmarcDiscovery {
 
 impl EnumImpl for DmarcDisposition {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcDisposition,
             b"none" => DmarcDisposition::None,
             b"quarantine" => DmarcDisposition::Quarantine,
             b"reject" => DmarcDisposition::Reject,
             b"unspecified" => DmarcDisposition::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2587,8 +2677,9 @@ impl<'de> serde::Deserialize<'de> for DmarcDisposition {
 
 impl EnumImpl for DmarcPolicyOverride {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcPolicyOverride,
             b"Forwarded" => DmarcPolicyOverride::Forwarded,
             b"SampledOut" => DmarcPolicyOverride::SampledOut,
             b"TrustedForwarder" => DmarcPolicyOverride::TrustedForwarder,
@@ -2597,6 +2688,7 @@ impl EnumImpl for DmarcPolicyOverride {
             b"Other" => DmarcPolicyOverride::Other,
             b"PolicyTestMode" => DmarcPolicyOverride::PolicyTestMode,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2652,12 +2744,14 @@ impl<'de> serde::Deserialize<'de> for DmarcPolicyOverride {
 
 impl EnumImpl for DmarcResult {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcResult,
             b"pass" => DmarcResult::Pass,
             b"fail" => DmarcResult::Fail,
             b"unspecified" => DmarcResult::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2705,8 +2799,9 @@ impl<'de> serde::Deserialize<'de> for DmarcResult {
 
 impl EnumImpl for DmarcTroubleshootAuthResultType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DmarcTroubleshootAuthResultType,
             b"Pass" => DmarcTroubleshootAuthResultType::Pass,
             b"Fail" => DmarcTroubleshootAuthResultType::Fail,
             b"SoftFail" => DmarcTroubleshootAuthResultType::SoftFail,
@@ -2715,6 +2810,7 @@ impl EnumImpl for DmarcTroubleshootAuthResultType {
             b"Neutral" => DmarcTroubleshootAuthResultType::Neutral,
             b"None" => DmarcTroubleshootAuthResultType::None,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2770,11 +2866,13 @@ impl<'de> serde::Deserialize<'de> for DmarcTroubleshootAuthResultType {
 
 impl EnumImpl for DnsManagementType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DnsManagementType,
             b"Manual" => DnsManagementType::Manual,
             b"Automatic" => DnsManagementType::Automatic,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2820,13 +2918,15 @@ impl<'de> serde::Deserialize<'de> for DnsManagementType {
 
 impl EnumImpl for DnsPublishStatus {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DnsPublishStatus,
             b"synced" => DnsPublishStatus::Synced,
             b"pending" => DnsPublishStatus::Pending,
             b"failed" => DnsPublishStatus::Failed,
             b"unknown" => DnsPublishStatus::Unknown,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2876,8 +2976,9 @@ impl<'de> serde::Deserialize<'de> for DnsPublishStatus {
 
 impl EnumImpl for DnsRecordType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DnsRecordType,
             b"dkim" => DnsRecordType::Dkim,
             b"tlsa" => DnsRecordType::Tlsa,
             b"spf" => DnsRecordType::Spf,
@@ -2891,6 +2992,7 @@ impl EnumImpl for DnsRecordType {
             b"autoConfigLegacy" => DnsRecordType::AutoConfigLegacy,
             b"autoDiscover" => DnsRecordType::AutoDiscover,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -2956,12 +3058,14 @@ impl<'de> serde::Deserialize<'de> for DnsRecordType {
 
 impl EnumImpl for DnsResolverProtocol {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DnsResolverProtocol,
             b"tls" => DnsResolverProtocol::Tls,
             b"udp" => DnsResolverProtocol::Udp,
             b"tcp" => DnsResolverProtocol::Tcp,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -3009,14 +3113,16 @@ impl<'de> serde::Deserialize<'de> for DnsResolverProtocol {
 
 impl EnumImpl for DnsResolverType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            DnsResolverType,
             b"System" => DnsResolverType::System,
             b"Custom" => DnsResolverType::Custom,
             b"Cloudflare" => DnsResolverType::Cloudflare,
             b"Quad9" => DnsResolverType::Quad9,
             b"Google" => DnsResolverType::Google,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -3579,14 +3685,16 @@ impl<'de> serde::Deserialize<'de> for DnsServerType {
 
 impl EnumImpl for EncryptionAtRestType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            EncryptionAtRestType,
             b"Disabled" => EncryptionAtRestType::Disabled,
             b"Aes128" => EncryptionAtRestType::Aes128,
             b"Aes256" => EncryptionAtRestType::Aes256,
             b"Aes256Gcm" => EncryptionAtRestType::Aes256Gcm,
             b"ChaCha20Poly1305" => EncryptionAtRestType::ChaCha20Poly1305,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -3638,11 +3746,13 @@ impl<'de> serde::Deserialize<'de> for EncryptionAtRestType {
 
 impl EnumImpl for EventPolicy {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            EventPolicy,
             b"include" => EventPolicy::Include,
             b"exclude" => EventPolicy::Exclude,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -3688,8 +3798,9 @@ impl<'de> serde::Deserialize<'de> for EventPolicy {
 
 impl EnumImpl for ExpressionConstant {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ExpressionConstant,
             b"relaxed" => ExpressionConstant::Relaxed,
             b"strict" => ExpressionConstant::Strict,
             b"disable" => ExpressionConstant::Disable,
@@ -3710,6 +3821,7 @@ impl EnumImpl for ExpressionConstant {
             b"stanag4406" => ExpressionConstant::Stanag4406,
             b"nsep" => ExpressionConstant::Nsep,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4111,13 +4223,15 @@ impl<'de> serde::Deserialize<'de> for ExpressionVariable {
 
 impl EnumImpl for FailureReportingOption {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            FailureReportingOption,
             b"all" => FailureReportingOption::All,
             b"any" => FailureReportingOption::Any,
             b"dkimFailure" => FailureReportingOption::DkimFailure,
             b"spfFailure" => FailureReportingOption::SpfFailure,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4167,12 +4281,14 @@ impl<'de> serde::Deserialize<'de> for FailureReportingOption {
 
 impl EnumImpl for HttpAuthType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            HttpAuthType,
             b"Unauthenticated" => HttpAuthType::Unauthenticated,
             b"Basic" => HttpAuthType::Basic,
             b"Bearer" => HttpAuthType::Bearer,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4220,11 +4336,13 @@ impl<'de> serde::Deserialize<'de> for HttpAuthType {
 
 impl EnumImpl for HttpLookupFormatType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            HttpLookupFormatType,
             b"Csv" => HttpLookupFormatType::Csv,
             b"List" => HttpLookupFormatType::List,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4270,12 +4388,14 @@ impl<'de> serde::Deserialize<'de> for HttpLookupFormatType {
 
 impl EnumImpl for InMemoryStoreBaseType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            InMemoryStoreBaseType,
             b"Redis" => InMemoryStoreBaseType::Redis,
             b"RedisCluster" => InMemoryStoreBaseType::RedisCluster,
             b"RedisSentinel" => InMemoryStoreBaseType::RedisSentinel,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4323,14 +4443,16 @@ impl<'de> serde::Deserialize<'de> for InMemoryStoreBaseType {
 
 impl EnumImpl for InMemoryStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            InMemoryStoreType,
             b"Default" => InMemoryStoreType::Default,
             b"Sharded" => InMemoryStoreType::Sharded,
             b"Redis" => InMemoryStoreType::Redis,
             b"RedisCluster" => InMemoryStoreType::RedisCluster,
             b"RedisSentinel" => InMemoryStoreType::RedisSentinel,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4382,11 +4504,13 @@ impl<'de> serde::Deserialize<'de> for InMemoryStoreType {
 
 impl EnumImpl for IndexStatusType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            IndexStatusType,
             b"Running" => IndexStatusType::Running,
             b"Failed" => IndexStatusType::Failed,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4432,14 +4556,16 @@ impl<'de> serde::Deserialize<'de> for IndexStatusType {
 
 impl EnumImpl for IndexType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            IndexType,
             b"telemetry" => IndexType::Telemetry,
             b"email" => IndexType::Email,
             b"calendar" => IndexType::Calendar,
             b"contacts" => IndexType::Contacts,
             b"file" => IndexType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4491,11 +4617,13 @@ impl<'de> serde::Deserialize<'de> for IndexType {
 
 impl EnumImpl for IpProtocol {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            IpProtocol,
             b"udp" => IpProtocol::Udp,
             b"tcp" => IpProtocol::Tcp,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4541,11 +4669,13 @@ impl<'de> serde::Deserialize<'de> for IpProtocol {
 
 impl EnumImpl for JokerAuthType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            JokerAuthType,
             b"ApiKey" => JokerAuthType::ApiKey,
             b"UsernamePassword" => JokerAuthType::UsernamePassword,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -4591,8 +4721,9 @@ impl<'de> serde::Deserialize<'de> for JokerAuthType {
 
 impl EnumImpl for JwtSignatureAlgorithm {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            JwtSignatureAlgorithm,
             b"es256" => JwtSignatureAlgorithm::Es256,
             b"es384" => JwtSignatureAlgorithm::Es384,
             b"ps256" => JwtSignatureAlgorithm::Ps256,
@@ -4605,6 +4736,7 @@ impl EnumImpl for JwtSignatureAlgorithm {
             b"hs384" => JwtSignatureAlgorithm::Hs384,
             b"hs512" => JwtSignatureAlgorithm::Hs512,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -5683,13 +5815,15 @@ impl<'de> serde::Deserialize<'de> for Locale {
 
 impl EnumImpl for LogRotateFrequency {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            LogRotateFrequency,
             b"daily" => LogRotateFrequency::Daily,
             b"hourly" => LogRotateFrequency::Hourly,
             b"minutely" => LogRotateFrequency::Minutely,
             b"never" => LogRotateFrequency::Never,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -5739,8 +5873,9 @@ impl<'de> serde::Deserialize<'de> for LogRotateFrequency {
 
 impl EnumImpl for LookupStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            LookupStoreType,
             b"PostgreSql" => LookupStoreType::PostgreSql,
             b"MySql" => LookupStoreType::MySql,
             b"Sqlite" => LookupStoreType::Sqlite,
@@ -5749,6 +5884,7 @@ impl EnumImpl for LookupStoreType {
             b"RedisCluster" => LookupStoreType::RedisCluster,
             b"RedisSentinel" => LookupStoreType::RedisSentinel,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -5804,8 +5940,9 @@ impl<'de> serde::Deserialize<'de> for LookupStoreType {
 
 impl EnumImpl for MessageFlag {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MessageFlag,
             b"authenticated" => MessageFlag::Authenticated,
             b"unauthenticated" => MessageFlag::Unauthenticated,
             b"unauthenticatedDmarc" => MessageFlag::UnauthenticatedDmarc,
@@ -5813,6 +5950,7 @@ impl EnumImpl for MessageFlag {
             b"report" => MessageFlag::Report,
             b"autogenerated" => MessageFlag::Autogenerated,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -5866,12 +6004,14 @@ impl<'de> serde::Deserialize<'de> for MessageFlag {
 
 impl EnumImpl for MetricType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MetricType,
             b"Counter" => MetricType::Counter,
             b"Gauge" => MetricType::Gauge,
             b"Histogram" => MetricType::Histogram,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -5919,12 +6059,14 @@ impl<'de> serde::Deserialize<'de> for MetricType {
 
 impl EnumImpl for MetricsOtelType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MetricsOtelType,
             b"Disabled" => MetricsOtelType::Disabled,
             b"Http" => MetricsOtelType::Http,
             b"Grpc" => MetricsOtelType::Grpc,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -5972,11 +6114,13 @@ impl<'de> serde::Deserialize<'de> for MetricsOtelType {
 
 impl EnumImpl for MetricsPrometheusType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MetricsPrometheusType,
             b"Disabled" => MetricsPrometheusType::Disabled,
             b"Enabled" => MetricsPrometheusType::Enabled,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6022,14 +6166,16 @@ impl<'de> serde::Deserialize<'de> for MetricsPrometheusType {
 
 impl EnumImpl for MetricsStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MetricsStoreType,
             b"Disabled" => MetricsStoreType::Disabled,
             b"Default" => MetricsStoreType::Default,
             b"FoundationDb" => MetricsStoreType::FoundationDb,
             b"PostgreSql" => MetricsStoreType::PostgreSql,
             b"MySql" => MetricsStoreType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6081,11 +6227,13 @@ impl<'de> serde::Deserialize<'de> for MetricsStoreType {
 
 impl EnumImpl for MilterVersion {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MilterVersion,
             b"v2" => MilterVersion::V2,
             b"v6" => MilterVersion::V6,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6131,8 +6279,9 @@ impl<'de> serde::Deserialize<'de> for MilterVersion {
 
 impl EnumImpl for ModelSize {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ModelSize,
             b"16" => ModelSize::V16,
             b"17" => ModelSize::V17,
             b"18" => ModelSize::V18,
@@ -6147,6 +6296,7 @@ impl EnumImpl for ModelSize {
             b"27" => ModelSize::V27,
             b"28" => ModelSize::V28,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6214,11 +6364,13 @@ impl<'de> serde::Deserialize<'de> for ModelSize {
 
 impl EnumImpl for MtaDeliveryExpirationType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaDeliveryExpirationType,
             b"Ttl" => MtaDeliveryExpirationType::Ttl,
             b"Attempts" => MtaDeliveryExpirationType::Attempts,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6264,11 +6416,13 @@ impl<'de> serde::Deserialize<'de> for MtaDeliveryExpirationType {
 
 impl EnumImpl for MtaDeliveryScheduleIntervalsOrDefaultType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaDeliveryScheduleIntervalsOrDefaultType,
             b"Default" => MtaDeliveryScheduleIntervalsOrDefaultType::Default,
             b"Custom" => MtaDeliveryScheduleIntervalsOrDefaultType::Custom,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6314,8 +6468,9 @@ impl<'de> serde::Deserialize<'de> for MtaDeliveryScheduleIntervalsOrDefaultType 
 
 impl EnumImpl for MtaInboundThrottleKey {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaInboundThrottleKey,
             b"listener" => MtaInboundThrottleKey::Listener,
             b"remoteIp" => MtaInboundThrottleKey::RemoteIp,
             b"localIp" => MtaInboundThrottleKey::LocalIp,
@@ -6326,6 +6481,7 @@ impl EnumImpl for MtaInboundThrottleKey {
             b"rcpt" => MtaInboundThrottleKey::Rcpt,
             b"rcptDomain" => MtaInboundThrottleKey::RcptDomain,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6385,13 +6541,15 @@ impl<'de> serde::Deserialize<'de> for MtaInboundThrottleKey {
 
 impl EnumImpl for MtaIpStrategy {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaIpStrategy,
             b"v4ThenV6" => MtaIpStrategy::V4ThenV6,
             b"v6ThenV4" => MtaIpStrategy::V6ThenV4,
             b"v4Only" => MtaIpStrategy::V4Only,
             b"v6Only" => MtaIpStrategy::V6Only,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6441,8 +6599,9 @@ impl<'de> serde::Deserialize<'de> for MtaIpStrategy {
 
 impl EnumImpl for MtaOutboundThrottleKey {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaOutboundThrottleKey,
             b"mx" => MtaOutboundThrottleKey::Mx,
             b"remoteIp" => MtaOutboundThrottleKey::RemoteIp,
             b"localIp" => MtaOutboundThrottleKey::LocalIp,
@@ -6450,6 +6609,7 @@ impl EnumImpl for MtaOutboundThrottleKey {
             b"senderDomain" => MtaOutboundThrottleKey::SenderDomain,
             b"rcptDomain" => MtaOutboundThrottleKey::RcptDomain,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6503,11 +6663,13 @@ impl<'de> serde::Deserialize<'de> for MtaOutboundThrottleKey {
 
 impl EnumImpl for MtaProtocol {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaProtocol,
             b"smtp" => MtaProtocol::Smtp,
             b"lmtp" => MtaProtocol::Lmtp,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6553,13 +6715,15 @@ impl<'de> serde::Deserialize<'de> for MtaProtocol {
 
 impl EnumImpl for MtaQueueQuotaKey {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaQueueQuotaKey,
             b"sender" => MtaQueueQuotaKey::Sender,
             b"senderDomain" => MtaQueueQuotaKey::SenderDomain,
             b"rcpt" => MtaQueueQuotaKey::Rcpt,
             b"rcptDomain" => MtaQueueQuotaKey::RcptDomain,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6609,12 +6773,14 @@ impl<'de> serde::Deserialize<'de> for MtaQueueQuotaKey {
 
 impl EnumImpl for MtaRequiredOrOptional {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaRequiredOrOptional,
             b"optional" => MtaRequiredOrOptional::Optional,
             b"require" => MtaRequiredOrOptional::Require,
             b"disable" => MtaRequiredOrOptional::Disable,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6662,12 +6828,14 @@ impl<'de> serde::Deserialize<'de> for MtaRequiredOrOptional {
 
 impl EnumImpl for MtaRouteType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaRouteType,
             b"Mx" => MtaRouteType::Mx,
             b"Relay" => MtaRouteType::Relay,
             b"Local" => MtaRouteType::Local,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6715,8 +6883,9 @@ impl<'de> serde::Deserialize<'de> for MtaRouteType {
 
 impl EnumImpl for MtaStage {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            MtaStage,
             b"connect" => MtaStage::Connect,
             b"ehlo" => MtaStage::Ehlo,
             b"auth" => MtaStage::Auth,
@@ -6724,6 +6893,7 @@ impl EnumImpl for MtaStage {
             b"rcpt" => MtaStage::Rcpt,
             b"data" => MtaStage::Data,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6777,8 +6947,9 @@ impl<'de> serde::Deserialize<'de> for MtaStage {
 
 impl EnumImpl for NetworkListenerProtocol {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            NetworkListenerProtocol,
             b"smtp" => NetworkListenerProtocol::Smtp,
             b"lmtp" => NetworkListenerProtocol::Lmtp,
             b"http" => NetworkListenerProtocol::Http,
@@ -6786,6 +6957,7 @@ impl EnumImpl for NetworkListenerProtocol {
             b"pop3" => NetworkListenerProtocol::Pop3,
             b"manageSieve" => NetworkListenerProtocol::ManageSieve,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6839,8 +7011,9 @@ impl<'de> serde::Deserialize<'de> for NetworkListenerProtocol {
 
 impl EnumImpl for OvhEndpoint {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            OvhEndpoint,
             b"ovh-eu" => OvhEndpoint::OvhEu,
             b"ovh-ca" => OvhEndpoint::OvhCa,
             b"kimsufi-eu" => OvhEndpoint::KimsufiEu,
@@ -6848,6 +7021,7 @@ impl EnumImpl for OvhEndpoint {
             b"soyoustart-eu" => OvhEndpoint::SoyoustartEu,
             b"soyoustart-ca" => OvhEndpoint::SoyoustartCa,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6901,13 +7075,15 @@ impl<'de> serde::Deserialize<'de> for OvhEndpoint {
 
 impl EnumImpl for PasswordHashAlgorithm {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PasswordHashAlgorithm,
             b"argon2id" => PasswordHashAlgorithm::Argon2id,
             b"bcrypt" => PasswordHashAlgorithm::Bcrypt,
             b"scrypt" => PasswordHashAlgorithm::Scrypt,
             b"pbkdf2" => PasswordHashAlgorithm::Pbkdf2,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -6957,14 +7133,16 @@ impl<'de> serde::Deserialize<'de> for PasswordHashAlgorithm {
 
 impl EnumImpl for PasswordStrength {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PasswordStrength,
             b"zero" => PasswordStrength::Zero,
             b"one" => PasswordStrength::One,
             b"two" => PasswordStrength::Two,
             b"three" => PasswordStrength::Three,
             b"four" => PasswordStrength::Four,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9061,12 +9239,14 @@ impl<'de> serde::Deserialize<'de> for Permission {
 
 impl EnumImpl for PermissionsType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PermissionsType,
             b"Inherit" => PermissionsType::Inherit,
             b"Merge" => PermissionsType::Merge,
             b"Replace" => PermissionsType::Replace,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9114,12 +9294,14 @@ impl<'de> serde::Deserialize<'de> for PermissionsType {
 
 impl EnumImpl for PolicyEnforcement {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PolicyEnforcement,
             b"enforce" => PolicyEnforcement::Enforce,
             b"testing" => PolicyEnforcement::Testing,
             b"disable" => PolicyEnforcement::Disable,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9167,12 +9349,14 @@ impl<'de> serde::Deserialize<'de> for PolicyEnforcement {
 
 impl EnumImpl for PostgreSqlRecyclingMethod {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PostgreSqlRecyclingMethod,
             b"fast" => PostgreSqlRecyclingMethod::Fast,
             b"verified" => PostgreSqlRecyclingMethod::Verified,
             b"clean" => PostgreSqlRecyclingMethod::Clean,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9220,8 +9404,9 @@ impl<'de> serde::Deserialize<'de> for PostgreSqlRecyclingMethod {
 
 impl EnumImpl for ProviderInfo {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ProviderInfo,
             b"providerName" => ProviderInfo::ProviderName,
             b"providerShortName" => ProviderInfo::ProviderShortName,
             b"userDocumentation" => ProviderInfo::UserDocumentation,
@@ -9231,6 +9416,7 @@ impl EnumImpl for ProviderInfo {
             b"logoWidth" => ProviderInfo::LogoWidth,
             b"logoHeight" => ProviderInfo::LogoHeight,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9288,13 +9474,15 @@ impl<'de> serde::Deserialize<'de> for ProviderInfo {
 
 impl EnumImpl for PublicStringOptionalType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PublicStringOptionalType,
             b"None" => PublicStringOptionalType::None,
             b"Value" => PublicStringOptionalType::Value,
             b"EnvironmentVariable" => PublicStringOptionalType::EnvironmentVariable,
             b"File" => PublicStringOptionalType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9344,12 +9532,14 @@ impl<'de> serde::Deserialize<'de> for PublicStringOptionalType {
 
 impl EnumImpl for PublicTextType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            PublicTextType,
             b"Text" => PublicTextType::Text,
             b"EnvironmentVariable" => PublicTextType::EnvironmentVariable,
             b"File" => PublicTextType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9397,11 +9587,13 @@ impl<'de> serde::Deserialize<'de> for PublicTextType {
 
 impl EnumImpl for QueueExpiryType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            QueueExpiryType,
             b"Ttl" => QueueExpiryType::Ttl,
             b"Attempts" => QueueExpiryType::Attempts,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9447,11 +9639,13 @@ impl<'de> serde::Deserialize<'de> for QueueExpiryType {
 
 impl EnumImpl for RecipientFlag {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            RecipientFlag,
             b"dsnSent" => RecipientFlag::DsnSent,
             b"spamPayload" => RecipientFlag::SpamPayload,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9497,13 +9691,15 @@ impl<'de> serde::Deserialize<'de> for RecipientFlag {
 
 impl EnumImpl for RecipientStatusType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            RecipientStatusType,
             b"Scheduled" => RecipientStatusType::Scheduled,
             b"Completed" => RecipientStatusType::Completed,
             b"TemporaryFailure" => RecipientStatusType::TemporaryFailure,
             b"PermanentFailure" => RecipientStatusType::PermanentFailure,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9553,11 +9749,13 @@ impl<'de> serde::Deserialize<'de> for RecipientStatusType {
 
 impl EnumImpl for RedisProtocol {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            RedisProtocol,
             b"resp2" => RedisProtocol::Resp2,
             b"resp3" => RedisProtocol::Resp3,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9603,13 +9801,15 @@ impl<'de> serde::Deserialize<'de> for RedisProtocol {
 
 impl EnumImpl for RedisSwapStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            RedisSwapStoreType,
             b"Default" => RedisSwapStoreType::Default,
             b"Redis" => RedisSwapStoreType::Redis,
             b"RedisCluster" => RedisSwapStoreType::RedisCluster,
             b"RedisSentinel" => RedisSwapStoreType::RedisSentinel,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9659,11 +9859,13 @@ impl<'de> serde::Deserialize<'de> for RedisSwapStoreType {
 
 impl EnumImpl for RolesType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            RolesType,
             b"Default" => RolesType::Default,
             b"Custom" => RolesType::Custom,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9709,8 +9911,9 @@ impl<'de> serde::Deserialize<'de> for RolesType {
 
 impl EnumImpl for S3StoreRegionType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            S3StoreRegionType,
             b"UsEast1" => S3StoreRegionType::UsEast1,
             b"UsEast2" => S3StoreRegionType::UsEast2,
             b"UsWest1" => S3StoreRegionType::UsWest1,
@@ -9755,6 +9958,7 @@ impl EnumImpl for S3StoreRegionType {
             b"WaApSoutheast2" => S3StoreRegionType::WaApSoutheast2,
             b"Custom" => S3StoreRegionType::Custom,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9882,14 +10086,16 @@ impl<'de> serde::Deserialize<'de> for S3StoreRegionType {
 
 impl EnumImpl for SearchCalendarField {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SearchCalendarField,
             b"title" => SearchCalendarField::Title,
             b"description" => SearchCalendarField::Description,
             b"location" => SearchCalendarField::Location,
             b"owner" => SearchCalendarField::Owner,
             b"attendee" => SearchCalendarField::Attendee,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -9941,8 +10147,9 @@ impl<'de> serde::Deserialize<'de> for SearchCalendarField {
 
 impl EnumImpl for SearchContactField {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SearchContactField,
             b"member" => SearchContactField::Member,
             b"kind" => SearchContactField::Kind,
             b"name" => SearchContactField::Name,
@@ -9954,6 +10161,7 @@ impl EnumImpl for SearchContactField {
             b"address" => SearchContactField::Address,
             b"note" => SearchContactField::Note,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10015,8 +10223,9 @@ impl<'de> serde::Deserialize<'de> for SearchContactField {
 
 impl EnumImpl for SearchEmailField {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SearchEmailField,
             b"from" => SearchEmailField::From,
             b"to" => SearchEmailField::To,
             b"cc" => SearchEmailField::Cc,
@@ -10026,6 +10235,7 @@ impl EnumImpl for SearchEmailField {
             b"attachment" => SearchEmailField::Attachment,
             b"headers" => SearchEmailField::Headers,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10083,11 +10293,13 @@ impl<'de> serde::Deserialize<'de> for SearchEmailField {
 
 impl EnumImpl for SearchFileField {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SearchFileField,
             b"name" => SearchFileField::Name,
             b"content" => SearchFileField::Content,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10133,8 +10345,9 @@ impl<'de> serde::Deserialize<'de> for SearchFileField {
 
 impl EnumImpl for SearchStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SearchStoreType,
             b"Default" => SearchStoreType::Default,
             b"ElasticSearch" => SearchStoreType::ElasticSearch,
             b"Meilisearch" => SearchStoreType::Meilisearch,
@@ -10142,6 +10355,7 @@ impl EnumImpl for SearchStoreType {
             b"PostgreSql" => SearchStoreType::PostgreSql,
             b"MySql" => SearchStoreType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10195,12 +10409,14 @@ impl<'de> serde::Deserialize<'de> for SearchStoreType {
 
 impl EnumImpl for SearchTracingField {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SearchTracingField,
             b"eventType" => SearchTracingField::EventType,
             b"queueId" => SearchTracingField::QueueId,
             b"keywords" => SearchTracingField::Keywords,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10248,13 +10464,15 @@ impl<'de> serde::Deserialize<'de> for SearchTracingField {
 
 impl EnumImpl for SecretKeyOptionalType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SecretKeyOptionalType,
             b"None" => SecretKeyOptionalType::None,
             b"Value" => SecretKeyOptionalType::Value,
             b"EnvironmentVariable" => SecretKeyOptionalType::EnvironmentVariable,
             b"File" => SecretKeyOptionalType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10304,12 +10522,14 @@ impl<'de> serde::Deserialize<'de> for SecretKeyOptionalType {
 
 impl EnumImpl for SecretKeyType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SecretKeyType,
             b"Value" => SecretKeyType::Value,
             b"EnvironmentVariable" => SecretKeyType::EnvironmentVariable,
             b"File" => SecretKeyType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10357,13 +10577,15 @@ impl<'de> serde::Deserialize<'de> for SecretKeyType {
 
 impl EnumImpl for SecretTextOptionalType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SecretTextOptionalType,
             b"None" => SecretTextOptionalType::None,
             b"Text" => SecretTextOptionalType::Text,
             b"EnvironmentVariable" => SecretTextOptionalType::EnvironmentVariable,
             b"File" => SecretTextOptionalType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10413,12 +10635,14 @@ impl<'de> serde::Deserialize<'de> for SecretTextOptionalType {
 
 impl EnumImpl for SecretTextType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SecretTextType,
             b"Text" => SecretTextType::Text,
             b"EnvironmentVariable" => SecretTextType::EnvironmentVariable,
             b"File" => SecretTextType::File,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10466,8 +10690,9 @@ impl<'de> serde::Deserialize<'de> for SecretTextType {
 
 impl EnumImpl for ServiceProtocol {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            ServiceProtocol,
             b"jmap" => ServiceProtocol::Jmap,
             b"imap" => ServiceProtocol::Imap,
             b"pop3" => ServiceProtocol::Pop3,
@@ -10477,6 +10702,7 @@ impl EnumImpl for ServiceProtocol {
             b"webdav" => ServiceProtocol::Webdav,
             b"managesieve" => ServiceProtocol::Managesieve,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10534,8 +10760,9 @@ impl<'de> serde::Deserialize<'de> for ServiceProtocol {
 
 impl EnumImpl for SieveCapability {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SieveCapability,
             b"envelope" => SieveCapability::Envelope,
             b"envelope-dsn" => SieveCapability::EnvelopeDsn,
             b"envelope-deliverby" => SieveCapability::EnvelopeDeliverby,
@@ -10586,6 +10813,7 @@ impl EnumImpl for SieveCapability {
             b"vnd.stalwart.while" => SieveCapability::VndStalwartWhile,
             b"vnd.stalwart.expressions" => SieveCapability::VndStalwartExpressions,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10725,12 +10953,14 @@ impl<'de> serde::Deserialize<'de> for SieveCapability {
 
 impl EnumImpl for Sig0Algorithm {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            Sig0Algorithm,
             b"ecdsa-p256-sha256" => Sig0Algorithm::EcdsaP256Sha256,
             b"ecdsa-p384-sha384" => Sig0Algorithm::EcdsaP384Sha384,
             b"ed25519" => Sig0Algorithm::Ed25519,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10778,12 +11008,14 @@ impl<'de> serde::Deserialize<'de> for Sig0Algorithm {
 
 impl EnumImpl for SpamClassifierModelType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamClassifierModelType,
             b"FtrlFh" => SpamClassifierModelType::FtrlFh,
             b"FtrlCcfh" => SpamClassifierModelType::FtrlCcfh,
             b"Disabled" => SpamClassifierModelType::Disabled,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10831,13 +11063,15 @@ impl<'de> serde::Deserialize<'de> for SpamClassifierModelType {
 
 impl EnumImpl for SpamClassifyParameters {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamClassifyParameters,
             b"bit7" => SpamClassifyParameters::Bit7,
             b"bit8Mime - 8-bit MIME message content" => SpamClassifyParameters::Bit8Mime8BitMIMEMessageContent,
             b"binaryMime" => SpamClassifyParameters::BinaryMime,
             b"smtpUtf8" => SpamClassifyParameters::SmtpUtf8,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10889,13 +11123,15 @@ impl<'de> serde::Deserialize<'de> for SpamClassifyParameters {
 
 impl EnumImpl for SpamClassifyResult {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamClassifyResult,
             b"spam" => SpamClassifyResult::Spam,
             b"ham" => SpamClassifyResult::Ham,
             b"reject" => SpamClassifyResult::Reject,
             b"discard" => SpamClassifyResult::Discard,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10945,12 +11181,14 @@ impl<'de> serde::Deserialize<'de> for SpamClassifyResult {
 
 impl EnumImpl for SpamClassifyTagDisposition {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamClassifyTagDisposition,
             b"score" => SpamClassifyTagDisposition::Score,
             b"reject" => SpamClassifyTagDisposition::Reject,
             b"discard" => SpamClassifyTagDisposition::Discard,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -10998,8 +11236,9 @@ impl<'de> serde::Deserialize<'de> for SpamClassifyTagDisposition {
 
 impl EnumImpl for SpamDnsblServerType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamDnsblServerType,
             b"Any" => SpamDnsblServerType::Any,
             b"Url" => SpamDnsblServerType::Url,
             b"Domain" => SpamDnsblServerType::Domain,
@@ -11008,6 +11247,7 @@ impl EnumImpl for SpamDnsblServerType {
             b"Header" => SpamDnsblServerType::Header,
             b"Body" => SpamDnsblServerType::Body,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11063,11 +11303,13 @@ impl<'de> serde::Deserialize<'de> for SpamDnsblServerType {
 
 impl EnumImpl for SpamLlmType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamLlmType,
             b"Disable" => SpamLlmType::Disable,
             b"Enable" => SpamLlmType::Enable,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11113,8 +11355,9 @@ impl<'de> serde::Deserialize<'de> for SpamLlmType {
 
 impl EnumImpl for SpamRuleType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamRuleType,
             b"Any" => SpamRuleType::Any,
             b"Url" => SpamRuleType::Url,
             b"Domain" => SpamRuleType::Domain,
@@ -11123,6 +11366,7 @@ impl EnumImpl for SpamRuleType {
             b"Header" => SpamRuleType::Header,
             b"Body" => SpamRuleType::Body,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11178,12 +11422,14 @@ impl<'de> serde::Deserialize<'de> for SpamRuleType {
 
 impl EnumImpl for SpamTagType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpamTagType,
             b"Score" => SpamTagType::Score,
             b"Discard" => SpamTagType::Discard,
             b"Reject" => SpamTagType::Reject,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11231,8 +11477,9 @@ impl<'de> serde::Deserialize<'de> for SpamTagType {
 
 impl EnumImpl for SpecialUse {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpecialUse,
             b"inbox" => SpecialUse::Inbox,
             b"trash" => SpecialUse::Trash,
             b"junk" => SpecialUse::Junk,
@@ -11245,6 +11492,7 @@ impl EnumImpl for SpecialUse {
             b"scheduled" => SpecialUse::Scheduled,
             b"snoozed" => SpecialUse::Snoozed,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11308,8 +11556,9 @@ impl<'de> serde::Deserialize<'de> for SpecialUse {
 
 impl EnumImpl for SpfAuthResult {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpfAuthResult,
             b"none" => SpfAuthResult::None,
             b"neutral" => SpfAuthResult::Neutral,
             b"pass" => SpfAuthResult::Pass,
@@ -11318,6 +11567,7 @@ impl EnumImpl for SpfAuthResult {
             b"tempError" => SpfAuthResult::TempError,
             b"permError" => SpfAuthResult::PermError,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11373,12 +11623,14 @@ impl<'de> serde::Deserialize<'de> for SpfAuthResult {
 
 impl EnumImpl for SpfDomainScope {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SpfDomainScope,
             b"helo" => SpfDomainScope::Helo,
             b"mailFrom" => SpfDomainScope::MailFrom,
             b"unspecified" => SpfDomainScope::Unspecified,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11426,13 +11678,15 @@ impl<'de> serde::Deserialize<'de> for SpfDomainScope {
 
 impl EnumImpl for SqlAuthStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SqlAuthStoreType,
             b"Default" => SqlAuthStoreType::Default,
             b"PostgreSql" => SqlAuthStoreType::PostgreSql,
             b"MySql" => SqlAuthStoreType::MySql,
             b"Sqlite" => SqlAuthStoreType::Sqlite,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11482,8 +11736,9 @@ impl<'de> serde::Deserialize<'de> for SqlAuthStoreType {
 
 impl EnumImpl for StorageQuota {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            StorageQuota,
             b"maxEmails" => StorageQuota::MaxEmails,
             b"maxMailboxes" => StorageQuota::MaxMailboxes,
             b"maxEmailSubmissions" => StorageQuota::MaxEmailSubmissions,
@@ -11504,6 +11759,7 @@ impl EnumImpl for StorageQuota {
             b"maxPublicKeys" => StorageQuota::MaxPublicKeys,
             b"maxDiskQuota" => StorageQuota::MaxDiskQuota,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11583,12 +11839,14 @@ impl<'de> serde::Deserialize<'de> for StorageQuota {
 
 impl EnumImpl for SubAddressingType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            SubAddressingType,
             b"Enabled" => SubAddressingType::Enabled,
             b"Custom" => SubAddressingType::Custom,
             b"Disabled" => SubAddressingType::Disabled,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11636,13 +11894,15 @@ impl<'de> serde::Deserialize<'de> for SubAddressingType {
 
 impl EnumImpl for TaskAccountMaintenanceType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskAccountMaintenanceType,
             b"purge" => TaskAccountMaintenanceType::Purge,
             b"reindex" => TaskAccountMaintenanceType::Reindex,
             b"recalculateImapUid" => TaskAccountMaintenanceType::RecalculateImapUid,
             b"recalculateQuota" => TaskAccountMaintenanceType::RecalculateQuota,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11692,11 +11952,13 @@ impl<'de> serde::Deserialize<'de> for TaskAccountMaintenanceType {
 
 impl EnumImpl for TaskRetryStrategyType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskRetryStrategyType,
             b"ExponentialBackoff" => TaskRetryStrategyType::ExponentialBackoff,
             b"FixedDelay" => TaskRetryStrategyType::FixedDelay,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11742,14 +12004,16 @@ impl<'de> serde::Deserialize<'de> for TaskRetryStrategyType {
 
 impl EnumImpl for TaskSpamFilterMaintenanceType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskSpamFilterMaintenanceType,
             b"train" => TaskSpamFilterMaintenanceType::Train,
             b"retrain" => TaskSpamFilterMaintenanceType::Retrain,
             b"abort" => TaskSpamFilterMaintenanceType::Abort,
             b"reset" => TaskSpamFilterMaintenanceType::Reset,
             b"updateRules" => TaskSpamFilterMaintenanceType::UpdateRules,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11801,12 +12065,14 @@ impl<'de> serde::Deserialize<'de> for TaskSpamFilterMaintenanceType {
 
 impl EnumImpl for TaskStatusType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskStatusType,
             b"Pending" => TaskStatusType::Pending,
             b"Retry" => TaskStatusType::Retry,
             b"Failed" => TaskStatusType::Failed,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11854,8 +12120,9 @@ impl<'de> serde::Deserialize<'de> for TaskStatusType {
 
 impl EnumImpl for TaskStoreMaintenanceType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskStoreMaintenanceType,
             b"reindexAccounts" => TaskStoreMaintenanceType::ReindexAccounts,
             b"reindexTelemetry" => TaskStoreMaintenanceType::ReindexTelemetry,
             b"purgeAccounts" => TaskStoreMaintenanceType::PurgeAccounts,
@@ -11872,6 +12139,7 @@ impl EnumImpl for TaskStoreMaintenanceType {
             b"removeSieveId" => TaskStoreMaintenanceType::RemoveSieveId,
             b"removeGreylist" => TaskStoreMaintenanceType::RemoveGreylist,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11943,10 +12211,12 @@ impl<'de> serde::Deserialize<'de> for TaskStoreMaintenanceType {
 
 impl EnumImpl for TaskTenantMaintenanceType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskTenantMaintenanceType,
             b"recalculateQuota" => TaskTenantMaintenanceType::RecalculateQuota,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -11990,8 +12260,9 @@ impl<'de> serde::Deserialize<'de> for TaskTenantMaintenanceType {
 
 impl EnumImpl for TaskType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TaskType,
             b"CalendarAlarmEmail" => TaskType::CalendarAlarmEmail,
             b"CalendarAlarmNotification" => TaskType::CalendarAlarmNotification,
             b"CalendarItipMessage" => TaskType::CalendarItipMessage,
@@ -12008,6 +12279,7 @@ impl EnumImpl for TaskType {
             b"DkimManagement" => TaskType::DkimManagement,
             b"DnsManagement" => TaskType::DnsManagement,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -12079,8 +12351,9 @@ impl<'de> serde::Deserialize<'de> for TaskType {
 
 impl EnumImpl for TenantStorageQuota {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TenantStorageQuota,
             b"maxAccounts" => TenantStorageQuota::MaxAccounts,
             b"maxGroups" => TenantStorageQuota::MaxGroups,
             b"maxDomains" => TenantStorageQuota::MaxDomains,
@@ -12093,6 +12366,7 @@ impl EnumImpl for TenantStorageQuota {
             b"maxAcmeProviders" => TenantStorageQuota::MaxAcmeProviders,
             b"maxDiskQuota" => TenantStorageQuota::MaxDiskQuota,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -13996,8 +14270,9 @@ impl<'de> serde::Deserialize<'de> for TimeZone {
 
 impl EnumImpl for TlsCipherSuite {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TlsCipherSuite,
             b"tls13-aes-256-gcm-sha384" => TlsCipherSuite::Tls13Aes256GcmSha384,
             b"tls13-aes-128-gcm-sha256" => TlsCipherSuite::Tls13Aes128GcmSha256,
             b"tls13-chacha20-poly1305-sha256" => TlsCipherSuite::Tls13Chacha20Poly1305Sha256,
@@ -14008,6 +14283,7 @@ impl EnumImpl for TlsCipherSuite {
             b"tls-ecdhe-rsa-with-aes-128-gcm-sha256" => TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256,
             b"tls-ecdhe-rsa-with-chacha20-poly1305-sha256" => TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14079,13 +14355,15 @@ impl<'de> serde::Deserialize<'de> for TlsCipherSuite {
 
 impl EnumImpl for TlsPolicyType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TlsPolicyType,
             b"tlsa" => TlsPolicyType::Tlsa,
             b"sts" => TlsPolicyType::Sts,
             b"noPolicyFound" => TlsPolicyType::NoPolicyFound,
             b"other" => TlsPolicyType::Other,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14135,8 +14413,9 @@ impl<'de> serde::Deserialize<'de> for TlsPolicyType {
 
 impl EnumImpl for TlsResultType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TlsResultType,
             b"startTlsNotSupported" => TlsResultType::StartTlsNotSupported,
             b"certificateHostMismatch" => TlsResultType::CertificateHostMismatch,
             b"certificateExpired" => TlsResultType::CertificateExpired,
@@ -14150,6 +14429,7 @@ impl EnumImpl for TlsResultType {
             b"stsWebpkiInvalid" => TlsResultType::StsWebpkiInvalid,
             b"other" => TlsResultType::Other,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14215,11 +14495,13 @@ impl<'de> serde::Deserialize<'de> for TlsResultType {
 
 impl EnumImpl for TlsVersion {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TlsVersion,
             b"tls12" => TlsVersion::Tls12,
             b"tls13" => TlsVersion::Tls13,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14265,8 +14547,9 @@ impl<'de> serde::Deserialize<'de> for TlsVersion {
 
 impl EnumImpl for TraceValueType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TraceValueType,
             b"String" => TraceValueType::String,
             b"UnsignedInt" => TraceValueType::UnsignedInt,
             b"Integer" => TraceValueType::Integer,
@@ -14279,6 +14562,7 @@ impl EnumImpl for TraceValueType {
             b"Event" => TraceValueType::Event,
             b"Null" => TraceValueType::Null,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14342,14 +14626,16 @@ impl<'de> serde::Deserialize<'de> for TraceValueType {
 
 impl EnumImpl for TracerType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TracerType,
             b"Log" => TracerType::Log,
             b"Stdout" => TracerType::Stdout,
             b"Journal" => TracerType::Journal,
             b"OtelHttp" => TracerType::OtelHttp,
             b"OtelGrpc" => TracerType::OtelGrpc,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14401,14 +14687,16 @@ impl<'de> serde::Deserialize<'de> for TracerType {
 
 impl EnumImpl for TracingLevel {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TracingLevel,
             b"error" => TracingLevel::Error,
             b"warn" => TracingLevel::Warn,
             b"info" => TracingLevel::Info,
             b"debug" => TracingLevel::Debug,
             b"trace" => TracingLevel::Trace,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14460,8 +14748,9 @@ impl<'de> serde::Deserialize<'de> for TracingLevel {
 
 impl EnumImpl for TracingLevelOpt {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TracingLevelOpt,
             b"disable" => TracingLevelOpt::Disable,
             b"error" => TracingLevelOpt::Error,
             b"warn" => TracingLevelOpt::Warn,
@@ -14469,6 +14758,7 @@ impl EnumImpl for TracingLevelOpt {
             b"debug" => TracingLevelOpt::Debug,
             b"trace" => TracingLevelOpt::Trace,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14522,14 +14812,16 @@ impl<'de> serde::Deserialize<'de> for TracingLevelOpt {
 
 impl EnumImpl for TracingStoreType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TracingStoreType,
             b"Disabled" => TracingStoreType::Disabled,
             b"Default" => TracingStoreType::Default,
             b"FoundationDb" => TracingStoreType::FoundationDb,
             b"PostgreSql" => TracingStoreType::PostgreSql,
             b"MySql" => TracingStoreType::MySql,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14581,8 +14873,9 @@ impl<'de> serde::Deserialize<'de> for TracingStoreType {
 
 impl EnumImpl for TsigAlgorithm {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            TsigAlgorithm,
             b"hmac-md5" => TsigAlgorithm::HmacMd5,
             b"gss" => TsigAlgorithm::Gss,
             b"hmac-sha1" => TsigAlgorithm::HmacSha1,
@@ -14594,6 +14887,7 @@ impl EnumImpl for TsigAlgorithm {
             b"hmac-sha512" => TsigAlgorithm::HmacSha512,
             b"hmac-sha512-256" => TsigAlgorithm::HmacSha512256,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14655,12 +14949,14 @@ impl<'de> serde::Deserialize<'de> for TsigAlgorithm {
 
 impl EnumImpl for UserRolesType {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            UserRolesType,
             b"User" => UserRolesType::User,
             b"Admin" => UserRolesType::Admin,
             b"Custom" => UserRolesType::Custom,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {
@@ -14708,11 +15004,13 @@ impl<'de> serde::Deserialize<'de> for UserRolesType {
 
 impl EnumImpl for VCardVersion {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map! {
+        hashify::map! {
             value.as_bytes(),
+            VCardVersion,
             b"v4" => VCardVersion::V4,
             b"v3" => VCardVersion::V3,
         }
+        .copied()
     }
 
     fn as_str(&self) -> &'static str {

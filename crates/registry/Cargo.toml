@@ -8,7 +8,7 @@ utils = { path =  "../utils" }
 trc = { path = "../trc" }
 types = { path = "../types" }
 serde = { version = "1.0", features = ["derive"]}
-hashify = "0.2.9"
+hashify = "0.3"
 ahash = { version = "0.8" }
 jmap-tools = { version = "0.1.9" }
 mail-auth = { version = "0.13" }

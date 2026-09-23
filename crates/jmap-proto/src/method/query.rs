@@ -223,11 +223,12 @@ where
                 while let Some(key) = map.next_key::<Cow<str>>()? {
                     match key.len() {
                         8 if key == "operator" => {
-                            let op_ = hashify::tiny_map!(
+                            let op_ = hashify::fnc_map!(
                                 map.next_value::<&str>()?.as_bytes(),
-                                "AND" => Filter::And,
-                                "OR" => Filter::Or,
-                                "NOT" => Filter::Not,
+                                "AND" => Some(Filter::And),
+                                "OR" => Some(Filter::Or),
+                                "NOT" => Some(Filter::Not),
+                                _ => None,
                             )
                             .ok_or_else(|| {
                                 de::Error::custom(format!("Unknown filter operator: {}", key))

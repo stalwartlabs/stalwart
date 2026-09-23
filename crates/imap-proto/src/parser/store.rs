@@ -66,13 +66,14 @@ impl Request<Command> {
             .next()
             .ok_or_else(|| bad(self.tag.clone(), "Missing message data item name."))?
             .unwrap_bytes();
-        let (is_silent, operation) = hashify::tiny_map_ignore_case!(operation.as_slice(),
-            "FLAGS" => (false, Operation::Set),
-            "FLAGS.SILENT" => (true, Operation::Set),
-            "+FLAGS" => (false, Operation::Add),
-            "+FLAGS.SILENT" => (true, Operation::Add),
-            "-FLAGS" => (false, Operation::Clear),
-            "-FLAGS.SILENT" => (true, Operation::Clear),
+        let (is_silent, operation) = hashify::fnc_map_ignore_case!(operation.as_slice(),
+            "FLAGS" => Some((false, Operation::Set)),
+            "FLAGS.SILENT" => Some((true, Operation::Set)),
+            "+FLAGS" => Some((false, Operation::Add)),
+            "+FLAGS.SILENT" => Some((true, Operation::Add)),
+            "-FLAGS" => Some((false, Operation::Clear)),
+            "-FLAGS.SILENT" => Some((true, Operation::Clear)),
+            _ => None,
         )
         .ok_or_else(|| {
             bad(

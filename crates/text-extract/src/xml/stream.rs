@@ -371,7 +371,7 @@ fn utf8_or_declared(rest: &[u8], skip: usize) -> Sniff {
     };
     let Some(label) = declaration
         .attributes()
-        .find_map(|(name, value)| hashify::tiny_set!(name, b"encoding").then_some(value))
+        .find_map(|(name, value)| hashify::set!(name, b"encoding").then_some(value))
     else {
         return Sniff::Utf8 { skip };
     };

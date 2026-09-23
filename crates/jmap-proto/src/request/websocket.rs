@@ -194,10 +194,11 @@ impl<'de> Visitor<'de> for WebSocketMessageVisitor {
 
 impl MessageType {
     fn parse(s: &str) -> Self {
-        hashify::tiny_map!(s.as_bytes(),
-            b"Request" => MessageType::Request,
-            b"WebSocketPushEnable" => MessageType::PushEnable,
-            b"WebSocketPushDisable" => MessageType::PushDisable,
+        hashify::fnc_map!(s.as_bytes(),
+            b"Request" => Some(MessageType::Request),
+            b"WebSocketPushEnable" => Some(MessageType::PushEnable),
+            b"WebSocketPushDisable" => Some(MessageType::PushDisable),
+            _ => None,
         )
         .unwrap_or(MessageType::None)
     }

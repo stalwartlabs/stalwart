@@ -119,13 +119,14 @@ pub struct DestroyArchive<T>(pub T);
 
 impl DavResourceName {
     pub fn parse(service: &str) -> Option<Self> {
-        hashify::tiny_map!(service.as_bytes(),
+        hashify::map!(service.as_bytes(), DavResourceName,
             "card" => DavResourceName::Card,
             "cal" => DavResourceName::Cal,
             "file" => DavResourceName::File,
             "pal" => DavResourceName::Principal,
             "itip" => DavResourceName::Scheduling,
         )
+        .copied()
     }
 
     pub fn base_path(&self) -> &'static str {

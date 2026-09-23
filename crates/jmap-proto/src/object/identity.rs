@@ -76,15 +76,16 @@ impl Element for IdentityValue {
 
 impl IdentityProperty {
     fn parse(value: &str, allow_patch: bool) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => IdentityProperty::Id,
-            b"name" => IdentityProperty::Name,
-            b"email" => IdentityProperty::Email,
-            b"replyTo" => IdentityProperty::ReplyTo,
-            b"bcc" => IdentityProperty::Bcc,
-            b"textSignature" => IdentityProperty::TextSignature,
-            b"htmlSignature" => IdentityProperty::HtmlSignature,
-            b"mayDelete" => IdentityProperty::MayDelete,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(IdentityProperty::Id),
+            b"name" => Some(IdentityProperty::Name),
+            b"email" => Some(IdentityProperty::Email),
+            b"replyTo" => Some(IdentityProperty::ReplyTo),
+            b"bcc" => Some(IdentityProperty::Bcc),
+            b"textSignature" => Some(IdentityProperty::TextSignature),
+            b"htmlSignature" => Some(IdentityProperty::HtmlSignature),
+            b"mayDelete" => Some(IdentityProperty::MayDelete),
+            _ => None,
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {

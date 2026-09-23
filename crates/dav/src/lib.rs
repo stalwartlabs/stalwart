@@ -121,20 +121,19 @@ impl DavMethod {
             Method::POST => Some(DavMethod::POST),
             Method::PATCH => Some(DavMethod::PATCH),
             Method::HEAD => Some(DavMethod::HEAD),
-            _ => {
-                hashify::tiny_map!(method.as_str().as_bytes(),
-                    "PROPFIND" => DavMethod::PROPFIND,
-                    "PROPPATCH" => DavMethod::PROPPATCH,
-                    "REPORT" => DavMethod::REPORT,
-                    "MKCOL" => DavMethod::MKCOL,
-                    "MKCALENDAR" => DavMethod::MKCALENDAR,
-                    "COPY" => DavMethod::COPY,
-                    "MOVE" => DavMethod::MOVE,
-                    "LOCK" => DavMethod::LOCK,
-                    "UNLOCK" => DavMethod::UNLOCK,
-                    "ACL" => DavMethod::ACL
-                )
-            }
+            _ => hashify::map!(method.as_str().as_bytes(), DavMethod,
+                "PROPFIND" => DavMethod::PROPFIND,
+                "PROPPATCH" => DavMethod::PROPPATCH,
+                "REPORT" => DavMethod::REPORT,
+                "MKCOL" => DavMethod::MKCOL,
+                "MKCALENDAR" => DavMethod::MKCALENDAR,
+                "COPY" => DavMethod::COPY,
+                "MOVE" => DavMethod::MOVE,
+                "LOCK" => DavMethod::LOCK,
+                "UNLOCK" => DavMethod::UNLOCK,
+                "ACL" => DavMethod::ACL
+            )
+            .copied(),
         }
     }
 

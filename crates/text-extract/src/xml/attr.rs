@@ -55,13 +55,14 @@ pub(crate) fn resolve_entity(body: &[u8]) -> Option<char> {
     match body {
         [b'#', b'x' | b'X', hex @ ..] => parse_code_point(hex, 16),
         [b'#', decimal @ ..] => parse_code_point(decimal, 10),
-        _ => hashify::tiny_map!(body,
+        _ => hashify::map!(body, char,
             b"amp" => '&',
             b"lt" => '<',
             b"gt" => '>',
             b"quot" => '"',
             b"apos" => '\'',
-        ),
+        )
+        .copied(),
     }
 }
 

@@ -447,7 +447,7 @@ impl Capabilities {
 
 impl Capability {
     pub fn parse(s: &str) -> Option<Self> {
-        hashify::tiny_map!(s.as_bytes(),
+        hashify::map!(s.as_bytes(), Capability,
             "urn:ietf:params:jmap:core" => Capability::Core,
             "urn:ietf:params:jmap:mail" => Capability::Mail,
             "urn:ietf:params:jmap:submission" => Capability::Submission,
@@ -469,6 +469,7 @@ impl Capability {
             "urn:ietf:params:jmap:webpush-vapid" => Capability::WebPushVapid,
             "urn:ietf:params:jmap:emailpush" => Capability::EmailPush,
         )
+        .copied()
     }
 }
 

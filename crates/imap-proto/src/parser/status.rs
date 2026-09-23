@@ -69,18 +69,19 @@ impl Request<Command> {
 
 impl Status {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "MESSAGES" => Self::Messages,
-            "UIDNEXT" => Self::UidNext,
-            "UIDVALIDITY" => Self::UidValidity,
-            "UNSEEN" => Self::Unseen,
-            "DELETED" => Self::Deleted,
-            "SIZE" => Self::Size,
-            "HIGHESTMODSEQ" => Self::HighestModSeq,
-            "OBJECTID" => Self::ObjectId,
-            "RECENT" => Self::Recent,
-            "DELETED-STORAGE" => Self::DeletedStorage
+        hashify::map_ignore_case!(value, Status,
+            "MESSAGES" => Status::Messages,
+            "UIDNEXT" => Status::UidNext,
+            "UIDVALIDITY" => Status::UidValidity,
+            "UNSEEN" => Status::Unseen,
+            "DELETED" => Status::Deleted,
+            "SIZE" => Status::Size,
+            "HIGHESTMODSEQ" => Status::HighestModSeq,
+            "OBJECTID" => Status::ObjectId,
+            "RECENT" => Status::Recent,
+            "DELETED-STORAGE" => Status::DeletedStorage
         )
+        .copied()
         .ok_or_else(|| {
             format!(
                 "Invalid status option '{}'.",

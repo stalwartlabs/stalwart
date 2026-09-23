@@ -52,7 +52,7 @@ impl FileContentKind {
 
     fn from_extension(file_name: &str) -> Option<Self> {
         let (_, extension) = file_name.rsplit_once('.')?;
-        hashify::tiny_map_ignore_case!(extension.as_bytes(),
+        hashify::map_ignore_case!(extension.as_bytes(), FileContentKind,
             b"html" => FileContentKind::Html,
             b"htm" => FileContentKind::Html,
             b"xhtml" => FileContentKind::Html,
@@ -90,6 +90,7 @@ impl FileContentKind {
             b"rb" => FileContentKind::PlainText,
             b"php" => FileContentKind::PlainText,
         )
+        .copied()
     }
 
     pub fn index_hash(kind: Option<Self>, blob_hash: &[u8]) -> u64 {

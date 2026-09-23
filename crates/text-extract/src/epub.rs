@@ -37,16 +37,17 @@ enum Element {
 
 impl Element {
     fn parse(local: &[u8]) -> Option<Element> {
-        hashify::tiny_map!(local,
+        hashify::map!(local, Element,
             b"rootfile" => Element::Rootfile,
             b"item" => Element::Item,
             b"itemref" => Element::ItemRef,
         )
+        .copied()
     }
 }
 
 fn is_html_media_type(media_type: &[u8]) -> bool {
-    hashify::tiny_set_ignore_case!(
+    hashify::set_ignore_case!(
         media_type.trim_ascii(),
         b"application/xhtml+xml",
         b"text/html",
@@ -59,7 +60,7 @@ fn has_html_extension(name: &[u8]) -> bool {
     memrchr(b'.', name)
         .and_then(|dot| name.get(dot + 1..))
         .is_some_and(|extension| {
-            hashify::tiny_set_ignore_case!(extension, b"xhtml", b"html", b"htm", b"xht")
+            hashify::set_ignore_case!(extension, b"xhtml", b"html", b"htm", b"xht")
         })
 }
 
@@ -79,7 +80,7 @@ impl Handler for ContainerHandler<'_> {
             hashify::fnc_map!(name,
                 b"full-path" => { path = Some(value); },
                 b"media-type" => {
-                    is_package = hashify::tiny_set_ignore_case!(value, b"application/oebps-package+xml");
+                    is_package = hashify::set_ignore_case!(value, b"application/oebps-package+xml");
                 },
                 _ => {}
             );
@@ -133,7 +134,7 @@ impl Handler for PackageHandler<'_> {
             Some(Element::ItemRef) if self.spine.len() < self.limit => {
                 if let Some(id) = tag
                     .attributes()
-                    .find_map(|(name, value)| hashify::tiny_set!(name, b"idref").then_some(value))
+                    .find_map(|(name, value)| hashify::set!(name, b"idref").then_some(value))
                     .and_then(|id| self.arena.push_decoded(id))
                 {
                     self.spine.push(id);

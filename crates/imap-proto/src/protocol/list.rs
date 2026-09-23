@@ -157,7 +157,7 @@ impl TryFrom<&str> for Attribute {
     type Error = ();
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), Attribute,
             "archive" => Attribute::Archive,
             "drafts" => Attribute::Drafts,
             "junk" => Attribute::Junk,
@@ -168,6 +168,7 @@ impl TryFrom<&str> for Attribute {
             "scheduled" => Attribute::Scheduled,
             "snoozed" => Attribute::Snoozed,
         )
+        .copied()
         .ok_or(())
     }
 }

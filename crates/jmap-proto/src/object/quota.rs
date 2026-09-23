@@ -59,17 +59,18 @@ impl Property for QuotaProperty {
 
 impl QuotaProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => QuotaProperty::Id,
-            b"resourceType" => QuotaProperty::ResourceType,
-            b"used" => QuotaProperty::Used,
-            b"name" => QuotaProperty::Name,
-            b"scope" => QuotaProperty::Scope,
-            b"types" => QuotaProperty::Types,
-            b"hardLimit" => QuotaProperty::HardLimit,
-            b"warnLimit" => QuotaProperty::WarnLimit,
-            b"softLimit" => QuotaProperty::SoftLimit,
-            b"description" => QuotaProperty::Description,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(QuotaProperty::Id),
+            b"resourceType" => Some(QuotaProperty::ResourceType),
+            b"used" => Some(QuotaProperty::Used),
+            b"name" => Some(QuotaProperty::Name),
+            b"scope" => Some(QuotaProperty::Scope),
+            b"types" => Some(QuotaProperty::Types),
+            b"hardLimit" => Some(QuotaProperty::HardLimit),
+            b"warnLimit" => Some(QuotaProperty::WarnLimit),
+            b"softLimit" => Some(QuotaProperty::SoftLimit),
+            b"description" => Some(QuotaProperty::Description),
+            _ => None,
         )
     }
 }

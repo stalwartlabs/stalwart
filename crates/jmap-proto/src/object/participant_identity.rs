@@ -69,11 +69,12 @@ impl Element for ParticipantIdentityValue {
 
 impl ParticipantIdentityProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => ParticipantIdentityProperty::Id,
-            b"name" => ParticipantIdentityProperty::Name,
-            b"calendarAddress" => ParticipantIdentityProperty::CalendarAddress,
-            b"isDefault" => ParticipantIdentityProperty::IsDefault
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(ParticipantIdentityProperty::Id),
+            b"name" => Some(ParticipantIdentityProperty::Name),
+            b"calendarAddress" => Some(ParticipantIdentityProperty::CalendarAddress),
+            b"isDefault" => Some(ParticipantIdentityProperty::IsDefault),
+            _ => None
         )
     }
 

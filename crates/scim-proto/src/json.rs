@@ -138,9 +138,10 @@ macro_rules! scim_object {
                         let mut has_schemas = false;
 
                         while let Some(key) = map.next_key::<$crate::json::Str<$lt>>()? {
-                            let field = hashify::tiny_map_ignore_case!(key.0.as_bytes(),
-                                "schemas" => __Field::__schemas,
-                                $($key => __Field::$field,)*
+                            let field = hashify::fnc_map_ignore_case!(key.0.as_bytes(),
+                                "schemas" => Some(__Field::__schemas),
+                                $($key => Some(__Field::$field),)*
+                                _ => None
                             );
 
                             match field {

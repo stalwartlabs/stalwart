@@ -40,12 +40,13 @@ pub enum ResourceType {
 
 impl ResourceType {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map_ignore_case!(value.as_bytes(),
+        hashify::map_ignore_case!(value.as_bytes(), ResourceType,
             "User" => ResourceType::User,
             "Users" => ResourceType::User,
             "Group" => ResourceType::Group,
             "Groups" => ResourceType::Group,
         )
+        .copied()
     }
 
     pub fn from_endpoint(endpoint: &str) -> Option<Self> {

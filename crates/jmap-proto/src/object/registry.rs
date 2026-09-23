@@ -178,12 +178,13 @@ impl<'de> DeserializeArguments<'de> for RegistryComparator {
 
 impl RegistryFilterOperator {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), RegistryFilterOperator,
             b"GreaterThan" => RegistryFilterOperator::GreaterThan,
             b"GreaterThanOrEqual" => RegistryFilterOperator::GreaterThanOrEqual,
             b"LessThan" => RegistryFilterOperator::LessThan,
             b"LessThanOrEqual" => RegistryFilterOperator::LessThanOrEqual,
         )
+        .copied()
     }
 }
 

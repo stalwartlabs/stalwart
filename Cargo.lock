@@ -1039,7 +1039,7 @@ name = "calcard"
 version = "0.4.0"
 dependencies = [
  "ahash",
- "hashify",
+ "hashify 0.3.0",
  "jiff",
  "jmap-tools",
  "mail-builder",
@@ -1306,7 +1306,7 @@ dependencies = [
  "directory",
  "dns-update",
  "futures",
- "hashify",
+ "hashify 0.3.0",
  "hickory-proto",
  "hostname",
  "hyper",
@@ -1896,7 +1896,7 @@ dependencies = [
  "dav-proto",
  "directory",
  "groupware",
- "hashify",
+ "hashify 0.3.0",
  "http_proto",
  "hyper",
  "percent-encoding",
@@ -1914,7 +1914,7 @@ version = "0.16.23"
 dependencies = [
  "calcard",
  "compact_str",
- "hashify",
+ "hashify 0.3.0",
  "hyper",
  "mail-parser",
  "quick-xml 0.41.0",
@@ -2372,7 +2372,7 @@ dependencies = [
  "common",
  "compact_str",
  "groupware",
- "hashify",
+ "hashify 0.3.0",
  "jmap-tools",
  "jmap_proto",
  "mail-builder",
@@ -3008,7 +3008,7 @@ dependencies = [
  "calcard",
  "common",
  "compact_str",
- "hashify",
+ "hashify 0.3.0",
  "icu_datetime",
  "icu_locale_core",
  "icu_plurals",
@@ -3108,6 +3108,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "hashify"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ada2bbbc255310309a75c6ac1014e1a41c8ca38d7c6fc4e4d9cd0c060cb259fd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -3305,7 +3316,7 @@ dependencies = [
  "flate2",
  "form-data",
  "groupware",
- "hashify",
+ "hashify 0.3.0",
  "http-body-util",
  "http_proto",
  "hyper",
@@ -3522,7 +3533,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -3901,7 +3912,7 @@ dependencies = [
  "ahash",
  "base64 0.23.1",
  "compact_str",
- "hashify",
+ "hashify 0.3.0",
  "itoa",
  "jiff",
  "mail-parser",
@@ -4106,10 +4117,12 @@ dependencies = [
  "jiff-static",
  "jiff-tzdb",
  "jiff-tzdb-platform",
+ "js-sys",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -4163,7 +4176,7 @@ dependencies = [
  "email",
  "futures-util",
  "groupware",
- "hashify",
+ "hashify 0.3.0",
  "http-body-util",
  "http_proto",
  "hyper",
@@ -4224,7 +4237,6 @@ dependencies = [
 name = "jmap-tools"
 version = "0.1.9"
 dependencies = [
- "hashify",
  "rkyv",
  "serde",
  "serde_json",
@@ -4237,7 +4249,7 @@ dependencies = [
  "ahash",
  "calcard",
  "compact_str",
- "hashify",
+ "hashify 0.3.0",
  "jmap-tools",
  "mail-parser",
  "registry",
@@ -4687,7 +4699,7 @@ dependencies = [
  "flate2",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
- "hashify",
+ "hashify 0.2.9",
  "hickory-resolver",
  "idna",
  "mail-builder",
@@ -4720,7 +4732,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ec00bda90c6e645a54506c630c2820cd6b1890cfd2b0a169b50f74b2b8c7c86"
 dependencies = [
  "encoding_rs",
- "hashify",
+ "hashify 0.2.9",
  "memchr",
  "rkyv",
  "serde",
@@ -5137,7 +5149,7 @@ name = "nlp"
 version = "0.16.23"
 dependencies = [
  "ahash",
- "hashify",
+ "hashify 0.3.0",
  "jieba-rs",
  "maplit",
  "memchr",
@@ -6311,7 +6323,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -6352,7 +6364,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -6776,7 +6788,7 @@ version = "0.16.23"
 dependencies = [
  "ahash",
  "compact_str",
- "hashify",
+ "hashify 0.3.0",
  "jmap-tools",
  "lz4_flex 0.14.0",
  "mail-auth",
@@ -7348,7 +7360,7 @@ dependencies = [
 name = "scim-proto"
 version = "0.16.23"
 dependencies = [
- "hashify",
+ "hashify 0.3.0",
  "serde",
  "serde_json",
 ]
@@ -7483,7 +7495,7 @@ dependencies = [
  "sha2 0.10.9",
  "sha3 0.10.9",
  "slh-dsa",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "twofish",
  "typenum",
  "x25519-dalek",
@@ -7871,7 +7883,7 @@ dependencies = [
  "bumpalo",
  "fancy-regex 0.19.2",
  "hashbrown 0.17.1",
- "hashify",
+ "hashify 0.2.9",
  "mail-builder",
  "mail-parser",
  "memchr",
@@ -7999,7 +8011,7 @@ dependencies = [
  "compact_str",
  "directory",
  "email",
- "hashify",
+ "hashify 0.3.0",
  "mail-auth",
  "mail-builder",
  "mail-parser",
@@ -8085,7 +8097,7 @@ dependencies = [
  "common",
  "compact_str",
  "decancer",
- "hashify",
+ "hashify 0.3.0",
  "hyper",
  "idna",
  "infer 0.22.0",
@@ -8573,7 +8585,7 @@ version = "1.0.0"
 dependencies = [
  "encoding_rs",
  "flate2",
- "hashify",
+ "hashify 0.3.0",
  "mail-parser",
  "memchr",
  "quick-xml 0.41.0",
@@ -9107,7 +9119,7 @@ dependencies = [
  "base64 0.23.1",
  "compact_str",
  "event_macro",
- "hashify",
+ "hashify 0.3.0",
  "itoa",
  "mail-auth",
  "mail-parser",
@@ -9215,7 +9227,7 @@ version = "0.16.23"
 dependencies = [
  "blake3",
  "compact_str",
- "hashify",
+ "hashify 0.3.0",
  "jmap-tools",
  "rkyv",
  "serde",

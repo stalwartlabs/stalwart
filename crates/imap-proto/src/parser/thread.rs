@@ -51,9 +51,10 @@ impl Request<Command> {
 
 impl Algorithm {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "ORDEREDSUBJECT" => Self::OrderedSubject,
-            "REFERENCES" => Self::References,
+        hashify::fnc_map_ignore_case!(value,
+            "ORDEREDSUBJECT" => Some(Self::OrderedSubject),
+            "REFERENCES" => Some(Self::References),
+            _ => None,
         )
         .ok_or_else(|| {
             format!(

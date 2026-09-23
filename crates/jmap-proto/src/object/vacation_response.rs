@@ -82,14 +82,15 @@ impl Element for VacationResponseValue {
 
 impl VacationResponseProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => VacationResponseProperty::Id,
-            b"isEnabled" => VacationResponseProperty::IsEnabled,
-            b"fromDate" => VacationResponseProperty::FromDate,
-            b"toDate" => VacationResponseProperty::ToDate,
-            b"textBody" => VacationResponseProperty::TextBody,
-            b"htmlBody" => VacationResponseProperty::HtmlBody,
-            b"subject" => VacationResponseProperty::Subject,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(VacationResponseProperty::Id),
+            b"isEnabled" => Some(VacationResponseProperty::IsEnabled),
+            b"fromDate" => Some(VacationResponseProperty::FromDate),
+            b"toDate" => Some(VacationResponseProperty::ToDate),
+            b"textBody" => Some(VacationResponseProperty::TextBody),
+            b"htmlBody" => Some(VacationResponseProperty::HtmlBody),
+            b"subject" => Some(VacationResponseProperty::Subject),
+            _ => None,
         )
     }
 }

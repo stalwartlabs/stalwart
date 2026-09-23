@@ -11,7 +11,7 @@ ahash = { version = "0.8" }
 base64 = "0.23"
 jiff = "0.2.37"
 trc = { path = "../trc" }
-hashify = { version = "0.2" }
+hashify = { version = "0.3" }
 compact_str = "0.10.0"
 smallvec = { version = "1", features = ["union"] }
 itoa = "1"

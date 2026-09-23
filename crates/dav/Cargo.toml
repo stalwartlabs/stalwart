@@ -15,7 +15,7 @@ http_proto = { path = "../http-proto" }
 types = { path = "../types" }
 trc = { path = "../trc" }
 calcard = { version = "0.4", features = ["rkyv"] }
-hashify = { version = "0.2" }
+hashify = { version = "0.3" }
 hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 percent-encoding = "2.3.2"
 rkyv.workspace = true

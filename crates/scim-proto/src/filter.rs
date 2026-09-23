@@ -207,7 +207,7 @@ impl<'x> AttrPath<'x> {
 
 impl CompareOp {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map_ignore_case!(value.as_bytes(),
+        hashify::map_ignore_case!(value.as_bytes(), CompareOp,
             "eq" => CompareOp::Eq,
             "ne" => CompareOp::Ne,
             "co" => CompareOp::Co,
@@ -218,6 +218,7 @@ impl CompareOp {
             "lt" => CompareOp::Lt,
             "le" => CompareOp::Le,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -542,10 +543,11 @@ impl<'x> Parser<'x> {
                 let start = self.pos;
                 let word = self.parse_word();
 
-                hashify::tiny_map_ignore_case!(word.as_bytes(),
-                    "true" => CompValue::Bool(true),
-                    "false" => CompValue::Bool(false),
-                    "null" => CompValue::Null,
+                hashify::fnc_map_ignore_case!(word.as_bytes(),
+                    "true" => Some(CompValue::Bool(true)),
+                    "false" => Some(CompValue::Bool(false)),
+                    "null" => Some(CompValue::Null),
+                    _ => None,
                 )
                 .ok_or_else(|| {
                     Error::invalid_filter(format!(

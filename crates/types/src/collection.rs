@@ -460,7 +460,7 @@ impl FromStr for Collection {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        hashify::tiny_map!(s.as_bytes(),
+        hashify::map!(s.as_bytes(), Collection,
             "pushSubscription" => Collection::PushSubscription,
             "email" => Collection::Email,
             "mailbox" => Collection::Mailbox,
@@ -476,6 +476,7 @@ impl FromStr for Collection {
             "fileNode" => Collection::FileNode,
             "calendarEventNotification" => Collection::CalendarEventNotification,
         )
+        .copied()
         .ok_or(())
     }
 }

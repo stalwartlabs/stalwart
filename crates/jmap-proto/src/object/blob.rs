@@ -103,19 +103,20 @@ impl Element for BlobValue {
 
 impl BlobProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"blobId" => BlobProperty::BlobId,
-            b"id" => BlobProperty::Id,
-            b"size" => BlobProperty::Size,
-            b"type" => BlobProperty::Type,
-            b"isEncodingProblem" => BlobProperty::IsEncodingProblem,
-            b"isTruncated" => BlobProperty::IsTruncated,
-            b"data:asText" => BlobProperty::Data(DataProperty::AsText),
-            b"data:asBase64" => BlobProperty::Data(DataProperty::AsBase64),
-            b"data" => BlobProperty::Data(DataProperty::Default),
-            b"digest:sha" => BlobProperty::Digest(DigestProperty::Sha),
-            b"digest:sha-256" => BlobProperty::Digest(DigestProperty::Sha256),
-            b"digest:sha-512" => BlobProperty::Digest(DigestProperty::Sha512),
+        hashify::fnc_map!(value.as_bytes(),
+            b"blobId" => Some(BlobProperty::BlobId),
+            b"id" => Some(BlobProperty::Id),
+            b"size" => Some(BlobProperty::Size),
+            b"type" => Some(BlobProperty::Type),
+            b"isEncodingProblem" => Some(BlobProperty::IsEncodingProblem),
+            b"isTruncated" => Some(BlobProperty::IsTruncated),
+            b"data:asText" => Some(BlobProperty::Data(DataProperty::AsText)),
+            b"data:asBase64" => Some(BlobProperty::Data(DataProperty::AsBase64)),
+            b"data" => Some(BlobProperty::Data(DataProperty::Default)),
+            b"digest:sha" => Some(BlobProperty::Digest(DigestProperty::Sha)),
+            b"digest:sha-256" => Some(BlobProperty::Digest(DigestProperty::Sha256)),
+            b"digest:sha-512" => Some(BlobProperty::Digest(DigestProperty::Sha512)),
+            _ => None,
         )
     }
 }

@@ -176,11 +176,12 @@ impl Request<Command> {
 
 impl SelectionOption {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "SUBSCRIBED" => Self::Subscribed,
-            "REMOTE" => Self::Remote,
-            "RECURSIVEMATCH" => Self::RecursiveMatch,
-            "SPECIAL-USE" => Self::SpecialUse,
+        hashify::fnc_map_ignore_case!(value,
+            "SUBSCRIBED" => Some(Self::Subscribed),
+            "REMOTE" => Some(Self::Remote),
+            "RECURSIVEMATCH" => Some(Self::RecursiveMatch),
+            "SPECIAL-USE" => Some(Self::SpecialUse),
+            _ => None,
         )
         .ok_or_else(|| {
             format!(
@@ -194,11 +195,12 @@ impl SelectionOption {
 
 impl ReturnOption {
     pub fn parse(value: &[u8]) -> super::Result<Self> {
-        hashify::tiny_map_ignore_case!(value,
-            "SUBSCRIBED" => Self::Subscribed,
-            "CHILDREN" => Self::Children,
-            "STATUS" => Self::Status(Vec::with_capacity(2)),
-            "SPECIAL-USE" => Self::SpecialUse,
+        hashify::fnc_map_ignore_case!(value,
+            "SUBSCRIBED" => Some(Self::Subscribed),
+            "CHILDREN" => Some(Self::Children),
+            "STATUS" => Some(Self::Status(Vec::with_capacity(2))),
+            "SPECIAL-USE" => Some(Self::SpecialUse),
+            _ => None,
         )
         .ok_or_else(|| format!("Invalid return option {:?}", String::from_utf8_lossy(value)).into())
     }

@@ -617,25 +617,25 @@ fn is_known_resource<'x>(hostnames: impl IntoIterator<Item = &'x str>, uri: &str
     let Some((scheme, rest)) = uri.split_once("://") else {
         return false;
     };
-    let supported = hashify::tiny_map!(scheme.as_bytes(),
-        b"http" => true,
-        b"https" => true,
-        b"smtp" => true,
-        b"smtps" => true,
-        b"imap" => true,
-        b"imaps" => true,
-        b"pop3" => true,
-        b"pop3s" => true,
-        b"caldav" => true,
-        b"caldavs" => true,
-        b"webdav" => true,
-        b"webdavs" => true,
-        b"carddav" => true,
-        b"carddavs" => true,
-        b"sieve" => true,
-        b"sieves" => true
-    )
-    .unwrap_or(false);
+    let supported = hashify::set!(
+        scheme.as_bytes(),
+        b"http",
+        b"https",
+        b"smtp",
+        b"smtps",
+        b"imap",
+        b"imaps",
+        b"pop3",
+        b"pop3s",
+        b"caldav",
+        b"caldavs",
+        b"webdav",
+        b"webdavs",
+        b"carddav",
+        b"carddavs",
+        b"sieve",
+        b"sieves"
+    );
 
     let authority = rest.split_once('/').map_or(rest, |(auth, _)| auth);
     let host = authority

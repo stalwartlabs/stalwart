@@ -147,11 +147,12 @@ impl FileNodeNodeType {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), FileNodeNodeType,
             b"file" => FileNodeNodeType::File,
             b"directory" => FileNodeNodeType::Directory,
             b"symlink" => FileNodeNodeType::Symlink,
         )
+        .copied()
     }
 }
 
@@ -185,7 +186,7 @@ impl FileNodeRole {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), FileNodeRole,
             b"root" => FileNodeRole::Root,
             b"home" => FileNodeRole::Home,
             b"temp" => FileNodeRole::Temp,
@@ -196,6 +197,7 @@ impl FileNodeRole {
             b"pictures" => FileNodeRole::Pictures,
             b"videos" => FileNodeRole::Videos,
         )
+        .copied()
     }
 }
 
@@ -254,30 +256,31 @@ impl Element for FileNodeValue {
 
 impl FileNodeProperty {
     fn parse(value: &str, allow_patch: bool) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => FileNodeProperty::Id,
-            b"parentId" => FileNodeProperty::ParentId,
-            b"blobId" => FileNodeProperty::BlobId,
-            b"size" => FileNodeProperty::Size,
-            b"name" => FileNodeProperty::Name,
-            b"type" => FileNodeProperty::Type,
-            b"nodeType" => FileNodeProperty::NodeType,
-            b"target" => FileNodeProperty::Target,
-            b"created" => FileNodeProperty::Created,
-            b"modified" => FileNodeProperty::Modified,
-            b"accessed" => FileNodeProperty::Accessed,
-            b"changed" => FileNodeProperty::Changed,
-            b"executable" => FileNodeProperty::Executable,
-            b"role" => FileNodeProperty::Role,
-            b"myRights" => FileNodeProperty::MyRights,
-            b"shareWith" => FileNodeProperty::ShareWith,
-            b"isSubscribed" => FileNodeProperty::IsSubscribed,
-            b"mayRead" => FileNodeProperty::Rights(FileNodeRight::MayRead),
-            b"mayAddChildren" => FileNodeProperty::Rights(FileNodeRight::MayAddChildren),
-            b"mayRename" => FileNodeProperty::Rights(FileNodeRight::MayRename),
-            b"mayDelete" => FileNodeProperty::Rights(FileNodeRight::MayDelete),
-            b"mayModifyContent" => FileNodeProperty::Rights(FileNodeRight::MayModifyContent),
-            b"mayShare" => FileNodeProperty::Rights(FileNodeRight::MayShare),
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(FileNodeProperty::Id),
+            b"parentId" => Some(FileNodeProperty::ParentId),
+            b"blobId" => Some(FileNodeProperty::BlobId),
+            b"size" => Some(FileNodeProperty::Size),
+            b"name" => Some(FileNodeProperty::Name),
+            b"type" => Some(FileNodeProperty::Type),
+            b"nodeType" => Some(FileNodeProperty::NodeType),
+            b"target" => Some(FileNodeProperty::Target),
+            b"created" => Some(FileNodeProperty::Created),
+            b"modified" => Some(FileNodeProperty::Modified),
+            b"accessed" => Some(FileNodeProperty::Accessed),
+            b"changed" => Some(FileNodeProperty::Changed),
+            b"executable" => Some(FileNodeProperty::Executable),
+            b"role" => Some(FileNodeProperty::Role),
+            b"myRights" => Some(FileNodeProperty::MyRights),
+            b"shareWith" => Some(FileNodeProperty::ShareWith),
+            b"isSubscribed" => Some(FileNodeProperty::IsSubscribed),
+            b"mayRead" => Some(FileNodeProperty::Rights(FileNodeRight::MayRead)),
+            b"mayAddChildren" => Some(FileNodeProperty::Rights(FileNodeRight::MayAddChildren)),
+            b"mayRename" => Some(FileNodeProperty::Rights(FileNodeRight::MayRename)),
+            b"mayDelete" => Some(FileNodeProperty::Rights(FileNodeRight::MayDelete)),
+            b"mayModifyContent" => Some(FileNodeProperty::Rights(FileNodeRight::MayModifyContent)),
+            b"mayShare" => Some(FileNodeProperty::Rights(FileNodeRight::MayShare)),
+            _ => None,
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {

@@ -17,7 +17,7 @@ tokio = { version = "1.53", features = ["net", "macros"] }
 ahash = "0.8.12"
 rkyv.workspace = true
 compact_str = "0.10.0"
-hashify = "0.2.9"
+hashify = "0.3"
 itoa = "1"
 
 [features]

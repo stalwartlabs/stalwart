@@ -42,11 +42,12 @@ scim_object!(PatchOperationBody<'x>, None::<&'static str>, {
 
 impl PatchOp {
     pub fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map_ignore_case!(value.as_bytes(),
+        hashify::map_ignore_case!(value.as_bytes(), PatchOp,
             "add" => PatchOp::Add,
             "remove" => PatchOp::Remove,
             "replace" => PatchOp::Replace,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {

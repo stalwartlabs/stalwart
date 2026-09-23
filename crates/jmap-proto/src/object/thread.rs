@@ -58,9 +58,10 @@ impl Element for ThreadValue {
 
 impl ThreadProperty {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => ThreadProperty::Id,
-            b"emailIds" => ThreadProperty::EmailIds,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(ThreadProperty::Id),
+            b"emailIds" => Some(ThreadProperty::EmailIds),
+            _ => None,
         )
     }
 }

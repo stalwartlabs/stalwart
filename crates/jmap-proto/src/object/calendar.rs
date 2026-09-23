@@ -149,11 +149,12 @@ impl CalendarRight {
 
 impl IncludeInAvailability {
     fn parse(value: &str) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
+        hashify::map!(value.as_bytes(), IncludeInAvailability,
             b"all" => IncludeInAvailability::All,
             b"attending" => IncludeInAvailability::Attending,
             b"none" => IncludeInAvailability::None,
         )
+        .copied()
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -214,35 +215,36 @@ impl Element for CalendarValue {
 
 impl CalendarProperty {
     fn parse(value: &str, allow_patch: bool) -> Option<Self> {
-        hashify::tiny_map!(value.as_bytes(),
-            b"id" => CalendarProperty::Id,
-            b"name" => CalendarProperty::Name,
-            b"description" => CalendarProperty::Description,
-            b"color" => CalendarProperty::Color,
-            b"sortOrder" => CalendarProperty::SortOrder,
-            b"isSubscribed" => CalendarProperty::IsSubscribed,
-            b"isVisible" => CalendarProperty::IsVisible,
-            b"isDefault" => CalendarProperty::IsDefault,
-            b"includeInAvailability" => CalendarProperty::IncludeInAvailability,
-            b"defaultAlertsWithTime" => CalendarProperty::DefaultAlertsWithTime,
-            b"defaultAlertsWithoutTime" => CalendarProperty::DefaultAlertsWithoutTime,
-            b"timeZone" => CalendarProperty::TimeZone,
-            b"shareWith" => CalendarProperty::ShareWith,
-            b"myRights" => CalendarProperty::MyRights,
-            b"mayReadFreeBusy" => CalendarProperty::Rights(CalendarRight::MayReadFreeBusy),
-            b"mayReadItems" => CalendarProperty::Rights(CalendarRight::MayReadItems),
-            b"mayWriteAll" => CalendarProperty::Rights(CalendarRight::MayWriteAll),
-            b"mayWriteOwn" => CalendarProperty::Rights(CalendarRight::MayWriteOwn),
-            b"mayUpdatePrivate" => CalendarProperty::Rights(CalendarRight::MayUpdatePrivate),
-            b"mayRSVP" => CalendarProperty::Rights(CalendarRight::MayRSVP),
-            b"mayShare" => CalendarProperty::Rights(CalendarRight::MayShare),
-            b"mayDelete" => CalendarProperty::Rights(CalendarRight::MayDelete),
-            b"@type" => CalendarProperty::Type,
-            b"when" => CalendarProperty::When,
-            b"trigger" => CalendarProperty::Trigger,
-            b"offset" => CalendarProperty::Offset,
-            b"relativeTo" => CalendarProperty::RelativeTo,
-            b"action" => CalendarProperty::Action,
+        hashify::fnc_map!(value.as_bytes(),
+            b"id" => Some(CalendarProperty::Id),
+            b"name" => Some(CalendarProperty::Name),
+            b"description" => Some(CalendarProperty::Description),
+            b"color" => Some(CalendarProperty::Color),
+            b"sortOrder" => Some(CalendarProperty::SortOrder),
+            b"isSubscribed" => Some(CalendarProperty::IsSubscribed),
+            b"isVisible" => Some(CalendarProperty::IsVisible),
+            b"isDefault" => Some(CalendarProperty::IsDefault),
+            b"includeInAvailability" => Some(CalendarProperty::IncludeInAvailability),
+            b"defaultAlertsWithTime" => Some(CalendarProperty::DefaultAlertsWithTime),
+            b"defaultAlertsWithoutTime" => Some(CalendarProperty::DefaultAlertsWithoutTime),
+            b"timeZone" => Some(CalendarProperty::TimeZone),
+            b"shareWith" => Some(CalendarProperty::ShareWith),
+            b"myRights" => Some(CalendarProperty::MyRights),
+            b"mayReadFreeBusy" => Some(CalendarProperty::Rights(CalendarRight::MayReadFreeBusy)),
+            b"mayReadItems" => Some(CalendarProperty::Rights(CalendarRight::MayReadItems)),
+            b"mayWriteAll" => Some(CalendarProperty::Rights(CalendarRight::MayWriteAll)),
+            b"mayWriteOwn" => Some(CalendarProperty::Rights(CalendarRight::MayWriteOwn)),
+            b"mayUpdatePrivate" => Some(CalendarProperty::Rights(CalendarRight::MayUpdatePrivate)),
+            b"mayRSVP" => Some(CalendarProperty::Rights(CalendarRight::MayRSVP)),
+            b"mayShare" => Some(CalendarProperty::Rights(CalendarRight::MayShare)),
+            b"mayDelete" => Some(CalendarProperty::Rights(CalendarRight::MayDelete)),
+            b"@type" => Some(CalendarProperty::Type),
+            b"when" => Some(CalendarProperty::When),
+            b"trigger" => Some(CalendarProperty::Trigger),
+            b"offset" => Some(CalendarProperty::Offset),
+            b"relativeTo" => Some(CalendarProperty::RelativeTo),
+            b"action" => Some(CalendarProperty::Action),
+            _ => None,
         )
         .or_else(|| {
             if allow_patch && value.contains('/') {

@@ -402,12 +402,13 @@ pub fn dav_base_uri(uri: &str) -> Option<&str> {
 
 impl Depth {
     pub fn parse(value: &[u8]) -> Option<Self> {
-        hashify::tiny_map!(value,
+        hashify::map!(value, Depth,
             "0" => Depth::Zero,
             "1" => Depth::One,
             "infinity" => Depth::Infinity,
             "infinite" => Depth::Infinity,
         )
+        .copied()
     }
 }
 

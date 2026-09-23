@@ -37,7 +37,7 @@ pub enum SpecialUse {
 
 impl SpecialUse {
     pub fn parse(s: &str) -> Option<Self> {
-        hashify::tiny_map_ignore_case!(s.as_bytes(),
+        hashify::map_ignore_case!(s.as_bytes(), SpecialUse,
             b"inbox" => SpecialUse::Inbox,
             b"trash" => SpecialUse::Trash,
             b"junk" => SpecialUse::Junk,
@@ -50,6 +50,7 @@ impl SpecialUse {
             b"scheduled" => SpecialUse::Scheduled,
             b"snoozed" => SpecialUse::Snoozed,
         )
+        .copied()
     }
 
     #[inline(always)]

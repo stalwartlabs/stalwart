@@ -882,7 +882,7 @@ impl EventValueProperties for EventValue<'_> {
             .is_some_and(|name| {
                 name.get(..2)
                     .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VENDOR_PROPERTY_PREFIX))
-                    || hashify::tiny_set_ignore_case!(
+                    || hashify::set_ignore_case!(
                         name.as_bytes(),
                         "dtstamp",
                         "last-modified",

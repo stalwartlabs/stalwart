@@ -143,15 +143,16 @@ impl<'a> Hints<'a> {
 
     fn media_type_format(&self) -> Option<Format> {
         let (type_, subtype) = self.media_type?;
-        if hashify::tiny_set_ignore_case!(type_.as_bytes(), b"text") {
-            return hashify::tiny_map_ignore_case!(subtype.as_bytes(),
+        if hashify::set_ignore_case!(type_.as_bytes(), b"text") {
+            return hashify::map_ignore_case!(subtype.as_bytes(), Format,
                 b"rtf" => Format::Rtf,
-            );
+            )
+            .copied();
         }
-        if !hashify::tiny_set_ignore_case!(type_.as_bytes(), b"application") {
+        if !hashify::set_ignore_case!(type_.as_bytes(), b"application") {
             return None;
         }
-        hashify::tiny_map_ignore_case!(subtype.as_bytes(),
+        hashify::map_ignore_case!(subtype.as_bytes(), Format,
             b"vnd.openxmlformats-officedocument.wordprocessingml.document" => Format::Docx,
             b"vnd.openxmlformats-officedocument.wordprocessingml.template" => Format::Docx,
             b"vnd.ms-word.document.macroenabled.12" => Format::Docx,
@@ -175,12 +176,13 @@ impl<'a> Hints<'a> {
             b"rtf" => Format::Rtf,
             b"x-rtf" => Format::Rtf,
         )
+        .copied()
     }
 
     fn is_generic_media_type(&self) -> bool {
         self.media_type.is_some_and(|(type_, subtype)| {
-            hashify::tiny_set_ignore_case!(type_.as_bytes(), b"application")
-                && hashify::tiny_set_ignore_case!(
+            hashify::set_ignore_case!(type_.as_bytes(), b"application")
+                && hashify::set_ignore_case!(
                     subtype.as_bytes(),
                     b"octet-stream",
                     b"zip",
@@ -208,7 +210,7 @@ impl<'a> Hints<'a> {
 
     fn extension_format(&self) -> Option<Format> {
         let (_, extension) = self.file_name?.rsplit_once('.')?;
-        hashify::tiny_map_ignore_case!(extension.as_bytes().trim_ascii_end(),
+        hashify::map_ignore_case!(extension.as_bytes().trim_ascii_end(), Format,
             b"docx" => Format::Docx,
             b"docm" => Format::Docx,
             b"dotx" => Format::Docx,
@@ -232,6 +234,7 @@ impl<'a> Hints<'a> {
             b"epub" => Format::Epub,
             b"rtf" => Format::Rtf,
         )
+        .copied()
     }
 }
 
@@ -347,7 +350,7 @@ fn detect(package: &mut Package<'_, '_>, hints: Hints<'_>) -> Option<Container> 
                 _ => None,
             });
     if let Some(declared) = declared {
-        if hashify::tiny_set!(declared.trim_ascii(), b"application/epub+zip") {
+        if hashify::set!(declared.trim_ascii(), b"application/epub+zip") {
             return Some(Container::Epub);
         }
         if let Some(format) = odf::format_from_mimetype(declared) {
