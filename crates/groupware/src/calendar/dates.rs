@@ -9,6 +9,7 @@ use super::{
     alarm::ExpandAlarm,
     alerts::{DefaultAlerts, ICalendarDefaultAlerts},
     expand::RangeFlags,
+    overlap::ICalendarOverlap,
 };
 use crate::calendar::ComponentTimeRange;
 use calcard::{
@@ -21,6 +22,7 @@ use store::{
     ahash::{AHashMap, RandomState},
     write::key::KeySerializer,
 };
+use types::OverlapCondition;
 #[cfg(test)]
 use utils::codec::leb128::Leb128Reader;
 
@@ -42,7 +44,8 @@ impl CalendarEventData {
         let expanded = ical.expand_dates(default_tz, max_expansions);
         let mut groups: IndexMap<(u16, u16, u16, i32, RangeFlags), Vec<i64>, RandomState> =
             IndexMap::with_capacity_and_hasher(16, RandomState::default());
-        let mut alarms: AHashMap<u16, Vec<Alarm>> = AHashMap::with_capacity(16);
+        let mut components: AHashMap<u16, (Vec<Alarm>, OverlapCondition)> =
+            AHashMap::with_capacity(16);
 
         for event in expanded.events {
             let Ok(comp_id) = u16::try_from(event.comp_id) else {
@@ -53,9 +56,10 @@ impl CalendarEventData {
             let (start_timestamp_utc, end_timestamp_utc) = event.timestamps();
             let (start_timestamp_naive, end_timestamp_naive) = event.naive_timestamps();
 
-            // Expand alarms
-            alarms.entry(comp_id).or_insert_with(|| {
-                ical.component_by_id(event.comp_id)
+            let (_, condition) = components.entry(comp_id).or_insert_with(|| {
+                // Expand alarms
+                let alarms = ical
+                    .component_by_id(event.comp_id)
                     .map_or(&[][..], |c| c.component_ids.as_slice())
                     .iter()
                     .filter_map(|alarm_id| {
@@ -71,8 +75,10 @@ impl CalendarEventData {
                             }
                         })
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+                (alarms, ical.overlap_condition(event.comp_id))
             });
+            let condition = condition.for_instance(start_timestamp_utc, end_timestamp_utc);
 
             ranges.update_base_offset(start_timestamp_naive, end_timestamp_naive);
             ranges.update_utc_min_max(
@@ -86,7 +92,7 @@ impl CalendarEventData {
                     comp_id,
                     (end_timestamp_naive - start_timestamp_naive)
                         .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
-                    RangeFlags::of(&event.start, &event.end),
+                    RangeFlags::of(&event.start, &event.end).with_condition(condition),
                 ))
                 .or_default()
                 .push(start_timestamp_naive);
@@ -145,9 +151,9 @@ impl CalendarEventData {
         CalendarEventData {
             event: ical,
             time_ranges: events.into_boxed_slice(),
-            alarms: alarms
+            alarms: components
                 .into_values()
-                .flatten()
+                .flat_map(|(alarms, _)| alarms)
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             base_offset: ranges.base_offset,

@@ -15,6 +15,7 @@ pub mod index;
 pub mod instance_filter;
 pub mod itip;
 pub mod notification;
+pub mod overlap;
 pub mod participants;
 pub mod privacy;
 pub mod rights;
@@ -60,7 +61,7 @@ pub enum SupportedComponent {
     Participant,   // [RFC9073, Section 7.1]
     VLocation,     // [RFC9073, Section 7.2] [RFC Errata 7381]
     VResource,     // [RFC9073, Section 7.3]
-    VStatus,       // draft-ietf-calext-ical-tasks-14
+    VStatus,       // draft-ietf-calext-ical-tasks-17
     Other,
 }
 
@@ -145,6 +146,7 @@ pub const EVENT_HAS_ALARMS: u16 = 1 << 5;
 pub const EVENT_PRIVATE: u16 = 1 << 6;
 pub const EVENT_SECRET: u16 = 1 << 7;
 pub const EVENT_USES_DEFAULT_ALERTS: u16 = 1 << 8;
+pub const EVENT_HAS_UNBOUNDED_TODO: u16 = 1 << 9;
 
 pub const EVENT_NOTIFICATION_IS_DRAFT: u16 = 1;
 pub const EVENT_NOTIFICATION_IS_CHANGE: u16 = 1 << 1;

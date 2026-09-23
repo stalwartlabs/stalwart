@@ -20,12 +20,12 @@ use calcard::{
 use jiff::{SignedDuration, Timestamp, civil::DateTime};
 use std::str::FromStr;
 use store::write::bitpack::BitpackIterator;
-use types::TimeRange;
+use types::{OverlapCondition, OverlapRule, TimeRange};
 use utils::codec::leb128::Leb128Reader;
 
 const RECURRENCE_KEY_EPOCH: i64 = -2208988800;
 const RECURRENCE_KEY_GRANULARITY: i64 = 60;
-pub(crate) const SECONDS_PER_DAY: i64 = 86_400;
+pub const SECONDS_PER_DAY: i64 = 86_400;
 const NAIVE_EPOCH: DateTime = DateTime::constant(1970, 1, 1, 0, 0, 0, 0);
 pub const MAX_UTC_OFFSET: i64 = SECONDS_PER_DAY;
 
@@ -310,7 +310,12 @@ impl ArchivedCalendarEventData {
             .and_then(|range| Tz::from_id(range.start_tz.to_native()))
     }
 
-    pub fn expand(&self, default_tz: Tz, limit: TimeRange) -> Option<Vec<CalendarEventExpansion>> {
+    pub fn expand(
+        &self,
+        default_tz: Tz,
+        limit: TimeRange,
+        rule: OverlapRule,
+    ) -> Option<Vec<CalendarEventExpansion>> {
         let mut expansion = Vec::with_capacity(self.time_ranges.len());
         let base_offset = self.base_offset.to_native();
         let mut shifts = ThisAndFutureShifts::default();
@@ -323,6 +328,7 @@ impl ArchivedCalendarEventData {
             let component = self.event.components.get(comp_id as usize)?;
             let duration = range.duration.to_native() as i64;
             let flags = RangeFlags::from_bits(range.flags);
+            let condition = flags.condition();
             let component_tz = Tz::from_id(range.start_tz.to_native())?;
             let mut own_recurrence_id = self
                 .time_ranges
@@ -334,7 +340,6 @@ impl ArchivedCalendarEventData {
             let this_and_future_tz = component.this_and_future_tz(component_tz);
             let mut start_tz = component_tz;
             let mut end_tz = Tz::from_id(range.end_tz.to_native())?;
-            let is_todo = component.component_type.is_todo();
 
             if start_tz.is_floating() && !default_tz.is_floating() {
                 start_tz = default_tz;
@@ -368,7 +373,7 @@ impl ArchivedCalendarEventData {
                     };
                     let (start, end) = (start.timestamp(), end.timestamp());
 
-                    if limit.is_in_range(is_todo, start, end) {
+                    if limit.matches(rule, condition, start, end) {
                         expansion.push(CalendarEventExpansion {
                             comp_id,
                             own_recurrence_id,
@@ -401,7 +406,7 @@ impl ArchivedCalendarEventData {
                 if let (Some(start), Some(end)) = (
                     flags.resolve_start(start_tz, start_date_naive),
                     flags.resolve_end(end_tz, end_date_naive),
-                ) && limit.is_in_range(is_todo, start.timestamp(), end.timestamp())
+                ) && limit.matches(rule, condition, start.timestamp(), end.timestamp())
                 {
                     expansion.push(CalendarEventExpansion {
                         comp_id,
@@ -620,6 +625,8 @@ pub struct RangeFlags(u8);
 impl RangeFlags {
     const LATER_START: u8 = 1;
     const LATER_END: u8 = 1 << 1;
+    const CONDITION_SHIFT: u8 = 2;
+    const CONDITION_MASK: u8 = 0b111 << Self::CONDITION_SHIFT;
 
     pub fn of(start: &ZonedDateTime, end: &ZonedDateTime) -> Self {
         let mut flags = RangeFlags::default();
@@ -630,6 +637,22 @@ impl RangeFlags {
             flags.0 |= Self::LATER_END;
         }
         flags
+    }
+
+    pub fn with_condition(self, condition: OverlapCondition) -> Self {
+        RangeFlags(
+            (self.0 & !Self::CONDITION_MASK)
+                | (((condition as u8) << Self::CONDITION_SHIFT) & Self::CONDITION_MASK),
+        )
+    }
+
+    pub fn condition(self) -> OverlapCondition {
+        OverlapCondition::ALL
+            .get(usize::from(
+                (self.0 & Self::CONDITION_MASK) >> Self::CONDITION_SHIFT,
+            ))
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn from_bits(bits: u8) -> Self {
@@ -817,7 +840,11 @@ mod tests {
         let archived = rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&archived)
             .expect("access");
         let expanded = archived
-            .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+            .expand(
+                Tz::UTC,
+                TimeRange::new(i64::MIN, i64::MAX),
+                OverlapRule::CalDav,
+            )
             .expect("expansion")
             .into_iter()
             .map(|expansion| {
@@ -919,6 +946,7 @@ mod tests {
             .expand(
                 berlin,
                 TimeRange::new(naive(2027, 3, 1, 0, 0, 0), naive(2027, 3, 2, 0, 0, 0)),
+                OverlapRule::CalDav,
             )
             .expect("expansion");
         assert_eq!(
@@ -988,7 +1016,11 @@ mod tests {
         let archived =
             rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes).expect("access");
         let expansion = archived
-            .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+            .expand(
+                Tz::UTC,
+                TimeRange::new(i64::MIN, i64::MAX),
+                OverlapRule::CalDav,
+            )
             .expect("expansion");
         let instants = |expansion: &[CalendarEventExpansion]| {
             let mut instants = expansion
@@ -1029,7 +1061,11 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(data).expect("archive");
         rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes)
             .expect("access")
-            .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+            .expand(
+                Tz::UTC,
+                TimeRange::new(i64::MIN, i64::MAX),
+                OverlapRule::CalDav,
+            )
             .expect("expansion")
     }
 
@@ -1087,7 +1123,11 @@ mod tests {
             let archived = rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes)
                 .expect("access");
             let expansions = archived
-                .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+                .expand(
+                    Tz::UTC,
+                    TimeRange::new(i64::MIN, i64::MAX),
+                    OverlapRule::CalDav,
+                )
                 .expect("expansion");
             assert!(!expansions.is_empty());
             for expansion in expansions {
@@ -1108,6 +1148,35 @@ mod tests {
                         "{expansion:?}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn range_flags_keep_the_overlap_condition_apart_from_the_offset_choice() {
+        for later in [
+            0,
+            RangeFlags::LATER_START,
+            RangeFlags::LATER_END,
+            RangeFlags::LATER_START | RangeFlags::LATER_END,
+        ] {
+            for condition in OverlapCondition::ALL {
+                let flags = RangeFlags(later).with_condition(condition);
+                assert_eq!(
+                    RangeFlags::from_bits(flags.bits()).condition(),
+                    condition,
+                    "{later:#b}"
+                );
+                assert_eq!(
+                    flags.0 & (RangeFlags::LATER_START | RangeFlags::LATER_END),
+                    later
+                );
+                assert_eq!(
+                    flags
+                        .with_condition(OverlapCondition::Event)
+                        .with_condition(condition),
+                    flags
+                );
             }
         }
     }

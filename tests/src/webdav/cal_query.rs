@@ -18,7 +18,7 @@ use groupware::{
 use hyper::StatusCode;
 use std::str::FromStr;
 use store::write::serialize::rkyv_unarchive;
-use types::TimeRange;
+use types::{OverlapRule, TimeRange};
 
 pub async fn test(test: &TestServer) {
     println!("Running REPORT calendar-query & free-busy-query tests...");
@@ -226,6 +226,106 @@ pub async fn test(test: &TestServer) {
         .calendar_data()
         .with_values([REPORT_14_EXPECTED.replace('\n', "\r\n").as_str()]);
 
+    let todos = [
+        (12, "DUE:20300106T090000Z\r\n", false),
+        (13, "DUE:20300106T100000Z\r\n", true),
+        (14, "COMPLETED:20300106T100000Z\r\n", true),
+        (15, "CREATED:20290101T000000Z\r\n", true),
+        (16, "", true),
+        (17, "DTSTART:20300106T080000Z\r\nDURATION:PT1H\r\n", true),
+        (
+            18,
+            "DTSTART:20300106T080000Z\r\nDUE:20300106T090000Z\r\n",
+            false,
+        ),
+        (19, "DTSTART:20300106T100000Z\r\n", false),
+        (
+            20,
+            "CREATED:20300106T100000Z\r\nCOMPLETED:20300107T100000Z\r\n",
+            true,
+        ),
+        (21, "CREATED:20300106T100000Z\r\n", false),
+        (
+            22,
+            "DTSTART:20300106T093000Z\r\nDUE:20300106T093000Z\r\n",
+            true,
+        ),
+    ];
+    for (num, properties, _) in todos {
+        client
+            .request("PUT", &rfc_file_name(num), &todo_ics(num, properties))
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    client
+        .request("PUT", &rfc_file_name(23), TODO_SERIES_WITH_OVERRIDE)
+        .await
+        .with_status(StatusCode::CREATED);
+    let matching_todos = todos
+        .iter()
+        .filter(|(_, _, is_match)| *is_match)
+        .map(|(num, _, _)| rfc_file_name(*num))
+        .chain([rfc_file_name(23)])
+        .collect::<Vec<_>>();
+    client
+        .request("REPORT", &cal_path, REPORT_15)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs(matching_todos.iter().map(String::as_str));
+
+    client
+        .request("REPORT", &cal_path, REPORT_16)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([]);
+
+    let response = client
+        .request("REPORT", &cal_path, REPORT_17)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs(matching_todos.iter().map(String::as_str))
+        .into_propfind_response(None);
+    let undated = response
+        .properties(&rfc_file_name(16))
+        .calendar_data()
+        .value()
+        .to_string();
+    assert!(
+        undated.contains("BEGIN:VTODO\r\n") && undated.contains("SUMMARY:Task 16\r\n"),
+        "RFC 4791 Sections 9.6.5 and 9.9: a VTODO without any of the dates intersects every time range\n{undated}"
+    );
+    let due_at_start = response
+        .properties(&rfc_file_name(22))
+        .calendar_data()
+        .value()
+        .to_string();
+    assert!(
+        due_at_start.contains("DTSTART:20300106T093000Z\r\n")
+            && due_at_start.contains("DUE:20300106T093000Z\r\n"),
+        "RFC 5545 Section 3.8.2.3: DUE may equal DTSTART\n{due_at_start}"
+    );
+    let inherited_due = response
+        .properties(&rfc_file_name(23))
+        .calendar_data()
+        .value()
+        .to_string();
+    assert!(
+        inherited_due.contains("RECURRENCE-ID:20300106T090000Z\r\n")
+            && inherited_due.contains("DUE:20300106T170000Z\r\n")
+            && inherited_due.contains("SUMMARY:Task 23 moved\r\n"),
+        "RFC 4791 Section 9.9: the instance keeps the effective DUE of the series\n{inherited_due}"
+    );
+
+    client
+        .request("PUT", &rfc_file_name(24), ICAL_FLOATING_ALL_DAY_ICS)
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request("REPORT", &cal_path, REPORT_18)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([rfc_file_name(24).as_str()]);
+
     client.delete_default_containers().await;
     test.assert_is_empty().await;
 }
@@ -328,6 +428,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
                 start: i64::MIN,
                 end: i64::MAX,
             },
+            OverlapRule::CalDav,
         )
         .unwrap();
 
@@ -390,6 +491,7 @@ fn calendar_expand_dst_fallback() {
                 start: 1782777600,
                 end: 1786579200,
             },
+            OverlapRule::CalDav,
         )
         .unwrap();
     assert!(
@@ -404,6 +506,7 @@ fn calendar_expand_dst_fallback() {
                 start: 1775260800,
                 end: 1775433600,
             },
+            OverlapRule::CalDav,
         )
         .unwrap();
     assert_eq!(
@@ -427,6 +530,7 @@ fn calendar_expand_beyond_indexable_span() {
                 start: i64::MIN,
                 end: i64::MAX,
             },
+            OverlapRule::CalDav,
         )
         .unwrap();
 
@@ -453,6 +557,7 @@ fn calendar_expand_beyond_indexable_span() {
                 start: JUNE_2027_START,
                 end: JUNE_2027_END,
             },
+            OverlapRule::CalDav,
         )
         .unwrap();
     assert_eq!(in_2027.len(), 1);
@@ -471,6 +576,47 @@ const LAST_YEARLY_INSTANCE: i64 = 5819590800;
 const JUNE_2027_START: i64 = 1811808000;
 const JUNE_2027_END: i64 = 1814400000;
 const JUNE_2027_INSTANCE: i64 = 1811840400;
+
+const ICAL_FLOATING_ALL_DAY_ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+    PRODID:-//Stalwart Labs//CalDAV Tests//EN\r\n\
+    BEGIN:VEVENT\r\nUID:floating-all-day@example.com\r\nDTSTAMP:20300101T000000Z\r\n\
+    DTSTART;VALUE=DATE:20300107\r\nSUMMARY:All day\r\nEND:VEVENT\r\n\
+    END:VCALENDAR\r\n";
+
+const REPORT_18: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20300106T230000Z"
+                         end="20300106T233000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+     <C:timezone-id>Europe/Berlin</C:timezone-id>
+   </C:calendar-query>
+"#;
+
+const TODO_SERIES_WITH_OVERRIDE: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+    PRODID:-//Stalwart Labs//CalDAV Tests//EN\r\n\
+    BEGIN:VTODO\r\nUID:todo-23@example.com\r\nDTSTAMP:20300101T000000Z\r\n\
+    DTSTART:20300105T090000Z\r\nDUE:20300105T170000Z\r\nRRULE:FREQ=DAILY;COUNT=3\r\n\
+    SUMMARY:Task 23\r\nEND:VTODO\r\n\
+    BEGIN:VTODO\r\nUID:todo-23@example.com\r\nDTSTAMP:20300101T000000Z\r\n\
+    RECURRENCE-ID:20300106T090000Z\r\nSUMMARY:Task 23 moved\r\nEND:VTODO\r\n\
+    END:VCALENDAR\r\n";
+
+fn todo_ics(num: usize, properties: &str) -> String {
+    format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Stalwart Labs//CalDAV Tests//EN\r\n\
+         BEGIN:VTODO\r\nUID:todo-{num}@example.com\r\nDTSTAMP:20300101T000000Z\r\n\
+         {properties}SUMMARY:Task {num}\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+    )
+}
 
 fn rfc_file_name(num: usize) -> String {
     format!(
@@ -723,7 +869,7 @@ UID:00959BC664CA650E933C892C@example.com
 END:VEVENT
 BEGIN:VEVENT
 DTSTART:20060104T190000Z
-RECURRENCE-ID:20060104T190000Z
+RECURRENCE-ID:20060104T170000Z
 DTSTAMP:20060206T001121Z
 DURATION:PT1H
 SUMMARY:Event #2 bis
@@ -877,6 +1023,63 @@ const REPORT_9: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
              <C:text-match
                 negate-condition="yes">CANCELLED</C:text-match>
            </C:prop-filter>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>
+"#;
+
+const REPORT_15: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VTODO">
+           <C:time-range start="20300106T090000Z"
+                         end="20300106T100000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>
+"#;
+
+const REPORT_16: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20300106T090000Z"
+                         end="20300106T100000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>
+"#;
+
+const REPORT_17: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:comp name="VCALENDAR">
+           <C:comp name="VTODO"/>
+         </C:comp>
+         <C:expand start="20300106T090000Z"
+                   end="20300106T100000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VTODO">
+           <C:time-range start="20300106T090000Z"
+                         end="20300106T100000Z"/>
          </C:comp-filter>
        </C:comp-filter>
      </C:filter>

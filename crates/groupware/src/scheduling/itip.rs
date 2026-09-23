@@ -8,8 +8,8 @@ use crate::scheduling::{Email, ItipMessage, ItipMessages, ItipSummary};
 use calcard::{
     common::{IanaString, PartialDateTime},
     icalendar::{
-        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarMethod,
-        ICalendarParameter, ICalendarParameterName, ICalendarParameterValue,
+        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarDuration, ICalendarEntry,
+        ICalendarMethod, ICalendarParameter, ICalendarParameterName, ICalendarParameterValue,
         ICalendarParticipationStatus, ICalendarProperty, ICalendarScheduleAgentValue,
         ICalendarValue,
     },
@@ -214,6 +214,7 @@ pub(crate) fn itip_export_component(
     dt_stamp: &PartialDateTime,
     sequence: i64,
     export_as: ItipExportAs<'_>,
+    series_length: Option<&ICalendarDuration>,
 ) -> ICalendarComponent {
     let is_todo = component.component_type == ICalendarComponentType::VTodo;
     let is_event = component.component_type == ICalendarComponentType::VEvent;
@@ -347,6 +348,16 @@ pub(crate) fn itip_export_component(
             {
                 comp.entries
                     .push(itip_date_entry(ICalendarProperty::Dtstart, recurrence_id));
+                if !component.has_property(&ICalendarProperty::Dtend)
+                    && !component.has_property(&ICalendarProperty::Duration)
+                    && let Some(series_length) = series_length
+                {
+                    comp.entries.push(ICalendarEntry {
+                        name: ICalendarProperty::Duration,
+                        params: vec![],
+                        values: vec![ICalendarValue::Duration(series_length.clone())],
+                    });
+                }
             }
         }
     }

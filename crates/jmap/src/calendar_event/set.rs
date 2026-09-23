@@ -24,7 +24,10 @@ use crate::calendar_event::{
 };
 use crate::changes::state::JmapCacheState;
 use calcard::{
-    common::{PartialDateTime, timezone::Tz},
+    common::{
+        PartialDateTime,
+        timezone::{NominalDuration, Tz, ZonedDateTime},
+    },
     icalendar::{
         ICalendar, ICalendarComponent, ICalendarDuration, ICalendarProperty, ICalendarValue,
     },
@@ -2232,6 +2235,7 @@ struct InstanceTarget {
     recurrence_id: i64,
     recurrence_id_naive: i64,
     start_naive: i64,
+    start: Option<ZonedDateTime>,
     duration: i64,
 }
 
@@ -2638,10 +2642,10 @@ impl<'x> EventUpdate<'x> {
             .as_object_and_get(&Key::Property(JSCalendarProperty::Duration))
             .and_then(Value::as_element)
             .and_then(|duration| match duration {
-                JSCalendarValue::Duration(duration) => Some(duration.as_seconds()),
+                JSCalendarValue::Duration(duration) => duration.to_nominal(),
                 _ => None,
             })
-            .unwrap_or_default();
+            .unwrap_or(NominalDuration::new(0, 0));
 
         instances.retain_mut(|instance| {
             let Some(target) = instance.target.take() else {
@@ -2816,6 +2820,9 @@ impl InstanceTarget {
             recurrence_id: recurrence_id.utc,
             recurrence_id_naive: recurrence_id.naive,
             start_naive: expansion.start_naive,
+            start: expansion
+                .flags
+                .resolve_start(expansion.start_tz, expansion.start_naive),
             duration: expansion.end - expansion.start,
         })
     }
@@ -2844,7 +2851,7 @@ impl InstanceTarget {
         &self,
         js_calendar_event: &mut Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>,
         key: JSCalendarDateTime,
-        base_duration: i64,
+        base_duration: NominalDuration,
         metadata: &InstanceMetadata<'_>,
         patch: Option<Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>>,
         id: Id,
@@ -2940,7 +2947,12 @@ impl InstanceTarget {
                 ))),
             );
         }
-        if self.duration != base_duration
+        let spans_base_duration = self.start.is_some_and(|start| {
+            start
+                .checked_add_nominal(base_duration)
+                .is_some_and(|end| end.signed_duration_since(start).as_secs() == self.duration)
+        });
+        if !spans_base_duration
             && !instance.contains_key(&Key::Property(JSCalendarProperty::Duration))
         {
             instance.insert(

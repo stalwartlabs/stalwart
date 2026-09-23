@@ -14,8 +14,8 @@ use crate::{
         ArchivedCalendarEventContent, ArchivedCalendarEventNotification,
         ArchivedCalendarEventNotificationContent, ArchivedChangedBy, CalendarEventContent,
         CalendarEventNotification, CalendarEventNotificationContent, ChangedBy, EVENT_HAS_ALARMS,
-        EVENT_HAS_DEAD_PROPERTIES, EVENT_USES_DEFAULT_ALERTS, EventPreferences, PREF_HAS_ALERTS,
-        privacy::ICalendarPrivacy,
+        EVENT_HAS_DEAD_PROPERTIES, EVENT_HAS_UNBOUNDED_TODO, EVENT_USES_DEFAULT_ALERTS,
+        EventPreferences, PREF_HAS_ALERTS, privacy::ICalendarPrivacy,
     },
     strip_mailto_scheme,
 };
@@ -190,6 +190,11 @@ impl SplitObject for CalendarEvent {
             self.flags &= !EVENT_HAS_DEAD_PROPERTIES;
         } else {
             self.flags |= EVENT_HAS_DEAD_PROPERTIES;
+        }
+        if content.data.has_unbounded_todo() {
+            self.flags |= EVENT_HAS_UNBOUNDED_TODO;
+        } else {
+            self.flags &= !EVENT_HAS_UNBOUNDED_TODO;
         }
         let alarm_flags = if content
             .preferences
@@ -799,7 +804,8 @@ impl ArchiveCompression for CalendarEventNotificationContent {
 mod tests {
     use super::*;
     use crate::calendar::{
-        CalendarEventData, EventUserData, PREF_USE_DEFAULT_ALERTS, alerts::DefaultAlerts,
+        CalendarEventData, EVENT_HAS_UNBOUNDED_TODO, EventUserData, PREF_USE_DEFAULT_ALERTS,
+        alerts::DefaultAlerts,
     };
     use calcard::common::timezone::Tz;
 
@@ -879,6 +885,29 @@ mod tests {
             event.flags & (EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS),
             0
         );
+    }
+
+    #[test]
+    fn unbounded_todo_flag_follows_the_content() {
+        let todo = |properties: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:todo\r\n{properties}END:VTODO\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        let mut event = CalendarEvent::default();
+        for (properties, expected) in [
+            ("SUMMARY:Someday\r\n", EVENT_HAS_UNBOUNDED_TODO),
+            ("DUE:20300101T100000Z\r\n", 0),
+            ("CREATED:20300101T100000Z\r\n", EVENT_HAS_UNBOUNDED_TODO),
+            ("COMPLETED:20300101T100000Z\r\n", 0),
+        ] {
+            event.refresh_from_content(&content(&todo(properties), vec![]), ());
+            assert_eq!(
+                event.flags & EVENT_HAS_UNBOUNDED_TODO,
+                expected,
+                "RFC 4791 Section 9.9: {properties}"
+            );
+        }
     }
 
     #[test]

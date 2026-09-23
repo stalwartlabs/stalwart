@@ -12,8 +12,9 @@ use crate::{
 use calcard::{
     common::{PartialDateTime, timezone::Tz},
     icalendar::{
-        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarParameter,
-        ICalendarParameterName, ICalendarParameterValue, ICalendarProperty, ICalendarValue,
+        ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarDuration, ICalendarEntry,
+        ICalendarParameter, ICalendarParameterName, ICalendarParameterValue, ICalendarProperty,
+        ICalendarValue, ICalendarValueType,
     },
     jscalendar::{
         JSCalendar, JSCalendarDateTime, JSCalendarProperty, JSCalendarValue, import::ImportOptions,
@@ -29,7 +30,7 @@ use groupware::{
         ArchivedCalendarEventContent, CalendarEventContent, CalendarEventData, EVENT_DRAFT,
         EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS, EVENT_INVITE_SELF, EVENT_SECRET,
         alerts::{DefaultAlertsResolver, DefaultAlertsView, ICalendarDefaultAlerts},
-        expand::{CalendarEventExpansion, resolve_local},
+        expand::{CalendarEventExpansion, SECONDS_PER_DAY, resolve_local},
         identity::{CalendarAddresses, EventOwnership, ParticipantIdentityAddresses},
         participants::VisibleParticipants,
         privacy::{EventPrivacy, ICalendarPrivacy},
@@ -992,9 +993,48 @@ trait InstanceDateTime {
         fallback_tz: Option<Tz>,
         parameters: InstanceParameters,
     ) -> ICalendarEntry;
+
+    fn with_date_time_in(
+        &self,
+        name: ICalendarProperty,
+        naive: i64,
+        tz: Option<Tz>,
+    ) -> ICalendarEntry;
 }
 
 impl InstanceDateTime for ICalendarEntry {
+    fn with_date_time_in(
+        &self,
+        name: ICalendarProperty,
+        naive: i64,
+        tz: Option<Tz>,
+    ) -> ICalendarEntry {
+        let is_date = self
+            .values
+            .first()
+            .and_then(ICalendarValue::as_partial_date_time)
+            .is_some_and(|value| !value.has_time());
+        let (params, value) = match tz {
+            _ if is_date => (
+                vec![ICalendarParameter::value(ICalendarValueType::Date)],
+                PartialDateTime::from_date_timestamp(naive),
+            ),
+            Some(tz) if tz.is_utc() => (vec![], PartialDateTime::from_utc_timestamp(naive)),
+            tz => (
+                tz.and_then(|tz| tz.name())
+                    .map(|tz_name| ICalendarParameter::tzid(tz_name.into_owned()))
+                    .into_iter()
+                    .collect(),
+                PartialDateTime::from_naive_timestamp(naive),
+            ),
+        };
+        ICalendarEntry {
+            name,
+            params,
+            values: vec![ICalendarValue::PartialDateTime(Box::new(value))],
+        }
+    }
+
     fn with_date_time(
         &self,
         name: ICalendarProperty,
@@ -1137,14 +1177,19 @@ impl EventInstanceBuilder for CalendarEventData {
             .cloned()
             .collect::<Vec<_>>();
 
-        entries.push(match dtstart {
-            Some(dtstart) => dtstart.with_date_time(
+        entries.push(match (dtstart, recurrence_id) {
+            (Some(dtstart), _) => dtstart.with_date_time(
                 ICalendarProperty::Dtstart,
                 expansion.start_naive,
                 start_tz,
                 InstanceParameters::All,
             ),
-            None => ICalendarEntry {
+            (None, Some(recurrence_id)) => recurrence_id.with_date_time_in(
+                ICalendarProperty::Dtstart,
+                expansion.start_naive,
+                start_tz,
+            ),
+            (None, None) => ICalendarEntry {
                 name: ICalendarProperty::Dtstart,
                 params: vec![],
                 values: vec![ICalendarValue::PartialDateTime(Box::new(
@@ -1168,7 +1213,7 @@ impl EventInstanceBuilder for CalendarEventData {
             }
         }
 
-        if !has_duration
+        let rebased_end = if !has_duration
             && let Some(dtend) = dtend
             && let Some(end) = dtend
                 .values
@@ -1180,12 +1225,40 @@ impl EventInstanceBuilder for CalendarEventData {
                 .and_then(ICalendarValue::as_partial_date_time)
                 .and_then(|value| value.to_date_time())
         {
-            entries.push(dtend.with_date_time(
+            Some(dtend.with_date_time(
                 ICalendarProperty::Dtend,
                 expansion.start_naive + end.date_time.duration_since(start.date_time).as_secs(),
                 end_tz,
                 InstanceParameters::All,
-            ));
+            ))
+        } else {
+            None
+        };
+
+        if let Some(rebased_end) = rebased_end {
+            entries.push(rebased_end);
+        } else if !has_duration
+            && expansion.end > expansion.start
+            && !entries
+                .iter()
+                .any(|entry| entry.name == ICalendarProperty::Due)
+        {
+            let is_date = dtstart
+                .or(recurrence_id)
+                .and_then(|entry| entry.values.first())
+                .and_then(ICalendarValue::as_partial_date_time)
+                .is_some_and(|value| !value.has_time());
+            entries.push(ICalendarEntry {
+                name: ICalendarProperty::Duration,
+                params: vec![],
+                values: vec![ICalendarValue::Duration(if is_date {
+                    ICalendarDuration::from_days(
+                        (expansion.end_naive - expansion.start_naive) / SECONDS_PER_DAY,
+                    )
+                } else {
+                    ICalendarDuration::from_seconds(expansion.end - expansion.start)
+                })],
+            });
         }
 
         let mut components = Vec::with_capacity(2 + source.component_ids.len());
@@ -1275,5 +1348,71 @@ impl PrivateViewProperty for JSCalendarProperty<Id> {
                 | JSCalendarProperty::UtcStart
                 | JSCalendarProperty::UtcEnd
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use groupware::calendar::ArchivedCalendarEventData;
+    use types::{OverlapRule, TimeRange};
+
+    fn override_instance(occurrence: &str) -> String {
+        let data = CalendarEventData::new(
+            ICalendar::parse(format!(
+                "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:series\r\n\
+                 DTSTART;TZID=America/New_York:20300102T090000\r\nDURATION:PT1H\r\n\
+                 RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\n\
+                 BEGIN:VEVENT\r\nUID:series\r\n{occurrence}SUMMARY:Moved\r\nEND:VEVENT\r\n\
+                 END:VCALENDAR\r\n"
+            ))
+            .expect("valid iCalendar"),
+            Tz::Floating,
+            100,
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data).expect("archive");
+        let expansion = rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes)
+            .expect("access")
+            .expand(
+                Tz::UTC,
+                TimeRange::new(i64::MIN, i64::MAX),
+                OverlapRule::Jmap,
+            )
+            .expect("expansion")
+            .into_iter()
+            .find(|expansion| expansion.comp_id == 2)
+            .expect("override instance");
+        data.instance(&expansion, None, InstanceBinaries::Keep)
+            .expect("instance")
+            .to_string()
+    }
+
+    #[test]
+    fn an_override_without_dtstart_starts_in_the_time_zone_of_its_instance() {
+        for occurrence in [
+            "RECURRENCE-ID:20300103T140000Z\r\n",
+            "RECURRENCE-ID;TZID=Europe/Berlin:20300103T150000\r\n",
+            "RECURRENCE-ID;TZID=America/New_York:20300103T090000\r\n",
+        ] {
+            let instance = override_instance(occurrence);
+            assert!(
+                instance.contains("DTSTART;TZID=America/New_York:20300103T090000\r\n")
+                    && instance.contains("DURATION:PT1H\r\n"),
+                "RFC 5545 Section 3.8.4.4: the occurrence starts as the instance it replaces\n{occurrence}\n{instance}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_override_with_dtend_but_no_dtstart_keeps_its_end() {
+        let instance = override_instance(
+            "RECURRENCE-ID;TZID=America/New_York:20300103T090000\r\n\
+             DTEND;TZID=America/New_York:20300103T120000\r\n",
+        );
+        assert!(
+            instance.contains("DTSTART;TZID=America/New_York:20300103T090000\r\n")
+                && instance.contains("DURATION:PT3H\r\n"),
+            "RFC 5545 Section 3.8.2.2: the occurrence ends at its DTEND\n{instance}"
+        );
     }
 }

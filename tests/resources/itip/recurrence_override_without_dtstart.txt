@@ -1,0 +1,67 @@
+# An override sent without DTSTART starts at its RECURRENCE-ID and lasts as long as the series
+> put a@example.com override-without-dtstart@example.com
+BEGIN:VCALENDAR
+PRODID:-//Example/ExampleCalendarClient//EN
+VERSION:2.0
+BEGIN:VEVENT
+UID:override-without-dtstart@example.com
+SEQUENCE:0
+DTSTAMP:20250101T000000Z
+DTSTART:20250106T090000Z
+DTEND:20250106T100000Z
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Daily sync
+ORGANIZER:mailto:a@example.com
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE:mailto:b@example.com
+END:VEVENT
+BEGIN:VEVENT
+UID:override-without-dtstart@example.com
+SEQUENCE:0
+DTSTAMP:20250101T000000Z
+RECURRENCE-ID:20250107T090000Z
+SUMMARY:Daily sync (renamed)
+ORGANIZER:mailto:a@example.com
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:a@example.com
+ATTENDEE:mailto:b@example.com
+END:VEVENT
+END:VCALENDAR
+
+> expect
+from: a@example.com
+to: b@example.com
+summary: invite
+summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
+summary.dtstart: Time(ItipTime { start: 1736154000, tz_id: 32768 })
+summary.rrule: Rrule(ICalendarRecurrenceRule { freq: Daily, until: None, count: Some(3), interval: None, bysecond: [], byminute: [], byhour: [], byday: [], bymonthday: [], byyearday: [], byweekno: [], bymonth: [], bysetpos: [], wkst: None, rscale: None, skip: None })
+summary.summary: Text("Daily sync")
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:-//Stalwart Labs LLC//Stalwart Server//EN
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Daily sync
+DTEND:20250106T100000Z
+DTSTART:20250106T090000Z
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:a@example.com
+ORGANIZER:mailto:a@example.com
+UID:override-without-dtstart@example.com
+RRULE:FREQ=DAILY;COUNT=3
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Daily sync (renamed)
+DTSTART:20250107T090000Z
+DURATION:PT1H
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:b@example.com
+ATTENDEE;PARTSTAT=ACCEPTED:mailto:a@example.com
+ORGANIZER:mailto:a@example.com
+RECURRENCE-ID:20250107T090000Z
+UID:override-without-dtstart@example.com
+DTSTAMP:0
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+

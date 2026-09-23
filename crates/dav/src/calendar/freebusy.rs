@@ -35,7 +35,7 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    TimeRange,
+    OverlapCondition, TimeRange,
     acl::Acl,
     collection::{Collection, SyncCollection},
     field::CalendarEventField,
@@ -248,7 +248,12 @@ impl CalendarFreebusyRequestHandler for Server {
                             let mut events_in_range = Vec::new();
                             for event in &events {
                                 if event.comp_id == component_id
-                                    && range.is_in_range(false, event.start, event.end)
+                                    && event.start < event.end
+                                    && range.is_in_range(
+                                        OverlapCondition::Event,
+                                        event.start,
+                                        event.end,
+                                    )
                                 {
                                     events_in_range.push((event.start, event.end));
                                 }
@@ -385,7 +390,7 @@ pub(crate) fn freebusy_in_range(
             period.time_range(tz).and_then(|(start, end)| {
                 let start = start.timestamp();
                 let end = end.timestamp();
-                if range.is_in_range(false, start, end) {
+                if range.overlaps(start, end) {
                     rkyv_deserialize(value).ok()
                 } else {
                     None
@@ -412,7 +417,7 @@ fn freebusy_in_range_utc(
             period.time_range(tz).and_then(|(start, end)| {
                 let start = start.timestamp();
                 let end = end.timestamp();
-                if range.is_in_range(false, start, end) {
+                if start < end && range.overlaps(start, end) {
                     Some((start, end))
                 } else {
                     None

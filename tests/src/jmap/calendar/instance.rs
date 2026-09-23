@@ -888,6 +888,56 @@ pub async fn test(test: &TestServer) {
         .await
         .with_status(StatusCode::NO_CONTENT);
 
+    for (name, ical, start) in [
+        (
+            "all-day-without-end.ics",
+            ALL_DAY_WITHOUT_END_ICAL,
+            "2007-04-03T00:00:00",
+        ),
+        (
+            "all-day-across-dst.ics",
+            ALL_DAY_ACROSS_DST_ICAL,
+            "2007-03-11T00:00:00",
+        ),
+    ] {
+        dav_client
+            .request("PUT", &format!("{calendar_path}/{name}"), ical)
+            .await
+            .with_status(StatusCode::CREATED);
+        test.wait_for_tasks().await;
+
+        let instances = expand_instances(account, &calendar_id).await;
+        let occurrence = instance(&instances, start);
+        let base_id = occurrence.text_field("baseEventId").to_string();
+        let id = occurrence.id().to_string();
+        account
+            .jmap_update(
+                MethodObject::CalendarEvent,
+                [(&id, json!({"title": "Renamed day"}))],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .updated(&id);
+        test.wait_for_tasks().await;
+
+        assert_eq!(
+            base_event(account, &base_id).await["recurrenceOverrides"],
+            json!({start: {"title": "Renamed day"}}),
+            "RFC 5545 Section 3.3.6: the duration of a week or a day depends on its position in the calendar ({name})"
+        );
+        let updated = expand_instances(account, &calendar_id).await;
+        assert_eq!(
+            instance(&updated, start).text_field("duration"),
+            "P1D",
+            "{name}"
+        );
+
+        dav_client
+            .request("DELETE", &format!("{calendar_path}/{name}"), "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
+
     // Instances keep the form of the original start, the timeZone argument only affects UTC times
     for (name, ical) in [
         ("instance-forms-floating.ics", FLOATING_INSTANCES_ICAL),
@@ -1209,4 +1259,18 @@ const NIGHT_SHIFT_ICAL: &str = concat!(
     "SUMMARY:Night shift\r\nDTSTART;TZID=US/Eastern:20070310T230000\r\n",
     "DTEND;TZID=US/Eastern:20070311T050000\r\nRRULE:FREQ=DAILY;COUNT=2\r\n",
     "END:VEVENT\r\nEND:VCALENDAR\r\n"
+);
+
+const ALL_DAY_WITHOUT_END_ICAL: &str = concat!(
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+    "BEGIN:VEVENT\r\nUID:all-day-without-end@example.com\r\nDTSTAMP:20070206T001121Z\r\n",
+    "SUMMARY:Holidays\r\nDTSTART;VALUE=DATE:20070402\r\nRRULE:FREQ=DAILY;COUNT=3\r\n",
+    "END:VEVENT\r\nEND:VCALENDAR\r\n"
+);
+
+const ALL_DAY_ACROSS_DST_ICAL: &str = concat!(
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+    "BEGIN:VEVENT\r\nUID:all-day-across-dst@example.com\r\nDTSTAMP:20070206T001121Z\r\n",
+    "SUMMARY:Daylight saving\r\nDTSTART;TZID=US/Eastern:20070310T000000\r\nDURATION:P1D\r\n",
+    "RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 );

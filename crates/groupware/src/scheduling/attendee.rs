@@ -155,6 +155,7 @@ pub(crate) fn attendee_handle_update(
                             &dt_stamp,
                             instance.sequence.unwrap_or_default(),
                             ItipExportAs::Attendee(attendee_entry_uids),
+                            None,
                         ));
                         mail_from = Some(&local_attendee.email.email);
                         replied_instances.push(instance_id.clone());
@@ -209,6 +210,7 @@ pub(crate) fn attendee_handle_update(
                 &dt_stamp,
                 instance.sequence.unwrap_or_default(),
                 ItipExportAs::Attendee(attendee_entry_uids),
+                None,
             ));
             mail_from = Some(&local_attendee.email.email);
             replied_instances.push(instance_id.clone());

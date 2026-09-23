@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::calendar::expand::SECONDS_PER_DAY;
 use crate::scheduling::{
     Attendee, Email, InstanceId, ItipDateTime, ItipEntry, ItipEntryValue, ItipError, ItipField,
     ItipParticipant, ItipSnapshot, ItipSnapshots, ItipTime, ItipValue, Organizer, RecurrenceId,
 };
 use ahash::AHashMap;
 use calcard::icalendar::{
-    ICalendar, ICalendarParameterName, ICalendarParameterValue, ICalendarParticipationStatus,
-    ICalendarProperty, ICalendarScheduleAgentValue, ICalendarValue, Uri,
+    ICalendar, ICalendarDuration, ICalendarParameterName, ICalendarParameterValue,
+    ICalendarParticipationStatus, ICalendarProperty, ICalendarScheduleAgentValue, ICalendarValue,
+    Uri,
 };
 use std::borrow::Borrow;
 
@@ -495,6 +497,30 @@ const SUMMARY_IDENTITY: [ICalendarProperty; 4] = [
 ];
 
 impl<'x> ItipSnapshot<'x> {
+    pub fn length(&self) -> Option<ICalendarDuration> {
+        let mut start = None;
+        let mut end = None;
+        for entry in &self.entries {
+            match (entry.name, &entry.value) {
+                (ICalendarProperty::Duration, ItipEntryValue::Duration(duration)) => {
+                    return Some((*duration).clone());
+                }
+                (ICalendarProperty::Dtstart, ItipEntryValue::DateTime(date)) => start = Some(date),
+                (ICalendarProperty::Dtend, ItipEntryValue::DateTime(date)) => end = Some(date),
+                _ => {}
+            }
+        }
+        let (start, end) = (start?, end?);
+        let seconds = end.timestamp - start.timestamp;
+        (seconds > 0).then(|| {
+            if start.date.has_time() {
+                ICalendarDuration::from_seconds(seconds)
+            } else {
+                ICalendarDuration::from_days((seconds + SECONDS_PER_DAY / 2) / SECONDS_PER_DAY)
+            }
+        })
+    }
+
     fn unanswered(&self) -> ItipSnapshot<'x> {
         ItipSnapshot {
             comp_id: self.comp_id,

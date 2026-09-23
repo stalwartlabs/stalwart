@@ -33,7 +33,7 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    TimeRange,
+    OverlapRule, TimeRange,
     acl::Acl,
     collection::{Collection, SyncCollection},
     field::CalendarEventField,
@@ -469,7 +469,7 @@ impl CalendarEventQuery for Server {
 
                 for expansion in content
                     .data
-                    .expand(default_tz, time_range)
+                    .expand(default_tz, time_range, OverlapRule::Jmap)
                     .unwrap_or_default()
                 {
                     let prefix = match (is_recurring, expansion.recurrence_key()) {
@@ -808,7 +808,7 @@ impl TimeBound {
             .unarchive::<CalendarEventContent>()
             .caused_by(trc::location!())?
             .data
-            .expand(default_tz, self.time_range())
+            .expand(default_tz, self.time_range(), OverlapRule::Jmap)
             .is_some_and(|instances| !instances.is_empty()))
     }
 }

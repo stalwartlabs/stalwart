@@ -314,6 +314,7 @@ pub(crate) fn organizer_handle_update(
             })
             .unwrap_or_default();
         let dt_stamp = PartialDateTime::now();
+        let series_length = new_itip.main_instance().and_then(ItipSnapshot::length);
         for ((method, instances), emails) in updates {
             let is_cancel = matches!(method, ICalendarMethod::Cancel);
             let mut tz_source = if is_cancel { old_ical } else { new_ical };
@@ -371,6 +372,7 @@ pub(crate) fn organizer_handle_update(
                         &dt_stamp,
                         sequence,
                         ItipExportAs::Organizer(&ICalendarParticipationStatus::NeedsAction),
+                        series_length.as_ref(),
                     )
                 };
 
@@ -565,6 +567,7 @@ pub(crate) fn organizer_request_full(
 
     let mut recipients = AHashSet::new();
     let mut copy_components = AHashSet::new();
+    let series_length = itip.main_instance().and_then(ItipSnapshot::length);
 
     for (instance_id, comp) in &itip.components {
         // Skip private components
@@ -584,6 +587,7 @@ pub(crate) fn organizer_request_full(
             &dt_stamp,
             sequence,
             ItipExportAs::Organizer(&ICalendarParticipationStatus::NeedsAction),
+            series_length.as_ref(),
         );
 
         // Add VALARM sub-components

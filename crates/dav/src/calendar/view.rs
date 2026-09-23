@@ -227,7 +227,7 @@ impl EntryView for ICalendarEntry {
             .filter(|value| {
                 matches!(value, ICalendarValue::Period(period)
                 if period.time_range(tz).is_some_and(|(start, end)| {
-                    range.is_in_range(false, start.timestamp(), end.timestamp())
+                    range.overlaps(start.timestamp(), end.timestamp())
                 }))
             })
             .cloned()

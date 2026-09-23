@@ -54,7 +54,7 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    TimeRange,
+    OverlapRule, TimeRange,
     acl::Acl,
     blob::BlobId,
     collection::{Collection, SyncCollection},
@@ -205,7 +205,7 @@ impl PrincipalGetAvailability for Server {
                     continue;
                 };
                 let privacy = EventPrivacy::from_flags(flags);
-                if privacy == EventPrivacy::Secret || !candidates.is_in_range(false, start, end) {
+                if privacy == EventPrivacy::Secret || !candidates.overlaps(start, end) {
                     continue;
                 }
                 let names = resource.child_names();
@@ -248,7 +248,11 @@ impl PrincipalGetAvailability for Server {
                     && privacy == EventPrivacy::Public
                     && calendars.may_read_items(names);
                 let first_interval = intervals.len();
-                for expansion in event.data.expand(calendar.tz, filter).unwrap_or_default() {
+                for expansion in event
+                    .data
+                    .expand(calendar.tz, filter, OverlapRule::Jmap)
+                    .unwrap_or_default()
+                {
                     let Some(Some(busy)) = components.get(expansion.comp_id as usize) else {
                         continue;
                     };

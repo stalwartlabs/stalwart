@@ -668,7 +668,7 @@ impl PropFindRequestHandler for Server {
                             timezone,
                             max_time_range,
                         },
-                        ArchivedResource::CalendarEvent(_, Some(content)),
+                        ArchivedResource::CalendarEvent(event, Some(content)),
                     ) => {
                         let default_tz = if let Some(tz) = try_parse_tz(timezone) {
                             tz
@@ -681,8 +681,12 @@ impl PropFindRequestHandler for Server {
                         } else {
                             Tz::UTC
                         };
-                        let mut query_handler =
-                            CalendarQueryHandler::for_content(content, *max_time_range, default_tz);
+                        let mut query_handler = CalendarQueryHandler::for_content(
+                            event.inner,
+                            content,
+                            *max_time_range,
+                            default_tz,
+                        );
                         if !query_handler.filter_content(content, filter) {
                             continue;
                         }
@@ -1241,7 +1245,12 @@ impl PropFindRequestHandler for Server {
                             if calendar_filter.is_some() || !data.properties.is_empty() {
                                 if let Some(ical) = calendar_filter
                                     .get_or_insert_with(|| {
-                                        CalendarQueryHandler::for_content(content, None, Tz::UTC)
+                                        CalendarQueryHandler::for_content(
+                                            event.inner,
+                                            content,
+                                            None,
+                                            Tz::UTC,
+                                        )
                                     })
                                     .serialize_content(
                                         content,
