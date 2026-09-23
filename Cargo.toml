@@ -85,4 +85,5 @@ rpath = false
 
 [patch.crates-io]
 calcard = { path = "../calcard" }
+dns-update = { path = "../dns-update" }
 jmap-tools = { path = "../jmap-tools" }

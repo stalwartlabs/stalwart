@@ -12,7 +12,7 @@ use registry::{
         prelude::Object,
         structs::{Certificate, PublicText, SecretText, SystemSettings},
     },
-    types::{datetime::UTCDateTime, map::Map},
+    types::map::Map,
 };
 use rustls::{
     SupportedProtocolVersion,
@@ -61,10 +61,8 @@ pub(crate) async fn parse_certificates(
             };
             match ParsedCert::parse(&pem) {
                 Ok(parsed) => {
-                    let not_valid_after =
-                        UTCDateTime::from_timestamp(parsed.valid_not_after.timestamp());
-                    let not_valid_before =
-                        UTCDateTime::from_timestamp(parsed.valid_not_before.timestamp());
+                    let not_valid_after = parsed.valid_not_after;
+                    let not_valid_before = parsed.valid_not_before;
                     let sans = Map::new(parsed.sans);
                     if cert.not_valid_after != not_valid_after
                         || cert.not_valid_before != not_valid_before

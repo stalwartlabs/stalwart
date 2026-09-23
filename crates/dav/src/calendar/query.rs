@@ -249,7 +249,7 @@ impl CalendarQueryHandler {
                         .unwrap_or_else(|| {
                             trc::event!(
                                 Calendar(trc::CalendarEvent::RuleExpansionError),
-                                Reason = "chrono error",
+                                Reason = "Failed to expand stored time ranges",
                                 Details = event.data.event.to_compact_string(),
                             );
                             vec![]
@@ -405,11 +405,7 @@ impl CalendarQueryHandler {
                                         alarms.iter().any(|alarm| {
                                             alarm.parent_id() == expansion.comp_id
                                                 && alarm
-                                                    .timestamp(
-                                                        expansion.start,
-                                                        expansion.end,
-                                                        self.default_tz,
-                                                    )
+                                                    .timestamp(expansion, self.default_tz)
                                                     .is_some_and(|timestamp| {
                                                         range.is_in_range(
                                                             false, timestamp, timestamp,

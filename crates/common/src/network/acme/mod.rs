@@ -13,8 +13,7 @@ pub mod renew;
 pub mod resolver;
 
 use crate::network::dns::update::DnsUpdater;
-use chrono::{DateTime, Utc};
-use registry::schema::enums::AcmeChallengeType;
+use registry::{schema::enums::AcmeChallengeType, types::datetime::UTCDateTime};
 use rustls::sign::CertifiedKey;
 use serde::Deserialize;
 use std::{
@@ -74,8 +73,8 @@ pub struct PemCert {
 pub struct ParsedCert {
     pub sans: Vec<String>,
     pub issuer: String,
-    pub valid_not_before: DateTime<Utc>,
-    pub valid_not_after: DateTime<Utc>,
+    pub valid_not_before: UTCDateTime,
+    pub valid_not_after: UTCDateTime,
 }
 
 #[derive(Debug, Clone, Deserialize)]

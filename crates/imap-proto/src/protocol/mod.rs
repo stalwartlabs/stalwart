@@ -970,14 +970,13 @@ mod tests {
     use crate::protocol::ObjectId;
     use crate::{Command, StatusResponse};
     use base64::{Engine, engine::general_purpose::STANDARD};
+    use jiff::Timestamp;
     use mail_parser::DateTime;
     use types::id::Id;
     use utils::chained_bytes::SliceRange;
 
     #[test]
-    fn quoted_timestamp_matches_chrono() {
-        use chrono::{DateTime, Utc};
-
+    fn quoted_timestamp_matches_strftime() {
         let mut timestamp = -2_208_988_800i64;
         while timestamp < 4_102_444_800 {
             let mut buf = Vec::new();
@@ -985,9 +984,9 @@ mod tests {
 
             let expected = format!(
                 "\"{}\"",
-                DateTime::<Utc>::from_timestamp(timestamp, 0)
-                    .unwrap_or_default()
-                    .format("%d-%b-%Y %H:%M:%S %z")
+                Timestamp::from_second(timestamp)
+                    .expect("timestamp within range")
+                    .strftime("%d-%b-%Y %H:%M:%S %z")
             );
             assert_eq!(
                 String::from_utf8(buf).unwrap(),

@@ -4,12 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::{
-    common::timezone::Tz,
-    icalendar::{
-        ArchivedICalendarComponent, ArchivedICalendarEntry, ArchivedICalendarParameterName,
-        ArchivedICalendarProperty, ICalendar, ICalendarComponentType,
-    },
+use calcard::icalendar::{
+    ArchivedICalendarComponent, ArchivedICalendarEntry, ArchivedICalendarParameterName,
+    ArchivedICalendarProperty, ICalendar, ICalendarComponentType,
 };
 use common::{
     ArchivedDavName, DEFAULT_LOGO_BASE64, GroupwareResources, Server,
@@ -23,7 +20,7 @@ use groupware::{
     calendar::{
         ArchivedCalendarEvent, ArchivedCalendarEventContent, CalendarEvent, CalendarEventContent,
         EVENT_DRAFT, EVENT_HIDE_ATTENDEES,
-        alarm::{AlarmId, AlarmTarget, EventAlarmData, TriggeredAlarm},
+        alarm::{AlarmId, AlarmTarget, TriggeredAlarm},
         alerts::{DefaultAlerts, DefaultAlertsResolver},
         expand::RecurrenceKey,
         identity::{CalendarAddresses, EventOwnership, ParticipantIdentityAddresses},
@@ -159,13 +156,10 @@ async fn send_email_alarm(
         );
         return alarm.build_next(server, event, fired).await;
     }
-    let recurrence_key = event
-        .data
-        .component_recurrence(
-            task.event_id as u16,
-            Tz::from_id(task.event_start_tz as u16).unwrap_or(Tz::Floating),
-        )
-        .recurrence_key(task.event_start.timestamp());
+    let recurrence_key = task
+        .recurrence_id
+        .and_then(RecurrenceKey::from_recurrence_id)
+        .map(RecurrenceKey::prefix);
     let alarm_id = AlarmId::from_task_id(task.alarm_id);
     let defaults = alarm.defaults(server, event, alarm_id).await?;
     let Some(triggered) =

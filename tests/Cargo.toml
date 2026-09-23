@@ -70,7 +70,7 @@ hyper-util = { version = "0.1.20", features = ["tokio"] }
 base64 = "0.23"
 ahash = { version = "0.8" }
 serial_test = "4.0.1"
-chrono = "0.4"
+jiff = "0.2.37"
 aws-lc-rs = { version = "1" }
 biscuit = "0.8.0"
 form_urlencoded = "1.2.2"

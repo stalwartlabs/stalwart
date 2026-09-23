@@ -700,6 +700,7 @@ impl CalendarAlarm {
                 event_start_tz,
                 event_end,
                 event_end_tz,
+                recurrence_id,
             } => Task::CalendarAlarmEmail(TaskCalendarAlarmEmail {
                 account_id: account_id.into(),
                 document_id: Id::default(),
@@ -710,6 +711,7 @@ impl CalendarAlarm {
                 event_start: UTCDateTime::from_timestamp(*event_start),
                 event_start_tz: (*event_start_tz).into(),
                 target_account_id: self.target.sharee_id().map(Id::from),
+                recurrence_id: *recurrence_id,
                 status: TaskStatus::at(self.alarm_time),
             }),
             CalendarAlarmType::Display { recurrence_id } => {

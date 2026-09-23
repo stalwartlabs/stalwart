@@ -133,8 +133,8 @@ impl Server {
                 value: pem_cert.certificate,
             }),
             issuer: parsed_cert.issuer,
-            not_valid_after: UTCDateTime::from_timestamp(parsed_cert.valid_not_after.timestamp()),
-            not_valid_before: UTCDateTime::from_timestamp(parsed_cert.valid_not_before.timestamp()),
+            not_valid_after: parsed_cert.valid_not_after,
+            not_valid_before: parsed_cert.valid_not_before,
             subject_alternative_names: Map::new(parsed_cert.sans),
         };
         let now = now();

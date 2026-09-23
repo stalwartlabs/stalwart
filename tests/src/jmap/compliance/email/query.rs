@@ -6,8 +6,12 @@
 
 use crate::jmap::compliance::{CompCtx, TestOutcome, check, check_eq};
 use crate::utils::jmap::JmapResponse;
-use chrono::{Duration as ChronoDuration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::{Value, json};
+
+fn days_ago(days: i64) -> String {
+    (Timestamp::now() - SignedDuration::from_hours(24 * days)).to_string()
+}
 
 pub async fn run(ctx: &CompCtx<'_>) {
     ctx.run("email/filter-in-mailbox", filter_in_mailbox(ctx))
@@ -272,7 +276,7 @@ async fn filter_in_mailbox_other_than(ctx: &CompCtx<'_>) -> TestOutcome {
 }
 
 async fn filter_before(ctx: &CompCtx<'_>) -> TestOutcome {
-    let five_days_ago = (Utc::now() - ChronoDuration::days(5)).to_rfc3339();
+    let five_days_ago = days_ago(5);
     let resp = email_query(ctx, json!({ "filter": { "before": five_days_ago } })).await;
     let ids = query_ids(&resp);
     check(has_id(&ids, ctx.email("very-old")), "very-old should match")?;
@@ -283,7 +287,7 @@ async fn filter_before(ctx: &CompCtx<'_>) -> TestOutcome {
 }
 
 async fn filter_after(ctx: &CompCtx<'_>) -> TestOutcome {
-    let five_days_ago = (Utc::now() - ChronoDuration::days(5)).to_rfc3339();
+    let five_days_ago = days_ago(5);
     let resp = email_query(ctx, json!({ "filter": { "after": five_days_ago } })).await;
     let ids = query_ids(&resp);
     check(
@@ -692,8 +696,8 @@ async fn filter_in_child_mailbox(ctx: &CompCtx<'_>) -> TestOutcome {
 }
 
 async fn filter_before_and_after(ctx: &CompCtx<'_>) -> TestOutcome {
-    let eight_days_ago = (Utc::now() - ChronoDuration::days(8)).to_rfc3339();
-    let two_days_ago = (Utc::now() - ChronoDuration::days(2)).to_rfc3339();
+    let eight_days_ago = days_ago(8);
+    let two_days_ago = days_ago(2);
     let resp = email_query(
         ctx,
         json!({ "filter": { "after": eight_days_ago, "before": two_days_ago } }),

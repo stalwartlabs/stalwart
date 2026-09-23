@@ -1207,16 +1207,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chrono-tz"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
-dependencies = [
- "chrono",
- "phf 0.12.1",
-]
-
-[[package]]
 name = "cipher"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1310,7 +1300,6 @@ dependencies = [
  "bincode",
  "bytes",
  "calcard",
- "chrono",
  "compact_str",
  "coordinator",
  "decancer",
@@ -1324,6 +1313,7 @@ dependencies = [
  "idna",
  "imagesize",
  "infer 0.22.0",
+ "jiff",
  "jmap_proto",
  "jsonwebtoken",
  "libc",
@@ -1901,7 +1891,6 @@ name = "dav"
 version = "0.16.23"
 dependencies = [
  "calcard",
- "chrono",
  "common",
  "compact_str",
  "dav-proto",
@@ -1924,7 +1913,6 @@ name = "dav-proto"
 version = "0.16.23"
 dependencies = [
  "calcard",
- "chrono",
  "compact_str",
  "hashify",
  "hyper",
@@ -2207,16 +2195,14 @@ dependencies = [
 
 [[package]]
 name = "dns-update"
-version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "887fbd45d910c4dd5808f65c0cd686d4f0f756450b9a6c7ecce4a9f450657509"
+version = "0.5.9"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
- "chrono",
  "hex",
  "hickory-net",
  "hickory-proto",
+ "jiff",
  "quick-xml 0.42.0",
  "reqwest 0.13.5",
  "rustls",
@@ -3020,7 +3006,6 @@ version = "0.16.23"
 dependencies = [
  "ahash",
  "calcard",
- "chrono",
  "common",
  "compact_str",
  "hashify",
@@ -3029,6 +3014,7 @@ dependencies = [
  "icu_plurals",
  "icu_provider",
  "indexmap 2.14.2",
+ "jiff",
  "jmap-tools",
  "nlp",
  "percent-encoding",
@@ -3311,7 +3297,6 @@ version = "0.16.23"
 dependencies = [
  "async-stream",
  "base64 0.23.1",
- "chrono",
  "common",
  "compact_str",
  "dav",
@@ -3537,7 +3522,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3589,13 +3574,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58655df2f728e46e4eee80bddebefacf52ec3e77cdb925014b47c5a5905eb55c"
 dependencies = [
  "calendrical_calculations",
- "chrono",
  "displaydoc",
  "icu_calendar_data",
  "icu_locale_core",
  "icu_locale_fallback",
  "icu_provider",
  "ixdtf",
+ "jiff",
  "tinystr",
  "zerovec",
 ]
@@ -3626,7 +3611,6 @@ version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c44df99c4c5297b05653d1a1629f13bdc9fd4044acfbbaf30b15194a1eed4cd6"
 dependencies = [
- "chrono",
  "displaydoc",
  "fixed_decimal",
  "icu_calendar",
@@ -3638,6 +3622,7 @@ dependencies = [
  "icu_plurals",
  "icu_provider",
  "icu_time",
+ "jiff",
  "potential_utf",
  "tinystr",
  "writeable",
@@ -3825,14 +3810,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af37e1c3b9f3ab564b619fdf4b22de169f6381eb0f7048e3ca454290c438126b"
 dependencies = [
  "calendrical_calculations",
- "chrono",
- "chrono-tz",
  "displaydoc",
  "icu_calendar",
  "icu_locale_core",
  "icu_provider",
  "icu_time_data",
  "ixdtf",
+ "jiff",
  "serde",
  "zerotrie",
  "zerovec",
@@ -3916,10 +3900,10 @@ version = "0.16.23"
 dependencies = [
  "ahash",
  "base64 0.23.1",
- "chrono",
  "compact_str",
  "hashify",
  "itoa",
+ "jiff",
  "mail-parser",
  "smallvec",
  "trc",
@@ -4107,7 +4091,7 @@ dependencies = [
  "cedarwood",
  "include-flate",
  "jieba-macros",
- "phf 0.13.1",
+ "phf",
  "rustc-hash",
 ]
 
@@ -4120,6 +4104,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -4172,7 +4157,6 @@ dependencies = [
  "async-stream",
  "base64 0.23.1",
  "calcard",
- "chrono",
  "common",
  "compact_str",
  "directory",
@@ -4184,6 +4168,7 @@ dependencies = [
  "http_proto",
  "hyper",
  "hyper-util",
+ "jiff",
  "jmap-tools",
  "jmap_proto",
  "mail-auth",
@@ -5793,21 +5778,12 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
-dependencies = [
- "phf_shared 0.12.1",
-]
-
-[[package]]
-name = "phf"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
 dependencies = [
  "phf_macros",
- "phf_shared 0.13.1",
+ "phf_shared",
  "serde",
 ]
 
@@ -5818,7 +5794,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49aa7f9d80421bca176ca8dbfebe668cc7a2684708594ec9f3c0db0805d5d6e1"
 dependencies = [
  "phf_generator",
- "phf_shared 0.13.1",
+ "phf_shared",
 ]
 
 [[package]]
@@ -5828,7 +5804,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "135ace3a761e564ec88c03a77317a7c6b80bb7f7135ef2544dbe054243b89737"
 dependencies = [
  "fastrand 2.5.0",
- "phf_shared 0.13.1",
+ "phf_shared",
 ]
 
 [[package]]
@@ -5838,19 +5814,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef"
 dependencies = [
  "phf_generator",
- "phf_shared 0.13.1",
+ "phf_shared",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -6344,7 +6311,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -6385,7 +6352,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -7516,7 +7483,7 @@ dependencies = [
  "sha2 0.10.9",
  "sha3 0.10.9",
  "slh-dsa",
- "thiserror 2.0.20",
+ "thiserror 1.0.69",
  "twofish",
  "typenum",
  "x25519-dalek",
@@ -8327,7 +8294,7 @@ checksum = "a18596f8c785a729f2819c0f6a7eae6ebeebdfffbfe4214ae6b087f690e31901"
 dependencies = [
  "new_debug_unreachable",
  "parking_lot",
- "phf_shared 0.13.1",
+ "phf_shared",
  "precomputed-hash",
 ]
 
@@ -8536,7 +8503,6 @@ dependencies = [
  "biscuit",
  "bytes",
  "calcard",
- "chrono",
  "common",
  "compact_str",
  "coordinator",
@@ -8557,6 +8523,7 @@ dependencies = [
  "hyper-util",
  "imap",
  "imap_proto",
+ "jiff",
  "jmap",
  "jmap-client",
  "jmap-tools",
@@ -8806,7 +8773,7 @@ dependencies = [
  "log",
  "parking_lot",
  "percent-encoding",
- "phf 0.13.1",
+ "phf",
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
@@ -9419,12 +9386,12 @@ dependencies = [
  "arcstr",
  "aws-lc-rs",
  "base64 0.23.1",
- "chrono",
  "compact_str",
  "farmhash",
  "form_urlencoded",
  "futures",
  "idna",
+ "jiff",
  "mail-auth",
  "nohash-hasher",
  "privdrop",
@@ -10155,7 +10122,7 @@ dependencies = [
  "nonempty-collections",
  "once_cell",
  "petgraph",
- "phf 0.13.1",
+ "phf",
  "rand 0.8.8",
  "rustc_version",
  "serde",

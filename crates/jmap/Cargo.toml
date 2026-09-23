@@ -41,7 +41,7 @@ sha2 = "0.11"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"]}
 tokio-tungstenite = "0.30"
 tungstenite = "0.30"
-chrono = "0.4"
+jiff = "0.2.37"
 rand = "0.10.2"
 rkyv.workspace = true
 hashify = "0.2"

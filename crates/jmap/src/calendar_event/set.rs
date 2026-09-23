@@ -30,7 +30,6 @@ use calcard::{
     },
     jscalendar::{JSCalendar, JSCalendarDateTime, JSCalendarProperty, JSCalendarValue},
 };
-use chrono::DateTime;
 use common::{
     ArchivedDavName, DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountInfo},
@@ -65,6 +64,7 @@ use groupware::{
     },
 };
 use http_proto::HttpSessionData;
+use jiff::Timestamp;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
@@ -2113,9 +2113,9 @@ fn update_calendar_event<'x>(
         };
 
         if let Some(start) = utc_start {
-            let local_start = DateTime::from_timestamp(start, 0)
-                .map(|dt| dt.with_timezone(&tz).naive_local().and_utc().timestamp())
-                .ok_or_else(|| {
+            let local_start = Timestamp::from_second(start)
+                .map(|start| tz.from_timestamp(start).naive_timestamp())
+                .map_err(|_| {
                     SetError::invalid_properties()
                         .with_property(JSCalendarProperty::UtcStart)
                         .with_description("Invalid utcStart value.")

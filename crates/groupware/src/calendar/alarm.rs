@@ -5,19 +5,23 @@
  */
 
 use super::{
-    ALARM_EMAIL, Alarm, AlarmDelta, ArchivedAlarmDelta, ArchivedCalendarEventContent,
-    ArchivedCalendarEventData, ArchivedEventPreferences, ArchivedEventUserData, CalendarEventData,
-    DefaultAlert, EventPreferences, PREF_HAS_ALERTS,
+    ALARM_EMAIL, Alarm, AlarmDelta, AlarmOffset, ArchivedAlarmDelta, ArchivedAlarmOffset,
+    ArchivedCalendarEventContent, ArchivedCalendarEventData, ArchivedEventPreferences,
+    ArchivedEventUserData, CalendarEventData, DefaultAlert, EventPreferences, PREF_HAS_ALERTS,
     alerts::{DefaultAlerts, SnoozeAlarm},
-    expand::{ComponentRecurrenceId, RecurrenceKey, resolve_local},
+    expand::{
+        ComponentRecurrenceId, NaiveTimestamp, RangeFlags, RecurrenceKey, RecurrenceShift,
+        SECONDS_PER_DAY, resolve_local,
+    },
     user::BASE_INSTANCE,
 };
 use calcard::{
-    common::timezone::Tz,
+    common::timezone::{NominalDuration, Tz, ZonedDateTime},
     icalendar::{
         ArchivedICalendar, ArchivedICalendarComponent, ArchivedICalendarEntry, ICalendar,
-        ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarParameterName,
-        ICalendarParameterValue, ICalendarProperty, ICalendarRelated, ICalendarValue,
+        ICalendarComponent, ICalendarComponentType, ICalendarDuration, ICalendarEntry,
+        ICalendarParameterName, ICalendarParameterValue, ICalendarProperty, ICalendarRelated,
+        ICalendarValue,
     },
 };
 use std::str::FromStr;
@@ -119,6 +123,7 @@ pub enum CalendarAlarmType {
         event_start_tz: u16,
         event_end: i64,
         event_end_tz: u16,
+        recurrence_id: Option<i64>,
     },
     Display {
         recurrence_id: Option<i64>,
@@ -357,22 +362,21 @@ impl ArchivedCalendarEventContent {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AlarmRecurrence {
     is_recurrent: bool,
-    override_shift: i64,
+    shift: Option<RecurrenceShift>,
+    tz: Tz,
+    flags: RangeFlags,
+    recurrence_tz: Tz,
 }
 
 impl AlarmRecurrence {
-    fn new(is_recurrent: bool, start: Option<i64>, recurrence_id: Option<i64>) -> Self {
-        AlarmRecurrence {
-            is_recurrent,
-            override_shift: start
-                .zip(recurrence_id)
-                .map_or(0, |(start, recurrence_id)| start - recurrence_id),
-        }
-    }
-
     pub fn recurrence_id(&self, start_date_naive: i64) -> Option<i64> {
-        self.is_recurrent
-            .then_some(start_date_naive - self.override_shift)
+        match (self.is_recurrent, &self.shift) {
+            (false, _) => None,
+            (true, Some(shift)) => shift
+                .recurrence_id(self.tz, self.flags, start_date_naive, self.recurrence_tz)
+                .map(|recurrence_id| recurrence_id.naive),
+            (true, None) => Some(start_date_naive),
+        }
     }
 
     pub fn recurrence_key(&self, start_date_naive: i64) -> Option<u32> {
@@ -387,16 +391,22 @@ impl AlarmRecurrence {
 
     fn of<C: CalendarComponentView + ComponentRecurrenceId>(
         component: Option<&C>,
-        component_tz: Tz,
+        own_tz: Tz,
+        tz: Tz,
+        flags: RangeFlags,
     ) -> Self {
-        component.map_or_else(AlarmRecurrence::default, |component| {
-            AlarmRecurrence::new(
-                component.is_recurrent_or_override(),
-                component.timestamp(&ICalendarProperty::Dtstart),
-                component
-                    .recurrence_id(component_tz)
-                    .map(|recurrence_id| recurrence_id.naive),
-            )
+        component.map_or_else(AlarmRecurrence::default, |component| AlarmRecurrence {
+            is_recurrent: component.is_recurrent_or_override(),
+            shift: component
+                .timestamp(&ICalendarProperty::Dtstart)
+                .zip(component.recurrence_id(own_tz))
+                .zip(component.recurrence_tz(own_tz))
+                .and_then(|((start, recurrence_id), recurrence_tz)| {
+                    RecurrenceShift::new(own_tz, start, recurrence_id, recurrence_tz)
+                }),
+            tz,
+            flags,
+            recurrence_tz: component.recurrence_tz(tz).unwrap_or(tz),
         })
     }
 }
@@ -464,7 +474,7 @@ macro_rules! calendar_view {
                     .first()?
                     .as_partial_date_time()?
                     .to_date_time()
-                    .map(|date_time| date_time.date_time.and_utc().timestamp())
+                    .map(|date_time| date_time.date_time.naive_timestamp())
             }
         }
 
@@ -606,6 +616,7 @@ pub struct AlarmRange<'x> {
     pub start_tz: u16,
     pub end_tz: u16,
     pub duration: i64,
+    pub flags: RangeFlags,
     pub instances: &'x [u8],
 }
 
@@ -658,23 +669,19 @@ impl AlarmCandidate {
         best_so_far: Option<i64>,
     ) {
         match &self.delta {
-            AlarmDelta::Start(delta) => {
-                self.naive_bias = Some(*delta);
+            AlarmDelta::Start(offset) => {
+                self.naive_bias = Some(offset.naive_seconds());
                 self.is_pending = true;
             }
-            AlarmDelta::End(delta) => {
-                self.naive_bias = Some(*delta + duration);
+            AlarmDelta::End(offset) => {
+                self.naive_bias = Some(offset.naive_seconds() + duration);
                 self.is_pending = true;
             }
             AlarmDelta::FixedUtc(_) | AlarmDelta::FixedFloating(_) => {
                 self.naive_bias = None;
-                match self
-                    .delta
-                    .to_timestamp(0, 0, default_tz)
-                    .filter(|alarm_time| {
-                        *alarm_time > start_time
-                            && best_so_far.is_none_or(|best| *alarm_time < best)
-                    }) {
+                match self.delta.fixed_timestamp(default_tz).filter(|alarm_time| {
+                    *alarm_time > start_time && best_so_far.is_none_or(|best| *alarm_time < best)
+                }) {
                     Some(alarm_time) => {
                         self.fixed_time = alarm_time;
                         self.is_pending = true;
@@ -685,7 +692,12 @@ impl AlarmCandidate {
         }
     }
 
-    fn alarm_time(&self, start: i64, end: i64, default_tz: Tz) -> Option<i64> {
+    fn alarm_time(
+        &self,
+        start: &ZonedDateTime,
+        end: &ZonedDateTime,
+        default_tz: Tz,
+    ) -> Option<i64> {
         if self.naive_bias.is_some() {
             self.delta.to_timestamp(start, end, default_tz)
         } else {
@@ -737,7 +749,12 @@ pub trait EventAlarmData {
 
     fn has_floating_stored_alarms(&self) -> bool;
 
-    fn component_recurrence(&self, comp_id: u16, component_tz: Tz) -> AlarmRecurrence;
+    fn component_recurrence(
+        &self,
+        comp_id: u16,
+        component_tz: Tz,
+        flags: RangeFlags,
+    ) -> AlarmRecurrence;
 
     fn needs_default_tz(&self, source: &AlarmSource<'_>) -> bool {
         let floating = Tz::Floating.as_id();
@@ -784,6 +801,7 @@ pub trait EventAlarmData {
                 continue;
             };
             let duration = range.duration;
+            let flags = range.flags;
             let (Some(mut start_tz), Some(mut end_tz)) =
                 (Tz::from_id(range.start_tz), Tz::from_id(range.end_tz))
             else {
@@ -801,7 +819,7 @@ pub trait EventAlarmData {
             for candidate in &mut candidates {
                 candidate.prepare(duration, default_tz, start_time, best_so_far);
             }
-            let recurrence = self.component_recurrence(comp_id, component_tz);
+            let recurrence = self.component_recurrence(comp_id, component_tz, flags);
             if !recurrence.is_recurrent() {
                 for candidate in &mut candidates {
                     candidate.is_pending &= !candidate.scope.is_occurrence();
@@ -864,8 +882,8 @@ pub trait EventAlarmData {
                         Some(resolved) => resolved,
                         None => {
                             let (Some(start), Some(end)) = (
-                                resolve_local(start_tz, start_date_naive),
-                                resolve_local(end_tz, end_date_naive),
+                                flags.resolve_start(start_tz, start_date_naive),
+                                flags.resolve_end(end_tz, end_date_naive),
                             ) else {
                                 break;
                             };
@@ -873,7 +891,7 @@ pub trait EventAlarmData {
                         }
                     };
 
-                    if let Some(alarm_time) = candidate.alarm_time(start, end, default_tz)
+                    if let Some(alarm_time) = candidate.alarm_time(&start, &end, default_tz)
                         && alarm_time > start_time
                     {
                         if next_alarm
@@ -886,10 +904,11 @@ pub trait EventAlarmData {
                                 alarm_time,
                                 typ: if candidate.is_email_alert {
                                     CalendarAlarmType::Email {
-                                        event_start: start_date_naive,
+                                        event_start: start.timestamp(),
                                         event_start_tz: start_tz.as_id(),
-                                        event_end: end_date_naive,
+                                        event_end: end.timestamp(),
                                         event_end_tz: end_tz.as_id(),
+                                        recurrence_id: recurrence.recurrence_id(start_date_naive),
                                     }
                                 } else {
                                     CalendarAlarmType::Display {
@@ -920,6 +939,7 @@ impl EventAlarmData for ArchivedCalendarEventData {
             start_tz: range.start_tz.to_native(),
             end_tz: range.end_tz.to_native(),
             duration: range.duration.to_native() as i64,
+            flags: RangeFlags::from_bits(range.flags),
             instances: range.instances.as_ref(),
         })
     }
@@ -931,14 +951,7 @@ impl EventAlarmData for ArchivedCalendarEventData {
             .map(|alarm| Alarm {
                 id: alarm.id.to_native(),
                 parent_id: alarm.parent_id.to_native(),
-                delta: match &alarm.delta {
-                    ArchivedAlarmDelta::Start(delta) => AlarmDelta::Start(delta.to_native()),
-                    ArchivedAlarmDelta::End(delta) => AlarmDelta::End(delta.to_native()),
-                    ArchivedAlarmDelta::FixedUtc(ts) => AlarmDelta::FixedUtc(ts.to_native()),
-                    ArchivedAlarmDelta::FixedFloating(ts) => {
-                        AlarmDelta::FixedFloating(ts.to_native())
-                    }
-                },
+                delta: AlarmDelta::from(&alarm.delta),
                 flags: alarm.flags.to_native(),
             })
     }
@@ -953,8 +966,19 @@ impl EventAlarmData for ArchivedCalendarEventData {
             .any(|alarm| matches!(alarm.delta, ArchivedAlarmDelta::FixedFloating(_)))
     }
 
-    fn component_recurrence(&self, comp_id: u16, component_tz: Tz) -> AlarmRecurrence {
-        AlarmRecurrence::of(self.event.components.get(comp_id as usize), component_tz)
+    fn component_recurrence(
+        &self,
+        comp_id: u16,
+        component_tz: Tz,
+        flags: RangeFlags,
+    ) -> AlarmRecurrence {
+        AlarmRecurrence::of(
+            self.event.components.get(comp_id as usize),
+            self.component_tz(u32::from(comp_id))
+                .unwrap_or(component_tz),
+            component_tz,
+            flags,
+        )
     }
 }
 
@@ -969,6 +993,7 @@ impl EventAlarmData for CalendarEventData {
             start_tz: range.start_tz,
             end_tz: range.end_tz,
             duration: range.duration as i64,
+            flags: RangeFlags::from_bits(range.flags),
             instances: range.instances.as_ref(),
         })
     }
@@ -990,8 +1015,19 @@ impl EventAlarmData for CalendarEventData {
             .any(|alarm| matches!(alarm.delta, AlarmDelta::FixedFloating(_)))
     }
 
-    fn component_recurrence(&self, comp_id: u16, component_tz: Tz) -> AlarmRecurrence {
-        AlarmRecurrence::of(self.event.components.get(comp_id as usize), component_tz)
+    fn component_recurrence(
+        &self,
+        comp_id: u16,
+        component_tz: Tz,
+        flags: RangeFlags,
+    ) -> AlarmRecurrence {
+        AlarmRecurrence::of(
+            self.event.components.get(comp_id as usize),
+            self.component_tz(u32::from(comp_id))
+                .unwrap_or(component_tz),
+            component_tz,
+            flags,
+        )
     }
 }
 
@@ -1043,9 +1079,9 @@ impl ExpandAlarm for ICalendarComponent {
                         }
                         ICalendarValue::Duration(duration) => {
                             if trigger_start {
-                                Some(AlarmDelta::Start(duration.as_seconds()))
+                                Some(AlarmDelta::Start(duration.into()))
                             } else {
-                                Some(AlarmDelta::End(duration.as_seconds()))
+                                Some(AlarmDelta::End(duration.into()))
                             }
                         }
                         _ => None,
@@ -1085,25 +1121,80 @@ impl ExpandAlarm for ICalendarComponent {
 }
 
 impl AlarmDelta {
-    pub fn to_timestamp(&self, start: i64, end: i64, default_tz: Tz) -> Option<i64> {
+    pub fn to_timestamp(
+        &self,
+        start: &ZonedDateTime,
+        end: &ZonedDateTime,
+        default_tz: Tz,
+    ) -> Option<i64> {
         match self {
-            AlarmDelta::Start(delta) => Some(start + delta),
-            AlarmDelta::End(delta) => Some(end + delta),
+            AlarmDelta::Start(offset) => offset.apply(start),
+            AlarmDelta::End(offset) => offset.apply(end),
+            AlarmDelta::FixedUtc(_) | AlarmDelta::FixedFloating(_) => {
+                self.fixed_timestamp(default_tz)
+            }
+        }
+    }
+
+    fn fixed_timestamp(&self, default_tz: Tz) -> Option<i64> {
+        match self {
             AlarmDelta::FixedUtc(timestamp) => Some(*timestamp),
             AlarmDelta::FixedFloating(timestamp) => resolve_local(default_tz, *timestamp),
+            AlarmDelta::Start(_) | AlarmDelta::End(_) => None,
         }
     }
 }
 
-impl ArchivedAlarmDelta {
-    pub fn to_timestamp(&self, start: i64, end: i64, default_tz: Tz) -> Option<i64> {
-        match self {
-            ArchivedAlarmDelta::Start(delta) => Some(start + delta.to_native()),
-            ArchivedAlarmDelta::End(delta) => Some(end + delta.to_native()),
-            ArchivedAlarmDelta::FixedUtc(timestamp) => Some(timestamp.to_native()),
+impl From<&ArchivedAlarmDelta> for AlarmDelta {
+    fn from(delta: &ArchivedAlarmDelta) -> Self {
+        match delta {
+            ArchivedAlarmDelta::Start(offset) => AlarmDelta::Start(offset.into()),
+            ArchivedAlarmDelta::End(offset) => AlarmDelta::End(offset.into()),
+            ArchivedAlarmDelta::FixedUtc(timestamp) => AlarmDelta::FixedUtc(timestamp.to_native()),
             ArchivedAlarmDelta::FixedFloating(timestamp) => {
-                resolve_local(default_tz, timestamp.to_native())
+                AlarmDelta::FixedFloating(timestamp.to_native())
             }
+        }
+    }
+}
+
+impl AlarmOffset {
+    pub fn naive_seconds(&self) -> i64 {
+        i64::from(self.days) * SECONDS_PER_DAY + i64::from(self.seconds)
+    }
+
+    pub fn apply(&self, from: &ZonedDateTime) -> Option<i64> {
+        from.checked_add_nominal(NominalDuration::new(self.days, 0))
+            .map(|at| at.timestamp() + i64::from(self.seconds))
+    }
+}
+
+impl From<&ICalendarDuration> for AlarmOffset {
+    fn from(duration: &ICalendarDuration) -> Self {
+        let days = i32::try_from(u64::from(duration.weeks) * 7 + u64::from(duration.days))
+            .unwrap_or(i32::MAX);
+        let seconds = i32::try_from(
+            u64::from(duration.hours) * 3600
+                + u64::from(duration.minutes) * 60
+                + u64::from(duration.seconds),
+        )
+        .unwrap_or(i32::MAX);
+        if duration.neg {
+            AlarmOffset {
+                days: -days,
+                seconds: -seconds,
+            }
+        } else {
+            AlarmOffset { days, seconds }
+        }
+    }
+}
+
+impl From<&ArchivedAlarmOffset> for AlarmOffset {
+    fn from(offset: &ArchivedAlarmOffset) -> Self {
+        AlarmOffset {
+            days: offset.days.to_native(),
+            seconds: offset.seconds.to_native(),
         }
     }
 }
@@ -1116,13 +1207,12 @@ mod tests {
         alerts::CalendarSettings,
     };
     use calcard::icalendar::{ICalendar, ICalendarDuration};
-    use chrono::NaiveDate;
+    use jiff::civil::DateTime;
 
-    fn naive(day: u32, hour: u32, minute: u32) -> i64 {
-        NaiveDate::from_ymd_opt(2030, 1, day)
-            .and_then(|date| date.and_hms_opt(hour, minute, 0))
-            .map(|date_time| date_time.and_utc().timestamp())
+    fn naive(day: i8, hour: i8, minute: i8) -> i64 {
+        DateTime::new(2030, 1, day, hour, minute, 0, 0)
             .expect("valid date")
+            .naive_timestamp()
     }
 
     fn event_data(ical: &str) -> CalendarEventData {
@@ -1492,6 +1582,7 @@ mod tests {
         let recurrence = data.component_recurrence(
             alarm.event_id,
             Tz::from_str("America/New_York").expect("time zone"),
+            RangeFlags::default(),
         );
         assert_eq!(
             recurrence.recurrence_key(naive(2, 12, 0)),
@@ -1517,7 +1608,7 @@ mod tests {
             }
         );
 
-        let recurrence = data.component_recurrence(alarm.event_id, Tz::Floating);
+        let recurrence = data.component_recurrence(alarm.event_id, Tz::UTC, RangeFlags::default());
         assert_eq!(
             recurrence.recurrence_key(naive(2, 12, 0)),
             Some(recurrence_key(naive(2, 10, 0)))
@@ -1696,5 +1787,276 @@ mod tests {
         );
         assert!(archived.personal_alert(None, 1).is_none());
         assert!(archived.personal_alert(None, u16::MAX).is_none());
+    }
+
+    const SPRING_FORWARD_ALARMS: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "PRODID:test\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:spring-forward\r\n",
+        "DTSTART;TZID=America/New_York:20260308T090000\r\n",
+        "DTEND;TZID=America/New_York:20260308T100000\r\n",
+        "BEGIN:VALARM\r\n",
+        "ACTION:DISPLAY\r\n",
+        "TRIGGER:-P1D\r\n",
+        "END:VALARM\r\n",
+        "BEGIN:VALARM\r\n",
+        "ACTION:DISPLAY\r\n",
+        "TRIGGER:-PT24H\r\n",
+        "END:VALARM\r\n",
+        "BEGIN:VALARM\r\n",
+        "ACTION:DISPLAY\r\n",
+        "TRIGGER;RELATED=END:-P1DT30M\r\n",
+        "END:VALARM\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n"
+    );
+
+    fn utc_2026(month: i8, day: i8, hour: i8, minute: i8) -> i64 {
+        DateTime::new(2026, month, day, hour, minute, 0, 0)
+            .expect("valid date")
+            .naive_timestamp()
+    }
+
+    #[test]
+    fn day_offsets_are_nominal_and_time_offsets_exact_across_daylight_saving() {
+        let data = event_data(SPRING_FORWARD_ALARMS);
+        let disabled = DefaultAlerts::disabled();
+        let source = AlarmSource::Stored(&disabled);
+        let mut start_time = utc_2026(3, 6, 0, 0);
+        let mut alarm_times = Vec::new();
+        while let Some(alarm) = data.next_alarm_from(start_time, Tz::UTC, &source) {
+            alarm_times.push(alarm.alarm_time);
+            start_time = alarm.alarm_time;
+        }
+        assert_eq!(
+            alarm_times,
+            [
+                utc_2026(3, 7, 13, 0),
+                utc_2026(3, 7, 14, 0),
+                utc_2026(3, 7, 14, 30),
+            ]
+        );
+    }
+
+    #[test]
+    fn expansion_alarm_times_match_the_scheduler() {
+        let data = event_data(SPRING_FORWARD_ALARMS);
+        let expansion = data.expand_base(Tz::UTC).expect("base expansion");
+        assert_eq!(
+            data.alarms
+                .iter()
+                .map(|alarm| expansion.alarm_time(&alarm.delta, Tz::UTC))
+                .collect::<Vec<_>>(),
+            [
+                Some(utc_2026(3, 7, 14, 0)),
+                Some(utc_2026(3, 7, 13, 0)),
+                Some(utc_2026(3, 7, 14, 30)),
+            ]
+        );
+    }
+
+    #[test]
+    fn end_alarms_follow_an_end_in_the_second_pass_of_a_repeated_hour() {
+        let data = event_data(concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "PRODID:test\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:repeated-hour\r\n",
+            "DTSTART;TZID=America/New_York:20261101T013000\r\n",
+            "DURATION:PT1H\r\n",
+            "BEGIN:VALARM\r\n",
+            "ACTION:DISPLAY\r\n",
+            "TRIGGER;RELATED=END:-PT10M\r\n",
+            "END:VALARM\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ));
+        let disabled = DefaultAlerts::disabled();
+        let source = AlarmSource::Stored(&disabled);
+        let alarm = data
+            .next_alarm_from(utc_2026(11, 1, 0, 0), Tz::UTC, &source)
+            .expect("end alarm");
+        assert_eq!(alarm.alarm_time, utc_2026(11, 1, 6, 20));
+
+        let expansion = data.expand_base(Tz::UTC).expect("base expansion");
+        assert_eq!(
+            expansion.alarm_time(&data.alarms[0].delta, Tz::UTC),
+            Some(utc_2026(11, 1, 6, 20))
+        );
+    }
+
+    fn display_alarms(data: &CalendarEventData, mut start_time: i64) -> Vec<(i64, Option<i64>)> {
+        let disabled = DefaultAlerts::disabled();
+        let source = AlarmSource::Stored(&disabled);
+        let mut alarms = Vec::new();
+        while let Some(alarm) = data.next_alarm_from(start_time, Tz::UTC, &source) {
+            start_time = alarm.alarm_time;
+            let CalendarAlarmType::Display { recurrence_id } = alarm.typ else {
+                panic!("display alarm expected, got {alarm:?}");
+            };
+            alarms.push((alarm.alarm_time, recurrence_id));
+        }
+        alarms
+    }
+
+    #[test]
+    fn alarms_of_moved_occurrences_keep_the_recurrence_id_of_the_series() {
+        let other_zone = event_data(concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "PRODID:test\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:other-zone\r\n",
+            "DTSTART;TZID=America/New_York:20261029T013000\r\n",
+            "DURATION:PT30M\r\n",
+            "RRULE:FREQ=DAILY;COUNT=5\r\n",
+            "END:VEVENT\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:other-zone\r\n",
+            "RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20261030T013000\r\n",
+            "DTSTART;TZID=Europe/London:20261030T063000\r\n",
+            "DURATION:PT30M\r\n",
+            "BEGIN:VALARM\r\n",
+            "ACTION:DISPLAY\r\n",
+            "TRIGGER:-PT15M\r\n",
+            "END:VALARM\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ));
+        assert_eq!(
+            display_alarms(&other_zone, utc_2026(10, 29, 0, 0)),
+            [
+                (utc_2026(10, 30, 6, 15), Some(utc_2026(10, 30, 1, 30))),
+                (utc_2026(10, 31, 6, 15), Some(utc_2026(10, 31, 1, 30))),
+                (utc_2026(11, 1, 6, 15), Some(utc_2026(11, 1, 1, 30))),
+                (utc_2026(11, 2, 7, 15), Some(utc_2026(11, 2, 1, 30))),
+            ]
+        );
+
+        let same_zone = event_data(concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "PRODID:test\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:same-zone\r\n",
+            "DTSTART;TZID=America/New_York:20260306T230000\r\n",
+            "DURATION:PT30M\r\n",
+            "RRULE:FREQ=DAILY;COUNT=5\r\n",
+            "END:VEVENT\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:same-zone\r\n",
+            "RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20260307T230000\r\n",
+            "DTSTART;TZID=America/New_York:20260308T030000\r\n",
+            "DURATION:PT30M\r\n",
+            "BEGIN:VALARM\r\n",
+            "ACTION:DISPLAY\r\n",
+            "TRIGGER:-PT15M\r\n",
+            "END:VALARM\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ));
+        assert_eq!(
+            display_alarms(&same_zone, utc_2026(3, 6, 0, 0)),
+            [
+                (utc_2026(3, 8, 6, 45), Some(utc_2026(3, 7, 23, 0))),
+                (utc_2026(3, 9, 6, 45), Some(utc_2026(3, 8, 23, 0))),
+                (utc_2026(3, 10, 6, 45), Some(utc_2026(3, 9, 23, 0))),
+                (utc_2026(3, 11, 6, 45), Some(utc_2026(3, 10, 23, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn email_alarms_carry_instants_and_the_recurrence_id() {
+        let data = event_data(concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "PRODID:test\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:email\r\n",
+            "DTSTART;TZID=Europe/Berlin:20300110T090000\r\n",
+            "DURATION:PT1H\r\n",
+            "RRULE:FREQ=DAILY;COUNT=2\r\n",
+            "BEGIN:VALARM\r\n",
+            "ACTION:EMAIL\r\n",
+            "TRIGGER:-PT15M\r\n",
+            "END:VALARM\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ));
+        let disabled = DefaultAlerts::disabled();
+        let source = AlarmSource::Stored(&disabled);
+        let berlin = Tz::from_str("Europe/Berlin")
+            .expect("known time zone")
+            .as_id();
+        let alarm = data
+            .next_alarm_from(naive(10, 9, 0), Tz::UTC, &source)
+            .expect("email alarm");
+        assert_eq!(alarm.alarm_time, naive(11, 7, 45));
+        assert_eq!(
+            alarm.typ,
+            CalendarAlarmType::Email {
+                event_start: naive(11, 8, 0),
+                event_start_tz: berlin,
+                event_end: naive(11, 9, 0),
+                event_end_tz: berlin,
+                recurrence_id: Some(naive(11, 9, 0)),
+            }
+        );
+    }
+
+    #[test]
+    fn trigger_durations_split_into_nominal_days_and_exact_seconds() {
+        for (trigger, expected) in [
+            ("-P1D", (-1, 0)),
+            ("-P2W", (-14, 0)),
+            ("-PT24H", (0, -86_400)),
+            ("-P1DT30M", (-1, -1_800)),
+            ("PT15M", (0, 900)),
+        ] {
+            let alarm = valarms(&format!(
+                "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:{trigger}\r\nEND:VALARM\r\n"
+            ))
+            .first()
+            .and_then(|alarm| alarm.expand_alarm(0, 0))
+            .expect("relative alarm");
+            assert_eq!(
+                alarm.delta,
+                AlarmDelta::Start(AlarmOffset {
+                    days: expected.0,
+                    seconds: expected.1,
+                }),
+                "{trigger}"
+            );
+        }
+    }
+
+    #[test]
+    fn trigger_durations_beyond_the_stored_range_saturate() {
+        let huge = ICalendarDuration {
+            neg: true,
+            weeks: u32::MAX,
+            days: u32::MAX,
+            hours: u32::MAX,
+            minutes: u32::MAX,
+            seconds: u32::MAX,
+        };
+        assert_eq!(
+            AlarmOffset::from(&huge),
+            AlarmOffset {
+                days: -i32::MAX,
+                seconds: -i32::MAX,
+            }
+        );
+        assert_eq!(
+            AlarmOffset::from(&ICalendarDuration { neg: false, ..huge }),
+            AlarmOffset {
+                days: i32::MAX,
+                seconds: i32::MAX,
+            }
+        );
     }
 }

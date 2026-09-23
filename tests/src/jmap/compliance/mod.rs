@@ -8,8 +8,8 @@ use crate::utils::account::Account;
 use crate::utils::jmap::JmapUtils;
 use crate::utils::server::{DestroyAllMailboxes, TestServer};
 use base64::{Engine, engine::general_purpose};
-use chrono::{Duration as ChronoDuration, Utc};
 use futures::FutureExt;
+use jiff::{SignedDuration, Timestamp};
 use registry::schema::{
     prelude::{ObjectType, Property},
     structs::Action,
@@ -502,6 +502,8 @@ async fn seed_blobs(ctx: &mut CompCtx<'_>) {
         .insert("jpeg".into(), jpeg_resp.blob_id().to_string());
 }
 
+const RFC2822_DATE: &str = "%a, %d %b %Y %H:%M:%S %z";
+
 struct SeedEmail {
     key: &'static str,
     rfc5322: String,
@@ -511,11 +513,12 @@ struct SeedEmail {
 }
 
 async fn seed_emails(ctx: &mut CompCtx<'_>) {
-    let now = Utc::now();
-    let days_ago = |d: i64| (now - ChronoDuration::days(d)).to_rfc3339();
-    let hours_ago = |h: i64| (now - ChronoDuration::hours(h)).to_rfc3339();
-    let date_days_ago = |d: i64| (now - ChronoDuration::days(d)).to_rfc2822();
-    let date_hours_ago = |h: i64| (now - ChronoDuration::hours(h)).to_rfc2822();
+    let now = Timestamp::now();
+    let ago = |hours: i64| now - SignedDuration::from_hours(hours);
+    let days_ago = |d: i64| ago(24 * d).to_string();
+    let hours_ago = |h: i64| ago(h).to_string();
+    let date_days_ago = |d: i64| ago(24 * d).strftime(RFC2822_DATE).to_string();
+    let date_hours_ago = |h: i64| ago(h).strftime(RFC2822_DATE).to_string();
 
     let inbox = ctx.role("inbox").to_string();
     let drafts = ctx.role_opt("drafts").unwrap_or(&inbox).to_string();

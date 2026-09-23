@@ -12,11 +12,11 @@ use crate::network::acme::{
     ParsedCert, PemCert,
 };
 use crate::{KV_ACME, Server};
-use chrono::{TimeZone, Utc};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use dns_update::DnsRecord;
 use futures::future::try_join_all;
 use rcgen::{CertificateParams, DistinguishedName, KeyPair, PKCS_ECDSA_P256_SHA256};
+use registry::types::datetime::UTCDateTime;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
@@ -461,7 +461,7 @@ impl ParsedCert {
     pub fn parse_der(der: &[u8]) -> AcmeResult<ParsedCert> {
         parse_x509_certificate(der)
             .map_err(|err| AcmeError::Crypto(format!("Failed to parse X.509 certificate: {}", err)))
-            .and_then(|(_, cert)| {
+            .map(|(_, cert)| {
                 // Add CNs and SANs to the list of names
                 let mut names: BTreeSet<String> = BTreeSet::new();
                 for name in cert.subject().iter_common_name() {
@@ -490,26 +490,16 @@ impl ParsedCert {
                     }
                 }
 
-                Ok(ParsedCert {
+                ParsedCert {
                     sans: names.into_iter().collect(),
                     issuer: cert.tbs_certificate.issuer().to_string(),
-                    valid_not_before: Utc
-                        .timestamp_opt(cert.tbs_certificate.validity().not_before.timestamp(), 0)
-                        .single()
-                        .ok_or_else(|| {
-                            AcmeError::Crypto(
-                                "Certificate not_before time is out of range".to_string(),
-                            )
-                        })?,
-                    valid_not_after: Utc
-                        .timestamp_opt(cert.tbs_certificate.validity().not_after.timestamp(), 0)
-                        .single()
-                        .ok_or_else(|| {
-                            AcmeError::Crypto(
-                                "Certificate not_after time is out of range".to_string(),
-                            )
-                        })?,
-                })
+                    valid_not_before: UTCDateTime::from_timestamp(
+                        cert.tbs_certificate.validity().not_before.timestamp(),
+                    ),
+                    valid_not_after: UTCDateTime::from_timestamp(
+                        cert.tbs_certificate.validity().not_after.timestamp(),
+                    ),
+                }
             })
     }
 }

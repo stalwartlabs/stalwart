@@ -5,8 +5,8 @@
  */
 
 use crate::config::smtp::auth::{rsa_key_parse, simple_pem_parse};
-use chrono::Utc;
 use dns_update::{DnsRecord, NamedDnsRecord};
+use jiff::{Timestamp, fmt::strtime, tz::TimeZone};
 use mail_auth::common::crypto::Ed25519Key;
 use mail_auth::dkim::generate::DkimKeyPair;
 use mail_builder::encoders::Base64Encoder;
@@ -154,7 +154,7 @@ pub fn generate_dkim_dns_record_name(key: &DkimSignature, domain: &str) -> Strin
 /// - `{algorithm}`: signing algorithm in lowercase (`rsa`, `ed25519`)
 /// - `{hash}`: hash algorithm (`sha256`)
 /// - `{version}`: DKIM version number (`1`)
-/// - `{date-<fmt>}`: current UTC date formatted with chrono strftime (e.g. `{date-%Y%m%d}`)
+/// - `{date-<fmt>}`: current UTC date formatted with strftime specifiers (e.g. `{date-%Y%m%d}`)
 /// - `{epoch}`: current UTC unix timestamp
 /// - `{random}`: random 8-character alphanumeric string
 ///
@@ -162,7 +162,7 @@ pub fn generate_dkim_selector(
     template: &str,
     sig_type: DkimSignatureType,
 ) -> Result<String, String> {
-    let now = Utc::now();
+    let now = Timestamp::now().to_zoned(TimeZone::UTC);
     let mut result = Vec::with_capacity(template.len());
     let mut chars = template.as_bytes();
 
@@ -202,7 +202,7 @@ pub fn generate_dkim_selector(
             "hash" => result.extend_from_slice(sig_type.hash().as_bytes()),
             "version" => result.extend_from_slice(sig_type.version().as_bytes()),
             "epoch" => {
-                result.extend_from_slice(now.timestamp().to_string().as_bytes());
+                result.extend_from_slice(now.timestamp().as_second().to_string().as_bytes());
             }
             "random" => {
                 let rand_str: String = rand::rng()
@@ -217,7 +217,8 @@ pub fn generate_dkim_selector(
                     if fmt.is_empty() {
                         return Err("empty strftime format in {date-}".into());
                     }
-                    let formatted = now.format(fmt).to_string();
+                    let formatted = strtime::format(fmt, &now)
+                        .map_err(|err| format!("invalid date format '{fmt}': {err}"))?;
                     if formatted.is_empty() {
                         return Err(format!("date format '{fmt}' produced empty output"));
                     }
@@ -256,7 +257,7 @@ mod tests {
             DkimSignatureType::Dkim1RsaSha256,
         )
         .unwrap();
-        let today = Utc::now().format("%Y%m%d").to_string();
+        let today = Timestamp::now().strftime("%Y%m%d").to_string();
         assert_eq!(sel, format!("rsa-{today}"));
     }
 
@@ -309,9 +310,24 @@ mod tests {
     }
 
     #[test]
+    fn unknown_date_specifier_errors() {
+        for template in ["{date-%J}", "{date-%Y%}", "{date-%+}"] {
+            let err = generate_dkim_selector(template, DkimSignatureType::default()).unwrap_err();
+            assert!(err.contains("invalid date format"), "{template}: {err}");
+        }
+    }
+
+    #[test]
+    fn date_zone_specifiers_render_utc() {
+        let sel =
+            generate_dkim_selector("{date-%Z}-{date-%z}", DkimSignatureType::default()).unwrap();
+        assert_eq!(sel, "UTC-0000");
+    }
+
+    #[test]
     fn date_month_only() {
         let sel = generate_dkim_selector("{date-%Y%m}", DkimSignatureType::Dkim1RsaSha256).unwrap();
-        let expected = Utc::now().format("%Y%m").to_string();
+        let expected = Timestamp::now().strftime("%Y%m").to_string();
         assert_eq!(sel, expected);
     }
 }

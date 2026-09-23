@@ -109,9 +109,9 @@ impl DefaultAlert {
 
     pub fn delta(&self) -> AlarmDelta {
         if self.flags & ALERT_RELATIVE_TO_END != 0 {
-            AlarmDelta::End(self.offset.as_seconds())
+            AlarmDelta::End((&self.offset).into())
         } else {
-            AlarmDelta::Start(self.offset.as_seconds())
+            AlarmDelta::Start((&self.offset).into())
         }
     }
 
@@ -876,7 +876,7 @@ impl SnoozeAlarm for ICalendarComponent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calendar::{CalendarEventData, CalendarPreferences, Timezone};
+    use crate::calendar::{AlarmOffset, CalendarEventData, CalendarPreferences, Timezone};
     use calcard::icalendar::ICalendarDuration;
 
     const EVENT: &str = concat!(
@@ -1343,9 +1343,21 @@ mod tests {
             defaults.get(1).map(|alert| alert.id.as_str()),
             Some("default-2")
         );
-        assert!(matches!(alerts[1].1.delta(), AlarmDelta::End(300)));
+        assert_eq!(
+            alerts[1].1.delta(),
+            AlarmDelta::End(AlarmOffset {
+                days: 0,
+                seconds: 300
+            })
+        );
         assert!(alerts[1].1.is_email());
-        assert!(matches!(alerts[0].1.delta(), AlarmDelta::Start(-900)));
+        assert_eq!(
+            alerts[0].1.delta(),
+            AlarmDelta::Start(AlarmOffset {
+                days: 0,
+                seconds: -900
+            })
+        );
         assert!(defaults.get(2).is_none());
         assert!(DefaultAlerts::disabled().get(0).is_none());
     }

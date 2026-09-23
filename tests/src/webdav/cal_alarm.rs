@@ -5,15 +5,23 @@
  */
 
 use crate::utils::server::TestServer;
+use calcard::common::timezone::Tz;
 use email::cache::MessageCacheFetch;
+use groupware::scheduling::{
+    ItipTime, ItipValue,
+    format::{DateStyle, TextFormatter},
+};
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
+use registry::types::EnumImpl;
+use std::str::FromStr;
 use store::write::now;
 
 pub async fn test(test: &TestServer) {
     println!("Running calendar e-mail alarms tests...");
     let account = test.account("john@example.com");
     let client = account.webdav_client();
+    let start = now() as i64 + 5;
     client
         .request_with_headers(
             "PUT",
@@ -21,7 +29,7 @@ pub async fn test(test: &TestServer) {
             [("content-type", "text/calendar; charset=utf-8")],
             TEST_ALARM_1.replace(
                 "$START",
-                &DateTime::from_timestamp(now() as i64 + 5)
+                &DateTime::from_timestamp(start)
                     .to_rfc3339()
                     .replace(['-', ':'], ""),
             ),
@@ -38,6 +46,33 @@ pub async fn test(test: &TestServer) {
         .await
         .unwrap();
     assert_eq!(messages.emails.len(), 2);
+
+    let formatter = TextFormatter::new(
+        test.server
+            .account_info(client.account_id)
+            .await
+            .unwrap()
+            .locale()
+            .as_str(),
+    )
+    .unwrap();
+    let event_time = |start: i64, tz: Tz| {
+        formatter.field_to_string(
+            &ItipValue::Time(ItipTime {
+                start,
+                tz_id: tz.as_id(),
+            }),
+            DateStyle::Short,
+        )
+    };
+    let event_start = event_time(start, Tz::UTC);
+    let event_end = event_time(
+        "2050-02-21T18:00:00-05:00"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_second(),
+        Tz::from_str("America/New_York").unwrap(),
+    );
 
     for (idx, message) in messages.emails.iter().enumerate() {
         let contents = test
@@ -79,6 +114,14 @@ pub async fn test(test: &TestServer) {
             )),
             "failed for {contents}"
         );
+        assert!(
+            contents.contains(&event_start),
+            "missing {event_start} in {contents}"
+        );
+        assert!(
+            contents.contains(&event_end),
+            "missing {event_end} in {contents}"
+        );
 
         // The logo is an inline part, so the template must reference it by cid: URI
         let html = message.html_bodies().next().unwrap().contents().to_vec();
@@ -113,7 +156,7 @@ UID: 2371c2d9-a136-43b0-bba3-f6ab249ad46e
 SUMMARY:See the pretty girl in that mirror there
 DESCRIPTION:What mirror where?!
 DTSTART:$START
-DTEND;TZID=America/New_York:21250221T180000
+DTEND;TZID=America/New_York:20500221T180000
 LOCATION:West Side
 CONFERENCE;VALUE=URI;FEATURE=VIDEO:https://meet.example.com/west-side
 BEGIN:VALARM

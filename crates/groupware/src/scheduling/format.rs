@@ -9,12 +9,15 @@ use calcard::{
     common::timezone::Tz,
     icalendar::{ICalendarDay, ICalendarFrequency, ICalendarRecurrenceRule, ICalendarWeekday},
 };
-use chrono::{DateTime, NaiveDate, TimeZone, Weekday};
 use common::i18n::{self, Locale, PluralForms};
 use compact_str::ToCompactString;
 use icu_datetime::{DateTimeFormatter, fieldsets};
 use icu_locale_core::{Locale as IcuLocale, locale};
 use icu_plurals::{PluralCategory, PluralRuleType, PluralRules, PluralRulesOptions};
+use jiff::{
+    Timestamp,
+    civil::{Date, ISOWeekDate, Weekday},
+};
 use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,11 +97,7 @@ impl TextFormatter {
                     DateStyle::Long => (&self.weekday, &self.date_long),
                 };
                 let local = tz
-                    .from_utc_datetime(
-                        &DateTime::from_timestamp(time.start, 0)
-                            .unwrap_or_default()
-                            .naive_local(),
-                    )
+                    .from_timestamp(Timestamp::from_second(time.start).unwrap_or_default())
                     .naive_local();
                 let _ = write!(
                     out,
@@ -317,22 +316,22 @@ impl TextFormatter {
 
     fn write_weekday(&self, out: &mut String, weekday: ICalendarWeekday) {
         let weekday = match weekday {
-            ICalendarWeekday::Monday => Weekday::Mon,
-            ICalendarWeekday::Tuesday => Weekday::Tue,
-            ICalendarWeekday::Wednesday => Weekday::Wed,
-            ICalendarWeekday::Thursday => Weekday::Thu,
-            ICalendarWeekday::Friday => Weekday::Fri,
-            ICalendarWeekday::Saturday => Weekday::Sat,
-            ICalendarWeekday::Sunday => Weekday::Sun,
+            ICalendarWeekday::Monday => Weekday::Monday,
+            ICalendarWeekday::Tuesday => Weekday::Tuesday,
+            ICalendarWeekday::Wednesday => Weekday::Wednesday,
+            ICalendarWeekday::Thursday => Weekday::Thursday,
+            ICalendarWeekday::Friday => Weekday::Friday,
+            ICalendarWeekday::Saturday => Weekday::Saturday,
+            ICalendarWeekday::Sunday => Weekday::Sunday,
         };
 
-        if let Some(date) = NaiveDate::from_isoywd_opt(2024, 1, weekday) {
+        if let Ok(date) = ISOWeekDate::new(2024, 1, weekday).map(ISOWeekDate::date) {
             let _ = write!(out, "{}", self.weekday.format(&date));
         }
     }
 
     fn write_month(&self, out: &mut String, month: u8) {
-        if let Some(date) = NaiveDate::from_ymd_opt(2024, month.clamp(1, 12) as u32, 1) {
+        if let Ok(date) = Date::new(2024, month.clamp(1, 12) as i8, 1) {
             let _ = write!(out, "{}", self.month.format(&date));
         }
     }

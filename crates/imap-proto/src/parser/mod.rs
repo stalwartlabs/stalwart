@@ -31,8 +31,8 @@ use crate::{
     protocol::{Flag, Sequence},
     receiver::{ArgumentBytes, CommandParser},
 };
-use chrono::{DateTime, NaiveDate};
 use compact_str::CompactString;
+use jiff::{civil::Time, fmt::strtime, tz::Offset};
 use std::{borrow::Cow, str::FromStr};
 
 pub type Result<T> = std::result::Result<T, Cow<'static, str>>;
@@ -315,17 +315,18 @@ pub fn parse_datetime(value: &[u8]) -> Result<i64> {
         return Ok(timestamp);
     }
 
-    parse_datetime_chrono(value)
+    parse_datetime_slow(value)
 }
 
 #[inline(never)]
-fn parse_datetime_chrono(value: &[u8]) -> Result<i64> {
+fn parse_datetime_slow(value: &[u8]) -> Result<i64> {
     std::str::from_utf8(value)
         .map_err(|_| Cow::from("Expected date/time, found an invalid UTF-8 string."))
         .and_then(|datetime| {
-            DateTime::parse_from_str(datetime.trim(), "%d-%b-%Y %H:%M:%S %z")
+            strtime::parse("%d-%b-%Y %H:%M:%S %z", datetime.trim())
+                .and_then(|parsed| parsed.to_timestamp())
+                .map(|timestamp| timestamp.as_second())
                 .map_err(|_| Cow::from(format!("Failed to parse date/time '{}'.", datetime)))
-                .map(|dt| dt.timestamp())
         })
 }
 
@@ -334,22 +335,19 @@ pub fn parse_date(value: &[u8]) -> Result<i64> {
         return Ok(timestamp);
     }
 
-    parse_date_chrono(value)
+    parse_date_slow(value)
 }
 
 #[inline(never)]
-fn parse_date_chrono(value: &[u8]) -> Result<i64> {
+fn parse_date_slow(value: &[u8]) -> Result<i64> {
     std::str::from_utf8(value)
         .map_err(|_| Cow::from("Expected date, found an invalid UTF-8 string."))
         .and_then(|date| {
-            NaiveDate::parse_from_str(date.trim(), "%d-%b-%Y")
+            strtime::parse("%d-%b-%Y", date.trim())
+                .and_then(|parsed| parsed.to_date())
+                .and_then(|parsed| Offset::UTC.to_timestamp(parsed.to_datetime(Time::midnight())))
+                .map(|timestamp| timestamp.as_second())
                 .map_err(|_| Cow::from(format!("Failed to parse date '{}'.", date)))
-                .map(|dt| {
-                    dt.and_hms_opt(0, 0, 0)
-                        .unwrap_or_default()
-                        .and_utc()
-                        .timestamp()
-                })
         })
 }
 
@@ -658,6 +656,7 @@ impl<T: PartialEq> PushUnique<T> for Vec<T> {
 #[cfg(test)]
 mod tests {
     use crate::{Command, protocol::Sequence, receiver::CommandParser};
+    use jiff::Timestamp;
 
     #[test]
     fn parse_command() {
@@ -823,13 +822,23 @@ mod tests {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
 
+    fn assert_fast_path_matches(fast: super::Result<i64>, slow: super::Result<i64>, input: &str) {
+        let beyond_slow_path_range = matches!(
+            (&fast, &slow),
+            (Ok(timestamp), Err(_)) if *timestamp > Timestamp::MAX.as_second()
+        );
+        if !beyond_slow_path_range {
+            assert_eq!(format!("{fast:?}"), format!("{slow:?}"), "{input:?}");
+        }
+    }
+
     #[test]
-    fn date_fast_path_matches_chrono() {
+    fn date_fast_path_matches_slow_path() {
         for year in (0..=9999)
             .step_by(7)
             .chain([1, 4, 100, 400, 1900, 2000, 2024, 9999])
         {
-            for (index, month) in MONTHS.iter().enumerate() {
+            for month in MONTHS {
                 for day in [0u32, 1, 9, 10, 28, 29, 30, 31, 32] {
                     for text in [
                         format!("{day}-{month}-{year:04}"),
@@ -838,10 +847,10 @@ mod tests {
                         format!("{day}-{}-{year}", month.to_ascii_lowercase()),
                         format!("{day}-{month}-{year:05}"),
                     ] {
-                        assert_eq!(
-                            format!("{:?}", super::parse_date(text.as_bytes())),
-                            format!("{:?}", super::parse_date_chrono(text.as_bytes())),
-                            "{text:?} month index {index}"
+                        assert_fast_path_matches(
+                            super::parse_date(text.as_bytes()),
+                            super::parse_date_slow(text.as_bytes()),
+                            &text,
                         );
                     }
                 }
@@ -868,16 +877,16 @@ mod tests {
             "1-Fe\u{fc}-1994",
             "\u{ff}",
         ] {
-            assert_eq!(
-                format!("{:?}", super::parse_date(text.as_bytes())),
-                format!("{:?}", super::parse_date_chrono(text.as_bytes())),
-                "{text:?}"
+            assert_fast_path_matches(
+                super::parse_date(text.as_bytes()),
+                super::parse_date_slow(text.as_bytes()),
+                text,
             );
         }
     }
 
     #[test]
-    fn datetime_fast_path_matches_chrono() {
+    fn datetime_fast_path_matches_slow_path() {
         for (day, month, year) in [
             (7u32, "Feb", 1994u32),
             (17, "Jul", 1996),
@@ -902,10 +911,10 @@ mod tests {
                             let text = format!(
                                 "{day}-{month}-{year:04} {hour:02}:{minute:02}:{second:02} {sign}{tz_hour:02}{tz_minute:02}"
                             );
-                            assert_eq!(
-                                format!("{:?}", super::parse_datetime(text.as_bytes())),
-                                format!("{:?}", super::parse_datetime_chrono(text.as_bytes())),
-                                "{text:?}"
+                            assert_fast_path_matches(
+                                super::parse_datetime(text.as_bytes()),
+                                super::parse_datetime_slow(text.as_bytes()),
+                                &text,
                             );
                         }
                     }
@@ -931,10 +940,10 @@ mod tests {
             "",
             "\u{ff}",
         ] {
-            assert_eq!(
-                format!("{:?}", super::parse_datetime(text.as_bytes())),
-                format!("{:?}", super::parse_datetime_chrono(text.as_bytes())),
-                "{text:?}"
+            assert_fast_path_matches(
+                super::parse_datetime(text.as_bytes()),
+                super::parse_datetime_slow(text.as_bytes()),
+                text,
             );
         }
     }

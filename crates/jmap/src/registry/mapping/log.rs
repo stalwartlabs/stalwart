@@ -11,7 +11,7 @@ use crate::{
         query::RegistryQueryFilters,
     },
 };
-use chrono::DateTime;
+use jiff::Timestamp;
 use jmap_proto::types::state::State;
 use registry::{
     jmap::IntoValue,
@@ -281,19 +281,19 @@ fn is_log_header(line: &str) -> bool {
     let Some((timestamp, _)) = line.split_once(' ') else {
         return false;
     };
-    DateTime::parse_from_rfc3339(timestamp).is_ok()
+    timestamp.parse::<Timestamp>().is_ok()
 }
 
 fn log_from_line(line: &str) -> Option<Log> {
     let line = strip_ansi(line);
     let (timestamp, rest) = line.split_once(' ')?;
-    let timestamp = DateTime::parse_from_rfc3339(timestamp).ok()?;
+    let timestamp = timestamp.parse::<Timestamp>().ok()?;
     let (level, rest) = rest.trim().split_once(' ')?;
     let (_, rest) = rest.trim().split_once(" (")?;
     let (event_id, details) = rest.split_once(")")?;
 
     Some(Log {
-        timestamp: UTCDateTime::from_timestamp(timestamp.timestamp()),
+        timestamp: UTCDateTime::from_timestamp(timestamp.as_second()),
         level: TracingLevel::parse(&level.to_ascii_lowercase()).unwrap_or(TracingLevel::Info),
         event: EventType::parse(event_id)?,
         details: details.trim().to_string(),

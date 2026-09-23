@@ -10,7 +10,10 @@ use ahash::AHashSet;
 use calcard::{common::timezone::Tz, icalendar::ICalendar};
 use groupware::{
     DavResourceName,
-    calendar::{CalendarEventData, expand::CalendarEventExpansion},
+    calendar::{
+        CalendarEventData,
+        expand::{CalendarEventExpansion, RangeFlags},
+    },
 };
 use hyper::StatusCode;
 use std::str::FromStr;
@@ -268,9 +271,7 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
         .events
         .into_iter()
         .map(|e| {
-            let e = e.try_into_date_time().unwrap();
-            let start = e.start.timestamp();
-            let end = e.end.timestamp();
+            let (start, end) = e.timestamps();
             let min = std::cmp::min(start, end);
             let max = std::cmp::max(start, end);
 
@@ -287,6 +288,10 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
                 start,
                 end,
                 start_naive: 0,
+                end_naive: 0,
+                start_tz: Tz::Floating,
+                end_tz: Tz::Floating,
+                flags: RangeFlags::default(),
             }
         })
         .collect::<Vec<_>>();
@@ -356,9 +361,18 @@ fn roundtrip_expansion(ics: &str, ignore_errors: bool) {
         event.own_recurrence_id = None;
         event.series_recurrence_id = None;
         event.start_naive = 0;
+        event.end_naive = 0;
+        event.start_tz = Tz::Floating;
+        event.end_tz = Tz::Floating;
+        event.flags = RangeFlags::default();
     }
 
     assert_eq!(events, events_archive);
+}
+
+#[test]
+fn calendar_expand_second_pass_of_a_repeated_hour() {
+    roundtrip_expansion(ICAL_REPEATED_HOUR_ICS, false);
 }
 
 #[test]
@@ -1035,6 +1049,43 @@ DURATION:PT2H10M
 RRULE:FREQ=DAILY;INTERVAL=3
 SUMMARY:Auckland DST fall-back recurrence
 UID:auckland-dst-fallback@example.com
+END:VEVENT
+END:VCALENDAR
+"#;
+
+const ICAL_REPEATED_HOUR_ICS: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+DTSTAMP:20261001T000000Z
+DTSTART;TZID=America/New_York:20261101T013000
+DURATION:PT1H
+SUMMARY:Ends in the repeated hour
+UID:repeated-hour-duration@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261001T000000Z
+DTSTART;TZID=America/New_York:20261030T013000
+DTEND;TZID=America/New_York:20261030T020000
+RRULE:FREQ=DAILY;COUNT=4
+SUMMARY:Daily series ending in the repeated hour
+UID:repeated-hour-series@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261001T000000Z
+DTSTART;TZID=America/New_York:20261029T013000
+DURATION:PT30M
+RRULE:FREQ=DAILY;COUNT=5
+SUMMARY:Series moved by an exact hour
+UID:repeated-hour-shift@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261001T000000Z
+RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20261030T013000
+DTSTART;TZID=Europe/London:20261030T063000
+DURATION:PT30M
+SUMMARY:Series moved by an exact hour
+UID:repeated-hour-shift@example.com
 END:VEVENT
 END:VCALENDAR
 "#;

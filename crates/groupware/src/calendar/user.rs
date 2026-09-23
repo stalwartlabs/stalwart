@@ -1346,9 +1346,13 @@ impl ShiftedEntry for ICalendarEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::expand::NaiveTimestamp;
     use crate::calendar::sequence::ICalendarSequence;
     use calcard::jscalendar::JSCalendar;
-    use chrono::NaiveDate;
+    use jiff::{
+        ToSpan,
+        civil::{Date, DateTime},
+    };
     use serde_json::{Value, json};
 
     const EVENT: &str = concat!(
@@ -1577,10 +1581,10 @@ mod tests {
             .expect("valid personal data")
     }
 
-    fn occurrence_key(year: i32, month: u32, day: u32, hour: u32) -> u32 {
-        NaiveDate::from_ymd_opt(year, month, day)
-            .and_then(|date| date.and_hms_opt(hour, 0, 0))
-            .and_then(|date| RecurrenceKey::from_recurrence_id(date.and_utc().timestamp()))
+    fn occurrence_key(year: i16, month: i8, day: i8, hour: i8) -> u32 {
+        DateTime::new(year, month, day, hour, 0, 0, 0)
+            .ok()
+            .and_then(|date| RecurrenceKey::from_recurrence_id(date.naive_timestamp()))
             .expect("valid recurrence key")
             .prefix()
     }
@@ -2120,9 +2124,9 @@ mod tests {
             .join(",");
         let overrides = (1..=130)
             .map(|day| {
-                let date = NaiveDate::from_ymd_opt(2024, 1, 1)
-                    .and_then(|date| date.checked_add_days(chrono::Days::new(day)))
-                    .map(|date| date.format("%Y%m%d").to_string())
+                let date = Date::new(2024, 1, 1)
+                    .and_then(|date| date.checked_add(day.days()))
+                    .map(|date| date.strftime("%Y%m%d").to_string())
                     .expect("valid date");
                 format!(
                     concat!(
@@ -2491,10 +2495,9 @@ mod tests {
         let dropped = event.copy_user_data(&from_json(&view));
         assert_eq!(
             dropped,
-            [NaiveDate::from_ymd_opt(2030, 6, 3)
-                .and_then(|date| date.and_hms_opt(9, 0, 0))
-                .map(|date| date.and_utc().timestamp())
-                .expect("valid date")]
+            [DateTime::new(2030, 6, 3, 9, 0, 0, 0)
+                .expect("valid date")
+                .naive_timestamp()]
         );
         assert!(!event.to_string().contains("COLOR:azure"), "{event}");
     }

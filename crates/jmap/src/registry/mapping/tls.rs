@@ -19,7 +19,7 @@ use registry::{
         prelude::Property,
         structs::{AcmeProvider, Certificate},
     },
-    types::{datetime::UTCDateTime, map::Map},
+    types::map::Map,
 };
 use utils::map::vec_map::VecMap;
 
@@ -89,10 +89,8 @@ pub(crate) async fn validate_certificate(
         match cert.certificate.value().await {
             Ok(pem) => match ParsedCert::parse(pem.as_ref()) {
                 Ok(parsed) => {
-                    cert.not_valid_after =
-                        UTCDateTime::from_timestamp(parsed.valid_not_after.timestamp());
-                    cert.not_valid_before =
-                        UTCDateTime::from_timestamp(parsed.valid_not_before.timestamp());
+                    cert.not_valid_after = parsed.valid_not_after;
+                    cert.not_valid_before = parsed.valid_not_before;
                     cert.issuer = parsed.issuer;
                     cert.subject_alternative_names = Map::new(parsed.sans);
 

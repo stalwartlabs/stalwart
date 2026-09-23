@@ -1069,19 +1069,6 @@ impl StableInstanceDuration for CalendarEventData {
     }
 }
 
-trait FixedOffsetZone {
-    fn has_fixed_offset(&self) -> bool;
-}
-
-impl FixedOffsetZone for Tz {
-    fn has_fixed_offset(&self) -> bool {
-        match self {
-            Tz::Floating | Tz::Fixed(_) => true,
-            Tz::Tz(_) => *self == Tz::UTC,
-        }
-    }
-}
-
 pub(super) trait EventInstanceBuilder {
     fn instance(
         &self,
@@ -1195,7 +1182,7 @@ impl EventInstanceBuilder for CalendarEventData {
         {
             entries.push(dtend.with_date_time(
                 ICalendarProperty::Dtend,
-                expansion.start_naive + (end.date_time - start.date_time).num_seconds(),
+                expansion.start_naive + end.date_time.duration_since(start.date_time).as_secs(),
                 end_tz,
                 InstanceParameters::All,
             ));

@@ -5,12 +5,12 @@
  */
 
 use crate::network::acme::{AcmeError, AcmeResult};
-use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use hyper::{
     Method, StatusCode,
     header::{CONTENT_TYPE, USER_AGENT},
 };
+use jiff::{Timestamp, fmt::rfc2822::DateTimeParser};
 use reqwest::Response;
 use std::time::Duration;
 
@@ -119,23 +119,48 @@ fn alternate_links<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
 }
 
 pub(crate) fn parse_retry_after(response: &Response) -> Option<Duration> {
-    let value = response.headers().get("Retry-After")?.to_str().ok()?;
+    retry_after(
+        response.headers().get("Retry-After")?.to_str().ok()?,
+        Timestamp::now(),
+    )
+}
+
+fn retry_after(value: &str, now: Timestamp) -> Option<Duration> {
     if let Ok(secs) = value.parse::<u64>() {
         Some(Duration::from_secs(secs + 1))
-    } else if let Ok(dt) = DateTime::parse_from_rfc2822(value) {
-        Utc::now()
-            .signed_duration_since(dt.with_timezone(&Utc))
-            .to_std()
-            .map(|dur| dur + Duration::from_secs(1))
-            .ok()
     } else {
-        None
+        let retry_at = DateTimeParser::new().parse_timestamp(value).ok()?;
+        Duration::try_from(retry_at.duration_since(now))
+            .ok()
+            .map(|delay| delay + Duration::from_secs(1))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::alternate_links;
+    use super::{alternate_links, retry_after};
+    use jiff::Timestamp;
+    use std::time::Duration;
+
+    #[test]
+    fn retry_after_waits_until_the_given_http_date() {
+        let now = Timestamp::from_second(1_445_412_000).expect("valid timestamp");
+        for (value, expected) in [
+            (
+                "Wed, 21 Oct 2015 07:28:00 GMT",
+                Some(Duration::from_secs(481)),
+            ),
+            (
+                "Wed, 21 Oct 2015 07:28:00 +0000",
+                Some(Duration::from_secs(481)),
+            ),
+            ("Wed, 21 Oct 2015 07:00:00 GMT", None),
+            ("120", Some(Duration::from_secs(121))),
+            ("soon", None),
+        ] {
+            assert_eq!(retry_after(value, now), expected, "{value}");
+        }
+    }
 
     #[test]
     fn parses_single_alternate_link() {

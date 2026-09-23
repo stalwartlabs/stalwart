@@ -13,7 +13,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc
 serde = { version = "1.0", features = ["derive"]}
 mail-auth = { version = "0.13" }
 ahash = { version = "0.8", features = ["serde"] }
-chrono = "0.4"
+jiff = "0.2.37"
 aws-lc-rs = { version = "1" }
 base64 = "0.23"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"]}

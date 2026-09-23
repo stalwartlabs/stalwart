@@ -5,7 +5,6 @@
  */
 
 use crate::auth::oauth::FormData;
-use chrono::Utc;
 use common::{
     KV_RATE_LIMIT_CONTACT, Server,
     config::network::{ContactForm, FieldOrDefault},
@@ -21,6 +20,7 @@ use mail_builder::{
     headers::{
         HeaderType,
         address::{Address, EmailAddress},
+        date::Date,
     },
     mime::make_boundary,
 };
@@ -128,11 +128,7 @@ impl FormHandler for Server {
                     body.push_str("\r\n");
                 }
             }
-            let _ = write!(
-                &mut body,
-                "Date: {}\r\n",
-                Utc::now().format("%a, %d %b %Y %T %z")
-            );
+            let _ = write!(&mut body, "Date: {}\r\n", Date::now().to_rfc822());
             let _ = write!(
                 &mut body,
                 "IP: {}:{}\r\n",

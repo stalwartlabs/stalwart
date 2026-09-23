@@ -10,7 +10,7 @@ use crate::{
     },
     utils::{dns::DnsCache, server::TestServer, smtp::SmtpConnection},
 };
-use chrono::{TimeDelta, Utc};
+use jiff::{SignedDuration, Timestamp};
 use std::time::Instant;
 
 pub async fn test(test: &TestServer) {
@@ -101,8 +101,8 @@ pub async fn test(test: &TestServer) {
     // Vacation responses should honor the configured date ranges
     client
         .vacation_response_set_dates(
-            (Utc::now() + TimeDelta::try_days(1).unwrap_or_default())
-                .timestamp()
+            (Timestamp::now() + SignedDuration::from_hours(24))
+                .as_second()
                 .into(),
             None,
         )
@@ -125,8 +125,8 @@ pub async fn test(test: &TestServer) {
 
     client
         .vacation_response_set_dates(
-            (Utc::now() - TimeDelta::try_days(1).unwrap_or_default())
-                .timestamp()
+            (Timestamp::now() - SignedDuration::from_hours(24))
+                .as_second()
                 .into(),
             None,
         )

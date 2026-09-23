@@ -4,17 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ArchivedCalendarEventData;
+use super::{AlarmDelta, ArchivedCalendarEventData};
 use crate::calendar::CalendarEventData;
 use ahash::AHashSet;
 use calcard::{
-    common::{DateTimeResult, timezone::Tz},
+    common::{
+        DateTimeResult,
+        timezone::{Tz, ZonedDateTime},
+    },
     icalendar::{
         ArchivedICalendarComponent, ArchivedICalendarParameterName, ICalendarComponent,
         ICalendarParameterName, ICalendarProperty, ICalendarValue,
     },
 };
-use chrono::DateTime;
+use jiff::{SignedDuration, Timestamp, civil::DateTime};
 use std::str::FromStr;
 use store::write::bitpack::BitpackIterator;
 use types::TimeRange;
@@ -22,8 +25,27 @@ use utils::codec::leb128::Leb128Reader;
 
 const RECURRENCE_KEY_EPOCH: i64 = -2208988800;
 const RECURRENCE_KEY_GRANULARITY: i64 = 60;
-const SECONDS_PER_DAY: i64 = 86_400;
+pub(crate) const SECONDS_PER_DAY: i64 = 86_400;
+const NAIVE_EPOCH: DateTime = DateTime::constant(1970, 1, 1, 0, 0, 0, 0);
 pub const MAX_UTC_OFFSET: i64 = SECONDS_PER_DAY;
+
+pub trait NaiveTimestamp: Sized {
+    fn naive_timestamp(&self) -> i64;
+
+    fn from_naive_timestamp(timestamp: i64) -> Option<Self>;
+}
+
+impl NaiveTimestamp for DateTime {
+    fn naive_timestamp(&self) -> i64 {
+        self.duration_since(NAIVE_EPOCH).as_secs()
+    }
+
+    fn from_naive_timestamp(timestamp: i64) -> Option<Self> {
+        NAIVE_EPOCH
+            .checked_add(SignedDuration::from_secs(timestamp))
+            .ok()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecurrenceKey(u32);
@@ -63,17 +85,17 @@ impl RecurrenceId {
     fn from_utc(utc: i64, tz: Tz) -> Option<Self> {
         Some(RecurrenceId {
             utc,
-            naive: DateTime::from_timestamp(utc, 0)?
-                .with_timezone(&tz)
-                .naive_local()
-                .and_utc()
-                .timestamp(),
+            naive: tz
+                .from_timestamp(Timestamp::from_second(utc).ok()?)
+                .naive_timestamp(),
         })
     }
 }
 
 pub trait ComponentRecurrenceId {
     fn recurrence_id(&self, fallback_tz: Tz) -> Option<RecurrenceId>;
+
+    fn recurrence_tz(&self, fallback_tz: Tz) -> Option<Tz>;
 
     fn this_and_future_tz(&self, fallback_tz: Tz) -> Option<Tz>;
 }
@@ -90,6 +112,11 @@ impl ComponentRecurrenceId for ArchivedICalendarComponent {
                 .to_date_time()?,
             fallback_tz,
         )
+    }
+
+    fn recurrence_tz(&self, fallback_tz: Tz) -> Option<Tz> {
+        self.property(&ICalendarProperty::RecurrenceId)
+            .map(|entry| resolve_tz(entry.tz_id(), fallback_tz))
     }
 
     fn this_and_future_tz(&self, fallback_tz: Tz) -> Option<Tz> {
@@ -116,6 +143,11 @@ impl ComponentRecurrenceId for ICalendarComponent {
         )
     }
 
+    fn recurrence_tz(&self, fallback_tz: Tz) -> Option<Tz> {
+        self.property(&ICalendarProperty::RecurrenceId)
+            .map(|entry| resolve_tz(entry.tz_id(), fallback_tz))
+    }
+
     fn this_and_future_tz(&self, fallback_tz: Tz) -> Option<Tz> {
         let entry = self.property(&ICalendarProperty::RecurrenceId)?;
         entry
@@ -138,37 +170,97 @@ fn resolve_recurrence_id(
     fallback_tz: Tz,
 ) -> Option<RecurrenceId> {
     let tz = resolve_tz(tz_id, fallback_tz);
-    let date_time = date_time.to_date_time_with_tz(tz)?.with_timezone(&tz);
+    let date_time = date_time.to_date_time_with_tz(tz)?.with_timezone(tz);
 
     Some(RecurrenceId {
         utc: date_time.timestamp(),
-        naive: date_time.naive_local().and_utc().timestamp(),
+        naive: date_time.naive_timestamp(),
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecurrenceShift {
+    tz: Tz,
+    nominal: i64,
+    exact: i64,
+}
+
+impl RecurrenceShift {
+    pub(crate) fn new(
+        tz: Tz,
+        start_naive: i64,
+        recurrence_id: RecurrenceId,
+        recurrence_tz: Tz,
+    ) -> Option<Self> {
+        let recurrence_naive = if recurrence_tz == tz {
+            recurrence_id.naive
+        } else {
+            RecurrenceId::from_utc(recurrence_id.utc, tz)?.naive
+        };
+        Some(RecurrenceShift {
+            tz,
+            nominal: start_naive - recurrence_naive,
+            exact: resolve_local(tz, start_naive)? - recurrence_id.utc,
+        })
+    }
+
+    pub(crate) fn recurrence_id(
+        &self,
+        tz: Tz,
+        flags: RangeFlags,
+        start_naive: i64,
+        recurrence_tz: Tz,
+    ) -> Option<RecurrenceId> {
+        if tz == self.tz {
+            let naive = start_naive - self.nominal;
+            let utc = resolve_local(tz, naive)?;
+            if recurrence_tz == tz {
+                Some(RecurrenceId { utc, naive })
+            } else {
+                RecurrenceId::from_utc(utc, recurrence_tz)
+            }
+        } else {
+            RecurrenceId::from_utc(
+                flags.resolve_start(tz, start_naive)?.timestamp() - self.exact,
+                recurrence_tz,
+            )
+        }
+    }
+}
+
 #[derive(Debug, Default)]
-struct ThisAndFutureShifts(Vec<(u32, i64)>);
+struct ThisAndFutureShifts(Vec<(u32, RecurrenceShift)>);
 
 impl ThisAndFutureShifts {
     fn recurrence_id(
         &mut self,
         comp_id: u32,
+        flags: RangeFlags,
         own_recurrence_id: Option<RecurrenceId>,
         component_tz: Tz,
         start_naive: i64,
         recurrence_tz: Tz,
     ) -> Option<RecurrenceId> {
-        let start = resolve_local(component_tz, start_naive)?;
         match own_recurrence_id {
             Some(own_recurrence_id) => {
-                self.0.push((comp_id, start - own_recurrence_id.utc));
+                self.0.extend(
+                    RecurrenceShift::new(
+                        component_tz,
+                        start_naive,
+                        own_recurrence_id,
+                        recurrence_tz,
+                    )
+                    .map(|shift| (comp_id, shift)),
+                );
                 None
             }
             None => self
                 .0
                 .iter()
                 .find(|(id, _)| *id == comp_id)
-                .and_then(|(_, shift)| RecurrenceId::from_utc(start - shift, recurrence_tz)),
+                .and_then(|(_, shift)| {
+                    shift.recurrence_id(component_tz, flags, start_naive, recurrence_tz)
+                }),
         }
     }
 }
@@ -181,9 +273,21 @@ pub struct CalendarEventExpansion {
     pub start: i64,
     pub end: i64,
     pub start_naive: i64,
+    pub end_naive: i64,
+    pub start_tz: Tz,
+    pub end_tz: Tz,
+    pub flags: RangeFlags,
 }
 
 impl CalendarEventExpansion {
+    pub fn alarm_time(&self, delta: &AlarmDelta, default_tz: Tz) -> Option<i64> {
+        delta.to_timestamp(
+            &self.flags.resolve_start(self.start_tz, self.start_naive)?,
+            &self.flags.resolve_end(self.end_tz, self.end_naive)?,
+            default_tz,
+        )
+    }
+
     pub fn recurrence_id(&self) -> RecurrenceId {
         self.own_recurrence_id
             .or(self.series_recurrence_id)
@@ -199,6 +303,13 @@ impl CalendarEventExpansion {
 }
 
 impl ArchivedCalendarEventData {
+    pub fn component_tz(&self, comp_id: u32) -> Option<Tz> {
+        self.time_ranges
+            .iter()
+            .find(|range| range.id.to_native() as u32 == comp_id)
+            .and_then(|range| Tz::from_id(range.start_tz.to_native()))
+    }
+
     pub fn expand(&self, default_tz: Tz, limit: TimeRange) -> Option<Vec<CalendarEventExpansion>> {
         let mut expansion = Vec::with_capacity(self.time_ranges.len());
         let base_offset = self.base_offset.to_native();
@@ -211,6 +322,7 @@ impl ArchivedCalendarEventData {
             let comp_id = range.id.to_native() as u32;
             let component = self.event.components.get(comp_id as usize)?;
             let duration = range.duration.to_native() as i64;
+            let flags = RangeFlags::from_bits(range.flags);
             let component_tz = Tz::from_id(range.start_tz.to_native())?;
             let mut own_recurrence_id = self
                 .time_ranges
@@ -241,6 +353,7 @@ impl ArchivedCalendarEventData {
                     let series_recurrence_id = this_and_future_tz.and_then(|recurrence_tz| {
                         shifts.recurrence_id(
                             comp_id,
+                            flags,
                             own_recurrence_id,
                             component_tz,
                             start_date_naive,
@@ -248,11 +361,12 @@ impl ArchivedCalendarEventData {
                         )
                     });
                     let (Some(start), Some(end)) = (
-                        resolve_local(start_tz, start_date_naive),
-                        resolve_local(end_tz, end_date_naive),
+                        flags.resolve_start(start_tz, start_date_naive),
+                        flags.resolve_end(end_tz, end_date_naive),
                     ) else {
                         continue;
                     };
+                    let (start, end) = (start.timestamp(), end.timestamp());
 
                     if limit.is_in_range(is_todo, start, end) {
                         expansion.push(CalendarEventExpansion {
@@ -262,6 +376,10 @@ impl ArchivedCalendarEventData {
                             start,
                             end,
                             start_naive: start_date_naive,
+                            end_naive: end_date_naive,
+                            start_tz,
+                            end_tz,
+                            flags,
                         });
                     } else if start > limit.end {
                         continue 'outer;
@@ -273,6 +391,7 @@ impl ArchivedCalendarEventData {
                 let series_recurrence_id = this_and_future_tz.and_then(|recurrence_tz| {
                     shifts.recurrence_id(
                         comp_id,
+                        flags,
                         own_recurrence_id,
                         component_tz,
                         start_date_naive,
@@ -280,17 +399,21 @@ impl ArchivedCalendarEventData {
                     )
                 });
                 if let (Some(start), Some(end)) = (
-                    resolve_local(start_tz, start_date_naive),
-                    resolve_local(end_tz, end_date_naive),
-                ) && limit.is_in_range(is_todo, start, end)
+                    flags.resolve_start(start_tz, start_date_naive),
+                    flags.resolve_end(end_tz, end_date_naive),
+                ) && limit.is_in_range(is_todo, start.timestamp(), end.timestamp())
                 {
                     expansion.push(CalendarEventExpansion {
                         comp_id,
                         own_recurrence_id,
                         series_recurrence_id,
-                        start,
-                        end,
+                        start: start.timestamp(),
+                        end: end.timestamp(),
                         start_naive: start_date_naive,
+                        end_naive: end_date_naive,
+                        start_tz,
+                        end_tz,
+                        flags,
                     });
                 }
             }
@@ -323,6 +446,7 @@ impl CalendarEventData {
             let comp_id = range.id as u32;
             let component = self.event.components.get(comp_id as usize)?;
             let duration = range.duration as i64;
+            let flags = RangeFlags::from_bits(range.flags);
             let component_tz = Tz::from_id(range.start_tz)?;
             let mut own_recurrence_id = self
                 .time_ranges
@@ -347,6 +471,7 @@ impl CalendarEventData {
                 let series_recurrence_id = this_and_future_tz.and_then(|recurrence_tz| {
                     shifts.recurrence_id(
                         comp_id,
+                        flags,
                         own_recurrence_id,
                         component_tz,
                         start_date_naive,
@@ -364,16 +489,20 @@ impl CalendarEventData {
 
                 let end_date_naive = start_date_naive + duration;
                 if let (Some(start), Some(end)) = (
-                    resolve_local(start_tz, start_date_naive),
-                    resolve_local(end_tz, end_date_naive),
+                    flags.resolve_start(start_tz, start_date_naive),
+                    flags.resolve_end(end_tz, end_date_naive),
                 ) {
                     expansion.push(CalendarEventExpansion {
                         comp_id,
                         own_recurrence_id,
                         series_recurrence_id,
-                        start,
-                        end,
+                        start: start.timestamp(),
+                        end: end.timestamp(),
                         start_naive: start_date_naive,
+                        end_naive: end_date_naive,
+                        start_tz,
+                        end_tz,
+                        flags,
                     });
                 }
             };
@@ -410,16 +539,25 @@ impl CalendarEventData {
         let dtstart = component.property(&ICalendarProperty::Dtstart)?;
         let start = dtstart.values.first()?.as_partial_date_time()?;
         let start_date_time = start.to_date_time()?;
-        let start_date_naive = start_date_time.date_time.and_utc().timestamp();
-        let (component_tz, mut end_tz, duration) = match self
+        let start_date_naive = start_date_time.date_time.naive_timestamp();
+        let effective_tz = |tz: Tz| {
+            if tz.is_floating() && !default_tz.is_floating() {
+                default_tz
+            } else {
+                tz
+            }
+        };
+        let (component_tz, end_zoned) = match self
             .time_ranges
             .iter()
             .find(|range| range.id as u32 == comp_id)
         {
             Some(range) => (
                 Tz::from_id(range.start_tz)?,
-                Tz::from_id(range.end_tz)?,
-                range.duration as i64,
+                RangeFlags::from_bits(range.flags).resolve_end(
+                    effective_tz(Tz::from_id(range.end_tz)?),
+                    start_date_naive + range.duration as i64,
+                )?,
             ),
             None => {
                 let resolver = self.event.build_tz_resolver();
@@ -440,59 +578,114 @@ impl CalendarEventData {
                             .map(|tz_id| resolver.resolve_or_default(Some(tz_id)))
                     })
                     .unwrap_or(start_tz);
-                let duration = match (
+                let end = match (
                     end,
                     component
                         .property(&ICalendarProperty::Duration)
                         .and_then(|entry| entry.values.first()),
                 ) {
-                    (Some(end), _) => end.date_time.and_utc().timestamp() - start_date_naive,
-                    (None, Some(ICalendarValue::Duration(duration))) => duration.as_seconds(),
-                    (None, _) if !start.has_time() => SECONDS_PER_DAY,
-                    (None, _) => 0,
+                    (Some(end), _) => effective_tz(end_tz).from_local(end.date_time)?,
+                    (None, Some(ICalendarValue::Duration(duration))) => effective_tz(start_tz)
+                        .from_local(start_date_time.date_time)?
+                        .checked_add_nominal(duration.to_nominal()?)?,
+                    (None, _) if !start.has_time() => resolve_local_zoned(
+                        effective_tz(end_tz),
+                        start_date_naive + SECONDS_PER_DAY,
+                    )?,
+                    (None, _) => resolve_local_zoned(effective_tz(end_tz), start_date_naive)?,
                 };
-                (start_tz, end_tz, duration)
+                (start_tz, end)
             }
         };
-        let mut start_tz = component_tz;
-
-        if start_tz.is_floating() && !default_tz.is_floating() {
-            start_tz = default_tz;
-        }
-        if end_tz.is_floating() && !default_tz.is_floating() {
-            end_tz = default_tz;
-        }
+        let start_zoned = resolve_local_zoned(effective_tz(component_tz), start_date_naive)?;
 
         Some(CalendarEventExpansion {
             comp_id,
             own_recurrence_id: component.recurrence_id(component_tz),
             series_recurrence_id: None,
-            start: resolve_local(start_tz, start_date_naive)?,
-            end: resolve_local(end_tz, start_date_naive + duration)?,
+            start: start_zoned.timestamp(),
+            end: end_zoned.timestamp(),
             start_naive: start_date_naive,
+            end_naive: end_zoned.naive_timestamp(),
+            start_tz: start_zoned.timezone(),
+            end_tz: end_zoned.timezone(),
+            flags: RangeFlags::of(&start_zoned, &end_zoned),
         })
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct RangeFlags(u8);
+
+impl RangeFlags {
+    const LATER_START: u8 = 1;
+    const LATER_END: u8 = 1 << 1;
+
+    pub fn of(start: &ZonedDateTime, end: &ZonedDateTime) -> Self {
+        let mut flags = RangeFlags::default();
+        if Self::is_later(start) {
+            flags.0 |= Self::LATER_START;
+        }
+        if Self::is_later(end) {
+            flags.0 |= Self::LATER_END;
+        }
+        flags
+    }
+
+    pub fn from_bits(bits: u8) -> Self {
+        RangeFlags(bits)
+    }
+
+    pub fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub fn resolve_start(self, tz: Tz, naive_secs: i64) -> Option<ZonedDateTime> {
+        self.resolve(Self::LATER_START, tz, naive_secs)
+    }
+
+    pub fn resolve_end(self, tz: Tz, naive_secs: i64) -> Option<ZonedDateTime> {
+        self.resolve(Self::LATER_END, tz, naive_secs)
+    }
+
+    fn resolve(self, flag: u8, tz: Tz, naive_secs: i64) -> Option<ZonedDateTime> {
+        let local = DateTime::from_naive_timestamp(naive_secs)?;
+        if self.0 & flag != 0 {
+            tz.from_local_later(local)
+        } else {
+            tz.from_local(local)
+        }
+    }
+
+    fn is_later(date_time: &ZonedDateTime) -> bool {
+        date_time
+            .timezone()
+            .from_local(date_time.naive_local())
+            .is_some_and(|earlier| earlier.timestamp() < date_time.timestamp())
+    }
+}
+
 pub fn resolve_local(tz: Tz, naive_secs: i64) -> Option<i64> {
-    tz.resolve_local_datetime(&DateTime::from_timestamp(naive_secs, 0)?.naive_local())
-        .map(|dt| dt.timestamp())
+    resolve_local_zoned(tz, naive_secs).map(|dt| dt.timestamp())
+}
+
+pub fn resolve_local_zoned(tz: Tz, naive_secs: i64) -> Option<ZonedDateTime> {
+    tz.from_local(DateTime::from_naive_timestamp(naive_secs)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::alarm::EventAlarmData;
     use calcard::{Entry, Parser};
-    use chrono::NaiveDate;
 
-    fn naive(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> i64 {
-        NaiveDate::from_ymd_opt(year, month, day)
-            .and_then(|date| date.and_hms_opt(hour, minute, second))
-            .map(|date_time| date_time.and_utc().timestamp())
+    fn naive(year: i16, month: i8, day: i8, hour: i8, minute: i8, second: i8) -> i64 {
+        DateTime::new(year, month, day, hour, minute, second, 0)
             .expect("valid date")
+            .naive_timestamp()
     }
 
-    fn key(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> RecurrenceKey {
+    fn key(year: i16, month: i8, day: i8, hour: i8, minute: i8) -> RecurrenceKey {
         RecurrenceKey::from_recurrence_id(naive(year, month, day, hour, minute, 0))
             .expect("representable recurrence id")
     }
@@ -739,6 +932,184 @@ mod tests {
             data.expand_base(berlin).map(|expansion| expansion.start),
             Some(naive(2027, 3, 1, 9, 0, 0))
         );
+    }
+
+    const REPEATED_HOUR: &str = concat!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+        "BEGIN:VEVENT\r\nUID:d@example.com\r\nDTSTAMP:20261001T000000Z\r\n",
+        "DTSTART;TZID=America/New_York:20261101T013000\r\nDURATION:PT1H\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\nUID:s@example.com\r\nDTSTAMP:20261001T000000Z\r\n",
+        "DTSTART;TZID=America/New_York:20261030T013000\r\n",
+        "DTEND;TZID=America/New_York:20261030T020000\r\n",
+        "RRULE:FREQ=DAILY;COUNT=4\r\nEND:VEVENT\r\n",
+        "BEGIN:VEVENT\r\nUID:m@example.com\r\nDTSTAMP:20261001T000000Z\r\n",
+        "DTSTART;TZID=America/New_York:20261029T013000\r\nDURATION:PT30M\r\n",
+        "RRULE:FREQ=DAILY;COUNT=5\r\nEND:VEVENT\r\n",
+        "BEGIN:VEVENT\r\nUID:m@example.com\r\nDTSTAMP:20261001T000000Z\r\n",
+        "RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20261030T013000\r\n",
+        "DTSTART;TZID=Europe/London:20261030T063000\r\nDURATION:PT30M\r\n",
+        "END:VEVENT\r\nEND:VCALENDAR\r\n",
+    );
+
+    #[test]
+    fn readings_in_the_second_pass_of_a_repeated_hour_keep_their_instant() {
+        let data = event_data(REPEATED_HOUR);
+        let mut expected = data
+            .event
+            .expand_dates(Tz::UTC, 1000)
+            .events
+            .iter()
+            .map(|event| {
+                (
+                    event.comp_id,
+                    event.start.timestamp(),
+                    event.end.timestamp(),
+                )
+            })
+            .collect::<Vec<_>>();
+        expected.sort_unstable();
+        for second_pass in [
+            (
+                1,
+                naive(2026, 11, 1, 5, 30, 0),
+                naive(2026, 11, 1, 6, 30, 0),
+            ),
+            (2, naive(2026, 11, 1, 5, 30, 0), naive(2026, 11, 1, 6, 0, 0)),
+            (4, naive(2026, 11, 1, 6, 30, 0), naive(2026, 11, 1, 7, 0, 0)),
+        ] {
+            assert!(
+                expected.contains(&second_pass),
+                "{second_pass:?} in {expected:?}"
+            );
+        }
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data).expect("archive");
+        let archived =
+            rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes).expect("access");
+        let expansion = archived
+            .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+            .expect("expansion");
+        let instants = |expansion: &[CalendarEventExpansion]| {
+            let mut instants = expansion
+                .iter()
+                .map(|expansion| (expansion.comp_id, expansion.start, expansion.end))
+                .collect::<Vec<_>>();
+            instants.sort_unstable();
+            instants
+        };
+        assert_eq!(instants(&expansion), expected);
+
+        let mut keys = expansion
+            .iter()
+            .filter_map(|expansion| expansion.recurrence_key())
+            .collect::<AHashSet<_>>();
+        let from_ids = data.expand_from_ids(&mut keys, Tz::UTC).expect("expansion");
+        assert_eq!(instants(&from_ids), expected);
+
+        let base = data.expand_base(Tz::UTC).expect("base expansion");
+        assert_eq!(
+            (base.start, base.end),
+            (naive(2026, 11, 1, 5, 30, 0), naive(2026, 11, 1, 6, 30, 0))
+        );
+    }
+
+    const WALL_CLOCK_SHIFT: &str = concat!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+        "BEGIN:VEVENT\r\nUID:w@example.com\r\nDTSTAMP:20260301T000000Z\r\n",
+        "DTSTART;TZID=America/New_York:20260306T230000\r\nDURATION:PT30M\r\n",
+        "RRULE:FREQ=DAILY;COUNT=5\r\nEND:VEVENT\r\n",
+        "BEGIN:VEVENT\r\nUID:w@example.com\r\nDTSTAMP:20260301T000000Z\r\n",
+        "RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20260307T230000\r\n",
+        "DTSTART;TZID=America/New_York:20260308T030000\r\nDURATION:PT30M\r\n",
+        "END:VEVENT\r\nEND:VCALENDAR\r\n",
+    );
+
+    fn expand_all(data: &CalendarEventData) -> Vec<CalendarEventExpansion> {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(data).expect("archive");
+        rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes)
+            .expect("access")
+            .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+            .expect("expansion")
+    }
+
+    fn recurrence_ids(data: &CalendarEventData, comp_id: u32) -> Vec<(i64, i64)> {
+        let mut ids = expand_all(data)
+            .into_iter()
+            .filter(|expansion| expansion.comp_id == comp_id)
+            .map(|expansion| (expansion.start_naive, expansion.recurrence_id().naive))
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    }
+
+    #[test]
+    fn this_and_future_recurrence_ids_undo_the_shift_calcard_applied() {
+        let wall_clock = event_data(WALL_CLOCK_SHIFT);
+        assert_eq!(
+            recurrence_ids(&wall_clock, 2),
+            [
+                (naive(2026, 3, 8, 3, 0, 0), naive(2026, 3, 7, 23, 0, 0)),
+                (naive(2026, 3, 9, 3, 0, 0), naive(2026, 3, 8, 23, 0, 0)),
+                (naive(2026, 3, 10, 3, 0, 0), naive(2026, 3, 9, 23, 0, 0)),
+                (naive(2026, 3, 11, 3, 0, 0), naive(2026, 3, 10, 23, 0, 0)),
+            ]
+        );
+        assert_eq!(
+            expand_key(&wall_clock, key(2026, 3, 9, 23, 0)),
+            [(2, naive(2026, 3, 10, 3, 0, 0))]
+        );
+
+        let exact = event_data(REPEATED_HOUR);
+        assert_eq!(
+            recurrence_ids(&exact, 4),
+            [
+                (naive(2026, 10, 30, 6, 30, 0), naive(2026, 10, 30, 1, 30, 0)),
+                (naive(2026, 10, 31, 2, 30, 0), naive(2026, 10, 31, 1, 30, 0)),
+                (naive(2026, 11, 1, 1, 30, 0), naive(2026, 11, 1, 1, 30, 0)),
+                (naive(2026, 11, 2, 2, 30, 0), naive(2026, 11, 2, 1, 30, 0)),
+            ]
+        );
+        assert_eq!(
+            expand_key(&exact, key(2026, 10, 31, 1, 30)),
+            [
+                (2, naive(2026, 10, 31, 1, 30, 0)),
+                (4, naive(2026, 10, 31, 2, 30, 0))
+            ]
+        );
+    }
+
+    #[test]
+    fn alarm_recurrence_ids_match_the_expansion() {
+        for ical in [WALL_CLOCK_SHIFT, REPEATED_HOUR] {
+            let data = event_data(ical);
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data).expect("archive");
+            let archived = rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&bytes)
+                .expect("access");
+            let expansions = archived
+                .expand(Tz::UTC, TimeRange::new(i64::MIN, i64::MAX))
+                .expect("expansion");
+            assert!(!expansions.is_empty());
+            for expansion in expansions {
+                let comp_id = expansion.comp_id as u16;
+                let expected = data
+                    .event
+                    .components
+                    .get(expansion.comp_id as usize)
+                    .is_some_and(ICalendarComponent::is_recurrent_or_override)
+                    .then(|| expansion.recurrence_id().naive);
+                for recurrence in [
+                    data.component_recurrence(comp_id, expansion.start_tz, expansion.flags),
+                    archived.component_recurrence(comp_id, expansion.start_tz, expansion.flags),
+                ] {
+                    assert_eq!(
+                        recurrence.recurrence_id(expansion.start_naive),
+                        expected,
+                        "{expansion:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

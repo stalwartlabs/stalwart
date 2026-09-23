@@ -5680,6 +5680,8 @@ pub struct TaskCalendarAlarmEmail {
     pub event_end_tz: u64,
     #[serde(rename = "targetAccountId")]
     pub target_account_id: Option<Id>,
+    #[serde(rename = "recurrenceId")]
+    pub recurrence_id: Option<i64>,
     #[serde(rename = "accountId")]
     pub account_id: Id,
     #[serde(rename = "documentId")]

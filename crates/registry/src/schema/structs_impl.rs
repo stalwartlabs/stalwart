@@ -42815,7 +42815,7 @@ impl RegistryJsonPropertyPatch for SystemSettings {
 
 impl ObjectImpl for Task {
     const FLAGS: u64 = 0;
-    const VERSION: u8 = 1;
+    const VERSION: u8 = 2;
     const OBJECT: ObjectType = ObjectType::Task;
 
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
@@ -43296,6 +43296,7 @@ impl Pickle for TaskCalendarAlarmEmail {
         self.event_start_tz.pickle(out);
         self.event_end_tz.pickle(out);
         self.target_account_id.pickle(out);
+        self.recurrence_id.pickle(out);
         self.account_id.pickle(out);
         self.document_id.pickle(out);
         self.status.pickle(out);
@@ -43311,6 +43312,9 @@ impl Pickle for TaskCalendarAlarmEmail {
         this.event_end_tz = Pickle::unpickle(stream)?;
         if stream.version() >= 1 {
             this.target_account_id = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.recurrence_id = Pickle::unpickle(stream)?;
         }
         this.account_id = Pickle::unpickle(stream)?;
         this.document_id = Pickle::unpickle(stream)?;
@@ -43329,6 +43333,7 @@ impl Default for TaskCalendarAlarmEmail {
             event_start_tz: 0u64,
             event_end_tz: 0u64,
             target_account_id: Default::default(),
+            recurrence_id: Default::default(),
             account_id: Default::default(),
             document_id: Default::default(),
             status: Default::default(),
@@ -43338,7 +43343,7 @@ impl Default for TaskCalendarAlarmEmail {
 
 impl IntoValue for TaskCalendarAlarmEmail {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(12);
+        let mut map = jmap_tools::Map::with_capacity(13);
         map.insert_unchecked(Property::AlarmId, self.alarm_id.into_value());
         map.insert_unchecked(Property::EventId, self.event_id.into_value());
         map.insert_unchecked(Property::EventStart, self.event_start.into_value());
@@ -43349,6 +43354,7 @@ impl IntoValue for TaskCalendarAlarmEmail {
             Property::TargetAccountId,
             self.target_account_id.into_value(),
         );
+        map.insert_unchecked(Property::RecurrenceId, self.recurrence_id.into_value());
         map.insert_unchecked(Property::AccountId, self.account_id.into_value());
         map.insert_unchecked(Property::DocumentId, self.document_id.into_value());
         map.insert_unchecked(Property::Status, self.status.into_value());
@@ -43370,6 +43376,7 @@ impl RegistryJsonPropertyPatch for TaskCalendarAlarmEmail {
             Some(Property::EventStartTz) => pointer.assert_server_set(),
             Some(Property::EventEndTz) => pointer.assert_server_set(),
             Some(Property::TargetAccountId) => pointer.assert_server_set(),
+            Some(Property::RecurrenceId) => pointer.assert_server_set(),
             Some(Property::AccountId) => self
                 .account_id
                 .patch(pointer.assert_read_only()?.assert_can_set_account()?, value),

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::user::UserDataEntry;
+use super::{expand::NaiveTimestamp, user::UserDataEntry};
 use ahash::AHashMap;
 use calcard::{
     common::PartialDateTime,
@@ -238,7 +238,7 @@ pub trait NaiveDateTime {
 impl NaiveDateTime for PartialDateTime {
     fn naive_timestamp(&self) -> Option<i64> {
         self.to_date_time()
-            .map(|date_time| date_time.date_time.and_utc().timestamp())
+            .map(|date_time| date_time.date_time.naive_timestamp())
     }
 
     fn has_same_shape(&self, other: &Self) -> bool {

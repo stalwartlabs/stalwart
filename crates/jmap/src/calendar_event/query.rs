@@ -596,7 +596,7 @@ impl CalendarEventQuery for Server {
 }
 
 fn local_timestamp(dt: &JSCalendarDateTime, tz: Tz) -> Option<i64> {
-    tz.resolve_local_datetime(&dt.to_naive_date_time()?)
+    tz.from_local(dt.to_naive_date_time()?)
         .map(|dt| dt.timestamp())
 }
 

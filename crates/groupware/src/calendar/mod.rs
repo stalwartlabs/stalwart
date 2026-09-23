@@ -342,10 +342,17 @@ impl ArchivedAlarm {
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(compare(PartialEq), derive(Debug))]
 pub enum AlarmDelta {
-    Start(i64),
-    End(i64),
+    Start(AlarmOffset),
+    End(AlarmOffset),
     FixedUtc(i64),
     FixedFloating(i64),
+}
+
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[rkyv(compare(PartialEq), derive(Debug))]
+pub struct AlarmOffset {
+    pub days: i32,
+    pub seconds: i32,
 }
 
 #[derive(
@@ -356,6 +363,7 @@ pub struct ComponentTimeRange {
     pub start_tz: u16,
     pub end_tz: u16,
     pub duration: i32,
+    pub flags: u8,
     pub instances: Box<[u8]>,
 }
 

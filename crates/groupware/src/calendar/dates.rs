@@ -8,11 +8,12 @@ use super::{
     Alarm, ArchivedCalendarEventData, ArchivedTimezone, CalendarEventData, Timezone,
     alarm::ExpandAlarm,
     alerts::{DefaultAlerts, ICalendarDefaultAlerts},
+    expand::RangeFlags,
 };
 use crate::calendar::ComponentTimeRange;
 use calcard::{
     common::timezone::Tz,
-    icalendar::{ICalendar, ICalendarComponentType, dates::TimeOrDelta},
+    icalendar::{ICalendar, ICalendarComponentType},
 };
 use compact_str::ToCompactString;
 use indexmap::IndexMap;
@@ -39,7 +40,7 @@ impl CalendarEventData {
         let mut ranges = TimeRanges::default();
 
         let expanded = ical.expand_dates(default_tz, max_expansions);
-        let mut groups: IndexMap<(u16, u16, u16, i32), Vec<i64>, RandomState> =
+        let mut groups: IndexMap<(u16, u16, u16, i32, RangeFlags), Vec<i64>, RandomState> =
             IndexMap::with_capacity_and_hasher(16, RandomState::default());
         let mut alarms: AHashMap<u16, Vec<Alarm>> = AHashMap::with_capacity(16);
 
@@ -47,30 +48,10 @@ impl CalendarEventData {
             let Ok(comp_id) = u16::try_from(event.comp_id) else {
                 continue;
             };
-            let start_naive = event.start.naive_local();
             let start_tz = event.start.timezone().as_id();
-            let start_timestamp_utc = event.start.timestamp();
-            let start_timestamp_naive = start_naive.and_utc().timestamp();
-            let (end_timestamp_utc, end_timestamp_naive, end_tz) = match event.end {
-                TimeOrDelta::Time(time) => {
-                    let end_naive = time.naive_local();
-                    let end_timestamp_utc = time.timestamp();
-                    let end_timestamp_naive = end_naive.and_utc().timestamp();
-                    (
-                        end_timestamp_utc,
-                        end_timestamp_naive,
-                        time.timezone().as_id(),
-                    )
-                }
-                TimeOrDelta::Delta(delta) => {
-                    let delta = delta.num_seconds();
-                    (
-                        start_timestamp_utc + delta,
-                        start_timestamp_naive + delta,
-                        start_tz,
-                    )
-                }
-            };
+            let end_tz = event.end.timezone().as_id();
+            let (start_timestamp_utc, end_timestamp_utc) = event.timestamps();
+            let (start_timestamp_naive, end_timestamp_naive) = event.naive_timestamps();
 
             // Expand alarms
             alarms.entry(comp_id).or_insert_with(|| {
@@ -105,13 +86,14 @@ impl CalendarEventData {
                     comp_id,
                     (end_timestamp_naive - start_timestamp_naive)
                         .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+                    RangeFlags::of(&event.start, &event.end),
                 ))
                 .or_default()
                 .push(start_timestamp_naive);
         }
 
         let mut events = Vec::with_capacity(groups.len());
-        for ((start_tz, end_tz, id, duration), mut instances) in groups {
+        for ((start_tz, end_tz, id, duration, flags), mut instances) in groups {
             instances.sort_unstable();
             instances.dedup();
             instances.truncate(instances.partition_point(|instance| {
@@ -142,6 +124,7 @@ impl CalendarEventData {
                 start_tz,
                 end_tz,
                 duration,
+                flags: flags.bits(),
                 instances: instances.into_boxed_slice(),
             });
         }
@@ -273,12 +256,13 @@ impl ArchivedTimezone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::expand::NaiveTimestamp;
     use crate::calendar::{
         ALERT_WITH_TIME, CALENDAR_SUBSCRIBED, Calendar, CalendarEventData, CalendarPreferences,
         DefaultAlert, alerts::CalendarSettings,
     };
     use calcard::icalendar::ICalendarDuration;
-    use chrono::NaiveDate;
+    use jiff::civil::DateTime;
 
     const ALARMED_EVENT: &str = concat!(
         "BEGIN:VCALENDAR\r\n",
@@ -294,11 +278,10 @@ mod tests {
         "END:VCALENDAR\r\n",
     );
 
-    fn utc(day: u32, hour: u32) -> i64 {
-        NaiveDate::from_ymd_opt(2030, 3, day)
-            .and_then(|date| date.and_hms_opt(hour, 0, 0))
-            .map(|date_time| date_time.and_utc().timestamp())
+    fn utc(day: i8, hour: i8) -> i64 {
+        DateTime::new(2030, 3, day, hour, 0, 0, 0)
             .expect("valid date")
+            .naive_timestamp()
     }
 
     fn default_alerts(offset: i64) -> DefaultAlerts {

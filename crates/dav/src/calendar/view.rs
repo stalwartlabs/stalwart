@@ -16,6 +16,7 @@ use calcard::{
 };
 use groupware::calendar::{
     Alarm, AlarmDelta, ArchivedAlarm, ArchivedCalendarEventContent, CalendarEventContent,
+    expand::CalendarEventExpansion,
 };
 use rkyv::primitive::ArchivedU32;
 use store::write::serialize::rkyv_deserialize;
@@ -80,7 +81,7 @@ pub(crate) trait ParameterView {
 
 pub(crate) trait AlarmView {
     fn parent_id(&self) -> u32;
-    fn timestamp(&self, start: i64, end: i64, default_tz: Tz) -> Option<i64>;
+    fn timestamp(&self, expansion: &CalendarEventExpansion, default_tz: Tz) -> Option<i64>;
 }
 
 pub(crate) trait ChildIdView: Sized + From<u32> {
@@ -312,8 +313,8 @@ impl AlarmView for Alarm {
         self.parent_id as u32
     }
 
-    fn timestamp(&self, start: i64, end: i64, default_tz: Tz) -> Option<i64> {
-        AlarmDelta::to_timestamp(&self.delta, start, end, default_tz)
+    fn timestamp(&self, expansion: &CalendarEventExpansion, default_tz: Tz) -> Option<i64> {
+        expansion.alarm_time(&self.delta, default_tz)
     }
 }
 
@@ -322,8 +323,8 @@ impl AlarmView for ArchivedAlarm {
         self.parent_id.to_native() as u32
     }
 
-    fn timestamp(&self, start: i64, end: i64, default_tz: Tz) -> Option<i64> {
-        self.delta.to_timestamp(start, end, default_tz)
+    fn timestamp(&self, expansion: &CalendarEventExpansion, default_tz: Tz) -> Option<i64> {
+        expansion.alarm_time(&AlarmDelta::from(&self.delta), default_tz)
     }
 }
 

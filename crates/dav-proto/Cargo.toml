@@ -11,7 +11,6 @@ quick-xml = "0.41"
 calcard = { version = "0.4", features = ["rkyv"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
 hyper = "1.11.1"
-chrono = { version = "0.4.45", features = ["serde"], optional = true }
 compact_str = "0.10.0"
 
 [dev-dependencies]
@@ -19,10 +18,9 @@ calcard = { version = "0.4", features = ["serde", "rkyv"] }
 types = { path = "../types", features = ["test_mode"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-chrono = { version = "0.4.45", features = ["serde"] }
 
 [features]
-test_mode = ["chrono"]
+test_mode = []
 enterprise = []
 
 [lints]
