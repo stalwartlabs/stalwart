@@ -1044,9 +1044,12 @@ dependencies = [
  "jmap-tools",
  "mail-builder",
  "mail-parser",
+ "memchr",
  "rkyv",
  "serde",
  "serde_json",
+ "sha1 0.11.0",
+ "simdutf8",
  "uuid",
 ]
 
@@ -9430,7 +9433,6 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
- "sha1_smol",
  "wasm-bindgen",
 ]
 

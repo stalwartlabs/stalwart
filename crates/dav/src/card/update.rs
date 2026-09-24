@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::assert_is_unique_uid;
+use super::{assert_is_unique_uid, is_same_uid};
 use crate::{
     DavError, DavErrorCondition, DavMethod,
     common::{
@@ -14,7 +14,10 @@ use crate::{
     file::DavFileResource,
     fix_percent_encoding,
 };
-use calcard::{Entry, Parser};
+use calcard::{
+    Entry, Parser,
+    vcard::{VCardProperty, VCardValue},
+};
 use common::{DavName, Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders, Return,
@@ -94,7 +97,7 @@ impl CardUpdateRequestHandler for Server {
             )
         })?;
 
-        let vcard = match Parser::new(vcard_raw).strict().entry() {
+        let mut vcard = match Parser::new(vcard_raw).strict().entry() {
             Entry::VCard(vcard) => vcard,
             _ => {
                 return Err(DavError::Condition(
@@ -208,15 +211,32 @@ impl CardUpdateRequestHandler for Server {
             }
 
             // Validate UID
-            match (content.inner.card.uid(), vcard.uid()) {
-                (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
-                (None, None) | (None, Some(_)) => {}
+            let restored_uid = match (
+                content.inner.card.uid().filter(|uid| !uid.is_empty()),
+                vcard.uid().filter(|uid| !uid.is_empty()),
+            ) {
+                (Some(stored_uid), Some(uid)) if is_same_uid(stored_uid, uid) => {
+                    (stored_uid != uid).then_some(stored_uid)
+                }
+                (None, uid) => {
+                    assert_is_unique_uid(&resources, parent_id, uid)?;
+                    None
+                }
                 _ => {
                     return Err(DavError::Condition(DavErrorCondition::new(
                         StatusCode::PRECONDITION_FAILED,
                         CardCondition::NoUidConflict(resources.format_resource(resource).into()),
                     )));
                 }
+            };
+            if let Some(stored_uid) = restored_uid
+                && let Some(value) = vcard
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.name == VCardProperty::Uid)
+                    .and_then(|entry| entry.values.first_mut())
+            {
+                *value = VCardValue::Text(stored_uid.to_string());
             }
 
             // Build node
@@ -254,7 +274,8 @@ impl CardUpdateRequestHandler for Server {
                 .caused_by(trc::location!())?;
             self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag(etag))
+            Ok(HttpResponse::new(StatusCode::NO_CONTENT)
+                .with_etag_opt(restored_uid.is_none().then_some(etag)))
         } else if let Some((Some(parent), name)) = resources.map_parent(resource_name.as_ref()) {
             if !parent.is_container() {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));

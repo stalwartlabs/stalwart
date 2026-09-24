@@ -194,6 +194,92 @@ pub async fn test(test: &TestServer) {
             ),
     );
 
+    // A UID can be added to a contact without one, but never removed or respelled
+    let response = account
+        .jmap_create(
+            MethodObject::ContactCard,
+            [
+                json!({
+                    "name": {
+                        "full": "Contact without UID",
+                    },
+                    "addressBookIds": {
+                        &book1_id: true
+                    },
+                }),
+                json!({
+                    "uid": "urn:uuid:5c2f7a1e-8d3b-4f60-9e42-b17c0d6a3f85",
+                    "name": {
+                        "full": "Contact with UID",
+                    },
+                    "addressBookIds": {
+                        &book1_id: true
+                    },
+                }),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let no_uid_contact_id = response.created(0).id().to_string();
+    let uid_contact_id = response.created(1).id().to_string();
+    for uid in [Value::Null, json!("5c2f7a1e-8d3b-4f60-9e42-b17c0d6a3f85")] {
+        assert_eq!(
+            account
+                .jmap_update(
+                    MethodObject::ContactCard,
+                    [(&uid_contact_id, json!({ "uid": uid }))],
+                    Vec::<(&str, &str)>::new(),
+                )
+                .await
+                .not_updated(&uid_contact_id)
+                .description(),
+            "You cannot change the UID of a contact."
+        );
+    }
+    assert!(
+        account
+            .jmap_update(
+                MethodObject::ContactCard,
+                [(
+                    &no_uid_contact_id,
+                    json!({ "uid": "urn:uuid:5c2f7a1e-8d3b-4f60-9e42-b17c0d6a3f85" }),
+                )],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .not_updated(&no_uid_contact_id)
+            .description()
+            .contains(
+                "Contact with UID urn:uuid:5c2f7a1e-8d3b-4f60-9e42-b17c0d6a3f85 already exists"
+            ),
+    );
+    account
+        .jmap_update(
+            MethodObject::ContactCard,
+            [(
+                &no_uid_contact_id,
+                json!({ "uid": "urn:uuid:7e4b9d20-1a6c-4c8f-b3e5-2d9f8a0c6b17" }),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .updated(&no_uid_contact_id);
+    test.wait_for_tasks().await;
+    assert_eq!(
+        account
+            .jmap_destroy(
+                MethodObject::ContactCard,
+                [no_uid_contact_id.as_str(), uid_contact_id.as_str()],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .destroyed()
+            .collect::<AHashSet<_>>(),
+        [no_uid_contact_id.as_str(), uid_contact_id.as_str()]
+            .into_iter()
+            .collect::<AHashSet<_>>()
+    );
+
     // Patching tests
     let response = account
         .jmap_update(

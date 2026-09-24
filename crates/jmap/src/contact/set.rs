@@ -226,9 +226,17 @@ impl ContactCardSet for Server {
             }
 
             // Validate UID
-            match (new_content.card.uid(), content.inner.card.uid()) {
-                (Some(old_uid), Some(new_uid)) if old_uid == new_uid => {}
-                (None, None) | (None, Some(_)) => {}
+            match (
+                content.inner.card.uid().filter(|uid| !uid.is_empty()),
+                new_content.card.uid().filter(|uid| !uid.is_empty()),
+            ) {
+                (Some(stored_uid), Some(uid)) if stored_uid == uid => {}
+                (None, uid) => {
+                    if let Err(err) = assert_is_unique_uid(&cache, &new_contact_card.names, uid)? {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                }
                 _ => {
                     response.not_updated.append(
                         id,

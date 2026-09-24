@@ -478,6 +478,7 @@ pub async fn test(test: &TestServer) {
             .with_status(StatusCode::PRECONDITION_FAILED)
             .with_failed_precondition(precond_key, precond_value);
     }
+    card_uid_changes(test).await;
 
     // iCal containing different component types should fail
     client
@@ -634,4 +635,110 @@ END:VCALENDAR
     client.delete_default_containers().await;
     mike_noquota.delete_default_containers().await;
     test.assert_is_empty().await;
+}
+
+async fn card_uid_changes(test: &TestServer) {
+    let client = test.account("john@example.com").webdav_client();
+    let urn_path = "/dav/card/john%40example.com/default/uid-urn.vcf";
+    let bare_path = "/dav/card/john%40example.com/default/uid-bare.vcf";
+    let text_path = "/dav/card/john%40example.com/default/uid-text.vcf";
+    let missing_path = "/dav/card/john%40example.com/default/uid-missing.vcf";
+    let urn_uid = "urn:uuid:cddccf70-dc55-4cad-a171-f55f1c5c0162";
+    let bare_uid = "0f5a3c8e-2b7d-4e91-a6c4-9d8e7f6a5b43";
+    let vcard = |uid: &str, title: &str| {
+        format!(
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:{uid}\r\nFN:UID Test\r\nTITLE:{title}\r\nEND:VCARD\r\n"
+        )
+    };
+    let vcard_without_uid = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:UID Test\r\nEND:VCARD\r\n";
+
+    for (path, content) in [
+        (urn_path, vcard(urn_uid, "Created")),
+        (bare_path, vcard(bare_uid, "Created")),
+        (text_path, vcard("foo", "Created")),
+        (missing_path, vcard_without_uid.to_string()),
+    ] {
+        client
+            .request_with_headers("PUT", path, [("if-none-match", "*")], content)
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+
+    // Other spellings of the stored UUID are accepted and the stored spelling is kept
+    for (idx, (path, stored_uid, uid)) in [
+        (urn_path, urn_uid, "cddccf70-dc55-4cad-a171-f55f1c5c0162"),
+        (urn_path, urn_uid, "CDDCCF70-DC55-4CAD-A171-F55F1C5C0162"),
+        (
+            urn_path,
+            urn_uid,
+            "URN:UUID:CDDCCF70-DC55-4CAD-A171-F55F1C5C0162",
+        ),
+        (
+            bare_path,
+            bare_uid,
+            "urn:uuid:0f5a3c8e-2b7d-4e91-a6c4-9d8e7f6a5b43",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let title = format!("Edit {idx}");
+        let response = client
+            .request("PUT", path, vcard(uid, &title))
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+        assert!(!response.headers.contains_key("etag"), "{response:?}");
+        client
+            .request("GET", path, "")
+            .await
+            .with_status(StatusCode::OK)
+            .with_body(vcard(stored_uid, &title));
+    }
+    assert!(
+        !client
+            .request("PUT", urn_path, vcard(urn_uid, "Same spelling"))
+            .await
+            .with_status(StatusCode::NO_CONTENT)
+            .etag()
+            .is_empty()
+    );
+
+    // A different UUID, or a non-UUID behind a urn:uuid: prefix, is a UID change
+    for (path, uid) in [
+        (urn_path, "urn:uuid:0ddccf70-dc55-4cad-a171-f55f1c5c0162"),
+        (text_path, "urn:uuid:foo"),
+    ] {
+        client
+            .request("PUT", path, vcard(uid, "Conflict"))
+            .await
+            .with_status(StatusCode::PRECONDITION_FAILED)
+            .with_failed_precondition("B:no-uid-conflict.D:href", path);
+    }
+
+    // A UID added to a card without one has to be unique, and cannot be removed
+    client
+        .request("PUT", missing_path, vcard(urn_uid, "Taken"))
+        .await
+        .with_status(StatusCode::PRECONDITION_FAILED)
+        .with_failed_precondition("B:no-uid-conflict.D:href", urn_path);
+    client
+        .request(
+            "PUT",
+            missing_path,
+            vcard("urn:uuid:7e4b9d20-1a6c-4c8f-b3e5-2d9f8a0c6b17", "Added"),
+        )
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+    client
+        .request("PUT", missing_path, vcard_without_uid)
+        .await
+        .with_status(StatusCode::PRECONDITION_FAILED)
+        .with_failed_precondition("B:no-uid-conflict.D:href", missing_path);
+
+    for path in [urn_path, bare_path, text_path, missing_path] {
+        client
+            .request("DELETE", path, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
 }
