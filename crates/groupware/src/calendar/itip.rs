@@ -24,7 +24,7 @@ use crate::{
             MergeAction, MergeResult, itip_import_message, itip_merge_changes, itip_method,
             itip_process_message,
         },
-        itip::itip_build_envelope,
+        itip::{itip_add_tz, itip_build_envelope},
         recipient::RecipientPolicy,
         snapshot::itip_snapshot,
     },
@@ -533,13 +533,14 @@ impl ItipIngest for Server {
         instances.sort_unstable();
 
         // Deliver the reply to the organizer without going through the mail queue
-        let reply = build_rsvp_reply(
+        let mut reply = build_rsvp_reply(
             &snapshots,
             &instances,
             &rsvp.attendee,
             &part_stat,
             comment.as_deref(),
         );
+        itip_add_tz(&mut reply, &content.data.event);
         let attendee_copy = http_rsvp_attendee_copy(self, &rsvp, snapshots.uid, remote_ip).await?;
         let changed_by = if let Some(account_id) = self
             .account_id_from_email(&rsvp.attendee, true)

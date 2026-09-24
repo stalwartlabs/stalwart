@@ -113,7 +113,7 @@ ATTENDEE;PARTSTAT=ACCEPTED:mailto:b@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777-00@example.com
 DTSTAMP:0
-SEQUENCE:1
+SEQUENCE:0
 REQUEST-STATUS:2.0;Success
 END:VTODO
 END:VCALENDAR
@@ -183,7 +183,7 @@ ATTENDEE;PARTSTAT=IN-PROCESS:mailto:b@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777-00@example.com
 DTSTAMP:0
-SEQUENCE:1
+SEQUENCE:0
 REQUEST-STATUS:2.0;Success
 END:VTODO
 END:VCALENDAR
@@ -250,7 +250,7 @@ ATTENDEE;PARTSTAT=COMPLETED:mailto:d@example.com
 ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777-00@example.com
 DTSTAMP:0
-SEQUENCE:1
+SEQUENCE:0
 REQUEST-STATUS:2.0;Success
 END:VTODO
 END:VCALENDAR
@@ -406,7 +406,7 @@ SEQUENCE:1
 END:VTODO
 END:VCALENDAR
 
-# Reply to an instance of a recurring to-do
+# Reply to an instance of a recurring to-do (RFC 5546 4.5.7.2 uses 19980101T170000Z, which the series does not generate)
 > put b@example.com calsrv.example.com-873970198738777-00@example.com
 BEGIN:VCALENDAR
 PRODID:-//Example/ExampleCalendarClient//EN
@@ -435,7 +435,7 @@ ATTENDEE;PARTSTAT=IN-PROCESS:mailto:b@example.com
 PERCENT-COMPLETE:75
 UID:calsrv.example.com-873970198738777-00@example.com
 DTSTAMP:19970717T233000Z
-RECURRENCE-ID:19980101T170000Z
+RECURRENCE-ID:19980102T100000Z
 SEQUENCE:1
 END:VTODO
 END:VCALENDAR
@@ -445,7 +445,7 @@ from: b@example.com
 to: a@example.com
 summary: rsvp NEEDS-ACTION
 summary.attendee: Participants([ItipParticipant { email: "a@example.com", name: None, is_organizer: true }, ItipParticipant { email: "b@example.com", name: None, is_organizer: false }])
-summary.dtstart: Time(ItipTime { start: 883674000, tz_id: 32768 })
+summary.dtstart: Time(ItipTime { start: 883735200, tz_id: 32768 })
 summary.summary: Text("Send Status Reports to Area Managers")
 BEGIN:VCALENDAR
 METHOD:REPLY
@@ -455,7 +455,7 @@ BEGIN:VTODO
 PERCENT-COMPLETE:75
 ATTENDEE;PARTSTAT=IN-PROCESS:mailto:b@example.com
 ORGANIZER:mailto:a@example.com
-RECURRENCE-ID:19980101T170000Z
+RECURRENCE-ID:19980102T100000Z
 UID:calsrv.example.com-873970198738777-00@example.com
 DTSTAMP:0
 SEQUENCE:1
@@ -471,6 +471,23 @@ BEGIN:VCALENDAR
 PRODID:-//Example/ExampleCalendarClient//EN
 VERSION:2.0
 BEGIN:VTODO
+PERCENT-COMPLETE:75
+PRIORITY:1
+STATUS:NEEDS-ACTION
+SUMMARY:Send Status Reports to Area Managers
+DUE:19980104T100000Z
+DTSTART:19980102T100000Z
+ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=IN-PROCESS;SCHEDULE-STATUS=2.0:mailto:b
+ @example.com
+ATTENDEE;ROLE=CHAIR:mailto:a@example.com
+ATTENDEE;RSVP=TRUE;CUTYPE=INDIVIDUAL:mailto:d@example.com
+ORGANIZER:mailto:a@example.com
+RECURRENCE-ID:19980102T100000Z
+UID:calsrv.example.com-873970198738777-00@example.com
+DTSTAMP:1
+SEQUENCE:1
+END:VTODO
+BEGIN:VTODO
 PRIORITY:1
 STATUS:NEEDS-ACTION
 SUMMARY:Send Status Reports to Area Managers
@@ -483,15 +500,6 @@ ORGANIZER:mailto:a@example.com
 UID:calsrv.example.com-873970198738777-00@example.com
 RRULE:FREQ=MONTHLY;COUNT=10;BYDAY=1FR
 DTSTAMP:1
-SEQUENCE:1
-END:VTODO
-BEGIN:VTODO
-PERCENT-COMPLETE:75
-ATTENDEE;PARTSTAT=IN-PROCESS:mailto:b@example.com
-ORGANIZER:mailto:a@example.com
-RECURRENCE-ID:19980101T170000Z
-UID:calsrv.example.com-873970198738777-00@example.com
-DTSTAMP:0
 SEQUENCE:1
 END:VTODO
 END:VCALENDAR

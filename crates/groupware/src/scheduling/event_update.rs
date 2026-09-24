@@ -6,7 +6,7 @@
 
 use crate::scheduling::{
     ItipError, ItipMessage,
-    attendee::attendee_handle_update,
+    attendee::{OrganizerSequences, attendee_handle_update},
     event_cancel::itip_cancel,
     itip::itip_finalize,
     organizer::organizer_handle_update,
@@ -32,7 +32,15 @@ pub fn itip_update(
                 organizer_handle_update(old_ical, ical, old_itip, new_itip, &mut sequences)
                     .and_then(|messages| itip_messages_per_recipient(messages, policy))
             } else {
-                attendee_handle_update(ical, old_itip, new_itip)
+                let organizer_sequences = OrganizerSequences::of(&old_itip, &new_itip);
+                if organizer_sequences.is_empty() {
+                    attendee_handle_update(ical, old_itip, new_itip)
+                } else {
+                    drop(new_itip);
+                    organizer_sequences.restore(ical);
+                    itip_snapshot(ical, account_emails, false)
+                        .and_then(|new_itip| attendee_handle_update(ical, old_itip, new_itip))
+                }
             }
             .inspect(|_| {
                 itip_finalize(ical, &sequences);

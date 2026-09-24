@@ -12,7 +12,7 @@ use calcard::icalendar::ICalendar;
 use common::config::groupware::GroupwareConfig;
 use split::RecipientSplit;
 
-mod series;
+pub(crate) mod series;
 mod split;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

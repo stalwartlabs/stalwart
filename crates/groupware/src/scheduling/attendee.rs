@@ -379,6 +379,51 @@ pub(crate) fn attendee_decline<'x>(
     })
 }
 
+pub(crate) struct OrganizerSequences(Vec<(u16, Option<i64>)>);
+
+impl OrganizerSequences {
+    pub(crate) fn of(old_itip: &ItipSnapshots<'_>, new_itip: &ItipSnapshots<'_>) -> Self {
+        OrganizerSequences(
+            new_itip
+                .components
+                .iter()
+                .filter_map(|(instance_id, instance)| {
+                    let sequence = match (old_itip.components.get(instance_id), instance_id) {
+                        (Some(old_instance), _) => old_instance.sequence,
+                        (None, InstanceId::Recurrence(recurrence_id)) => {
+                            old_itip.occurrence_source(recurrence_id)?.sequence
+                        }
+                        (None, InstanceId::Main) => return None,
+                    };
+                    (sequence.unwrap_or_default() != instance.sequence.unwrap_or_default())
+                        .then_some((instance.comp_id, sequence))
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn restore(self, ical: &mut ICalendar) {
+        for (comp_id, sequence) in self.0 {
+            let Some(component) = ical.components.get_mut(usize::from(comp_id)) else {
+                continue;
+            };
+            match sequence {
+                Some(sequence) => match component.property_mut(&ICalendarProperty::Sequence) {
+                    Some(entry) => entry.values = vec![ICalendarValue::Integer(sequence)],
+                    None => component.add_sequence(sequence),
+                },
+                None => component
+                    .entries
+                    .retain(|entry| entry.name != ICalendarProperty::Sequence),
+            }
+        }
+    }
+}
+
 fn count_entry_names<'x>(entries: &'x ItipEntries<'x>) -> AHashMap<&'x ICalendarProperty, usize> {
     let mut counts = AHashMap::with_capacity(entries.len());
     for entry in entries {
@@ -390,4 +435,93 @@ fn count_entry_names<'x>(entries: &'x ItipEntries<'x>) -> AHashMap<&'x ICalendar
 #[inline]
 fn name_count(counts: &AHashMap<&ICalendarProperty, usize>, name: &ICalendarProperty) -> usize {
     counts.get(name).copied().unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::scheduling::{
+        event_update::itip_update,
+        recipient::{AttendeeVisibility, RecipientPolicy},
+    };
+    use calcard::icalendar::ICalendar;
+
+    const ATTENDEE: &str = "bob@example.com";
+
+    fn policy() -> RecipientPolicy {
+        RecipientPolicy {
+            visibility: AttendeeVisibility::All,
+            max_recipients: usize::MAX,
+            max_instances: 3000,
+        }
+    }
+
+    fn attendee_copy(sequence: i64, part_stat: &str, overrides: &str) -> ICalendar {
+        ICalendar::parse(format!(
+            concat!(
+                "BEGIN:VCALENDAR\r\n",
+                "VERSION:2.0\r\n",
+                "PRODID:-//Test//EN\r\n",
+                "BEGIN:VEVENT\r\n",
+                "UID:weekly@example.com\r\n",
+                "SEQUENCE:{}\r\n",
+                "DTSTAMP:20250101T000000Z\r\n",
+                "DTSTART;TZID=Europe/Berlin:20250106T090000\r\n",
+                "DTEND;TZID=Europe/Berlin:20250106T100000\r\n",
+                "RRULE:FREQ=WEEKLY;COUNT=4\r\n",
+                "SUMMARY:Weekly sync\r\n",
+                "ORGANIZER:mailto:org@example.net\r\n",
+                "ATTENDEE;PARTSTAT=ACCEPTED:mailto:org@example.net\r\n",
+                "ATTENDEE;PARTSTAT={}:mailto:bob@example.com\r\n",
+                "END:VEVENT\r\n",
+                "{}",
+                "END:VCALENDAR\r\n"
+            ),
+            sequence, part_stat, overrides
+        ))
+        .expect("valid iCalendar")
+    }
+
+    #[test]
+    fn attendee_changes_to_sequence_are_neither_sent_nor_stored() {
+        let stored = attendee_copy(2, "NEEDS-ACTION", "");
+        let mut updated = attendee_copy(
+            3,
+            "ACCEPTED",
+            concat!(
+                "BEGIN:VEVENT\r\n",
+                "UID:weekly@example.com\r\n",
+                "SEQUENCE:3\r\n",
+                "DTSTAMP:20250101T000000Z\r\n",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20250113T090000\r\n",
+                "DTSTART;TZID=Europe/Berlin:20250113T090000\r\n",
+                "DTEND;TZID=Europe/Berlin:20250113T100000\r\n",
+                "SUMMARY:Weekly sync\r\n",
+                "ORGANIZER:mailto:org@example.net\r\n",
+                "ATTENDEE;PARTSTAT=ACCEPTED:mailto:org@example.net\r\n",
+                "ATTENDEE;PARTSTAT=DECLINED:mailto:bob@example.com\r\n",
+                "END:VEVENT\r\n"
+            ),
+        );
+
+        let messages =
+            itip_update(&mut updated, &stored, &[ATTENDEE.to_string()], policy()).expect("reply");
+        let [message] = messages.as_slice() else {
+            panic!("expected one reply: {messages:#?}");
+        };
+        let reply = message.message.to_string();
+        assert_eq!(
+            reply.matches("SEQUENCE:2\r\n").count(),
+            2,
+            "RFC 5546 Section 3.2.3: a REPLY carries the SEQUENCE of the original REQUEST\n{reply}"
+        );
+        assert!(!reply.contains("SEQUENCE:3"), "{reply}");
+
+        let stored = updated.to_string();
+        assert_eq!(
+            stored.matches("SEQUENCE:2\r\n").count(),
+            2,
+            "RFC 6638 Section 3.2.2.1: SEQUENCE is not an attendee change\n{stored}"
+        );
+        assert!(!stored.contains("SEQUENCE:3"), "{stored}");
+    }
 }

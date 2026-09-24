@@ -6,7 +6,10 @@
 
 use crate::scheduling::{ItipTime, itip::itip_date_entry};
 use calcard::{
-    common::{PartialDateTime, timezone::Tz},
+    common::{
+        PartialDateTime,
+        timezone::{Tz, ZonedDateTime},
+    },
     icalendar::{
         ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarEntry,
         ICalendarParameterName, ICalendarPeriod, ICalendarProperty, ICalendarRecurrenceRule,
@@ -15,10 +18,12 @@ use calcard::{
 };
 use std::{borrow::Cow, cell::OnceCell};
 
+mod occurrence;
+
 const SECONDS_PER_DAY: i64 = 86400;
 const EXPANSION_COMPONENT_ID: u32 = 1;
 
-pub(super) struct Series<'x> {
+pub(crate) struct Series<'x> {
     ical: &'x ICalendar,
     tz: TzResolver<&'x str>,
     master: Option<Master<'x>>,
@@ -65,7 +70,7 @@ trait InstanceStart {
 }
 
 impl<'x> Series<'x> {
-    pub(super) fn new(
+    pub(crate) fn new(
         ical: &'x ICalendar,
         master: Option<&'x ICalendarComponent>,
         max_instances: usize,
@@ -156,16 +161,52 @@ impl<'x> Series<'x> {
     }
 
     fn timestamp(&self, date: &PartialDateTime, tz_id: Option<&str>) -> Option<i64> {
+        self.zoned(date, tz_id).map(|date| date.timestamp())
+    }
+
+    fn zoned(&self, date: &PartialDateTime, tz_id: Option<&str>) -> Option<ZonedDateTime> {
         date.to_date_time_with_tz(self.tz.resolve_or_default(
             tz_id.or_else(|| self.master.as_ref().and_then(|master| master.tz_id)),
         ))
-        .map(|date| date.timestamp())
+    }
+
+    pub(crate) fn has_occurrence(&self, start: i64) -> bool {
+        let Some(master) = &self.master else {
+            return false;
+        };
+        let is_rule_instance = || {
+            let occurrences = self.occurrences();
+            occurrences.contains(start)
+                || (master
+                    .start
+                    .is_some_and(|master_start| start > master_start)
+                    && occurrences.is_unknown_at(start))
+        };
+        let is_instance = self.is_rdate(start)
+            || (master.has_rule && is_rule_instance())
+            || (!master.has_rule && !master.rdates.is_empty() && master.start == Some(start));
+        is_instance && !self.is_exdate(start)
     }
 
     fn is_rdate(&self, start: i64) -> bool {
         self.master
             .as_ref()
             .is_some_and(|master| master.rdates.binary_search(&start).is_ok())
+    }
+
+    fn is_exdate(&self, start: i64) -> bool {
+        self.master.as_ref().is_some_and(|master| {
+            master
+                .component
+                .properties(&ICalendarProperty::Exdate)
+                .any(|entry| {
+                    entry
+                        .values
+                        .iter()
+                        .filter_map(|value| value.as_partial_date_time())
+                        .any(|date| self.timestamp(date, entry.tz_id()) == Some(start))
+                })
+        })
     }
 
     fn is_rule_instance(&self, start: i64, is_rdate: bool) -> bool {
@@ -325,7 +366,7 @@ impl RuleOccurrences {
         let expanded = ICalendar {
             components: [root, rule].into_iter().chain(timezones).collect(),
         }
-        .expand_dates(Tz::Floating, limit);
+        .expand_dates(Tz::Floating, limit.saturating_add(1));
 
         let mut starts = expanded
             .events
@@ -335,7 +376,7 @@ impl RuleOccurrences {
         starts.sort_unstable();
 
         RuleOccurrences {
-            is_complete: expanded.errors.is_empty() && starts.len() < limit,
+            is_complete: expanded.errors.is_empty() && starts.len() <= limit,
             starts,
         }
     }

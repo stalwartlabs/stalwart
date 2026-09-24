@@ -402,6 +402,40 @@ impl<'x> ItipSnapshots<'x> {
             .unwrap_or_else(|| self.components.values().next().unwrap())
     }
 
+    pub fn matching_instance(
+        &self,
+        instance_id: &InstanceId,
+    ) -> Option<(&InstanceId, &ItipSnapshot<'x>)> {
+        self.components
+            .get_key_value(instance_id)
+            .or_else(|| match instance_id {
+                InstanceId::Recurrence(recurrence_id) => {
+                    self.components
+                        .get_key_value(&InstanceId::Recurrence(RecurrenceId {
+                            this_and_future: !recurrence_id.this_and_future,
+                            ..recurrence_id.clone()
+                        }))
+                }
+                InstanceId::Main => None,
+            })
+    }
+
+    pub fn occurrence_source(&self, recurrence_id: &RecurrenceId) -> Option<&ItipSnapshot<'x>> {
+        self.components
+            .iter()
+            .filter_map(|(instance_id, instance)| match instance_id {
+                InstanceId::Recurrence(covering)
+                    if covering.this_and_future && covering.date <= recurrence_id.date =>
+                {
+                    Some((covering.date, instance))
+                }
+                InstanceId::Recurrence(_) | InstanceId::Main => None,
+            })
+            .max_by_key(|(date, _)| *date)
+            .map(|(_, instance)| instance)
+            .or_else(|| self.components.get(&InstanceId::Main))
+    }
+
     pub fn instance_time(&self, instance_id: &InstanceId) -> Option<ItipTime> {
         let instance = self.components.get(instance_id);
         if let Some(time) = instance.and_then(ItipSnapshot::start_time) {
