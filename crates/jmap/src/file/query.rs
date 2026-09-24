@@ -274,6 +274,7 @@ impl FileNodeQuery for Server {
                             ));
                             continue;
                         }
+                        FileNodeFilter::Metadata(_) => todo!(),
                         unsupported @ (FileNodeFilter::Body(_) | FileNodeFilter::_T(_)) => {
                             return Err(trc::JmapEvent::UnsupportedFilter
                                 .into_err()

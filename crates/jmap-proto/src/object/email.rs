@@ -6,7 +6,11 @@
 
 use crate::{
     method::query::{Comparator, Filter},
-    object::{AnyId, JmapObject, JmapObjectId, MaybeReference, parse_ref},
+    object::{
+        AnyId, JmapObject, JmapObjectId, MaybeReference,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        parse_ref,
+    },
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
@@ -74,6 +78,10 @@ pub enum EmailProperty {
     HasAttachment,
     Preview,
 
+    // Object metadata
+    Metadata,
+    PrivateMetadata,
+
     // Other
     Keyword(Keyword),
     IdValue(Id),
@@ -110,8 +118,9 @@ pub enum EmailValue {
 impl Property for EmailProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
         let allow_patch = key.is_none();
-        if let Some(Key::Property(key)) = key {
-            match key.patch_or_prop() {
+        match key {
+            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
+            Some(Key::Property(key)) => match key.patch_or_prop() {
                 EmailProperty::Keywords => EmailProperty::Keyword(Keyword::parse(value)).into(),
                 EmailProperty::MailboxIds => match parse_ref(value) {
                     MaybeReference::Value(v) => Some(EmailProperty::IdValue(v)),
@@ -119,9 +128,8 @@ impl Property for EmailProperty {
                     MaybeReference::ParseError => None,
                 },
                 _ => EmailProperty::parse(value, allow_patch),
-            }
-        } else {
-            EmailProperty::parse(value, allow_patch)
+            },
+            _ => EmailProperty::parse(value, allow_patch),
         }
     }
 
@@ -167,6 +175,8 @@ impl Property for EmailProperty {
             EmailProperty::Value => "value",
             EmailProperty::IsEncodingProblem => "isEncodingProblem",
             EmailProperty::IsTruncated => "isTruncated",
+            EmailProperty::Metadata => "metadata",
+            EmailProperty::PrivateMetadata => "privateMetadata",
             EmailProperty::Header(header) => return header.to_string().into(),
             EmailProperty::Keyword(keyword) => return keyword.to_string().into(),
             EmailProperty::IdValue(id) => return id.to_string().into(),
@@ -261,6 +271,8 @@ impl EmailProperty {
                 "isTruncated" => Some(EmailProperty::IsTruncated),
                 "hasAttachment" => Some(EmailProperty::HasAttachment),
                 "preview" => Some(EmailProperty::Preview),
+                "metadata" => Some(EmailProperty::Metadata),
+                "privateMetadata" => Some(EmailProperty::PrivateMetadata),
                 _ => None
         )
         .or_else(|| {
@@ -276,6 +288,7 @@ impl EmailProperty {
 
     fn patch_or_prop(&self) -> &EmailProperty {
         if let EmailProperty::Pointer(ptr) = self
+            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
@@ -381,11 +394,33 @@ impl Display for HeaderForm {
     }
 }
 
+impl MetadataProperty for EmailProperty {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            EmailProperty::Metadata => Some(MetadataRoot::Shared),
+            EmailProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            EmailProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
+        }
+    }
+}
+
 impl FromStr for EmailProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        EmailProperty::parse(s, false).ok_or(())
+        EmailProperty::parse(s, false)
+            .or_else(|| {
+                MetadataRoot::from_selector(s)
+                    .map(|_| EmailProperty::Pointer(JsonPointer::parse(s)))
+            })
+            .ok_or(())
     }
 }
 
@@ -494,7 +529,7 @@ impl JmapObject for Email {
 
     type Id = Id;
 
-    type Filter = EmailFilter;
+    type Filter = EmailQueryFilter;
 
     type Comparator = EmailComparator;
 
@@ -538,6 +573,12 @@ pub enum EmailFilter {
     InThread(Id),
     Id(Vec<Id>),
     _T(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmailQueryFilter {
+    Email(EmailFilter),
+    Metadata(MetadataFilter),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -644,6 +685,24 @@ impl<'de> DeserializeArguments<'de> for EmailFilter {
     }
 }
 
+impl<'de> DeserializeArguments<'de> for EmailQueryFilter {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        *self = match MetadataFilter::try_deserialize(key, map)? {
+            Some(filter) => EmailQueryFilter::Metadata(filter),
+            None => {
+                let mut filter = EmailFilter::default();
+                filter.deserialize_argument(key, map)?;
+                EmailQueryFilter::Email(filter)
+            }
+        };
+
+        Ok(())
+    }
+}
+
 impl<'de> DeserializeArguments<'de> for EmailComparator {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
     where
@@ -717,6 +776,12 @@ impl Default for EmailFilter {
     }
 }
 
+impl Default for EmailQueryFilter {
+    fn default() -> Self {
+        EmailQueryFilter::Email(EmailFilter::default())
+    }
+}
+
 impl Default for EmailComparator {
     fn default() -> Self {
         EmailComparator::_T("".to_string())
@@ -772,6 +837,15 @@ impl Display for EmailFilter {
     }
 }
 
+impl Display for EmailQueryFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmailQueryFilter::Email(filter) => filter.fmt(f),
+            EmailQueryFilter::Metadata(filter) => f.write_str(filter.as_str()),
+        }
+    }
+}
+
 impl Display for EmailComparator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -806,10 +880,11 @@ impl Serialize for EmailComparator {
     }
 }
 
-impl Filter<EmailFilter> {
+impl Filter<EmailQueryFilter> {
     pub fn is_immutable(&self) -> bool {
         match self {
-            Filter::Property(f) => f.is_immutable(),
+            Filter::Property(EmailQueryFilter::Email(f)) => f.is_immutable(),
+            Filter::Property(EmailQueryFilter::Metadata(_)) => false,
             Filter::And | Filter::Or | Filter::Not | Filter::Close => true,
         }
     }

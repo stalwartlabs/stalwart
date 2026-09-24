@@ -6,7 +6,9 @@
 
 use crate::{
     object::{
-        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
+        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        parse_ref,
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
@@ -31,6 +33,8 @@ pub enum MailboxProperty {
     ShareWith,
     MyRights,
     IsSubscribed,
+    Metadata,
+    PrivateMetadata,
 
     // Other
     IdValue(Id),
@@ -62,15 +66,15 @@ pub enum MailboxValue {
 impl Property for MailboxProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
         let allow_patch = key.is_none();
-        if let Some(Key::Property(key)) = key {
-            match key.patch_or_prop() {
+        match key {
+            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
+            Some(Key::Property(key)) => match key.patch_or_prop() {
                 MailboxProperty::ShareWith => {
                     Id::from_str(value).ok().map(MailboxProperty::IdValue)
                 }
                 _ => MailboxProperty::parse(value, allow_patch),
-            }
-        } else {
-            MailboxProperty::parse(value, allow_patch)
+            },
+            _ => MailboxProperty::parse(value, allow_patch),
         }
     }
 
@@ -88,6 +92,8 @@ impl Property for MailboxProperty {
             MailboxProperty::UnreadEmails => "unreadEmails",
             MailboxProperty::UnreadThreads => "unreadThreads",
             MailboxProperty::ShareWith => "shareWith",
+            MailboxProperty::Metadata => "metadata",
+            MailboxProperty::PrivateMetadata => "privateMetadata",
             MailboxProperty::Rights(mailbox_right) => mailbox_right.as_str(),
             MailboxProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
             MailboxProperty::IdValue(id) => return id.to_string().into(),
@@ -166,6 +172,8 @@ impl MailboxProperty {
             b"mayDelete" => Some(MailboxProperty::Rights(MailboxRight::MayDelete)),
             b"mayShare" => Some(MailboxProperty::Rights(MailboxRight::MayShare)),
             b"isSubscribed" => Some(MailboxProperty::IsSubscribed),
+            b"metadata" => Some(MailboxProperty::Metadata),
+            b"privateMetadata" => Some(MailboxProperty::PrivateMetadata),
             _ => None,
         )
         .or_else(|| {
@@ -179,11 +187,29 @@ impl MailboxProperty {
 
     fn patch_or_prop(&self) -> &MailboxProperty {
         if let MailboxProperty::Pointer(ptr) = self
+            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
         } else {
             self
+        }
+    }
+}
+
+impl MetadataProperty for MailboxProperty {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            MailboxProperty::Metadata => Some(MetadataRoot::Shared),
+            MailboxProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            MailboxProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
         }
     }
 }
@@ -239,7 +265,12 @@ impl FromStr for MailboxProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        MailboxProperty::parse(s, false).ok_or(())
+        MailboxProperty::parse(s, false)
+            .or_else(|| {
+                MetadataRoot::from_selector(s)
+                    .map(|_| MailboxProperty::Pointer(JsonPointer::parse(s)))
+            })
+            .ok_or(())
     }
 }
 
@@ -310,6 +341,7 @@ pub enum MailboxFilter {
     Role(Option<SpecialUse>),
     HasAnyRole(bool),
     IsSubscribed(bool),
+    Metadata(MetadataFilter),
     _T(String),
 }
 
@@ -343,8 +375,13 @@ impl<'de> DeserializeArguments<'de> for MailboxFilter {
                 *self = MailboxFilter::IsSubscribed(map.next_value()?);
             },
             _ => {
-                *self = MailboxFilter::_T(key.to_string());
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                *self = match MetadataFilter::try_deserialize(key, map)? {
+                    Some(filter) => MailboxFilter::Metadata(filter),
+                    None => {
+                        let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        MailboxFilter::_T(key.to_string())
+                    }
+                };
             }
         );
 

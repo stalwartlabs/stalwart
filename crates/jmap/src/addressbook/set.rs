@@ -22,7 +22,10 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::addressbook::{self, AddressBookProperty, AddressBookValue},
+    object::{
+        addressbook::{self, AddressBookProperty, AddressBookValue},
+        metadata::MetadataProperty,
+    },
     request::{MaybeInvalid, reference::MaybeIdReference},
     types::state::State,
 };
@@ -471,6 +474,7 @@ fn update_address_book(
         };
 
         match (property, value) {
+            (property, _) if property.metadata_root().is_some() => todo!(),
             (AddressBookProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
                 address_book.preferences_mut(personal_id).name = value.into_owned();
             }

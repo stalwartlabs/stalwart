@@ -22,6 +22,7 @@ pub mod email_submission;
 pub mod file_node;
 pub mod identity;
 pub mod mailbox;
+pub mod metadata;
 pub mod participant_identity;
 pub mod principal;
 pub mod push_subscription;

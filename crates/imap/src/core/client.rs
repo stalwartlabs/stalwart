@@ -264,6 +264,14 @@ impl<T: SessionStream> Session<T> {
                     .handle_uidbatches(request)
                     .await
                     .map(|_| SessionResult::Continue),
+                Command::GetMetadata => self
+                    .handle_get_metadata(request)
+                    .await
+                    .map(|_| SessionResult::Continue),
+                Command::SetMetadata => self
+                    .handle_set_metadata(request)
+                    .await
+                    .map(|_| SessionResult::Continue),
             };
 
             match result {
@@ -415,7 +423,9 @@ impl<T: SessionStream> Session<T> {
             | Command::Unauthenticate
             | Command::GetQuota
             | Command::GetQuotaRoot
-            | Command::GetJmapAccess => {
+            | Command::GetJmapAccess
+            | Command::GetMetadata
+            | Command::SetMetadata => {
                 if let State::Authenticated { .. } | State::Selected { .. } = state {
                     Ok(request)
                 } else {

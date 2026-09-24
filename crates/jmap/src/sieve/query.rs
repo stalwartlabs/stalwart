@@ -118,6 +118,7 @@ impl SieveScriptQuery for Server {
                             filters.push(SearchFilter::is_in_set(inactive_set));
                         }
                     }
+                    SieveFilter::Metadata(_) => todo!(),
                     SieveFilter::_T(other) => {
                         return Err(trc::JmapEvent::UnsupportedFilter.into_err().details(other));
                     }

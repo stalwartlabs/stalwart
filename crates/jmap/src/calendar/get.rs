@@ -19,7 +19,10 @@ use groupware::{
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
+    object::{
+        calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
+        metadata::MetadataSelection,
+    },
 };
 use jmap_tools::{Key, Map, Value};
 use store::{
@@ -49,7 +52,7 @@ impl CalendarGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<calendar::Calendar>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let properties = request.unwrap_properties(&[
+        let mut properties = request.unwrap_properties(&[
             CalendarProperty::Id,
             CalendarProperty::Name,
             CalendarProperty::Description,
@@ -65,6 +68,9 @@ impl CalendarGet for Server {
             CalendarProperty::ShareWith,
             CalendarProperty::MyRights,
         ]);
+        if !MetadataSelection::extract(&mut properties)?.is_none() {
+            todo!()
+        }
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Calendar);
         let cache = self

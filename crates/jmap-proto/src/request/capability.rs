@@ -95,6 +95,8 @@ pub enum Capability {
     WebPushVapid = 1 << 18,
     #[serde(rename(serialize = "urn:ietf:params:jmap:emailpush"))]
     EmailPush = 1 << 19,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:metadata"))]
+    Metadata = 1 << 20,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -104,6 +106,15 @@ pub struct CapabilityIds(pub u32);
 impl CapabilityIds {
     pub fn contains(&self, capability: Capability) -> bool {
         self.0 & capability as u32 != 0
+    }
+}
+
+impl FromIterator<Capability> for CapabilityIds {
+    fn from_iter<T: IntoIterator<Item = Capability>>(iter: T) -> Self {
+        CapabilityIds(
+            iter.into_iter()
+                .fold(0, |ids, capability| ids | capability as u32),
+        )
     }
 }
 
@@ -125,6 +136,7 @@ pub enum Capabilities {
     Calendar(CalendarCapabilities),
     FileNode(FileNodeCapabilities),
     WebPush(WebPushCapabilities),
+    Metadata(MetadataCapabilities),
     Empty(EmptyCapabilities),
 }
 
@@ -291,6 +303,24 @@ pub struct WebPushCapabilities {
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MetadataCapabilities {
+    #[serde(rename(serialize = "dataTypes"))]
+    pub data_types: VecMap<DataType, DataTypeMetadataInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DataTypeMetadataInfo {
+    #[serde(rename(serialize = "namespaces"))]
+    pub namespaces: Vec<&'static str>,
+    #[serde(rename(serialize = "supportsVendorNamespaces"))]
+    pub supports_vendor_namespaces: bool,
+    #[serde(rename(serialize = "supportsPrivate"))]
+    pub supports_private: bool,
+    #[serde(rename(serialize = "maxDepth"))]
+    pub max_depth: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct EmptyCapabilities {}
 
 #[derive(Default, Clone)]
@@ -322,6 +352,18 @@ impl Capability {
             Capability::Stalwart => "urn:stalwart:jmap",
             Capability::WebPushVapid => "urn:ietf:params:jmap:webpush-vapid",
             Capability::EmailPush => "urn:ietf:params:jmap:emailpush",
+            Capability::Metadata => "urn:ietf:params:jmap:metadata",
+        }
+    }
+
+    pub fn for_data_type(data_type: DataType) -> Option<Self> {
+        match data_type {
+            DataType::Email | DataType::Mailbox => Some(Capability::Mail),
+            DataType::SieveScript => Some(Capability::Sieve),
+            DataType::Calendar | DataType::CalendarEvent => Some(Capability::Calendars),
+            DataType::AddressBook | DataType::ContactCard => Some(Capability::Contacts),
+            DataType::FileNode => Some(Capability::FileNode),
+            _ => None,
         }
     }
 
@@ -346,6 +388,7 @@ impl Capability {
             Capability::Stalwart,
             Capability::WebPushVapid,
             Capability::EmailPush,
+            Capability::Metadata,
         ]
     }
 }
@@ -445,6 +488,34 @@ impl Capabilities {
     }
 }
 
+impl MetadataCapabilities {
+    pub fn to_account_capabilities(
+        &self,
+        account_capabilities: CapabilityIds,
+        supports_private: bool,
+    ) -> MetadataCapabilities {
+        MetadataCapabilities {
+            data_types: self
+                .data_types
+                .iter()
+                .filter(|(data_type, _)| {
+                    Capability::for_data_type(**data_type)
+                        .is_some_and(|capability| account_capabilities.contains(capability))
+                })
+                .map(|(data_type, info)| {
+                    (
+                        *data_type,
+                        DataTypeMetadataInfo {
+                            supports_private: info.supports_private && supports_private,
+                            ..info.clone()
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
 impl Capability {
     pub fn parse(s: &str) -> Option<Self> {
         hashify::map!(s.as_bytes(), Capability,
@@ -468,6 +539,7 @@ impl Capability {
             "urn:stalwart:jmap" => Capability::Stalwart,
             "urn:ietf:params:jmap:webpush-vapid" => Capability::WebPushVapid,
             "urn:ietf:params:jmap:emailpush" => Capability::EmailPush,
+            "urn:ietf:params:jmap:metadata" => Capability::Metadata,
         )
         .copied()
     }
@@ -509,5 +581,79 @@ impl<'de> Deserialize<'de> for CapabilityIds {
         }
 
         deserializer.deserialize_seq(CapabilityIdsVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Capability, CapabilityIds, DataTypeMetadataInfo, MetadataCapabilities};
+    use serde_json::json;
+    use types::type_state::DataType;
+
+    #[test]
+    fn metadata_capability() {
+        assert_eq!(
+            Capability::parse("urn:ietf:params:jmap:metadata"),
+            Some(Capability::Metadata)
+        );
+        assert_eq!(
+            Capability::Metadata.as_str(),
+            "urn:ietf:params:jmap:metadata"
+        );
+        assert!(Capability::all_capabilities().contains(&Capability::Metadata));
+
+        let base = MetadataCapabilities {
+            data_types: [
+                DataType::Email,
+                DataType::Mailbox,
+                DataType::SieveScript,
+                DataType::CalendarEvent,
+                DataType::FileNode,
+            ]
+            .into_iter()
+            .map(|data_type| {
+                (
+                    data_type,
+                    DataTypeMetadataInfo {
+                        namespaces: Vec::new(),
+                        supports_vendor_namespaces: true,
+                        supports_private: true,
+                        max_depth: Some(8),
+                    },
+                )
+            })
+            .collect(),
+        };
+        let account = [Capability::Mail, Capability::FileNode, Capability::Metadata]
+            .into_iter()
+            .collect::<CapabilityIds>();
+        let info = |supports_private: bool| {
+            json!({
+                "namespaces": [],
+                "supportsVendorNamespaces": true,
+                "supportsPrivate": supports_private,
+                "maxDepth": 8
+            })
+        };
+
+        for supports_private in [true, false] {
+            assert_eq!(
+                serde_json::to_value(base.to_account_capabilities(account, supports_private))
+                    .unwrap(),
+                json!({
+                    "dataTypes": {
+                        "Email": info(supports_private),
+                        "Mailbox": info(supports_private),
+                        "FileNode": info(supports_private)
+                    }
+                })
+            );
+        }
+
+        assert_eq!(
+            serde_json::to_value(base.to_account_capabilities(CapabilityIds::default(), true))
+                .unwrap(),
+            json!({"dataTypes": {}})
+        );
     }
 }

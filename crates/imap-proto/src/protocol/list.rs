@@ -8,7 +8,9 @@ use compact_str::CompactString;
 use crate::utf7::quoted_mailbox_name;
 
 use super::{
-    ImapResponse, quoted_string,
+    ImapResponse,
+    metadata::Entry,
+    quoted_string,
     status::{Status, StatusItem},
 };
 
@@ -51,6 +53,7 @@ pub enum ReturnOption {
     Children,
     Status(Vec<Status>),
     SpecialUse,
+    Metadata(Vec<Entry<'static>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

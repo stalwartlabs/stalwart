@@ -3524,6 +3524,33 @@ pub struct MemoryLookupKeyValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Metadata {
+    #[serde(rename = "dataTypes")]
+    pub data_types: Map<MetadataDataType>,
+    #[serde(rename = "vendorNamespaces")]
+    pub vendor_namespaces: bool,
+    #[serde(rename = "privateMetadata")]
+    pub private_metadata: bool,
+    #[serde(rename = "maxDepth")]
+    pub max_depth: Option<u64>,
+    #[serde(rename = "maxEntrySize")]
+    pub max_entry_size: u64,
+    #[serde(rename = "maxSize")]
+    pub max_size: u64,
+    #[serde(rename = "maxPrivateSize")]
+    pub max_private_size: u64,
+    #[serde(rename = "maxEntries")]
+    pub max_entries: u64,
+    #[serde(rename = "queryMaxScan")]
+    pub query_max_scan: u64,
+    #[serde(rename = "imapServerComment")]
+    pub imap_server_comment: Option<String>,
+    #[serde(rename = "imapServerAdmin")]
+    pub imap_server_admin: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "@type")]
 pub enum Metric {
     Counter(MetricCount),

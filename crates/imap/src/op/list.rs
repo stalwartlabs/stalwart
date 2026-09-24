@@ -161,6 +161,7 @@ impl<T: SessionStream> SessionData<T> {
                 ReturnOption::SpecialUse => {
                     include_special_use = true;
                 }
+                ReturnOption::Metadata(_) => todo!(),
             }
         }
         if recursive_match && !filter_subscribed {

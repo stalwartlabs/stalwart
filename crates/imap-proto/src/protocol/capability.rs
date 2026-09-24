@@ -59,6 +59,9 @@ pub enum Capability {
     UidBatches,
     MessageLimit(u32),
     SaveLimit(u32),
+    Metadata,
+    MetadataServer,
+    ListMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +131,9 @@ impl Capability {
             Capability::JmapAccess => b"JMAPACCESS",
             Capability::UidOnly => b"UIDONLY",
             Capability::UidBatches => b"UIDBATCHES",
+            Capability::Metadata => b"METADATA",
+            Capability::MetadataServer => b"METADATA-SERVER",
+            Capability::ListMetadata => b"LIST-METADATA",
             Capability::MessageLimit(limit) => {
                 buf.extend_from_slice(b"MESSAGELIMIT=");
                 push_int(buf, *limit);
@@ -249,6 +255,17 @@ mod tests {
             }
             .serialize(),
             "* CAPABILITY IMAP4rev2 STARTTLS LOGINDISABLED\r\n".as_bytes()
+        );
+        assert_eq!(
+            &Response {
+                capabilities: vec![
+                    Capability::Metadata,
+                    Capability::MetadataServer,
+                    Capability::ListMetadata
+                ],
+            }
+            .serialize(),
+            "* CAPABILITY METADATA METADATA-SERVER LIST-METADATA\r\n".as_bytes()
         );
     }
 }

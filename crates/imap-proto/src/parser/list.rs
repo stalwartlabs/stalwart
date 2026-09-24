@@ -8,6 +8,7 @@ use crate::{
     Command,
     protocol::{
         list::{self, ReturnOption, SelectionOption},
+        metadata::Entry,
         status::Status,
     },
     receiver::{Request, Token, bad},
@@ -149,6 +150,33 @@ impl Request<Command> {
                                             }
                                         }
                                     }
+                                } else if let ReturnOption::Metadata(entries) = &mut return_option {
+                                    if tokens
+                                        .next()
+                                        .is_none_or(|token| !token.is_parenthesis_open())
+                                    {
+                                        return Err(bad(
+                                            self.tag,
+                                            "Invalid return option, expected parenthesis after METADATA.",
+                                        ));
+                                    }
+                                    while let Some(token) = tokens.next() {
+                                        match token {
+                                            Token::ParenthesisClose if !entries.is_empty() => break,
+                                            Token::ParenthesisOpen | Token::ParenthesisClose => {
+                                                return Err(bad(
+                                                    self.tag,
+                                                    "Invalid metadata return option argument.",
+                                                ));
+                                            }
+                                            token => {
+                                                entries.push(
+                                                    Entry::parse_specifier(token.as_bytes())
+                                                        .map_err(|v| bad(self.tag.clone(), v))?,
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                                 return_options.push(return_option);
                             }
@@ -200,6 +228,7 @@ impl ReturnOption {
             "CHILDREN" => Some(Self::Children),
             "STATUS" => Some(Self::Status(Vec::with_capacity(2))),
             "SPECIAL-USE" => Some(Self::SpecialUse),
+            "METADATA" => Some(Self::Metadata(Vec::new())),
             _ => None,
         )
         .ok_or_else(|| format!("Invalid return option {:?}", String::from_utf8_lossy(value)).into())
@@ -211,6 +240,7 @@ mod tests {
     use crate::{
         protocol::{
             list::{self, ReturnOption, SelectionOption},
+            metadata::{Entry, Scope},
             status::Status,
         },
         receiver::Receiver,
@@ -367,6 +397,31 @@ mod tests {
                     ],
                 },
             ),
+            (
+                concat!(
+                    "A03 LIST \"\" % RETURN (METADATA (\"/shared/vendor/cmu/cyrus-imapd/color\" ",
+                    "/Private/Comment) CHILDREN)\r\n"
+                ),
+                list::Arguments::Extended {
+                    tag: "A03".into(),
+                    reference_name: "".into(),
+                    mailbox_name: vec!["%".into()],
+                    selection_options: vec![],
+                    return_options: vec![
+                        ReturnOption::Metadata(vec![
+                            Entry {
+                                scope: Scope::Shared,
+                                path: "/vendor/cmu/cyrus-imapd/color".into(),
+                            },
+                            Entry {
+                                scope: Scope::Private,
+                                path: "/comment".into(),
+                            },
+                        ]),
+                        ReturnOption::Children,
+                    ],
+                },
+            ),
         ] {
             assert_eq!(
                 receiver
@@ -375,6 +430,21 @@ mod tests {
                     .parse_list(true)
                     .unwrap(),
                 arguments
+            );
+        }
+
+        for command in [
+            "A04 LIST \"\" % RETURN (METADATA)\r\n",
+            "A05 LIST \"\" % RETURN (METADATA ())\r\n",
+            "A06 LIST \"\" % RETURN (METADATA (comment))\r\n",
+        ] {
+            assert!(
+                receiver
+                    .parse(&mut command.as_bytes().iter())
+                    .unwrap()
+                    .parse_list(true)
+                    .is_err(),
+                "{command:?}"
             );
         }
     }

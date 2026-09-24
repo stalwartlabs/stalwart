@@ -5,10 +5,14 @@
  */
 
 use crate::{
-    object::{AnyId, DeserializeArguments, JmapObject, JmapObjectId, MaybeReference, parse_ref},
+    object::{
+        AnyId, DeserializeArguments, JmapObject, JmapObjectId, MaybeReference,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        parse_ref,
+    },
     request::reference::MaybeIdReference,
 };
-use jmap_tools::{Element, Key, Property};
+use jmap_tools::{Element, JsonPointer, Key, Property};
 use std::{borrow::Cow, str::FromStr};
 use types::{blob::BlobId, id::Id};
 
@@ -21,6 +25,9 @@ pub enum SieveProperty {
     Name,
     BlobId,
     IsActive,
+    Metadata,
+    PrivateMetadata,
+    Pointer(JsonPointer<SieveProperty>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -31,8 +38,11 @@ pub enum SieveValue {
 }
 
 impl Property for SieveProperty {
-    fn try_parse(_: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        SieveProperty::parse(value)
+    fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
+        match key {
+            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
+            _ => SieveProperty::parse(value, key.is_none()),
+        }
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -41,6 +51,9 @@ impl Property for SieveProperty {
             SieveProperty::Id => "id",
             SieveProperty::Name => "name",
             SieveProperty::IsActive => "isActive",
+            SieveProperty::Metadata => "metadata",
+            SieveProperty::PrivateMetadata => "privateMetadata",
+            SieveProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
         }
         .into()
     }
@@ -79,14 +92,40 @@ impl Element for SieveValue {
 }
 
 impl SieveProperty {
-    fn parse(value: &str) -> Option<Self> {
+    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(SieveProperty::Id),
             b"name" => Some(SieveProperty::Name),
             b"blobId" => Some(SieveProperty::BlobId),
             b"isActive" => Some(SieveProperty::IsActive),
+            b"metadata" => Some(SieveProperty::Metadata),
+            b"privateMetadata" => Some(SieveProperty::PrivateMetadata),
             _ => None,
         )
+        .or_else(|| {
+            if allow_patch && value.contains('/') {
+                SieveProperty::Pointer(JsonPointer::parse(value)).into()
+            } else {
+                None
+            }
+        })
+    }
+}
+
+impl MetadataProperty for SieveProperty {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            SieveProperty::Metadata => Some(MetadataRoot::Shared),
+            SieveProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            SieveProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
+        }
     }
 }
 
@@ -121,7 +160,12 @@ impl FromStr for SieveProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        SieveProperty::parse(s).ok_or(())
+        SieveProperty::parse(s, false)
+            .or_else(|| {
+                MetadataRoot::from_selector(s)
+                    .map(|_| SieveProperty::Pointer(JsonPointer::parse(s)))
+            })
+            .ok_or(())
     }
 }
 
@@ -153,6 +197,7 @@ impl JmapObject for Sieve {
 pub enum SieveFilter {
     Name(String),
     IsActive(bool),
+    Metadata(MetadataFilter),
     _T(String),
 }
 
@@ -176,8 +221,13 @@ impl<'de> DeserializeArguments<'de> for SieveFilter {
                 *self = SieveFilter::IsActive(map.next_value()?);
             },
             _ => {
-                *self = SieveFilter::_T(key.to_string());
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                *self = match MetadataFilter::try_deserialize(key, map)? {
+                    Some(filter) => SieveFilter::Metadata(filter),
+                    None => {
+                        let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        SieveFilter::_T(key.to_string())
+                    }
+                };
             }
         );
 

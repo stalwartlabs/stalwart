@@ -13,7 +13,7 @@ use compact_str::CompactString;
 use directory::Credentials;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
-    protocol::{authenticate::Mechanism, capability::Capability},
+    protocol::authenticate::Mechanism,
     receiver::{self, Request},
 };
 use mail_parser::decoders::base64::base64_decode;
@@ -122,13 +122,7 @@ impl<T: SessionStream> Session<T> {
         self.write_bytes(
             StatusResponse::ok("Authentication successful")
                 .with_code(ResponseCode::Capability {
-                    capabilities: Capability::all_capabilities(
-                        true,
-                        !self.is_tls && self.instance.acceptor.is_tls(),
-                        true,
-                        self.server.core.imap.max_messages_per_command,
-                        self.server.core.imap.max_messages_per_save,
-                    ),
+                    capabilities: self.capabilities(),
                 })
                 .with_tag(tag)
                 .into_bytes(),

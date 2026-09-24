@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use crate::core::Session;
+use crate::core::{Session, State};
 use common::network::SessionStream;
 use imap_proto::{
     Command, StatusResponse,
@@ -36,16 +36,28 @@ impl<T: SessionStream> Session<T> {
             StatusResponse::completed(Command::Capability)
                 .with_tag(request.tag)
                 .serialize_after(&Response {
-                    capabilities: Capability::all_capabilities(
-                        self.state.is_authenticated(),
-                        !self.is_tls && self.instance.acceptor.is_tls(),
-                        self.is_tls || self.server.core.imap.allow_plain_auth,
-                        self.server.core.imap.max_messages_per_command,
-                        self.server.core.imap.max_messages_per_save,
-                    ),
+                    capabilities: self.capabilities(),
                 }),
         )
         .await
+    }
+
+    pub fn capabilities(&self) -> Vec<Capability> {
+        let mut capabilities = Capability::all_capabilities(
+            self.state.is_authenticated(),
+            !self.is_tls && self.instance.acceptor.is_tls(),
+            self.is_tls || self.server.core.imap.allow_plain_auth,
+            self.server.core.imap.max_messages_per_command,
+            self.server.core.imap.max_messages_per_save,
+        );
+        if let State::Authenticated { data } | State::Selected { data, .. } = &self.state
+            && data
+                .access_token
+                .has_permission(Permission::ImapMetadataGet)
+        {
+            capabilities.push(Capability::Metadata);
+        }
+        capabilities
     }
 
     pub async fn handle_id(&mut self, request: Request<Command>) -> trc::Result<()> {

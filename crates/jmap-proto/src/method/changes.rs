@@ -18,6 +18,7 @@ pub struct ChangesRequest {
     pub account_id: Id,
     pub since_state: State,
     pub max_changes: Option<usize>,
+    pub ignore_metadata_only_changes: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -60,6 +61,9 @@ impl<'de> DeserializeArguments<'de> for ChangesRequest {
             b"maxChanges" => {
                 self.max_changes = map.next_value()?;
             },
+            b"ignoreMetadataOnlyChanges" => {
+                self.ignore_metadata_only_changes = map.next_value()?;
+            },
             _ => {
                 let _ = map.next_value::<serde::de::IgnoredAny>()?;
             }
@@ -81,5 +85,34 @@ impl<'de> Deserialize<'de> for ChangesRequest {
 impl<T: JmapObject> ChangesResponse<T> {
     pub fn has_changes(&self) -> bool {
         !self.created.is_empty() || !self.updated.is_empty() || !self.destroyed.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChangesRequest;
+    use crate::types::state::State;
+
+    #[test]
+    fn parse_ignore_metadata_only_changes() {
+        for (json, expected) in [
+            (r#"{"accountId": "a", "sinceState": "n"}"#, None),
+            (
+                r#"{"accountId": "a", "sinceState": "n", "ignoreMetadataOnlyChanges": true}"#,
+                Some(true),
+            ),
+            (
+                r#"{"accountId": "a", "sinceState": "n", "ignoreMetadataOnlyChanges": false}"#,
+                Some(false),
+            ),
+            (
+                r#"{"accountId": "a", "sinceState": "n", "ignoreMetadataOnlyChanges": null}"#,
+                None,
+            ),
+        ] {
+            let request = serde_json::from_str::<ChangesRequest>(json).unwrap();
+            assert_eq!(request.since_state, State::Initial);
+            assert_eq!(request.ignore_metadata_only_changes, expected, "{json}");
+        }
     }
 }

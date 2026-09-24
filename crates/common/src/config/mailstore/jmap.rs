@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::network::webpush::{Vapid, VapidKey};
+use crate::{
+    config::metadata::MetadataConfig,
+    network::webpush::{Vapid, VapidKey},
+};
 use jmap_proto::request::capability::BaseCapabilities;
 use registry::schema::{prelude::ObjectType, structs::Jmap};
 use std::time::Duration;
@@ -54,7 +57,7 @@ pub struct JmapConfig {
 }
 
 impl JmapConfig {
-    pub async fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, metadata: &MetadataConfig) -> Self {
         let jmap = bp.setting_infallible::<Jmap>().await;
         let web_push_key = jmap
             .web_push_key
@@ -128,7 +131,7 @@ impl JmapConfig {
             .map(|key| Vapid::new(key, web_push_contact));
 
         // Add capabilities
-        jmap.add_capabilities(bp).await;
+        jmap.add_capabilities(bp, metadata).await;
         jmap
     }
 }

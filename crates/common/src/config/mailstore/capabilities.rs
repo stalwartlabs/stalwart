@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    config::mailstore::jmap::JmapConfig,
+    config::{mailstore::jmap::JmapConfig, metadata::MetadataConfig},
     storage::dav::{
         FORBIDDEN_FILE_NAME_CHARS, FORBIDDEN_FILE_NODE_NAMES, MAX_DAV_FILE_NAME_LEN,
         MAX_FILE_NODE_DEPTH,
@@ -17,9 +17,10 @@ use jmap_proto::{
     object::{email::EmailComparator, file_node::FileNodeComparator},
     request::capability::{
         BlobCapabilities, CalendarCapabilities, Capabilities, Capability, ContactsCapabilities,
-        CoreCapabilities, EmptyCapabilities, FileNodeCapabilities, MailCapabilities,
-        PrincipalAvailabilityCapabilities, PrincipalCapabilities, SieveAccountCapabilities,
-        SieveSessionCapabilities, SubmissionCapabilities, WebPushCapabilities,
+        CoreCapabilities, DataTypeMetadataInfo, EmptyCapabilities, FileNodeCapabilities,
+        MailCapabilities, MetadataCapabilities, PrincipalAvailabilityCapabilities,
+        PrincipalCapabilities, SieveAccountCapabilities, SieveSessionCapabilities,
+        SubmissionCapabilities, WebPushCapabilities,
     },
     types::date::UTCDate,
 };
@@ -32,7 +33,7 @@ use types::type_state::DataType;
 use utils::map::vec_map::VecMap;
 
 impl JmapConfig {
-    pub async fn add_capabilities(&mut self, bp: &mut Bootstrap) {
+    pub async fn add_capabilities(&mut self, bp: &mut Bootstrap, metadata: &MetadataConfig) {
         // Add core capabilities
         self.capabilities.session.append(
             Capability::Core,
@@ -316,6 +317,34 @@ impl JmapConfig {
             Capability::EmailPush,
             Capabilities::Empty(EmptyCapabilities::default()),
         );
+
+        // Add metadata capabilities
+        let mut data_types = metadata
+            .data_types
+            .map(|data_type| {
+                (
+                    data_type,
+                    DataTypeMetadataInfo {
+                        namespaces: Vec::new(),
+                        supports_vendor_namespaces: metadata.vendor_namespaces,
+                        supports_private: metadata.private_metadata,
+                        max_depth: metadata.max_depth,
+                    },
+                )
+            })
+            .filter(|(_, info)| info.supports_vendor_namespaces || !info.namespaces.is_empty())
+            .collect::<VecMap<_, _>>();
+        if !data_types.is_empty() {
+            data_types.sort_unstable_by_key();
+            self.capabilities.session.append(
+                Capability::Metadata,
+                Capabilities::Empty(EmptyCapabilities::default()),
+            );
+            self.capabilities.account.insert(
+                Capability::Metadata,
+                Capabilities::Metadata(MetadataCapabilities { data_types }),
+            );
+        }
 
         // Add Web Push VAPID capabilities
         if let Some(application_server_key) = self

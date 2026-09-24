@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    object::{AnyId, JmapObject, JmapObjectId},
+    object::{AnyId, JmapObject, JmapObjectId, metadata::MetadataFilter},
     request::{MaybeInvalid, deserialize::DeserializeArguments},
 };
 use calcard::{
@@ -89,6 +89,7 @@ pub enum CalendarEventFilter {
     Owner(String),
     Attendee(String),
     Uid(String),
+    Metadata(MetadataFilter),
     _T(String),
 }
 
@@ -185,8 +186,13 @@ impl<'de> DeserializeArguments<'de> for CalendarEventFilter {
                 *self = CalendarEventFilter::Uid(map.next_value()?);
             },
             _ => {
-                *self = CalendarEventFilter::_T(key.to_string());
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                *self = match MetadataFilter::try_deserialize(key, map)? {
+                    Some(filter) => CalendarEventFilter::Metadata(filter),
+                    None => {
+                        let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        CalendarEventFilter::_T(key.to_string())
+                    }
+                };
             }
         );
         Ok(())
@@ -303,6 +309,7 @@ impl CalendarEventFilter {
             CalendarEventFilter::Owner(_) => "owner",
             CalendarEventFilter::Attendee(_) => "attendee",
             CalendarEventFilter::Uid(_) => "uid",
+            CalendarEventFilter::Metadata(filter) => filter.as_str(),
             CalendarEventFilter::_T(s) => return Cow::Owned(s),
         }
         .into()

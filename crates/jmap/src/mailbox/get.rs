@@ -8,7 +8,10 @@ use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::mailbox::{Mailbox, MailboxProperty, MailboxValue},
+    object::{
+        mailbox::{Mailbox, MailboxProperty, MailboxValue},
+        metadata::MetadataSelection,
+    },
 };
 use jmap_tools::{Map, Value};
 use std::future::Future;
@@ -32,7 +35,7 @@ impl MailboxGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Mailbox>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let properties = request.unwrap_properties(&[
+        let mut properties = request.unwrap_properties(&[
             MailboxProperty::Id,
             MailboxProperty::Name,
             MailboxProperty::ParentId,
@@ -45,6 +48,9 @@ impl MailboxGet for Server {
             MailboxProperty::UnreadThreads,
             MailboxProperty::MyRights,
         ]);
+        if !MetadataSelection::extract(&mut properties)?.is_none() {
+            todo!()
+        }
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Mailbox);
         let cache = self.get_cached_messages(account_id).await?;

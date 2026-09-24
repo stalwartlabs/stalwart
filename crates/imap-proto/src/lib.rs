@@ -7,6 +7,7 @@
 use compact_str::CompactString;
 use protocol::ObjectId;
 use protocol::capability::Capability;
+use protocol::metadata::MetadataCode;
 use std::borrow::Cow;
 
 pub mod parser;
@@ -82,6 +83,10 @@ pub enum Command {
 
     // RFC 10022
     UidBatches,
+
+    // RFC 5464
+    GetMetadata,
+    SetMetadata,
 }
 
 impl Command {
@@ -169,6 +174,8 @@ impl Command {
             Command::GetQuota => "GETQUOTA completed",
             Command::GetQuotaRoot => "GETQUOTAROOT completed",
             Command::GetJmapAccess => "GETJMAPACCESS completed",
+            Command::GetMetadata => "GETMETADATA completed",
+            Command::SetMetadata => "SETMETADATA completed",
         }
     }
 }
@@ -246,6 +253,9 @@ pub enum ResponseCode {
         limit: u32,
         uid: Option<u32>,
     },
+
+    // METADATA
+    Metadata(MetadataCode),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

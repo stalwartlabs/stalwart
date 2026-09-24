@@ -16,7 +16,7 @@ use email::{
 };
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
-    object::email::{Email, EmailComparator, EmailFilter},
+    object::email::{Email, EmailComparator, EmailFilter, EmailQueryFilter},
 };
 use mail_parser::HeaderName;
 use nlp::language::Language;
@@ -53,7 +53,8 @@ impl EmailQuery for Server {
 
         for filter in std::mem::take(&mut request.filter) {
             match filter {
-                Filter::Property(cond) => match cond {
+                Filter::Property(EmailQueryFilter::Metadata(_)) => todo!(),
+                Filter::Property(EmailQueryFilter::Email(cond)) => match cond {
                     EmailFilter::Text(text) => {
                         let (text, language) =
                             Language::detect(text, self.core.email.default_language);

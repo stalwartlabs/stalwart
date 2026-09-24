@@ -192,6 +192,7 @@ impl RegistrySet for Server {
             | ObjectType::InMemoryStore
             | ObjectType::Jmap
             | ObjectType::SystemSettings
+            | ObjectType::Metadata
             | ObjectType::Metrics
             | ObjectType::MetricsStore
             | ObjectType::MtaConnectionStrategy

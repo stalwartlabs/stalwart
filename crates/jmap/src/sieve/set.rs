@@ -17,7 +17,10 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
-    object::sieve::{Sieve, SieveProperty, SieveValue},
+    object::{
+        metadata::MetadataProperty,
+        sieve::{Sieve, SieveProperty, SieveValue},
+    },
     references::resolve::ResolveCreatedReference,
     request::{MaybeInvalid, reference::MaybeIdReference},
     types::state::State,
@@ -457,6 +460,7 @@ impl SieveScriptSet for Server {
                 return Ok(Err(err));
             };
             match (&property, value) {
+                (Key::Property(property), _) if property.metadata_root().is_some() => todo!(),
                 (Key::Property(SieveProperty::Name), Value::Str(value)) => {
                     if value.len() > self.core.email.sieve_max_script_name {
                         return Ok(Err(SetError::invalid_properties()

@@ -6,7 +6,8 @@
 
 use common::{Server, auth::AccessToken};
 use jmap_proto::request::capability::{
-    Account, Capabilities, Capability, EmptyCapabilities, PrincipalOwnerCapabilities, Session,
+    Account, BaseCapabilities, Capabilities, Capability, CapabilityIds, EmptyCapabilities,
+    PrincipalOwnerCapabilities, Session,
 };
 use registry::schema::enums::Permission;
 use std::future::Future;
@@ -57,12 +58,13 @@ impl JmapAccount for Server {
         access_token: &AccessToken,
         account_id: u32,
     ) -> impl Iterator<Item = (Capability, Capabilities)> {
-        let account_capabilities = &self.core.jmap.capabilities.account;
+        let base_capabilities = &self.core.jmap.capabilities;
         let is_owner = access_token.is_member(account_id);
         let current_user_principal_id = Some(Id::from(access_token.account_id()));
-        access_token
-            .account_capabilities()
-            .filter(move |capability| {
+        let supports_private = access_token.has_permission(Permission::JmapMetadataPrivate);
+        let capability_ids = access_token
+            .account_capabilities(base_capabilities)
+            .filter(|capability| {
                 is_owner
                     || !matches!(
                         capability,
@@ -73,14 +75,23 @@ impl JmapAccount for Server {
                             | Capability::EmailPush
                     )
             })
+            .collect::<CapabilityIds>();
+
+        Capability::all_capabilities()
+            .iter()
+            .copied()
+            .filter(move |capability| capability_ids.contains(*capability))
             .map(move |capability| {
-                (
-                    capability,
-                    account_capabilities
-                        .get(&capability)
-                        .map(|v| v.to_account_capabilities(current_user_principal_id, is_owner))
-                        .unwrap_or_else(|| Capabilities::Empty(EmptyCapabilities::default())),
-                )
+                let capabilities = match base_capabilities.account.get(&capability) {
+                    Some(Capabilities::Metadata(metadata)) => Capabilities::Metadata(
+                        metadata.to_account_capabilities(capability_ids, supports_private),
+                    ),
+                    Some(capabilities) => {
+                        capabilities.to_account_capabilities(current_user_principal_id, is_owner)
+                    }
+                    None => Capabilities::Empty(EmptyCapabilities::default()),
+                };
+                (capability, capabilities)
             })
     }
 }
@@ -101,7 +112,7 @@ impl SessionHandler for Server {
             .caused_by(trc::location!())?;
         session.username = account.name().to_string();
         let account_id = Id::from(access_token.account_id());
-        for capability in access_token.account_capabilities() {
+        for capability in access_token.account_capabilities(&self.core.jmap.capabilities) {
             session.primary_accounts.append(capability, account_id);
         }
         session.accounts.append(
@@ -138,11 +149,17 @@ impl SessionHandler for Server {
 }
 
 trait AccountCapabilities {
-    fn account_capabilities(&self) -> impl Iterator<Item = Capability>;
+    fn account_capabilities(
+        &self,
+        base_capabilities: &BaseCapabilities,
+    ) -> impl Iterator<Item = Capability>;
 }
 
 impl AccountCapabilities for AccessToken {
-    fn account_capabilities(&self) -> impl Iterator<Item = Capability> {
+    fn account_capabilities(
+        &self,
+        base_capabilities: &BaseCapabilities,
+    ) -> impl Iterator<Item = Capability> {
         Capability::all_capabilities()
             .iter()
             .filter(move |capability| {
@@ -160,11 +177,21 @@ impl AccountCapabilities for AccessToken {
                     Capability::Blob => Permission::JmapBlobGet,
                     Capability::Quota => Permission::JmapQuotaGet,
                     Capability::FileNode => Permission::JmapFileNodeGet,
+                    Capability::Metadata
+                        if base_capabilities
+                            .account
+                            .contains_key(&Capability::Metadata) =>
+                    {
+                        Permission::JmapMetadataGet
+                    }
                     Capability::WebSocket
                     | Capability::Principals
                     | Capability::PrincipalsAvailability
                     | Capability::Stalwart => return true,
-                    Capability::Core | Capability::PrincipalsOwner | Capability::WebPushVapid => {
+                    Capability::Core
+                    | Capability::PrincipalsOwner
+                    | Capability::WebPushVapid
+                    | Capability::Metadata => {
                         return false;
                     }
                 };

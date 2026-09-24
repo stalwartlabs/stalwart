@@ -20,7 +20,10 @@ use jmap_proto::{
         copy::{CopyRequest, CopyResponse},
         set::SetRequest,
     },
-    object::email::{Email, EmailProperty, EmailValue},
+    object::{
+        email::{Email, EmailProperty, EmailValue},
+        metadata::MetadataProperty,
+    },
     request::{
         Call, MaybeInvalid, RequestMethod, SetRequestMethod,
         method::{MethodFunction, MethodName, MethodObject},
@@ -113,6 +116,9 @@ impl JmapEmailCopy for Server {
                             .into_expanded_boolean_set()
                             .filter_map(|id| id.try_into_property()?.try_into_keyword())
                             .collect();
+                    }
+                    (Key::Property(property), _) if property.metadata_root().is_some() => {
+                        todo!()
                     }
                     (Key::Property(EmailProperty::Pointer(pointer)), value) => {
                         match handle_email_patch(&pointer, value) {

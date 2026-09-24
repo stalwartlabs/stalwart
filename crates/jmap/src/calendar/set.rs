@@ -35,7 +35,10 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
+    object::{
+        calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
+        metadata::MetadataProperty,
+    },
     request::{MaybeInvalid, reference::MaybeIdReference},
     types::state::State,
 };
@@ -836,6 +839,7 @@ fn update_calendar(
         }
 
         match (property, value) {
+            (property, _) if property.metadata_root().is_some() => todo!(),
             (CalendarProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
                 calendar.preferences_mut(personal_id).name = value.into_owned();
             }

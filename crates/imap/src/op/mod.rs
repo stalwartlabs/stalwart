@@ -24,6 +24,7 @@ pub mod idle;
 pub mod list;
 pub mod login;
 pub mod logout;
+pub mod metadata;
 pub mod namespace;
 pub mod noop;
 pub mod quota;

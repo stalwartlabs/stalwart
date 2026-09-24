@@ -133,6 +133,7 @@ impl RegistryGet for Server {
             | ObjectType::SystemSettings
             | ObjectType::MemoryLookupKey
             | ObjectType::MemoryLookupKeyValue
+            | ObjectType::Metadata
             | ObjectType::Metrics
             | ObjectType::MetricsStore
             | ObjectType::MtaConnectionStrategy

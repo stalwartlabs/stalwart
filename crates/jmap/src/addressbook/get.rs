@@ -9,7 +9,10 @@ use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{cache::GroupwareCache, contact::AddressBook};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::addressbook::{self, AddressBookProperty, AddressBookValue},
+    object::{
+        addressbook::{self, AddressBookProperty, AddressBookValue},
+        metadata::MetadataSelection,
+    },
 };
 use jmap_tools::{Map, Value};
 use store::{
@@ -39,7 +42,7 @@ impl AddressBookGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<addressbook::AddressBook>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let properties = request.unwrap_properties(&[
+        let mut properties = request.unwrap_properties(&[
             AddressBookProperty::Id,
             AddressBookProperty::Name,
             AddressBookProperty::Description,
@@ -49,6 +52,9 @@ impl AddressBookGet for Server {
             AddressBookProperty::ShareWith,
             AddressBookProperty::MyRights,
         ]);
+        if !MetadataSelection::extract(&mut properties)?.is_none() {
+            todo!()
+        }
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::AddressBook);
         let cache = self

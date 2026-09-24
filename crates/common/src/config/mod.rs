@@ -6,7 +6,9 @@
 
 use std::io::Cursor;
 
-use self::{mailstore::jmap::JmapConfig, smtp::SmtpConfig, storage::Storage};
+use self::{
+    mailstore::jmap::JmapConfig, metadata::MetadataConfig, smtp::SmtpConfig, storage::Storage,
+};
 use crate::{
     Core, Network,
     auth::oauth::config::OAuthConfig,
@@ -31,6 +33,7 @@ use telemetry::Metrics;
 pub mod groupware;
 pub mod inner;
 pub mod mailstore;
+pub mod metadata;
 pub mod network;
 pub mod server;
 pub mod smtp;
@@ -78,6 +81,8 @@ impl Core {
         };
         // SPDX-SnippetEnd
 
+        let metadata = MetadataConfig::parse(bp).await;
+
         Self {
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -88,13 +93,14 @@ impl Core {
             sieve: Scripting::parse(bp).await,
             network: Network::parse(bp).await,
             smtp: Box::pin(SmtpConfig::parse(bp)).await,
-            jmap: JmapConfig::parse(bp).await,
+            jmap: JmapConfig::parse(bp, &metadata).await,
             imap: ImapConfig::parse(bp).await,
             oauth: OAuthConfig::parse(bp).await,
             metrics: Metrics::parse(bp).await,
             spam: SpamFilterConfig::parse(bp).await,
             email: EmailConfig::parse(bp).await,
             groupware: GroupwareConfig::parse(bp).await,
+            metadata,
             storage,
         }
     }

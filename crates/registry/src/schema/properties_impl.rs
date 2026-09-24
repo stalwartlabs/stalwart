@@ -68,6 +68,7 @@ impl EnumImpl for ObjectType {
             b"MaskedEmail" => ObjectType::MaskedEmail,
             b"MemoryLookupKey" => ObjectType::MemoryLookupKey,
             b"MemoryLookupKeyValue" => ObjectType::MemoryLookupKeyValue,
+            b"Metadata" => ObjectType::Metadata,
             b"Metric" => ObjectType::Metric,
             b"Metrics" => ObjectType::Metrics,
             b"MetricsStore" => ObjectType::MetricsStore,
@@ -192,6 +193,7 @@ impl EnumImpl for ObjectType {
             ObjectType::MaskedEmail => "MaskedEmail",
             ObjectType::MemoryLookupKey => "MemoryLookupKey",
             ObjectType::MemoryLookupKeyValue => "MemoryLookupKeyValue",
+            ObjectType::Metadata => "Metadata",
             ObjectType::Metric => "Metric",
             ObjectType::Metrics => "Metrics",
             ObjectType::MetricsStore => "MetricsStore",
@@ -319,6 +321,7 @@ impl EnumImpl for ObjectType {
             51 => Some(ObjectType::MaskedEmail),
             52 => Some(ObjectType::MemoryLookupKey),
             53 => Some(ObjectType::MemoryLookupKeyValue),
+            118 => Some(ObjectType::Metadata),
             54 => Some(ObjectType::Metric),
             55 => Some(ObjectType::Metrics),
             56 => Some(ObjectType::MetricsStore),
@@ -386,7 +389,7 @@ impl EnumImpl for ObjectType {
         }
     }
 
-    const COUNT: usize = 118;
+    const COUNT: usize = 119;
 }
 
 impl serde::Serialize for ObjectType {
@@ -582,6 +585,7 @@ impl EnumImpl for Property {
             b"dataCleanupSchedule" => Property::DataCleanupSchedule,
             b"dataStore" => Property::DataStore,
             b"dataTimeout" => Property::DataTimeout,
+            b"dataTypes" => Property::DataTypes,
             b"database" => Property::Database,
             b"datacenterId" => Property::DatacenterId,
             b"dateRangeBegin" => Property::DateRangeBegin,
@@ -813,6 +817,8 @@ impl EnumImpl for Property {
             b"idTokenExpiry" => Property::IdTokenExpiry,
             b"identityAlignment" => Property::IdentityAlignment,
             b"if" => Property::If,
+            b"imapServerAdmin" => Property::ImapServerAdmin,
+            b"imapServerComment" => Property::ImapServerComment,
             b"impersonateServiceAccount" => Property::ImpersonateServiceAccount,
             b"implicitTls" => Property::ImplicitTls,
             b"inMemoryStore" => Property::InMemoryStore,
@@ -917,6 +923,7 @@ impl EnumImpl for Property {
             b"maxContacts" => Property::MaxContacts,
             b"maxCpuCycles" => Property::MaxCpuCycles,
             b"maxDelay" => Property::MaxDelay,
+            b"maxDepth" => Property::MaxDepth,
             b"maxDuration" => Property::MaxDuration,
             b"maxEntries" => Property::MaxEntries,
             b"maxEntrySize" => Property::MaxEntrySize,
@@ -958,6 +965,7 @@ impl EnumImpl for Property {
             b"maxNestedTests" => Property::MaxNestedTests,
             b"maxOutMessages" => Property::MaxOutMessages,
             b"maxParticipantIdentities" => Property::MaxParticipantIdentities,
+            b"maxPrivateSize" => Property::MaxPrivateSize,
             b"maxPublicKeys" => Property::MaxPublicKeys,
             b"maxPushSize" => Property::MaxPushSize,
             b"maxReceivedHeaders" => Property::MaxReceivedHeaders,
@@ -1099,6 +1107,7 @@ impl EnumImpl for Property {
             b"privateKey" => Property::PrivateKey,
             b"privateKeyPassword" => Property::PrivateKeyPassword,
             b"privateKeyPem" => Property::PrivateKeyPem,
+            b"privateMetadata" => Property::PrivateMetadata,
             b"privateZone" => Property::PrivateZone,
             b"privateZoneOnly" => Property::PrivateZoneOnly,
             b"profile" => Property::Profile,
@@ -1124,6 +1133,7 @@ impl EnumImpl for Property {
             b"queryEmailAliases" => Property::QueryEmailAliases,
             b"queryLogin" => Property::QueryLogin,
             b"queryMaxResults" => Property::QueryMaxResults,
+            b"queryMaxScan" => Property::QueryMaxScan,
             b"queryMemberOf" => Property::QueryMemberOf,
             b"queryRecipient" => Property::QueryRecipient,
             b"queueId" => Property::QueueId,
@@ -1363,6 +1373,7 @@ impl EnumImpl for Property {
             b"validateDomain" => Property::ValidateDomain,
             b"value" => Property::Value,
             b"variableName" => Property::VariableName,
+            b"vendorNamespaces" => Property::VendorNamespaces,
             b"verifyAfterWrite" => Property::VerifyAfterWrite,
             b"version" => Property::Version,
             b"viewName" => Property::ViewName,
@@ -1552,6 +1563,7 @@ impl EnumImpl for Property {
             Property::DataCleanupSchedule => "dataCleanupSchedule",
             Property::DataStore => "dataStore",
             Property::DataTimeout => "dataTimeout",
+            Property::DataTypes => "dataTypes",
             Property::Database => "database",
             Property::DatacenterId => "datacenterId",
             Property::DateRangeBegin => "dateRangeBegin",
@@ -1783,6 +1795,8 @@ impl EnumImpl for Property {
             Property::IdTokenExpiry => "idTokenExpiry",
             Property::IdentityAlignment => "identityAlignment",
             Property::If => "if",
+            Property::ImapServerAdmin => "imapServerAdmin",
+            Property::ImapServerComment => "imapServerComment",
             Property::ImpersonateServiceAccount => "impersonateServiceAccount",
             Property::ImplicitTls => "implicitTls",
             Property::InMemoryStore => "inMemoryStore",
@@ -1887,6 +1901,7 @@ impl EnumImpl for Property {
             Property::MaxContacts => "maxContacts",
             Property::MaxCpuCycles => "maxCpuCycles",
             Property::MaxDelay => "maxDelay",
+            Property::MaxDepth => "maxDepth",
             Property::MaxDuration => "maxDuration",
             Property::MaxEntries => "maxEntries",
             Property::MaxEntrySize => "maxEntrySize",
@@ -1928,6 +1943,7 @@ impl EnumImpl for Property {
             Property::MaxNestedTests => "maxNestedTests",
             Property::MaxOutMessages => "maxOutMessages",
             Property::MaxParticipantIdentities => "maxParticipantIdentities",
+            Property::MaxPrivateSize => "maxPrivateSize",
             Property::MaxPublicKeys => "maxPublicKeys",
             Property::MaxPushSize => "maxPushSize",
             Property::MaxReceivedHeaders => "maxReceivedHeaders",
@@ -2069,6 +2085,7 @@ impl EnumImpl for Property {
             Property::PrivateKey => "privateKey",
             Property::PrivateKeyPassword => "privateKeyPassword",
             Property::PrivateKeyPem => "privateKeyPem",
+            Property::PrivateMetadata => "privateMetadata",
             Property::PrivateZone => "privateZone",
             Property::PrivateZoneOnly => "privateZoneOnly",
             Property::Profile => "profile",
@@ -2094,6 +2111,7 @@ impl EnumImpl for Property {
             Property::QueryEmailAliases => "queryEmailAliases",
             Property::QueryLogin => "queryLogin",
             Property::QueryMaxResults => "queryMaxResults",
+            Property::QueryMaxScan => "queryMaxScan",
             Property::QueryMemberOf => "queryMemberOf",
             Property::QueryRecipient => "queryRecipient",
             Property::QueueId => "queueId",
@@ -2333,6 +2351,7 @@ impl EnumImpl for Property {
             Property::ValidateDomain => "validateDomain",
             Property::Value => "value",
             Property::VariableName => "variableName",
+            Property::VendorNamespaces => "vendorNamespaces",
             Property::VerifyAfterWrite => "verifyAfterWrite",
             Property::Version => "version",
             Property::ViewName => "viewName",
@@ -2525,6 +2544,7 @@ impl EnumImpl for Property {
             199 => Some(Property::DataCleanupSchedule),
             125 => Some(Property::DataStore),
             506 => Some(Property::DataTimeout),
+            964 => Some(Property::DataTypes),
             575 => Some(Property::Database),
             383 => Some(Property::DatacenterId),
             245 => Some(Property::DateRangeBegin),
@@ -2756,6 +2776,8 @@ impl EnumImpl for Property {
             621 => Some(Property::IdTokenExpiry),
             91 => Some(Property::IdentityAlignment),
             376 => Some(Property::If),
+            971 => Some(Property::ImapServerAdmin),
+            970 => Some(Property::ImapServerComment),
             320 => Some(Property::ImpersonateServiceAccount),
             546 => Some(Property::ImplicitTls),
             128 => Some(Property::InMemoryStore),
@@ -2860,6 +2882,7 @@ impl EnumImpl for Property {
             24 => Some(Property::MaxContacts),
             702 => Some(Property::MaxCpuCycles),
             823 => Some(Property::MaxDelay),
+            967 => Some(Property::MaxDepth),
             530 => Some(Property::MaxDuration),
             417 => Some(Property::MaxEntries),
             418 => Some(Property::MaxEntrySize),
@@ -2901,6 +2924,7 @@ impl EnumImpl for Property {
             722 => Some(Property::MaxNestedTests),
             704 => Some(Property::MaxOutMessages),
             162 => Some(Property::MaxParticipantIdentities),
+            968 => Some(Property::MaxPrivateSize),
             366 => Some(Property::MaxPublicKeys),
             923 => Some(Property::MaxPushSize),
             561 => Some(Property::MaxReceivedHeaders),
@@ -3042,6 +3066,7 @@ impl EnumImpl for Property {
             177 => Some(Property::PrivateKey),
             904 => Some(Property::PrivateKeyPassword),
             903 => Some(Property::PrivateKeyPem),
+            966 => Some(Property::PrivateMetadata),
             319 => Some(Property::PrivateZone),
             332 => Some(Property::PrivateZoneOnly),
             661 => Some(Property::Profile),
@@ -3067,6 +3092,7 @@ impl EnumImpl for Property {
             786 => Some(Property::QueryEmailAliases),
             783 => Some(Property::QueryLogin),
             437 => Some(Property::QueryMaxResults),
+            969 => Some(Property::QueryMaxScan),
             785 => Some(Property::QueryMemberOf),
             784 => Some(Property::QueryRecipient),
             514 => Some(Property::QueueId),
@@ -3306,6 +3332,7 @@ impl EnumImpl for Property {
             413 => Some(Property::ValidateDomain),
             492 => Some(Property::Value),
             675 => Some(Property::VariableName),
+            965 => Some(Property::VendorNamespaces),
             874 => Some(Property::VerifyAfterWrite),
             80 => Some(Property::Version),
             884 => Some(Property::ViewName),
@@ -3324,7 +3351,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 964;
+    const COUNT: usize = 972;
 }
 
 impl serde::Serialize for Property {
@@ -3404,6 +3431,7 @@ impl ObjectType {
             ObjectType::MaskedEmail => MaskedEmail::FLAGS,
             ObjectType::MemoryLookupKey => MemoryLookupKey::FLAGS,
             ObjectType::MemoryLookupKeyValue => MemoryLookupKeyValue::FLAGS,
+            ObjectType::Metadata => Metadata::FLAGS,
             ObjectType::Metric => Metric::FLAGS,
             ObjectType::Metrics => Metrics::FLAGS,
             ObjectType::MetricsStore => MetricsStore::FLAGS,
@@ -3782,6 +3810,7 @@ impl ObjectType {
             ObjectType::MaskedEmail => Permission::SysMaskedEmailGet,
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyGet,
             ObjectType::MemoryLookupKeyValue => Permission::SysMemoryLookupKeyValueGet,
+            ObjectType::Metadata => Permission::SysMetadataGet,
             ObjectType::Metric => Permission::SysMetricGet,
             ObjectType::Metrics => Permission::SysMetricsGet,
             ObjectType::MetricsStore => Permission::SysMetricsStoreGet,
@@ -4190,6 +4219,11 @@ impl ObjectType {
                 Permission::SysMemoryLookupKeyValueCreate,
                 Permission::SysMemoryLookupKeyValueUpdate,
                 Permission::SysMemoryLookupKeyValueDestroy,
+            ],
+            ObjectType::Metadata => [
+                Permission::SysMetadataUpdate,
+                Permission::SysMetadataUpdate,
+                Permission::SysMetadataUpdate,
             ],
             ObjectType::Metric => [
                 Permission::SysMetricCreate,
@@ -4808,6 +4842,7 @@ impl ObjectInner {
             ObjectInner::MaskedEmail(obj) => obj.to_pickled_vec(),
             ObjectInner::MemoryLookupKey(obj) => obj.to_pickled_vec(),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.to_pickled_vec(),
+            ObjectInner::Metadata(obj) => obj.to_pickled_vec(),
             ObjectInner::Metric(obj) => obj.to_pickled_vec(),
             ObjectInner::Metrics(obj) => obj.to_pickled_vec(),
             ObjectInner::MetricsStore(obj) => obj.to_pickled_vec(),
@@ -4960,6 +4995,7 @@ impl ObjectInner {
             ObjectType::MemoryLookupKeyValue => {
                 Pickle::unpickle(stream).map(ObjectInner::MemoryLookupKeyValue)
             }
+            ObjectType::Metadata => Pickle::unpickle(stream).map(ObjectInner::Metadata),
             ObjectType::Metric => Pickle::unpickle(stream).map(ObjectInner::Metric),
             ObjectType::Metrics => Pickle::unpickle(stream).map(ObjectInner::Metrics),
             ObjectType::MetricsStore => Pickle::unpickle(stream).map(ObjectInner::MetricsStore),
@@ -5207,6 +5243,7 @@ impl ObjectInner {
             }
             ObjectType::MemoryLookupKeyValue => MemoryLookupKeyValue::deserialize(deserializer)
                 .map(ObjectInner::MemoryLookupKeyValue),
+            ObjectType::Metadata => Metadata::deserialize(deserializer).map(ObjectInner::Metadata),
             ObjectType::Metric => Metric::deserialize(deserializer).map(ObjectInner::Metric),
             ObjectType::Metrics => Metrics::deserialize(deserializer).map(ObjectInner::Metrics),
             ObjectType::MetricsStore => {
@@ -5452,6 +5489,7 @@ impl Object {
             ObjectInner::MaskedEmail(_) => MaskedEmail::FLAGS,
             ObjectInner::MemoryLookupKey(_) => MemoryLookupKey::FLAGS,
             ObjectInner::MemoryLookupKeyValue(_) => MemoryLookupKeyValue::FLAGS,
+            ObjectInner::Metadata(_) => Metadata::FLAGS,
             ObjectInner::Metric(_) => Metric::FLAGS,
             ObjectInner::Metrics(_) => Metrics::FLAGS,
             ObjectInner::MetricsStore(_) => MetricsStore::FLAGS,
@@ -5575,6 +5613,7 @@ impl Object {
             ObjectInner::MaskedEmail(_) => ObjectType::MaskedEmail,
             ObjectInner::MemoryLookupKey(_) => ObjectType::MemoryLookupKey,
             ObjectInner::MemoryLookupKeyValue(_) => ObjectType::MemoryLookupKeyValue,
+            ObjectInner::Metadata(_) => ObjectType::Metadata,
             ObjectInner::Metric(_) => ObjectType::Metric,
             ObjectInner::Metrics(_) => ObjectType::Metrics,
             ObjectInner::MetricsStore(_) => ObjectType::MetricsStore,
@@ -5727,6 +5766,7 @@ impl Object {
             ObjectInner::MaskedEmail(obj) => obj.validate(errors),
             ObjectInner::MemoryLookupKey(obj) => obj.validate(errors),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.validate(errors),
+            ObjectInner::Metadata(obj) => obj.validate(errors),
             ObjectInner::Metric(obj) => obj.validate(errors),
             ObjectInner::Metrics(obj) => obj.validate(errors),
             ObjectInner::MetricsStore(obj) => obj.validate(errors),
@@ -5850,6 +5890,7 @@ impl Object {
             ObjectInner::MaskedEmail(obj) => obj.index(i),
             ObjectInner::MemoryLookupKey(obj) => obj.index(i),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.index(i),
+            ObjectInner::Metadata(obj) => obj.index(i),
             ObjectInner::Metric(obj) => obj.index(i),
             ObjectInner::Metrics(obj) => obj.index(i),
             ObjectInner::MetricsStore(obj) => obj.index(i),
@@ -5977,6 +6018,7 @@ impl Object {
             ObjectInner::MaskedEmail(obj) => obj.patch(pointer, value),
             ObjectInner::MemoryLookupKey(obj) => obj.patch(pointer, value),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.patch(pointer, value),
+            ObjectInner::Metadata(obj) => obj.patch(pointer, value),
             ObjectInner::Metric(obj) => obj.patch(pointer, value),
             ObjectInner::Metrics(obj) => obj.patch(pointer, value),
             ObjectInner::MetricsStore(obj) => obj.patch(pointer, value),
@@ -6102,6 +6144,7 @@ impl IntoValue for Object {
             ObjectInner::MaskedEmail(obj) => obj.into_value(),
             ObjectInner::MemoryLookupKey(obj) => obj.into_value(),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.into_value(),
+            ObjectInner::Metadata(obj) => obj.into_value(),
             ObjectInner::Metric(obj) => obj.into_value(),
             ObjectInner::Metrics(obj) => obj.into_value(),
             ObjectInner::MetricsStore(obj) => obj.into_value(),
@@ -6229,6 +6272,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::MemoryLookupKeyValue => {
                 ObjectInner::MemoryLookupKeyValue(Default::default())
             }
+            ObjectType::Metadata => ObjectInner::Metadata(Default::default()),
             ObjectType::Metric => ObjectInner::Metric(Default::default()),
             ObjectType::Metrics => ObjectInner::Metrics(Default::default()),
             ObjectType::MetricsStore => ObjectInner::MetricsStore(Default::default()),
@@ -7122,6 +7166,21 @@ impl From<Object> for MemoryLookupKeyValue {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::MemoryLookupKeyValue(obj) => obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<Metadata> for ObjectInner {
+    fn from(value: Metadata) -> Self {
+        ObjectInner::Metadata(value)
+    }
+}
+
+impl From<Object> for Metadata {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::Metadata(obj) => obj,
             _ => unreachable!(),
         }
     }

@@ -10,7 +10,7 @@ use groupware::cache::GroupwareCache;
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::{
-        addressbook::AddressBook,
+        addressbook::{AddressBook, AddressBookFilter},
         contact::{ContactCard, ContactCardComparator, ContactCardFilter},
     },
     request::MaybeInvalid,
@@ -192,6 +192,7 @@ impl ContactCardQuery for Server {
                             }),
                         )));
                     }
+                    ContactCardFilter::Metadata(_) => todo!(),
                     unsupported => {
                         return Err(trc::JmapEvent::UnsupportedFilter
                             .into_err()
@@ -301,6 +302,18 @@ impl ContactCardQuery for Server {
         request: QueryRequest<AddressBook>,
         access_token: &AccessToken,
     ) -> trc::Result<QueryResponse> {
+        for filter in &request.filter {
+            match filter {
+                Filter::Property(AddressBookFilter::Metadata(_)) => todo!(),
+                Filter::Property(AddressBookFilter::_T(other)) => {
+                    return Err(trc::JmapEvent::UnsupportedFilter
+                        .into_err()
+                        .details(other.clone()));
+                }
+                Filter::And | Filter::Or | Filter::Not | Filter::Close => {}
+            }
+        }
+
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_groupware_resources(

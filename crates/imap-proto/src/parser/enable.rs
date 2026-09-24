@@ -7,32 +7,32 @@
 use crate::{
     Command,
     protocol::{capability::Capability, enable},
-    receiver::{Request, bad},
+    receiver::{Request, Token, bad},
 };
 
 impl Request<Command> {
     pub fn parse_enable(self) -> trc::Result<enable::Arguments> {
-        let len = self.tokens.len();
-        if len > 0 {
-            let mut capabilities = Vec::with_capacity(len);
-            for capability in self.tokens {
-                capabilities.push(
-                    Capability::parse(&capability.unwrap_bytes())
-                        .map_err(|v| bad(self.tag.clone(), v))?,
-                );
-            }
-            Ok(enable::Arguments {
-                tag: self.tag,
-                capabilities,
-            })
-        } else {
-            Err(self.into_error("Missing arguments."))
+        if self.tokens.is_empty() {
+            return Err(self.into_error("Missing arguments."));
         }
+
+        let mut capabilities = Vec::with_capacity(self.tokens.len());
+        for token in self.tokens {
+            match token {
+                Token::Argument(name) => capabilities.extend(Capability::parse(&name)),
+                _ => return Err(bad(self.tag, "Invalid capability name.")),
+            }
+        }
+
+        Ok(enable::Arguments {
+            tag: self.tag,
+            capabilities,
+        })
     }
 }
 
 impl Capability {
-    pub fn parse(value: &[u8]) -> super::Result<Self> {
+    pub fn parse(value: &[u8]) -> Option<Self> {
         hashify::fnc_map_ignore_case!(value,
             "IMAP4rev2" => Some(Self::IMAP4rev2),
             "STARTTLS" => Some(Self::StartTLS),
@@ -44,13 +44,6 @@ impl Capability {
             "UIDONLY" => Some(Self::UidOnly),
             _ => None,
         )
-        .ok_or_else(|| {
-            format!(
-                "Unsupported capability '{}'.",
-                String::from_utf8_lossy(value)
-            )
-            .into()
-        })
     }
 }
 
@@ -89,6 +82,20 @@ mod tests {
                         Capability::ObjectIdPlus,
                         Capability::Utf8Accept,
                     ],
+                },
+            ),
+            (
+                "t5 ENABLE METADATA X-UNKNOWN condstore\r\n",
+                enable::Arguments {
+                    tag: "t5".into(),
+                    capabilities: vec![Capability::CondStore],
+                },
+            ),
+            (
+                "t6 ENABLE METADATA-SERVER\r\n",
+                enable::Arguments {
+                    tag: "t6".into(),
+                    capabilities: vec![],
                 },
             ),
         ] {

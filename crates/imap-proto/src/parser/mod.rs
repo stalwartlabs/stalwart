@@ -15,6 +15,7 @@ pub mod fetch;
 pub mod list;
 pub mod login;
 pub mod lsub;
+pub mod metadata;
 pub mod quota;
 pub mod rename;
 pub mod search;
@@ -82,6 +83,8 @@ impl CommandParser for Command {
             "GETQUOTAROOT" => Some(Command::GetQuotaRoot),
             "GETJMAPACCESS" => Some(Command::GetJmapAccess),
             "UIDBATCHES" => Some(Command::UidBatches),
+            "GETMETADATA" => Some(Command::GetMetadata),
+            "SETMETADATA" => Some(Command::SetMetadata),
             _ => None,
         )
     }
@@ -89,6 +92,11 @@ impl CommandParser for Command {
     #[inline(always)]
     fn tokenize_brackets(&self) -> bool {
         matches!(self, Command::Fetch(_))
+    }
+
+    #[inline(always)]
+    fn tokenize_nil(&self) -> bool {
+        matches!(self, Command::SetMetadata)
     }
 }
 

@@ -6,7 +6,9 @@
 
 use crate::{
     object::{
-        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
+        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        parse_ref,
     },
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
@@ -38,6 +40,8 @@ pub enum FileNodeProperty {
     MyRights,
     ShareWith,
     IsSubscribed,
+    Metadata,
+    PrivateMetadata,
 
     IdValue(Id),
     Rights(FileNodeRight),
@@ -85,15 +89,15 @@ pub enum FileNodeValue {
 impl Property for FileNodeProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
         let allow_patch = key.is_none();
-        if let Some(Key::Property(key)) = key {
-            match key.patch_or_prop() {
+        match key {
+            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
+            Some(Key::Property(key)) => match key.patch_or_prop() {
                 FileNodeProperty::ShareWith => {
                     Id::from_str(value).ok().map(FileNodeProperty::IdValue)
                 }
                 _ => FileNodeProperty::parse(value, allow_patch),
-            }
-        } else {
-            FileNodeProperty::parse(value, allow_patch)
+            },
+            _ => FileNodeProperty::parse(value, allow_patch),
         }
     }
 
@@ -116,6 +120,8 @@ impl Property for FileNodeProperty {
             FileNodeProperty::MyRights => "myRights",
             FileNodeProperty::ShareWith => "shareWith",
             FileNodeProperty::IsSubscribed => "isSubscribed",
+            FileNodeProperty::Metadata => "metadata",
+            FileNodeProperty::PrivateMetadata => "privateMetadata",
             FileNodeProperty::Rights(file_right) => file_right.as_str(),
             FileNodeProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
             FileNodeProperty::IdValue(id) => return id.to_string().into(),
@@ -274,6 +280,8 @@ impl FileNodeProperty {
             b"myRights" => Some(FileNodeProperty::MyRights),
             b"shareWith" => Some(FileNodeProperty::ShareWith),
             b"isSubscribed" => Some(FileNodeProperty::IsSubscribed),
+            b"metadata" => Some(FileNodeProperty::Metadata),
+            b"privateMetadata" => Some(FileNodeProperty::PrivateMetadata),
             b"mayRead" => Some(FileNodeProperty::Rights(FileNodeRight::MayRead)),
             b"mayAddChildren" => Some(FileNodeProperty::Rights(FileNodeRight::MayAddChildren)),
             b"mayRename" => Some(FileNodeProperty::Rights(FileNodeRight::MayRename)),
@@ -293,11 +301,29 @@ impl FileNodeProperty {
 
     fn patch_or_prop(&self) -> &FileNodeProperty {
         if let FileNodeProperty::Pointer(ptr) = self
+            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
         } else {
             self
+        }
+    }
+}
+
+impl MetadataProperty for FileNodeProperty {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            FileNodeProperty::Metadata => Some(MetadataRoot::Shared),
+            FileNodeProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            FileNodeProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
         }
     }
 }
@@ -406,7 +432,12 @@ impl FromStr for FileNodeProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        FileNodeProperty::parse(s, false).ok_or(())
+        FileNodeProperty::parse(s, false)
+            .or_else(|| {
+                MetadataRoot::from_selector(s)
+                    .map(|_| FileNodeProperty::Pointer(JsonPointer::parse(s)))
+            })
+            .ok_or(())
     }
 }
 
@@ -501,6 +532,7 @@ pub enum FileNodeFilter {
     TypeMatch(GlobPattern),
     Text(String),
     Body(String),
+    Metadata(MetadataFilter),
     _T(String),
 }
 
@@ -592,8 +624,13 @@ impl<'de> DeserializeArguments<'de> for FileNodeFilter {
                 *self = FileNodeFilter::Text(map.next_value()?);
             },
             _ => {
-                *self = FileNodeFilter::_T(key.to_string());
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                *self = match MetadataFilter::try_deserialize(key, map)? {
+                    Some(filter) => FileNodeFilter::Metadata(filter),
+                    None => {
+                        let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        FileNodeFilter::_T(key.to_string())
+                    }
+                };
             }
         );
 
@@ -723,6 +760,7 @@ impl FileNodeFilter {
             FileNodeFilter::TypeMatch(_) => "typeMatch",
             FileNodeFilter::Text(_) => "text",
             FileNodeFilter::Body(_) => "body",
+            FileNodeFilter::Metadata(filter) => filter.as_str(),
             FileNodeFilter::_T(s) => return s.into(),
         }
         .into()

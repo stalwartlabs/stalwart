@@ -6,7 +6,9 @@
 
 use crate::{
     object::{
-        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference, parse_ref,
+        AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        parse_ref,
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
     types::date::UTCDate,
@@ -39,6 +41,8 @@ pub enum CalendarProperty {
     TimeZone,
     ShareWith,
     MyRights,
+    Metadata,
+    PrivateMetadata,
 
     // Alert object properties
     When,
@@ -90,15 +94,15 @@ pub enum IncludeInAvailability {
 impl Property for CalendarProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
         let allow_patch = key.is_none();
-        if let Some(Key::Property(key)) = key {
-            match key.patch_or_prop() {
+        match key {
+            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
+            Some(Key::Property(key)) => match key.patch_or_prop() {
                 CalendarProperty::ShareWith => {
                     Id::from_str(value).ok().map(CalendarProperty::IdValue)
                 }
                 _ => CalendarProperty::parse(value, allow_patch),
-            }
-        } else {
-            CalendarProperty::parse(value, allow_patch)
+            },
+            _ => CalendarProperty::parse(value, allow_patch),
         }
     }
 
@@ -118,6 +122,8 @@ impl Property for CalendarProperty {
             CalendarProperty::TimeZone => "timeZone",
             CalendarProperty::ShareWith => "shareWith",
             CalendarProperty::MyRights => "myRights",
+            CalendarProperty::Metadata => "metadata",
+            CalendarProperty::PrivateMetadata => "privateMetadata",
             CalendarProperty::When => "when",
             CalendarProperty::Trigger => "trigger",
             CalendarProperty::Offset => "offset",
@@ -230,6 +236,8 @@ impl CalendarProperty {
             b"timeZone" => Some(CalendarProperty::TimeZone),
             b"shareWith" => Some(CalendarProperty::ShareWith),
             b"myRights" => Some(CalendarProperty::MyRights),
+            b"metadata" => Some(CalendarProperty::Metadata),
+            b"privateMetadata" => Some(CalendarProperty::PrivateMetadata),
             b"mayReadFreeBusy" => Some(CalendarProperty::Rights(CalendarRight::MayReadFreeBusy)),
             b"mayReadItems" => Some(CalendarProperty::Rights(CalendarRight::MayReadItems)),
             b"mayWriteAll" => Some(CalendarProperty::Rights(CalendarRight::MayWriteAll)),
@@ -257,11 +265,29 @@ impl CalendarProperty {
 
     fn patch_or_prop(&self) -> &CalendarProperty {
         if let CalendarProperty::Pointer(ptr) = self
+            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
         } else {
             self
+        }
+    }
+}
+
+impl MetadataProperty for CalendarProperty {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            CalendarProperty::Metadata => Some(MetadataRoot::Shared),
+            CalendarProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            CalendarProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
         }
     }
 }
@@ -297,7 +323,41 @@ impl FromStr for CalendarProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        CalendarProperty::parse(s, false).ok_or(())
+        CalendarProperty::parse(s, false)
+            .or_else(|| {
+                MetadataRoot::from_selector(s)
+                    .map(|_| CalendarProperty::Pointer(JsonPointer::parse(s)))
+            })
+            .ok_or(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CalendarFilter {
+    Metadata(MetadataFilter),
+    _T(String),
+}
+
+impl<'de> DeserializeArguments<'de> for CalendarFilter {
+    fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        *self = match MetadataFilter::try_deserialize(key, map)? {
+            Some(filter) => CalendarFilter::Metadata(filter),
+            None => {
+                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                CalendarFilter::_T(key.to_string())
+            }
+        };
+
+        Ok(())
+    }
+}
+
+impl Default for CalendarFilter {
+    fn default() -> Self {
+        CalendarFilter::_T("".to_string())
     }
 }
 
@@ -308,7 +368,7 @@ impl JmapObject for Calendar {
 
     type Id = Id;
 
-    type Filter = ();
+    type Filter = CalendarFilter;
 
     type Comparator = ();
 

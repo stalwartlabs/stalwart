@@ -30,6 +30,7 @@ use jmap_proto::{
     object::{
         AnyId,
         mailbox::{self, MailboxProperty, MailboxValue},
+        metadata::MetadataProperty,
     },
     references::resolve::ResolveCreatedReference,
     request::MaybeInvalid,
@@ -539,6 +540,7 @@ impl MailboxSet for Server {
                             .with_description("The id property is immutable.".to_string())));
                     }
                 }
+                (Key::Property(property), _) if property.metadata_root().is_some() => todo!(),
                 _ => {
                     return Ok(Err(SetError::invalid_properties()
                         .with_property(property.into_owned())

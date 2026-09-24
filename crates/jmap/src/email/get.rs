@@ -20,7 +20,10 @@ use email::{
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::email::{Email, EmailProperty, EmailValue, HeaderForm},
+    object::{
+        email::{Email, EmailProperty, EmailValue, HeaderForm},
+        metadata::MetadataSelection,
+    },
     request::IntoValid,
     types::date::UTCDate,
 };
@@ -58,7 +61,7 @@ impl EmailGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Email>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let properties = request.unwrap_properties(&[
+        let mut properties = request.unwrap_properties(&[
             EmailProperty::Id,
             EmailProperty::BlobId,
             EmailProperty::ThreadId,
@@ -84,6 +87,9 @@ impl EmailGet for Server {
             EmailProperty::HtmlBody,
             EmailProperty::Attachments,
         ]);
+        if !MetadataSelection::extract(&mut properties)?.is_none() {
+            todo!()
+        }
         let body_properties = request
             .arguments
             .body_properties

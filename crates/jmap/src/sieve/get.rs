@@ -9,7 +9,10 @@ use common::Server;
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::sieve::{Sieve, SieveProperty, SieveValue},
+    object::{
+        metadata::MetadataSelection,
+        sieve::{Sieve, SieveProperty, SieveValue},
+    },
 };
 use jmap_tools::{Map, Value};
 use std::future::Future;
@@ -37,12 +40,15 @@ impl SieveScriptGet for Server {
         mut request: GetRequest<Sieve>,
     ) -> trc::Result<GetResponse<Sieve>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let properties = request.unwrap_properties(&[
+        let mut properties = request.unwrap_properties(&[
             SieveProperty::Id,
             SieveProperty::Name,
             SieveProperty::BlobId,
             SieveProperty::IsActive,
         ]);
+        if !MetadataSelection::extract(&mut properties)?.is_none() {
+            todo!()
+        }
         let account_id = request.account_id.document_id();
         let script_ids = self
             .document_ids(account_id, Collection::SieveScript, SieveField::Name)
@@ -126,6 +132,9 @@ impl SieveScriptGet for Server {
                             Value::Element(SieveValue::BlobId(blob_id)),
                         );
                     }
+                    SieveProperty::Metadata
+                    | SieveProperty::PrivateMetadata
+                    | SieveProperty::Pointer(_) => unreachable!(),
                 }
             }
             response.list.push(result.into());

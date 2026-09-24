@@ -18,6 +18,7 @@ use jmap_proto::{
     object::{
         AnyId,
         file_node::{self, FileNodeNodeType, FileNodeProperty, FileNodeValue},
+        metadata::MetadataProperty,
     },
     references::resolve::ResolveCreatedReference,
 };
@@ -91,6 +92,7 @@ impl NodePatch {
             resolver.resolve_self_references(&mut value, 0, false)?;
 
             match (property, value) {
+                (property, _) if property.metadata_root().is_some() => todo!(),
                 (FileNodeProperty::Name, Value::Str(value)) => {
                     validate_name(&value)?;
                     patch.name = Some(value.into_owned());

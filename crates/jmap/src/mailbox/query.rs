@@ -127,6 +127,7 @@ impl MailboxQuery for Server {
                                     .collect::<RoaringBitmap>(),
                             ));
                         }
+                        MailboxFilter::Metadata(_) => todo!(),
                         MailboxFilter::_T(other) => {
                             return Err(trc::JmapEvent::UnsupportedFilter
                                 .into_err()

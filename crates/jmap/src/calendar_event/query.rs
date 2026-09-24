@@ -18,7 +18,7 @@ use groupware::{
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::{
-        calendar,
+        calendar::{self, CalendarFilter},
         calendar_event::{self, CalendarEventComparator, CalendarEventFilter},
     },
     request::MaybeInvalid,
@@ -253,6 +253,7 @@ impl CalendarEventQuery for Server {
                             ));
                         }
                     }
+                    CalendarEventFilter::Metadata(_) => todo!(),
                     unsupported => {
                         return Err(trc::JmapEvent::UnsupportedFilter
                             .into_err()
@@ -563,6 +564,18 @@ impl CalendarEventQuery for Server {
         request: QueryRequest<calendar::Calendar>,
         access_token: &AccessToken,
     ) -> trc::Result<QueryResponse> {
+        for filter in &request.filter {
+            match filter {
+                Filter::Property(CalendarFilter::Metadata(_)) => todo!(),
+                Filter::Property(CalendarFilter::_T(other)) => {
+                    return Err(trc::JmapEvent::UnsupportedFilter
+                        .into_err()
+                        .details(other.clone()));
+                }
+                Filter::And | Filter::Or | Filter::Not | Filter::Close => {}
+            }
+        }
+
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_groupware_resources(

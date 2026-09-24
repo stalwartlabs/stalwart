@@ -27,7 +27,10 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
-    object::email::{Email, EmailProperty, EmailValue},
+    object::{
+        email::{Email, EmailProperty, EmailValue},
+        metadata::MetadataProperty,
+    },
     references::resolve::ResolveCreatedReference,
     request::MaybeInvalid,
     types::state::State,
@@ -677,6 +680,8 @@ impl EmailSet for Server {
                         }
                     }
 
+                    (property, _) if property.metadata_root().is_some() => todo!(),
+
                     (_, Value::Null) => (),
 
                     (property, _) => {
@@ -869,6 +874,9 @@ impl EmailSet for Server {
                                 })
                                 .collect(),
                         );
+                    }
+                    (Key::Property(property), _) if property.metadata_root().is_some() => {
+                        todo!()
                     }
                     (Key::Property(EmailProperty::Pointer(pointer)), value) => {
                         match handle_email_patch(&pointer, value) {

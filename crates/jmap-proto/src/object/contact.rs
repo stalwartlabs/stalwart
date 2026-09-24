@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    object::{AnyId, JmapObject, JmapObjectId},
+    object::{AnyId, JmapObject, JmapObjectId, metadata::MetadataFilter},
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
@@ -101,6 +101,7 @@ pub enum ContactCardFilter {
     OnlineService(String),
     Address(String),
     Note(String),
+    Metadata(MetadataFilter),
     _T(String),
 }
 
@@ -181,8 +182,13 @@ impl<'de> DeserializeArguments<'de> for ContactCardFilter {
                 *self = ContactCardFilter::Note(map.next_value::<Cow<str>>()?.to_lowercase());
             },
             _ => {
-                *self = ContactCardFilter::_T(key.to_string());
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                *self = match MetadataFilter::try_deserialize(key, map)? {
+                    Some(filter) => ContactCardFilter::Metadata(filter),
+                    None => {
+                        let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        ContactCardFilter::_T(key.to_string())
+                    }
+                };
             }
         );
         Ok(())
@@ -246,6 +252,7 @@ impl ContactCardFilter {
             ContactCardFilter::OnlineService(_) => "onlineService",
             ContactCardFilter::Address(_) => "address",
             ContactCardFilter::Note(_) => "note",
+            ContactCardFilter::Metadata(filter) => filter.as_str(),
             ContactCardFilter::_T(s) => return Cow::Owned(s),
         }
         .into()

@@ -25,6 +25,7 @@ pub mod expunge;
 pub mod fetch;
 pub mod list;
 pub mod login;
+pub mod metadata;
 pub mod namespace;
 pub mod quota;
 pub mod rename;
@@ -713,6 +714,10 @@ impl ResponseCode {
                 }
                 return;
             }
+            ResponseCode::Metadata(code) => {
+                code.serialize(buf);
+                return;
+            }
         });
     }
 
@@ -760,6 +765,7 @@ impl ResponseCode {
             ResponseCode::TooFew => "TOOFEW",
             ResponseCode::TooMany => "TOOMANY",
             ResponseCode::MessageLimit { .. } => "MESSAGELIMIT",
+            ResponseCode::Metadata(code) => code.as_str(),
         }
     }
 
@@ -783,6 +789,7 @@ impl ResponseCode {
                 ResponseCode::ObjectId(_) => OBJECT_ID_LEN,
                 ResponseCode::HighestModseq { .. } => 21,
                 ResponseCode::MessageLimit { .. } => INT_LEN * 2 + 1,
+                ResponseCode::Metadata(_) => INT_LEN + 1,
                 _ => 0,
             }
     }

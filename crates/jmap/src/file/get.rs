@@ -16,7 +16,10 @@ use groupware::{
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::file_node::{self, FileNodeProperty, FileNodeValue},
+    object::{
+        file_node::{self, FileNodeProperty, FileNodeValue},
+        metadata::MetadataSelection,
+    },
     types::date::UTCDate,
 };
 use jmap_tools::{Map, Value};
@@ -46,7 +49,7 @@ impl FileNodeGet for Server {
         access_token: &AccessToken,
     ) -> trc::Result<GetResponse<file_node::FileNode>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let properties = request.unwrap_properties(&[
+        let mut properties = request.unwrap_properties(&[
             FileNodeProperty::Id,
             FileNodeProperty::ParentId,
             FileNodeProperty::NodeType,
@@ -65,6 +68,9 @@ impl FileNodeGet for Server {
             FileNodeProperty::ShareWith,
             FileNodeProperty::Role,
         ]);
+        if !MetadataSelection::extract(&mut properties)?.is_none() {
+            todo!()
+        }
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_groupware_resources(

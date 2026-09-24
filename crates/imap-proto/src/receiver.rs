@@ -30,6 +30,9 @@ pub struct Request<T: CommandParser> {
 pub trait CommandParser: Sized + Default {
     fn parse(bytes: &[u8], is_uid: bool) -> Option<Self>;
     fn tokenize_brackets(&self) -> bool;
+    fn tokenize_nil(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +46,7 @@ pub enum Token {
     Gt,               // >
     Dot,              // .
     Nil,              // NIL
+    NilAtom,
 }
 
 impl<T: CommandParser> Default for Request<T> {
@@ -195,7 +199,14 @@ impl<T: CommandParser> Receiver<T> {
             if self.current_request_size > self.max_request_size {
                 return Err(self.request_size_error());
             }
-            let token = Token::Argument(ArgumentBytes::from_slice(self.buf.as_ref()));
+            let token = if !in_quote
+                && self.request.command.tokenize_nil()
+                && self.buf.as_ref().eq_ignore_ascii_case(b"NIL")
+            {
+                Token::NilAtom
+            } else {
+                Token::Argument(ArgumentBytes::from_slice(self.buf.as_ref()))
+            };
             self.push_request_token(token);
             self.buf.clear();
         } else if in_quote {
@@ -701,6 +712,7 @@ impl Token {
             Token::Lt => bytes.eq(b"<"),
             Token::Dot => bytes.eq(b"."),
             Token::Nil => bytes.is_empty(),
+            Token::NilAtom => bytes.eq_ignore_ascii_case(b"NIL"),
         }
     }
 
@@ -763,6 +775,7 @@ impl Token {
             Token::Lt => b"<",
             Token::Dot => b".",
             Token::Nil => b"",
+            Token::NilAtom => b"NIL",
         }
     }
 }

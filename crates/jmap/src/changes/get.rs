@@ -159,6 +159,9 @@ impl ChangesLookup for Server {
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
             }
         };
+        if request.ignore_metadata_only_changes.unwrap_or_default() {
+            todo!()
+        }
         let max_changes = match request.max_changes {
             Some(0) => {
                 return Err(trc::JmapEvent::InvalidArguments

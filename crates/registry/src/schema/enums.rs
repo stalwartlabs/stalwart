@@ -1323,6 +1323,20 @@ pub enum MessageFlag {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum MetadataDataType {
+    #[default]
+    Email = 0,
+    Mailbox = 1,
+    SieveScript = 2,
+    Calendar = 3,
+    CalendarEvent = 4,
+    AddressBook = 5,
+    ContactCard = 6,
+    FileNode = 7,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum MetricType {
     #[default]
     Counter = 0,
@@ -1665,6 +1679,9 @@ pub enum Permission {
     JmapParticipantIdentityUpdate = 126,
     JmapParticipantIdentityDestroy = 127,
     JmapCoreEcho = 128,
+    JmapMetadataGet = 663,
+    JmapMetadataSet = 664,
+    JmapMetadataPrivate = 665,
     ImapAuthenticate = 129,
     ImapAclGet = 130,
     ImapAclSet = 131,
@@ -1693,6 +1710,9 @@ pub enum Permission {
     ImapStore = 154,
     ImapSubscribe = 155,
     ImapThread = 156,
+    ImapMetadataGet = 666,
+    ImapMetadataSet = 667,
+    ImapMetadataPrivate = 668,
     Pop3Authenticate = 157,
     Pop3List = 158,
     Pop3Uidl = 159,
@@ -1964,6 +1984,8 @@ pub enum Permission {
     SysMemoryLookupKeyValueUpdate = 419,
     SysMemoryLookupKeyValueDestroy = 420,
     SysMemoryLookupKeyValueQuery = 421,
+    SysMetadataGet = 669,
+    SysMetadataUpdate = 670,
     SysMetricGet = 422,
     SysMetricCreate = 423,
     SysMetricUpdate = 424,

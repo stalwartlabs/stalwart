@@ -25639,6 +25639,172 @@ impl RegistryJsonPropertyPatch for MemoryLookupKeyValue {
     }
 }
 
+impl ObjectImpl for Metadata {
+    const FLAGS: u64 = OBJ_SINGLETON;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::Metadata;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        if let Some(value) = &self.max_depth {
+            if *value < 1 {
+                errors.push(ValidationError::min_value(Property::MaxDepth, 1));
+            }
+        }
+        let value = &self.max_entry_size;
+        if *value < 1024 {
+            errors.push(ValidationError::min_value(Property::MaxEntrySize, 1024));
+        }
+        let value = &self.max_size;
+        if *value < 1024 {
+            errors.push(ValidationError::min_value(Property::MaxSize, 1024));
+        }
+        let value = &self.max_private_size;
+        if *value < 1024 {
+            errors.push(ValidationError::min_value(Property::MaxPrivateSize, 1024));
+        }
+        let value = &self.max_entries;
+        if *value < 10 {
+            errors.push(ValidationError::min_value(Property::MaxEntries, 10));
+        }
+        let value = &self.query_max_scan;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::QueryMaxScan, 1));
+        }
+        if let Some(value) = &self.imap_server_comment {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ImapServerComment));
+            }
+        }
+        if let Some(value) = &self.imap_server_admin {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ImapServerAdmin));
+            }
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Pickle for Metadata {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.data_types.pickle(out);
+        self.vendor_namespaces.pickle(out);
+        self.private_metadata.pickle(out);
+        self.max_depth.pickle(out);
+        self.max_entry_size.pickle(out);
+        self.max_size.pickle(out);
+        self.max_private_size.pickle(out);
+        self.max_entries.pickle(out);
+        self.query_max_scan.pickle(out);
+        self.imap_server_comment.pickle(out);
+        self.imap_server_admin.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.data_types = Pickle::unpickle(stream)?;
+        this.vendor_namespaces = Pickle::unpickle(stream)?;
+        this.private_metadata = Pickle::unpickle(stream)?;
+        this.max_depth = Pickle::unpickle(stream)?;
+        this.max_entry_size = Pickle::unpickle(stream)?;
+        this.max_size = Pickle::unpickle(stream)?;
+        this.max_private_size = Pickle::unpickle(stream)?;
+        this.max_entries = Pickle::unpickle(stream)?;
+        this.query_max_scan = Pickle::unpickle(stream)?;
+        this.imap_server_comment = Pickle::unpickle(stream)?;
+        this.imap_server_admin = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for Metadata {
+    fn default() -> Self {
+        Self {
+            data_types: Map::new(vec![
+                MetadataDataType::Email,
+                MetadataDataType::Mailbox,
+                MetadataDataType::SieveScript,
+                MetadataDataType::Calendar,
+                MetadataDataType::CalendarEvent,
+                MetadataDataType::AddressBook,
+                MetadataDataType::ContactCard,
+                MetadataDataType::FileNode,
+            ]),
+            vendor_namespaces: true,
+            private_metadata: true,
+            max_depth: Some(8u64),
+            max_entry_size: 8192u64,
+            max_size: 65536u64,
+            max_private_size: 16384u64,
+            max_entries: 128u64,
+            query_max_scan: 50000u64,
+            imap_server_comment: Default::default(),
+            imap_server_admin: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for Metadata {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(13);
+        map.insert_unchecked(Property::DataTypes, self.data_types.into_value());
+        map.insert_unchecked(
+            Property::VendorNamespaces,
+            self.vendor_namespaces.into_value(),
+        );
+        map.insert_unchecked(
+            Property::PrivateMetadata,
+            self.private_metadata.into_value(),
+        );
+        map.insert_unchecked(Property::MaxDepth, self.max_depth.into_value());
+        map.insert_unchecked(Property::MaxEntrySize, self.max_entry_size.into_value());
+        map.insert_unchecked(Property::MaxSize, self.max_size.into_value());
+        map.insert_unchecked(Property::MaxPrivateSize, self.max_private_size.into_value());
+        map.insert_unchecked(Property::MaxEntries, self.max_entries.into_value());
+        map.insert_unchecked(Property::QueryMaxScan, self.query_max_scan.into_value());
+        map.insert_unchecked(
+            Property::ImapServerComment,
+            self.imap_server_comment.into_value(),
+        );
+        map.insert_unchecked(
+            Property::ImapServerAdmin,
+            self.imap_server_admin.into_value(),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for Metadata {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::DataTypes) => self.data_types.patch(pointer, value),
+            Some(Property::VendorNamespaces) => self.vendor_namespaces.patch(pointer, value),
+            Some(Property::PrivateMetadata) => self.private_metadata.patch(pointer, value),
+            Some(Property::MaxDepth) => self.max_depth.patch(pointer, value),
+            Some(Property::MaxEntrySize) => self.max_entry_size.patch(pointer, value),
+            Some(Property::MaxSize) => self.max_size.patch(pointer, value),
+            Some(Property::MaxPrivateSize) => self.max_private_size.patch(pointer, value),
+            Some(Property::MaxEntries) => self.max_entries.patch(pointer, value),
+            Some(Property::QueryMaxScan) => self.query_max_scan.patch(pointer, value),
+            Some(Property::ImapServerComment) => self.imap_server_comment.patch(pointer, value),
+            Some(Property::ImapServerAdmin) => self
+                .imap_server_admin
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl ObjectImpl for Metric {
     const FLAGS: u64 = 0;
     const VERSION: u8 = 0;

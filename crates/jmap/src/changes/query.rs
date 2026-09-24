@@ -306,6 +306,7 @@ fn build_changes_request<T: JmapObject>(req: &QueryChangesRequest<T>) -> Changes
         account_id: req.account_id,
         since_state: req.since_query_state.clone(),
         max_changes: req.max_changes,
+        ignore_metadata_only_changes: None,
     }
 }
 

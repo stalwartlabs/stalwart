@@ -6002,6 +6002,76 @@ impl<'de> serde::Deserialize<'de> for MessageFlag {
     }
 }
 
+impl EnumImpl for MetadataDataType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MetadataDataType,
+            b"Email" => MetadataDataType::Email,
+            b"Mailbox" => MetadataDataType::Mailbox,
+            b"SieveScript" => MetadataDataType::SieveScript,
+            b"Calendar" => MetadataDataType::Calendar,
+            b"CalendarEvent" => MetadataDataType::CalendarEvent,
+            b"AddressBook" => MetadataDataType::AddressBook,
+            b"ContactCard" => MetadataDataType::ContactCard,
+            b"FileNode" => MetadataDataType::FileNode,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MetadataDataType::Email => "Email",
+            MetadataDataType::Mailbox => "Mailbox",
+            MetadataDataType::SieveScript => "SieveScript",
+            MetadataDataType::Calendar => "Calendar",
+            MetadataDataType::CalendarEvent => "CalendarEvent",
+            MetadataDataType::AddressBook => "AddressBook",
+            MetadataDataType::ContactCard => "ContactCard",
+            MetadataDataType::FileNode => "FileNode",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MetadataDataType::Email),
+            1 => Some(MetadataDataType::Mailbox),
+            2 => Some(MetadataDataType::SieveScript),
+            3 => Some(MetadataDataType::Calendar),
+            4 => Some(MetadataDataType::CalendarEvent),
+            5 => Some(MetadataDataType::AddressBook),
+            6 => Some(MetadataDataType::ContactCard),
+            7 => Some(MetadataDataType::FileNode),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 8;
+}
+
+impl serde::Serialize for MetadataDataType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MetadataDataType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for MetricType {
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
@@ -7327,6 +7397,9 @@ impl EnumImpl for Permission {
             b"jmapParticipantIdentityUpdate" => Permission::JmapParticipantIdentityUpdate,
             b"jmapParticipantIdentityDestroy" => Permission::JmapParticipantIdentityDestroy,
             b"jmapCoreEcho" => Permission::JmapCoreEcho,
+            b"jmapMetadataGet" => Permission::JmapMetadataGet,
+            b"jmapMetadataSet" => Permission::JmapMetadataSet,
+            b"jmapMetadataPrivate" => Permission::JmapMetadataPrivate,
             b"imapAuthenticate" => Permission::ImapAuthenticate,
             b"imapAclGet" => Permission::ImapAclGet,
             b"imapAclSet" => Permission::ImapAclSet,
@@ -7355,6 +7428,9 @@ impl EnumImpl for Permission {
             b"imapStore" => Permission::ImapStore,
             b"imapSubscribe" => Permission::ImapSubscribe,
             b"imapThread" => Permission::ImapThread,
+            b"imapMetadataGet" => Permission::ImapMetadataGet,
+            b"imapMetadataSet" => Permission::ImapMetadataSet,
+            b"imapMetadataPrivate" => Permission::ImapMetadataPrivate,
             b"pop3Authenticate" => Permission::Pop3Authenticate,
             b"pop3List" => Permission::Pop3List,
             b"pop3Uidl" => Permission::Pop3Uidl,
@@ -7626,6 +7702,8 @@ impl EnumImpl for Permission {
             b"sysMemoryLookupKeyValueUpdate" => Permission::SysMemoryLookupKeyValueUpdate,
             b"sysMemoryLookupKeyValueDestroy" => Permission::SysMemoryLookupKeyValueDestroy,
             b"sysMemoryLookupKeyValueQuery" => Permission::SysMemoryLookupKeyValueQuery,
+            b"sysMetadataGet" => Permission::SysMetadataGet,
+            b"sysMetadataUpdate" => Permission::SysMetadataUpdate,
             b"sysMetricGet" => Permission::SysMetricGet,
             b"sysMetricCreate" => Permission::SysMetricCreate,
             b"sysMetricUpdate" => Permission::SysMetricUpdate,
@@ -8006,6 +8084,9 @@ impl EnumImpl for Permission {
             Permission::JmapParticipantIdentityUpdate => "jmapParticipantIdentityUpdate",
             Permission::JmapParticipantIdentityDestroy => "jmapParticipantIdentityDestroy",
             Permission::JmapCoreEcho => "jmapCoreEcho",
+            Permission::JmapMetadataGet => "jmapMetadataGet",
+            Permission::JmapMetadataSet => "jmapMetadataSet",
+            Permission::JmapMetadataPrivate => "jmapMetadataPrivate",
             Permission::ImapAuthenticate => "imapAuthenticate",
             Permission::ImapAclGet => "imapAclGet",
             Permission::ImapAclSet => "imapAclSet",
@@ -8034,6 +8115,9 @@ impl EnumImpl for Permission {
             Permission::ImapStore => "imapStore",
             Permission::ImapSubscribe => "imapSubscribe",
             Permission::ImapThread => "imapThread",
+            Permission::ImapMetadataGet => "imapMetadataGet",
+            Permission::ImapMetadataSet => "imapMetadataSet",
+            Permission::ImapMetadataPrivate => "imapMetadataPrivate",
             Permission::Pop3Authenticate => "pop3Authenticate",
             Permission::Pop3List => "pop3List",
             Permission::Pop3Uidl => "pop3Uidl",
@@ -8305,6 +8389,8 @@ impl EnumImpl for Permission {
             Permission::SysMemoryLookupKeyValueUpdate => "sysMemoryLookupKeyValueUpdate",
             Permission::SysMemoryLookupKeyValueDestroy => "sysMemoryLookupKeyValueDestroy",
             Permission::SysMemoryLookupKeyValueQuery => "sysMemoryLookupKeyValueQuery",
+            Permission::SysMetadataGet => "sysMetadataGet",
+            Permission::SysMetadataUpdate => "sysMetadataUpdate",
             Permission::SysMetricGet => "sysMetricGet",
             Permission::SysMetricCreate => "sysMetricCreate",
             Permission::SysMetricUpdate => "sysMetricUpdate",
@@ -8678,6 +8764,9 @@ impl EnumImpl for Permission {
             126 => Some(Permission::JmapParticipantIdentityUpdate),
             127 => Some(Permission::JmapParticipantIdentityDestroy),
             128 => Some(Permission::JmapCoreEcho),
+            663 => Some(Permission::JmapMetadataGet),
+            664 => Some(Permission::JmapMetadataSet),
+            665 => Some(Permission::JmapMetadataPrivate),
             129 => Some(Permission::ImapAuthenticate),
             130 => Some(Permission::ImapAclGet),
             131 => Some(Permission::ImapAclSet),
@@ -8706,6 +8795,9 @@ impl EnumImpl for Permission {
             154 => Some(Permission::ImapStore),
             155 => Some(Permission::ImapSubscribe),
             156 => Some(Permission::ImapThread),
+            666 => Some(Permission::ImapMetadataGet),
+            667 => Some(Permission::ImapMetadataSet),
+            668 => Some(Permission::ImapMetadataPrivate),
             157 => Some(Permission::Pop3Authenticate),
             158 => Some(Permission::Pop3List),
             159 => Some(Permission::Pop3Uidl),
@@ -8977,6 +9069,8 @@ impl EnumImpl for Permission {
             419 => Some(Permission::SysMemoryLookupKeyValueUpdate),
             420 => Some(Permission::SysMemoryLookupKeyValueDestroy),
             421 => Some(Permission::SysMemoryLookupKeyValueQuery),
+            669 => Some(Permission::SysMetadataGet),
+            670 => Some(Permission::SysMetadataUpdate),
             422 => Some(Permission::SysMetricGet),
             423 => Some(Permission::SysMetricCreate),
             424 => Some(Permission::SysMetricUpdate),
@@ -9215,7 +9309,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 663;
+    const COUNT: usize = 671;
 }
 
 impl serde::Serialize for Permission {

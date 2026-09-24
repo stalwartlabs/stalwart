@@ -31,6 +31,7 @@ use compact_str::CompactString;
 use config::{
     groupware::GroupwareConfig,
     mailstore::jmap::JmapConfig,
+    metadata::MetadataConfig,
     network::Network,
     smtp::{
         SmtpConfig,
@@ -526,6 +527,7 @@ pub struct Core {
     pub smtp: SmtpConfig,
     pub spam: SpamFilterConfig,
     pub groupware: GroupwareConfig,
+    pub metadata: MetadataConfig,
     pub metrics: Metrics,
 
     // SPDX-SnippetBegin

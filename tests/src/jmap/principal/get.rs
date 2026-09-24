@@ -36,6 +36,12 @@ pub async fn test(test: &TestServer) {
     let application_server_key =
         response["capabilities"]["urn:ietf:params:jmap:webpush-vapid"]["applicationServerKey"]
             .clone();
+    let metadata_info = json!({
+        "namespaces": [],
+        "supportsVendorNamespaces": true,
+        "supportsPrivate": true,
+        "maxDepth": 8
+    });
     response.assert_is_equal(json!({
       "capabilities": {
         "urn:ietf:params:jmap:core": {
@@ -68,6 +74,7 @@ pub async fn test(test: &TestServer) {
         },
         "urn:ietf:params:jmap:blob": {},
         "urn:ietf:params:jmap:quota": {},
+        "urn:ietf:params:jmap:metadata": {},
         "urn:ietf:params:jmap:webpush-vapid": {
           "applicationServerKey": application_server_key
         },
@@ -264,7 +271,19 @@ pub async fn test(test: &TestServer) {
               "webWriteUrlTemplate": null
             },
             "urn:ietf:params:jmap:mail:share": {},
-            "urn:stalwart:jmap": {}
+            "urn:stalwart:jmap": {},
+            "urn:ietf:params:jmap:metadata": {
+              "dataTypes": {
+                "Email": metadata_info,
+                "Mailbox": metadata_info,
+                "SieveScript": metadata_info,
+                "Calendar": metadata_info,
+                "CalendarEvent": metadata_info,
+                "AddressBook": metadata_info,
+                "ContactCard": metadata_info,
+                "FileNode": metadata_info
+              }
+            }
           }
         }
       },
@@ -285,7 +304,8 @@ pub async fn test(test: &TestServer) {
         "urn:ietf:params:jmap:principals:availability": john_id,
         "urn:ietf:params:jmap:filenode": john_id,
         "urn:ietf:params:jmap:mail:share": john_id,
-        "urn:stalwart:jmap": john_id
+        "urn:stalwart:jmap": john_id,
+        "urn:ietf:params:jmap:metadata": john_id
       },
       "username": "jdoe@example.com",
       "apiUrl": "https://127.0.0.1:8899/jmap/",
