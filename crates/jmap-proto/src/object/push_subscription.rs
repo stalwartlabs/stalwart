@@ -8,10 +8,11 @@ use crate::object::email::{EmailProperty, HeaderForm, HeaderProperty};
 use crate::object::{AnyId, JmapObject, JmapObjectId};
 use crate::types::date::UTCDate;
 use jmap_tools::{Element, JsonPointer, JsonPointerItem};
-use jmap_tools::{Key, Property};
+use jmap_tools::{Key, PointerDepth, Property};
+use serde::{Serialize, Serializer};
 use std::borrow::Cow;
 use std::str::FromStr;
-use types::{id::Id, type_state::DataType};
+use types::{id::Id, text::Text, type_state::DataType};
 
 #[derive(Debug, Clone, Default)]
 pub struct PushSubscription;
@@ -42,11 +43,41 @@ pub enum PushSubscriptionValue {
 
 impl Property for PushSubscriptionProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        PushSubscriptionProperty::parse(value, key.is_none())
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        PushSubscriptionProperty::parse(value, key.is_none().then_some(depth))
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
+        }
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl PushSubscriptionProperty {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
             PushSubscriptionProperty::DeviceClientId => "deviceClientId",
             PushSubscriptionProperty::Expires => "expires",
             PushSubscriptionProperty::Id => "id",
@@ -57,16 +88,15 @@ impl Property for PushSubscriptionProperty {
             PushSubscriptionProperty::VerificationCode => "verificationCode",
             PushSubscriptionProperty::P256dh => "p256dh",
             PushSubscriptionProperty::Auth => "auth",
-            PushSubscriptionProperty::Pointer(json_pointer) => {
-                return json_pointer.to_string().into();
-            }
-        }
-        .into()
+            PushSubscriptionProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+        })
     }
-}
 
-impl PushSubscriptionProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    fn has_dynamic_text(&self) -> bool {
+        matches!(self, PushSubscriptionProperty::Pointer(_))
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(PushSubscriptionProperty::Id),
             b"deviceClientId" => Some(PushSubscriptionProperty::DeviceClientId),
@@ -81,11 +111,10 @@ impl PushSubscriptionProperty {
             _ => None,
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                PushSubscriptionProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(PushSubscriptionProperty::Pointer)
         })
     }
 
@@ -123,10 +152,23 @@ impl Element for PushSubscriptionValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            PushSubscriptionValue::Id(id) => id.to_string().into(),
-            PushSubscriptionValue::Date(utcdate) => utcdate.to_string().into(),
-            PushSubscriptionValue::Types(data_type) => data_type.as_str().into(),
+            PushSubscriptionValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl PushSubscriptionValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            PushSubscriptionValue::Id(id) => Text::Id(*id),
+            PushSubscriptionValue::Date(utcdate) => Text::Display(utcdate),
+            PushSubscriptionValue::Types(data_type) => Text::Static(data_type.as_str()),
         }
     }
 }
@@ -135,7 +177,7 @@ impl FromStr for PushSubscriptionProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        PushSubscriptionProperty::parse(s, false).ok_or(())
+        PushSubscriptionProperty::parse(s, None).ok_or(())
     }
 }
 

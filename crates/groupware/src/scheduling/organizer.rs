@@ -453,7 +453,7 @@ pub(crate) fn organizer_handle_update(
                 let tz_id = entry.tz_id();
                 for value in &entry.values {
                     if let ICalendarValue::PartialDateTime(value) = value {
-                        exdate_sources.entry((tz_id, &**value)).or_insert(entry);
+                        exdate_sources.entry((tz_id, value)).or_insert(entry);
                     }
                 }
             }
@@ -482,7 +482,7 @@ pub(crate) fn organizer_handle_update(
             };
             let overridden = overridden.map(|(_, instance)| instance);
             let params = itip_date_params(source);
-            let value = ICalendarValue::PartialDateTime(Box::new(date.date.clone()));
+            let value = ICalendarValue::PartialDateTime(date.date.clone());
             let dt_start = match overridden
                 .and_then(|instance| instance.comp.property(&ICalendarProperty::Dtstart))
             {
@@ -490,7 +490,7 @@ pub(crate) fn organizer_handle_update(
                 None => ICalendarEntry {
                     name: ICalendarProperty::Dtstart,
                     params: params.clone(),
-                    values: vec![value.clone()],
+                    values: [value.clone()].into(),
                 },
             };
 
@@ -511,7 +511,7 @@ pub(crate) fn organizer_handle_update(
             component.entries.push(ICalendarEntry {
                 name: ICalendarProperty::RecurrenceId,
                 params,
-                values: vec![value],
+                values: [value].into(),
             });
             component.entries.push(dt_start);
 

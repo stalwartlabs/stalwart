@@ -39,7 +39,9 @@ pub trait ToJmapHttpResponse {
 
 impl ToJmapHttpResponse for Response<'_> {
     fn into_http_response(self) -> HttpResponse {
-        JsonResponse::new(self).into_http_response()
+        HttpResponse::new(StatusCode::OK)
+            .with_content_type("application/json; charset=utf-8")
+            .with_text_body(self.to_json())
     }
 }
 

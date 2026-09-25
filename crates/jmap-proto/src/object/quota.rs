@@ -9,8 +9,9 @@ use crate::{
     request::deserialize::DeserializeArguments,
 };
 use jmap_tools::{Element, Key, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::{id::Id, type_state::DataType};
+use types::{id::Id, text::Text, type_state::DataType};
 
 #[derive(Debug, Clone, Default)]
 pub struct Quota;
@@ -55,6 +56,10 @@ impl Property for QuotaProperty {
         }
         .into()
     }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl QuotaProperty {
@@ -91,9 +96,19 @@ impl Element for QuotaValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl QuotaValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            QuotaValue::Id(id) => id.to_string().into(),
-            QuotaValue::Types(data_type) => data_type.as_str().into(),
+            QuotaValue::Id(id) => Text::Id(*id),
+            QuotaValue::Types(data_type) => Text::Static(data_type.as_str()),
         }
     }
 }

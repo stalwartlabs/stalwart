@@ -121,7 +121,7 @@ impl ComponentSequence for ICalendarComponent {
             .iter_mut()
             .find(|entry| entry.name == ICalendarProperty::Sequence)
         {
-            Some(entry) => entry.values = vec![ICalendarValue::Integer(sequence)],
+            Some(entry) => entry.values = [ICalendarValue::Integer(sequence)].into(),
             None => self.add_sequence(sequence),
         }
     }

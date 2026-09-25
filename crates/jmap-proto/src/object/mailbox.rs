@@ -12,9 +12,10 @@ use crate::{
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::{acl::Acl, id::Id, special_use::SpecialUse};
+use types::{acl::Acl, id::Id, special_use::SpecialUse, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct Mailbox;
@@ -65,40 +66,45 @@ pub enum MailboxValue {
 
 impl Property for MailboxProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        let allow_patch = key.is_none();
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        let patch_depth = key.is_none().then_some(depth);
         match key {
             Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 MailboxProperty::ShareWith => {
                     Id::from_str(value).ok().map(MailboxProperty::IdValue)
                 }
-                _ => MailboxProperty::parse(value, allow_patch),
+                _ => MailboxProperty::parse(value, patch_depth),
             },
-            _ => MailboxProperty::parse(value, allow_patch),
+            _ => MailboxProperty::parse(value, patch_depth),
         }
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            MailboxProperty::Id => "id",
-            MailboxProperty::IsSubscribed => "isSubscribed",
-            MailboxProperty::MyRights => "myRights",
-            MailboxProperty::Name => "name",
-            MailboxProperty::ParentId => "parentId",
-            MailboxProperty::Role => "role",
-            MailboxProperty::SortOrder => "sortOrder",
-            MailboxProperty::TotalEmails => "totalEmails",
-            MailboxProperty::TotalThreads => "totalThreads",
-            MailboxProperty::UnreadEmails => "unreadEmails",
-            MailboxProperty::UnreadThreads => "unreadThreads",
-            MailboxProperty::ShareWith => "shareWith",
-            MailboxProperty::Metadata => "metadata",
-            MailboxProperty::PrivateMetadata => "privateMetadata",
-            MailboxProperty::Rights(mailbox_right) => mailbox_right.as_str(),
-            MailboxProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
-            MailboxProperty::IdValue(id) => return id.to_string().into(),
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -139,16 +145,57 @@ impl Element for MailboxValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl MailboxValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            MailboxValue::Id(id) => id.to_string().into(),
-            MailboxValue::IdReference(r) => format!("#{r}").into(),
-            MailboxValue::Role(special_use) => special_use.as_str().unwrap_or_default().into(),
+            MailboxValue::Id(id) => Text::Id(*id),
+            MailboxValue::IdReference(r) => Text::Reference(r),
+            MailboxValue::Role(special_use) => {
+                Text::Static(special_use.as_str().unwrap_or_default())
+            }
         }
     }
 }
 
 impl MailboxProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            MailboxProperty::Id => "id",
+            MailboxProperty::IsSubscribed => "isSubscribed",
+            MailboxProperty::MyRights => "myRights",
+            MailboxProperty::Name => "name",
+            MailboxProperty::ParentId => "parentId",
+            MailboxProperty::Role => "role",
+            MailboxProperty::SortOrder => "sortOrder",
+            MailboxProperty::TotalEmails => "totalEmails",
+            MailboxProperty::TotalThreads => "totalThreads",
+            MailboxProperty::UnreadEmails => "unreadEmails",
+            MailboxProperty::UnreadThreads => "unreadThreads",
+            MailboxProperty::ShareWith => "shareWith",
+            MailboxProperty::Metadata => "metadata",
+            MailboxProperty::PrivateMetadata => "privateMetadata",
+            MailboxProperty::Rights(mailbox_right) => mailbox_right.as_str(),
+            MailboxProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+            MailboxProperty::IdValue(id) => return Text::Id(*id),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(
+            self,
+            MailboxProperty::Pointer(_) | MailboxProperty::IdValue(_)
+        )
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(MailboxProperty::Id),
             b"name" => Some(MailboxProperty::Name),
@@ -177,11 +224,10 @@ impl MailboxProperty {
             _ => None,
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                MailboxProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(MailboxProperty::Pointer)
         })
     }
 
@@ -265,7 +311,7 @@ impl FromStr for MailboxProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        MailboxProperty::parse(s, false)
+        MailboxProperty::parse(s, None)
             .or_else(|| {
                 MetadataRoot::from_selector(s)
                     .map(|_| MailboxProperty::Pointer(JsonPointer::parse(s)))

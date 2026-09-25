@@ -6,8 +6,9 @@
 
 use crate::{jmap::RegistryValue, schema::prelude::Property, types::EnumImpl};
 use jmap_tools::Key;
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::{blob::BlobId, id::Id};
+use types::{blob::BlobId, id::Id, text::Text};
 
 impl jmap_tools::Property for Property {
     fn try_parse(_: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
@@ -16,6 +17,10 @@ impl jmap_tools::Property for Property {
 
     fn to_cow(&self) -> Cow<'static, str> {
         self.as_str().into()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
     }
 }
 
@@ -73,10 +78,20 @@ impl jmap_tools::Element for RegistryValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl RegistryValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            RegistryValue::Id(id) => id.to_string().into(),
-            RegistryValue::BlobId(blob_id) => blob_id.to_string().into(),
-            RegistryValue::IdReference(r) => format!("#{r}").into(),
+            RegistryValue::Id(id) => Text::Id(*id),
+            RegistryValue::BlobId(blob_id) => Text::Display(blob_id),
+            RegistryValue::IdReference(r) => Text::Reference(r),
         }
     }
 }

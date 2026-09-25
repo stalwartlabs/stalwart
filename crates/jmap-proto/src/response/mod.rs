@@ -5,6 +5,8 @@
  */
 
 pub mod serialize;
+#[cfg(test)]
+mod sonic_tests;
 pub mod status;
 
 use self::serialize::serialize_hex;
@@ -173,6 +175,10 @@ pub struct Response<'x> {
 }
 
 impl<'x> Response<'x> {
+    pub fn to_json(&self) -> String {
+        sonic_rs::to_string(self).unwrap_or_default()
+    }
+
     pub fn new(session_state: u32, created_ids: HashMap<String, AnyId>, capacity: usize) -> Self {
         Response {
             session_state,

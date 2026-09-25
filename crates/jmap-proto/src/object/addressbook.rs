@@ -12,9 +12,10 @@ use crate::{
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::{acl::Acl, id::Id, special_use::SpecialUse};
+use types::{acl::Acl, id::Id, special_use::SpecialUse, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct AddressBook;
@@ -55,36 +56,45 @@ pub enum AddressBookValue {
 
 impl Property for AddressBookProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        let allow_patch = key.is_none();
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        let patch_depth = key.is_none().then_some(depth);
         match key {
             Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 AddressBookProperty::ShareWith => {
                     Id::from_str(value).ok().map(AddressBookProperty::IdValue)
                 }
-                _ => AddressBookProperty::parse(value, allow_patch),
+                _ => AddressBookProperty::parse(value, patch_depth),
             },
-            _ => AddressBookProperty::parse(value, allow_patch),
+            _ => AddressBookProperty::parse(value, patch_depth),
         }
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            AddressBookProperty::Id => "id",
-            AddressBookProperty::Name => "name",
-            AddressBookProperty::Description => "description",
-            AddressBookProperty::SortOrder => "sortOrder",
-            AddressBookProperty::IsDefault => "isDefault",
-            AddressBookProperty::IsSubscribed => "isSubscribed",
-            AddressBookProperty::ShareWith => "shareWith",
-            AddressBookProperty::MyRights => "myRights",
-            AddressBookProperty::Metadata => "metadata",
-            AddressBookProperty::PrivateMetadata => "privateMetadata",
-            AddressBookProperty::Rights(addressbook_right) => addressbook_right.as_str(),
-            AddressBookProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
-            AddressBookProperty::IdValue(id) => return id.to_string().into(),
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -118,16 +128,53 @@ impl Element for AddressBookValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl AddressBookValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            AddressBookValue::Id(id) => id.to_string().into(),
-            AddressBookValue::IdReference(r) => format!("#{r}").into(),
-            AddressBookValue::Role(special_use) => special_use.as_str().unwrap_or_default().into(),
+            AddressBookValue::Id(id) => Text::Id(*id),
+            AddressBookValue::IdReference(r) => Text::Reference(r),
+            AddressBookValue::Role(special_use) => {
+                Text::Static(special_use.as_str().unwrap_or_default())
+            }
         }
     }
 }
 
 impl AddressBookProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            AddressBookProperty::Id => "id",
+            AddressBookProperty::Name => "name",
+            AddressBookProperty::Description => "description",
+            AddressBookProperty::SortOrder => "sortOrder",
+            AddressBookProperty::IsDefault => "isDefault",
+            AddressBookProperty::IsSubscribed => "isSubscribed",
+            AddressBookProperty::ShareWith => "shareWith",
+            AddressBookProperty::MyRights => "myRights",
+            AddressBookProperty::Metadata => "metadata",
+            AddressBookProperty::PrivateMetadata => "privateMetadata",
+            AddressBookProperty::Rights(addressbook_right) => addressbook_right.as_str(),
+            AddressBookProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+            AddressBookProperty::IdValue(id) => return Text::Id(*id),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(
+            self,
+            AddressBookProperty::Pointer(_) | AddressBookProperty::IdValue(_)
+        )
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(AddressBookProperty::Id),
             b"name" => Some(AddressBookProperty::Name),
@@ -146,11 +193,10 @@ impl AddressBookProperty {
             _ => None
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                AddressBookProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(AddressBookProperty::Pointer)
         })
     }
 
@@ -214,7 +260,7 @@ impl FromStr for AddressBookProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        AddressBookProperty::parse(s, false)
+        AddressBookProperty::parse(s, None)
             .or_else(|| {
                 MetadataRoot::from_selector(s)
                     .map(|_| AddressBookProperty::Pointer(JsonPointer::parse(s)))

@@ -21,6 +21,8 @@ pub mod email;
 pub mod email_submission;
 pub mod file_node;
 pub mod identity;
+#[cfg(test)]
+mod key_tests;
 pub mod mailbox;
 pub mod metadata;
 pub mod participant_identity;

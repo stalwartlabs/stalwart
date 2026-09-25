@@ -9,8 +9,9 @@ use crate::{
     request::deserialize::DeserializeArguments,
 };
 use jmap_tools::{Element, Key, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::{blob::BlobId, id::Id};
+use types::{blob::BlobId, id::Id, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct Blob;
@@ -73,6 +74,10 @@ impl Property for BlobProperty {
         }
         .into()
     }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl Element for BlobValue {
@@ -94,9 +99,19 @@ impl Element for BlobValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl BlobValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            BlobValue::BlobId(blob_id) => blob_id.to_string().into(),
-            BlobValue::IdReference(r) => format!("#{r}").into(),
+            BlobValue::BlobId(blob_id) => Text::Display(blob_id),
+            BlobValue::IdReference(r) => Text::Reference(r),
         }
     }
 }

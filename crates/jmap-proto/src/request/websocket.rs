@@ -11,11 +11,12 @@ use crate::{
     request::{Call, deserialize::DeserializeArguments},
     response::{Response, ResponseMethod, serialize::serialize_hex, status::PushObject},
 };
-use compact_str::format_compact;
+use compact_str::{ToCompactString, format_compact};
 use serde::{
     Deserialize, Deserializer,
     de::{self, MapAccess, Visitor},
 };
+use simdutf8::basic::from_utf8;
 use std::{borrow::Cow, collections::HashMap, fmt};
 use types::type_state::DataType;
 
@@ -107,7 +108,13 @@ enum MessageType {
 impl<'x> WebSocketMessage<'x> {
     pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
         if json.len() <= max_size {
-            match serde_json::from_slice::<Self>(json) {
+            let message = match from_utf8(json) {
+                Ok(text) => {
+                    serde_json::from_str::<Self>(text).map_err(|err| err.to_compact_string())
+                }
+                Err(err) => Err(err.to_compact_string()),
+            };
+            match message {
                 Ok(WebSocketMessage::Request(req))
                     if req.request.method_calls.len() > max_calls =>
                 {
@@ -238,8 +245,8 @@ impl<'x> WebSocketResponse<'x> {
         }
     }
 
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap()
+    pub fn to_json(&self) -> Result<String, sonic_rs::Error> {
+        sonic_rs::to_string(self)
     }
 }
 

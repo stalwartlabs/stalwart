@@ -10,8 +10,9 @@ use crate::{
     types::date::UTCDate,
 };
 use jmap_tools::{Element, Key, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use types::{id::Id, type_state::DataType};
+use types::{id::Id, text::Text, type_state::DataType};
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareNotification;
@@ -61,6 +62,17 @@ impl Property for ShareNotificationProperty {
         }
         .into()
     }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
+            || matches!(
+                (self, other),
+                (
+                    ShareNotificationProperty::Name | ShareNotificationProperty::ChangedByName,
+                    ShareNotificationProperty::Name | ShareNotificationProperty::ChangedByName
+                )
+            )
+    }
 }
 
 impl Element for ShareNotificationValue {
@@ -86,10 +98,23 @@ impl Element for ShareNotificationValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            ShareNotificationValue::Id(id) => id.to_string().into(),
-            ShareNotificationValue::Date(date) => date.to_string().into(),
-            ShareNotificationValue::ObjectType(ty) => ty.as_str().into(),
+            ShareNotificationValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl ShareNotificationValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            ShareNotificationValue::Id(id) => Text::Id(*id),
+            ShareNotificationValue::Date(date) => Text::Display(date),
+            ShareNotificationValue::ObjectType(ty) => Text::Static(ty.as_str()),
         }
     }
 }

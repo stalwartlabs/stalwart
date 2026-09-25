@@ -13,9 +13,10 @@ use crate::{
     request::{MaybeInvalid, deserialize::DeserializeArguments, reference::MaybeIdReference},
     types::date::UTCDate,
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property, Value};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property, Value};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::{blob::BlobId, id::Id};
+use types::{blob::BlobId, id::Id, text::Text};
 use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Clone, Default)]
@@ -78,33 +79,35 @@ pub enum Displayed {
 
 impl Property for EmailSubmissionProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        EmailSubmissionProperty::parse(value, key.is_none())
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        EmailSubmissionProperty::parse(value, key.is_none().then_some(depth))
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            EmailSubmissionProperty::DeliveryStatus => "deliveryStatus",
-            EmailSubmissionProperty::DsnBlobIds => "dsnBlobIds",
-            EmailSubmissionProperty::Email => "email",
-            EmailSubmissionProperty::Envelope => "envelope",
-            EmailSubmissionProperty::Id => "id",
-            EmailSubmissionProperty::IdentityId => "identityId",
-            EmailSubmissionProperty::MdnBlobIds => "mdnBlobIds",
-            EmailSubmissionProperty::SendAt => "sendAt",
-            EmailSubmissionProperty::ThreadId => "threadId",
-            EmailSubmissionProperty::UndoStatus => "undoStatus",
-            EmailSubmissionProperty::Parameters => "parameters",
-            EmailSubmissionProperty::SmtpReply => "smtpReply",
-            EmailSubmissionProperty::Delivered => "delivered",
-            EmailSubmissionProperty::Displayed => "displayed",
-            EmailSubmissionProperty::MailFrom => "mailFrom",
-            EmailSubmissionProperty::RcptTo => "rcptTo",
-            EmailSubmissionProperty::EmailId => "emailId",
-            EmailSubmissionProperty::Pointer(json_pointer) => {
-                return json_pointer.to_string().into();
-            }
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -149,20 +152,60 @@ impl Element for EmailSubmissionValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            EmailSubmissionValue::Id(id) => id.to_string().into(),
-            EmailSubmissionValue::Date(utcdate) => utcdate.to_string().into(),
-            EmailSubmissionValue::BlobId(blob_id) => blob_id.to_string().into(),
-            EmailSubmissionValue::IdReference(r) => format!("#{r}").into(),
-            EmailSubmissionValue::UndoStatus(undo_status) => undo_status.as_str().into(),
-            EmailSubmissionValue::Delivered(delivered) => delivered.as_str().into(),
-            EmailSubmissionValue::Displayed(displayed) => displayed.as_str().into(),
+            EmailSubmissionValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl EmailSubmissionValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            EmailSubmissionValue::Id(id) => Text::Id(*id),
+            EmailSubmissionValue::Date(utcdate) => Text::Display(utcdate),
+            EmailSubmissionValue::BlobId(blob_id) => Text::Display(blob_id),
+            EmailSubmissionValue::IdReference(r) => Text::Reference(r),
+            EmailSubmissionValue::UndoStatus(undo_status) => Text::Static(undo_status.as_str()),
+            EmailSubmissionValue::Delivered(delivered) => Text::Static(delivered.as_str()),
+            EmailSubmissionValue::Displayed(displayed) => Text::Static(displayed.as_str()),
         }
     }
 }
 
 impl EmailSubmissionProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            EmailSubmissionProperty::DeliveryStatus => "deliveryStatus",
+            EmailSubmissionProperty::DsnBlobIds => "dsnBlobIds",
+            EmailSubmissionProperty::Email => "email",
+            EmailSubmissionProperty::Envelope => "envelope",
+            EmailSubmissionProperty::Id => "id",
+            EmailSubmissionProperty::IdentityId => "identityId",
+            EmailSubmissionProperty::MdnBlobIds => "mdnBlobIds",
+            EmailSubmissionProperty::SendAt => "sendAt",
+            EmailSubmissionProperty::ThreadId => "threadId",
+            EmailSubmissionProperty::UndoStatus => "undoStatus",
+            EmailSubmissionProperty::Parameters => "parameters",
+            EmailSubmissionProperty::SmtpReply => "smtpReply",
+            EmailSubmissionProperty::Delivered => "delivered",
+            EmailSubmissionProperty::Displayed => "displayed",
+            EmailSubmissionProperty::MailFrom => "mailFrom",
+            EmailSubmissionProperty::RcptTo => "rcptTo",
+            EmailSubmissionProperty::EmailId => "emailId",
+            EmailSubmissionProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(self, EmailSubmissionProperty::Pointer(_))
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             "id" => Some(EmailSubmissionProperty::Id),
             "identityId" => Some(EmailSubmissionProperty::IdentityId),
@@ -184,11 +227,10 @@ impl EmailSubmissionProperty {
             _ => None,
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                EmailSubmissionProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(EmailSubmissionProperty::Pointer)
         })
     }
 
@@ -213,7 +255,7 @@ impl UndoStatus {
         )
     }
 
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             UndoStatus::Pending => "pending",
             UndoStatus::Final => "final",
@@ -233,7 +275,7 @@ impl Delivered {
         )
     }
 
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Delivered::Queued => "queued",
             Delivered::Yes => "yes",
@@ -252,7 +294,7 @@ impl Displayed {
         )
     }
 
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Displayed::Yes => "yes",
             Displayed::Unknown => "unknown",
@@ -292,7 +334,7 @@ impl FromStr for EmailSubmissionProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        EmailSubmissionProperty::parse(s, false).ok_or(())
+        EmailSubmissionProperty::parse(s, None).ok_or(())
     }
 }
 

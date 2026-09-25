@@ -578,7 +578,7 @@ impl CalendarQueryHandler {
                     let mut date_entry = ICalendarEntry {
                         name: ICalendarProperty::Dtstart,
                         params: vec![],
-                        values: vec![ICalendarValue::PartialDateTime(Box::default())],
+                        values: [ICalendarValue::PartialDateTime(Default::default())].into(),
                     };
                     let mut write_date =
                         |out: &mut String, name: ICalendarProperty, timestamp: i64| {
@@ -586,7 +586,7 @@ impl CalendarQueryHandler {
                             if let Some(ICalendarValue::PartialDateTime(value)) =
                                 date_entry.values.first_mut()
                             {
-                                **value = PartialDateTime::from_utc_timestamp(timestamp);
+                                *value = PartialDateTime::from_utc_timestamp(timestamp);
                             }
                             let _ = date_entry.write_to(out);
                         };

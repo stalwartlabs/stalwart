@@ -5,8 +5,9 @@
  */
 
 use jmap_tools::{Element, Key, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::id::Id;
+use types::{id::Id, text::Text};
 
 use crate::object::{AnyId, JmapObject, JmapObjectId};
 
@@ -36,6 +37,10 @@ impl Property for ThreadProperty {
         }
         .into()
     }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl Element for ThreadValue {
@@ -50,8 +55,18 @@ impl Element for ThreadValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl ThreadValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            ThreadValue::Id(id) => id.to_string().into(),
+            ThreadValue::Id(id) => Text::Id(*id),
         }
     }
 }

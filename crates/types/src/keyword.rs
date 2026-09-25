@@ -211,6 +211,41 @@ impl Keyword {
             })
     }
 
+    pub fn as_str(&self) -> &str {
+        match self {
+            Keyword::Seen => "$seen",
+            Keyword::Draft => "$draft",
+            Keyword::Flagged => "$flagged",
+            Keyword::Answered => "$answered",
+            Keyword::Recent => "$recent",
+            Keyword::Important => "$important",
+            Keyword::Phishing => "$phishing",
+            Keyword::Junk => "$junk",
+            Keyword::NotJunk => "$notjunk",
+            Keyword::Deleted => "$deleted",
+            Keyword::Forwarded => "$forwarded",
+            Keyword::MdnSent => "$mdnsent",
+            Keyword::Autosent => "$autosent",
+            Keyword::CanUnsubscribe => "$canunsubscribe",
+            Keyword::Followed => "$followed",
+            Keyword::HasAttachment => "$hasattachment",
+            Keyword::HasMemo => "$hasmemo",
+            Keyword::HasNoAttachment => "$hasnoattachment",
+            Keyword::Imported => "$imported",
+            Keyword::IsTrusted => "$istrusted",
+            Keyword::MailFlagBit0 => "$MailFlagBit0",
+            Keyword::MailFlagBit1 => "$MailFlagBit1",
+            Keyword::MailFlagBit2 => "$MailFlagBit2",
+            Keyword::MaskedEmail => "$maskedemail",
+            Keyword::Memo => "$memo",
+            Keyword::Muted => "$muted",
+            Keyword::New => "$new",
+            Keyword::Notify => "$notify",
+            Keyword::Unsubscribed => "$unsubscribed",
+            Keyword::Other(string) => string.as_str(),
+        }
+    }
+
     pub fn id(&self) -> Result<u32, &str> {
         match self {
             Keyword::Seen => Ok(SEEN as u32),
@@ -325,38 +360,7 @@ impl From<String> for Keyword {
 
 impl Display for Keyword {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Keyword::Seen => write!(f, "$seen"),
-            Keyword::Draft => write!(f, "$draft"),
-            Keyword::Flagged => write!(f, "$flagged"),
-            Keyword::Answered => write!(f, "$answered"),
-            Keyword::Recent => write!(f, "$recent"),
-            Keyword::Important => write!(f, "$important"),
-            Keyword::Phishing => write!(f, "$phishing"),
-            Keyword::Junk => write!(f, "$junk"),
-            Keyword::NotJunk => write!(f, "$notjunk"),
-            Keyword::Deleted => write!(f, "$deleted"),
-            Keyword::Forwarded => write!(f, "$forwarded"),
-            Keyword::MdnSent => write!(f, "$mdnsent"),
-            Keyword::Autosent => write!(f, "$autosent"),
-            Keyword::CanUnsubscribe => write!(f, "$canunsubscribe"),
-            Keyword::Followed => write!(f, "$followed"),
-            Keyword::HasAttachment => write!(f, "$hasattachment"),
-            Keyword::HasMemo => write!(f, "$hasmemo"),
-            Keyword::HasNoAttachment => write!(f, "$hasnoattachment"),
-            Keyword::Imported => write!(f, "$imported"),
-            Keyword::IsTrusted => write!(f, "$istrusted"),
-            Keyword::MailFlagBit0 => write!(f, "$MailFlagBit0"),
-            Keyword::MailFlagBit1 => write!(f, "$MailFlagBit1"),
-            Keyword::MailFlagBit2 => write!(f, "$MailFlagBit2"),
-            Keyword::MaskedEmail => write!(f, "$maskedemail"),
-            Keyword::Memo => write!(f, "$memo"),
-            Keyword::Muted => write!(f, "$muted"),
-            Keyword::New => write!(f, "$new"),
-            Keyword::Notify => write!(f, "$notify"),
-            Keyword::Unsubscribed => write!(f, "$unsubscribed"),
-            Keyword::Other(s) => write!(f, "{}", s),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -470,7 +474,42 @@ fn truncate(value: &str) -> CompactString {
 
 #[cfg(test)]
 mod tests {
-    use super::Keyword;
+    use super::{Keyword, OTHER};
+
+    const NAMES: &str = "$seen $draft $flagged $answered $recent $important $phishing $junk \
+        $notjunk $deleted $forwarded $mdnsent $autosent $canunsubscribe \
+        $followed $hasattachment $hasmemo $hasnoattachment $imported \
+        $istrusted $MailFlagBit0 $MailFlagBit1 $MailFlagBit2 $maskedemail \
+        $memo $muted $new $notify $unsubscribed";
+
+    #[test]
+    fn keywords_render_their_names() {
+        let known = (0..=OTHER)
+            .filter_map(|id| Keyword::try_from_id(id).ok())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            known.iter().map(Keyword::as_str).collect::<Vec<_>>(),
+            NAMES.split_whitespace().collect::<Vec<_>>()
+        );
+        for keyword in known {
+            assert!(keyword.as_str().starts_with('$'), "{keyword:?}");
+            assert_eq!(keyword.to_string(), keyword.as_str());
+            assert_eq!(Keyword::try_parse(keyword.as_str()), Some(keyword));
+        }
+        for (keyword, text) in [
+            (Keyword::parse("$SEEN"), "$seen"),
+            (Keyword::parse("\\Seen"), "$seen"),
+            (Keyword::parse("$MailFlagBit0"), "$MailFlagBit0"),
+            (Keyword::Other("$seen".into()), "$seen"),
+            (Keyword::parse("custom"), "custom"),
+            (Keyword::Other("é🎉".into()), "é🎉"),
+            (Keyword::Other("".into()), ""),
+        ] {
+            assert_eq!(keyword.as_str(), text);
+            assert_eq!(keyword.to_string(), text);
+            assert_eq!(format!("{keyword:>20}"), text);
+        }
+    }
 
     #[test]
     fn truncation_keeps_keywords_detectably_long() {

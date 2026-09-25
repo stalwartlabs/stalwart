@@ -377,7 +377,7 @@ impl ItipDateTime<'_> {
                 .tz_id
                 .map(|tz_id| vec![ICalendarParameter::tzid(tz_id.to_string())])
                 .unwrap_or_default(),
-            values: vec![ICalendarValue::PartialDateTime(Box::new(self.date.clone()))],
+            values: [ICalendarValue::PartialDateTime(self.date.clone())].into(),
         }
     }
 }

@@ -236,7 +236,7 @@ impl EntryView for ICalendarEntry {
         (!values.is_empty()).then(|| ICalendarEntry {
             name: ICalendarProperty::Freebusy,
             params: self.params.clone(),
-            values,
+            values: values.into(),
         })
     }
 

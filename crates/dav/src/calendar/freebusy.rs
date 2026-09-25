@@ -133,23 +133,26 @@ impl CalendarFreebusyRequestHandler for Server {
             entries.push(ICalendarEntry {
                 name: ICalendarProperty::Dtstart,
                 params: vec![],
-                values: vec![ICalendarValue::PartialDateTime(Box::new(
+                values: [ICalendarValue::PartialDateTime(
                     PartialDateTime::from_utc_timestamp(range.start),
-                ))],
+                )]
+                .into(),
             });
             entries.push(ICalendarEntry {
                 name: ICalendarProperty::Dtend,
                 params: vec![],
-                values: vec![ICalendarValue::PartialDateTime(Box::new(
+                values: [ICalendarValue::PartialDateTime(
                     PartialDateTime::from_utc_timestamp(range.end),
-                ))],
+                )]
+                .into(),
             });
             entries.push(ICalendarEntry {
                 name: ICalendarProperty::Dtstamp,
                 params: vec![],
-                values: vec![ICalendarValue::PartialDateTime(Box::new(
+                values: [ICalendarValue::PartialDateTime(
                     PartialDateTime::from_utc_timestamp(now() as i64),
-                ))],
+                )]
+                .into(),
             });
 
             let document_ids = resources
@@ -306,7 +309,7 @@ impl CalendarFreebusyRequestHandler for Server {
                 entries.push(ICalendarEntry {
                     name: ICalendarProperty::Freebusy,
                     params: vec![ICalendarParameter::fbtype(fbtype)],
-                    values: merge_intervals(events_in_range),
+                    values: merge_intervals(events_in_range).into(),
                 });
             }
         }
@@ -320,12 +323,12 @@ impl CalendarFreebusyRequestHandler for Server {
                         ICalendarEntry {
                             name: ICalendarProperty::Version,
                             params: vec![],
-                            values: vec![ICalendarValue::Text("2.0".to_string())],
+                            values: [ICalendarValue::Text("2.0".to_string())].into(),
                         },
                         ICalendarEntry {
                             name: ICalendarProperty::Prodid,
                             params: vec![],
-                            values: vec![ICalendarValue::Text(PROD_ID.to_string())],
+                            values: [ICalendarValue::Text(PROD_ID.to_string())].into(),
                         },
                     ],
                     component_ids: vec![1],
@@ -369,10 +372,10 @@ fn merge_intervals(mut intervals: Vec<(i64, i64)>) -> Vec<ICalendarValue> {
 }
 
 fn build_ical_value(from: i64, to: i64) -> ICalendarValue {
-    ICalendarValue::Period(ICalendarPeriod::Range {
+    ICalendarValue::Period(Box::new(ICalendarPeriod::Range {
         start: PartialDateTime::from_utc_timestamp(from),
         end: PartialDateTime::from_utc_timestamp(to),
-    })
+    }))
 }
 
 pub(crate) fn freebusy_in_range(

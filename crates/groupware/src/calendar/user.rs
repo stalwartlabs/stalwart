@@ -530,7 +530,7 @@ impl ICalendarUserData for ICalendar {
                         .map(|color| ICalendarEntry {
                             name: ICalendarProperty::Color,
                             params: vec![],
-                            values: vec![ICalendarValue::Text(color.to_string())],
+                            values: [ICalendarValue::Text(color.to_string())].into(),
                         }),
                     resolve(PREF_HAS_KEYWORDS)
                         .filter(|i| !i.keywords.is_empty())
@@ -546,13 +546,14 @@ impl ICalendarUserData for ICalendar {
                     resolve(PREF_HAS_FREE_BUSY).map(|i| ICalendarEntry {
                         name: ICalendarProperty::Transp,
                         params: vec![],
-                        values: vec![ICalendarValue::Transparency(
+                        values: [ICalendarValue::Transparency(
                             if i.flags & PREF_FREE_BUSY_FREE != 0 {
                                 ICalendarTransparency::Transparent
                             } else {
                                 ICalendarTransparency::Opaque
                             },
-                        )],
+                        )]
+                        .into(),
                     }),
                 ]
                 .into_iter()
@@ -1336,9 +1337,7 @@ impl ShiftedEntry for ICalendarEntry {
         Some(ICalendarEntry {
             name: self.name.clone(),
             params: self.params.clone(),
-            values: vec![ICalendarValue::PartialDateTime(Box::new(
-                value.shifted(shift)?,
-            ))],
+            values: [ICalendarValue::PartialDateTime(value.shifted(shift)?)].into(),
         })
     }
 }

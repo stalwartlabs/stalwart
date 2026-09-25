@@ -1031,7 +1031,7 @@ impl InstanceDateTime for ICalendarEntry {
         ICalendarEntry {
             name,
             params,
-            values: vec![ICalendarValue::PartialDateTime(Box::new(value))],
+            values: [ICalendarValue::PartialDateTime(value)].into(),
         }
     }
 
@@ -1078,7 +1078,7 @@ impl InstanceDateTime for ICalendarEntry {
                     _ => param.clone(),
                 })
                 .collect(),
-            values: vec![ICalendarValue::PartialDateTime(Box::new(value))],
+            values: [ICalendarValue::PartialDateTime(value)].into(),
         }
     }
 }
@@ -1192,9 +1192,10 @@ impl EventInstanceBuilder for CalendarEventData {
             (None, None) => ICalendarEntry {
                 name: ICalendarProperty::Dtstart,
                 params: vec![],
-                values: vec![ICalendarValue::PartialDateTime(Box::new(
+                values: [ICalendarValue::PartialDateTime(
                     PartialDateTime::from_naive_timestamp(expansion.start_naive),
-                ))],
+                )]
+                .into(),
             },
         });
 
@@ -1251,13 +1252,14 @@ impl EventInstanceBuilder for CalendarEventData {
             entries.push(ICalendarEntry {
                 name: ICalendarProperty::Duration,
                 params: vec![],
-                values: vec![ICalendarValue::Duration(if is_date {
+                values: [ICalendarValue::Duration(if is_date {
                     ICalendarDuration::from_days(
                         (expansion.end_naive - expansion.start_naive) / SECONDS_PER_DAY,
                     )
                 } else {
                     ICalendarDuration::from_seconds(expansion.end - expansion.start)
-                })],
+                })]
+                .into(),
             });
         }
 

@@ -324,7 +324,7 @@ pub fn itip_snapshot<'x, 'y>(
                                         .get_or_insert_with(|| ical.build_tz_resolver())
                                         .resolve_or_default(tz_id);
                                     ItipEntryValue::DateTime(ItipDateTime {
-                                        date: date.as_ref(),
+                                        date,
                                         tz_id,
                                         tz_code: tz.as_id(),
                                         timestamp: date

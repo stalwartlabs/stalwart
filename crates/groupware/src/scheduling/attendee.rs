@@ -413,7 +413,7 @@ impl OrganizerSequences {
             };
             match sequence {
                 Some(sequence) => match component.property_mut(&ICalendarProperty::Sequence) {
-                    Some(entry) => entry.values = vec![ICalendarValue::Integer(sequence)],
+                    Some(entry) => entry.values = [ICalendarValue::Integer(sequence)].into(),
                     None => component.add_sequence(sequence),
                 },
                 None => component

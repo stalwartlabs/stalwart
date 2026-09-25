@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::{fmt::Display, str::FromStr};
+use std::{
+    fmt::Display,
+    str::{FromStr, from_utf8},
+};
 
 #[derive(
     rkyv::Archive,
@@ -117,6 +120,39 @@ impl FromStr for UTCDate {
 }
 
 impl UTCDate {
+    fn text(&self) -> DateText {
+        let mut text = DateText {
+            bytes: [0; DATE_TEXT_CAPACITY],
+            len: 0,
+        };
+        text.push_number(self.year, 4);
+        text.push(b'-');
+        text.push_number(self.month.into(), 2);
+        text.push(b'-');
+        text.push_number(self.day.into(), 2);
+        text.push(b'T');
+        text.push_number(self.hour.into(), 2);
+        text.push(b':');
+        text.push_number(self.minute.into(), 2);
+        text.push(b':');
+        text.push_number(self.second.into(), 2);
+        if self.tz_hour != 0 || self.tz_minute != 0 {
+            text.push(
+                if self.tz_before_gmt && (self.tz_hour > 0 || self.tz_minute > 0) {
+                    b'-'
+                } else {
+                    b'+'
+                },
+            );
+            text.push_number(self.tz_hour.into(), 2);
+            text.push(b':');
+            text.push_number(self.tz_minute.into(), 2);
+        } else {
+            text.push(b'Z');
+        }
+        text
+    }
+
     pub fn from_timestamp(timestamp: i64) -> Self {
         // Ported from http://howardhinnant.github.io/date_algorithms.html#civil_from_days
         let (z, seconds) = (
@@ -192,33 +228,51 @@ impl From<&ArchivedUTCDate> for UTCDate {
     }
 }
 
+const DATE_TEXT_CAPACITY: usize = 40;
+const MAX_DIGITS: usize = 5;
+
+struct DateText {
+    bytes: [u8; DATE_TEXT_CAPACITY],
+    len: usize,
+}
+
+impl DateText {
+    fn push(&mut self, byte: u8) {
+        if let Some(slot) = self.bytes.get_mut(self.len) {
+            *slot = byte;
+            self.len += 1;
+        }
+    }
+
+    fn push_number(&mut self, value: u16, width: usize) {
+        let mut digits = [0u8; MAX_DIGITS];
+        let mut rest = value;
+        let mut count = 0;
+        for digit in digits.iter_mut().rev() {
+            *digit = b'0' + (rest % 10) as u8;
+            rest /= 10;
+            count += 1;
+            if rest == 0 {
+                break;
+            }
+        }
+        (count..width).for_each(|_| self.push(b'0'));
+        if let Some((_, significant)) = digits.split_at_checked(MAX_DIGITS - count) {
+            significant.iter().for_each(|&digit| self.push(digit));
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        self.bytes
+            .get(..self.len)
+            .and_then(|bytes| from_utf8(bytes).ok())
+            .unwrap_or_default()
+    }
+}
+
 impl Display for UTCDate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.tz_hour != 0 || self.tz_minute != 0 {
-            write!(
-                f,
-                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
-                self.year,
-                self.month,
-                self.day,
-                self.hour,
-                self.minute,
-                self.second,
-                if self.tz_before_gmt && (self.tz_hour > 0 || self.tz_minute > 0) {
-                    "-"
-                } else {
-                    "+"
-                },
-                self.tz_hour,
-                self.tz_minute,
-            )
-        } else {
-            write!(
-                f,
-                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-                self.year, self.month, self.day, self.hour, self.minute, self.second,
-            )
-        }
+        f.write_str(self.text().as_str())
     }
 }
 
@@ -227,7 +281,7 @@ impl serde::Serialize for UTCDate {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.to_string().as_str())
+        serializer.serialize_str(self.text().as_str())
     }
 }
 
@@ -257,6 +311,61 @@ impl From<u64> for UTCDate {
 mod tests {
     use crate::types::date::UTCDate;
     use std::str::FromStr;
+
+    #[test]
+    fn display_renders_padded_fields() {
+        let date =
+            |year, month, day, hour, minute, second, tz_before_gmt, tz_hour, tz_minute| UTCDate {
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+                tz_before_gmt,
+                tz_hour,
+                tz_minute,
+            };
+        for (value, text) in [
+            (UTCDate::from_timestamp(0), "1970-01-01T00:00:00Z"),
+            (
+                UTCDate::from_timestamp(1_738_598_445),
+                "2025-02-03T16:00:45Z",
+            ),
+            (
+                date(2025, 2, 3, 16, 0, 45, false, 5, 30),
+                "2025-02-03T16:00:45+05:30",
+            ),
+            (
+                date(2025, 2, 3, 16, 0, 45, true, 8, 0),
+                "2025-02-03T16:00:45-08:00",
+            ),
+            (
+                date(2025, 2, 3, 16, 0, 45, true, 0, 0),
+                "2025-02-03T16:00:45Z",
+            ),
+            (
+                date(2025, 2, 3, 16, 0, 45, true, 0, 30),
+                "2025-02-03T16:00:45-00:30",
+            ),
+            (date(7, 1, 1, 0, 0, 0, false, 0, 0), "0007-01-01T00:00:00Z"),
+            (
+                date(12345, 12, 31, 23, 59, 59, false, 0, 0),
+                "12345-12-31T23:59:59Z",
+            ),
+            (
+                date(2024, 100, 9, 1, 2, 3, false, 14, 0),
+                "2024-100-09T01:02:03+14:00",
+            ),
+            (
+                date(65535, 255, 255, 255, 255, 255, true, 255, 255),
+                "65535-255-255T255:255:255-255:255",
+            ),
+        ] {
+            assert_eq!(value.to_string(), text);
+            assert_eq!(format!("{value:>40}"), text);
+        }
+    }
 
     #[test]
     fn parse_jmap_date() {

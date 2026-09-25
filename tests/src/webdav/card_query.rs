@@ -141,6 +141,12 @@ END:VCARD
         )
         .with_href_count(3);
 
+    client
+        .request("REPORT", &default_path, QUERY5)
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([uri_sarah, uri_acme]);
+
     client.delete_default_containers().await;
     test.assert_is_empty().await;
 }
@@ -229,6 +235,26 @@ const QUERY4: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
      <C:limit>
        <C:nresults>2</C:nresults>
      </C:limit>
+   </C:addressbook-query>"#;
+
+const QUERY5: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:addressbook-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:carddav">
+     <D:prop>
+       <D:getetag/>
+     </D:prop>
+     <C:filter test="anyof">
+       <C:prop-filter name="KIND">
+         <C:text-match collation="i;unicode-casemap"
+                       match-type="equals"
+         >org</C:text-match>
+       </C:prop-filter>
+       <C:prop-filter name="GENDER">
+         <C:text-match collation="i;unicode-casemap"
+                       match-type="equals"
+         >f</C:text-match>
+       </C:prop-filter>
+     </C:filter>
    </C:addressbook-query>"#;
 
 const VCARD1: &str = r#"BEGIN:VCARD

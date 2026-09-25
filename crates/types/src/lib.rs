@@ -15,6 +15,7 @@ pub mod keyword;
 pub mod media_type;
 pub mod semver;
 pub mod special_use;
+pub mod text;
 pub mod type_state;
 
 pub type DocumentId = u32;

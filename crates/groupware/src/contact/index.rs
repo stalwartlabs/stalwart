@@ -12,7 +12,7 @@ use crate::{MetaHasher, SizeWriter};
 use ahash::AHashSet;
 use calcard::{
     common::IanaString,
-    vcard::{ArchivedVCardProperty, ArchivedVCardValue, VCardProperty, VCardVersion},
+    vcard::{ArchivedVCardProperty, ArchivedVCardValue, VCardProperty, VCardValue, VCardVersion},
 };
 use common::storage::index::{
     ArchivedSplitObject, IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
@@ -318,7 +318,15 @@ impl ContactCardContent {
                         | VCardProperty::Tel
                 )
             })
-            .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
+            .flat_map(|e| e.values.iter())
+            .flat_map(|v| {
+                let (text, items) = match v {
+                    VCardValue::Component(items) => (None, items.as_slice()),
+                    value => (value.as_text(), Default::default()),
+                };
+                text.into_iter()
+                    .chain(items.iter().map(|item| item.as_str()))
+            })
             .map(|v| xxh3::xxh3_64(v.as_bytes()))
     }
 
@@ -364,7 +372,15 @@ impl ArchivedContactCardContent {
                         | ArchivedVCardProperty::Tel
                 )
             })
-            .flat_map(|e| e.values.iter().filter_map(|v| v.as_text()))
+            .flat_map(|e| e.values.iter())
+            .flat_map(|v| {
+                let (text, items) = match v {
+                    ArchivedVCardValue::Component(items) => (None, items.as_slice()),
+                    value => (value.as_text(), Default::default()),
+                };
+                text.into_iter()
+                    .chain(items.iter().map(|item| item.as_str()))
+            })
             .map(|v| xxh3::xxh3_64(v.as_bytes()))
     }
 
@@ -469,4 +485,54 @@ impl ArchiveCompression for ContactCard {
 
 impl ArchiveCompression for ContactCardContent {
     const COMPRESSION: Compression = Compression::Zstd(Some(Dictionary::Contact));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use calcard::vcard::VCard;
+    use rkyv::rancor::Error;
+
+    fn card(address: &str) -> ContactCardContent {
+        let vcard = [
+            "BEGIN:VCARD\r\n",
+            "VERSION:4.0\r\n",
+            "KIND:individual\r\n",
+            "UID:urn:uuid:search-hash\r\n",
+            "FN:Jane Doe\r\n",
+            "N:Doe;Jane,Ann;;;\r\n",
+            address,
+            "END:VCARD\r\n",
+        ]
+        .concat();
+        ContactCardContent {
+            card: VCard::parse(vcard).expect("valid vCard"),
+            ..Default::default()
+        }
+    }
+
+    fn search_hashes(content: &ContactCardContent) -> (u64, u64) {
+        let bytes = rkyv::to_bytes::<Error>(content).expect("the card archives");
+        let archived = rkyv::access::<ArchivedContactCardContent, Error>(&bytes)
+            .expect("the archive validates");
+        (
+            content.hashes().fold(0, |acc, hash| acc ^ hash),
+            archived.hashes().fold(0, |acc, hash| acc ^ hash),
+        )
+    }
+
+    #[test]
+    fn archived_search_hash_matches_the_native_hash() {
+        let (native, archived) = search_hashes(&card("ADR:;;1 Main St,Apt 4;Springfield;;;\r\n"));
+
+        assert_eq!(native, archived);
+    }
+
+    #[test]
+    fn search_hash_covers_every_list_item() {
+        let (before, _) = search_hashes(&card("ADR:;;1 Main St,Apt 4;Springfield;;;\r\n"));
+        let (after, _) = search_hashes(&card("ADR:;;1 Main St,Apt 5;Springfield;;;\r\n"));
+
+        assert_ne!(before, after);
+    }
 }

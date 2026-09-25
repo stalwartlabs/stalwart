@@ -14,11 +14,11 @@ use crate::{
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
 use mail_parser::HeaderName;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use types::{blob::BlobId, id::Id, keyword::Keyword};
+use types::{blob::BlobId, id::Id, keyword::Keyword, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct Email;
@@ -117,7 +117,15 @@ pub enum EmailValue {
 
 impl Property for EmailProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        let allow_patch = key.is_none();
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        let patch_depth = key.is_none().then_some(depth);
         match key {
             Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
@@ -127,14 +135,90 @@ impl Property for EmailProperty {
                     MaybeReference::Reference(v) => Some(EmailProperty::IdReference(v)),
                     MaybeReference::ParseError => None,
                 },
-                _ => EmailProperty::parse(value, allow_patch),
+                _ => EmailProperty::parse(value, patch_depth),
             },
-            _ => EmailProperty::parse(value, allow_patch),
+            _ => EmailProperty::parse(value, patch_depth),
         }
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
+        }
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl Element for EmailValue {
+    type Property = EmailProperty;
+
+    fn try_parse<P>(key: &Key<'_, Self::Property>, value: &str) -> Option<Self> {
+        if let Key::Property(prop) = key {
+            match prop.patch_or_prop() {
+                EmailProperty::Id | EmailProperty::ThreadId | EmailProperty::MailboxIds => {
+                    match parse_ref(value) {
+                        MaybeReference::Value(v) => Some(EmailValue::Id(v)),
+                        MaybeReference::Reference(v) => Some(EmailValue::IdReference(v)),
+                        MaybeReference::ParseError => None,
+                    }
+                }
+                EmailProperty::BlobId => match parse_ref(value) {
+                    MaybeReference::Value(v) => Some(EmailValue::BlobId(v)),
+                    MaybeReference::Reference(v) => Some(EmailValue::IdReference(v)),
+                    MaybeReference::ParseError => None,
+                },
+                EmailProperty::Header(HeaderProperty {
+                    form: HeaderForm::Date,
+                    ..
+                })
+                | EmailProperty::ReceivedAt
+                | EmailProperty::SentAt => UTCDate::from_str(value).ok().map(EmailValue::Date),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
+            EmailValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl EmailValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            EmailValue::Id(id) => Text::Id(*id),
+            EmailValue::Date(utcdate) => Text::Display(utcdate),
+            EmailValue::BlobId(blob_id) => Text::Display(blob_id),
+            EmailValue::IdReference(r) => Text::Reference(r),
+        }
+    }
+}
+
+impl EmailProperty {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
             EmailProperty::Attachments => "attachments",
             EmailProperty::Bcc => "bcc",
             EmailProperty::BlobId => "blobId",
@@ -177,59 +261,26 @@ impl Property for EmailProperty {
             EmailProperty::IsTruncated => "isTruncated",
             EmailProperty::Metadata => "metadata",
             EmailProperty::PrivateMetadata => "privateMetadata",
-            EmailProperty::Header(header) => return header.to_string().into(),
-            EmailProperty::Keyword(keyword) => return keyword.to_string().into(),
-            EmailProperty::IdValue(id) => return id.to_string().into(),
-            EmailProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
-            EmailProperty::IdReference(r) => return format!("#{r}").into(),
-        }
-        .into()
-    }
-}
-
-impl Element for EmailValue {
-    type Property = EmailProperty;
-
-    fn try_parse<P>(key: &Key<'_, Self::Property>, value: &str) -> Option<Self> {
-        if let Key::Property(prop) = key {
-            match prop.patch_or_prop() {
-                EmailProperty::Id | EmailProperty::ThreadId | EmailProperty::MailboxIds => {
-                    match parse_ref(value) {
-                        MaybeReference::Value(v) => Some(EmailValue::Id(v)),
-                        MaybeReference::Reference(v) => Some(EmailValue::IdReference(v)),
-                        MaybeReference::ParseError => None,
-                    }
-                }
-                EmailProperty::BlobId => match parse_ref(value) {
-                    MaybeReference::Value(v) => Some(EmailValue::BlobId(v)),
-                    MaybeReference::Reference(v) => Some(EmailValue::IdReference(v)),
-                    MaybeReference::ParseError => None,
-                },
-                EmailProperty::Header(HeaderProperty {
-                    form: HeaderForm::Date,
-                    ..
-                })
-                | EmailProperty::ReceivedAt
-                | EmailProperty::SentAt => UTCDate::from_str(value).ok().map(EmailValue::Date),
-                _ => None,
-            }
-        } else {
-            None
-        }
+            EmailProperty::Header(header) => return Text::Display(header),
+            EmailProperty::Keyword(keyword) => return Text::Str(keyword.as_str()),
+            EmailProperty::IdValue(id) => return Text::Id(*id),
+            EmailProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+            EmailProperty::IdReference(r) => return Text::Reference(r),
+        })
     }
 
-    fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            EmailValue::Id(id) => id.to_string().into(),
-            EmailValue::Date(utcdate) => utcdate.to_string().into(),
-            EmailValue::BlobId(blob_id) => blob_id.to_string().into(),
-            EmailValue::IdReference(r) => format!("#{r}").into(),
-        }
+    fn has_dynamic_text(&self) -> bool {
+        matches!(
+            self,
+            EmailProperty::Pointer(_)
+                | EmailProperty::IdValue(_)
+                | EmailProperty::Header(_)
+                | EmailProperty::Keyword(_)
+                | EmailProperty::IdReference(_)
+        )
     }
-}
 
-impl EmailProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
                 "id" => Some(EmailProperty::Id),
                 "blobId" => Some(EmailProperty::BlobId),
@@ -278,10 +329,11 @@ impl EmailProperty {
         .or_else(|| {
             if let Some(header) = value.strip_prefix("header:") {
                 HeaderProperty::parse(header).map(EmailProperty::Header)
-            } else if allow_patch && value.contains('/') {
-                EmailProperty::Pointer(JsonPointer::parse(value)).into()
             } else {
-                None
+                patch_depth
+                    .filter(|_| value.contains('/'))
+                    .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                    .map(EmailProperty::Pointer)
             }
         })
     }
@@ -415,7 +467,7 @@ impl FromStr for EmailProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        EmailProperty::parse(s, false)
+        EmailProperty::parse(s, None)
             .or_else(|| {
                 MetadataRoot::from_selector(s)
                     .map(|_| EmailProperty::Pointer(JsonPointer::parse(s)))

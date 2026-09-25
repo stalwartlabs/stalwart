@@ -473,7 +473,7 @@ mod tests {
             .flat_map(|component| component.entries.iter_mut())
             .filter(|entry| entry.name == ICalendarProperty::Organizer)
         {
-            entry.values = vec![ICalendarValue::Text("mailto:a@example.org".to_string())];
+            entry.values = [ICalendarValue::Text("mailto:a@example.org".to_string())].into();
         }
         assert!(ComparisonScope::SharedData.component_eq(&a, 0, &b, 0));
     }

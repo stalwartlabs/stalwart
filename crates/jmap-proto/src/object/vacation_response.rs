@@ -9,8 +9,9 @@ use crate::{
     types::date::UTCDate,
 };
 use jmap_tools::{Element, Key, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::id::Id;
+use types::{id::Id, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct VacationResponse;
@@ -49,6 +50,10 @@ impl Property for VacationResponseProperty {
         }
         .into()
     }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl Element for VacationResponseValue {
@@ -73,9 +78,22 @@ impl Element for VacationResponseValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            VacationResponseValue::Id(id) => id.to_string().into(),
-            VacationResponseValue::Date(utcdate) => utcdate.to_string().into(),
+            VacationResponseValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl VacationResponseValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            VacationResponseValue::Id(id) => Text::Id(*id),
+            VacationResponseValue::Date(utcdate) => Text::Display(utcdate),
         }
     }
 }

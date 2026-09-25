@@ -439,7 +439,7 @@ impl<'x> SeriesPlan<'x> {
                     Cow::Owned(ICalendarEntry {
                         name: ICalendarProperty::Rdate,
                         params: entry.params.clone(),
-                        values,
+                        values: values.into(),
                     })
                 })
             }
@@ -472,9 +472,11 @@ impl InstanceStart for ICalendarValue {
     fn instance_start(&self) -> Option<&PartialDateTime> {
         match self {
             ICalendarValue::PartialDateTime(date) => Some(date),
-            ICalendarValue::Period(
-                ICalendarPeriod::Range { start, .. } | ICalendarPeriod::Duration { start, .. },
-            ) => Some(start),
+            ICalendarValue::Period(period) => match period.as_ref() {
+                ICalendarPeriod::Range { start, .. } | ICalendarPeriod::Duration { start, .. } => {
+                    Some(start)
+                }
+            },
             _ => None,
         }
     }

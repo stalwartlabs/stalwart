@@ -511,7 +511,7 @@ fn normalize_ical(mut ical: ICalendar, map: &mut AHashMap<PartialDateTime, usize
                         index
                     }
                 };
-                entry.values = vec![ICalendarValue::Integer(index as i64)];
+                entry.values = vec![ICalendarValue::Integer(index as i64)].into();
             }
         }
         comp.entries.sort_unstable();

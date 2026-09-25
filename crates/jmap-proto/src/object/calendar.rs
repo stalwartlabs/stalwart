@@ -18,9 +18,10 @@ use calcard::{
     icalendar::ICalendarDuration,
     jscalendar::{JSCalendarAlertAction, JSCalendarRelativeTo, JSCalendarType},
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use types::{acl::Acl, id::Id};
+use types::{acl::Acl, id::Id, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct Calendar;
@@ -93,48 +94,45 @@ pub enum IncludeInAvailability {
 
 impl Property for CalendarProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        let allow_patch = key.is_none();
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        let patch_depth = key.is_none().then_some(depth);
         match key {
             Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 CalendarProperty::ShareWith => {
                     Id::from_str(value).ok().map(CalendarProperty::IdValue)
                 }
-                _ => CalendarProperty::parse(value, allow_patch),
+                _ => CalendarProperty::parse(value, patch_depth),
             },
-            _ => CalendarProperty::parse(value, allow_patch),
+            _ => CalendarProperty::parse(value, patch_depth),
         }
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            CalendarProperty::Id => "id",
-            CalendarProperty::Name => "name",
-            CalendarProperty::Description => "description",
-            CalendarProperty::Color => "color",
-            CalendarProperty::SortOrder => "sortOrder",
-            CalendarProperty::IsSubscribed => "isSubscribed",
-            CalendarProperty::IsVisible => "isVisible",
-            CalendarProperty::IsDefault => "isDefault",
-            CalendarProperty::IncludeInAvailability => "includeInAvailability",
-            CalendarProperty::DefaultAlertsWithTime => "defaultAlertsWithTime",
-            CalendarProperty::DefaultAlertsWithoutTime => "defaultAlertsWithoutTime",
-            CalendarProperty::TimeZone => "timeZone",
-            CalendarProperty::ShareWith => "shareWith",
-            CalendarProperty::MyRights => "myRights",
-            CalendarProperty::Metadata => "metadata",
-            CalendarProperty::PrivateMetadata => "privateMetadata",
-            CalendarProperty::When => "when",
-            CalendarProperty::Trigger => "trigger",
-            CalendarProperty::Offset => "offset",
-            CalendarProperty::RelativeTo => "relativeTo",
-            CalendarProperty::Action => "action",
-            CalendarProperty::Type => "@type",
-            CalendarProperty::Rights(calendar_right) => calendar_right.as_str(),
-            CalendarProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
-            CalendarProperty::IdValue(id) => return id.to_string().into(),
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -217,10 +215,56 @@ impl Element for CalendarValue {
             CalendarValue::Timezone(tz) => tz.name().unwrap_or_default(),
         }
     }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            CalendarValue::Id(id) => serializer.serialize_str(id.text().as_str()),
+            CalendarValue::Date(date) => date.serialize(serializer),
+            CalendarValue::Duration(duration) => serializer.collect_str(duration),
+            value => serializer.serialize_str(&value.to_cow()),
+        }
+    }
 }
 
 impl CalendarProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            CalendarProperty::Id => "id",
+            CalendarProperty::Name => "name",
+            CalendarProperty::Description => "description",
+            CalendarProperty::Color => "color",
+            CalendarProperty::SortOrder => "sortOrder",
+            CalendarProperty::IsSubscribed => "isSubscribed",
+            CalendarProperty::IsVisible => "isVisible",
+            CalendarProperty::IsDefault => "isDefault",
+            CalendarProperty::IncludeInAvailability => "includeInAvailability",
+            CalendarProperty::DefaultAlertsWithTime => "defaultAlertsWithTime",
+            CalendarProperty::DefaultAlertsWithoutTime => "defaultAlertsWithoutTime",
+            CalendarProperty::TimeZone => "timeZone",
+            CalendarProperty::ShareWith => "shareWith",
+            CalendarProperty::MyRights => "myRights",
+            CalendarProperty::Metadata => "metadata",
+            CalendarProperty::PrivateMetadata => "privateMetadata",
+            CalendarProperty::When => "when",
+            CalendarProperty::Trigger => "trigger",
+            CalendarProperty::Offset => "offset",
+            CalendarProperty::RelativeTo => "relativeTo",
+            CalendarProperty::Action => "action",
+            CalendarProperty::Type => "@type",
+            CalendarProperty::Rights(calendar_right) => calendar_right.as_str(),
+            CalendarProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+            CalendarProperty::IdValue(id) => return Text::Id(*id),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(
+            self,
+            CalendarProperty::Pointer(_) | CalendarProperty::IdValue(_)
+        )
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(CalendarProperty::Id),
             b"name" => Some(CalendarProperty::Name),
@@ -255,11 +299,10 @@ impl CalendarProperty {
             _ => None,
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                CalendarProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(CalendarProperty::Pointer)
         })
     }
 
@@ -323,7 +366,7 @@ impl FromStr for CalendarProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        CalendarProperty::parse(s, false)
+        CalendarProperty::parse(s, None)
             .or_else(|| {
                 MetadataRoot::from_selector(s)
                     .map(|_| CalendarProperty::Pointer(JsonPointer::parse(s)))

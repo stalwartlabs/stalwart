@@ -5,8 +5,9 @@
  */
 
 use jmap_tools::{Element, Key, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use types::id::Id;
+use types::{id::Id, text::Text};
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
@@ -51,19 +52,23 @@ impl Property for PrincipalProperty {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            PrincipalProperty::Capabilities => "capabilities",
-            PrincipalProperty::Description => "description",
-            PrincipalProperty::Email => "email",
-            PrincipalProperty::Id => "id",
-            PrincipalProperty::Name => "name",
-            PrincipalProperty::Timezone => "timeZone",
-            PrincipalProperty::Type => "type",
-            PrincipalProperty::Accounts => "accounts",
-            PrincipalProperty::Capability(cap) => cap.as_str(),
-            PrincipalProperty::IdValue(id) => return id.to_string().into(),
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -83,14 +88,43 @@ impl Element for PrincipalValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl PrincipalValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            PrincipalValue::Id(id) => id.to_string().into(),
-            PrincipalValue::Type(t) => t.as_str().into(),
+            PrincipalValue::Id(id) => Text::Id(*id),
+            PrincipalValue::Type(t) => Text::Static(t.as_str()),
         }
     }
 }
 
 impl PrincipalProperty {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            PrincipalProperty::Capabilities => "capabilities",
+            PrincipalProperty::Description => "description",
+            PrincipalProperty::Email => "email",
+            PrincipalProperty::Id => "id",
+            PrincipalProperty::Name => "name",
+            PrincipalProperty::Timezone => "timeZone",
+            PrincipalProperty::Type => "type",
+            PrincipalProperty::Accounts => "accounts",
+            PrincipalProperty::Capability(cap) => cap.as_str(),
+            PrincipalProperty::IdValue(id) => return Text::Id(*id),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(self, PrincipalProperty::IdValue(_))
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(PrincipalProperty::Id),

@@ -13,9 +13,10 @@ use crate::{
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use types::{acl::Acl, blob::BlobId, id::Id};
+use types::{acl::Acl, blob::BlobId, id::Id, text::Text};
 use utils::glob::GlobPattern;
 
 #[derive(Debug, Clone, Default)]
@@ -88,45 +89,45 @@ pub enum FileNodeValue {
 
 impl Property for FileNodeProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        let allow_patch = key.is_none();
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        let patch_depth = key.is_none().then_some(depth);
         match key {
             Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 FileNodeProperty::ShareWith => {
                     Id::from_str(value).ok().map(FileNodeProperty::IdValue)
                 }
-                _ => FileNodeProperty::parse(value, allow_patch),
+                _ => FileNodeProperty::parse(value, patch_depth),
             },
-            _ => FileNodeProperty::parse(value, allow_patch),
+            _ => FileNodeProperty::parse(value, patch_depth),
         }
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            FileNodeProperty::Id => "id",
-            FileNodeProperty::ParentId => "parentId",
-            FileNodeProperty::BlobId => "blobId",
-            FileNodeProperty::Size => "size",
-            FileNodeProperty::Name => "name",
-            FileNodeProperty::Type => "type",
-            FileNodeProperty::NodeType => "nodeType",
-            FileNodeProperty::Target => "target",
-            FileNodeProperty::Created => "created",
-            FileNodeProperty::Modified => "modified",
-            FileNodeProperty::Accessed => "accessed",
-            FileNodeProperty::Changed => "changed",
-            FileNodeProperty::Executable => "executable",
-            FileNodeProperty::Role => "role",
-            FileNodeProperty::MyRights => "myRights",
-            FileNodeProperty::ShareWith => "shareWith",
-            FileNodeProperty::IsSubscribed => "isSubscribed",
-            FileNodeProperty::Metadata => "metadata",
-            FileNodeProperty::PrivateMetadata => "privateMetadata",
-            FileNodeProperty::Rights(file_right) => file_right.as_str(),
-            FileNodeProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
-            FileNodeProperty::IdValue(id) => return id.to_string().into(),
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -251,17 +252,64 @@ impl Element for FileNodeValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            FileNodeValue::Id(id) => id.to_string().into(),
-            FileNodeValue::Date(utcdate) => utcdate.to_string().into(),
-            FileNodeValue::BlobId(blob_id) => blob_id.to_string().into(),
-            FileNodeValue::IdReference(r) => format!("#{r}").into(),
+            FileNodeValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl FileNodeValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            FileNodeValue::Id(id) => Text::Id(*id),
+            FileNodeValue::Date(utcdate) => Text::Display(utcdate),
+            FileNodeValue::BlobId(blob_id) => Text::Display(blob_id),
+            FileNodeValue::IdReference(r) => Text::Reference(r),
         }
     }
 }
 
 impl FileNodeProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            FileNodeProperty::Id => "id",
+            FileNodeProperty::ParentId => "parentId",
+            FileNodeProperty::BlobId => "blobId",
+            FileNodeProperty::Size => "size",
+            FileNodeProperty::Name => "name",
+            FileNodeProperty::Type => "type",
+            FileNodeProperty::NodeType => "nodeType",
+            FileNodeProperty::Target => "target",
+            FileNodeProperty::Created => "created",
+            FileNodeProperty::Modified => "modified",
+            FileNodeProperty::Accessed => "accessed",
+            FileNodeProperty::Changed => "changed",
+            FileNodeProperty::Executable => "executable",
+            FileNodeProperty::Role => "role",
+            FileNodeProperty::MyRights => "myRights",
+            FileNodeProperty::ShareWith => "shareWith",
+            FileNodeProperty::IsSubscribed => "isSubscribed",
+            FileNodeProperty::Metadata => "metadata",
+            FileNodeProperty::PrivateMetadata => "privateMetadata",
+            FileNodeProperty::Rights(file_right) => file_right.as_str(),
+            FileNodeProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+            FileNodeProperty::IdValue(id) => return Text::Id(*id),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(
+            self,
+            FileNodeProperty::Pointer(_) | FileNodeProperty::IdValue(_)
+        )
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(FileNodeProperty::Id),
             b"parentId" => Some(FileNodeProperty::ParentId),
@@ -291,11 +339,10 @@ impl FileNodeProperty {
             _ => None,
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                FileNodeProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(FileNodeProperty::Pointer)
         })
     }
 
@@ -432,7 +479,7 @@ impl FromStr for FileNodeProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        FileNodeProperty::parse(s, false)
+        FileNodeProperty::parse(s, None)
             .or_else(|| {
                 MetadataRoot::from_selector(s)
                     .map(|_| FileNodeProperty::Pointer(JsonPointer::parse(s)))

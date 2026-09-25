@@ -102,8 +102,18 @@ impl WebSocketHandler for Server {
                                                     &session,
                                                 )
                                                 .await;
-                                            WebSocketResponse::from_response(response, request.id)
-                                            .to_json()
+                                            match WebSocketResponse::from_response(response, request.id).to_json() {
+                                                Ok(response) => response,
+                                                Err(err) => {
+                                                    trc::event!(
+                                                        Jmap(JmapEvent::WebsocketError),
+                                                        Details = "Failed to serialize response",
+                                                        SpanId = session.session_id,
+                                                        Reason = err.to_compact_string()
+                                                    );
+                                                    WebSocketRequestError::from(RequestError::internal_server_error()).to_json()
+                                                }
+                                            }
                                         }
                                         Ok(WebSocketMessage::PushEnable(push_enable)) => {
                                             change_types = if !push_enable.data_types.is_empty() {

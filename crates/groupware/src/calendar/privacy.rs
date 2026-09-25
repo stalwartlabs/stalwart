@@ -156,7 +156,7 @@ impl ICalendarPrivacy for ICalendar {
                 component.entries.push(ICalendarEntry {
                     name: ICalendarProperty::Class,
                     params: vec![],
-                    values: vec![ICalendarValue::Classification(privacy.classification())],
+                    values: [ICalendarValue::Classification(privacy.classification())].into(),
                 });
             }
         }

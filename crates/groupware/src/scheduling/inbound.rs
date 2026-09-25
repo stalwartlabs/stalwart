@@ -254,9 +254,10 @@ pub fn itip_process_message(
                                     .chain([ICalendarEntry {
                                         name: ICalendarProperty::Status,
                                         params: vec![],
-                                        values: vec![ICalendarValue::Status(
+                                        values: [ICalendarValue::Status(
                                             ICalendarStatus::Cancelled,
-                                        )],
+                                        )]
+                                        .into(),
                                     }])
                                     .collect(),
                             });
@@ -283,9 +284,10 @@ pub fn itip_process_message(
                                     .chain([ICalendarEntry {
                                         name: ICalendarProperty::Status,
                                         params: vec![],
-                                        values: vec![ICalendarValue::Status(
+                                        values: [ICalendarValue::Status(
                                             ICalendarStatus::Cancelled,
-                                        )],
+                                        )]
+                                        .into(),
                                     }])
                                     .collect(),
                                 component_ids: vec![],
@@ -326,9 +328,10 @@ pub fn itip_process_message(
                                     .chain([ICalendarEntry {
                                         name: ICalendarProperty::Status,
                                         params: vec![],
-                                        values: vec![ICalendarValue::Status(
+                                        values: [ICalendarValue::Status(
                                             ICalendarStatus::Cancelled,
-                                        )],
+                                        )]
+                                        .into(),
                                     }])
                                     .collect(),
                             });

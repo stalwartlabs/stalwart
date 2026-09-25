@@ -423,7 +423,7 @@ impl CalendarEventNotificationHandler for Server {
                     free_busy.components[0].entries.push(ICalendarEntry {
                         name: ICalendarProperty::Method,
                         params: vec![],
-                        values: vec![ICalendarValue::Method(ICalendarMethod::Reply)],
+                        values: [ICalendarValue::Method(ICalendarMethod::Reply)].into(),
                     });
 
                     // Add properties

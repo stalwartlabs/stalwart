@@ -46,7 +46,7 @@ impl<T: Property> Serialize for PropertyWrapper<T> {
     where
         S: Serializer,
     {
-        serializer.serialize_str(self.0.to_cow().as_ref())
+        self.0.serialize_text(serializer)
     }
 }
 

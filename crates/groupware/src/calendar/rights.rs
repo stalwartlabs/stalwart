@@ -629,11 +629,11 @@ impl RecurrenceSet {
                     .values
                     .iter()
                     .filter_map(|value| match value {
-                        ICalendarValue::PartialDateTime(date_time) => Some(date_time.as_ref()),
-                        ICalendarValue::Period(
+                        ICalendarValue::PartialDateTime(date_time) => Some(date_time),
+                        ICalendarValue::Period(period) => match period.as_ref() {
                             ICalendarPeriod::Range { start, .. }
-                            | ICalendarPeriod::Duration { start, .. },
-                        ) => Some(start),
+                            | ICalendarPeriod::Duration { start, .. } => Some(start),
+                        },
                         _ => None,
                     })
                     .filter_map(|date_time| date_time.to_date_time_with_tz(tz))

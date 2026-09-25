@@ -1749,7 +1749,7 @@ fn stamp_updated(ical: &mut ICalendar, timestamp: i64) {
             .iter_mut()
             .find(|entry| entry.name == ICalendarProperty::Dtstamp)
         {
-            entry.values = vec![ICalendarValue::PartialDateTime(Box::new(dtstamp.clone()))];
+            entry.values = [ICalendarValue::PartialDateTime(dtstamp.clone())].into();
         } else {
             component.add_dtstamp(dtstamp.clone());
         }
@@ -1763,9 +1763,7 @@ fn stamp_created(ical: &mut ICalendar, timestamp: i64) {
         {
             component.add_property(
                 ICalendarProperty::Created,
-                ICalendarValue::PartialDateTime(Box::new(PartialDateTime::from_utc_timestamp(
-                    timestamp,
-                ))),
+                ICalendarValue::PartialDateTime(PartialDateTime::from_utc_timestamp(timestamp)),
             );
         }
     }
@@ -1786,9 +1784,10 @@ fn clamp_created(ical: &mut ICalendar, timestamp: i64) {
             .and_then(|dt| dt.to_timestamp())
             .is_none_or(|created| created > timestamp)
         {
-            entry.values = vec![ICalendarValue::PartialDateTime(Box::new(
+            entry.values = [ICalendarValue::PartialDateTime(
                 PartialDateTime::from_utc_timestamp(timestamp),
-            ))];
+            )]
+            .into();
         }
     }
 }

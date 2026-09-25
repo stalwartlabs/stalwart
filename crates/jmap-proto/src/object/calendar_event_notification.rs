@@ -13,7 +13,7 @@ use calcard::jscalendar::JSCalendar;
 use jmap_tools::{Element, Key, Property};
 use serde::{Serialize, Serializer};
 use std::{borrow::Cow, fmt::Display, str::FromStr};
-use types::{blob::BlobId, id::Id};
+use types::{blob::BlobId, id::Id, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct CalendarEventNotification;
@@ -160,6 +160,10 @@ impl Property for CalendarEventNotificationProperty {
         }
         .into()
     }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl Element for CalendarEventNotificationValue {
@@ -187,10 +191,23 @@ impl Element for CalendarEventNotificationValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            CalendarEventNotificationValue::Id(id) => id.to_string().into(),
-            CalendarEventNotificationValue::Date(date) => date.to_string().into(),
-            CalendarEventNotificationValue::Type(t) => t.as_str().into(),
+            CalendarEventNotificationValue::Date(date) => date.serialize(serializer),
+            value => value.text().serialize(serializer),
+        }
+    }
+}
+
+impl CalendarEventNotificationValue {
+    pub fn text(&self) -> Text<'_> {
+        match self {
+            CalendarEventNotificationValue::Id(id) => Text::Id(*id),
+            CalendarEventNotificationValue::Date(date) => Text::Display(date),
+            CalendarEventNotificationValue::Type(t) => Text::Static(t.as_str()),
         }
     }
 }

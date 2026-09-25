@@ -149,7 +149,7 @@ impl ItipIngest for Server {
                         comp.entries.push(ICalendarEntry {
                             name: ICalendarProperty::Organizer,
                             params: vec![],
-                            values: vec![ICalendarValue::Text(format!("mailto:{recipient}"))],
+                            values: [ICalendarValue::Text(format!("mailto:{recipient}"))].into(),
                         });
                     }
                 }
@@ -1099,7 +1099,8 @@ fn build_rsvp_reply(
             values: vec![
                 ICalendarValue::Text("2.0".to_string()),
                 ICalendarValue::Text("Success".to_string()),
-            ],
+            ]
+            .into(),
         });
 
         let comp_id = message.components.len() as u32;

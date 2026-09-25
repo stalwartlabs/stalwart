@@ -5,9 +5,10 @@
  */
 
 use crate::object::{AnyId, JmapObject, JmapObjectId};
-use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property};
+use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
+use serde::{Serialize, Serializer};
 use std::{borrow::Cow, str::FromStr};
-use types::id::Id;
+use types::{id::Id, text::Text};
 
 #[derive(Debug, Clone, Default)]
 pub struct Identity;
@@ -34,22 +35,35 @@ pub enum IdentityValue {
 
 impl Property for IdentityProperty {
     fn try_parse(key: Option<&Key<'_, Self>>, value: &str) -> Option<Self> {
-        IdentityProperty::parse(value, key.is_none())
+        Self::try_parse_nested(key, value, PointerDepth::default())
+    }
+
+    fn try_parse_nested(
+        key: Option<&Key<'_, Self>>,
+        value: &str,
+        depth: PointerDepth,
+    ) -> Option<Self> {
+        IdentityProperty::parse(value, key.is_none().then_some(depth))
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
-        match self {
-            IdentityProperty::Bcc => "bcc",
-            IdentityProperty::Email => "email",
-            IdentityProperty::HtmlSignature => "htmlSignature",
-            IdentityProperty::Id => "id",
-            IdentityProperty::MayDelete => "mayDelete",
-            IdentityProperty::Name => "name",
-            IdentityProperty::ReplyTo => "replyTo",
-            IdentityProperty::TextSignature => "textSignature",
-            IdentityProperty::Pointer(json_pointer) => return json_pointer.to_string().into(),
+        self.text().to_cow()
+    }
+
+    fn key_eq(&self, other: &Self) -> bool {
+        if self.has_dynamic_text() || other.has_dynamic_text() {
+            self.text().eq_text(other.text())
+        } else {
+            self == other
         }
-        .into()
+    }
+
+    fn key_eq_str(&self, other: &str) -> bool {
+        self.text().eq_str(other)
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
     }
 }
 
@@ -68,14 +82,42 @@ impl Element for IdentityValue {
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
+        self.text().to_cow()
+    }
+
+    fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(serializer)
+    }
+}
+
+impl IdentityValue {
+    pub fn text(&self) -> Text<'_> {
         match self {
-            IdentityValue::Id(id) => id.to_string().into(),
+            IdentityValue::Id(id) => Text::Id(*id),
         }
     }
 }
 
 impl IdentityProperty {
-    fn parse(value: &str, allow_patch: bool) -> Option<Self> {
+    pub fn text(&self) -> Text<'_> {
+        Text::Static(match self {
+            IdentityProperty::Bcc => "bcc",
+            IdentityProperty::Email => "email",
+            IdentityProperty::HtmlSignature => "htmlSignature",
+            IdentityProperty::Id => "id",
+            IdentityProperty::MayDelete => "mayDelete",
+            IdentityProperty::Name => "name",
+            IdentityProperty::ReplyTo => "replyTo",
+            IdentityProperty::TextSignature => "textSignature",
+            IdentityProperty::Pointer(json_pointer) => return Text::Display(json_pointer),
+        })
+    }
+
+    fn has_dynamic_text(&self) -> bool {
+        matches!(self, IdentityProperty::Pointer(_))
+    }
+
+    fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
         hashify::fnc_map!(value.as_bytes(),
             b"id" => Some(IdentityProperty::Id),
             b"name" => Some(IdentityProperty::Name),
@@ -88,11 +130,10 @@ impl IdentityProperty {
             _ => None,
         )
         .or_else(|| {
-            if allow_patch && value.contains('/') {
-                IdentityProperty::Pointer(JsonPointer::parse(value)).into()
-            } else {
-                None
-            }
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(IdentityProperty::Pointer)
         })
     }
 
@@ -111,7 +152,7 @@ impl FromStr for IdentityProperty {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        IdentityProperty::parse(s, false).ok_or(())
+        IdentityProperty::parse(s, None).ok_or(())
     }
 }
 

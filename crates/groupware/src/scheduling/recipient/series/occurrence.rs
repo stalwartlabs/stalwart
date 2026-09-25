@@ -77,9 +77,7 @@ impl Series<'_> {
                 _ => continue,
             };
             let form = self.date_form(entry)?;
-            entry.values = vec![ICalendarValue::PartialDateTime(Box::new(
-                form.value(instant),
-            ))];
+            entry.values = [ICalendarValue::PartialDateTime(form.value(instant))].into();
         }
 
         let period_end = self.period_end(&component.component_type, original_start);
@@ -98,9 +96,7 @@ impl Series<'_> {
             component.entries.push(ICalendarEntry {
                 name: ICalendarProperty::Dtstart,
                 params: itip_date_params(series_start),
-                values: vec![ICalendarValue::PartialDateTime(Box::new(
-                    series_form.value(start),
-                ))],
+                values: [ICalendarValue::PartialDateTime(series_form.value(start))].into(),
             });
         }
         let end = match period_end {
@@ -121,9 +117,7 @@ impl Series<'_> {
                         .cloned(),
                 )
                 .collect(),
-            values: vec![ICalendarValue::PartialDateTime(Box::new(
-                series_form.value(original),
-            ))],
+            values: [ICalendarValue::PartialDateTime(series_form.value(original))].into(),
         });
 
         Some(self.with_subcomponents(component))
@@ -158,10 +152,11 @@ impl Series<'_> {
                 Some(ICalendarEntry {
                     name: name.clone(),
                     params: itip_date_params(entry),
-                    values: vec![ICalendarValue::PartialDateTime(Box::new(
+                    values: [ICalendarValue::PartialDateTime(
                         self.date_form(entry)?
                             .value(self.end(entry, series_start, start)?),
-                    ))],
+                    )]
+                    .into(),
                 })
             })
     }
@@ -178,33 +173,36 @@ impl Series<'_> {
             .find_map(|entry| {
                 let tz_id = entry.tz_id();
                 entry.values.iter().find_map(|value| match value {
-                    ICalendarValue::Period(ICalendarPeriod::Range { start, end })
-                        if self.timestamp(start, tz_id) == Some(original_start) =>
-                    {
-                        Some(ICalendarEntry {
-                            name: if component_type == &ICalendarComponentType::VTodo {
-                                ICalendarProperty::Due
-                            } else {
-                                ICalendarProperty::Dtend
-                            },
-                            params: entry
-                                .params
-                                .iter()
-                                .filter(|param| param.name == ICalendarParameterName::Tzid)
-                                .cloned()
-                                .collect(),
-                            values: vec![ICalendarValue::PartialDateTime(Box::new(end.clone()))],
-                        })
-                    }
-                    ICalendarValue::Period(ICalendarPeriod::Duration { start, duration })
-                        if self.timestamp(start, tz_id) == Some(original_start) =>
-                    {
-                        Some(ICalendarEntry {
-                            name: ICalendarProperty::Duration,
-                            params: vec![],
-                            values: vec![ICalendarValue::Duration(duration.clone())],
-                        })
-                    }
+                    ICalendarValue::Period(period) => match period.as_ref() {
+                        ICalendarPeriod::Range { start, end }
+                            if self.timestamp(start, tz_id) == Some(original_start) =>
+                        {
+                            Some(ICalendarEntry {
+                                name: if component_type == &ICalendarComponentType::VTodo {
+                                    ICalendarProperty::Due
+                                } else {
+                                    ICalendarProperty::Dtend
+                                },
+                                params: entry
+                                    .params
+                                    .iter()
+                                    .filter(|param| param.name == ICalendarParameterName::Tzid)
+                                    .cloned()
+                                    .collect(),
+                                values: [ICalendarValue::PartialDateTime(end.clone())].into(),
+                            })
+                        }
+                        ICalendarPeriod::Duration { start, duration }
+                            if self.timestamp(start, tz_id) == Some(original_start) =>
+                        {
+                            Some(ICalendarEntry {
+                                name: ICalendarProperty::Duration,
+                                params: vec![],
+                                values: [ICalendarValue::Duration(duration.clone())].into(),
+                            })
+                        }
+                        _ => None,
+                    },
                     _ => None,
                 })
             })

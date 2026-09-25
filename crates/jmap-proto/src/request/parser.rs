@@ -17,12 +17,19 @@ use serde::{
     Deserialize, Deserializer,
     de::{self, SeqAccess, Visitor},
 };
+use simdutf8::basic::from_utf8;
 use std::fmt::{self, Display};
 
 impl<'x> Request<'x> {
     pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
         if json.len() <= max_size {
-            match serde_json::from_slice::<Request>(json) {
+            let request = match from_utf8(json) {
+                Ok(text) => {
+                    serde_json::from_str::<Request>(text).map_err(|err| err.to_compact_string())
+                }
+                Err(err) => Err(err.to_compact_string()),
+            };
+            match request {
                 Ok(request) => {
                     if request.method_calls.len() <= max_calls {
                         Ok(request)
@@ -766,7 +773,7 @@ impl<'de> Deserialize<'de> for Call<RequestMethod<'de>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::request::Request;
+    use crate::request::{Request, websocket::WebSocketMessage};
 
     const TEST: &str = r#"
     {
@@ -934,6 +941,148 @@ mod tests {
         println!("{:#?}", Request::parse(TEST.as_bytes(), 10, 10240));
         println!("{:#?}", Request::parse(TEST1.as_bytes(), 10, 10240));
         println!("{:#?}", Request::parse(TEST2.as_bytes(), 10, 10240));
+    }
+
+    const VALID: &[&str] = &[
+        r#"{"using":["urn:ietf:params:jmap:core"],"methodCalls":[["Core/echo",{"text":"caf\u00e9 \ud83c\udf89 \"\\\/","raw":"Café 🎉","big":18446744073709551616,"negative":-0,"float":1.5e-7},"c1"]]}"#,
+        r#"{"using":["urn:ietf:params:jmap:core"],"methodCalls":[["Core/echo",{"lone":"\ud800"},"c1"]]}"#,
+        r#"{"using":["urn:ietf:params:jmap:core"],"methodCalls":[["Core/echo",{"a":1},"c1"]"#,
+        r#"{"using":["urn:ietf:params:jmap:core"],"methodCalls":[]} trailing"#,
+        r#"{"using":["urn:ietf:params:jmap:core"],"methodCalls":[["Email/set",{"accountId":"b","update":{"a":{"keywords/$seen":true,"mailboxIds/c":null}}},"c1"]],"createdIds":{"k1":"b"}}"#,
+    ];
+
+    const ACCEPTED_INVALID_UTF8: &[&[u8]] = &[
+        b"{\"using\":[\"urn:ietf:params:jmap:core\"],\"methodCalls\":[],\"unknown\":\"\xc3\x28\"}",
+        b"{\"using\":[\"urn:ietf:params:jmap:core\"],\"methodCalls\":[[\"Unknown/method\",{\"a\":\"\xe2\x82\"},\"c1\"]]}",
+        b"{\"using\":[\"urn:ietf:params:jmap:mail\"],\"methodCalls\":[[\"Email/get\",{\"accountId\":\"b\",\"unknown\":{\"k\xff\":1}},\"c1\"]]}",
+        b"{\"using\":[\"urn:ietf:params:jmap:core\"],\"methodCalls\":[[\"Core/echo\",{\"a\":\"\xff\"},\"c1\"]]}",
+    ];
+
+    const REJECTED_INVALID_UTF8: &[&[u8]] = &[
+        b"{\"using\":[\"urn:ietf:params:jmap:core\"],\"methodCalls\":[[\"Core/echo\",{},\"c\xc3\"]]}",
+        b"{\"using\":[\"urn:ietf:params:jmap:core\"],\"methodCalls\":[[\"Core/echo\",{\"a\":\"\xff\",\"b\":1},\"c1\"]]}",
+    ];
+
+    fn describe(result: trc::Result<Request<'_>>) -> String {
+        match result {
+            Ok(request) => {
+                let mut created_ids = request
+                    .created_ids
+                    .map(|ids| ids.into_iter().collect::<Vec<_>>());
+                if let Some(ids) = &mut created_ids {
+                    ids.sort_by(|a, b| a.0.cmp(&b.0));
+                }
+                format!(
+                    "Ok({:?} {:?} {:?})",
+                    request.using, request.method_calls, created_ids
+                )
+            }
+            Err(err) => format!("Err({err:?})"),
+        }
+    }
+
+    fn reason(error: &trc::Error) -> Option<&str> {
+        error.value(trc::Key::Reason)?.as_str()
+    }
+
+    fn is_not_request(error: &trc::Error) -> bool {
+        matches!(
+            error.as_ref(),
+            trc::EventType::Jmap(trc::JmapEvent::NotRequest)
+        )
+    }
+
+    #[test]
+    fn valid_utf8_parses_like_from_slice() {
+        for text in [TEST, TEST1, TEST2, TEST_ESCAPED_SOLIDUS]
+            .into_iter()
+            .chain(VALID.iter().copied())
+        {
+            let parsed = Request::parse(text.as_bytes(), 10, 10240);
+            match serde_json::from_slice::<Request>(text.as_bytes()) {
+                Ok(expected) => assert_eq!(describe(parsed), describe(Ok(expected)), "{text}"),
+                Err(expected) => {
+                    let error = parsed.expect_err(text);
+                    assert!(is_not_request(&error), "{text}");
+                    assert_eq!(
+                        reason(&error),
+                        Some(expected.to_string().as_str()),
+                        "{text}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_utf8_is_rejected_before_parsing() {
+        for bytes in ACCEPTED_INVALID_UTF8 {
+            assert!(serde_json::from_slice::<Request>(bytes).is_ok());
+        }
+        for bytes in REJECTED_INVALID_UTF8 {
+            assert!(serde_json::from_slice::<Request>(bytes).is_err());
+        }
+        for bytes in ACCEPTED_INVALID_UTF8.iter().chain(REJECTED_INVALID_UTF8) {
+            let error = Request::parse(bytes, 10, 10240).expect_err("invalid UTF-8");
+            assert!(is_not_request(&error));
+            assert_eq!(reason(&error), Some("invalid utf-8 sequence"));
+        }
+    }
+
+    #[test]
+    fn request_limits() {
+        assert!(matches!(
+            Request::parse(TEST.as_bytes(), 2, 10240)
+                .expect_err("too many calls")
+                .as_ref(),
+            trc::EventType::Limit(trc::LimitEvent::CallsIn)
+        ));
+        assert!(matches!(
+            Request::parse(TEST.as_bytes(), 10, 16)
+                .expect_err("too large")
+                .as_ref(),
+            trc::EventType::Limit(trc::LimitEvent::SizeRequest)
+        ));
+    }
+
+    #[test]
+    fn websocket_messages_validate_utf8_once() {
+        for text in [
+            r#"{"@type":"WebSocketPushEnable","dataTypes":["Email","Mailbox"],"pushState":"s1"}"#,
+            r#"{"@type":"WebSocketPushDisable"}"#,
+            r#"{"@type":"Request","id":"r1","using":["urn:ietf:params:jmap:core"],"methodCalls":[["Core/echo",{"a":"caf\u00e9"},"c1"]]}"#,
+            r#"{"@type":"Request","using":[]}"#,
+            r#"{"@type":"Unknown"}"#,
+        ] {
+            let parsed = WebSocketMessage::parse(text.as_bytes(), 10, 10240);
+            match serde_json::from_slice::<WebSocketMessage>(text.as_bytes()) {
+                Ok(expected) => {
+                    assert_eq!(
+                        format!("{parsed:?}"),
+                        format!("{:?}", Ok::<_, ()>(expected))
+                    )
+                }
+                Err(expected) => assert_eq!(
+                    parsed
+                        .expect_err(text)
+                        .value(trc::Key::Details)
+                        .and_then(|details| details.as_str()),
+                    Some(format!("Invalid WebSocket JMAP request {expected}").as_str()),
+                    "{text}"
+                ),
+            }
+        }
+        let ignored =
+            b"{\"@type\":\"Request\",\"id\":\"r1\",\"using\":[],\"methodCalls\":[],\"x\":\"\xff\"}";
+        assert!(serde_json::from_slice::<WebSocketMessage>(ignored).is_ok());
+        let error = WebSocketMessage::parse(ignored, 10, 10240).expect_err("invalid UTF-8");
+        assert!(is_not_request(&error));
+        assert_eq!(
+            error
+                .value(trc::Key::Details)
+                .and_then(|details| details.as_str()),
+            Some("Invalid WebSocket JMAP request invalid utf-8 sequence")
+        );
     }
 
     #[test]
