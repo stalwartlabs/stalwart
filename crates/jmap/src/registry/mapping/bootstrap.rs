@@ -639,6 +639,7 @@ fn map_dns_server(dns_server: &DnsServerBootstrap) -> Option<registry::schema::s
         DnsServerBootstrap::Ns1(inner) => DnsServer::Ns1(inner.clone()).into(),
         DnsServerBootstrap::OracleCloud(inner) => DnsServer::OracleCloud(inner.clone()).into(),
         DnsServerBootstrap::Plesk(inner) => DnsServer::Plesk(inner.clone()).into(),
+        DnsServerBootstrap::PowerDns(inner) => DnsServer::PowerDns(inner.clone()).into(),
         DnsServerBootstrap::Safedns(inner) => DnsServer::Safedns(inner.clone()).into(),
         DnsServerBootstrap::Scaleway(inner) => DnsServer::Scaleway(inner.clone()).into(),
         DnsServerBootstrap::TencentCloud(inner) => DnsServer::TencentCloud(inner.clone()).into(),

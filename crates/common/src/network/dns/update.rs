@@ -961,6 +961,20 @@ impl DnsUpdater {
                 )
                 .map_err(|err| format!("Failed to build DNS updater: {}", err))?,
             }),
+            DnsServer::PowerDns(server) => Ok(DnsUpdater {
+                polling_interval: server.polling_interval.into_inner(),
+                propagation_timeout: server.propagation_timeout.into_inner(),
+                propagation_delay: server.propagation_delay.map(|d| d.into_inner()),
+                ttl: server.ttl.into_inner(),
+                core,
+                updater: dns_update::DnsUpdater::new_pdns(
+                    server.api_key.secret().await?,
+                    server.endpoint,
+                    server.server_id,
+                    server.timeout.into_inner().into(),
+                )
+                .map_err(|err| format!("Failed to build DNS updater: {}", err))?,
+            }),
             DnsServer::Safedns(server) => Ok(DnsUpdater {
                 polling_interval: server.polling_interval.into_inner(),
                 propagation_timeout: server.propagation_timeout.into_inner(),
