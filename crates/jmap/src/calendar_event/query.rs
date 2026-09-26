@@ -165,11 +165,7 @@ impl CalendarEventQuery for Server {
                         )))
                     }
                     CalendarEventFilter::Uid(value) => {
-                        filters.push(SearchFilter::is_in_set(RoaringBitmap::from_iter(
-                            cache.resources.iter().filter_map(|r| {
-                                (r.uid() == Some(value.as_str())).then_some(r.document_id())
-                            }),
-                        )));
+                        filters.push(SearchFilter::is_in_set(cache.uid_matches(&value)));
                     }
                     CalendarEventFilter::Text(value) => {
                         let (text, language) = Language::detect(value, default_language);

@@ -6,6 +6,7 @@
 
 pub mod copy_move;
 pub mod delete;
+pub mod filter;
 pub mod freebusy;
 pub mod get;
 pub mod mkcol;

@@ -19,7 +19,7 @@ use calcard::common::timezone::Tz;
 use common::{
     ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources,
     NO_ID, PathIndex, ResourceStore, Server, TinyCalendarPreferences, UpdateLock,
-    storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
+    storage::dav::{CONTAINER_FLAG, CachedUid, ResourceChunkBuilder},
 };
 use std::sync::Arc;
 use store::ahash::AHashMap;
@@ -383,7 +383,7 @@ pub(super) fn push_event(
             })
             .collect::<Vec<_>>(),
     );
-    let uid = builder.push_uid(truncate_uid(event.uid.as_str()), names);
+    let uid = builder.push_uid(event.uid.as_str().cached_uid(), names);
     builder.records.push(GroupwareResource {
         document_id,
         data: GroupwareResourceMetadata::CalendarEvent {
@@ -419,7 +419,7 @@ pub(super) fn push_card(
             })
             .collect::<Vec<_>>(),
     );
-    let uid = builder.push_uid(truncate_uid(card.uid.as_str()), names);
+    let uid = builder.push_uid(card.uid.as_str().cached_uid(), names);
     builder.records.push(GroupwareResource {
         document_id,
         data: GroupwareResourceMetadata::ContactCard {
@@ -434,14 +434,6 @@ pub(super) fn push_card(
             etag: card.etag.to_native(),
         },
     });
-}
-
-fn truncate_uid(uid: &str) -> &str {
-    if uid.len() <= 255 {
-        uid
-    } else {
-        &uid[..uid.ceil_char_boundary(255)]
-    }
 }
 
 pub(super) fn push_scheduling(

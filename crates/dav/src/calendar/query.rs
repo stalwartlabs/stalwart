@@ -4,33 +4,40 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::view::{AlarmView, CalendarView, ChildIdView, ComponentView, EntryView, ParameterView};
+use super::{
+    filter::{CalendarFilterPlan, FilterTimeRanges},
+    view::{CalendarView, ChildIdView, ComponentView, EntryView},
+};
 use crate::{
     DavError,
     common::{
-        CalendarFilter, DavQuery, EventContent,
-        propfind::{PropFindItem, PropFindRequestHandler},
+        CalendarQueryFilter, DavQuery, EventContent,
+        propfind::PropFindRequestHandler,
+        search::{QueryScope, TextIndex},
         uri::DavUriResource,
     },
 };
 use calcard::{
     common::{PartialDateTime, timezone::Tz},
-    icalendar::{ICalendarComponentType, ICalendarEntry, ICalendarProperty, ICalendarValue},
+    icalendar::{
+        ICalendar, ICalendarComponentType, ICalendarEntry, ICalendarProperty, ICalendarValue,
+    },
 };
-use common::{GroupwareResource, Server, auth::AccessToken};
+use common::{DavResourcePath, GroupwareResource, Server, auth::AccessToken};
 use compact_str::ToCompactString;
 use dav_proto::{
     RequestHeaders,
     schema::{
         property::{CalDavProperty, CalendarData, DavProperty},
-        request::{CalendarQuery, Filter, FilterOp, PropFind, Timezone},
+        request::{CalendarQuery, PropFind, Timezone},
         response::MultiStatus,
     },
 };
 use groupware::{
     cache::GroupwareCache,
     calendar::{
-        ArchivedCalendarEvent, ArchivedCalendarEventContent, EVENT_HAS_ALARMS,
+        ArchivedCalendarEvent, ArchivedCalendarEventContent,
+        ArchivedCalendarEventNotificationContent, CalendarEventContent, CalendarEventData,
         EVENT_HAS_UNBOUNDED_TODO, EVENT_SECRET,
         expand::{CalendarEventExpansion, MAX_UTC_OFFSET},
     },
@@ -38,8 +45,13 @@ use groupware::{
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::{fmt::Write, slice::Iter, str::FromStr};
+use store::write::{SearchIndex, serialize::rkyv_deserialize};
 use trc::AddContext;
-use types::{OverlapCondition, OverlapRule, TimeRange, acl::Acl, collection::SyncCollection};
+use types::{
+    OverlapCondition, OverlapRule, TimeRange,
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
     fn handle_calendar_query_request(
@@ -48,6 +60,18 @@ pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
         headers: &RequestHeaders<'_>,
         request: CalendarQuery,
     ) -> impl Future<Output = crate::Result<HttpResponse>> + Send;
+}
+
+pub(crate) trait QueryTimezone {
+    fn resolve(&self) -> Option<Tz>;
+}
+
+pub(crate) trait EventTimeRange {
+    fn is_in_time_range(&self, range: &TimeRange) -> bool;
+}
+
+pub(crate) trait CalendarDataRange {
+    fn calendar_data_range(&self) -> Option<TimeRange>;
 }
 
 impl CalendarQueryRequestHandler for Server {
@@ -63,11 +87,16 @@ impl CalendarQueryRequestHandler for Server {
             .await?
             .into_owned_uri()?;
         let account_id = resource_.account_id;
+        let collection = if resource_.collection == Collection::CalendarEventNotification {
+            Collection::CalendarEventNotification
+        } else {
+            Collection::Calendar
+        };
         let resources = self
             .fetch_groupware_resources(
                 access_token.account_id(),
                 account_id,
-                SyncCollection::Calendar,
+                SyncCollection::from(collection),
             )
             .await
             .caused_by(trc::location!())?;
@@ -79,192 +108,167 @@ impl CalendarQueryRequestHandler for Server {
             return Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
                 .with_xml_body(MultiStatus::not_found(headers.uri).to_string()));
         };
-        if !resource.is_container() {
-            return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
-        }
 
-        // Obtain shared ids
-        let shared_ids = if !access_token.is_member(account_id) {
+        let shared_ids = (!access_token.is_member(account_id)).then(|| {
             let mut shared_ids = resources.shared_items(access_token, [Acl::ReadItems], false);
             shared_ids -= resources.event_ids_with_flags(EVENT_SECRET);
-            Some(shared_ids)
+            shared_ids
+        });
+        let is_visible = |item: &DavResourcePath<'_>| {
+            shared_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(item.document_id()))
+        };
+        let scope = if resource.is_container() {
+            QueryScope::new(
+                resources
+                    .children(resource.document_id())
+                    .filter(is_visible),
+            )
         } else {
-            None
+            QueryScope::new(std::iter::once(resource).filter(is_visible))
         };
 
-        // Pre-filter by date range
-        let filter_range = extract_filter_range(&request);
-        let admits_alarms = filter_range.is_some()
-            && has_component_time_range(&request, |comp| {
-                comp == Some(&ICalendarComponentType::VAlarm)
-            });
-        let admits_unbounded_todos = filter_range.is_some()
-            && has_component_time_range(&request, |comp| {
-                matches!(
-                    comp,
-                    None | Some(ICalendarComponentType::VCalendar | ICalendarComponentType::VTodo)
-                )
-            });
-
-        // Obtain document ids in folder
-        let mut items = Vec::with_capacity(16);
-        for resource in resources.children(resource.document_id()) {
-            if shared_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(resource.document_id()))
-                && filter_range.as_ref().is_none_or(|range| {
-                    is_resource_in_time_range(resource.resource.resource, range)
-                        || (admits_alarms
-                            && has_event_flag(resource.resource.resource, EVENT_HAS_ALARMS))
-                        || (admits_unbounded_todos
-                            && has_event_flag(resource.resource.resource, EVENT_HAS_UNBOUNDED_TODO))
-                })
-            {
-                items.push(PropFindItem::new(
-                    resources.format_resource(resource),
-                    account_id,
-                    resource,
-                ));
+        let filter_ranges = request
+            .filter
+            .as_ref()
+            .map(CalendarFilterPlan::time_ranges)
+            .unwrap_or_default();
+        let items = match &request.filter {
+            Some(filter) if collection == Collection::Calendar && !scope.is_empty() => {
+                let candidates =
+                    filter.candidates(&scope, TextIndex::new(self, SearchIndex::Calendar));
+                scope
+                    .resolve(
+                        self,
+                        SearchIndex::Calendar,
+                        account_id,
+                        candidates,
+                        &resources,
+                    )
+                    .await
             }
-        }
+            _ => scope.into_items(&resources, account_id),
+        };
 
-        // Extract the time range from the request
-        let max_time_range = extract_data_range(&request.properties, filter_range);
+        let filter = CalendarQueryFilter {
+            expansion: filter_ranges.union(FilterTimeRanges {
+                range: request.properties.calendar_data_range(),
+                has_alarms: false,
+            }),
+            timezone: request.timezone.resolve(),
+            filter: request.filter,
+        };
 
         self.handle_dav_query(
             access_token,
-            DavQuery::calendar_query(request, max_time_range, items, headers),
+            DavQuery::calendar_query(request.properties, filter, collection, items, headers),
         )
         .await
     }
 }
 
-pub(crate) fn is_resource_in_time_range(resource: &GroupwareResource, filter: &TimeRange) -> bool {
-    // Check whether the resource has a time range and if it overlaps with the filter
-    if let Some((start, end)) = resource.event_time_range() {
-        filter.touches(
-            start.saturating_sub(MAX_UTC_OFFSET),
-            end.saturating_add(MAX_UTC_OFFSET),
-        )
-    } else {
-        // If the resource does not have a time range, it is not in the range
-        false
+impl QueryTimezone for Timezone {
+    fn resolve(&self) -> Option<Tz> {
+        match self {
+            Timezone::Id(id) => Tz::from_str(id).ok(),
+            Timezone::Name(value) => Tz::from_str(value).ok().or_else(|| {
+                ICalendar::parse(value).ok().and_then(|ical| {
+                    ical.timezones()
+                        .find_map(|timezone| timezone.timezone().map(|(_, tz)| tz))
+                })
+            }),
+            Timezone::None => None,
+        }
     }
 }
 
-fn has_event_flag(resource: &GroupwareResource, flag: u16) -> bool {
-    resource
-        .event_flags()
-        .is_some_and(|flags| flags & flag != 0)
+impl EventTimeRange for GroupwareResource {
+    fn is_in_time_range(&self, range: &TimeRange) -> bool {
+        self.event_time_range().is_some_and(|(start, end)| {
+            range.touches(
+                start.saturating_sub(MAX_UTC_OFFSET),
+                end.saturating_add(MAX_UTC_OFFSET),
+            )
+        })
+    }
 }
 
-fn has_component_time_range(
-    query: &CalendarQuery,
-    is_component: impl Fn(Option<&ICalendarComponentType>) -> bool,
-) -> bool {
-    query.filters.iter().any(|filter| {
-        matches!(
-            filter,
-            Filter::Component {
-                comp,
-                op: FilterOp::TimeRange(_)
-            } if is_component(comp.last())
-        )
-    })
-}
-
-fn extract_filter_range(query: &CalendarQuery) -> Option<TimeRange> {
-    let mut range = TimeRange {
-        start: i64::MAX,
-        end: i64::MIN,
-    };
-
-    for filter in &query.filters {
-        let op = match filter {
-            Filter::Component { op, .. } => op,
-            Filter::Property { op, .. } => op,
-            Filter::Parameter { op, .. } => op,
-            _ => continue,
+impl CalendarDataRange for PropFind {
+    fn calendar_data_range(&self) -> Option<TimeRange> {
+        let props = match self {
+            PropFind::AllProp(props) | PropFind::Prop(props) => props,
+            PropFind::PropName => return None,
         };
-        if let FilterOp::TimeRange(date_range) = op {
-            if date_range.start < range.start {
-                range.start = date_range.start;
-            }
-            if date_range.end > range.end {
-                range.end = date_range.end;
-            }
-        }
-    }
 
-    if range.start != i64::MAX {
-        Some(range)
-    } else {
-        None
+        props
+            .iter()
+            .find_map(|prop| match prop {
+                DavProperty::CalDav(CalDavProperty::CalendarData(data)) => Some(data),
+                _ => None,
+            })
+            .and_then(CalendarDataRange::calendar_data_range)
     }
 }
 
-fn extract_data_range(propfind: &PropFind, filter_range: Option<TimeRange>) -> Option<TimeRange> {
-    let props = match propfind {
-        PropFind::AllProp(props) | PropFind::Prop(props) => props,
-        PropFind::PropName => &[][..],
-    };
-
-    for prop in props {
-        if let DavProperty::CalDav(CalDavProperty::CalendarData(data)) = prop {
-            let mut range = filter_range.unwrap_or(TimeRange {
-                start: i64::MAX,
-                end: i64::MIN,
-            });
-
-            for data_range in [&data.expand, &data.limit_recurrence, &data.limit_freebusy]
-                .into_iter()
-                .flatten()
-            {
-                if data_range.start < range.start {
-                    range.start = data_range.start;
-                }
-                if data_range.end > range.end {
-                    range.end = data_range.end;
-                }
-            }
-
-            return if range.start != i64::MAX {
-                Some(range)
-            } else {
-                None
-            };
-        }
+impl CalendarDataRange for CalendarData {
+    fn calendar_data_range(&self) -> Option<TimeRange> {
+        [self.expand, self.limit_recurrence, self.limit_freebusy]
+            .into_iter()
+            .flatten()
+            .reduce(TimeRange::union)
     }
-
-    filter_range
 }
 
-pub fn try_parse_tz(tz: &Timezone) -> Option<Tz> {
-    match tz {
-        Timezone::Name(value) | Timezone::Id(value) => Tz::from_str(value).ok(),
-        Timezone::None => None,
+impl CalendarQueryFilter {
+    pub fn matches_scheduling_message(
+        &self,
+        content: &ArchivedCalendarEventNotificationContent,
+        default_tz: Tz,
+        max_instances: usize,
+    ) -> trc::Result<bool> {
+        let Some(filter) = &self.filter else {
+            return Ok(true);
+        };
+        let Some(ical) = content.calendar_data() else {
+            return Ok(false);
+        };
+        let time_ranges = filter.time_ranges();
+        if time_ranges.range.is_none() {
+            return Ok(CalendarQueryHandler::for_scheduling(default_tz).matches(ical, filter));
+        }
+
+        let content = CalendarEventContent {
+            data: CalendarEventData::new(rkyv_deserialize(ical)?, Tz::Floating, max_instances),
+            ..Default::default()
+        };
+        let mut handler = CalendarQueryHandler::for_event_data(&content, time_ranges, default_tz);
+        handler.dateless_events_match = true;
+
+        Ok(handler.matches(&content, filter))
     }
 }
 
 pub(crate) struct CalendarQueryHandler {
-    default_tz: Tz,
-    expanded_times: Vec<CalendarEventExpansion>,
-    undated_todos: Vec<u32>,
+    pub(super) default_tz: Tz,
+    pub(super) expanded_times: Vec<CalendarEventExpansion>,
+    pub(super) undated_todos: Vec<u32>,
+    pub(super) dateless_events_match: bool,
 }
 
 impl CalendarQueryHandler {
     pub fn new(
         event: &ArchivedCalendarEventContent,
-        max_time_range: Option<TimeRange>,
+        expansion_range: Option<TimeRange>,
         default_tz: Tz,
     ) -> Self {
         Self {
             default_tz,
-            expanded_times: max_time_range
-                .map(|max_time_range| {
+            expanded_times: expansion_range
+                .map(|expansion_range| {
                     event
                         .data
-                        .expand(default_tz, max_time_range, OverlapRule::CalDav)
+                        .expand(default_tz, expansion_range, OverlapRule::CalDav)
                         .unwrap_or_else(|| {
                             trc::event!(
                                 Calendar(trc::CalendarEvent::RuleExpansionError),
@@ -276,17 +280,49 @@ impl CalendarQueryHandler {
                 })
                 .unwrap_or_default(),
             undated_todos: Vec::new(),
+            dateless_events_match: false,
+        }
+        .indexed()
+    }
+
+    pub fn for_event_data(
+        content: &CalendarEventContent,
+        expansion: FilterTimeRanges,
+        default_tz: Tz,
+    ) -> Self {
+        CalendarQueryHandler {
+            default_tz,
+            expanded_times: expansion
+                .expansion_range(content)
+                .and_then(|range| content.data.expand(default_tz, range, OverlapRule::CalDav))
+                .unwrap_or_default(),
+            undated_todos: content.data.undated_todos().collect(),
+            dateless_events_match: false,
+        }
+        .indexed()
+    }
+
+    pub fn for_scheduling(default_tz: Tz) -> Self {
+        CalendarQueryHandler {
+            default_tz,
+            expanded_times: Vec::new(),
+            undated_todos: Vec::new(),
+            dateless_events_match: true,
         }
     }
 
     pub fn for_content(
         event: &ArchivedCalendarEvent,
         content: &EventContent<'_>,
-        max_time_range: Option<TimeRange>,
+        expansion: FilterTimeRanges,
         default_tz: Tz,
     ) -> Self {
         let stored = content.stored();
-        let mut handler = Self::new(stored, max_time_range, default_tz);
+        let expansion_range = match content.view() {
+            Some(view) => expansion.expansion_range(view),
+            None => expansion.expansion_range(stored),
+        };
+        let mut handler = Self::new(stored, expansion_range, default_tz);
         if event.flags.to_native() & EVENT_HAS_UNBOUNDED_TODO != 0 {
             handler.undated_todos.extend(stored.data.undated_todos());
         }
@@ -299,19 +335,29 @@ impl CalendarQueryHandler {
                     expansion.comp_id = base_id;
                 }
             }
+            handler = handler.indexed();
         }
         handler
     }
 
-    pub fn filter_content(&mut self, content: &EventContent<'_>, filters: &CalendarFilter) -> bool {
-        match content.view() {
-            Some(view) => self.filter(view, filters),
-            None => self.filter(content.stored(), filters),
-        }
+    fn indexed(mut self) -> Self {
+        self.expanded_times
+            .sort_unstable_by_key(|expansion| (expansion.comp_id, expansion.start));
+        self
+    }
+
+    pub(super) fn expansions_of(&self, comp_id: u32) -> &[CalendarEventExpansion] {
+        let from = self
+            .expanded_times
+            .partition_point(|expansion| expansion.comp_id < comp_id);
+        let to = self
+            .expanded_times
+            .partition_point(|expansion| expansion.comp_id <= comp_id);
+        self.expanded_times.get(from..to).unwrap_or_default()
     }
 
     pub fn serialize_content(
-        &mut self,
+        &self,
         content: &EventContent<'_>,
         size: u32,
         data: &CalendarData,
@@ -323,139 +369,8 @@ impl CalendarQueryHandler {
         }
     }
 
-    pub fn filter<V: CalendarView>(&mut self, event: &V, filters: &CalendarFilter) -> bool {
-        let mut is_all = true;
-        let mut matches_one = false;
-
-        for filter in filters {
-            match filter {
-                Filter::AnyOf => {
-                    is_all = false;
-                }
-                Filter::AllOf => {
-                    is_all = true;
-                }
-                Filter::Property { prop, op, comp } => {
-                    let mut properties = find_components(event, comp)
-                        .flat_map(|(_, component)| find_properties(component, prop))
-                        .peekable();
-
-                    let result = if properties.peek().is_some() {
-                        properties.any(|entry| match op {
-                            FilterOp::Exists => true,
-                            FilterOp::Undefined => false,
-                            FilterOp::TextMatch(text_match) => {
-                                entry.text_values().any(|text| text_match.matches(text))
-                            }
-                            FilterOp::TimeRange(range) => {
-                                entry.date_time_timestamp(self.default_tz).is_some_and(
-                                    |timestamp| range.start <= timestamp && range.end > timestamp,
-                                )
-                            }
-                        })
-                    } else {
-                        matches!(op, FilterOp::Undefined)
-                    };
-
-                    if result {
-                        matches_one = true;
-                    } else if is_all {
-                        return false;
-                    }
-                }
-                Filter::Parameter {
-                    prop,
-                    param,
-                    op,
-                    comp,
-                } => {
-                    let mut parameters = find_components(event, comp)
-                        .flat_map(|(_, component)| {
-                            find_properties(component, prop)
-                                .filter_map(|entry| entry.parameter(param))
-                        })
-                        .peekable();
-
-                    let result = if parameters.peek().is_some() {
-                        parameters.any(|parameter| match op {
-                            FilterOp::Exists => true,
-                            FilterOp::Undefined => false,
-                            FilterOp::TextMatch(text_match) => parameter
-                                .text()
-                                .is_some_and(|text| text_match.matches(text)),
-                            FilterOp::TimeRange(_) => false,
-                        })
-                    } else {
-                        matches!(op, FilterOp::Undefined)
-                    };
-
-                    if result {
-                        matches_one = true;
-                    } else if is_all {
-                        return false;
-                    }
-                }
-                Filter::Component { comp, op } => {
-                    let result = match op {
-                        FilterOp::Exists => find_components(event, comp).next().is_some(),
-                        FilterOp::Undefined => find_components(event, comp).next().is_none(),
-                        FilterOp::TimeRange(range) => {
-                            if !matches!(comp.last(), Some(ICalendarComponentType::VAlarm)) {
-                                let components = event.components();
-                                let is_matching = |comp_id: u32| {
-                                    components
-                                        .get(comp_id as usize)
-                                        .is_some_and(|component| is_in_path(component, comp))
-                                };
-
-                                self.undated_todos
-                                    .iter()
-                                    .any(|comp_id| is_matching(*comp_id))
-                                    || self.expanded_times.iter().any(|expansion| {
-                                        is_matching(expansion.comp_id)
-                                            && range.is_in_range(
-                                                expansion.flags.condition(),
-                                                expansion.start,
-                                                expansion.end,
-                                            )
-                                    })
-                            } else {
-                                let alarms = event.alarms();
-
-                                !alarms.is_empty()
-                                    && self.expanded_times.iter().any(|expansion| {
-                                        alarms.iter().any(|alarm| {
-                                            alarm.parent_id() == expansion.comp_id
-                                                && alarm
-                                                    .timestamp(expansion, self.default_tz)
-                                                    .is_some_and(|timestamp| {
-                                                        range.is_in_range(
-                                                            OverlapCondition::Event,
-                                                            timestamp,
-                                                            timestamp,
-                                                        )
-                                                    })
-                                        })
-                                    })
-                            }
-                        }
-                        FilterOp::TextMatch(_) => false,
-                    };
-
-                    if result {
-                        matches_one = true;
-                    } else if is_all {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        is_all || matches_one
-    }
-
     pub fn serialize_ical<V: CalendarView>(
-        &mut self,
+        &self,
         event: &V,
         size: u32,
         data: &CalendarData,
@@ -467,14 +382,18 @@ impl CalendarQueryHandler {
         let mut component_stack: Vec<(&V::Component, Iter<'_, ChildIdOf<V>>)> =
             Vec::with_capacity(4);
 
-        if data.expand.is_some() {
-            self.expanded_times.sort_unstable_by_key(|a| a.start);
-        }
-
         loop {
             if let Some(component_id) = component_iter.next() {
                 let component_id = component_id.child_id();
-                let Some(component) = event.components().get(component_id as usize) else {
+                let Some(component) =
+                    event
+                        .components()
+                        .get(component_id as usize)
+                        .filter(|component| {
+                            data.expand.is_none()
+                                || !component.is_type(ICalendarComponentType::VTimezone)
+                        })
+                else {
                     continue;
                 };
                 let is_todo = component.is_type(ICalendarComponentType::VTodo);
@@ -482,13 +401,12 @@ impl CalendarQueryHandler {
                 // Limit recurrence override
                 if let Some(limit_recurrence) = &data.limit_recurrence
                     && component.is_recurrence_override()
-                    && !self.expanded_times.iter().any(|expansion| {
-                        expansion.comp_id == component_id
-                            && limit_recurrence.is_in_range(
-                                expansion.flags.condition(),
-                                expansion.start,
-                                expansion.end,
-                            )
+                    && !self.expansions_of(component_id).iter().any(|expansion| {
+                        limit_recurrence.is_in_range(
+                            expansion.flags.condition(),
+                            expansion.start,
+                            expansion.end,
+                        )
                     })
                 {
                     continue;
@@ -498,13 +416,12 @@ impl CalendarQueryHandler {
                 let is_freebusy = component.is_type(ICalendarComponentType::VFreebusy);
                 if let Some(limit_freebusy) = &data.limit_freebusy
                     && is_freebusy
-                    && !self.expanded_times.iter().any(|expansion| {
-                        expansion.comp_id == component_id
-                            && limit_freebusy.is_in_range(
-                                OverlapCondition::Event,
-                                expansion.start,
-                                expansion.end,
-                            )
+                    && !self.expansions_of(component_id).iter().any(|expansion| {
+                        limit_freebusy.is_in_range(
+                            OverlapCondition::Event,
+                            expansion.start,
+                            expansion.end,
+                        )
                     })
                 {
                     continue;
@@ -590,14 +507,13 @@ impl CalendarQueryHandler {
                             }
                             let _ = date_entry.write_to(out);
                         };
-                    for expansion in &self.expanded_times {
-                        if expansion.comp_id == component_id
-                            && (!is_recurrent_or_override
-                                || expand.is_in_range(
-                                    expansion.flags.condition(),
-                                    expansion.start,
-                                    expansion.end,
-                                ))
+                    for expansion in self.expansions_of(component_id) {
+                        if !is_recurrent_or_override
+                            || expand.is_in_range(
+                                expansion.flags.condition(),
+                                expansion.start,
+                                expansion.end,
+                            )
                         {
                             if *instances_limit > 0 {
                                 *instances_limit -= 1;
@@ -687,32 +603,3 @@ impl CalendarQueryHandler {
 }
 
 type ChildIdOf<V> = <<V as CalendarView>::Component as ComponentView>::ChildId;
-
-#[inline(always)]
-fn find_components<'x, V: CalendarView>(
-    event: &'x V,
-    comp: &'x [ICalendarComponentType],
-) -> impl Iterator<Item = (usize, &'x V::Component)> {
-    event
-        .components()
-        .iter()
-        .enumerate()
-        .filter(move |(_, component)| is_in_path(*component, comp))
-}
-
-fn is_in_path<C: ComponentView>(component: &C, comp: &[ICalendarComponentType]) -> bool {
-    // TODO: Properly expand the component type path
-    let comp = comp.last().unwrap_or(&ICalendarComponentType::VCalendar);
-    comp == &ICalendarComponentType::VCalendar || component.component_type() == comp
-}
-
-#[inline(always)]
-fn find_properties<'x, C: ComponentView>(
-    component: &'x C,
-    prop: &'x ICalendarProperty,
-) -> impl Iterator<Item = &'x C::Entry> {
-    component
-        .entries()
-        .iter()
-        .filter(move |entry| entry.is_named(prop))
-}

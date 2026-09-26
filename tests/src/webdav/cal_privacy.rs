@@ -101,6 +101,7 @@ pub async fn test(test: &TestServer) {
         .await
         .with_status(StatusCode::NOT_FOUND);
 
+    test.wait_for_tasks().await;
     sharee_client
         .request("REPORT", &folder, CALENDAR_QUERY_SUMMARY_DETAILS)
         .await

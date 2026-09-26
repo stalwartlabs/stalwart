@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::{
-    icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
-    vcard::{VCardParameterName, VCardVersion},
-};
+use crate::calendar::filter::FilterTimeRanges;
+use calcard::{common::timezone::Tz, vcard::VCardVersion};
 use dav_proto::{
     Depth, RequestHeaders, Return,
     schema::{
         Namespace,
         property::{DavProperty, ReportSet, ResourceType},
         request::{
-            AddressbookQuery, CalendarQuery, ExpandProperty, Filter, MultiGet, PropFind,
-            SyncCollection, Timezone, VCardPropertyWithGroup,
+            AddressbookQuery, CardFilter, CompFilter, ExpandProperty, MultiGet, PropFind,
+            SyncCollection,
         },
     },
 };
@@ -38,7 +36,6 @@ use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
 use store::write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder};
 use types::{
-    TimeRange,
     acl::{Acl, ArchivedAclGrant},
     collection::Collection,
     dead_property::ArchivedDeadProperty,
@@ -48,6 +45,7 @@ use uri::{OwnedUri, Urn};
 pub mod acl;
 pub mod lock;
 pub mod propfind;
+pub mod search;
 pub mod uri;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,18 +125,17 @@ pub(crate) enum DavQueryResource<'x> {
     None,
 }
 
-pub(crate) type AddressbookFilter = Vec<Filter<(), VCardPropertyWithGroup, VCardParameterName>>;
-pub(crate) type CalendarFilter =
-    Vec<Filter<Vec<ICalendarComponentType>, ICalendarProperty, ICalendarParameterName>>;
-
 #[derive(Debug)]
 pub(crate) enum DavQueryFilter {
-    Addressbook(AddressbookFilter),
-    Calendar {
-        filter: CalendarFilter,
-        max_time_range: Option<TimeRange>,
-        timezone: Timezone,
-    },
+    Addressbook(CardFilter),
+    Calendar(CalendarQueryFilter),
+}
+
+#[derive(Debug)]
+pub(crate) struct CalendarQueryFilter {
+    pub filter: Option<CompFilter>,
+    pub expansion: FilterTimeRanges,
+    pub timezone: Option<Tz>,
 }
 
 pub(crate) trait ETag {
@@ -235,7 +232,7 @@ impl<'x> DavQuery<'x> {
     ) -> Self {
         Self {
             resource: DavQueryResource::Query {
-                filter: DavQueryFilter::Addressbook(query.filters),
+                filter: DavQueryFilter::Addressbook(query.filter),
                 parent_collection: Collection::AddressBook,
                 items,
             },
@@ -252,22 +249,19 @@ impl<'x> DavQuery<'x> {
     }
 
     pub fn calendar_query(
-        query: CalendarQuery,
-        max_time_range: Option<TimeRange>,
+        propfind: PropFind,
+        filter: CalendarQueryFilter,
+        parent_collection: Collection,
         items: Vec<PropFindItem>,
         headers: &RequestHeaders<'x>,
     ) -> Self {
         Self {
             resource: DavQueryResource::Query {
-                filter: DavQueryFilter::Calendar {
-                    filter: query.filters,
-                    timezone: query.timezone,
-                    max_time_range,
-                },
-                parent_collection: Collection::Calendar,
+                filter: DavQueryFilter::Calendar(filter),
+                parent_collection,
                 items,
             },
-            propfind: query.properties,
+            propfind,
             ret: headers.ret,
             depth_no_root: headers.depth_no_root,
             uri: headers.raw_uri,

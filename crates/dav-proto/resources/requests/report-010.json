@@ -23,29 +23,51 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Property",
-      "comp": [
-        "VCalendar",
-        "VEvent"
-      ],
-      "prop": {
-        "type": "Other",
-        "data": "X-ABC-GUID"
-      },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "ABC",
-          "collation": "AsciiCasemap",
-          "negate": false
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Other",
+                      "data": "X-ABC-GUID"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "Text",
+                          "data": {
+                            "match_type": "Contains",
+                            "value": "ABC",
+                            "collation": "AsciiCasemap",
+                            "negate": false
+                          }
+                        },
+                        "param_filters": []
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

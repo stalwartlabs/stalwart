@@ -1,0 +1,32 @@
+{
+  "type": "PrincipalPropertySearch",
+  "property_search": [
+    {
+      "properties": [
+        {
+          "type": "WebDav",
+          "data": {
+            "type": "DisplayName"
+          }
+        },
+        {
+          "type": "Principal",
+          "data": {
+            "type": "CalendarUserAddressSet"
+          }
+        }
+      ],
+      "match_": "jane"
+    }
+  ],
+  "properties": [
+    {
+      "type": "WebDav",
+      "data": {
+        "type": "DisplayName"
+      }
+    }
+  ],
+  "apply_to_principal_collection_set": false,
+  "test": "AnyOf"
+}

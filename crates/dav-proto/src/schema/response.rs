@@ -7,11 +7,7 @@
 use super::{
     Namespaces,
     property::{DavProperty, Privilege},
-    request::{DavPropertyValue, Filter},
-};
-use calcard::{
-    icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
-    vcard::{VCardParameterName, VCardProperty},
+    request::DavPropertyValue,
 };
 use hyper::StatusCode;
 use std::{borrow::Cow, fmt::Display};
@@ -238,9 +234,7 @@ pub enum CalCondition {
     NoUidConflict(Href),
     InitializeCalendarCollection,
     SupportedCalendarData,
-    SupportedFilter(
-        Vec<Filter<Vec<ICalendarComponentType>, ICalendarProperty, ICalendarParameterName>>,
-    ),
+    SupportedFilter,
     SupportedCollation(String),
     SupportedCalendarComponent,
     MinDateTime,
@@ -263,7 +257,7 @@ pub enum CalCondition {
 pub enum CardCondition {
     SupportedAddressData,
     SupportedAddressDataConversion,
-    SupportedFilter(Vec<Filter<(), VCardProperty, VCardParameterName>>),
+    SupportedFilter,
     SupportedCollation(String),
     ValidAddressData,
     NoUidConflict(Href),
@@ -350,7 +344,7 @@ impl CalCondition {
             CalCondition::NoUidConflict(_) => "NoUidConflict",
             CalCondition::InitializeCalendarCollection => "InitializeCalendarCollection",
             CalCondition::SupportedCalendarData => "SupportedCalendarData",
-            CalCondition::SupportedFilter(_) => "SupportedFilter",
+            CalCondition::SupportedFilter => "SupportedFilter",
             CalCondition::SupportedCollation(_) => "SupportedCollation",
             CalCondition::MinDateTime => "MinDateTime",
             CalCondition::MaxDateTime => "MaxDateTime",
@@ -375,7 +369,7 @@ impl CardCondition {
         match self {
             CardCondition::SupportedAddressData => "SupportedAddressData",
             CardCondition::SupportedAddressDataConversion => "SupportedAddressDataConversion",
-            CardCondition::SupportedFilter(_) => "SupportedFilter",
+            CardCondition::SupportedFilter => "SupportedFilter",
             CardCondition::SupportedCollation(_) => "SupportedCollation",
             CardCondition::ValidAddressData => "ValidAddressData",
             CardCondition::NoUidConflict(_) => "NoUidConflict",

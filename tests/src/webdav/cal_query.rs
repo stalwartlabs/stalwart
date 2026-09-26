@@ -45,6 +45,7 @@ pub async fn test(test: &TestServer) {
             .await
             .with_status(StatusCode::CREATED);
     }
+    test.wait_for_tasks().await;
 
     // Test 1: Partial Retrieval of Events by Time Range
     let response = client
@@ -93,6 +94,39 @@ pub async fn test(test: &TestServer) {
         .properties(&rfc_file_name(3))
         .calendar_data()
         .with_values([REPORT_3_EXPECTED_ABCD3.replace('\n', "\r\n").as_str()]);
+    let response = client
+        .request(
+            "REPORT",
+            &cal_path,
+            REPORT_3_MULTIGET
+                .replace("$HREF2", &rfc_file_name(2))
+                .replace("$HREF3", &rfc_file_name(3)),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([rfc_file_name(2).as_str(), rfc_file_name(3).as_str()])
+        .into_propfind_response(None);
+    response
+        .properties(&rfc_file_name(2))
+        .calendar_data()
+        .with_values([REPORT_3_EXPECTED_ABCD2.replace('\n', "\r\n").as_str()]);
+    response
+        .properties(&rfc_file_name(3))
+        .calendar_data()
+        .with_values([REPORT_3_EXPECTED_ABCD3.replace('\n', "\r\n").as_str()]);
+    client
+        .request(
+            "REPORT",
+            &cal_path,
+            REPORT_3_EXPAND_ONLY_MULTIGET.replace("$HREF", &rfc_file_name(2)),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .with_hrefs([rfc_file_name(2).as_str()])
+        .into_propfind_response(None)
+        .properties(&rfc_file_name(2))
+        .calendar_data()
+        .with_values([REPORT_3_EXPECTED_ABCD2.replace('\n', "\r\n").as_str()]);
 
     // Test 4: Partial Retrieval of Stored Free Busy Components
     let response = client
@@ -854,6 +888,36 @@ const REPORT_3: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
        </C:comp-filter>
      </C:filter>
    </C:calendar-query>
+"#;
+
+const REPORT_3_MULTIGET: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-multiget xmlns:D="DAV:"
+                        xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:comp name="VCALENDAR">
+           <C:comp name="VEVENT"/>
+         </C:comp>
+         <C:expand start="20060103T000000Z"
+                   end="20060105T000000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <D:href>$HREF2</D:href>
+     <D:href>$HREF3</D:href>
+   </C:calendar-multiget>
+"#;
+
+const REPORT_3_EXPAND_ONLY_MULTIGET: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
+   <C:calendar-multiget xmlns:D="DAV:"
+                        xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:expand start="20060103T000000Z"
+                   end="20060105T000000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <D:href>$HREF</D:href>
+   </C:calendar-multiget>
 "#;
 
 const REPORT_3_EXPECTED_ABCD2: &str = r#"BEGIN:VCALENDAR

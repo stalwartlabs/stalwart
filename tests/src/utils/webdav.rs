@@ -285,6 +285,19 @@ impl DummyWebDavClient {
         }
     }
 
+    pub async fn delete_default_containers_without_scheduling(&self) {
+        for col in ["card", "cal"] {
+            self.request_with_headers(
+                "DELETE",
+                &format!("/dav/{col}/{}/default", self.name),
+                [("Schedule-Reply", "F")],
+                "",
+            )
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+        }
+    }
+
     pub async fn lock_create(
         &self,
         path: &str,

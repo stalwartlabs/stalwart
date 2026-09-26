@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<D:principal-property-search xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" test="anyof">
+  <D:property-search>
+    <D:prop>
+      <D:displayname/>
+      <C:calendar-user-address-set/>
+    </D:prop>
+    <D:match>jane</D:match>
+  </D:property-search>
+  <D:prop>
+    <D:displayname/>
+  </D:prop>
+</D:principal-property-search>

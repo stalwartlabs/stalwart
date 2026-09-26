@@ -8,10 +8,12 @@ use super::freebusy::freebusy_in_range;
 use calcard::{
     common::timezone::Tz,
     icalendar::{
-        ArchivedICalendarComponent, ArchivedICalendarComponentType, ArchivedICalendarEntry,
-        ArchivedICalendarParameter, ArchivedICalendarParameterName, ArchivedICalendarProperty,
-        ICalendarComponent, ICalendarComponentType, ICalendarEntry, ICalendarParameter,
-        ICalendarParameterName, ICalendarProperty, ICalendarValue,
+        ArchivedICalendar, ArchivedICalendarComponent, ArchivedICalendarComponentType,
+        ArchivedICalendarEntry, ArchivedICalendarParameter, ArchivedICalendarParameterName,
+        ArchivedICalendarParameterValue, ArchivedICalendarProperty, ArchivedICalendarValue,
+        ArchivedICalendarValueType, ICalendarComponent, ICalendarComponentType, ICalendarEntry,
+        ICalendarParameter, ICalendarParameterName, ICalendarParameterValue, ICalendarProperty,
+        ICalendarValue, ICalendarValueType,
     },
 };
 use groupware::calendar::{
@@ -19,8 +21,11 @@ use groupware::calendar::{
     expand::CalendarEventExpansion,
 };
 use rkyv::primitive::ArchivedU32;
+use std::borrow::Cow;
 use store::write::serialize::rkyv_deserialize;
 use types::TimeRange;
+
+const SECONDS_PER_DAY: i64 = 86_400;
 
 pub(crate) trait CalendarView {
     type Component: ComponentView;
@@ -46,6 +51,46 @@ pub(crate) trait ComponentView {
     fn is_type(&self, component_type: ICalendarComponentType) -> bool {
         self.component_type() == &component_type
     }
+
+    fn effective_end(&self, property: &ICalendarProperty, default_tz: Tz) -> Option<i64> {
+        let applies = match property {
+            ICalendarProperty::Dtend => self.is_type(ICalendarComponentType::VEvent),
+            ICalendarProperty::Due => self.is_type(ICalendarComponentType::VTodo),
+            _ => false,
+        };
+        if !applies {
+            return None;
+        }
+        let mut start = None;
+        let mut duration = None;
+        for entry in self.entries() {
+            if entry.is_named(&ICalendarProperty::Dtstart) {
+                start = entry.date_time_timestamp(default_tz);
+            } else if entry.is_named(&ICalendarProperty::Duration) {
+                duration = entry.duration_seconds();
+            }
+        }
+        start?.checked_add(duration?)
+    }
+
+    fn alarm_repetition(&self) -> AlarmRepetition {
+        let mut count = None;
+        let mut interval = None;
+        for entry in self.entries() {
+            if entry.is_named(&ICalendarProperty::Repeat) {
+                count = entry.integer_value();
+            } else if entry.is_named(&ICalendarProperty::Duration) {
+                interval = entry.duration_seconds();
+            }
+        }
+        AlarmRepetition::new(count, interval)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AlarmRepetition {
+    count: u64,
+    interval: u64,
 }
 
 pub(crate) trait EntryView {
@@ -54,17 +99,15 @@ pub(crate) trait EntryView {
 
     fn name(&self) -> &Self::Name;
     fn params(&self) -> &[Self::Param];
-    fn text_values(&self) -> impl Iterator<Item = &str>;
+    fn text_values(&self) -> impl Iterator<Item = Cow<'_, str>>;
     fn date_time_timestamp(&self, default_tz: Tz) -> Option<i64>;
+    fn integer_value(&self) -> Option<i64>;
+    fn duration_seconds(&self) -> Option<i64>;
     fn freebusy_in_range(&self, range: &TimeRange, default_tz: Tz) -> Option<ICalendarEntry>;
     fn write_value(&self, out: &mut String, with_value: bool);
 
     fn is_named(&self, property: &ICalendarProperty) -> bool {
         self.name() == property
-    }
-
-    fn parameter(&self, name: &ICalendarParameterName) -> Option<&Self::Param> {
-        self.params().iter().find(|param| param.is_named(name))
     }
 }
 
@@ -72,7 +115,7 @@ pub(crate) trait ParameterView {
     type Name: PartialEq<ICalendarParameterName>;
 
     fn name(&self) -> &Self::Name;
-    fn text(&self) -> Option<&str>;
+    fn text(&self) -> Option<Cow<'_, str>>;
 
     fn is_named(&self, name: &ICalendarParameterName) -> bool {
         self.name() == name
@@ -80,8 +123,20 @@ pub(crate) trait ParameterView {
 }
 
 pub(crate) trait AlarmView {
+    fn id(&self) -> u32;
     fn parent_id(&self) -> u32;
+    fn delta(&self) -> AlarmDelta;
     fn timestamp(&self, expansion: &CalendarEventExpansion, default_tz: Tz) -> Option<i64>;
+
+    fn trigger_offset(&self) -> Option<i64> {
+        match self.delta() {
+            AlarmDelta::Start(offset) | AlarmDelta::End(offset) => Some(
+                i64::from(offset.days.unsigned_abs()) * SECONDS_PER_DAY
+                    + i64::from(offset.seconds.unsigned_abs()),
+            ),
+            AlarmDelta::FixedUtc(_) | AlarmDelta::FixedFloating(_) => None,
+        }
+    }
 }
 
 pub(crate) trait ChildIdView: Sized + From<u32> {
@@ -123,6 +178,19 @@ impl CalendarView for ArchivedCalendarEventContent {
 
     fn alarms(&self) -> &[Self::Alarm] {
         &self.data.alarms
+    }
+}
+
+impl CalendarView for ArchivedICalendar {
+    type Component = ArchivedICalendarComponent;
+    type Alarm = ArchivedAlarm;
+
+    fn components(&self) -> &[Self::Component] {
+        &self.components
+    }
+
+    fn alarms(&self) -> &[Self::Alarm] {
+        &[]
     }
 }
 
@@ -206,8 +274,8 @@ impl EntryView for ICalendarEntry {
         &self.params
     }
 
-    fn text_values(&self) -> impl Iterator<Item = &str> {
-        self.values.iter().filter_map(|value| value.as_text())
+    fn text_values(&self) -> impl Iterator<Item = Cow<'_, str>> {
+        self.values.iter().filter_map(ValueText::value_text)
     }
 
     fn date_time_timestamp(&self, default_tz: Tz) -> Option<i64> {
@@ -217,6 +285,17 @@ impl EntryView for ICalendarEntry {
             .and_then(|date| date.to_date_time())
             .and_then(|date| date.to_date_time_with_tz(entry_tz(self.tz_id(), default_tz)))
             .map(|date| date.timestamp())
+    }
+
+    fn integer_value(&self) -> Option<i64> {
+        self.values.first().and_then(ICalendarValue::as_integer)
+    }
+
+    fn duration_seconds(&self) -> Option<i64> {
+        match self.values.first() {
+            Some(ICalendarValue::Duration(duration)) => Some(duration.as_seconds()),
+            _ => None,
+        }
     }
 
     fn freebusy_in_range(&self, range: &TimeRange, default_tz: Tz) -> Option<ICalendarEntry> {
@@ -257,8 +336,8 @@ impl EntryView for ArchivedICalendarEntry {
         &self.params
     }
 
-    fn text_values(&self) -> impl Iterator<Item = &str> {
-        self.values.iter().filter_map(|value| value.as_text())
+    fn text_values(&self) -> impl Iterator<Item = Cow<'_, str>> {
+        self.values.iter().filter_map(ValueText::value_text)
     }
 
     fn date_time_timestamp(&self, default_tz: Tz) -> Option<i64> {
@@ -268,6 +347,19 @@ impl EntryView for ArchivedICalendarEntry {
             .and_then(|date| date.to_date_time())
             .and_then(|date| date.to_date_time_with_tz(entry_tz(self.tz_id(), default_tz)))
             .map(|date| date.timestamp())
+    }
+
+    fn integer_value(&self) -> Option<i64> {
+        self.values
+            .first()
+            .and_then(ArchivedICalendarValue::as_integer)
+    }
+
+    fn duration_seconds(&self) -> Option<i64> {
+        match self.values.first() {
+            Some(ArchivedICalendarValue::Duration(duration)) => Some(duration.as_seconds()),
+            _ => None,
+        }
     }
 
     fn freebusy_in_range(&self, range: &TimeRange, default_tz: Tz) -> Option<ICalendarEntry> {
@@ -291,8 +383,12 @@ impl ParameterView for ICalendarParameter {
         &self.name
     }
 
-    fn text(&self) -> Option<&str> {
-        self.value.as_text()
+    fn text(&self) -> Option<Cow<'_, str>> {
+        match &self.value {
+            ICalendarParameterValue::Integer(value) => Some(Cow::Owned(value.to_string())),
+            ICalendarParameterValue::Duration(value) => Some(Cow::Owned(value.to_string())),
+            value => value.as_text().map(Cow::Borrowed),
+        }
     }
 }
 
@@ -303,14 +399,125 @@ impl ParameterView for ArchivedICalendarParameter {
         &self.name
     }
 
-    fn text(&self) -> Option<&str> {
-        self.value.as_text()
+    fn text(&self) -> Option<Cow<'_, str>> {
+        match &self.value {
+            ArchivedICalendarParameterValue::Integer(value) => {
+                Some(Cow::Owned(value.to_native().to_string()))
+            }
+            ArchivedICalendarParameterValue::Duration(value) => Some(Cow::Owned(value.to_string())),
+            value => value.as_text().map(Cow::Borrowed),
+        }
+    }
+}
+
+trait ValueText {
+    fn value_text(&self) -> Option<Cow<'_, str>>;
+}
+
+impl ValueText for ICalendarValue {
+    fn value_text(&self) -> Option<Cow<'_, str>> {
+        match self {
+            ICalendarValue::Integer(value) => Some(Cow::Owned(value.to_string())),
+            ICalendarValue::Float(value) => Some(Cow::Owned(value.to_string())),
+            ICalendarValue::Boolean(value) => {
+                Some(Cow::Borrowed(if *value { "TRUE" } else { "FALSE" }))
+            }
+            ICalendarValue::Duration(value) => Some(Cow::Owned(value.to_string())),
+            ICalendarValue::RecurrenceRule(value) => Some(Cow::Owned(value.to_string())),
+            ICalendarValue::Period(value) => Some(Cow::Owned(value.to_string())),
+            ICalendarValue::PartialDateTime(value) => {
+                let value_type = match (value.has_date(), value.has_time()) {
+                    (true, true) => ICalendarValueType::DateTime,
+                    (true, false) => ICalendarValueType::Date,
+                    (false, true) => ICalendarValueType::Time,
+                    (false, false) => ICalendarValueType::UtcOffset,
+                };
+                let mut text = String::with_capacity(20);
+                value
+                    .format_as_ical(&mut text, &value_type)
+                    .ok()
+                    .map(|_| Cow::Owned(text))
+            }
+            value => value.as_text().map(Cow::Borrowed),
+        }
+    }
+}
+
+impl ValueText for ArchivedICalendarValue {
+    fn value_text(&self) -> Option<Cow<'_, str>> {
+        match self {
+            ArchivedICalendarValue::Integer(value) => {
+                Some(Cow::Owned(value.to_native().to_string()))
+            }
+            ArchivedICalendarValue::Float(value) => Some(Cow::Owned(value.to_native().to_string())),
+            ArchivedICalendarValue::Boolean(value) => {
+                Some(Cow::Borrowed(if *value { "TRUE" } else { "FALSE" }))
+            }
+            ArchivedICalendarValue::Duration(value) => Some(Cow::Owned(value.to_string())),
+            ArchivedICalendarValue::RecurrenceRule(value) => {
+                Some(Cow::Owned(value.as_ref().to_string()))
+            }
+            ArchivedICalendarValue::Period(value) => Some(Cow::Owned(value.to_string())),
+            ArchivedICalendarValue::PartialDateTime(value) => {
+                let value_type = match (value.has_date(), value.has_time()) {
+                    (true, true) => ArchivedICalendarValueType::DateTime,
+                    (true, false) => ArchivedICalendarValueType::Date,
+                    (false, true) => ArchivedICalendarValueType::Time,
+                    (false, false) => ArchivedICalendarValueType::UtcOffset,
+                };
+                let mut text = String::with_capacity(20);
+                value
+                    .format_as_ical(&mut text, &value_type)
+                    .ok()
+                    .map(|_| Cow::Owned(text))
+            }
+            value => value.as_text().map(Cow::Borrowed),
+        }
+    }
+}
+
+impl AlarmRepetition {
+    fn new(count: Option<i64>, interval: Option<i64>) -> Self {
+        match (
+            count.and_then(|count| u64::try_from(count).ok()),
+            interval.and_then(|interval| u64::try_from(interval).ok()),
+        ) {
+            (Some(count), Some(interval)) if count > 0 && interval > 0 => {
+                AlarmRepetition { count, interval }
+            }
+            _ => AlarmRepetition::default(),
+        }
+    }
+
+    pub fn span(&self) -> i64 {
+        i64::try_from(self.count.saturating_mul(self.interval)).unwrap_or(i64::MAX)
+    }
+
+    pub fn triggers_in(&self, first: i64, range: &TimeRange) -> bool {
+        if first >= range.start {
+            first < range.end
+        } else if self.count == 0 {
+            false
+        } else {
+            let steps = range.start.abs_diff(first).div_ceil(self.interval);
+            steps <= self.count
+                && i128::from(first) + i128::from(steps) * i128::from(self.interval)
+                    < i128::from(range.end)
+        }
     }
 }
 
 impl AlarmView for Alarm {
+    fn id(&self) -> u32 {
+        u32::from(self.id)
+    }
+
     fn parent_id(&self) -> u32 {
-        self.parent_id as u32
+        u32::from(self.parent_id)
+    }
+
+    fn delta(&self) -> AlarmDelta {
+        self.delta.clone()
     }
 
     fn timestamp(&self, expansion: &CalendarEventExpansion, default_tz: Tz) -> Option<i64> {
@@ -319,8 +526,16 @@ impl AlarmView for Alarm {
 }
 
 impl AlarmView for ArchivedAlarm {
+    fn id(&self) -> u32 {
+        u32::from(self.id.to_native())
+    }
+
     fn parent_id(&self) -> u32 {
-        self.parent_id.to_native() as u32
+        u32::from(self.parent_id.to_native())
+    }
+
+    fn delta(&self) -> AlarmDelta {
+        AlarmDelta::from(&self.delta)
     }
 
     fn timestamp(&self, expansion: &CalendarEventExpansion, default_tz: Tz) -> Option<i64> {

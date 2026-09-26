@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::schema::{
-    Namespace, Namespaces,
-    response::{BaseCondition, CalCondition, CardCondition, Condition, ErrorResponse},
+use crate::{
+    responses::XmlEscape,
+    schema::{
+        Namespace, Namespaces,
+        response::{BaseCondition, CalCondition, CardCondition, Condition, ErrorResponse},
+    },
 };
 use std::fmt::Display;
 
@@ -106,9 +109,11 @@ impl Display for CalCondition {
                 write!(f, "<A:initialize-calendar-collection/>")
             }
             CalCondition::SupportedCalendarData => write!(f, "<A:supported-calendar-data/>"),
-            CalCondition::SupportedFilter(_) => write!(f, "<A:supported-filter/>"),
+            CalCondition::SupportedFilter => write!(f, "<A:supported-filter/>"),
             CalCondition::SupportedCollation(c) => {
-                write!(f, "<A:supported-collation>{c}</A:supported-collation>")
+                write!(f, "<A:supported-collation>")?;
+                c.write_escaped_to(f)?;
+                write!(f, "</A:supported-collation>")
             }
             CalCondition::MinDateTime => write!(f, "<A:min-date-time/>"),
             CalCondition::MaxDateTime => write!(f, "<A:max-date-time/>"),
@@ -150,9 +155,11 @@ impl Display for CardCondition {
             CardCondition::SupportedAddressDataConversion => {
                 write!(f, "<B:supported-address-data-conversion/>")
             }
-            CardCondition::SupportedFilter(_) => write!(f, "<B:supported-filter/>"),
+            CardCondition::SupportedFilter => write!(f, "<B:supported-filter/>"),
             CardCondition::SupportedCollation(c) => {
-                write!(f, "<B:supported-collation>{c}</B:supported-collation>")
+                write!(f, "<B:supported-collation>")?;
+                c.write_escaped_to(f)?;
+                write!(f, "</B:supported-collation>")
             }
             CardCondition::ValidAddressData => write!(f, "<B:valid-address-data/>"),
             CardCondition::NoUidConflict(uid) => {

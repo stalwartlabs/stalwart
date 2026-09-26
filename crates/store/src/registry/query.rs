@@ -67,9 +67,9 @@ impl RegistryStore {
                             matches = result;
                         } else {
                             matches.list.intersect(&result.list);
-                            if !matches.list.has_items() {
-                                break;
-                            }
+                        }
+                        if !matches.list.has_items() {
+                            break;
                         }
                     }
 

@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    DavError, DavMethod, DavResourceName,
+    DavError, DavErrorCondition, DavMethod, DavResourceName,
     calendar::{
         copy_move::CalendarCopyMoveRequestHandler, delete::CalendarDeleteRequestHandler,
         freebusy::CalendarFreebusyRequestHandler, get::CalendarGetRequestHandler,
@@ -37,13 +37,14 @@ use common::{Server, auth::AccessToken, storage::dav::canonical_dav_resource_uri
 use compact_str::{CompactString, ToCompactString};
 use dav_proto::{
     RequestHeaders,
-    parser::{DavParser, header::strip_query_and_fragment, tokenizer::Tokenizer},
+    parser::{DavParser, FilterError, header::strip_query_and_fragment, tokenizer::Tokenizer},
     schema::{
         Namespace,
-        property::WebDavProperty,
+        property::{DavProperty, PrincipalProperty, WebDavProperty},
         request::{Acl, LockInfo, MkCol, PropFind, PropertyUpdate, Report},
         response::{
-            BaseCondition, ErrorResponse, PrincipalSearchProperty, PrincipalSearchPropertySet,
+            BaseCondition, CalCondition, CardCondition, ErrorResponse, PrincipalSearchProperty,
+            PrincipalSearchPropertySet,
         },
     },
 };
@@ -211,10 +212,19 @@ impl DavRequestDispatcher for Server {
                             .assert_has_permission(Permission::DavPrincipalSearchPropSet)?;
 
                         Ok(HttpResponse::new(StatusCode::OK).with_xml_body(
-                            PrincipalSearchPropertySet::new(vec![PrincipalSearchProperty::new(
-                                WebDavProperty::DisplayName,
-                                "Account or Group name",
-                            )])
+                            PrincipalSearchPropertySet::new(vec![
+                                PrincipalSearchProperty::new(
+                                    WebDavProperty::DisplayName,
+                                    "Account or Group name",
+                                ),
+                                PrincipalSearchProperty::new(
+                                    DavProperty::Principal(
+                                        PrincipalProperty::CalendarUserAddressSet,
+                                    ),
+                                    "Calendar user address",
+                                ),
+                            ])
+                            .with_namespace(Namespace::CalDav)
                             .to_string(),
                         ))
                     } else {
@@ -255,7 +265,15 @@ impl DavRequestDispatcher for Server {
 
                     self.handle_dav_query(
                         &access_token,
-                        DavQuery::multiget(report, Collection::Calendar, headers),
+                        DavQuery::multiget(
+                            report,
+                            if resource == DavResourceName::Scheduling {
+                                Collection::CalendarEventNotification
+                            } else {
+                                Collection::Calendar
+                            },
+                            headers,
+                        ),
                     )
                     .await
                 }
@@ -751,7 +769,33 @@ impl DavRequestHandler for Server {
 
 impl From<dav_proto::parser::Error> for DavError {
     fn from(err: dav_proto::parser::Error) -> Self {
-        DavError::Parse(err)
+        match err {
+            dav_proto::parser::Error::Filter(FilterError::Invalid(Namespace::CalDav)) => {
+                DavErrorCondition::new(StatusCode::FORBIDDEN, CalCondition::ValidFilter).into()
+            }
+            dav_proto::parser::Error::Filter(FilterError::UnsupportedCollation(
+                Namespace::CalDav,
+                collation,
+            )) => DavErrorCondition::new(
+                StatusCode::FORBIDDEN,
+                CalCondition::SupportedCollation(collation),
+            )
+            .into(),
+            dav_proto::parser::Error::Filter(FilterError::UnsupportedCollation(_, collation)) => {
+                DavErrorCondition::new(
+                    StatusCode::FORBIDDEN,
+                    CardCondition::SupportedCollation(collation),
+                )
+                .into()
+            }
+            dav_proto::parser::Error::Filter(FilterError::TooComplex(Namespace::CalDav)) => {
+                DavErrorCondition::new(StatusCode::FORBIDDEN, CalCondition::SupportedFilter).into()
+            }
+            dav_proto::parser::Error::Filter(FilterError::TooComplex(_)) => {
+                DavErrorCondition::new(StatusCode::FORBIDDEN, CardCondition::SupportedFilter).into()
+            }
+            err => DavError::Parse(err),
+        }
     }
 }
 

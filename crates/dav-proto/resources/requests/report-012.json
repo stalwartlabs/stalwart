@@ -23,7 +23,17 @@
       }
     ]
   },
-  "filters": [],
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": []
+      }
+    }
+  },
   "timezone": {
     "type": "None"
   }

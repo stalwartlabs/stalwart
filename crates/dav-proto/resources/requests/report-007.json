@@ -23,49 +23,63 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Property",
-      "comp": [
-        "VCalendar",
-        "VEvent"
-      ],
-      "prop": {
-        "type": "Attendee"
-      },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "mailto:lisa@example.com",
-          "collation": "AsciiCasemap",
-          "negate": false
-        }
-      }
-    },
-    {
-      "type": "Parameter",
-      "comp": [
-        "VCalendar",
-        "VEvent"
-      ],
-      "prop": {
-        "type": "Attendee"
-      },
-      "param": "Partstat",
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "NEEDS-ACTION",
-          "collation": "AsciiCasemap",
-          "negate": false
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Attendee"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "Text",
+                          "data": {
+                            "match_type": "Contains",
+                            "value": "mailto:lisa@example.com",
+                            "collation": "AsciiCasemap",
+                            "negate": false
+                          }
+                        },
+                        "param_filters": [
+                          {
+                            "name": "Partstat",
+                            "test": {
+                              "type": "IsDefined",
+                              "data": {
+                                "match_type": "Contains",
+                                "value": "NEEDS-ACTION",
+                                "collation": "AsciiCasemap",
+                                "negate": false
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

@@ -406,7 +406,9 @@ impl ArchivedContactCardContent {
 
         for entry in self.card.entries.iter() {
             let (is_text, is_keyword, field) = match entry.name {
-                ArchivedVCardProperty::N => (false, false, ContactSearchField::Name),
+                ArchivedVCardProperty::N | ArchivedVCardProperty::Fn => {
+                    (false, false, ContactSearchField::Name)
+                }
                 ArchivedVCardProperty::Nickname => (false, false, ContactSearchField::Nickname),
                 ArchivedVCardProperty::Org => (false, false, ContactSearchField::Organization),
                 ArchivedVCardProperty::Email => (false, false, ContactSearchField::Email),

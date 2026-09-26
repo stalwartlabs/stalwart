@@ -23,28 +23,50 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Property",
-      "comp": [
-        "VCalendar",
-        "VEvent"
-      ],
-      "prop": {
-        "type": "Uid"
-      },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "DC6C50A017428C5216A2F1CD@example.com",
-          "collation": "Octet",
-          "negate": false
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Uid"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "Text",
+                          "data": {
+                            "match_type": "Contains",
+                            "value": "DC6C50A017428C5216A2F1CD@example.com",
+                            "collation": "Octet",
+                            "negate": false
+                          }
+                        },
+                        "param_filters": []
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

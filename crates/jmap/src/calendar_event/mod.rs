@@ -42,15 +42,6 @@ pub mod set;
 pub mod user;
 pub mod validate;
 
-/*
-
-TODO: Not yet implemented:
-
-- CalendarEvent
-    - hideAttendees in outbound scheduling messages
-
-*/
-
 pub trait CalendarSyntheticId {
     fn new(key: RecurrenceKey, document_id: u32) -> Self;
 

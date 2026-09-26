@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop>
+    <D:getetag/>
+  </D:prop>
+  <C:filter>
+    <C:comp-filter name="VEVENT">
+      <C:prop-filter name="X-CUSTOM-PROP">
+        <C:text-match negate-condition="yes" collation="default">secret</C:text-match>
+      </C:prop-filter>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>

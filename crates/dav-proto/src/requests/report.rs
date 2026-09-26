@@ -6,30 +6,26 @@
 
 use crate::{
     Depth,
-    parser::{
-        DavParser, RawElement, Token, XmlValueParser, property::TimeRangeFromRaw,
-        tokenizer::Tokenizer,
-    },
+    parser::{DavParser, Token, XmlValueParser, property::TimeRangeFromRaw, tokenizer::Tokenizer},
     schema::{
-        Attribute, Collation, Element, MatchType, NamedElement, Namespace,
+        Attribute, Element, NamedElement, Namespace,
         property::DavProperty,
         request::{
-            AclPrincipalPropSet, AddressbookQuery, CalendarQuery, ExpandProperty,
-            ExpandPropertyItem, Filter, FilterOp, FreeBusyQuery, MultiGet, PrincipalMatch,
-            PrincipalPropertySearch, PropFind, Report, SyncCollection, TextMatch, Timezone,
-            VCardPropertyWithGroup,
+            AclPrincipalPropSet, AddressbookQuery, CalendarQuery, CardFilter, CompFilter,
+            ExpandProperty, ExpandPropertyItem, FreeBusyQuery, MultiGet, PrincipalMatch,
+            PrincipalPropertySearch, PropFind, Report, SyncCollection, Timezone,
         },
     },
-};
-use calcard::{
-    icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
-    vcard::VCardParameterName,
 };
 use types::{TimeRange, dead_property::DeadElementTag};
 
 impl DavParser for Report {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
-        match stream.unwrap_named_element()? {
+        let (name, principal_search_test) = match stream.token()? {
+            Token::ElementStart { name, raw } => (name, raw.principal_search_test()?),
+            token => return Err(token.into_unexpected()),
+        };
+        match name {
             NamedElement {
                 ns: Namespace::CalDav,
                 element: Element::CalendarQuery,
@@ -65,7 +61,10 @@ impl DavParser for Report {
             NamedElement {
                 ns: Namespace::Dav,
                 element: Element::PrincipalPropertySearch,
-            } => PrincipalPropertySearch::parse(stream).map(Report::PrincipalPropertySearch),
+            } => PrincipalPropertySearch::parse(stream).map(|mut search| {
+                search.test = principal_search_test;
+                Report::PrincipalPropertySearch(search)
+            }),
             NamedElement {
                 ns: Namespace::Dav,
                 element: Element::PrincipalSearchPropertySet,
@@ -85,158 +84,56 @@ impl DavParser for CalendarQuery {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
         let mut cq = CalendarQuery {
             properties: PropFind::AllProp(vec![]),
-            filters: vec![],
+            filter: None,
             timezone: Timezone::None,
         };
-        let mut depth = 1;
-        let mut components = Vec::with_capacity(3);
-        let mut property = None;
-        let mut parameter = None;
 
         loop {
             match stream.token()? {
-                Token::ElementStart { name, raw } => match name {
+                Token::ElementStart { name, .. } => match name {
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Propname,
-                    } if depth == 1 => {
+                    } => {
                         cq.properties = PropFind::PropName;
                         stream.expect_element_end()?;
                     }
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Allprop,
-                    } if depth == 1 => {
+                    } => {
                         stream.expect_element_end()?;
                     }
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Prop,
-                    } if depth == 1 => {
+                    } => {
                         cq.properties = PropFind::Prop(stream.collect_properties(Vec::new())?);
                     }
                     NamedElement {
                         ns: Namespace::CalDav,
                         element: Element::Filter,
-                    } if depth == 1 => {
-                        depth += 1;
+                    } if cq.filter.is_none() => {
+                        cq.filter = CompFilter::parse_filter(stream)?;
                     }
                     NamedElement {
                         ns: Namespace::CalDav,
                         element: Element::Timezone,
-                    } if depth == 1 => {
+                    } => {
                         cq.timezone =
                             Timezone::Name(stream.collect_string_value()?.unwrap_or_default());
                     }
                     NamedElement {
                         ns: Namespace::CalDav,
                         element: Element::TimezoneId,
-                    } if depth == 1 => {
+                    } => {
                         cq.timezone =
                             Timezone::Id(stream.collect_string_value()?.unwrap_or_default());
-                    }
-                    NamedElement {
-                        ns: Namespace::CalDav,
-                        element: Element::CompFilter,
-                    } if depth >= 2 => {
-                        for attribute in raw.attributes::<ICalendarComponentType>() {
-                            if let Attribute::Name(name) = attribute? {
-                                components.push((name, depth));
-                            }
-                        }
-                        depth += 1;
-                    }
-
-                    NamedElement {
-                        ns: Namespace::CalDav,
-                        element: Element::PropFilter,
-                    } if depth >= 3 => {
-                        for attribute in raw.attributes::<ICalendarProperty>() {
-                            if let Attribute::Name(name) = attribute? {
-                                property = Some(name);
-                            }
-                        }
-                        depth += 1;
-                    }
-                    NamedElement {
-                        ns: Namespace::CalDav,
-                        element: Element::ParamFilter,
-                    } if depth >= 4 => {
-                        for attribute in raw.attributes::<ICalendarParameterName>() {
-                            if let Attribute::Name(name) = attribute? {
-                                parameter = Some(name);
-                            }
-                        }
-                        depth += 1;
-                    }
-                    NamedElement {
-                        ns: Namespace::CalDav,
-                        element: Element::IsNotDefined,
-                    } => {
-                        stream.expect_element_end()?;
-                        if let Some(filter) = Filter::from_parts(
-                            components.iter().map(|(c, _)| c.clone()).collect(),
-                            property.clone(),
-                            parameter.clone(),
-                            FilterOp::Undefined,
-                        ) {
-                            cq.filters.push(filter);
-                        }
-                    }
-                    NamedElement {
-                        ns: Namespace::CalDav,
-                        element: Element::TextMatch,
-                    } => {
-                        let mut tm = TextMatch::parse(raw)?;
-                        tm.value = stream.collect_string_value()?.unwrap_or_default();
-                        if let Some(filter) = Filter::from_parts(
-                            components.iter().map(|(c, _)| c.clone()).collect(),
-                            property.clone(),
-                            parameter.clone(),
-                            FilterOp::TextMatch(tm),
-                        ) {
-                            cq.filters.push(filter);
-                        }
-                    }
-                    NamedElement {
-                        ns: Namespace::CalDav,
-                        element: Element::TimeRange,
-                    } => {
-                        let range = TimeRange::from_raw(&raw)?;
-                        stream.expect_element_end()?;
-                        if let Some(filter) = range.and_then(|range| {
-                            Filter::from_parts(
-                                components.iter().map(|(c, _)| c.clone()).collect(),
-                                property.clone(),
-                                parameter.clone(),
-                                FilterOp::TimeRange(range),
-                            )
-                        }) {
-                            cq.filters.push(filter);
-                        }
                     }
                     name => return Err(name.into_unexpected()),
                 },
                 Token::ElementEnd => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                    if matches!(components.last(), Some((_, d)) if *d == depth) {
-                        if components.len() > 1
-                            && cq
-                                .filters
-                                .last()
-                                .and_then(|c| c.components())
-                                .is_none_or(|c| c.len() < components.len())
-                        {
-                            cq.filters.push(Filter::Component {
-                                comp: components.iter().map(|(c, _)| c.clone()).collect(),
-                                op: FilterOp::Exists,
-                            });
-                        }
-                        components.pop();
-                    }
+                    break;
                 }
                 Token::UnknownElement(_) => {
                     stream.seek_element_end()?;
@@ -253,12 +150,10 @@ impl DavParser for AddressbookQuery {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
         let mut aq = AddressbookQuery {
             properties: PropFind::AllProp(vec![]),
-            filters: vec![],
+            filter: CardFilter::default(),
             limit: None,
         };
-        let mut depth = 1;
-        let mut property = None;
-        let mut parameter = None;
+        let mut has_filter = false;
 
         loop {
             match stream.token()? {
@@ -266,110 +161,44 @@ impl DavParser for AddressbookQuery {
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Propname,
-                    } if depth == 1 => {
+                    } => {
                         aq.properties = PropFind::PropName;
                         stream.expect_element_end()?;
                     }
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Allprop,
-                    } if depth == 1 => {
+                    } => {
                         stream.expect_element_end()?;
                     }
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Prop,
-                    } if depth == 1 => {
+                    } => {
                         aq.properties = PropFind::Prop(stream.collect_properties(Vec::new())?);
                     }
                     NamedElement {
                         ns: Namespace::CardDav,
                         element: Element::Filter,
-                    } if depth == 1 => {
-                        if let Some(filter) = Filter::parse(raw)? {
-                            aq.filters.push(filter);
-                        }
-                        depth += 1;
+                    } if !has_filter => {
+                        let test = raw.filter_test()?;
+                        aq.filter = CardFilter::parse_filter(test, stream)?;
+                        has_filter = true;
                     }
                     NamedElement {
                         ns: Namespace::CardDav,
                         element: Element::Limit,
-                    } if depth == 1 => {
+                    } => {
                         stream.expect_named_element(NamedElement::carddav(Element::Nresults))?;
                         if let Some(Ok(limit)) = stream.parse_value::<u32>()? {
                             aq.limit = limit.into();
                         }
                         stream.expect_element_end()?;
                     }
-                    NamedElement {
-                        ns: Namespace::CardDav,
-                        element: Element::PropFilter,
-                    } if depth == 2 => {
-                        let mut filter = None;
-                        for attribute in raw.attributes::<VCardPropertyWithGroup>() {
-                            match attribute? {
-                                Attribute::Name(name) => {
-                                    property = Some(name);
-                                }
-                                Attribute::TestAllOf(all_of) => {
-                                    filter =
-                                        (if all_of { Filter::AllOf } else { Filter::AnyOf }).into();
-                                }
-                                _ => {}
-                            }
-                        }
-                        if let Some(filter) = filter {
-                            aq.filters.push(filter);
-                        }
-                        depth += 1;
-                    }
-                    NamedElement {
-                        ns: Namespace::CardDav,
-                        element: Element::ParamFilter,
-                    } if depth == 3 => {
-                        for attribute in raw.attributes::<VCardParameterName>() {
-                            if let Attribute::Name(name) = attribute? {
-                                parameter = Some(name);
-                            }
-                        }
-                        depth += 1;
-                    }
-                    NamedElement {
-                        ns: Namespace::CardDav,
-                        element: Element::IsNotDefined,
-                    } => {
-                        stream.expect_element_end()?;
-                        if let Some(filter) = Filter::from_parts(
-                            (),
-                            property.clone(),
-                            parameter.clone(),
-                            FilterOp::Undefined,
-                        ) {
-                            aq.filters.push(filter);
-                        }
-                    }
-                    NamedElement {
-                        ns: Namespace::CardDav,
-                        element: Element::TextMatch,
-                    } => {
-                        let mut tm = TextMatch::parse(raw)?;
-                        tm.value = stream.collect_string_value()?.unwrap_or_default();
-                        if let Some(filter) = Filter::from_parts(
-                            (),
-                            property.clone(),
-                            parameter.clone(),
-                            FilterOp::TextMatch(tm),
-                        ) {
-                            aq.filters.push(filter);
-                        }
-                    }
                     name => return Err(name.into_unexpected()),
                 },
                 Token::ElementEnd => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
+                    break;
                 }
                 Token::UnknownElement(_) => {
                     stream.seek_element_end()?;
@@ -564,69 +393,6 @@ impl DavParser for ExpandProperty {
         }
 
         Ok(ep)
-    }
-}
-
-impl TextMatch {
-    fn parse(raw: RawElement<'_>) -> crate::parser::Result<Self> {
-        let mut tm = TextMatch {
-            match_type: MatchType::Contains,
-            value: String::new(),
-            collation: Collation::AsciiCasemap,
-            negate: false,
-        };
-
-        for attribute in raw.attributes::<String>() {
-            match attribute? {
-                Attribute::MatchType(match_type) => {
-                    tm.match_type = match_type;
-                }
-                Attribute::NegateCondition(negate) => {
-                    tm.negate = negate;
-                }
-                Attribute::Collation(collation) => {
-                    tm.collation = collation;
-                }
-                _ => {}
-            }
-        }
-
-        Ok(tm)
-    }
-}
-
-impl<A, B, C> Filter<A, B, C> {
-    fn from_parts(comp: A, prop: Option<B>, param: Option<C>, op: FilterOp) -> Option<Self> {
-        match (prop, param) {
-            (Some(prop), Some(param)) => Some(Filter::Parameter {
-                comp,
-                prop,
-                param,
-                op,
-            }),
-            (Some(prop), None) => Some(Filter::Property { comp, prop, op }),
-            (None, None) => Some(Filter::Component { comp, op }),
-            _ => None,
-        }
-    }
-
-    fn components(&self) -> Option<&A> {
-        match self {
-            Filter::Component { comp, .. } => Some(comp),
-            Filter::Property { comp, .. } => Some(comp),
-            Filter::Parameter { comp, .. } => Some(comp),
-            _ => None,
-        }
-    }
-
-    fn parse(raw: RawElement<'_>) -> crate::parser::Result<Option<Self>> {
-        for attribute in raw.attributes::<String>() {
-            if let Attribute::TestAllOf(all_of) = attribute? {
-                return Ok(Some(if all_of { Filter::AllOf } else { Filter::AnyOf }));
-            }
-        }
-
-        Ok(None)
     }
 }
 

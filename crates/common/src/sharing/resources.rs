@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{GroupwareResources, NO_ID, auth::AccessToken};
+use crate::{GroupwareResources, NO_ID, auth::AccessToken, storage::dav::CachedUid};
 use store::roaring::RoaringBitmap;
 use types::acl::Acl;
 use utils::map::bitmap::Bitmap;
@@ -105,6 +105,7 @@ impl GroupwareResources {
     }
 
     pub fn uid_matches(&self, uid: &str) -> RoaringBitmap {
+        let uid = uid.cached_uid();
         self.resources
             .iter()
             .filter(|&resource| resource.uid() == Some(uid))

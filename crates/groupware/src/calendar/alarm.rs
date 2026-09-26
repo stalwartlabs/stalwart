@@ -1136,7 +1136,7 @@ impl AlarmDelta {
         }
     }
 
-    fn fixed_timestamp(&self, default_tz: Tz) -> Option<i64> {
+    pub fn fixed_timestamp(&self, default_tz: Tz) -> Option<i64> {
         match self {
             AlarmDelta::FixedUtc(timestamp) => Some(*timestamp),
             AlarmDelta::FixedFloating(timestamp) => resolve_local(default_tz, *timestamp),

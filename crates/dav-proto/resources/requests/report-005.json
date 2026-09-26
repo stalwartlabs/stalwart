@@ -23,23 +23,44 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Component",
-      "comp": [
-        "VCalendar",
-        "VTodo",
-        "VAlarm"
-      ],
-      "op": {
-        "type": "TimeRange",
-        "data": {
-          "start": 1136541600,
-          "end": 1136628000
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VTodo",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [],
+                "comp_filters": [
+                  {
+                    "name": "VAlarm",
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "time_range": {
+                          "start": 1136541600,
+                          "end": 1136628000
+                        },
+                        "prop_filters": [],
+                        "comp_filters": []
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

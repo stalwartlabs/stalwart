@@ -1,0 +1,62 @@
+{
+  "type": "CalendarQuery",
+  "properties": {
+    "type": "Prop",
+    "data": [
+      {
+        "type": "WebDav",
+        "data": {
+          "type": "GetETag"
+        }
+      }
+    ]
+  },
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Other",
+                      "data": "X-CUSTOM-PROP"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "Text",
+                          "data": {
+                            "match_type": "Contains",
+                            "value": "secret",
+                            "collation": "AsciiCasemap",
+                            "negate": true
+                          }
+                        },
+                        "param_filters": []
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "timezone": {
+    "type": "None"
+  }
+}

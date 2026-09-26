@@ -21,6 +21,22 @@ use std::borrow::Cow;
 
 pub(crate) const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;
 pub const CONTAINER_FLAG: u32 = 1 << 31;
+pub const MAX_CACHED_UID_LEN: usize = 255;
+
+pub trait CachedUid {
+    fn cached_uid(&self) -> &str;
+}
+
+impl CachedUid for str {
+    fn cached_uid(&self) -> &str {
+        if self.len() <= MAX_CACHED_UID_LEN {
+            self
+        } else {
+            self.get(..self.ceil_char_boundary(MAX_CACHED_UID_LEN))
+                .unwrap_or(self)
+        }
+    }
+}
 pub const MAX_FILE_NODE_DEPTH: usize = 64;
 
 pub const RFC_3986: &AsciiSet = &CONTROLS

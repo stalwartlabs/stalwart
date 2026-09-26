@@ -11,22 +11,32 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Component",
-      "comp": [
-        "VCalendar",
-        "VEvent"
-      ],
-      "op": {
-        "type": "TimeRange",
-        "data": {
-          "start": 1094083200,
-          "end": 1094169600
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": {
+                  "start": 1094083200,
+                  "end": 1094169600
+                },
+                "prop_filters": [],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

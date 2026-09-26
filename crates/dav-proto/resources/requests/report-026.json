@@ -1,0 +1,113 @@
+{
+  "type": "CalendarQuery",
+  "properties": {
+    "type": "Prop",
+    "data": [
+      {
+        "type": "WebDav",
+        "data": {
+          "type": "GetETag"
+        }
+      }
+    ]
+  },
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Attendee"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": null,
+                        "param_filters": [
+                          {
+                            "name": "Partstat",
+                            "test": {
+                              "type": "IsDefined",
+                              "data": {
+                                "match_type": "Contains",
+                                "value": "NEEDS-ACTION",
+                                "collation": "AsciiCasemap",
+                                "negate": false
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "name": {
+                      "type": "Summary"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "Text",
+                          "data": {
+                            "match_type": "Contains",
+                            "value": "Board",
+                            "collation": "Octet",
+                            "negate": false
+                          }
+                        },
+                        "param_filters": []
+                      }
+                    }
+                  },
+                  {
+                    "name": {
+                      "type": "Location"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": null,
+                        "param_filters": []
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": [
+                  {
+                    "name": "VAlarm",
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "time_range": {
+                          "start": 1136332800,
+                          "end": 1136419200
+                        },
+                        "prop_filters": [],
+                        "comp_filters": []
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "timezone": {
+    "type": "None"
+  }
+}

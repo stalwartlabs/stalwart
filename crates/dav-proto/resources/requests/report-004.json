@@ -20,22 +20,32 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Component",
-      "comp": [
-        "VCalendar",
-        "VFreebusy"
-      ],
-      "op": {
-        "type": "TimeRange",
-        "data": {
-          "start": 1136160000,
-          "end": 1136246400
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VFreebusy",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": {
+                  "start": 1136160000,
+                  "end": 1136246400
+                },
+                "prop_filters": [],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

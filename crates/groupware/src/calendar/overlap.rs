@@ -70,6 +70,18 @@ impl CalendarEventData {
             component.component_type.is_todo() && TodoDates::of(&component.entries).is_unbounded()
         })
     }
+
+    pub fn undated_todos(&self) -> impl Iterator<Item = u32> + '_ {
+        self.event
+            .components
+            .iter()
+            .zip(0u32..)
+            .filter(|(component, _)| {
+                component.component_type.is_todo()
+                    && TodoDates::of(&component.entries).condition().is_none()
+            })
+            .map(|(_, comp_id)| comp_id)
+    }
 }
 
 impl ArchivedCalendarEventData {

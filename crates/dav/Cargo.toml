@@ -9,6 +9,7 @@ common = { path = "../common" }
 store = { path = "../store" }
 utils = { path = "../utils" }
 groupware = { path = "../groupware" }
+nlp = { path = "../nlp" }
 directory = { path = "../directory" }
 registry = { path = "../registry" }
 http_proto = { path = "../http-proto" }

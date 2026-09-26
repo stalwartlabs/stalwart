@@ -56,27 +56,33 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Property",
-      "comp": null,
-      "prop": {
+  "filter": {
+    "test": "AnyOf",
+    "prop_filters": [
+      {
         "name": {
-          "type": "Nickname"
+          "name": {
+            "type": "Nickname"
+          },
+          "group": null
         },
-        "group": null
-      },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Equals",
-          "value": "me",
-          "collation": "UnicodeCasemap",
-          "negate": false
+        "test": {
+          "type": "IsDefined",
+          "data": {
+            "test": "AnyOf",
+            "text_matches": [
+              {
+                "match_type": "Equals",
+                "value": "me",
+                "collation": "UnicodeCasemap",
+                "negate": false
+              }
+            ],
+            "param_filters": []
+          }
         }
       }
-    }
-  ],
+    ]
+  },
   "limit": null
 }

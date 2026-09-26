@@ -367,6 +367,7 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                         .with_values([
                             "A:supported-collation:i;unicode-casemap",
                             "A:supported-collation:i;ascii-casemap",
+                            "A:supported-collation:i;octet",
                         ]);
                     properties
                         .get(DavProperty::CalDav(CalDavProperty::MinDateTime))
@@ -407,6 +408,7 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                             .with_values([
                                 "B:supported-collation:i;unicode-casemap",
                                 "B:supported-collation:i;ascii-casemap",
+                                "B:supported-collation:i;octet",
                             ]);
                         properties
                             .get(DavProperty::CardDav(CardDavProperty::MaxResourceSize))

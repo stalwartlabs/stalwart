@@ -99,6 +99,13 @@ impl TimeRange {
         self.start < end && self.end > start
     }
 
+    pub fn union(self, other: TimeRange) -> Self {
+        TimeRange {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
+
     pub fn touches(&self, start: i64, end: i64) -> bool {
         self.start <= end && self.end >= start
     }

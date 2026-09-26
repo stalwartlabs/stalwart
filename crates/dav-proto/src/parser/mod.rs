@@ -22,6 +22,14 @@ pub mod tokenizer;
 pub enum Error {
     Xml(Box<quick_xml::Error>),
     UnexpectedToken(Box<UnexpectedToken>),
+    Filter(FilterError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilterError {
+    Invalid(Namespace),
+    UnsupportedCollation(Namespace, String),
+    TooComplex(Namespace),
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +184,18 @@ impl PartialEq for Token<'_> {
     }
 }
 
+impl From<FilterError> for Error {
+    fn from(err: FilterError) -> Self {
+        Error::Filter(err)
+    }
+}
+
+impl Error {
+    pub fn invalid_filter(namespace: Namespace) -> Self {
+        Error::Filter(FilterError::Invalid(namespace))
+    }
+}
+
 impl NamedElement {
     pub fn into_unexpected(self) -> Error {
         Error::UnexpectedToken(Box::new(UnexpectedToken {
@@ -205,6 +225,11 @@ impl Display for Error {
                 }
                 Ok(())
             }
+            Error::Filter(FilterError::Invalid(_)) => write!(f, "Invalid filter"),
+            Error::Filter(FilterError::UnsupportedCollation(_, collation)) => {
+                write!(f, "Unsupported collation: {collation}")
+            }
+            Error::Filter(FilterError::TooComplex(_)) => write!(f, "Filter is too complex"),
         }
     }
 }

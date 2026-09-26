@@ -316,30 +316,59 @@ impl ArchivedCalendarEventData {
         limit: TimeRange,
         rule: OverlapRule,
     ) -> Option<Vec<CalendarEventExpansion>> {
-        let mut expansion = Vec::with_capacity(self.time_ranges.len());
-        let base_offset = self.base_offset.to_native();
+        self.expand_instances(default_tz, limit, rule)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TimeRangeView<'x> {
+    id: u16,
+    start_tz: u16,
+    end_tz: u16,
+    duration: i32,
+    flags: u8,
+    instances: &'x [u8],
+}
+
+trait ExpansionSource {
+    type Component: ComponentRecurrenceId;
+
+    fn base_offset(&self) -> i64;
+
+    fn time_ranges(&self) -> impl Iterator<Item = TimeRangeView<'_>> + Clone;
+
+    fn component(&self, comp_id: u32) -> Option<&Self::Component>;
+
+    fn expand_instances(
+        &self,
+        default_tz: Tz,
+        limit: TimeRange,
+        rule: OverlapRule,
+    ) -> Option<Vec<CalendarEventExpansion>> {
+        let time_ranges = self.time_ranges();
+        let mut expansion = Vec::with_capacity(time_ranges.size_hint().0);
+        let base_offset = self.base_offset();
         let mut shifts = ThisAndFutureShifts::default();
 
-        'outer: for (range_index, range) in self.time_ranges.iter().enumerate() {
-            let instances = range.instances.as_ref();
+        'outer: for (range_index, range) in time_ranges.clone().enumerate() {
+            let instances = range.instances;
             let (offset_or_count, bytes_read) = instances.read_leb128::<u32>()?;
 
-            let comp_id = range.id.to_native() as u32;
-            let component = self.event.components.get(comp_id as usize)?;
-            let duration = range.duration.to_native() as i64;
+            let comp_id = range.id as u32;
+            let component = self.component(comp_id)?;
+            let duration = range.duration as i64;
             let flags = RangeFlags::from_bits(range.flags);
             let condition = flags.condition();
-            let component_tz = Tz::from_id(range.start_tz.to_native())?;
-            let mut own_recurrence_id = self
-                .time_ranges
-                .iter()
+            let component_tz = Tz::from_id(range.start_tz)?;
+            let mut own_recurrence_id = time_ranges
+                .clone()
                 .take(range_index)
                 .all(|prior| prior.id != range.id)
                 .then(|| component.recurrence_id(component_tz))
                 .flatten();
             let this_and_future_tz = component.this_and_future_tz(component_tz);
             let mut start_tz = component_tz;
-            let mut end_tz = Tz::from_id(range.end_tz.to_native())?;
+            let mut end_tz = Tz::from_id(range.end_tz)?;
 
             if start_tz.is_floating() && !default_tz.is_floating() {
                 start_tz = default_tz;
@@ -428,7 +457,62 @@ impl ArchivedCalendarEventData {
     }
 }
 
+impl ExpansionSource for ArchivedCalendarEventData {
+    type Component = ArchivedICalendarComponent;
+
+    fn base_offset(&self) -> i64 {
+        self.base_offset.to_native()
+    }
+
+    fn time_ranges(&self) -> impl Iterator<Item = TimeRangeView<'_>> + Clone {
+        self.time_ranges.iter().map(|range| TimeRangeView {
+            id: range.id.to_native(),
+            start_tz: range.start_tz.to_native(),
+            end_tz: range.end_tz.to_native(),
+            duration: range.duration.to_native(),
+            flags: range.flags,
+            instances: range.instances.as_ref(),
+        })
+    }
+
+    fn component(&self, comp_id: u32) -> Option<&Self::Component> {
+        self.event.components.get(comp_id as usize)
+    }
+}
+
+impl ExpansionSource for CalendarEventData {
+    type Component = ICalendarComponent;
+
+    fn base_offset(&self) -> i64 {
+        self.base_offset
+    }
+
+    fn time_ranges(&self) -> impl Iterator<Item = TimeRangeView<'_>> + Clone {
+        self.time_ranges.iter().map(|range| TimeRangeView {
+            id: range.id,
+            start_tz: range.start_tz,
+            end_tz: range.end_tz,
+            duration: range.duration,
+            flags: range.flags,
+            instances: range.instances.as_ref(),
+        })
+    }
+
+    fn component(&self, comp_id: u32) -> Option<&Self::Component> {
+        self.event.components.get(comp_id as usize)
+    }
+}
+
 impl CalendarEventData {
+    pub fn expand(
+        &self,
+        default_tz: Tz,
+        limit: TimeRange,
+        rule: OverlapRule,
+    ) -> Option<Vec<CalendarEventExpansion>> {
+        self.expand_instances(default_tz, limit, rule)
+    }
+
     pub fn component_tz(&self, comp_id: u32) -> Option<Tz> {
         self.time_ranges
             .iter()

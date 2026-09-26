@@ -391,6 +391,7 @@ impl Tokenizer<'_> {
 
 pub(crate) trait TimeRangeFromRaw {
     fn from_raw(raw: &RawElement<'_>) -> super::Result<Option<TimeRange>>;
+    fn from_raw_strict(raw: &RawElement<'_>) -> super::Result<Option<TimeRange>>;
 }
 
 impl TimeRangeFromRaw for TimeRange {
@@ -421,6 +422,33 @@ impl TimeRangeFromRaw for TimeRange {
         } else {
             Ok(None)
         }
+    }
+
+    fn from_raw_strict(raw: &RawElement<'_>) -> super::Result<Option<Self>> {
+        let mut range = TimeRange {
+            start: i64::MIN,
+            end: i64::MAX,
+        };
+        let mut has_bounds = false;
+
+        for attribute in raw.attributes::<ICalendarDateTime>() {
+            match attribute? {
+                Attribute::Start(start) => {
+                    range.start = start.0;
+                    has_bounds = true;
+                }
+                Attribute::End(end) => {
+                    range.end = end.0;
+                    has_bounds = true;
+                }
+                Attribute::Unknown { param, .. } if param == "start" || param == "end" => {
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+
+        Ok((has_bounds && range.start < range.end).then_some(range))
     }
 }
 

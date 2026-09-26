@@ -23,18 +23,29 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Component",
-      "comp": [
-        "VCalendar",
-        "VEvent"
-      ],
-      "op": {
-        "type": "Exists"
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

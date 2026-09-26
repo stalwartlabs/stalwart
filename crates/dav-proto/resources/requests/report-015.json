@@ -56,50 +56,56 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "AnyOf"
-    },
-    {
-      "type": "Property",
-      "comp": null,
-      "prop": {
+  "filter": {
+    "test": "AnyOf",
+    "prop_filters": [
+      {
         "name": {
-          "type": "Fn"
+          "name": {
+            "type": "Fn"
+          },
+          "group": null
         },
-        "group": null
+        "test": {
+          "type": "IsDefined",
+          "data": {
+            "test": "AnyOf",
+            "text_matches": [
+              {
+                "match_type": "Contains",
+                "value": "daboo",
+                "collation": "UnicodeCasemap",
+                "negate": false
+              }
+            ],
+            "param_filters": []
+          }
+        }
       },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "daboo",
-          "collation": "UnicodeCasemap",
-          "negate": false
+      {
+        "name": {
+          "name": {
+            "type": "Email"
+          },
+          "group": null
+        },
+        "test": {
+          "type": "IsDefined",
+          "data": {
+            "test": "AnyOf",
+            "text_matches": [
+              {
+                "match_type": "Contains",
+                "value": "daboo",
+                "collation": "UnicodeCasemap",
+                "negate": false
+              }
+            ],
+            "param_filters": []
+          }
         }
       }
-    },
-    {
-      "type": "Property",
-      "comp": null,
-      "prop": {
-        "name": {
-          "type": "Email"
-        },
-        "group": null
-      },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "daboo",
-          "collation": "UnicodeCasemap",
-          "negate": false
-        }
-      }
-    }
-  ],
+    ]
+  },
   "limit": null
 }

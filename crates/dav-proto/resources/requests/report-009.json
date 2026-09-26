@@ -23,41 +23,58 @@
       }
     ]
   },
-  "filters": [
-    {
-      "type": "Property",
-      "comp": [
-        "VCalendar",
-        "VTodo"
-      ],
-      "prop": {
-        "type": "Completed"
-      },
-      "op": {
-        "type": "Undefined"
-      }
-    },
-    {
-      "type": "Property",
-      "comp": [
-        "VCalendar",
-        "VTodo"
-      ],
-      "prop": {
-        "type": "Status"
-      },
-      "op": {
-        "type": "TextMatch",
-        "data": {
-          "type": "TextMatch",
-          "match_type": "Contains",
-          "value": "CANCELLED",
-          "collation": "AsciiCasemap",
-          "negate": true
-        }
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VTodo",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Completed"
+                    },
+                    "test": {
+                      "type": "IsNotDefined"
+                    }
+                  },
+                  {
+                    "name": {
+                      "type": "Status"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "Text",
+                          "data": {
+                            "match_type": "Contains",
+                            "value": "CANCELLED",
+                            "collation": "AsciiCasemap",
+                            "negate": true
+                          }
+                        },
+                        "param_filters": []
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
       }
     }
-  ],
+  },
   "timezone": {
     "type": "None"
   }

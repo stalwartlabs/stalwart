@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+  <D:prop>
+    <D:getetag/>
+  </D:prop>
+  <C:filter test="allof">
+    <C:prop-filter name="EMAIL" test="allof">
+      <C:text-match match-type="ends-with">@example.com</C:text-match>
+      <C:param-filter name="TYPE">
+        <C:text-match match-type="equals" collation="i;ascii-casemap">work</C:text-match>
+      </C:param-filter>
+    </C:prop-filter>
+    <C:prop-filter name="item1.TEL"/>
+    <C:prop-filter name="NICKNAME">
+      <C:is-not-defined/>
+    </C:prop-filter>
+    <C:prop-filter name="ADR">
+      <C:param-filter name="LABEL">
+        <C:is-not-defined/>
+      </C:param-filter>
+    </C:prop-filter>
+  </C:filter>
+  <C:limit>
+    <C:nresults>5</C:nresults>
+  </C:limit>
+</C:addressbook-query>

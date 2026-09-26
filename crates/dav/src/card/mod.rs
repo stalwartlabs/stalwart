@@ -14,6 +14,7 @@ use hyper::StatusCode;
 
 pub mod copy_move;
 pub mod delete;
+pub mod filter;
 pub mod get;
 pub mod mkcol;
 pub mod proppatch;

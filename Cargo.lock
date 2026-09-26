@@ -1904,6 +1904,7 @@ dependencies = [
  "hashify 0.3.0",
  "http_proto",
  "hyper",
+ "nlp",
  "percent-encoding",
  "registry",
  "rkyv",
@@ -1927,6 +1928,7 @@ dependencies = [
  "serde_json",
  "trc",
  "types",
+ "unicode-normalization",
 ]
 
 [[package]]

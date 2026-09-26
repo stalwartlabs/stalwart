@@ -1,0 +1,106 @@
+{
+  "type": "AddressbookQuery",
+  "properties": {
+    "type": "Prop",
+    "data": [
+      {
+        "type": "WebDav",
+        "data": {
+          "type": "GetETag"
+        }
+      }
+    ]
+  },
+  "filter": {
+    "test": "AllOf",
+    "prop_filters": [
+      {
+        "name": {
+          "name": {
+            "type": "Email"
+          },
+          "group": null
+        },
+        "test": {
+          "type": "IsDefined",
+          "data": {
+            "test": "AllOf",
+            "text_matches": [
+              {
+                "match_type": "EndsWith",
+                "value": "@example.com",
+                "collation": "UnicodeCasemap",
+                "negate": false
+              }
+            ],
+            "param_filters": [
+              {
+                "name": "Type",
+                "test": {
+                  "type": "IsDefined",
+                  "data": {
+                    "match_type": "Equals",
+                    "value": "work",
+                    "collation": "AsciiCasemap",
+                    "negate": false
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": {
+          "name": {
+            "type": "Tel"
+          },
+          "group": "item1"
+        },
+        "test": {
+          "type": "IsDefined",
+          "data": {
+            "test": "AnyOf",
+            "text_matches": [],
+            "param_filters": []
+          }
+        }
+      },
+      {
+        "name": {
+          "name": {
+            "type": "Nickname"
+          },
+          "group": null
+        },
+        "test": {
+          "type": "IsNotDefined"
+        }
+      },
+      {
+        "name": {
+          "name": {
+            "type": "Adr"
+          },
+          "group": null
+        },
+        "test": {
+          "type": "IsDefined",
+          "data": {
+            "test": "AnyOf",
+            "text_matches": [],
+            "param_filters": [
+              {
+                "name": "Label",
+                "test": {
+                  "type": "IsNotDefined"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "limit": 5
+}

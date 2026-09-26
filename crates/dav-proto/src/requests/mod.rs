@@ -11,6 +11,7 @@ use crate::{
 use types::dead_property::{DeadElementTag, DeadProperty, DeadPropertyTag};
 
 pub mod acl;
+pub mod filter;
 pub mod lockinfo;
 pub mod mkcol;
 pub mod propertyupdate;
@@ -191,12 +192,13 @@ mod tests {
                     }
                 };
 
-                /*if json_path.exists() {
-                    let expected = std::fs::read_to_string(json_path).unwrap();
-                    assert_eq!(json_output, expected);
-                } else {*/
-                std::fs::write(json_path, json_output).unwrap();
-                //}
+                if json_path.exists() {
+                    let expected =
+                        std::fs::read_to_string(&json_path).expect("golden file is readable");
+                    assert_eq!(json_output, expected, "{}", json_path.display());
+                } else {
+                    std::fs::write(json_path, json_output).expect("golden file is writable");
+                }
             }
         }
     }

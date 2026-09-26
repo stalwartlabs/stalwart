@@ -38,6 +38,7 @@ pub mod cal_scheduling;
 pub mod card_query;
 pub mod compliance;
 pub mod copy_move;
+pub mod dav_search;
 pub mod lock;
 pub mod mkcol;
 pub mod multiget;
@@ -204,6 +205,7 @@ pub async fn webdav_tests() {
     cal_personal::test(&test).await;
     card_query::test(&test).await;
     cal_query::test(&test).await;
+    dav_search::test(&test).await;
     cal_alarm::test(&test).await;
     storage_split::test(&test).await;
     cal_itip::test();

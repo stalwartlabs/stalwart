@@ -4,31 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::filter::CardFilterPlan;
 use crate::{
     DavError,
     common::{
-        AddressbookFilter, DavQuery,
-        propfind::{PropFindItem, PropFindRequestHandler},
+        DavQuery,
+        propfind::PropFindRequestHandler,
+        search::{QueryScope, TextIndex},
         uri::DavUriResource,
     },
 };
-use calcard::vcard::{
-    ArchivedVCard, ArchivedVCardEntry, ArchivedVCardParameter, VCardParameterName, VCardProperty,
-    VCardVersion,
-};
-use common::{Server, auth::AccessToken};
+use calcard::vcard::{ArchivedVCard, VCardProperty, VCardVersion};
+use common::{DavResourcePath, Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders,
-    schema::{
-        property::CardDavPropertyName,
-        request::{AddressbookQuery, Filter, FilterOp, VCardPropertyWithGroup},
-        response::MultiStatus,
-    },
+    schema::{property::CardDavPropertyName, request::AddressbookQuery, response::MultiStatus},
 };
 use groupware::cache::GroupwareCache;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use std::fmt::Write;
+use store::write::SearchIndex;
 use trc::AddContext;
 use types::{acl::Acl, collection::SyncCollection};
 
@@ -70,33 +66,36 @@ impl CardQueryRequestHandler for Server {
             return Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
                 .with_xml_body(MultiStatus::not_found(headers.uri).to_string()));
         };
-        if !resource.is_container() {
-            return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
-        }
 
-        // Obtain shared ids
-        let shared_ids = if !access_token.is_member(account_id) {
-            resources
-                .shared_items(access_token, [Acl::ReadItems], false)
-                .into()
+        let shared_ids = (!access_token.is_member(account_id))
+            .then(|| resources.shared_items(access_token, [Acl::ReadItems], false));
+        let is_visible = |item: &DavResourcePath<'_>| {
+            shared_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(item.document_id()))
+        };
+        let scope = if resource.is_container() {
+            QueryScope::new(
+                resources
+                    .children(resource.document_id())
+                    .filter(is_visible),
+            )
         } else {
-            None
+            QueryScope::new(std::iter::once(resource).filter(is_visible))
         };
 
-        // Obtain document ids in folder
-        let mut items = Vec::with_capacity(16);
-        for resource in resources.children(resource.document_id()) {
-            if shared_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(resource.document_id()))
-            {
-                items.push(PropFindItem::new(
-                    resources.format_resource(resource),
-                    account_id,
-                    resource,
-                ));
-            }
-        }
+        let candidates = request
+            .filter
+            .candidates(&scope, TextIndex::new(self, SearchIndex::Contacts));
+        let items = scope
+            .resolve(
+                self,
+                SearchIndex::Contacts,
+                account_id,
+                candidates,
+                &resources,
+            )
+            .await;
 
         self.handle_dav_query(
             access_token,
@@ -104,104 +103,6 @@ impl CardQueryRequestHandler for Server {
         )
         .await
     }
-}
-
-pub(crate) fn vcard_query(card: &ArchivedVCard, filters: &AddressbookFilter) -> bool {
-    let mut is_all = true;
-    let mut matches_one = false;
-
-    for filter in filters {
-        match filter {
-            Filter::AnyOf => {
-                is_all = false;
-            }
-            Filter::AllOf => {
-                is_all = true;
-            }
-            Filter::Property { prop, op, .. } => {
-                let mut properties = find_properties(card, prop).peekable();
-                let result = if properties.peek().is_some() {
-                    properties.any(|entry| match op {
-                        FilterOp::Exists => true,
-                        FilterOp::Undefined => false,
-                        FilterOp::TextMatch(text_match) => {
-                            let mut matched_any = false;
-
-                            for value in entry.values.iter() {
-                                if let Some(text) = value.as_text()
-                                    && text_match.matches(text)
-                                {
-                                    matched_any = true;
-                                    break;
-                                }
-                            }
-
-                            matched_any
-                        }
-                        FilterOp::TimeRange(_) => false,
-                    })
-                } else {
-                    matches!(op, FilterOp::Undefined)
-                };
-
-                if result {
-                    matches_one = true;
-                } else if is_all {
-                    return false;
-                }
-            }
-            Filter::Parameter {
-                prop, param, op, ..
-            } => {
-                let mut properties = find_properties(card, prop)
-                    .filter_map(|entry| find_parameter(entry, param))
-                    .peekable();
-                let result = if properties.peek().is_some() {
-                    properties.any(|entry| match op {
-                        FilterOp::Exists => true,
-                        FilterOp::Undefined => false,
-                        FilterOp::TextMatch(text_match) => {
-                            if let Some(text) = entry.value.as_text() {
-                                text_match.matches(text)
-                            } else {
-                                false
-                            }
-                        }
-                        FilterOp::TimeRange(_) => false,
-                    })
-                } else {
-                    matches!(op, FilterOp::Undefined)
-                };
-
-                if result {
-                    matches_one = true;
-                } else if is_all {
-                    return false;
-                }
-            }
-            Filter::Component { .. } => {}
-        }
-    }
-
-    is_all || matches_one
-}
-
-#[inline(always)]
-fn find_properties<'x>(
-    card: &'x ArchivedVCard,
-    prop: &VCardPropertyWithGroup,
-) -> impl Iterator<Item = &'x ArchivedVCardEntry> {
-    card.entries
-        .iter()
-        .filter(move |entry| entry.name == prop.name && entry.group == prop.group)
-}
-
-#[inline(always)]
-fn find_parameter<'x>(
-    entry: &'x ArchivedVCardEntry,
-    name: &VCardParameterName,
-) -> Option<&'x ArchivedVCardParameter> {
-    entry.params.iter().find(|param| param.name == *name)
 }
 
 pub(crate) fn serialize_vcard_with_props(
@@ -215,7 +116,14 @@ pub(crate) fn serialize_vcard_with_props(
 
         for entry in card.entries.iter() {
             for item in props {
-                if entry.name == item.name && entry.group == item.group {
+                if entry.name == item.name
+                    && item.group.as_deref().is_none_or(|group| {
+                        entry
+                            .group
+                            .as_ref()
+                            .is_some_and(|entry_group| entry_group.eq_ignore_ascii_case(group))
+                    })
+                {
                     if item.name != VCardProperty::Version {
                         let _ = entry.write_with_version(&mut vcard, !item.no_value, version);
                     } else {

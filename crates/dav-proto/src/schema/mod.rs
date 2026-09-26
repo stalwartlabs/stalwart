@@ -6,10 +6,12 @@
 
 use std::borrow::Cow;
 
-use request::TextMatch;
+pub mod collation;
 pub mod property;
 pub mod request;
 pub mod response;
+
+pub use collation::{Collation, MatchType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
@@ -1347,57 +1349,6 @@ impl AttributeValue for String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-pub enum Collation {
-    AsciiNumeric,
-    AsciiCasemap,
-    Octet,
-    UnicodeCasemap,
-}
-
-impl Collation {
-    pub fn try_parse(s: &str) -> Option<Self> {
-        hashify::fnc_map!(s.as_bytes(),
-            "i;ascii-numeric" => Some(Collation::AsciiNumeric),
-            "i;ascii-casemap" => Some(Collation::AsciiCasemap),
-            "i;octet" => Some(Collation::Octet),
-            "i;unicode-casemap" => Some(Collation::UnicodeCasemap),
-            _ => None,
-        )
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Collation::AsciiNumeric => "i;ascii-numeric",
-            Collation::AsciiCasemap => "i;ascii-casemap",
-            Collation::Octet => "i;octet",
-            Collation::UnicodeCasemap => "i;unicode-casemap",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-pub enum MatchType {
-    Equals,
-    Contains,
-    StartsWith,
-    EndsWith,
-}
-
-impl MatchType {
-    pub fn try_parse(s: &str) -> Option<Self> {
-        hashify::fnc_map!(s.as_bytes(),
-            "equals" => Some(MatchType::Equals),
-            "contains" => Some(MatchType::Contains),
-            "starts-with" => Some(MatchType::StartsWith),
-            "ends-with" => Some(MatchType::EndsWith),
-            _ => None,
-        )
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum XsiType {
     String,
@@ -1458,32 +1409,5 @@ impl YesNo {
             "no" => false,
         )
         .copied()
-    }
-}
-
-impl TextMatch {
-    pub fn matches(&self, text: &str) -> bool {
-        match self.collation {
-            Collation::Octet => {
-                (match self.match_type {
-                    MatchType::Equals => text == self.value,
-                    MatchType::Contains => text.contains(&self.value),
-                    MatchType::StartsWith => text.starts_with(&self.value),
-                    MatchType::EndsWith => text.ends_with(&self.value),
-                }) ^ self.negate
-            }
-            _ => {
-                (match self.match_type {
-                    MatchType::Equals => text.to_lowercase() == self.value.to_lowercase(),
-                    MatchType::Contains => text.to_lowercase().contains(&self.value.to_lowercase()),
-                    MatchType::StartsWith => {
-                        text.to_lowercase().starts_with(&self.value.to_lowercase())
-                    }
-                    MatchType::EndsWith => {
-                        text.to_lowercase().ends_with(&self.value.to_lowercase())
-                    }
-                }) ^ self.negate
-            }
-        }
     }
 }

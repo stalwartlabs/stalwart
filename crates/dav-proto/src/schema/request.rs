@@ -93,7 +93,7 @@ pub struct ExpandPropertyItem {
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct AddressbookQuery {
     pub properties: PropFind,
-    pub filters: Vec<Filter<(), VCardPropertyWithGroup, VCardParameterName>>,
+    pub filter: CardFilter,
     pub limit: Option<u32>,
 }
 
@@ -108,14 +108,13 @@ pub struct VCardPropertyWithGroup {
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct CalendarQuery {
     pub properties: PropFind,
-    pub filters:
-        Vec<Filter<Vec<ICalendarComponentType>, ICalendarProperty, ICalendarParameterName>>,
+    pub filter: Option<CompFilter>,
     pub timezone: Timezone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, serde(tag = "type"))]
+#[cfg_attr(test, serde(tag = "type", content = "data"))]
 pub enum Timezone {
     Name(String),
     Id(String),
@@ -144,47 +143,97 @@ pub struct SyncCollection {
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, serde(tag = "type"))]
-pub enum Filter<A, B, C> {
+pub enum FilterTest {
+    #[default]
     AnyOf,
     AllOf,
-    Component {
-        comp: A,
-        op: FilterOp,
-    },
-    Property {
-        comp: A,
-        prop: B,
-        op: FilterOp,
-    },
-    Parameter {
-        comp: A,
-        prop: B,
-        param: C,
-        op: FilterOp,
-    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(test, serde(tag = "type", content = "data"))]
-pub enum FilterOp {
-    Exists,
-    Undefined,
-    TimeRange(TimeRange),
-    TextMatch(TextMatch),
+pub enum Presence<T> {
+    IsNotDefined,
+    IsDefined(T),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(test, serde(tag = "type"))]
+pub struct CompFilter {
+    pub name: ICalendarComponentType,
+    pub test: Presence<CompFilterMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct CompFilterMatch {
+    pub time_range: Option<TimeRange>,
+    pub prop_filters: Vec<CalendarPropFilter>,
+    pub comp_filters: Vec<CompFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct CalendarPropFilter {
+    pub name: ICalendarProperty,
+    pub test: Presence<CalendarPropMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct CalendarPropMatch {
+    pub value: Option<PropValueMatch>,
+    pub param_filters: Vec<ParamFilter<ICalendarParameterName>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(test, serde(tag = "type", content = "data"))]
+pub enum PropValueMatch {
+    TimeRange(TimeRange),
+    Text(TextMatch),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct ParamFilter<P> {
+    pub name: P,
+    pub test: Presence<Option<TextMatch>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct CardFilter {
+    pub test: FilterTest,
+    pub prop_filters: Vec<CardPropFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct CardPropFilter {
+    pub name: VCardPropertyWithGroup,
+    pub test: Presence<CardPropMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub struct CardPropMatch {
+    pub test: FilterTest,
+    pub text_matches: Vec<TextMatch>,
+    pub param_filters: Vec<ParamFilter<VCardParameterName>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct TextMatch {
     pub match_type: MatchType,
     pub value: String,
     pub collation: Collation,
     pub negate: bool,
+    #[cfg_attr(test, serde(skip))]
+    pub(crate) needle: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,12 +268,13 @@ pub struct PrincipalPropertySearch {
     pub property_search: Vec<PropertySearch>,
     pub properties: Vec<DavProperty>,
     pub apply_to_principal_collection_set: bool,
+    pub test: FilterTest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct PropertySearch {
-    pub property: DavProperty,
+    pub properties: Vec<DavProperty>,
     pub match_: String,
 }
 

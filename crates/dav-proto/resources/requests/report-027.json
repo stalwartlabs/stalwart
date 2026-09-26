@@ -1,0 +1,123 @@
+{
+  "type": "CalendarQuery",
+  "properties": {
+    "type": "Prop",
+    "data": [
+      {
+        "type": "WebDav",
+        "data": {
+          "type": "GetETag"
+        }
+      }
+    ]
+  },
+  "filter": {
+    "name": "VCalendar",
+    "test": {
+      "type": "IsDefined",
+      "data": {
+        "time_range": null,
+        "prop_filters": [],
+        "comp_filters": [
+          {
+            "name": "VEvent",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Uid"
+                    },
+                    "test": {
+                      "type": "IsNotDefined"
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          },
+          {
+            "name": "VTodo",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [],
+                "comp_filters": []
+              }
+            }
+          },
+          {
+            "name": "VJournal",
+            "test": {
+              "type": "IsNotDefined"
+            }
+          },
+          {
+            "name": "VTodo",
+            "test": {
+              "type": "IsDefined",
+              "data": {
+                "time_range": null,
+                "prop_filters": [
+                  {
+                    "name": {
+                      "type": "Completed"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": {
+                          "type": "TimeRange",
+                          "data": {
+                            "start": 1136073600,
+                            "end": 9223372036854775807
+                          }
+                        },
+                        "param_filters": []
+                      }
+                    }
+                  },
+                  {
+                    "name": {
+                      "type": "Attendee"
+                    },
+                    "test": {
+                      "type": "IsDefined",
+                      "data": {
+                        "value": null,
+                        "param_filters": [
+                          {
+                            "name": "DelegatedFrom",
+                            "test": {
+                              "type": "IsDefined",
+                              "data": null
+                            }
+                          },
+                          {
+                            "name": "Role",
+                            "test": {
+                              "type": "IsNotDefined"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ],
+                "comp_filters": []
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "timezone": {
+    "type": "Id",
+    "data": "Europe/Berlin"
+  }
+}

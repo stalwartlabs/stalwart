@@ -28,6 +28,7 @@ pub async fn test(test: &TestServer) {
             .with_status(hyper::StatusCode::CREATED);
         hrefs.push(href);
     }
+    test.wait_for_tasks().await;
     let uri_sarah = hrefs[0].as_str();
     let uri_carlos = hrefs[1].as_str();
     let uri_acme = hrefs[2].as_str();

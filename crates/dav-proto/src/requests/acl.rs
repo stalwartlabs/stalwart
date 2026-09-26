@@ -10,8 +10,8 @@ use crate::{
         Element, NamedElement, Namespace,
         property::{DavValue, Privilege},
         request::{
-            Acl, AclPrincipalPropSet, DavPropertyValue, PrincipalMatch, PrincipalMatchProperties,
-            PrincipalPropertySearch, PropertySearch,
+            Acl, AclPrincipalPropSet, DavPropertyValue, FilterTest, PrincipalMatch,
+            PrincipalMatchProperties, PrincipalPropertySearch, PropertySearch,
         },
         response::{Ace, GrantDeny, Href, List, Principal},
     },
@@ -369,6 +369,7 @@ impl DavParser for PrincipalPropertySearch {
             property_search: vec![],
             properties: vec![],
             apply_to_principal_collection_set: false,
+            test: FilterTest::AllOf,
         };
 
         loop {
@@ -424,7 +425,7 @@ impl DavParser for PrincipalPropertySearch {
 
 impl PropertySearch {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Option<Self>> {
-        let mut property = None;
+        let mut properties = Vec::new();
         let mut match_ = None;
 
         loop {
@@ -437,7 +438,7 @@ impl PropertySearch {
                         },
                     ..
                 } => {
-                    property = stream.collect_properties(Vec::new())?.into_iter().next();
+                    properties = stream.collect_properties(properties)?;
                 }
                 Token::ElementStart {
                     name:
@@ -461,8 +462,8 @@ impl PropertySearch {
             }
         }
 
-        Ok(property.map(|property| PropertySearch {
-            property,
+        Ok((!properties.is_empty()).then(|| PropertySearch {
+            properties,
             match_: match_.unwrap_or_default(),
         }))
     }
