@@ -2380,7 +2380,7 @@ dependencies = [
  "mail-builder 1.0.0",
  "mail-parser",
  "nlp",
- "rand 0.8.8",
+ "rand 0.10.3",
  "rasn",
  "rasn-cms",
  "rasn-pkix",
