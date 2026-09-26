@@ -75,7 +75,7 @@ aws-lc-rs = { version = "1" }
 biscuit = "0.8.0"
 form_urlencoded = "1.2.2"
 rkyv = { version = "0.8.18", features = ["little_endian"] }
-quick-xml = "0.41"
+quick-xml = "0.42"
 jmap-tools = { version = "0.1" }
 dns-update = { version = "0.5", features = ["test_provider"] }
 x509-parser = "0.18"
