@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::number::DateSystem;
 use crate::{
     Format,
     output::{Output, Separator},
     package::{Arena, Span},
     xml::{
-        Handler, Skip, Tag,
+        Handler, Skip, Tag, Text,
         attr::{push_decoded, split_prefix},
         local_name,
     },
@@ -30,6 +31,7 @@ enum Run {
     Break,
     Paragraph,
     Block,
+    Boundary,
     NoBreakHyphen,
 }
 
@@ -58,6 +60,10 @@ impl Run {
             b"footnote" => Run::Block,
             b"endnote" => Run::Block,
             b"noBreakHyphen" => Run::NoBreakHyphen,
+            b"rt" => Run::Boundary,
+            b"sym" => Run::Boundary,
+            b"num" => Run::Boundary,
+            b"den" => Run::Boundary,
         )
         .copied()
     }
@@ -86,7 +92,7 @@ impl Handler for RunText {
                 | Run::MoveFrom
                 | Run::TabStops),
             ) => self.skip.begin(skipped),
-            Some(Run::Tab | Run::Cell) => out.separator(Separator::Space),
+            Some(Run::Tab | Run::Cell | Run::Boundary) => out.separator(Separator::Space),
             Some(Run::Break | Run::Paragraph) => out.separator(Separator::Newline),
             Some(Run::NoBreakHyphen) => out.push_str("-"),
             Some(Run::Block) | None => {}
@@ -101,114 +107,14 @@ impl Handler for RunText {
         match element {
             Some(Run::Text) => self.in_text = false,
             Some(Run::Paragraph | Run::Block) => out.separator(Separator::Newline),
-            Some(Run::Cell) => out.separator(Separator::Space),
+            Some(Run::Cell | Run::Boundary) => out.separator(Separator::Space),
             _ => {}
         }
     }
 
-    fn text(&mut self, text: &[u8], out: &mut Output<'_>) {
+    fn text(&mut self, text: Text<'_>, out: &mut Output<'_>) {
         if self.in_text {
-            out.push_utf8(text);
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SheetElement {
-    Cell,
-    Value,
-    InlineText,
-    Phonetic,
-    Extension,
-    Row,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Cell {
-    #[default]
-    None,
-    Value,
-    Inline,
-    Ignored,
-}
-
-#[derive(Default)]
-pub(crate) struct SheetText {
-    skip: Skip<SheetElement>,
-    cell: Cell,
-    collect: bool,
-}
-
-impl SheetElement {
-    fn parse(local: &[u8]) -> Option<SheetElement> {
-        hashify::map!(local, SheetElement,
-            b"c" => SheetElement::Cell,
-            b"v" => SheetElement::Value,
-            b"t" => SheetElement::InlineText,
-            b"rPh" => SheetElement::Phonetic,
-            b"extLst" => SheetElement::Extension,
-            b"row" => SheetElement::Row,
-        )
-        .copied()
-    }
-}
-
-fn cell_kind(tag: &Tag<'_>) -> Cell {
-    if tag.attrs.is_none() {
-        return Cell::Ignored;
-    }
-    let mut kind = Cell::Value;
-    for (name, value) in tag.attributes() {
-        if hashify::set!(name, b"t") {
-            kind = hashify::map!(value, Cell,
-                b"n" => Cell::Value,
-                b"str" => Cell::Value,
-                b"d" => Cell::Value,
-                b"inlineStr" => Cell::Inline,
-            )
-            .copied()
-            .unwrap_or(Cell::Ignored);
-        }
-    }
-    kind
-}
-
-impl Handler for SheetText {
-    fn start(&mut self, tag: &Tag<'_>, _out: &mut Output<'_>) {
-        let element = SheetElement::parse(tag.local());
-        if self.skip.on_start(element) {
-            return;
-        }
-        match element {
-            Some(SheetElement::Cell) => self.cell = cell_kind(tag),
-            Some(SheetElement::Value) => self.collect = self.cell == Cell::Value,
-            Some(SheetElement::InlineText) => self.collect = self.cell == Cell::Inline,
-            Some(skipped @ (SheetElement::Phonetic | SheetElement::Extension)) => {
-                self.skip.begin(skipped)
-            }
-            Some(SheetElement::Row) | None => {}
-        }
-    }
-
-    fn end(&mut self, name: &[u8], out: &mut Output<'_>) {
-        let element = SheetElement::parse(local_name(name));
-        if self.skip.on_end(element) {
-            return;
-        }
-        match element {
-            Some(SheetElement::Value | SheetElement::InlineText) => self.collect = false,
-            Some(SheetElement::Cell) => {
-                self.cell = Cell::None;
-                out.separator(Separator::Space);
-            }
-            Some(SheetElement::Row) => out.separator(Separator::Newline),
-            _ => {}
-        }
-    }
-
-    fn text(&mut self, text: &[u8], out: &mut Output<'_>) {
-        if self.collect {
-            out.push_utf8(text);
+            text.push(out);
         }
     }
 }
@@ -220,6 +126,7 @@ enum RootElement {
     Presentation,
     Sheet,
     SlideId,
+    WorkbookProperties,
 }
 
 impl RootElement {
@@ -230,6 +137,7 @@ impl RootElement {
             b"presentation" => RootElement::Presentation,
             b"sheet" => RootElement::Sheet,
             b"sldId" => RootElement::SlideId,
+            b"workbookPr" => RootElement::WorkbookProperties,
         )
         .copied()
     }
@@ -248,6 +156,8 @@ pub(crate) struct MainPart<'x> {
     arena: &'x mut Arena,
     ids: &'x mut Vec<Span>,
     limit: usize,
+    dates: DateSystem,
+    capped: bool,
 }
 
 impl<'x> MainPart<'x> {
@@ -257,7 +167,17 @@ impl<'x> MainPart<'x> {
             arena,
             ids,
             limit,
+            dates: DateSystem::Epoch1900,
+            capped: false,
         }
+    }
+
+    pub(crate) fn capped(&self) -> bool {
+        self.capped
+    }
+
+    pub(crate) fn dates(&self) -> DateSystem {
+        self.dates
     }
 
     pub(crate) fn format(&self) -> Option<Format> {
@@ -283,9 +203,9 @@ impl<'x> MainPart<'x> {
             push_decoded(sheet_name, out);
             out.separator(Separator::Newline);
         }
-        if self.ids.len() < self.limit
-            && let Some(id) = reference.and_then(|id| self.arena.push_decoded(id))
-        {
+        if self.ids.len() >= self.limit {
+            self.capped = true;
+        } else if let Some(id) = reference.and_then(|id| self.arena.push_decoded(id)) {
             self.ids.push(id);
         }
     }
@@ -307,6 +227,9 @@ impl Handler for MainPart<'_> {
             (Root::Pending, _) => self.root = Root::Unknown,
             (Root::Workbook, Some(RootElement::Sheet)) => self.collect_reference(tag, Some(out)),
             (Root::Presentation, Some(RootElement::SlideId)) => self.collect_reference(tag, None),
+            (Root::Workbook, Some(RootElement::WorkbookProperties)) => {
+                self.dates = DateSystem::from_properties(tag);
+            }
             _ => {}
         }
     }
@@ -317,7 +240,7 @@ impl Handler for MainPart<'_> {
         }
     }
 
-    fn text(&mut self, text: &[u8], out: &mut Output<'_>) {
+    fn text(&mut self, text: Text<'_>, out: &mut Output<'_>) {
         if let Root::Document(handler) = &mut self.root {
             handler.text(text, out);
         }

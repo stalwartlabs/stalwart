@@ -233,7 +233,7 @@ fn xlsx_cells_and_shared_strings() {
     );
     assert_eq!(
         extracted(&data, Format::Xlsx),
-        "First & Only Second plain rich 42.5 inline formula 2024-01-02 7"
+        "First & Only Second plain rich 42.5 TRUE inline formula 2024-01-02 7"
     );
 }
 
@@ -536,7 +536,10 @@ fn detection_uses_bytes_not_hints() {
         assert_eq!(result.map(|extraction| extraction.format), Ok(Format::Docx));
         assert_eq!(text, "bytes win");
     }
-    assert_eq!(run(b"%PDF-1.7 not supported").0, Err(Error::Unsupported));
+    assert_eq!(
+        run(b"%PDF-1.7 no objects at all").0,
+        Err(Error::Unsupported)
+    );
     assert_eq!(run(b"").0, Err(Error::Unsupported));
     let plain_zip = ZipBuilder::new().file("readme.txt", b"hello").build();
     assert_eq!(run(&plain_zip).0, Err(Error::Unsupported));
@@ -571,9 +574,27 @@ fn hints_prefilter() {
             .may_be_supported()
     );
     assert!(
-        !Hints::new()
+        Hints::new()
             .with_media_type("application/pdf")
             .may_be_supported()
+    );
+    for media_type in [
+        "application/pdf",
+        "application/x-pdf",
+        "application/acrobat",
+        "application/vnd.pdf",
+        "text/pdf",
+        "text/x-pdf; charset=binary",
+    ] {
+        assert_eq!(
+            Hints::new().with_media_type(media_type).format(),
+            Some(Format::Pdf),
+            "{media_type}"
+        );
+    }
+    assert_eq!(
+        Hints::new().with_file_name("Scan.PDF").format(),
+        Some(Format::Pdf)
     );
     assert!(
         !Hints::new()
@@ -664,5 +685,645 @@ fn extractor_can_move_across_threads() {
     assert_eq!(
         handle.join().ok().and_then(Result::ok).as_deref(),
         Some("threaded")
+    );
+}
+
+fn relationships(entries: &[(&str, &str, &str)]) -> String {
+    let body: String = entries
+        .iter()
+        .map(|(id, kind, target)| {
+            let kind = if kind.starts_with("http") {
+                (*kind).to_string()
+            } else {
+                format!("{REL_TYPE}/{kind}")
+            };
+            format!("<Relationship Id=\"{id}\" Type=\"{kind}\" Target=\"{target}\"/>")
+        })
+        .collect();
+    format!("<Relationships {RELS_NS}>{body}</Relationships>")
+}
+
+fn root_rels(main: &str) -> String {
+    relationships(&[("rId1", "officeDocument", main)])
+}
+
+const CHART_NS: &str = "xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:c15=\"c15\"";
+
+fn chart(title: &str, series: &str, categories: &[&str], values: &[&str]) -> String {
+    let points = |items: &[&str]| -> String {
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, value)| format!("<c:pt idx=\"{index}\"><c:v>{value}</c:v></c:pt>"))
+            .collect()
+    };
+    format!(
+        "<c:chartSpace {CHART_NS}><c:date1904 val=\"0\"/><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>{title}</a:t></a:r></a:p></c:rich></c:tx></c:title>\
+         <c:plotArea><c:barChart><c:ser><c:tx><c:strRef><c:f>Sheet1!$B$1</c:f><c:strCache><c:ptCount val=\"1\"/>{}</c:strCache></c:strRef></c:tx>\
+         <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$9</c:f><c:strCache>{}</c:strCache></c:strRef></c:cat>\
+         <c:val><c:numRef><c:f>Sheet1!$B$2:$B$9</c:f><c:numCache><c:formatCode>General</c:formatCode>{}</c:numCache></c:numRef></c:val>\
+         <c:extLst><c:ext><c15:filteredSeriesTitle><c15:tx><c:strRef><c:strCache><c:pt idx=\"0\"><c:v>hiddenext</c:v></c:pt></c:strCache></c:strRef></c15:tx></c15:filteredSeriesTitle></c:ext></c:extLst>\
+         </c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>",
+        points(&[series]),
+        points(categories),
+        points(values)
+    )
+}
+
+#[test]
+fn real_xlsx_comments_drawings_headers_and_formats() {
+    let text = extracted(&fixture("real/48539.xlsx"), Format::Xlsx);
+    assert_in_order(
+        &text,
+        &[
+            "Basic Operators and Functions",
+            "-2.3 8",
+            "0.785398163397448 0.707106781186547",
+            "Round to the nearest integer. If equidistant from two integers, then round to the nearest even integer.",
+        ],
+    );
+    assert!(!text.contains("0.78539816339744828"), "{text}");
+
+    let text = extracted(&fixture("real/testEXCEL_textbox.xlsx"), Format::Xlsx);
+    assert!(text.contains("this is some autoshape text"), "{text}");
+
+    let text = extracted(
+        &fixture("real/testEXCEL_headers_footers.xlsx"),
+        Format::Xlsx,
+    );
+    assert_in_order(
+        &text,
+        &[
+            "John Smith1",
+            "Header - Corporate Spreadsheet Header - For Internal Use Only Header - Author: John Smith",
+            "Footer - Corporate Spreadsheet Footer - For Internal Use Only Footer - Author: John Smith",
+        ],
+    );
+    assert!(!text.contains("&L") && !text.contains("&C"), "{text}");
+}
+
+#[test]
+fn xlsx_comments_drawings_charts_headers_and_number_formats() {
+    let data = ZipBuilder::new()
+        .file("_rels/.rels", root_rels("xl/workbook.xml").as_bytes())
+        .file(
+            "xl/workbook.xml",
+            b"<workbook xmlns:r=\"r\"><workbookPr date1904=\"1\"/><sheets><sheet name=\"Data\" r:id=\"rId1\"/><sheet name=\"Chart\" r:id=\"rId2\"/></sheets></workbook>",
+        )
+        .file(
+            "xl/_rels/workbook.xml.rels",
+            relationships(&[
+                ("rId3", "styles", "styles.xml"),
+                ("rId2", "chartsheet", "chartsheets/sheet1.xml"),
+                ("rId1", "worksheet", "worksheets/sheet1.xml"),
+            ])
+            .as_bytes(),
+        )
+        .file(
+            "xl/styles.xml",
+            b"<styleSheet><numFmts count=\"2\"><numFmt numFmtId=\"164\" formatCode=\"yyyy\\-mm\\-dd\"/><numFmt numFmtId=\"165\" formatCode=\"&quot;$&quot;#,##0.00\"/></numFmts>\
+              <cellStyleXfs><xf numFmtId=\"10\"/></cellStyleXfs>\
+              <cellXfs><xf numFmtId=\"0\"/><xf numFmtId=\"164\"/><xf numFmtId=\"165\"/><xf numFmtId=\"10\"/><xf numFmtId=\"21\"/><xf numFmtId=\"22\"/></cellXfs>\
+              <dxfs><dxf><numFmt numFmtId=\"166\" formatCode=\"0.0%\"/></dxf></dxfs></styleSheet>",
+        )
+        .file(
+            "xl/worksheets/sheet1.xml",
+            b"<worksheet><sheetData><row r=\"1\"><c r=\"A1\" s=\"1\"><v>43661</v></c><c r=\"B1\" s=\"2\"><v>1234.5</v></c><c r=\"C1\" s=\"3\"><v>0.1234</v></c>\
+              <c r=\"D1\" s=\"4\"><v>0.75</v></c><c r=\"E1\" s=\"5\"><v>43661.5</v></c><c r=\"F1\"><v>0.30000000000000004</v></c><c r=\"G1\" t=\"b\"><v>0</v></c>\
+              <c r=\"H1\" t=\"e\"><v>#N/A</v></c><c r=\"I1\" s=\"99\"><v>7.25</v></c></row></sheetData>\
+              <headerFooter><oddHeader>&amp;L&amp;\"Arial,Bold\"&amp;14Quarterly &amp;&amp; Annual&amp;RPage &amp;P of &amp;N</oddHeader>\
+              <oddFooter>&amp;C&amp;K00FF00Confidential&amp;\"-,Italic\"&amp;12 draft</oddFooter></headerFooter></worksheet>",
+        )
+        .file(
+            "xl/worksheets/_rels/sheet1.xml.rels",
+            relationships(&[
+                ("rId1", "comments", "../comments1.xml"),
+                ("rId2", "drawing", "../drawings/drawing1.xml"),
+                ("rId3", "vmlDrawing", "../drawings/vmlDrawing1.vml"),
+                (
+                    "rId4",
+                    "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment",
+                    "../threadedComments/threadedComment1.xml",
+                ),
+            ])
+            .as_bytes(),
+        )
+        .file(
+            "xl/comments1.xml",
+            b"<comments><authors><author>Secret Author</author></authors><commentList><comment ref=\"A1\" authorId=\"0\"><text><r><t>Check this date</t></r></text></comment></commentList></comments>",
+        )
+        .file(
+            "xl/drawings/vmlDrawing1.vml",
+            b"<xml><v:shape><v:textbox><div>vmlnoise</div></v:textbox></v:shape></xml>",
+        )
+        .file(
+            "xl/threadedComments/threadedComment1.xml",
+            b"<ThreadedComments><threadedComment><text>threadedtext</text></threadedComment></ThreadedComments>",
+        )
+        .file(
+            "xl/drawings/drawing1.xml",
+            b"<xdr:wsDr xmlns:xdr=\"x\" xmlns:a=\"a\" xmlns:c=\"c\" xmlns:r=\"r\"><xdr:twoCellAnchor><xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"2\" name=\"TextBox 1\"/></xdr:nvSpPr><xdr:txBody><a:p><a:r><a:t>Shape note</a:t></a:r></a:p></xdr:txBody></xdr:sp></xdr:twoCellAnchor>\
+              <xdr:twoCellAnchor><xdr:graphicFrame><a:graphic><a:graphicData><c:chart r:id=\"rId1\"/></a:graphicData></a:graphic></xdr:graphicFrame></xdr:twoCellAnchor></xdr:wsDr>",
+        )
+        .file(
+            "xl/drawings/_rels/drawing1.xml.rels",
+            relationships(&[("rId1", "chart", "../charts/chart1.xml")]).as_bytes(),
+        )
+        .file(
+            "xl/charts/chart1.xml",
+            chart("Revenue by region", "Sales", &["North", "South"], &["987654", "123"]).as_bytes(),
+        )
+        .file(
+            "xl/chartsheets/sheet1.xml",
+            b"<chartsheet xmlns:r=\"r\"><drawing r:id=\"rId1\"/></chartsheet>",
+        )
+        .file(
+            "xl/chartsheets/_rels/sheet1.xml.rels",
+            relationships(&[("rId1", "drawing", "../drawings/drawing2.xml")]).as_bytes(),
+        )
+        .file("xl/drawings/drawing2.xml", b"<xdr:wsDr xmlns:xdr=\"x\"/>")
+        .file(
+            "xl/drawings/_rels/drawing2.xml.rels",
+            relationships(&[("rId1", "chart", "../charts/chart2.xml")]).as_bytes(),
+        )
+        .file(
+            "xl/charts/chart2.xml",
+            chart("Chartsheet title", "Units", &["East"], &["55"]).as_bytes(),
+        )
+        .build();
+    assert_eq!(
+        extracted(&data, Format::Xlsx),
+        "Data Chart 2023-07-16 1234.50 12.34% 18:00:00 2023-07-16 12:00:00 0.3 FALSE 7.25 \
+         Quarterly & Annual Page of Confidential draft Check this date Shape note \
+         Revenue by region Sales threadedtext Chartsheet title Units"
+    );
+}
+
+#[test]
+fn real_pptx_charts_and_master_text() {
+    let text = extracted(&fixture("real/testPPT_charts.pptx"), Format::Pptx);
+    assert_eq!(
+        text,
+        "wants a peach NUMBER January February March April May June July August 5 8 4 7 4 2 5 6"
+    );
+    let text = extracted(&fixture("real/testPPT_masterText.pptx"), Format::Pptx);
+    assert_eq!(text, "Text that I added to the master slide");
+}
+
+#[test]
+fn pptx_charts_layouts_and_masters() {
+    let shape = |placeholder: &str, text: &str| {
+        format!(
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:nvPr>{placeholder}</p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>"
+        )
+    };
+    let part = |root: &str, shapes: &str| {
+        format!(
+            "<p:{root} xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree>{shapes}</p:spTree></p:cSld></p:{root}>"
+        )
+    };
+    let layout = part(
+        "sldLayout",
+        &format!(
+            "{}{}<p:grpSp>{}{}</p:grpSp><p:pic><p:nvPicPr><p:nvPr><p:ph type=\"pic\"/></p:nvPr></p:nvPicPr></p:pic>{}",
+            shape("<p:ph type=\"title\"/>", "Click to edit Master title style"),
+            shape("", "Confidential notice"),
+            shape("<p:ph type=\"dt\" idx=\"10\"/>", "9/24/2011"),
+            shape("", "Grouped footer"),
+            shape("", "Layout tail"),
+        ),
+    );
+    let master = part(
+        "sldMaster",
+        &format!(
+            "{}{}",
+            shape(
+                "<p:ph type=\"body\" idx=\"1\"/>",
+                "Click to edit Master text styles"
+            ),
+            shape("", "Company logo text"),
+        ),
+    );
+    let slide_rels = |index: usize| {
+        let mut entries = vec![("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml")];
+        if index == 1 {
+            entries.push(("rId2", "chart", "../charts/chart1.xml"));
+            entries.push(("rId3", "notesSlide", "../notesSlides/notesSlide1.xml"));
+        }
+        relationships(&entries)
+    };
+    let data = ZipBuilder::new()
+        .file("_rels/.rels", root_rels("ppt/presentation.xml").as_bytes())
+        .file(
+            "ppt/presentation.xml",
+            b"<p:presentation xmlns:p=\"p\" xmlns:r=\"r\"><p:sldMasterIdLst><p:sldMasterId r:id=\"rId1\"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id=\"256\" r:id=\"rId2\"/><p:sldId id=\"257\" r:id=\"rId3\"/></p:sldIdLst></p:presentation>",
+        )
+        .file(
+            "ppt/_rels/presentation.xml.rels",
+            relationships(&[
+                ("rId1", "slideMaster", "slideMasters/slideMaster1.xml"),
+                ("rId3", "slide", "slides/slide2.xml"),
+                ("rId2", "slide", "slides/slide1.xml"),
+            ])
+            .as_bytes(),
+        )
+        .file("ppt/slides/slide1.xml", part("sld", &shape("<p:ph type=\"title\"/>", "Body text")).as_bytes())
+        .file("ppt/slides/_rels/slide1.xml.rels", slide_rels(1).as_bytes())
+        .file("ppt/slides/slide2.xml", part("sld", &shape("", "Second slide")).as_bytes())
+        .file("ppt/slides/_rels/slide2.xml.rels", slide_rels(2).as_bytes())
+        .file(
+            "ppt/charts/chart1.xml",
+            chart("Units sold", "Units", &["Q1", "Q2"], &["3", "4.4000000000000004"]).as_bytes(),
+        )
+        .file("ppt/notesSlides/notesSlide1.xml", part("notes", &shape("", "Speaker notes")).as_bytes())
+        .file("ppt/slideLayouts/slideLayout1.xml", layout.as_bytes())
+        .file(
+            "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+            relationships(&[("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")]).as_bytes(),
+        )
+        .file("ppt/slideMasters/slideMaster1.xml", master.as_bytes())
+        .build();
+    assert_eq!(
+        extracted(&data, Format::Pptx),
+        "Body text Units sold Units Q1 Q2 3 4.4 Speaker notes Confidential notice Grouped footer \
+         Layout tail Company logo text Second slide"
+    );
+}
+
+#[test]
+fn docx_charts_ruby_symbols_and_math() {
+    let body = "<w:p><w:r><w:t>Before</w:t></w:r><w:r><w:sym w:font=\"Wingdings\" w:char=\"F0E0\"/></w:r><w:r><w:t>after</w:t></w:r></w:p>\
+                <w:p><w:r><w:ruby><w:rubyPr/><w:rt><w:r><w:t>kan</w:t></w:r></w:rt><w:rubyBase><w:r><w:t>\u{6f22}</w:t></w:r></w:rubyBase></w:ruby></w:r><w:r><w:t>\u{5b57}</w:t></w:r></w:p>\
+                <w:p><m:oMath xmlns:m=\"m\"><m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:den><m:r><m:t>b</m:t></m:r></m:den></m:f></m:oMath></w:p>";
+    let chart_ex = "<cx:chartSpace xmlns:cx=\"cx\" xmlns:a=\"a\"><cx:chartData><cx:data id=\"0\"><cx:strDim type=\"cat\"><cx:f>Sheet1!$A$2</cx:f><cx:lvl ptCount=\"1\"><cx:pt idx=\"0\">Leaf</cx:pt></cx:lvl></cx:strDim>\
+                    <cx:numDim type=\"size\"><cx:f>Sheet1!$B$2</cx:f><cx:lvl ptCount=\"1\" formatCode=\"General\"><cx:pt idx=\"0\">7.5</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData>\
+                    <cx:chart><cx:title><cx:tx><cx:txData><cx:v>Sunburst</cx:v></cx:txData></cx:tx></cx:title></cx:chart></cx:chartSpace>";
+    let direct_name = "<c:chartSpace xmlns:c=\"c\"><c:chart><c:plotArea><c:lineChart><c:ser><c:tx><c:v>Direct name</c:v></c:tx><c:val><c:numLit><c:pt idx=\"0\"><c:v>12</c:v></c:pt></c:numLit></c:val></c:ser></c:lineChart></c:plotArea></c:chart></c:chartSpace>";
+    let data = docx(body)
+        .file(
+            "word/_rels/document.xml.rels",
+            relationships(&[
+                ("rId7", "chart", "charts/chart1.xml"),
+                ("rId8", "http://schemas.microsoft.com/office/2014/relationships/chartEx", "charts/chartEx1.xml"),
+                ("rId9", "chart", "charts/chart2.xml"),
+                ("rId10", "styles", "styles.xml"),
+            ])
+            .as_bytes(),
+        )
+        .file(
+            "word/charts/chart1.xml",
+            chart("Line chart", "Series 1", &["Q1"], &["4.4000000000000004"]).as_bytes(),
+        )
+        .file("word/charts/chartEx1.xml", chart_ex.as_bytes())
+        .file("word/charts/chart2.xml", direct_name.as_bytes())
+        .file("word/styles.xml", format!("<w:styles {W_NS}><w:style><w:name w:val=\"stylenoise\"/><w:t>stylenoise</w:t></w:style></w:styles>").as_bytes())
+        .build();
+    assert_eq!(
+        extracted(&data, Format::Docx),
+        "Before after kan \u{6f22}\u{5b57} a b Line chart Series 1 Q1 4.4 Leaf 7.5 Sunburst Direct name 12"
+    );
+}
+
+#[test]
+fn odf_chart_objects_ruby_and_master_pages() {
+    let object = "<office:document-content xmlns:office=\"o\" xmlns:chart=\"c\" xmlns:table=\"ta\" xmlns:text=\"t\"><office:body><office:chart><chart:chart>\
+                  <chart:title><text:p>Sales chart</text:p></chart:title><chart:plot-area><chart:axis><chart:title><text:p>Years</text:p></chart:title></chart:axis></chart:plot-area>\
+                  <table:table table:name=\"local-table\"><table:table-row><table:table-cell><text:p>1984</text:p></table:table-cell><table:table-cell office:value-type=\"float\"><text:p>42</text:p></table:table-cell></table:table-row></table:table>\
+                  </chart:chart></office:chart></office:body></office:document-content>";
+    let mut builder =
+        ZipBuilder::new().stored("mimetype", b"application/vnd.oasis.opendocument.text");
+    for (name, contents) in zip_members_of(&odf(
+        None,
+        "<office:text><text:p>Body<draw:frame><draw:object xlink:href=\"./Object 1\"/></draw:frame></text:p>\
+         <text:p><text:ruby><text:ruby-base>\u{6f22}</text:ruby-base><text:ruby-text>kan</text:ruby-text></text:ruby>\u{5b57}</text:p></office:text>",
+        "<style:footer><text:p>Page <text:page-number>3</text:page-number></text:p></style:footer>",
+    )) {
+        builder = builder.file(&name, &contents);
+    }
+    let data = builder
+        .file("Object 1/content.xml", object.as_bytes())
+        .file("Object 1/styles.xml", b"<office:document-styles><office:master-styles><style:master-page><style:header><text:p>objectstyle</text:p></style:header></style:master-page></office:master-styles></office:document-styles>")
+        .file("ObjectReplacements/Object 1", b"\x00\x01binary")
+        .build();
+    assert_eq!(
+        extracted(&data, Format::Odt),
+        "Body \u{6f22} kan \u{5b57} Page Sales chart Years 1984 42"
+    );
+
+    let data = odf(
+        Some("application/vnd.oasis.opendocument.presentation"),
+        "<office:presentation><draw:page><draw:frame><draw:text-box><text:p>Slide text</text:p></draw:text-box></draw:frame></draw:page></office:presentation>",
+        "<draw:frame presentation:class=\"title\" presentation:placeholder=\"true\"><draw:text-box/></draw:frame>\
+         <draw:frame presentation:class=\"footer\"><draw:text-box><text:p>Master footer</text:p></draw:text-box></draw:frame>\
+         <draw:frame presentation:class=\"page-number\"><draw:text-box><text:p><text:page-number>&lt;number&gt;</text:page-number></text:p></draw:text-box></draw:frame>\
+         </style:master-page><style:handout-master><draw:frame><draw:text-box><text:p>Handout header</text:p></draw:text-box></draw:frame></style:handout-master><style:master-page>",
+    );
+    assert_eq!(
+        extracted(&data, Format::Odp),
+        "Slide text Master footer Handout header"
+    );
+}
+
+fn zip_members_of(data: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(data)).unwrap_or_else(|err| panic!("zip: {err}"));
+    (0..archive.len())
+        .map(|index| {
+            let mut file = archive
+                .by_index(index)
+                .unwrap_or_else(|err| panic!("zip entry: {err}"));
+            let mut contents = Vec::new();
+            std::io::Read::read_to_end(&mut file, &mut contents)
+                .unwrap_or_else(|err| panic!("zip read: {err}"));
+            (file.name().to_string(), contents)
+        })
+        .filter(|(name, _)| name != "mimetype")
+        .collect()
+}
+
+#[test]
+fn epub_details_summary_and_noscript_are_blocks() {
+    let data = epub(
+        "<package><manifest><item id=\"c1\" href=\"c1.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"c1\"/></spine></package>",
+        &[(
+            "OEBPS/content%20dir/c1.xhtml",
+            "<html><body><p>Hello world</p><details><summary>Sum</summary>mary</details><noscript>No</noscript>script</body></html>",
+        )],
+    )
+    .build();
+    let (result, text) = run(&data);
+    assert_eq!(result.map(|extraction| extraction.format), Ok(Format::Epub));
+    assert_eq!(text, "Hello world\nSum\nmary\nNo\nscript");
+}
+
+#[test]
+fn rtf_ignorable_destinations_annotations_and_html_tags() {
+    assert_eq!(
+        rtf(b"{\\rtf1 {\\field{\\*\\fldinst HYPERLINK x}{\\fldrslt \\*\\cs12 link text}} after {\\*\\unknown hidden}\r\n{\r\n\\*\\alsohidden gone}}"),
+        "link text after "
+    );
+    let text = extracted(&fixture("real/testRTFIgnoredControlWord.rtf"), Format::Rtf);
+    assert!(
+        text.contains("The quick brown fox jumps over the lazy dog"),
+        "{text}"
+    );
+
+    assert_eq!(
+        words(&rtf(
+            b"{\\rtf1 super{\\*\\annotation mid-word note}cali\\par}"
+        )),
+        "supercali mid-word note"
+    );
+    assert_eq!(
+        words(&rtf(b"{\\rtf1 He heard quiet {\\*\\atrfstart 1}steps{\\*\\atrfend 1}{\\*\\atnid MM}{\\*\\atnauthor Max Mustermann}\\chatn {\\*\\annotation{\\*\\atnref 1}{\\*\\atndate 2}\\pard\\plain {Comment} {\\b text}} behind him.\\par Next {\\*\\annotation cell note}word\\cell after}")),
+        "He heard quiet steps behind him. Comment text Next word cell note after"
+    );
+
+    assert_eq!(
+        rtf(b"{\\rtf1\\ansi\\fromhtml1 {\\*\\htmltag0 <td>}A{\\*\\htmltag0 </td><TD class=x>}B{\\*\\htmltag0 <b>}C{\\*\\htmltag0 </b>}D{\\*\\htmltag84 &nbsp;}E{\\*\\htmltag0 <br>}F}"),
+        "A BCD E\nF"
+    );
+    assert_eq!(rtf(b"{\\rtf1 {\\*\\htmltag0 <td>hidden}A}"), "A");
+    let text = extracted(&fixture("real/testRTFTIKA_1713.rtf"), Format::Rtf);
+    assert_in_order(&text, &["REDACTED.pptx (1.2 MB)", "REDACTED.docx (35 KB)"]);
+
+    assert_eq!(
+        words(&rtf(b"{\\rtf1 {\\*\\nesttableprops\\trowd\\nestrow}{\\nonesttables fallback text}inner\\nestcell outer\\cell}")),
+        "inner outer"
+    );
+}
+
+#[test]
+fn default_part_limit_counts_content_parts_only() {
+    assert_eq!(Limits::default().max_parts, 10_000);
+    let slides = 1200;
+    let ids: String = (0..slides)
+        .map(|index| format!("<p:sldId id=\"{}\" r:id=\"rId{index}\"/>", 256 + index))
+        .collect();
+    let rels: Vec<(String, String)> = (0..slides)
+        .map(|index| (format!("rId{index}"), format!("slides/slide{index}.xml")))
+        .collect();
+    let rel_refs: Vec<(&str, &str, &str)> = rels
+        .iter()
+        .map(|(id, target)| (id.as_str(), "slide", target.as_str()))
+        .collect();
+    let mut builder = ZipBuilder::new()
+        .file("_rels/.rels", root_rels("ppt/presentation.xml").as_bytes())
+        .file(
+            "ppt/presentation.xml",
+            format!("<p:presentation xmlns:p=\"p\" xmlns:r=\"r\"><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>").as_bytes(),
+        )
+        .file("ppt/_rels/presentation.xml.rels", relationships(&rel_refs).as_bytes());
+    for index in 0..slides {
+        builder = builder
+            .file(
+                &format!("ppt/slides/slide{index}.xml"),
+                format!("<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><a:p><a:r><a:t>slide{index}</a:t></a:r></a:p></p:sld>").as_bytes(),
+            )
+            .file(
+                &format!("ppt/slides/_rels/slide{index}.xml.rels"),
+                relationships(&[("rId1", "notesSlide", &format!("../notesSlides/notes{index}.xml"))]).as_bytes(),
+            )
+            .file(
+                &format!("ppt/notesSlides/notes{index}.xml"),
+                format!("<p:notes xmlns:p=\"p\" xmlns:a=\"a\"><a:p><a:r><a:t>notes{index}</a:t></a:r></a:p></p:notes>").as_bytes(),
+            );
+    }
+    let text = extracted(&builder.build(), Format::Pptx);
+    assert!(
+        text.ends_with("slide1199 notes1199"),
+        "{}",
+        &text[text.len() - 64..]
+    );
+}
+
+#[test]
+fn output_capacity_is_clamped_to_the_limit() {
+    let body: String = (0..5000)
+        .map(|index| format!("<w:p><w:r><w:t>paragraph number {index}</w:t></w:r></w:p>"))
+        .collect();
+    let data = docx(&body).build();
+    for limit in [1000, 50_000] {
+        let mut extractor = Extractor::new(Limits {
+            max_output_bytes: limit,
+            ..Limits::default()
+        });
+        let mut out = String::from("prefix");
+        let extraction = extractor
+            .extract(&data, Hints::new(), &mut out)
+            .unwrap_or_else(|err| panic!("{err:?}"));
+        assert!(extraction.truncated);
+        assert_eq!(out.len(), limit + 6);
+        assert!(
+            out.capacity() <= limit + 6,
+            "{} > {}",
+            out.capacity(),
+            limit + 6
+        );
+    }
+}
+
+#[test]
+fn chart_number_caches_use_their_format_codes() {
+    let chart = format!(
+        "<c:chartSpace {CHART_NS}><c:date1904 val=\"1\"/><c:chart><c:plotArea><c:lineChart><c:ser>\
+         <c:cat><c:numRef><c:numCache><c:formatCode>m/d/yyyy</c:formatCode><c:pt idx=\"0\"><c:v>43661</c:v></c:pt></c:numCache></c:numRef></c:cat>\
+         <c:val><c:numRef><c:numCache><c:formatCode>0.0%</c:formatCode><c:pt idx=\"0\"><c:v>0.79626390103711074</c:v></c:pt></c:numCache></c:numRef></c:val>\
+         </c:ser><c:ser><c:val><c:numRef><c:numCache><c:pt idx=\"0\"><c:v>0.60000000000000009</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>\
+         </c:lineChart></c:plotArea></c:chart></c:chartSpace>"
+    );
+    let chart_ex = "<cx:chartSpace xmlns:cx=\"cx\"><cx:chartData><cx:data id=\"0\"><cx:numDim type=\"val\"><cx:lvl ptCount=\"1\" formatCode=\"&quot;day &quot;0.00\"><cx:pt idx=\"0\">2.5</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData></cx:chartSpace>";
+    let data = docx("<w:p><w:r><w:t>Body</w:t></w:r></w:p>")
+        .file(
+            "word/_rels/document.xml.rels",
+            relationships(&[
+                ("rId1", "chart", "charts/chart1.xml"),
+                (
+                    "rId2",
+                    "http://schemas.microsoft.com/office/2014/relationships/chartEx",
+                    "charts/chartEx1.xml",
+                ),
+            ])
+            .as_bytes(),
+        )
+        .file("word/charts/chart1.xml", chart.as_bytes())
+        .file("word/charts/chartEx1.xml", chart_ex.as_bytes())
+        .build();
+    assert_eq!(
+        extracted(&data, Format::Docx),
+        "Body 2023-07-16 79.6% 0.6 2.50"
+    );
+}
+
+fn styled_xlsx(styles: &str, cells: &str, extra: &[(&str, &str)]) -> Vec<u8> {
+    let mut builder = ZipBuilder::new()
+        .file("_rels/.rels", root_rels("xl/workbook.xml").as_bytes())
+        .file(
+            "xl/workbook.xml",
+            b"<workbook xmlns:r=\"r\"><sheets><sheet name=\"S\" r:id=\"rId1\"/></sheets></workbook>",
+        )
+        .file(
+            "xl/_rels/workbook.xml.rels",
+            relationships(&[
+                ("rId1", "worksheet", "worksheets/sheet1.xml"),
+                ("rId2", "styles", "styles.xml"),
+            ])
+            .as_bytes(),
+        )
+        .file("xl/styles.xml", styles.as_bytes())
+        .file(
+            "xl/worksheets/sheet1.xml",
+            format!("<worksheet><sheetData>{cells}</sheetData></worksheet>").as_bytes(),
+        );
+    for (name, contents) in extra {
+        builder = builder.file(name, contents.as_bytes());
+    }
+    builder.build()
+}
+
+#[test]
+fn xlsx_values_split_across_scanner_windows() {
+    let rows = 20_000;
+    let cells: String = (1..=rows)
+        .map(|row| {
+            format!("<row r=\"{row}\"><c r=\"A{row}\" s=\"1\"><v>123456789012</v></c><c r=\"B{row}\" s=\"1\"><v>12&#51;.5</v></c></row>")
+        })
+        .collect();
+    let data = styled_xlsx(
+        "<styleSheet><cellXfs><xf numFmtId=\"0\"/><xf numFmtId=\"2\"/></cellXfs></styleSheet>",
+        &cells,
+        &[],
+    );
+    let text = extracted(&data, Format::Xlsx);
+    assert_eq!(text.matches("123456789012.00").count(), rows);
+    assert_eq!(text.matches("123.50").count(), rows);
+    assert_eq!(text.split(' ').count(), 1 + 2 * rows);
+}
+
+#[test]
+fn xlsx_threaded_comments_replace_their_legacy_mirror() {
+    let sheet_rels = relationships(&[
+        (
+            "rId3",
+            "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment",
+            "../threadedComments/threadedComment1.xml",
+        ),
+        ("rId2", "comments", "../comments1.xml"),
+    ]);
+    let data = styled_xlsx(
+        "<styleSheet/>",
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>cell</t></is></c></row>",
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", &sheet_rels),
+            (
+                "xl/threadedComments/threadedComment1.xml",
+                "<ThreadedComments><threadedComment ref=\"A1\" id=\"{1}\"><text>Thread start</text></threadedComment><threadedComment ref=\"A1\" parentId=\"{1}\"><text>Thread reply</text></threadedComment></ThreadedComments>",
+            ),
+            (
+                "xl/comments1.xml",
+                "<comments><commentList><comment ref=\"A1\"><text><t>[Threaded comment]\n\nYour version of Excel allows you to read this threaded comment; however, any edits to it will get removed if the file is opened in a newer version of Excel.\n\nComment:\n    Thread start</t></text></comment><comment ref=\"B2\"><text><r><t>Plain note</t></r></text></comment></commentList></comments>",
+            ),
+        ],
+    );
+    assert_eq!(
+        extracted(&data, Format::Xlsx),
+        "S cell Thread start Thread reply Plain note"
+    );
+}
+
+#[test]
+fn chart_categories_are_emitted_once_per_chart() {
+    let series = |name: &str, value: &str| {
+        format!(
+            "<c:ser><c:tx><c:strRef><c:strCache><c:pt idx=\"0\"><c:v>{name}</c:v></c:pt></c:strCache></c:strRef></c:tx>\
+             <c:cat><c:strRef><c:strCache><c:pt idx=\"0\"><c:v>Alpha</c:v></c:pt><c:pt idx=\"1\"><c:v>Beta</c:v></c:pt></c:strCache></c:strRef></c:cat>\
+             <c:val><c:numRef><c:numCache><c:pt idx=\"0\"><c:v>{value}</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        )
+    };
+    let chart = format!(
+        "<c:chartSpace {CHART_NS}><c:chart><c:plotArea><c:barChart>{}{}{}</c:barChart></c:plotArea></c:chart></c:chartSpace>",
+        series("One", "1"),
+        series("Two", "2"),
+        series("Three", "3")
+    );
+    let data = docx("<w:p><w:r><w:t>Body</w:t></w:r></w:p>")
+        .file(
+            "word/_rels/document.xml.rels",
+            relationships(&[("rId1", "chart", "charts/chart1.xml")]).as_bytes(),
+        )
+        .file("word/charts/chart1.xml", chart.as_bytes())
+        .build();
+    assert_eq!(
+        extracted(&data, Format::Docx),
+        "Body One Alpha Beta 1 Two 2 Three 3"
+    );
+}
+
+#[test]
+fn odp_master_prompt_frames_are_skipped() {
+    let data = odf(
+        Some("application/vnd.oasis.opendocument.presentation"),
+        "<office:presentation><draw:page><draw:frame><draw:text-box><text:p>Slide</text:p></draw:text-box></draw:frame></draw:page></office:presentation>",
+        "<draw:frame presentation:class=\"title\"><draw:text-box><text:p>Click to edit Master title style</text:p></draw:text-box></draw:frame>\
+         <draw:frame presentation:class=\"outline\"><draw:text-box><text:p>Click to edit Master text styles</text:p></draw:text-box></draw:frame>\
+         <draw:frame presentation:class=\"notes\" presentation:placeholder=\"true\"><draw:text-box><text:p>notes prompt</text:p></draw:text-box></draw:frame>\
+         <draw:frame presentation:class=\"footer\"><draw:text-box><text:p>Company footer</text:p></draw:text-box></draw:frame>\
+         <draw:frame><draw:text-box><text:p>Logo text</text:p></draw:text-box></draw:frame>",
+    );
+    assert_eq!(
+        extracted(&data, Format::Odp),
+        "Slide Company footer Logo text"
+    );
+}
+
+#[test]
+fn rtf_split_html_tags_and_nested_rows() {
+    assert_eq!(
+        rtf(b"{\\rtf1\\ansi\\fromhtml1 {\\*\\htmltag19 <body>}Hel{\\*\\htmltag84 <span\r\nstyle='font-size:11.0pt; color:red'>}lo{\\*\\htmltag92 </span>} wor{\\*\\htmltag84 <b title=\"a \\{x\\} b\">}ld{\\*\\htmltag92 </b>}}"),
+        "Hello world"
+    );
+    assert_eq!(
+        rtf(b"{\\rtf1 \\pard\\intbl\\itap2 A\\nestcell B\\nestcell{\\*\\nesttableprops\\trowd\\nestrow}{\\nonesttables fallback\\par}C\\nestcell D\\nestcell{\\*\\nesttableprops\\trowd\\nestrow}}"),
+        "A B\nC D"
     );
 }

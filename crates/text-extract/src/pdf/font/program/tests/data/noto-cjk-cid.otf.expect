@@ -1,0 +1,31 @@
+numglyphs 9
+cffnumglyphs 9
+cffros Adobe Identity 0
+cffcid 0 0
+cffcid 1 1470
+cffcid 2 1501
+cffcid 3 1564
+cffcid 4 1595
+cffcid 5 15364
+cffcid 6 24227
+cffcid 7 48123
+cffcid 8 58199
+cmap 0 3 4
+m 12363 1
+m 12394 2
+m 12459 3
+m 12490 4
+m 23383 5
+m 28450 6
+m 44544 7
+m 54620 8
+cmap 3 1 4
+m 12363 1
+m 12394 2
+m 12459 3
+m 12490 4
+m 23383 5
+m 28450 6
+m 44544 7
+m 54620 8
+postformat 3.0

@@ -5,6 +5,7 @@
  */
 
 pub mod acl;
+pub mod attachment_search;
 pub mod cache;
 pub mod changes;
 pub mod copy;

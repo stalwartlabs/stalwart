@@ -35491,6 +35491,32 @@ impl ObjectImpl for Search {
                 1,
             ));
         }
+        let value = &self.max_extract_part_size;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxExtractPartSize, 1));
+        }
+        let value = &self.max_extract_parts;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxExtractParts, 1));
+        }
+        let value = &self.max_extract_archive_entries;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxExtractArchiveEntries,
+                1,
+            ));
+        }
+        let value = &self.max_extract_pdf_objects;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(
+                Property::MaxExtractPdfObjects,
+                1,
+            ));
+        }
+        let value = &self.max_extract_rtf_depth;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxExtractRtfDepth, 1));
+        }
         errors.len() == neb
     }
 
@@ -35515,6 +35541,11 @@ impl Pickle for Search {
         self.max_extract_document_size.pickle(out);
         self.max_extract_text_size.pickle(out);
         self.max_extract_decompressed_size.pickle(out);
+        self.max_extract_part_size.pickle(out);
+        self.max_extract_parts.pickle(out);
+        self.max_extract_archive_entries.pickle(out);
+        self.max_extract_pdf_objects.pickle(out);
+        self.max_extract_rtf_depth.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -35544,6 +35575,21 @@ impl Pickle for Search {
         }
         if stream.version() >= 2 {
             this.max_extract_decompressed_size = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_part_size = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_parts = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_archive_entries = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_pdf_objects = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 2 {
+            this.max_extract_rtf_depth = Pickle::unpickle(stream)?;
         }
         Some(this)
     }
@@ -35597,13 +35643,18 @@ impl Default for Search {
             max_extract_document_size: 67108864u64,
             max_extract_text_size: 4194304u64,
             max_extract_decompressed_size: 268435456u64,
+            max_extract_part_size: 67108864u64,
+            max_extract_parts: 10000u64,
+            max_extract_archive_entries: 10000u64,
+            max_extract_pdf_objects: 1048576u64,
+            max_extract_rtf_depth: 256u64,
         }
     }
 }
 
 impl IntoValue for Search {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(18);
+        let mut map = jmap_tools::Map::with_capacity(23);
         map.insert_unchecked(Property::IndexBatchSize, self.index_batch_size.into_value());
         map.insert_unchecked(
             Property::DefaultLanguage,
@@ -35650,6 +35701,26 @@ impl IntoValue for Search {
             Property::MaxExtractDecompressedSize,
             self.max_extract_decompressed_size.into_value(),
         );
+        map.insert_unchecked(
+            Property::MaxExtractPartSize,
+            self.max_extract_part_size.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExtractParts,
+            self.max_extract_parts.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExtractArchiveEntries,
+            self.max_extract_archive_entries.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExtractPdfObjects,
+            self.max_extract_pdf_objects.into_value(),
+        );
+        map.insert_unchecked(
+            Property::MaxExtractRtfDepth,
+            self.max_extract_rtf_depth.into_value(),
+        );
         JmapValue::Object(map)
     }
 }
@@ -35681,6 +35752,15 @@ impl RegistryJsonPropertyPatch for Search {
             Some(Property::MaxExtractDecompressedSize) => {
                 self.max_extract_decompressed_size.patch(pointer, value)
             }
+            Some(Property::MaxExtractPartSize) => self.max_extract_part_size.patch(pointer, value),
+            Some(Property::MaxExtractParts) => self.max_extract_parts.patch(pointer, value),
+            Some(Property::MaxExtractArchiveEntries) => {
+                self.max_extract_archive_entries.patch(pointer, value)
+            }
+            Some(Property::MaxExtractPdfObjects) => {
+                self.max_extract_pdf_objects.patch(pointer, value)
+            }
+            Some(Property::MaxExtractRtfDepth) => self.max_extract_rtf_depth.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

@@ -194,6 +194,7 @@ pub async fn jmap_tests() {
         mail::parse::test(&test).await;
         mail::query::test(&test).await;
         mail::search_snippet::test(&test).await;
+        mail::attachment_search::test(&test).await;
         mail::changes::test(&test).await;
         mail::query_changes::test(&test).await;
         mail::copy::test(&test).await;

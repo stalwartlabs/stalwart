@@ -30,13 +30,15 @@ pub(super) struct AttachmentText {
 }
 
 pub fn document_limits(config: &ExtractLimits) -> Limits {
-    let defaults = Limits::default();
     Limits {
         max_input_bytes: config.max_document_size,
         max_output_bytes: config.max_text_size,
-        max_part_bytes: defaults.max_part_bytes.min(config.max_decompressed_size),
+        max_entries: config.max_archive_entries,
+        max_parts: config.max_parts,
+        max_part_bytes: config.max_part_size.min(config.max_decompressed_size),
         max_total_bytes: config.max_decompressed_size,
-        ..defaults
+        max_rtf_depth: config.max_rtf_depth,
+        max_pdf_objects: config.max_pdf_objects,
     }
 }
 
@@ -232,11 +234,19 @@ mod tests {
         include_bytes!("../../../../text-extract/tests/fixtures/real/textutil.docx");
     const DOCX_TYPE: &str =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const PDF: &[u8] = include_bytes!(
+        "../../../../text-extract/tests/fixtures/pdf/text/gen/type1-winansi-std14.pdf"
+    );
 
     const LIMITS: ExtractLimits = ExtractLimits {
         max_document_size: 64 << 20,
         max_text_size: 4 << 20,
         max_decompressed_size: 256 << 20,
+        max_part_size: 64 << 20,
+        max_parts: 10_000,
+        max_archive_entries: 10_000,
+        max_pdf_objects: 1 << 20,
+        max_rtf_depth: 256,
     };
 
     fn index_with(raw_message: &[u8], limits: &ExtractLimits) -> (bool, IndexDocument) {
@@ -426,6 +436,30 @@ mod tests {
             .attachment("application/pdf", "file.pdf", &b"%PDF-1.7"[..])
             .write_to_vec()
             .unwrap_or_default();
-        assert_eq!(index(&raw_message), (false, None));
+        assert_eq!(index(&raw_message), (true, None));
+    }
+
+    #[test]
+    fn pdf_attachment_becomes_searchable_text() {
+        for (content_type, name) in [
+            ("application/pdf", "survey.pdf"),
+            ("application/octet-stream", "scan"),
+        ] {
+            let raw_message = MessageBuilder::new()
+                .from("sender@example.com")
+                .to("rcpt@example.com")
+                .subject("Lighthouse survey")
+                .text_body("See attached")
+                .attachment(content_type, name, PDF)
+                .write_to_vec()
+                .unwrap_or_default();
+            let (extractable, attachment) = index(&raw_message);
+            assert!(extractable, "{content_type} {name}");
+            let attachment = attachment.unwrap_or_default();
+            assert!(
+                attachment.contains("Quillbrook") && attachment.contains("Marrowby"),
+                "{content_type} {name}: {attachment:?}"
+            );
+        }
     }
 }

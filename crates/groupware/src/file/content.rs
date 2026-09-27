@@ -23,7 +23,14 @@ impl FileContentKind {
             .and_then(|essence| essence.split_once('/'));
         match parts {
             Some(("text", "html")) => return Some(FileContentKind::Html),
-            Some(("text", "rtf")) => return Some(FileContentKind::Document),
+            Some(("text", subtype))
+                if Hints::new()
+                    .with_media_type_parts("text", subtype)
+                    .format()
+                    .is_some() =>
+            {
+                return Some(FileContentKind::Document);
+            }
             Some(("text", _)) => return Some(FileContentKind::PlainText),
             _ => {}
         }
@@ -143,6 +150,28 @@ mod tests {
             ),
             ("notes", Some("text/rtf"), Some(FileContentKind::Document)),
             ("notes.rtf", None, Some(FileContentKind::Document)),
+            ("report.pdf", None, Some(FileContentKind::Document)),
+            (
+                "report.PDF",
+                Some("application/octet-stream"),
+                Some(FileContentKind::Document),
+            ),
+            (
+                "scan",
+                Some("application/pdf"),
+                Some(FileContentKind::Document),
+            ),
+            (
+                "scan",
+                Some("application/x-pdf"),
+                Some(FileContentKind::Document),
+            ),
+            ("scan", Some("text/pdf"), Some(FileContentKind::Document)),
+            (
+                "notes.pdf",
+                Some("text/plain"),
+                Some(FileContentKind::PlainText),
+            ),
         ] {
             assert_eq!(
                 FileContentKind::detect(name, media_type),

@@ -7,7 +7,7 @@
 use crate::{
     output::Output,
     package::{Arena, Span},
-    xml::{Handler, Tag},
+    xml::{Handler, Tag, Text},
 };
 use memchr::memrchr;
 
@@ -19,10 +19,17 @@ pub(crate) enum RelKind {
     Footnotes,
     Endnotes,
     Comments,
+    ThreadedComments,
     DiagramData,
     SharedStrings,
+    Styles,
     Worksheet,
+    Chartsheet,
+    Drawing,
+    Chart,
     Slide,
+    SlideLayout,
+    SlideMaster,
     NotesSlide,
 }
 
@@ -38,10 +45,18 @@ impl RelKind {
             b"footnotes" => RelKind::Footnotes,
             b"endnotes" => RelKind::Endnotes,
             b"comments" => RelKind::Comments,
+            b"threadedComment" => RelKind::ThreadedComments,
             b"diagramData" => RelKind::DiagramData,
             b"sharedStrings" => RelKind::SharedStrings,
+            b"styles" => RelKind::Styles,
             b"worksheet" => RelKind::Worksheet,
+            b"chartsheet" => RelKind::Chartsheet,
+            b"drawing" => RelKind::Drawing,
+            b"chart" => RelKind::Chart,
+            b"chartEx" => RelKind::Chart,
             b"slide" => RelKind::Slide,
+            b"slideLayout" => RelKind::SlideLayout,
+            b"slideMaster" => RelKind::SlideMaster,
             b"notesSlide" => RelKind::NotesSlide,
         )
         .copied()
@@ -92,12 +107,34 @@ impl Handler for RelsHandler<'_> {
 
     fn end(&mut self, _name: &[u8], _out: &mut Output<'_>) {}
 
-    fn text(&mut self, _text: &[u8], _out: &mut Output<'_>) {}
+    fn text(&mut self, _text: Text<'_>, _out: &mut Output<'_>) {}
 }
 
-pub(crate) fn find_target(arena: &Arena, rels: &[Rel], kind: RelKind, id: Span) -> Option<Span> {
+pub(crate) fn sort_by_id(arena: &Arena, rels: &mut Vec<Rel>) {
+    rels.sort_unstable_by(|left, right| {
+        arena
+            .get(left.id)
+            .cmp(arena.get(right.id))
+            .then(left.id.start().cmp(&right.id.start()))
+    });
+    rels.dedup_by(|later, earlier| arena.get(later.id) == arena.get(earlier.id));
+}
+
+pub(crate) fn find_sorted(
+    arena: &Arena,
+    sorted: &[Rel],
+    id: Span,
+    accept: impl Fn(RelKind) -> bool,
+) -> Option<Rel> {
     let id = arena.get(id);
+    let index = sorted
+        .binary_search_by(|rel| arena.get(rel.id).cmp(id))
+        .ok()?;
+    sorted.get(index).filter(|rel| accept(rel.kind)).copied()
+}
+
+pub(crate) fn find_kind(rels: &[Rel], kind: RelKind) -> Option<Span> {
     rels.iter()
-        .find(|rel| rel.kind == kind && arena.get(rel.id) == id)
+        .find(|rel| rel.kind == kind)
         .map(|rel| rel.target)
 }

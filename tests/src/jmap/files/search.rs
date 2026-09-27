@@ -16,7 +16,21 @@ const DOCX: &[u8] =
     include_bytes!("../../../../crates/text-extract/tests/fixtures/real/textutil.docx");
 const ODT: &[u8] =
     include_bytes!("../../../../crates/text-extract/tests/fixtures/real/textutil.odt");
+const PDF: &[u8] = include_bytes!(
+    "../../../../crates/text-extract/tests/fixtures/pdf/text/gen/type1-winansi-std14.pdf"
+);
+const UNTYPED_PDF: &[u8] = include_bytes!(
+    "../../../../crates/text-extract/tests/fixtures/pdf/text/gen/actualtext-spans.pdf"
+);
+const XLSX: &[u8] =
+    include_bytes!("../../../../crates/text-extract/tests/fixtures/real/testEXCEL.xlsx");
+const PPTX: &[u8] =
+    include_bytes!("../../../../crates/text-extract/tests/fixtures/real/testPPT.pptx");
+const EPUB: &[u8] =
+    include_bytes!("../../../../crates/text-extract/tests/fixtures/real/testEPUB.epub");
 const DOCX_TYPE: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX_TYPE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PPTX_TYPE: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 pub async fn test(test: &TestServer) {
     println!("Running File Storage content search tests...");
@@ -31,6 +45,11 @@ pub async fn test(test: &TestServer) {
     .await;
     let plain = upload_blob(account, "the zebra crossed the road").await;
     let image = upload_binary(account, b"\x89PNG\r\n\x1a\nquokka zebra").await;
+    let pdf = upload_binary(account, PDF).await;
+    let untyped_pdf = upload_binary(account, UNTYPED_PDF).await;
+    let xlsx = upload_binary(account, XLSX).await;
+    let pptx = upload_binary(account, PPTX).await;
+    let epub = upload_binary(account, EPUB).await;
 
     let response = account
         .jmap_create(
@@ -42,12 +61,28 @@ pub async fn test(test: &TestServer) {
                 json!({"name": "notes.rtf", "parentId": "#i0", "blobId": &rtf, "type": "text/rtf"}),
                 json!({"name": "plain.txt", "parentId": "#i0", "blobId": &plain, "type": "text/plain"}),
                 json!({"name": "photo.png", "parentId": "#i0", "blobId": &image, "type": "image/png"}),
+                json!({"name": "report.pdf", "parentId": "#i0", "blobId": &pdf, "type": "application/pdf"}),
+                json!({"name": "scan.pdf", "parentId": "#i0", "blobId": &untyped_pdf}),
+                json!({"name": "numbers.xlsx", "parentId": "#i0", "blobId": &xlsx, "type": XLSX_TYPE}),
+                json!({"name": "slides.pptx", "parentId": "#i0", "blobId": &pptx, "type": PPTX_TYPE}),
+                json!({"name": "book.epub", "parentId": "#i0", "blobId": &epub, "type": "application/epub+zip"}),
             ],
             Vec::<(&str, &str)>::new(),
         )
         .await;
-    let [root, report, letter, notes, plain_id, photo] =
-        [0, 1, 2, 3, 4, 5].map(|idx| response.created(idx).id().to_string());
+    let [
+        root,
+        report,
+        letter,
+        notes,
+        plain_id,
+        photo,
+        report_pdf,
+        scan_pdf,
+        numbers,
+        slides,
+        book,
+    ] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(|idx| response.created(idx).id().to_string());
     wait_for_index(test).await;
 
     for (filter, expected) in [
@@ -58,6 +93,12 @@ pub async fn test(test: &TestServer) {
         (json!({"text": "zebra"}), vec![&plain_id]),
         (json!({"text": "photo.*"}), vec![&photo]),
         (json!({"text": "image/*"}), vec![&photo]),
+        (json!({"body": "Quillbrook"}), vec![&report_pdf]),
+        (json!({"body": "Marrowby"}), vec![&report_pdf]),
+        (json!({"body": "Oakhollow"}), vec![&scan_pdf]),
+        (json!({"body": "Worksheet"}), vec![&numbers]),
+        (json!({"body": "Avalanche"}), vec![&slides]),
+        (json!({"body": "superchapters"}), vec![&book]),
     ] {
         assert_eq!(
             query(account, filter.clone()).await,

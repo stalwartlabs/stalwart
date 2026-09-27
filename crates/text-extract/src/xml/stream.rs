@@ -13,6 +13,12 @@ use memchr::memmem;
 pub(crate) const WINDOW: usize = 1 << 16;
 const SNIFF_LEN: usize = 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Part {
+    Content,
+    Plumbing,
+}
+
 pub(crate) struct Budget {
     pub(crate) part_bytes: u64,
     pub(crate) total_bytes: u64,
@@ -23,12 +29,12 @@ pub(crate) struct Budget {
 }
 
 impl Budget {
-    fn part_cap(&self) -> u64 {
+    pub(crate) fn part_cap(&self) -> u64 {
         self.part_bytes
             .min(self.total_bytes.saturating_sub(self.used_bytes))
     }
 
-    fn charge(&mut self, bytes: usize) {
+    pub(crate) fn charge(&mut self, bytes: usize) {
         self.used_bytes = self.used_bytes.saturating_add(bytes as u64);
     }
 
@@ -116,6 +122,7 @@ impl Buffers {
     pub(crate) fn scan<H: Handler>(
         &mut self,
         member: MemberData<'_>,
+        part: Part,
         budget: &mut Budget,
         handler: &mut H,
         out: &mut Output<'_>,
@@ -124,7 +131,9 @@ impl Buffers {
             budget.truncated = true;
             return;
         }
-        budget.used_parts += 1;
+        if part == Part::Content {
+            budget.used_parts += 1;
+        }
         let cap = usize::try_from(budget.part_cap()).unwrap_or(usize::MAX);
         match member {
             MemberData::Stored(data) => {
@@ -135,12 +144,8 @@ impl Buffers {
                 match sniff(bounded) {
                     Sniff::Utf8 { skip } => {
                         budget.charge(bounded.len());
-                        Scanner::default().feed(
-                            bounded.get(skip..).unwrap_or_default(),
-                            true,
-                            handler,
-                            out,
-                        );
+                        let body = bounded.get(skip..).unwrap_or_default();
+                        Scanner::default().feed(body, true, handler, out);
                     }
                     Sniff::Encoded { encoding, skip } => {
                         let source = Source::Stored {
@@ -229,12 +234,8 @@ impl Buffers {
                 let mut start = skip.min(filled);
                 loop {
                     let exhausted = source.finished() || remaining == 0;
-                    let consumed = scanner.feed(
-                        window.get(start..filled).unwrap_or_default(),
-                        exhausted,
-                        handler,
-                        out,
-                    );
+                    let chunk = window.get(start..filled).unwrap_or_default();
+                    let consumed = scanner.feed(chunk, exhausted, handler, out);
                     if exhausted || out.is_full() || handler.aborted() {
                         if remaining == 0 && !source.finished() {
                             budget.truncated = true;
@@ -304,12 +305,8 @@ fn transcode<H: Handler>(
         raw_filled -= read.min(raw_filled);
         filled += written;
         let exhausted = source_done && raw_filled == 0 && result == CoderResult::InputEmpty;
-        let consumed = scanner.feed(
-            window.get(..filled).unwrap_or_default(),
-            exhausted,
-            handler,
-            out,
-        );
+        let chunk = window.get(..filled).unwrap_or_default();
+        let consumed = scanner.feed(chunk, exhausted, handler, out);
         if exhausted || out.is_full() || handler.aborted() {
             if remaining == 0 && !source.finished() {
                 budget.truncated = true;

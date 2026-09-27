@@ -8653,10 +8653,12 @@ dependencies = [
 name = "text-extract"
 version = "1.0.0"
 dependencies = [
+ "aws-lc-rs",
  "encoding_rs",
  "flate2",
  "hashify 0.3.0",
  "mail-parser",
+ "md5",
  "memchr",
  "quick-xml 0.41.0",
  "zip",

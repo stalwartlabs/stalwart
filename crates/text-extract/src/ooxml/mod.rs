@@ -4,16 +4,28 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+mod chart;
+mod comments;
+mod layout;
+mod number;
+mod pptx;
 mod rels;
+mod sheet;
+mod styles;
 mod text;
+mod xlsx;
 
 use crate::{
     Format,
     output::{Output, Separator},
     package::{Arena, Package, Span},
+    xml::stream::Part,
 };
-use rels::{Rel, RelKind, RelsHandler, find_target};
-use text::{MainPart, RunText, SheetText};
+use chart::{ChartText, ChartValues};
+use comments::CommentsText;
+use rels::{Rel, RelKind, RelsHandler};
+use styles::Styles;
+use text::{MainPart, RunText};
 
 const ROOT_RELS: &[u8] = b"_rels/.rels";
 const MAIN_PART_FALLBACKS: [&[u8]; 3] = [
@@ -27,7 +39,16 @@ pub(crate) struct Scratch {
     arena: Arena,
     rels: Vec<Rel>,
     child_rels: Vec<Rel>,
+    nested_rels: Vec<Rel>,
     ids: Vec<Span>,
+    styles: Styles,
+}
+
+pub(crate) struct Relations<'s> {
+    arena: &'s mut Arena,
+    child_rels: &'s mut Vec<Rel>,
+    nested_rels: &'s mut Vec<Rel>,
+    limit: usize,
 }
 
 pub(crate) fn is_package(package: &Package<'_, '_>) -> bool {
@@ -46,12 +67,16 @@ pub(crate) fn extract(
         arena,
         rels,
         child_rels,
+        nested_rels,
         ids,
+        styles,
     } = scratch;
     arena.clear();
     rels.clear();
     child_rels.clear();
+    nested_rels.clear();
     ids.clear();
+    styles.clear();
     let limit = package.budget.parts;
 
     let root = arena.push(b"")?;
@@ -70,22 +95,40 @@ pub(crate) fn extract(
         })?;
 
     let member = package.archive.find(arena.get(main))?;
-    let data = package.archive.read(&member, package.claimed)?;
     let mut main_part = MainPart::new(arena, ids, limit);
-    package
-        .buffers
-        .scan(data, &mut package.budget, &mut main_part, out);
+    package.scan_member_as(&member, Part::Content, &mut main_part, out);
     let format = main_part.format()?;
+    let dates = main_part.dates();
+    package.budget.truncated |= main_part.capped();
     out.separator(Separator::Newline);
 
     rels.clear();
     let main_rels = arena.push_rels_path(main)?;
     load_rels(package, arena, rels, main_rels, main, limit, out);
 
+    let mut relations = Relations {
+        arena,
+        child_rels,
+        nested_rels,
+        limit,
+    };
     match format {
-        Format::Docx => extract_docx(package, arena, rels, out),
-        Format::Xlsx => extract_xlsx(package, arena, rels, ids, out),
-        _ => extract_pptx(package, arena, rels, child_rels, ids, limit, out),
+        Format::Docx => {
+            let Relations {
+                arena, nested_rels, ..
+            } = relations;
+            scan_related(
+                package,
+                arena,
+                rels,
+                nested_rels,
+                limit,
+                ChartValues::All,
+                out,
+            );
+        }
+        Format::Xlsx => xlsx::extract(package, &mut relations, rels, ids, styles, dates, out),
+        _ => pptx::extract(package, &mut relations, rels, ids, out),
     }
     Some(format)
 }
@@ -98,12 +141,9 @@ fn load_rels(
     source: Span,
     limit: usize,
     out: &mut Output<'_>,
-) {
+) -> bool {
     let Some(member) = package.archive.find(arena.get(path)) else {
-        return;
-    };
-    let Some(data) = package.archive.read(&member, package.claimed) else {
-        return;
+        return false;
     };
     let mut handler = RelsHandler {
         arena,
@@ -111,90 +151,115 @@ fn load_rels(
         source,
         limit,
     };
-    package
-        .buffers
-        .scan(data, &mut package.budget, &mut handler, out);
+    package.scan_member_as(&member, Part::Plumbing, &mut handler, out)
 }
 
-fn extract_docx(package: &mut Package<'_, '_>, arena: &Arena, rels: &[Rel], out: &mut Output<'_>) {
-    for rel in rels.iter().filter(|rel| {
-        matches!(
-            rel.kind,
-            RelKind::Footnotes
-                | RelKind::Endnotes
-                | RelKind::Comments
-                | RelKind::DiagramData
-                | RelKind::Header
-                | RelKind::Footer
-        )
-    }) {
-        if package.stopped(out) {
-            return;
+impl Relations<'_> {
+    fn load_children(
+        &mut self,
+        package: &mut Package<'_, '_>,
+        part: Span,
+        out: &mut Output<'_>,
+    ) -> bool {
+        self.child_rels.clear();
+        match self.arena.push_rels_path(part) {
+            Some(path) => load_rels(
+                package,
+                self.arena,
+                self.child_rels,
+                path,
+                part,
+                self.limit,
+                out,
+            ),
+            None => false,
         }
-        package.scan(arena.get(rel.target), &mut RunText::default(), out);
-        out.separator(Separator::Newline);
+    }
+
+    fn scan_children(
+        &mut self,
+        package: &mut Package<'_, '_>,
+        values: ChartValues,
+        out: &mut Output<'_>,
+    ) {
+        let Relations {
+            arena,
+            child_rels,
+            nested_rels,
+            limit,
+        } = self;
+        scan_related(package, arena, child_rels, nested_rels, *limit, values, out);
     }
 }
 
-fn extract_xlsx(
-    package: &mut Package<'_, '_>,
-    arena: &Arena,
-    rels: &[Rel],
-    sheets: &[Span],
-    out: &mut Output<'_>,
-) {
-    if let Some(shared) = rels.iter().find(|rel| rel.kind == RelKind::SharedStrings) {
-        package.scan(arena.get(shared.target), &mut RunText::default(), out);
-        out.separator(Separator::Newline);
-    }
-    for &sheet in sheets {
-        if package.stopped(out) {
-            return;
-        }
-        if let Some(target) = find_target(arena, rels, RelKind::Worksheet, sheet) {
-            package.scan(arena.get(target), &mut SheetText::default(), out);
-            out.separator(Separator::Newline);
-        }
-    }
-}
-
-fn extract_pptx(
+fn scan_related(
     package: &mut Package<'_, '_>,
     arena: &mut Arena,
     rels: &[Rel],
-    child_rels: &mut Vec<Rel>,
-    slides: &[Span],
+    nested_rels: &mut Vec<Rel>,
     limit: usize,
+    values: ChartValues,
     out: &mut Output<'_>,
 ) {
-    for &slide in slides {
+    for rel in rels {
         if package.stopped(out) {
             return;
         }
-        let Some(target) = find_target(arena, rels, RelKind::Slide, slide) else {
-            continue;
-        };
-        if !package.scan(arena.get(target), &mut RunText::default(), out) {
-            continue;
+        match rel.kind {
+            RelKind::Comments | RelKind::ThreadedComments => {
+                package.scan(arena.get(rel.target), &mut CommentsText::default(), out);
+            }
+            RelKind::Footnotes
+            | RelKind::Endnotes
+            | RelKind::DiagramData
+            | RelKind::Header
+            | RelKind::Footer
+            | RelKind::NotesSlide => {
+                package.scan(arena.get(rel.target), &mut RunText::default(), out);
+            }
+            RelKind::Chart => {
+                package.scan(arena.get(rel.target), &mut ChartText::new(values), out);
+            }
+            RelKind::Drawing => {
+                if package.scan(arena.get(rel.target), &mut RunText::default(), out) {
+                    out.separator(Separator::Newline);
+                    scan_drawing(package, arena, rel.target, nested_rels, limit, values, out);
+                }
+            }
+            _ => continue,
         }
         out.separator(Separator::Newline);
-        let mark = arena.mark();
-        child_rels.clear();
-        if let Some(path) = arena.push_rels_path(target) {
-            load_rels(package, arena, child_rels, path, target, limit, out);
-        }
-        for rel in child_rels.iter().filter(|rel| {
-            matches!(
-                rel.kind,
-                RelKind::NotesSlide | RelKind::Comments | RelKind::DiagramData
-            )
-        }) {
-            if package.stopped(out) {
-                break;
-            }
-            package.scan(arena.get(rel.target), &mut RunText::default(), out);
-            out.separator(Separator::Newline);
-        }
-        arena.rewind(mark);
     }
+}
+
+fn scan_drawing(
+    package: &mut Package<'_, '_>,
+    arena: &mut Arena,
+    drawing: Span,
+    nested_rels: &mut Vec<Rel>,
+    limit: usize,
+    values: ChartValues,
+    out: &mut Output<'_>,
+) {
+    let mark = arena.mark();
+    nested_rels.clear();
+    if let Some(path) = arena.push_rels_path(drawing) {
+        load_rels(package, arena, nested_rels, path, drawing, limit, out);
+    }
+    for rel in nested_rels.iter() {
+        if package.stopped(out) {
+            break;
+        }
+        match rel.kind {
+            RelKind::Chart => {
+                package.scan(arena.get(rel.target), &mut ChartText::new(values), out);
+            }
+            RelKind::DiagramData => {
+                package.scan(arena.get(rel.target), &mut RunText::default(), out);
+            }
+            _ => continue,
+        }
+        out.separator(Separator::Newline);
+    }
+    arena.rewind(mark);
 }

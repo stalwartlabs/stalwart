@@ -27,3 +27,10 @@ path = "fuzz_targets/package.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pdf"
+path = "fuzz_targets/pdf.rs"
+test = false
+doc = false
+bench = false

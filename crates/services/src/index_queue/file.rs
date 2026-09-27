@@ -219,6 +219,9 @@ fn lossy_prefix(contents: &[u8], max_len: usize) -> Cow<'_, str> {
 mod tests {
     use super::*;
 
+    const PDF: &[u8] =
+        include_bytes!("../../../text-extract/tests/fixtures/pdf/text/gen/type1-winansi-std14.pdf");
+
     fn request(kind: FileContentKind, contents: &[u8], max_text_size: usize) -> FileIndexRequest {
         FileIndexRequest {
             account_id: 1,
@@ -231,8 +234,39 @@ mod tests {
                 max_document_size: 1024,
                 max_text_size,
                 max_decompressed_size: 1024,
+                max_part_size: 1024,
+                max_parts: 16,
+                max_archive_entries: 16,
+                max_pdf_objects: 1024,
+                max_rtf_depth: 16,
             },
             default_language: Language::English,
+        }
+    }
+
+    #[test]
+    fn pdf_documents_are_extracted() {
+        for (file_name, media_type) in [("report.pdf", None), ("scan", Some("application/pdf"))] {
+            assert_eq!(
+                FileContentKind::detect(file_name, media_type),
+                Some(FileContentKind::Document),
+                "{file_name} {media_type:?}"
+            );
+            let mut pdf = request(FileContentKind::Document, PDF, 64 << 10);
+            pdf.file_name = file_name.to_string();
+            pdf.media_type = media_type.map(str::to_string);
+            pdf.limits.max_document_size = PDF.len();
+            pdf.limits.max_decompressed_size = 1 << 20;
+            pdf.limits.max_part_size = 1 << 20;
+            let text = pdf.text().unwrap_or_default();
+            assert!(
+                text.contains("Quillbrook") && text.contains("Marrowby"),
+                "{file_name}: {text:?}"
+            );
+            assert!(
+                pdf.build()
+                    .has_field(&SearchField::File(FileSearchField::Content))
+            );
         }
     }
 

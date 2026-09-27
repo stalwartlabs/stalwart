@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub mod pdf;
+
 use flate2::{Compress, Compression, Crc, FlushCompress};
 use std::path::Path;
 use text_extract::{Error, Extraction, Hints, Limits};

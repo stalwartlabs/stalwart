@@ -9,7 +9,7 @@ use crate::{
     xml::{
         Handler,
         attr::decode_into,
-        stream::{Budget, Buffers},
+        stream::{Budget, Buffers, Part},
     },
     zip::{Archive, Member, ReadRanges},
 };
@@ -25,6 +25,10 @@ pub(crate) struct Span {
 }
 
 impl Span {
+    pub(crate) fn start(self) -> u32 {
+        self.start
+    }
+
     fn range(self) -> Range<usize> {
         self.start as usize..self.end as usize
     }
@@ -126,20 +130,21 @@ impl Arena {
             }
         }
         for segment in self.decoded.split(|&byte| byte == b'/' || byte == b'\\') {
-            match segment {
-                b"" | b"." => {}
+            hashify::fnc_map!(segment,
+                b"" => {},
+                b"." => {},
                 b".." => {
                     let current = self.bytes.get(start..).unwrap_or_default();
                     let keep = memrchr(b'/', current).unwrap_or(0);
                     self.bytes.truncate(start + keep);
-                }
+                },
                 _ => {
                     if self.bytes.len() > start {
                         self.bytes.push(b'/');
                     }
                     self.bytes.extend_from_slice(segment);
                 }
-            }
+            );
             if self.bytes.len() > MAX_ARENA {
                 self.bytes.truncate(start);
                 return None;
@@ -214,12 +219,35 @@ impl<'a> Package<'a, '_> {
         handler: &mut H,
         out: &mut Output<'_>,
     ) -> bool {
+        self.scan_member_as(member, Part::Content, handler, out)
+    }
+
+    pub(crate) fn scan_plumbing<H: Handler>(
+        &mut self,
+        name: &[u8],
+        handler: &mut H,
+        out: &mut Output<'_>,
+    ) -> bool {
+        match self.archive.find(name) {
+            Some(member) => self.scan_member_as(&member, Part::Plumbing, handler, out),
+            None => false,
+        }
+    }
+
+    pub(crate) fn scan_member_as<H: Handler>(
+        &mut self,
+        member: &Member<'a>,
+        part: Part,
+        handler: &mut H,
+        out: &mut Output<'_>,
+    ) -> bool {
         if out.is_full() {
             return false;
         }
         match self.archive.read(member, self.claimed) {
             Some(data) => {
-                self.buffers.scan(data, &mut self.budget, handler, out);
+                self.buffers
+                    .scan(data, part, &mut self.budget, handler, out);
                 true
             }
             None => false,

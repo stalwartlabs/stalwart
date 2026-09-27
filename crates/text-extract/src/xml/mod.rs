@@ -26,10 +26,67 @@ impl<'a> Tag<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Chunk<'a> {
+    Valid(&'a str),
+    Raw(&'a [u8]),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Text<'a> {
+    chunk: Chunk<'a>,
+    closed_by_tag: bool,
+}
+
+impl<'a> Text<'a> {
+    #[inline]
+    pub(crate) fn valid(text: &'a str) -> Self {
+        Text {
+            chunk: Chunk::Valid(text),
+            closed_by_tag: false,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn raw(bytes: &'a [u8]) -> Self {
+        Text {
+            chunk: Chunk::Raw(bytes),
+            closed_by_tag: false,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn closed_by_tag(mut self, closed: bool) -> Self {
+        self.closed_by_tag = closed;
+        self
+    }
+
+    #[inline]
+    pub(crate) fn is_closed_by_tag(self) -> bool {
+        self.closed_by_tag
+    }
+
+    #[inline]
+    pub(crate) fn as_bytes(self) -> &'a [u8] {
+        match self.chunk {
+            Chunk::Valid(text) => text.as_bytes(),
+            Chunk::Raw(bytes) => bytes,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn push(self, out: &mut Output<'_>) {
+        match self.chunk {
+            Chunk::Valid(text) => out.push_str(text),
+            Chunk::Raw(bytes) => out.push_utf8(bytes),
+        }
+    }
+}
+
 pub(crate) trait Handler {
     fn start(&mut self, tag: &Tag<'_>, out: &mut Output<'_>);
     fn end(&mut self, name: &[u8], out: &mut Output<'_>);
-    fn text(&mut self, text: &[u8], out: &mut Output<'_>);
+    fn text(&mut self, text: Text<'_>, out: &mut Output<'_>);
     fn entity(&mut self, _name: &[u8], _out: &mut Output<'_>) {}
     fn aborted(&self) -> bool {
         false

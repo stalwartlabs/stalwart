@@ -4785,6 +4785,16 @@ pub struct Search {
     pub max_extract_text_size: u64,
     #[serde(rename = "maxExtractDecompressedSize")]
     pub max_extract_decompressed_size: u64,
+    #[serde(rename = "maxExtractPartSize")]
+    pub max_extract_part_size: u64,
+    #[serde(rename = "maxExtractParts")]
+    pub max_extract_parts: u64,
+    #[serde(rename = "maxExtractArchiveEntries")]
+    pub max_extract_archive_entries: u64,
+    #[serde(rename = "maxExtractPdfObjects")]
+    pub max_extract_pdf_objects: u64,
+    #[serde(rename = "maxExtractRtfDepth")]
+    pub max_extract_rtf_depth: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -76,6 +76,11 @@ pub struct ExtractLimits {
     pub max_document_size: usize,
     pub max_text_size: usize,
     pub max_decompressed_size: u64,
+    pub max_part_size: u64,
+    pub max_parts: usize,
+    pub max_archive_entries: usize,
+    pub max_pdf_objects: usize,
+    pub max_rtf_depth: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -304,6 +309,11 @@ impl EmailConfig {
                 max_document_size: search.max_extract_document_size as usize,
                 max_text_size: search.max_extract_text_size as usize,
                 max_decompressed_size: search.max_extract_decompressed_size,
+                max_part_size: search.max_extract_part_size,
+                max_parts: search.max_extract_parts as usize,
+                max_archive_entries: search.max_extract_archive_entries as usize,
+                max_pdf_objects: search.max_extract_pdf_objects as usize,
+                max_rtf_depth: search.max_extract_rtf_depth as usize,
             },
             max_objects,
             default_folders,

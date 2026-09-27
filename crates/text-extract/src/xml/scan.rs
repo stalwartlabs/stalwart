@@ -5,10 +5,10 @@
  */
 
 use super::{
-    Handler, MAX_ENTITY, MAX_NAME, MAX_TAG_CARRY, Tag,
+    Handler, MAX_ENTITY, MAX_NAME, MAX_TAG_CARRY, Tag, Text,
     attr::{resolve_entity, split_entity},
 };
-use crate::output::Output;
+use crate::{output::Output, utf8::LazyUtf8};
 use memchr::{memchr2, memmem};
 
 const CDATA_OPEN: &[u8] = b"<![CDATA[";
@@ -67,15 +67,35 @@ impl Default for Scanner {
     }
 }
 
+struct Input<'a> {
+    len: usize,
+    utf8: LazyUtf8<'a>,
+}
+
+impl<'a> Input<'a> {
+    #[inline]
+    fn text(&mut self, rest: &'a [u8], len: usize) -> Text<'a> {
+        match self.utf8.get(self.len - rest.len(), len) {
+            Some(valid) => Text::valid(valid),
+            None => Text::raw(rest.get(..len).unwrap_or_default()),
+        }
+    }
+}
+
 impl Scanner {
     pub(crate) fn feed<H: Handler>(
         &mut self,
-        input: &[u8],
+        bytes: &[u8],
         last: bool,
         handler: &mut H,
         out: &mut Output<'_>,
     ) -> usize {
-        let mut rest = input;
+        let input_len = bytes.len();
+        let mut input = Input {
+            len: input_len,
+            utf8: LazyUtf8::new(bytes),
+        };
+        let mut rest = bytes;
         while !out.is_full() && !handler.aborted() {
             match self.state {
                 State::Text => match if rest.first() == Some(&b'<') {
@@ -85,16 +105,17 @@ impl Scanner {
                 } {
                     None => {
                         let keep = if last { 0 } else { incomplete_utf8_tail(rest) };
-                        let (text, tail) = rest.split_at(rest.len() - keep);
-                        if !text.is_empty() {
-                            handler.text(text, out);
+                        let len = rest.len() - keep;
+                        if len > 0 {
+                            handler.text(input.text(rest, len), out);
                         }
-                        return input.len() - tail.len();
+                        return input_len - keep;
                     }
                     Some(at) => {
-                        let (text, markup) = rest.split_at(at);
-                        if !text.is_empty() {
-                            handler.text(text, out);
+                        let markup = rest.get(at..).unwrap_or_default();
+                        if at > 0 {
+                            let text = input.text(rest, at);
+                            handler.text(text.closed_by_tag(markup.first() == Some(&b'<')), out);
                         }
                         let step = if markup.first() == Some(&b'&') {
                             entity(markup, last, handler, out)
@@ -103,7 +124,7 @@ impl Scanner {
                         };
                         match step {
                             Some(consumed) => rest = markup.get(consumed..).unwrap_or_default(),
-                            None => return input.len() - markup.len(),
+                            None => return input_len - markup.len(),
                         }
                     }
                 },
@@ -112,23 +133,22 @@ impl Scanner {
                         self.state = State::Text;
                         rest = rest.get(at + 3..).unwrap_or_default();
                     }
-                    None => return input.len() - if last { 0 } else { rest.len().min(2) },
+                    None => return input_len - if last { 0 } else { rest.len().min(2) },
                 },
                 State::Instruction => match memmem::find(rest, b"?>") {
                     Some(at) => {
                         self.state = State::Text;
                         rest = rest.get(at + 2..).unwrap_or_default();
                     }
-                    None => return input.len() - if last { 0 } else { rest.len().min(1) },
+                    None => return input_len - if last { 0 } else { rest.len().min(1) },
                 },
                 State::CData => match memmem::find(rest, b"]]>") {
                     Some(at) => {
-                        let (text, tail) = rest.split_at(at);
-                        if !text.is_empty() {
-                            handler.text(text, out);
+                        if at > 0 {
+                            handler.text(input.text(rest, at), out);
                         }
                         self.state = State::Text;
-                        rest = tail.get(3..).unwrap_or_default();
+                        rest = rest.get(at + 3..).unwrap_or_default();
                     }
                     None => {
                         let mut end = if last {
@@ -139,11 +159,10 @@ impl Scanner {
                         if !last {
                             end -= incomplete_utf8_tail(rest.get(..end).unwrap_or_default());
                         }
-                        let (text, tail) = rest.split_at(end);
-                        if !text.is_empty() {
-                            handler.text(text, out);
+                        if end > 0 {
+                            handler.text(input.text(rest, end), out);
                         }
-                        return input.len() - tail.len();
+                        return input_len - (rest.len() - end);
                     }
                 },
                 State::Declaration { depth, quote } => match skip_declaration(rest, depth, quote) {
@@ -153,7 +172,7 @@ impl Scanner {
                     }
                     Err((depth, quote)) => {
                         self.state = State::Declaration { depth, quote };
-                        return input.len();
+                        return input_len;
                     }
                 },
                 State::LongTag(mut long) => match find_tag_end(rest, &mut long.quote) {
@@ -179,12 +198,12 @@ impl Scanner {
                             long.previous = previous;
                         }
                         self.state = State::LongTag(long);
-                        return input.len();
+                        return input_len;
                     }
                 },
             }
         }
-        input.len()
+        input_len
     }
 
     fn markup<H: Handler>(
@@ -237,7 +256,7 @@ impl Scanner {
             [b'<', first, ..] if is_name_start(*first) => self.start_tag(rest, last, handler, out),
             [b'<'] if !last => None,
             _ => {
-                handler.text(b"<", out);
+                handler.text(Text::valid("<"), out);
                 Some(1)
             }
         }
@@ -299,14 +318,14 @@ fn entity<H: Handler>(
             match resolve_entity(body) {
                 Some(ch) => {
                     let mut encoded = [0u8; 4];
-                    handler.text(ch.encode_utf8(&mut encoded).as_bytes(), out);
+                    handler.text(Text::valid(ch.encode_utf8(&mut encoded)), out);
                 }
                 None if body.first() == Some(&b'#') => (),
                 None if !body.is_empty() && body.iter().all(u8::is_ascii_alphanumeric) => {
                     handler.entity(body, out);
                 }
                 None => {
-                    handler.text(b"&", out);
+                    handler.text(Text::valid("&"), out);
                     return Some(1);
                 }
             }
@@ -314,7 +333,7 @@ fn entity<H: Handler>(
         }
         None if !last && rest.len() < MAX_ENTITY => None,
         None => {
-            handler.text(b"&", out);
+            handler.text(Text::valid("&"), out);
             Some(1)
         }
     }
@@ -414,8 +433,9 @@ mod tests {
             self.events.push('>');
         }
 
-        fn text(&mut self, text: &[u8], _out: &mut Output<'_>) {
-            self.events.push_str(&String::from_utf8_lossy(text));
+        fn text(&mut self, text: Text<'_>, _out: &mut Output<'_>) {
+            self.events
+                .push_str(&String::from_utf8_lossy(text.as_bytes()));
         }
 
         fn entity(&mut self, name: &[u8], _out: &mut Output<'_>) {

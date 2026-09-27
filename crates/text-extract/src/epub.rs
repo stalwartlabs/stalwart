@@ -8,7 +8,7 @@ use crate::{
     html::HtmlText,
     output::{Output, Separator},
     package::{Arena, Package, Span},
-    xml::{Handler, Tag},
+    xml::{Handler, Tag, Text, stream::Part},
 };
 use memchr::memrchr;
 
@@ -92,7 +92,7 @@ impl Handler for ContainerHandler<'_> {
 
     fn end(&mut self, _name: &[u8], _out: &mut Output<'_>) {}
 
-    fn text(&mut self, _text: &[u8], _out: &mut Output<'_>) {}
+    fn text(&mut self, _text: Text<'_>, _out: &mut Output<'_>) {}
 }
 
 struct PackageHandler<'x> {
@@ -101,6 +101,7 @@ struct PackageHandler<'x> {
     spine: &'x mut Vec<Span>,
     source: Span,
     limit: usize,
+    capped: bool,
 }
 
 impl Handler for PackageHandler<'_> {
@@ -131,7 +132,8 @@ impl Handler for PackageHandler<'_> {
                     _ => self.arena.rewind(mark),
                 }
             }
-            Some(Element::ItemRef) if self.spine.len() < self.limit => {
+            Some(Element::ItemRef) if self.spine.len() >= self.limit => self.capped = true,
+            Some(Element::ItemRef) => {
                 if let Some(id) = tag
                     .attributes()
                     .find_map(|(name, value)| hashify::set!(name, b"idref").then_some(value))
@@ -146,7 +148,7 @@ impl Handler for PackageHandler<'_> {
 
     fn end(&mut self, _name: &[u8], _out: &mut Output<'_>) {}
 
-    fn text(&mut self, _text: &[u8], _out: &mut Output<'_>) {}
+    fn text(&mut self, _text: Text<'_>, _out: &mut Output<'_>) {}
 }
 
 pub(crate) fn extract(package: &mut Package<'_, '_>, scratch: &mut Scratch, out: &mut Output<'_>) {
@@ -165,22 +167,20 @@ pub(crate) fn extract(package: &mut Package<'_, '_>, scratch: &mut Scratch, out:
         arena,
         rootfile: None,
     };
-    package.scan(CONTAINER, &mut container, out);
-    if let Some(rootfile) = container.rootfile {
+    package.scan_plumbing(CONTAINER, &mut container, out);
+    if let Some(rootfile) = container.rootfile
+        && let Some(member) = package.archive.find(arena.get(rootfile))
+    {
         let mut handler = PackageHandler {
             arena,
             manifest,
             spine,
             source: rootfile,
             limit,
+            capped: false,
         };
-        if let Some(member) = package.archive.find(handler.arena.get(rootfile))
-            && let Some(data) = package.archive.read(&member, package.claimed)
-        {
-            package
-                .buffers
-                .scan(data, &mut package.budget, &mut handler, out);
-        }
+        package.scan_member_as(&member, Part::Plumbing, &mut handler, out);
+        package.budget.truncated |= handler.capped;
     }
 
     manifest.sort_unstable_by(|left, right| arena.get(left.id).cmp(arena.get(right.id)));

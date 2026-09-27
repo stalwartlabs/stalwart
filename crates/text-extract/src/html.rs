@@ -6,7 +6,7 @@
 
 use crate::{
     output::{Output, Separator},
-    xml::{Handler, Skip, Tag, local_name},
+    xml::{Handler, Skip, Tag, Text, local_name},
 };
 use mail_parser::decoders::html::add_html_token;
 
@@ -60,6 +60,9 @@ impl Element {
             b"hr" => Element::Block,
             b"figure" => Element::Block,
             b"figcaption" => Element::Block,
+            b"details" => Element::Block,
+            b"summary" => Element::Block,
+            b"noscript" => Element::Block,
             b"address" => Element::Block,
             b"main" => Element::Block,
             b"body" => Element::Block,
@@ -69,6 +72,14 @@ impl Element {
             b"th" => Element::Cell,
         )
         .copied()
+    }
+}
+
+pub(crate) fn tag_separator(local: &[u8]) -> Option<Separator> {
+    match Element::parse(local)? {
+        Element::Block => Some(Separator::Newline),
+        Element::Cell => Some(Separator::Space),
+        _ => None,
     }
 }
 
@@ -110,10 +121,11 @@ impl Handler for HtmlText {
         }
     }
 
-    fn text(&mut self, text: &[u8], out: &mut Output<'_>) {
-        if !self.skip.active() {
-            out.push_utf8(text);
+    fn text(&mut self, text: Text<'_>, out: &mut Output<'_>) {
+        if self.skip.active() {
+            return;
         }
+        text.push(out);
     }
 
     fn entity(&mut self, name: &[u8], out: &mut Output<'_>) {

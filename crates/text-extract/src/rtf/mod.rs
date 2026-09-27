@@ -7,9 +7,13 @@
 mod codepage;
 mod words;
 
-use crate::output::{Output, Separator};
+use crate::{
+    html::tag_separator,
+    output::{Mark, Output, Separator},
+    utf8::LazyUtf8,
+};
 use encoding_rs::{CoderResult, Decoder, Encoding, WINDOWS_1252};
-use memchr::memchr3;
+use memchr::{memchr, memchr3, memmem};
 use words::Word;
 
 const SIGNATURE: &[u8] = b"{\\rtf";
@@ -20,6 +24,7 @@ const MAX_PENDING: usize = 4096;
 const MAX_FONTS: usize = 4096;
 const MAX_SKIP: i64 = 64;
 const DECODE_CHUNK: usize = 256;
+const MAX_NOTE: usize = 1 << 16;
 
 pub(crate) fn is_rtf(data: &[u8]) -> bool {
     body(data).starts_with(SIGNATURE)
@@ -35,6 +40,7 @@ fn body(data: &[u8]) -> &[u8] {
 enum Destination {
     Text,
     FontTable,
+    HtmlTag,
     Ignored,
 }
 
@@ -44,6 +50,7 @@ struct Group {
     skip_after_unicode: u32,
     encoding: Option<&'static Encoding>,
     html_rtf: bool,
+    annotation: bool,
 }
 
 #[derive(Default)]
@@ -51,11 +58,15 @@ pub(crate) struct Scratch {
     stack: Vec<Group>,
     fonts: Vec<(i64, &'static Encoding)>,
     pending: Vec<u8>,
+    note: String,
 }
 
-struct Parser<'s, 'o, 'b> {
+struct Parser<'s, 'o, 'b, 'd> {
     scratch: &'s mut Scratch,
     out: &'o mut Output<'b>,
+    source_len: usize,
+    utf8: LazyUtf8<'d>,
+    group_open: usize,
     group: Group,
     overflow: u64,
     max_depth: usize,
@@ -63,6 +74,8 @@ struct Parser<'s, 'o, 'b> {
     default_font: Option<i64>,
     table_font: Option<i64>,
     from_html: bool,
+    html_in_tag: bool,
+    note_mark: Option<Mark>,
     ignorable: bool,
     skip: u32,
     high_surrogate: Option<u16>,
@@ -73,14 +86,20 @@ pub(crate) fn extract(data: &[u8], scratch: &mut Scratch, max_depth: usize, out:
     scratch.stack.clear();
     scratch.fonts.clear();
     scratch.pending.clear();
+    scratch.note.clear();
+    let body = body(data);
     let mut parser = Parser {
         scratch,
         out,
+        source_len: body.len(),
+        utf8: LazyUtf8::new(body),
+        group_open: usize::MAX,
         group: Group {
             destination: Destination::Text,
             skip_after_unicode: 1,
             encoding: None,
             html_rtf: false,
+            annotation: false,
         },
         overflow: 0,
         max_depth: max_depth.max(1),
@@ -88,16 +107,19 @@ pub(crate) fn extract(data: &[u8], scratch: &mut Scratch, max_depth: usize, out:
         default_font: None,
         table_font: None,
         from_html: false,
+        html_in_tag: false,
+        note_mark: None,
         ignorable: false,
         skip: 0,
         high_surrogate: None,
         decoder: None,
     };
-    parser.run(body(data));
+    parser.run(body);
     parser.flush();
+    parser.emit_note();
 }
 
-impl Parser<'_, '_, '_> {
+impl<'d> Parser<'_, '_, '_, 'd> {
     fn run(&mut self, mut rest: &[u8]) {
         while let Some((&byte, tail)) = rest.split_first() {
             if self.out.is_full() {
@@ -106,6 +128,7 @@ impl Parser<'_, '_, '_> {
             rest = match byte {
                 b'{' => {
                     self.open_group();
+                    self.group_open = self.source_len - tail.len();
                     tail
                 }
                 b'}' => {
@@ -114,8 +137,16 @@ impl Parser<'_, '_, '_> {
                     }
                     tail
                 }
-                b'\\' => self.control(tail),
-                b'\r' | b'\n' => tail,
+                b'\\' => {
+                    let group_start = self.source_len - rest.len() == self.group_open;
+                    self.control(tail, group_start)
+                }
+                b'\r' | b'\n' => {
+                    if self.source_len - rest.len() == self.group_open {
+                        self.group_open += 1;
+                    }
+                    tail
+                }
                 _ => self.text(rest),
             };
         }
@@ -127,6 +158,7 @@ impl Parser<'_, '_, '_> {
         self.ignorable = false;
         if self.scratch.stack.len() < self.max_depth {
             self.scratch.stack.push(self.group);
+            self.group.annotation = false;
         } else {
             self.overflow = self.overflow.saturating_add(1);
         }
@@ -143,7 +175,12 @@ impl Parser<'_, '_, '_> {
         let Some(parent) = self.scratch.stack.pop() else {
             return false;
         };
-        self.group = parent;
+        let closed = std::mem::replace(&mut self.group, parent);
+        if closed.annotation
+            && let Some(mark) = self.note_mark.take()
+        {
+            self.out.cut(mark, &mut self.scratch.note, MAX_NOTE);
+        }
         !self.scratch.stack.is_empty()
     }
 
@@ -166,15 +203,29 @@ impl Parser<'_, '_, '_> {
                 None => break,
             }
         }
+        if self.group.destination == Destination::HtmlTag {
+            for line in run.split(|&byte| byte == b'\r' || byte == b'\n') {
+                if let Some(separator) = html_tag_separator(line, &mut self.html_in_tag) {
+                    self.out.separator(separator);
+                }
+            }
+            return tail;
+        }
         if self.suppressed() {
             return tail;
         }
+        let mut offset = self.source_len - run.len() - tail.len();
         for line in run.split(|&byte| byte == b'\r' || byte == b'\n') {
+            let line_start = offset;
+            offset += line.len() + 1;
             if line.is_empty() {
                 continue;
             }
             if self.scratch.pending.is_empty() && line.is_ascii() {
-                self.out.push_utf8(line);
+                match self.utf8.get(line_start, line.len()) {
+                    Some(text) => self.out.push_str(text),
+                    None => self.out.push_utf8(line),
+                }
             } else {
                 self.scratch.pending.extend_from_slice(line);
                 if self.scratch.pending.len() > MAX_PENDING {
@@ -185,7 +236,7 @@ impl Parser<'_, '_, '_> {
         tail
     }
 
-    fn control<'a>(&mut self, rest: &'a [u8]) -> &'a [u8] {
+    fn control<'a>(&mut self, rest: &'a [u8], group_start: bool) -> &'a [u8] {
         let Some((&first, tail)) = rest.split_first() else {
             return rest;
         };
@@ -202,7 +253,7 @@ impl Parser<'_, '_, '_> {
         }
         match first {
             b'*' => {
-                self.ignorable = true;
+                self.ignorable = group_start;
                 return tail;
             }
             b'\\' | b'{' | b'}' => {
@@ -294,7 +345,14 @@ impl Parser<'_, '_, '_> {
 
     fn apply(&mut self, word: Option<Word>, parameter: Option<i64>, ignorable: bool) {
         let Some(word) = word.filter(|word| {
-            !ignorable || matches!(word, Word::UnicodeDestination | Word::ShapeInstructions)
+            !ignorable
+                || matches!(
+                    word,
+                    Word::UnicodeDestination
+                        | Word::ShapeInstructions
+                        | Word::Annotation
+                        | Word::HtmlTag
+                )
         }) else {
             if ignorable {
                 self.group.destination = Destination::Ignored;
@@ -340,13 +398,39 @@ impl Parser<'_, '_, '_> {
                     u32::try_from(parameter.unwrap_or(1).clamp(0, MAX_SKIP)).unwrap_or(1)
             }
             Word::Unicode => self.unicode(parameter.unwrap_or(0)),
-            Word::Paragraph => self.separator(Separator::Newline),
-            Word::Tab => self.separator(Separator::Space),
+            Word::Paragraph => {
+                if self.note_mark.is_none() {
+                    self.emit_note();
+                }
+                self.separator(Separator::Newline)
+            }
+            Word::NestedRow => self.out.separator(Separator::Newline),
+            Word::Tab => {
+                if self.note_mark.is_none() {
+                    self.emit_note();
+                }
+                self.separator(Separator::Space)
+            }
             Word::Character(ch) => self.push_char(ch),
             Word::UnicodeDestination => {
                 if self.group.destination == Destination::Ignored {
                     self.group.destination = Destination::Text;
                 }
+            }
+            Word::Annotation => {
+                if self.note_mark.is_none() {
+                    self.note_mark = Some(self.out.mark());
+                    self.group.annotation = true;
+                }
+            }
+            Word::HtmlTag => {
+                self.html_in_tag = false;
+                self.group.destination =
+                    if self.from_html && self.group.destination == Destination::Text {
+                        Destination::HtmlTag
+                    } else {
+                        Destination::Ignored
+                    };
             }
             Word::ShapeInstructions | Word::Bin => {}
             Word::Destination => self.group.destination = Destination::Ignored,
@@ -380,6 +464,15 @@ impl Parser<'_, '_, '_> {
         if let Some(ch) = ch {
             self.flush();
             self.push_char(ch);
+        }
+    }
+
+    fn emit_note(&mut self) {
+        if !self.scratch.note.is_empty() {
+            self.out.separator(Separator::Space);
+            self.out.push_str(&self.scratch.note);
+            self.out.separator(Separator::Space);
+            self.scratch.note.clear();
         }
     }
 
@@ -452,5 +545,42 @@ impl Parser<'_, '_, '_> {
         if last {
             self.decoder = None;
         }
+    }
+}
+
+fn html_tag_separator(line: &[u8], in_tag: &mut bool) -> Option<Separator> {
+    let mut separator = None;
+    let mut rest = line;
+    loop {
+        if *in_tag {
+            match memchr(b'>', rest) {
+                Some(end) => {
+                    *in_tag = false;
+                    rest = rest.get(end + 1..).unwrap_or_default();
+                }
+                None => return separator,
+            }
+        }
+        let (outside, tag) = match memchr(b'<', rest) {
+            Some(at) => rest.split_at(at),
+            None => (rest, b"".as_slice()),
+        };
+        if outside.iter().any(u8::is_ascii_whitespace)
+            || memmem::find(outside, b"&nbsp;").is_some()
+            || memmem::find(outside, b"&#160;").is_some()
+        {
+            separator = separator.max(Some(Separator::Space));
+        }
+        let Some(tag) = tag.get(1..) else {
+            return separator;
+        };
+        let name = tag.strip_prefix(b"/").unwrap_or(tag);
+        let name_len = name
+            .iter()
+            .position(|byte| !byte.is_ascii_alphanumeric())
+            .unwrap_or(name.len());
+        separator = separator.max(tag_separator(name.get(..name_len).unwrap_or_default()));
+        *in_tag = true;
+        rest = tag;
     }
 }

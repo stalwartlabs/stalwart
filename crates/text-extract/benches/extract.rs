@@ -9,7 +9,7 @@ mod common;
 #[path = "support/prototype.rs"]
 mod prototype;
 
-use common::{Rng, ZipBuilder, ZipEntry, deflate_bomb, docx, fixture};
+use common::{Rng, ZipBuilder, ZipEntry, deflate_bomb, docx, fixture, pdf};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     hint::black_box,
@@ -235,6 +235,179 @@ fn large_rtf(rng: &mut Rng) -> Vec<u8> {
     }
     rtf.push('}');
     rtf.into_bytes()
+}
+
+fn large_pdf(rng: &mut Rng, compressed: bool) -> Vec<u8> {
+    let pages: Vec<Vec<u8>> = (0..2000)
+        .map(|_| {
+            let mut content = String::from("BT /F1 11 Tf 72 720 Td 14 TL\n");
+            for _ in 0..30 {
+                content.push('(');
+                content.push_str(&sentence(rng, 10));
+                content.push_str(") Tj T*\n");
+            }
+            content.push_str("ET");
+            content.into_bytes()
+        })
+        .collect();
+    let refs: Vec<&[u8]> = pages.iter().map(Vec::as_slice).collect();
+    let mut document = pdf::Document::new(&refs);
+    document.compress = compressed;
+    document.object_streams = compressed;
+    document.xref_stream = compressed;
+    document.build()
+}
+
+const TEXT_FONTS: &str = "/Font << /F1 10 0 R /F2 11 0 R /F3 12 0 R /F4 13 0 R >>";
+
+fn text_layer_pdf(
+    pages: Vec<Vec<u8>>,
+    resources: &str,
+    objects: &[(u32, &str, Option<Vec<u8>>)],
+) -> Vec<u8> {
+    let mut pdf = pdf::Pdf::new();
+    let first = 100u32;
+    let kids: String = (0..pages.len() as u32)
+        .map(|index| format!("{} 0 R ", first + index * 2))
+        .collect();
+    pdf.object(1, "<< /Type /Catalog /Pages 2 0 R >>").object(
+        2,
+        &format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()),
+    );
+    for (num, body, stream) in objects {
+        match stream {
+            Some(data) => pdf.flate_stream(*num, body, data),
+            None => pdf.object(*num, body),
+        };
+    }
+    for (index, content) in pages.iter().enumerate() {
+        let num = first + index as u32 * 2;
+        pdf.object(
+            num,
+            &format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << {resources} >> /Contents {} 0 R >>",
+                num + 1
+            ),
+        )
+        .flate_stream(num + 1, "", content);
+    }
+    pdf.xref_table("/Root 1 0 R");
+    pdf.build()
+}
+
+fn multi_font_pdf(rng: &mut Rng) -> Vec<u8> {
+    let widths: String = (32..127).map(|_| "556 ").collect();
+    let to_unicode = b"begincmap 1 begincodespacerange <00> <FF> endcodespacerange 1 beginbfrange <20> <7E> <0020> endbfrange endcmap".to_vec();
+    let truetype = format!(
+        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Arial /FirstChar 32 /LastChar 126 /Widths [{widths}] /ToUnicode 14 0 R >>"
+    );
+    let type3 = format!(
+        "<< /Type /Font /Subtype /Type3 /FontMatrix [0.001 0 0 0.001 0 0] /FontBBox [0 0 1000 1000] /CharProcs << >> /Encoding << /Differences [32 /space /exclam] >> /FirstChar 32 /LastChar 126 /Widths [{widths}] >>"
+    );
+    let objects = [
+        (
+            10,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+            None,
+        ),
+        (11, truetype.as_str(), None),
+        (
+            12,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding << /Differences [1 /fi /fl] >> >>",
+            None,
+        ),
+        (13, type3.as_str(), None),
+        (14, "", Some(to_unicode)),
+    ];
+    let pages = (0..500)
+        .map(|_| {
+            let mut content = String::from("BT 14 TL 72 720 Td\n");
+            for line in 0..40 {
+                let font = 1 + line % 4;
+                content.push_str(&format!("/F{font} 10 Tf ["));
+                for word in sentence(rng, 10).split(' ') {
+                    content.push_str(&format!("({word}) -250 "));
+                }
+                content.push_str("] TJ T*\n");
+                if line % 5 == 0 {
+                    content.push_str("1.5 Tc (tracked heading) Tj 0 Tc T*\n");
+                }
+            }
+            content.push_str("ET");
+            content.into_bytes()
+        })
+        .collect();
+    text_layer_pdf(pages, TEXT_FONTS, &objects)
+}
+
+fn cjk_pdf(rng: &mut Rng) -> Vec<u8> {
+    let to_unicode = b"begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0000> <FFFF> <0000> endbfrange endcmap".to_vec();
+    let objects = [
+        (
+            10,
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Noto /Encoding /Identity-H /DescendantFonts [11 0 R] /ToUnicode 12 0 R >>",
+            None,
+        ),
+        (
+            11,
+            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Noto /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 1000 /W [32 [250] 48 57 500 65 122 600] >>",
+            None,
+        ),
+        (12, "", Some(to_unicode)),
+    ];
+    let pages = (0..300)
+        .map(|_| {
+            let mut content = String::from("BT /F1 10.5 Tf 16 TL 72 720 Td\n");
+            for _ in 0..40 {
+                content.push('<');
+                for _ in 0..36 {
+                    content.push_str(&format!("{:04X}", 0x4E00 + rng.below(0x5000)));
+                }
+                content.push_str("> Tj T*\n");
+            }
+            content.push_str("ET");
+            content.into_bytes()
+        })
+        .collect();
+    text_layer_pdf(pages, "/Font << /F1 10 0 R >>", &objects)
+}
+
+fn hostile_pdfs() -> Vec<(&'static str, Vec<u8>)> {
+    let tree = |pdf: &mut pdf::Pdf, filter: &str, content: &[u8]| {
+        pdf.object(1, "<< /Type /Catalog /Pages 2 0 R >>")
+            .object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+            .object(3, "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>")
+            .stream(4, filter, content);
+    };
+    let mut bomb = pdf::Pdf::new();
+    tree(
+        &mut bomb,
+        "/Filter /FlateDecode",
+        &pdf::zlib(&vec![b'0'; 1 << 30]),
+    );
+    bomb.xref_table("/Root 1 0 R");
+    let deep: String = ["[", "<<"]
+        .iter()
+        .copied()
+        .cycle()
+        .take(1_000_000)
+        .collect();
+    let mut nested = pdf::Pdf::new();
+    tree(&mut nested, "", deep.as_bytes());
+    nested.xref_table(&format!("/Root 1 0 R /Deep {deep}"));
+    let mut broken = Vec::with_capacity(8 << 20);
+    broken.extend_from_slice(b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj 2 0 obj << /Type /Pages /Kids [3 0 R] >> endobj 3 0 obj << /Type /Page >> endobj\n");
+    for num in 4..300_000 {
+        broken.extend_from_slice(
+            format!("{num} 0 obj << /Type /Annot /Rect [0 0 1 1] >> endobj\n").as_bytes(),
+        );
+    }
+    broken.extend_from_slice(b"trailer << /Root 1 0 R >>\n%%EOF\n");
+    vec![
+        ("pdf-flate-bomb-1gib", bomb.build()),
+        ("pdf-deep-nesting-1m", nested.build()),
+        ("pdf-repair-300k-objects", broken),
+    ]
 }
 
 struct Measurement {
@@ -496,6 +669,53 @@ fn main() {
             );
             report(name, "extract (fresh, defaults)", data.len(), &fresh);
         }
+    }
+
+    let mut pdfs = vec![
+        ("pdf-2000-pages-flate", large_pdf(&mut rng, true)),
+        ("pdf-2000-pages-plain", large_pdf(&mut rng, false)),
+        ("pdf-500-pages-four-fonts", multi_font_pdf(&mut rng)),
+        ("pdf-300-pages-cjk-composite", cjk_pdf(&mut rng)),
+        (
+            "pdf-fixture-libreoffice-letter",
+            fixture("pdf/text/gen/libreoffice-writer-letter.pdf"),
+        ),
+        (
+            "pdf-fixture-cjk-japanese",
+            fixture("pdf/text/gen/cjk-japanese-weasyprint.pdf"),
+        ),
+    ];
+    pdfs.extend(hostile_pdfs());
+    for (name, data) in &pdfs {
+        if filter
+            .as_deref()
+            .is_some_and(|filter| !name.contains(filter))
+        {
+            continue;
+        }
+        let decoded = inflated_size(data);
+        println!(
+            "| {name} | input {} KiB, decoded {} KiB | | | | | |",
+            data.len() / 1024,
+            decoded / 1024
+        );
+        let reused = measure(|| {
+            out.clear();
+            let _ = black_box(extractor.extract(black_box(data), Hints::new(), &mut out));
+            out.len()
+        });
+        report(name, "extractor (reused)", data.len(), &reused);
+        let fresh = measure(|| {
+            let mut text = String::new();
+            let _ = black_box(text_extract::extract(
+                black_box(data),
+                Hints::new(),
+                &limits,
+                &mut text,
+            ));
+            text.len()
+        });
+        report(name, "extract (fresh)", data.len(), &fresh);
     }
 
     if filter

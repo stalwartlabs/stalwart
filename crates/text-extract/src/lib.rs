@@ -10,7 +10,9 @@ mod odf;
 mod ooxml;
 mod output;
 mod package;
+mod pdf;
 mod rtf;
+mod utf8;
 mod xml;
 mod zip;
 
@@ -32,6 +34,7 @@ pub enum Format {
     Odp,
     Epub,
     Rtf,
+    Pdf,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -49,6 +52,7 @@ pub struct Limits {
     pub max_part_bytes: u64,
     pub max_total_bytes: u64,
     pub max_rtf_depth: usize,
+    pub max_pdf_objects: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +84,7 @@ pub struct Extractor {
     ooxml: ooxml::Scratch,
     epub: epub::Scratch,
     rtf: rtf::Scratch,
+    pdf: pdf::Scratch,
 }
 
 enum Container {
@@ -94,10 +99,11 @@ impl Default for Limits {
             max_input_bytes: 64 << 20,
             max_output_bytes: 4 << 20,
             max_entries: 10_000,
-            max_parts: 1_000,
+            max_parts: 10_000,
             max_part_bytes: 64 << 20,
             max_total_bytes: 256 << 20,
             max_rtf_depth: 256,
+            max_pdf_objects: 1 << 20,
         }
     }
 }
@@ -146,6 +152,8 @@ impl<'a> Hints<'a> {
         if hashify::set_ignore_case!(type_.as_bytes(), b"text") {
             return hashify::map_ignore_case!(subtype.as_bytes(), Format,
                 b"rtf" => Format::Rtf,
+                b"pdf" => Format::Pdf,
+                b"x-pdf" => Format::Pdf,
             )
             .copied();
         }
@@ -175,6 +183,10 @@ impl<'a> Hints<'a> {
             b"epub+zip" => Format::Epub,
             b"rtf" => Format::Rtf,
             b"x-rtf" => Format::Rtf,
+            b"pdf" => Format::Pdf,
+            b"x-pdf" => Format::Pdf,
+            b"acrobat" => Format::Pdf,
+            b"vnd.pdf" => Format::Pdf,
         )
         .copied()
     }
@@ -233,6 +245,7 @@ impl<'a> Hints<'a> {
             b"otp" => Format::Odp,
             b"epub" => Format::Epub,
             b"rtf" => Format::Rtf,
+            b"pdf" => Format::Pdf,
         )
         .copied()
     }
@@ -282,6 +295,15 @@ impl Extractor {
                 truncated: output.is_full(),
                 bytes_written: output.written(),
                 bytes_decompressed: 0,
+            });
+        }
+        if pdf::is_pdf(data) {
+            let summary = pdf::extract(data, &mut self.pdf, &self.limits, &mut output)?;
+            return Ok(Extraction {
+                format: Format::Pdf,
+                truncated: output.is_full() || summary.truncated,
+                bytes_written: output.written(),
+                bytes_decompressed: summary.used_bytes,
             });
         }
 

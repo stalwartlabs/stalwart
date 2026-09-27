@@ -930,8 +930,13 @@ impl EnumImpl for Property {
             b"maxEventNotifications" => Property::MaxEventNotifications,
             b"maxEvents" => Property::MaxEvents,
             b"maxExpandedQueryDuration" => Property::MaxExpandedQueryDuration,
+            b"maxExtractArchiveEntries" => Property::MaxExtractArchiveEntries,
             b"maxExtractDecompressedSize" => Property::MaxExtractDecompressedSize,
             b"maxExtractDocumentSize" => Property::MaxExtractDocumentSize,
+            b"maxExtractPartSize" => Property::MaxExtractPartSize,
+            b"maxExtractParts" => Property::MaxExtractParts,
+            b"maxExtractPdfObjects" => Property::MaxExtractPdfObjects,
+            b"maxExtractRtfDepth" => Property::MaxExtractRtfDepth,
             b"maxExtractTextSize" => Property::MaxExtractTextSize,
             b"maxFailures" => Property::MaxFailures,
             b"maxFiles" => Property::MaxFiles,
@@ -1908,8 +1913,13 @@ impl EnumImpl for Property {
             Property::MaxEventNotifications => "maxEventNotifications",
             Property::MaxEvents => "maxEvents",
             Property::MaxExpandedQueryDuration => "maxExpandedQueryDuration",
+            Property::MaxExtractArchiveEntries => "maxExtractArchiveEntries",
             Property::MaxExtractDecompressedSize => "maxExtractDecompressedSize",
             Property::MaxExtractDocumentSize => "maxExtractDocumentSize",
+            Property::MaxExtractPartSize => "maxExtractPartSize",
+            Property::MaxExtractParts => "maxExtractParts",
+            Property::MaxExtractPdfObjects => "maxExtractPdfObjects",
+            Property::MaxExtractRtfDepth => "maxExtractRtfDepth",
             Property::MaxExtractTextSize => "maxExtractTextSize",
             Property::MaxFailures => "maxFailures",
             Property::MaxFiles => "maxFiles",
@@ -2889,8 +2899,13 @@ impl EnumImpl for Property {
             163 => Some(Property::MaxEventNotifications),
             161 => Some(Property::MaxEvents),
             959 => Some(Property::MaxExpandedQueryDuration),
+            974 => Some(Property::MaxExtractArchiveEntries),
             957 => Some(Property::MaxExtractDecompressedSize),
             955 => Some(Property::MaxExtractDocumentSize),
+            972 => Some(Property::MaxExtractPartSize),
+            973 => Some(Property::MaxExtractParts),
+            975 => Some(Property::MaxExtractPdfObjects),
+            976 => Some(Property::MaxExtractRtfDepth),
             956 => Some(Property::MaxExtractTextSize),
             547 => Some(Property::MaxFailures),
             378 => Some(Property::MaxFiles),
@@ -3351,7 +3366,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 972;
+    const COUNT: usize = 977;
 }
 
 impl serde::Serialize for Property {

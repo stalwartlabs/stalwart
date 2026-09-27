@@ -9,13 +9,14 @@ use crate::{
     output::{Output, Separator},
     package::Package,
     xml::{
-        Handler, Skip, Tag,
+        Handler, Skip, Tag, Text,
         attr::{push_decoded, split_prefix},
     },
 };
 
 pub(crate) const CONTENT: &[u8] = b"content.xml";
 const STYLES: &[u8] = b"styles.xml";
+const OBJECT_CONTENT: &[u8] = b"/content.xml";
 
 pub(crate) fn format_from_mimetype(mimetype: &[u8]) -> Option<Format> {
     hashify::map!(mimetype.trim_ascii(), Format,
@@ -35,7 +36,7 @@ pub(crate) fn format_from_mimetype(mimetype: &[u8]) -> Option<Format> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Element {
     Body,
-    HeaderFooter,
+    MasterStyles,
     TextBody,
     SpreadsheetBody,
     PresentationBody,
@@ -43,6 +44,9 @@ enum Element {
     Space,
     Newline,
     Block,
+    Frame,
+    Boundary,
+    PageField,
     Cell,
     Table,
 }
@@ -71,12 +75,13 @@ impl Element {
     fn parse(local: &[u8]) -> Option<Element> {
         hashify::map!(local, Element,
             b"body" => Element::Body,
-            b"header" => Element::HeaderFooter,
-            b"footer" => Element::HeaderFooter,
-            b"header-left" => Element::HeaderFooter,
-            b"footer-left" => Element::HeaderFooter,
-            b"header-first" => Element::HeaderFooter,
-            b"footer-first" => Element::HeaderFooter,
+            b"master-styles" => Element::MasterStyles,
+            b"header" => Element::Block,
+            b"footer" => Element::Block,
+            b"header-left" => Element::Block,
+            b"footer-left" => Element::Block,
+            b"header-first" => Element::Block,
+            b"footer-first" => Element::Block,
             b"text" => Element::TextBody,
             b"spreadsheet" => Element::SpreadsheetBody,
             b"presentation" => Element::PresentationBody,
@@ -100,13 +105,16 @@ impl Element {
             b"h" => Element::Newline,
             b"list-item" => Element::Block,
             b"table-row" => Element::Block,
-            b"frame" => Element::Block,
+            b"frame" => Element::Frame,
             b"page" => Element::Block,
             b"note-body" => Element::Block,
             b"annotation" => Element::Block,
             b"title" => Element::Block,
             b"desc" => Element::Block,
             b"note-citation" => Element::Space,
+            b"ruby-text" => Element::Boundary,
+            b"page-number" => Element::PageField,
+            b"page-count" => Element::PageField,
             b"table-cell" => Element::Cell,
             b"covered-table-cell" => Element::Cell,
             b"table" => Element::Table,
@@ -147,6 +155,29 @@ fn table_name<'a>(tag: &Tag<'a>) -> Option<&'a [u8]> {
         })
 }
 
+fn is_prompt_frame(tag: &Tag<'_>) -> bool {
+    tag.attributes()
+        .any(|(name, value)| match split_prefix(name) {
+            (true, b"placeholder") => value == b"true",
+            (true, b"class") => hashify::set!(
+                value,
+                b"title",
+                b"subtitle",
+                b"outline",
+                b"notes",
+                b"text",
+                b"object",
+                b"chart",
+                b"table",
+                b"graphic",
+                b"orgchart",
+                b"page",
+                b"handout",
+            ),
+            _ => false,
+        })
+}
+
 impl Handler for OdfText {
     fn start(&mut self, tag: &Tag<'_>, out: &mut Output<'_>) {
         let element = Element::classify(tag.name);
@@ -170,7 +201,13 @@ impl Handler for OdfText {
         }
         match element {
             Some(ignored @ Element::Ignored(_)) => self.skip.begin(ignored),
-            Some(Element::Space) => out.separator(Separator::Space),
+            Some(Element::PageField) if self.scope == Element::MasterStyles => {
+                self.skip.begin(Element::PageField)
+            }
+            Some(Element::Frame) if self.scope == Element::MasterStyles && is_prompt_frame(tag) => {
+                self.skip.begin(Element::Frame)
+            }
+            Some(Element::Space | Element::Boundary) => out.separator(Separator::Space),
             Some(Element::Newline) => out.separator(Separator::Newline),
             Some(Element::Table) if self.body_kind == Some(Format::Ods) => {
                 if let Some(name) = table_name(tag) {
@@ -193,15 +230,17 @@ impl Handler for OdfText {
             return;
         }
         match element {
-            Some(Element::Newline | Element::Block) => out.separator(Separator::Newline),
-            Some(Element::Cell) => out.separator(Separator::Space),
+            Some(Element::Newline | Element::Block | Element::Frame) => {
+                out.separator(Separator::Newline)
+            }
+            Some(Element::Cell | Element::Boundary) => out.separator(Separator::Space),
             _ => {}
         }
     }
 
-    fn text(&mut self, text: &[u8], out: &mut Output<'_>) {
+    fn text(&mut self, text: Text<'_>, out: &mut Output<'_>) {
         if self.active > 0 && !self.skip.active() {
-            out.push_utf8(text);
+            text.push(out);
         }
     }
 
@@ -221,6 +260,18 @@ pub(crate) fn extract(
     }
     let format = declared.or(content.body_kind)?;
     out.separator(Separator::Newline);
-    package.scan(STYLES, &mut OdfText::new(Element::HeaderFooter, false), out);
+    package.scan(STYLES, &mut OdfText::new(Element::MasterStyles, false), out);
+    out.separator(Separator::Newline);
+    let archive = package.archive;
+    for member in archive.members().filter(|member| {
+        member.name.len() > OBJECT_CONTENT.len() && member.name.ends_with(OBJECT_CONTENT)
+    }) {
+        if package.stopped(out) {
+            break;
+        }
+        if package.scan_member(&member, &mut OdfText::new(Element::Body, false), out) {
+            out.separator(Separator::Newline);
+        }
+    }
     Some(format)
 }
