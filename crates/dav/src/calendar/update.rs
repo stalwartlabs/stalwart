@@ -16,7 +16,6 @@ use crate::{
         uri::DavUriResource,
     },
     file::DavFileResource,
-    fix_percent_encoding,
 };
 use calcard::{
     Entry, Parser,
@@ -98,11 +97,9 @@ impl CalendarUpdateRequestHandler for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let resource_name = fix_percent_encoding(
-            resource
-                .resource
-                .ok_or(DavError::Code(StatusCode::CONFLICT))?,
-        );
+        let resource_name = resource
+            .resource
+            .ok_or(DavError::Code(StatusCode::CONFLICT))?;
 
         if bytes.len() > self.core.groupware.max_ical_size {
             return Err(DavError::Condition(DavErrorCondition::new(
@@ -154,7 +151,7 @@ impl CalendarUpdateRequestHandler for Server {
             .await
             .caused_by(trc::location!())?;
 
-        if let Some(resource) = resources.by_path(resource_name.as_ref()) {
+        if let Some(resource) = resources.by_path(resource_name) {
             if resource.is_container() {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
             }
@@ -220,7 +217,7 @@ impl CalendarUpdateRequestHandler for Server {
                         collection: Collection::CalendarEvent,
                         document_id: Some(document_id),
                         etag: format!("\"{}\"", event.inner.etag.to_native()).into(),
-                        path: resource_name.as_ref(),
+                        path: resource_name,
                         ..Default::default()
                     }],
                     Default::default(),
@@ -627,7 +624,7 @@ impl CalendarUpdateRequestHandler for Server {
             Ok(HttpResponse::new(StatusCode::NO_CONTENT)
                 .with_etag_opt(serves_submitted_ical.then_some(etag))
                 .with_schedule_tag_opt(schedule_tag))
-        } else if let Some((Some(parent), name)) = resources.map_parent(resource_name.as_ref()) {
+        } else if let Some((Some(parent), name)) = resources.map_parent(resource_name) {
             if !parent.is_container() {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
             }
@@ -662,7 +659,7 @@ impl CalendarUpdateRequestHandler for Server {
                     account_id,
                     collection: resource.collection,
                     document_id: Some(u32::MAX),
-                    path: resource_name.as_ref(),
+                    path: resource_name,
                     ..Default::default()
                 }],
                 Default::default(),

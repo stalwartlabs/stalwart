@@ -5,11 +5,15 @@
  */
 
 use crate::{DavError, DavResourceName};
-use common::{Server, auth::AccessToken};
+use common::{
+    Server,
+    auth::AccessToken,
+    storage::dav::{DavFileNameError, canonical_calcard_uri, canonical_dav_resource_uri},
+};
 use groupware::cache::GroupwareCache;
 use http_proto::request::decode_path_element;
 use hyper::StatusCode;
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 use trc::AddContext;
 use types::collection::Collection;
 
@@ -172,11 +176,19 @@ impl OwnedUri<'_> {
     }
 }
 
-/*impl<A, R> UriResource<A, R> {
-    pub fn collection_path(&self) -> &'static str {
-        DavResourceName::from(self.collection).collection_path()
+pub(crate) fn canonical_dav_uri(uri: &str) -> Result<Cow<'_, str>, DavFileNameError> {
+    match uri
+        .split_once("/dav/")
+        .and_then(|(_, path)| path.split_once('/'))
+        .and_then(|(collection, _)| DavResourceName::parse(collection))
+    {
+        Some(DavResourceName::File) => canonical_dav_resource_uri(uri),
+        Some(DavResourceName::Cal | DavResourceName::Card) => Ok(canonical_calcard_uri(uri)),
+        Some(DavResourceName::Principal | DavResourceName::Scheduling) | None => {
+            Ok(Cow::Borrowed(uri))
+        }
     }
-}*/
+}
 
 impl Urn {
     pub fn try_extract_sync_id(token: &str) -> Option<&str> {

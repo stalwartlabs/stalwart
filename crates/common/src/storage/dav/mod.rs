@@ -16,8 +16,10 @@ pub use file::{
 };
 pub use store::ResourceChunkBuilder;
 
-use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
-use std::borrow::Cow;
+use percent_encoding::{
+    AsciiSet, CONTROLS, percent_decode_str, percent_encode, utf8_percent_encode,
+};
+use std::{borrow::Cow, convert::Infallible};
 
 pub(crate) const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;
 pub const CONTAINER_FLAG: u32 = 1 << 31;
@@ -109,10 +111,32 @@ pub fn canonical_path_segment(name: &str) -> Cow<'_, str> {
 }
 
 pub fn canonical_uri_path(path: &str) -> Result<Cow<'_, str>, DavFileNameError> {
-    if !path
-        .bytes()
-        .any(|byte| byte == b'%' || !is_pchar(byte) && byte != b'/')
-    {
+    canonicalize_path(path, push_file_segment)
+}
+
+pub fn canonical_dav_resource_uri(uri: &str) -> Result<Cow<'_, str>, DavFileNameError> {
+    canonicalize_resource_uri(uri, push_file_segment)
+}
+
+pub fn canonical_calcard_segment(segment: &str) -> Cow<'_, str> {
+    if segment.bytes().all(is_pchar) {
+        return Cow::Borrowed(segment);
+    }
+    let mut canonical = String::with_capacity(segment.len() + 8);
+    let Ok(()) = push_calcard_segment(&mut canonical, segment);
+    Cow::Owned(canonical)
+}
+
+pub fn canonical_calcard_uri(uri: &str) -> Cow<'_, str> {
+    let Ok(uri) = canonicalize_resource_uri(uri, push_calcard_segment);
+    uri
+}
+
+fn canonicalize_path<E>(
+    path: &str,
+    push_segment: impl Fn(&mut String, &str) -> Result<(), E>,
+) -> Result<Cow<'_, str>, E> {
+    if path.bytes().all(|byte| is_pchar(byte) || byte == b'/') {
         return Ok(Cow::Borrowed(path));
     }
     let mut canonical = String::with_capacity(path.len() + 8);
@@ -120,12 +144,15 @@ pub fn canonical_uri_path(path: &str) -> Result<Cow<'_, str>, DavFileNameError> 
         if idx > 0 {
             canonical.push('/');
         }
-        canonical.push_str(&canonical_path_segment(&decode_segment(segment)?));
+        push_segment(&mut canonical, segment)?;
     }
     Ok(Cow::Owned(canonical))
 }
 
-pub fn canonical_dav_resource_uri(uri: &str) -> Result<Cow<'_, str>, DavFileNameError> {
+fn canonicalize_resource_uri<E>(
+    uri: &str,
+    push_segment: impl Fn(&mut String, &str) -> Result<(), E>,
+) -> Result<Cow<'_, str>, E> {
     let Some((base, (collection, (account, resource)))) =
         uri.split_once("/dav/").and_then(|(base, path)| {
             path.split_once('/').and_then(|(collection, rest)| {
@@ -136,10 +163,21 @@ pub fn canonical_dav_resource_uri(uri: &str) -> Result<Cow<'_, str>, DavFileName
     else {
         return Ok(Cow::Borrowed(uri));
     };
-    Ok(match canonical_uri_path(resource)? {
+    Ok(match canonicalize_path(resource, push_segment)? {
         Cow::Borrowed(_) => Cow::Borrowed(uri),
         Cow::Owned(resource) => Cow::Owned(format!("{base}/dav/{collection}/{account}/{resource}")),
     })
+}
+
+fn push_file_segment(canonical: &mut String, segment: &str) -> Result<(), DavFileNameError> {
+    canonical.extend(utf8_percent_encode(&decode_segment(segment)?, FILE_SEGMENT));
+    Ok(())
+}
+
+fn push_calcard_segment(canonical: &mut String, segment: &str) -> Result<(), Infallible> {
+    let decoded: Cow<'_, [u8]> = percent_decode_str(segment).into();
+    canonical.extend(percent_encode(&decoded, FILE_SEGMENT));
+    Ok(())
 }
 
 pub fn dav_file_name(segment: &str) -> Result<String, DavFileNameError> {
@@ -207,32 +245,6 @@ fn is_pchar(byte: u8) -> bool {
             | b'='
             | b':'
             | b'@')
-}
-
-pub fn is_uri_segment(name: &str) -> bool {
-    let mut bytes = name.as_bytes().iter();
-
-    while let Some(&byte) = bytes.next() {
-        if byte == b'%' {
-            if !bytes.next().is_some_and(u8::is_ascii_hexdigit)
-                || !bytes.next().is_some_and(u8::is_ascii_hexdigit)
-            {
-                return false;
-            }
-        } else if !is_pchar(byte) {
-            return false;
-        }
-    }
-
-    true
-}
-
-pub fn encode_path_segment(name: &str) -> Cow<'_, str> {
-    if is_uri_segment(name) {
-        Cow::Borrowed(name)
-    } else {
-        utf8_percent_encode(name, RFC_3986).into()
-    }
 }
 
 #[cfg(test)]
@@ -343,7 +355,7 @@ mod tests {
             ),
         ] {
             assert_eq!(canonical_path_segment(name), expected, "{name:?}");
-            assert!(is_uri_segment(&canonical_path_segment(name)), "{name:?}");
+            assert_eq!(canonical_calcard_segment(expected), expected, "{name:?}");
         }
         assert!(matches!(
             canonical_path_segment("plain-name.txt"),
@@ -352,56 +364,90 @@ mod tests {
     }
 
     #[test]
-    fn path_segments_from_uris_are_preserved() {
-        for name in [
-            "readme.txt",
-            "My%20Folder",
-            "%C3%9Cnterlagen.txt",
-            "file(1).txt",
-            "a+b.txt",
-            "Q&A.txt",
-            "it's.txt",
-            "mail@host.txt",
-            "a:b.txt",
-            "notes;v=2,rev=3!$*=.txt",
-            "~backup_1-2.txt",
-        ] {
-            assert!(is_uri_segment(name), "{name:?}");
-            assert_eq!(encode_path_segment(name), name);
-        }
-    }
-
-    #[test]
-    fn path_segments_from_names_are_encoded() {
-        for (name, expected) in [
-            ("My Folder", "My%20Folder"),
-            ("Ünterlagen.txt", "%C3%9Cnterlagen.txt"),
-            ("Ünterlagen 2026.txt", "%C3%9Cnterlagen%202026.txt"),
+    fn calcard_names_canonicalize_from_any_spelling() {
+        for (segment, expected) in [
+            ("event.ics", "event.ics"),
+            ("abc@example.org.ics", "abc@example.org.ics"),
+            ("abc%40example.org.ics", "abc@example.org.ics"),
+            ("file(1)+a:b!$&'*,;=.ics", "file(1)+a:b!$&'*,;=.ics"),
+            ("file%281%29%2B.ics", "file(1)+.ics"),
+            ("My Event.ics", "My%20Event.ics"),
+            ("My%20Event.ics", "My%20Event.ics"),
+            ("%c3%9cbersicht.vcf", "%C3%9Cbersicht.vcf"),
+            ("\u{dc}bersicht.vcf", "%C3%9Cbersicht.vcf"),
+            ("a/b.ics", "a%2Fb.ics"),
+            ("a%2Fb.ics", "a%2Fb.ics"),
+            ("a%2fb.ics", "a%2Fb.ics"),
+            ("a%00b.ics", "a%00b.ics"),
             ("100%", "100%25"),
-            ("100%2", "100%252"),
+            ("100%25", "100%25"),
             ("100%zz", "100%25zz"),
-            ("a/b.txt", "a%2Fb.txt"),
-            ("a<b>c.txt", "a%3Cb%3Ec.txt"),
-            ("a\"b#c?d.txt", "a%22b%23c%3Fd.txt"),
-            ("a\tb.txt", "a%09b.txt"),
+            ("%2540", "%2540"),
+            ("%e9t%e9.ics", "%E9t%E9.ics"),
+            ("caf%E9.ics", "caf%E9.ics"),
+            ("caf%25E9.ics", "caf%25E9.ics"),
+            ("%E9%c3%bc", "%E9%C3%BC"),
+            ("a\"b#c?d.ics", "a%22b%23c%3Fd.ics"),
+            ("@", "@"),
+            ("%40", "@"),
+            ("%00", "%00"),
+            (" ", "%20"),
+            ("%20", "%20"),
+            ("%", "%25"),
+            ("%25", "%25"),
+            ("/", "%2F"),
+            ("%2F", "%2F"),
+            ("{", "%7B"),
+            ("%7b", "%7B"),
+            ("|", "%7C"),
+            ("\"", "%22"),
         ] {
-            assert!(!is_uri_segment(name), "{name:?}");
-            assert_eq!(encode_path_segment(name), expected, "{name:?}");
+            let canonical = canonical_calcard_segment(segment);
+            assert_eq!(canonical, expected, "{segment:?}");
+            assert_eq!(
+                canonical_calcard_segment(&canonical),
+                expected,
+                "{segment:?}"
+            );
         }
+        assert!(matches!(
+            canonical_calcard_segment("abc@example.org.ics"),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]
-    fn encoded_path_segments_are_stable() {
-        for name in [
-            "My Folder",
-            "Ünterlagen 2026.txt",
-            "100%",
-            "a/b.txt",
-            "file(1).txt",
+    fn calcard_uris_canonicalize_resource_path() {
+        for (uri, expected) in [
+            (
+                "/dav/cal/john%40example.com/home/abc%40example.org.ics",
+                "/dav/cal/john%40example.com/home/abc@example.org.ics",
+            ),
+            (
+                "https://host:8080/dav/card/john/My%20Book/a%2fb%c3%bc.vcf",
+                "https://host:8080/dav/card/john/My%20Book/a%2Fb%C3%BC.vcf",
+            ),
+            ("/dav/cal/john/work%40home/", "/dav/cal/john/work@home/"),
+            ("/dav/cal/john/a%2Fb/c.ics", "/dav/cal/john/a%2Fb/c.ics"),
+            ("/dav/cal/john/home/%7b", "/dav/cal/john/home/%7B"),
+            ("/dav/cal/john/home/%00", "/dav/cal/john/home/%00"),
+            (
+                "/dav/card/john/book/caf%e9.vcf",
+                "/dav/card/john/book/caf%E9.vcf",
+            ),
         ] {
-            let encoded = encode_path_segment(name).into_owned();
-            assert!(is_uri_segment(&encoded), "{encoded:?}");
-            assert_eq!(encode_path_segment(&encoded), encoded, "{name:?}");
+            assert_eq!(canonical_calcard_uri(uri), expected, "{uri}");
+        }
+        for uri in [
+            "/dav/cal/john/home/abc@example.org.ics",
+            "/dav/cal/john%40example.com",
+            "/dav/cal/john/",
+            "/dav/cal",
+        ] {
+            assert!(
+                matches!(canonical_calcard_uri(uri), Cow::Borrowed(_)),
+                "{uri}"
+            );
         }
     }
 }

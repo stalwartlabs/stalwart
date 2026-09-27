@@ -13,13 +13,12 @@ use crate::{
         EVENT_NOTIFICATION_IS_DIRECT, SCHEDULE_INBOX_ID, SCHEDULE_OUTBOX_ID,
     },
     contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
-    encode_path_segment,
 };
 use calcard::common::timezone::Tz;
 use common::{
     ArenaRef, DavName, DavPath, GroupwareResource, GroupwareResourceMetadata, GroupwareResources,
     NO_ID, PathIndex, ResourceStore, Server, TinyCalendarPreferences, UpdateLock,
-    storage::dav::{CONTAINER_FLAG, CachedUid, ResourceChunkBuilder},
+    storage::dav::{CONTAINER_FLAG, CachedUid, ResourceChunkBuilder, canonical_calcard_segment},
 };
 use std::sync::Arc;
 use store::ahash::AHashMap;
@@ -169,7 +168,7 @@ pub(super) fn build_calcard_paths(resources: &ResourceStore) -> PathIndex {
         {
             names.insert(
                 resource.document_id(),
-                encode_path_segment(name).into_owned(),
+                canonical_calcard_segment(name).into_owned(),
             );
         }
     }
@@ -194,7 +193,7 @@ pub(super) fn build_calcard_paths(resources: &ResourceStore) -> PathIndex {
                     entries.push((
                         format!(
                             "{parent}/{}",
-                            encode_path_segment(resource.child_name_at(name))
+                            canonical_calcard_segment(resource.child_name_at(name))
                         ),
                         DavPath {
                             path: ArenaRef::default(),

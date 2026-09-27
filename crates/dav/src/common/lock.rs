@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::uri::{DavUriResource, OwnedUri, UriResource, Urn};
+use super::uri::{DavUriResource, OwnedUri, UriResource, Urn, canonical_dav_uri};
 use crate::file::is_symlink;
 use crate::{DavError, DavErrorCondition, DavMethod};
 use common::KV_LOCK_DAV;
-use common::{
-    GroupwareResources, Server, auth::AccessToken, storage::dav::canonical_dav_resource_uri,
-};
+use common::{GroupwareResources, Server, auth::AccessToken};
 use dav_proto::schema::property::{ActiveLock, LockScope, WebDavProperty};
 use dav_proto::schema::request::DavPropertyValue;
 use dav_proto::schema::response::{BaseCondition, List, PropResponse};
@@ -29,8 +27,6 @@ use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 use types::dead_property::DeadProperty;
 use utils::map::vec_map::VecMap;
-
-const FILE_COLLECTION_PREFIX: &str = "file/";
 
 #[derive(Debug, Default, Clone)]
 pub struct ResourceState<'x> {
@@ -934,14 +930,7 @@ impl ResourceState<'_> {
 }
 
 fn canonical_if_resource(uri: &str) -> Cow<'_, str> {
-    if uri
-        .split_once("/dav/")
-        .is_some_and(|(_, path)| path.starts_with(FILE_COLLECTION_PREFIX))
-    {
-        canonical_dav_resource_uri(uri).unwrap_or(Cow::Borrowed(uri))
-    } else {
-        Cow::Borrowed(uri)
-    }
+    canonical_dav_uri(uri).unwrap_or(Cow::Borrowed(uri))
 }
 
 async fn groupware_resources_cached(

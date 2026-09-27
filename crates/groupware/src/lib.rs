@@ -8,7 +8,7 @@
 
 use calcard::common::timezone::Tz;
 use common::GroupwareResources;
-pub use common::storage::dav::{RFC_3986, encode_path_segment, is_uri_segment};
+pub use common::storage::dav::RFC_3986;
 use percent_encoding::percent_decode_str;
 use std::borrow::Cow;
 use types::collection::{Collection, SyncCollection};

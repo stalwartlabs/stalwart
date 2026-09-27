@@ -1339,6 +1339,50 @@ mod tests {
     }
 
     #[test]
+    fn calcard_paths_use_canonical_names() {
+        let base = vec![
+            calendar(0, "work%40home"),
+            calendar(1, "%2F"),
+            event(0, 0, "abc%40example.org.ics"),
+            event(1, 0, "My Event.ics"),
+            event(2, 0, "%00"),
+            event(3, 0, "{"),
+            event(4, 1, "caf%e9.ics"),
+        ];
+        let cache = cold_build(&base, SyncCollection::Calendar);
+        assert!(cache.by_path("work@home").is_some_and(|r| r.is_container()));
+        assert!(cache.by_path("%2F").is_some_and(|r| r.is_container()));
+        for (path, document_id) in [
+            ("work@home/abc@example.org.ics", 0),
+            ("work@home/My%20Event.ics", 1),
+            ("work@home/%00", 2),
+            ("work@home/%7B", 3),
+            ("%2F/caf%E9.ics", 4),
+        ] {
+            assert_eq!(
+                cache.by_path(path).map(|r| r.document_id()),
+                Some(document_id),
+                "{path}"
+            );
+        }
+
+        let created = apply(
+            &cache,
+            SyncCollection::Calendar,
+            &[(false, 7, Some(event(7, 0, "xyz%40example.org.ics")))],
+        );
+        let mut specs = base.clone();
+        specs.push(event(7, 0, "xyz%40example.org.ics"));
+        assert_matches_cold_build(&created, &specs, SyncCollection::Calendar);
+        assert_eq!(
+            created
+                .by_path("work@home/xyz@example.org.ics")
+                .map(|r| r.document_id()),
+            Some(7)
+        );
+    }
+
+    #[test]
     fn calcard_content_update_shares_the_path_index() {
         let base = vec![calendar(0, "work"), event(0, 0, "a.ics")];
         let cache = cold_build(&base, SyncCollection::Calendar);

@@ -9,7 +9,7 @@ use crate::{
     DavError,
     common::{
         DavCollection, DavQuery, SyncType,
-        uri::{DavUriResource, UriResource, Urn},
+        uri::{DavUriResource, UriResource, Urn, canonical_dav_uri},
     },
     file::is_symlink,
     principal::propfind::PrincipalPropFind,
@@ -18,7 +18,7 @@ use common::{DavResourcePath, Server, auth::AccessToken};
 use dav_proto::schema::response::{MultiStatus, Response};
 use groupware::calendar::EVENT_SECRET;
 use hyper::StatusCode;
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 use store::{
     ahash::AHashMap,
     query::log::{Change, Query},
@@ -458,8 +458,9 @@ pub(super) async fn multiget(
         AHashMap::with_capacity(3);
 
     for item in hrefs {
+        let uri = canonical_dav_uri(&item).unwrap_or(Cow::Borrowed(item.as_str()));
         let resource = match server
-            .validate_uri(access_token, &item)
+            .validate_uri(access_token, &uri)
             .await
             .and_then(|r| r.into_owned_uri())
         {

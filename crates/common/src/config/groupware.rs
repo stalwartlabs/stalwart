@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::storage::dav::canonical_calcard_segment;
 use calcard::vcard::VCardVersion;
 use registry::schema::{
     enums::VCardVersion as RegistryVCardVersion,
@@ -115,10 +116,18 @@ impl GroupwareConfig {
             max_lock_timeout: dav.max_lock_timeout.into_inner().as_secs(),
             max_locks_per_user: dav.max_locks as usize,
             max_results: dav.max_results as usize,
-            default_calendar_name: calendar.default_href_name,
-            default_calendar_display_name: calendar.default_display_name,
-            default_addressbook_name: book.default_href_name,
-            default_addressbook_display_name: book.default_display_name,
+            default_calendar_name: calendar
+                .default_href_name
+                .as_deref()
+                .map(|name| canonical_calcard_segment(name).into_owned()),
+            default_calendar_display_name: calendar
+                .default_display_name
+                .or(calendar.default_href_name),
+            default_addressbook_name: book
+                .default_href_name
+                .as_deref()
+                .map(|name| canonical_calcard_segment(name).into_owned()),
+            default_addressbook_display_name: book.default_display_name.or(book.default_href_name),
             max_ical_size: calendar.max_i_calendar_size as usize,
             max_ical_instances: calendar.max_recurrence_expansions as usize,
             max_ical_attendees_per_instance: calendar.max_attendees as usize,

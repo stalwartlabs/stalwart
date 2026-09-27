@@ -613,6 +613,140 @@ END:VCALENDAR
         }
     }
 
+    for (resource_type, stored, requested, canonical) in [
+        (
+            DavResourceName::Cal,
+            "abc@example.org.ics",
+            "abc%40example.org.ics",
+            "abc@example.org.ics",
+        ),
+        (
+            DavResourceName::Cal,
+            "abc%40example.org.ics",
+            "abc@example.org.ics",
+            "abc@example.org.ics",
+        ),
+        (
+            DavResourceName::Card,
+            "abc@example.org.vcf",
+            "abc%40example.org.vcf",
+            "abc@example.org.vcf",
+        ),
+        (
+            DavResourceName::Card,
+            "abc%40example.org.vcf",
+            "abc@example.org.vcf",
+            "abc@example.org.vcf",
+        ),
+        (
+            DavResourceName::Cal,
+            "%c3%bcber%20uns.ics",
+            "%C3%BCber%20uns.ics",
+            "%C3%BCber%20uns.ics",
+        ),
+        (DavResourceName::Card, "a%2fb.vcf", "a%2Fb.vcf", "a%2Fb.vcf"),
+        (DavResourceName::Cal, "%00", "%00", "%00"),
+        (DavResourceName::Card, "%7b", "%7B", "%7B"),
+        (
+            DavResourceName::Cal,
+            "caf%e9.ics",
+            "caf%E9.ics",
+            "caf%E9.ics",
+        ),
+    ] {
+        let container_path = format!("{}/john%40example.com/default", resource_type.base_path());
+        let stored_path = format!("{container_path}/{stored}");
+        let requested_path = format!("{container_path}/{requested}");
+        let canonical_path = format!("{container_path}/{canonical}");
+        let content = resource_type.generate();
+        client
+            .request("PUT", &stored_path, &content)
+            .await
+            .with_status(StatusCode::CREATED);
+        client
+            .request("GET", &requested_path, "")
+            .await
+            .with_status(StatusCode::OK)
+            .with_body(&content);
+        client
+            .propfind(&requested_path, ["D:getetag"])
+            .await
+            .with_hrefs([canonical_path.as_str()]);
+        client
+            .request("PUT", &requested_path, &content)
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+        client
+            .request("DELETE", &requested_path, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+        client
+            .request("GET", &stored_path, "")
+            .await
+            .with_status(StatusCode::NOT_FOUND);
+    }
+
+    let latin1_path = "/dav/cal/john%40example.com/default/caf%E9.ics";
+    let escaped_path = "/dav/cal/john%40example.com/default/caf%25E9.ics";
+    let content = DavResourceName::Cal.generate();
+    client
+        .request("PUT", latin1_path, &content)
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request("GET", escaped_path, "")
+        .await
+        .with_status(StatusCode::NOT_FOUND);
+    client
+        .request("DELETE", latin1_path, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
+    for (resource_type, stored, requested, item) in [
+        (
+            DavResourceName::Cal,
+            "work%40home",
+            "work@home",
+            "event.ics",
+        ),
+        (
+            DavResourceName::Card,
+            "book@home",
+            "book%40home",
+            "card.vcf",
+        ),
+    ] {
+        let account_path = format!("{}/john%40example.com", resource_type.base_path());
+        let stored_path = format!("{account_path}/{stored}");
+        let requested_path = format!("{account_path}/{requested}");
+        client
+            .request("MKCOL", &stored_path, "")
+            .await
+            .with_status(StatusCode::CREATED);
+        client
+            .request("MKCOL", &requested_path, "")
+            .await
+            .with_status(StatusCode::METHOD_NOT_ALLOWED);
+        let content = resource_type.generate();
+        client
+            .request("PUT", &format!("{requested_path}/{item}"), &content)
+            .await
+            .with_status(StatusCode::CREATED);
+        client
+            .request("GET", &format!("{stored_path}/{item}"), "")
+            .await
+            .with_status(StatusCode::OK)
+            .with_body(&content);
+        client
+            .request("DELETE", &format!("{stored_path}/{item}"), "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+        client
+            .request("DELETE", &requested_path, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
+
     // Delete files
     for (path, (_, _, etag)) in &files {
         client
