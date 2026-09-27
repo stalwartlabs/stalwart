@@ -10,11 +10,12 @@ use crate::{
 };
 use ahash::AHashMap;
 use common::auth::{AccountCache, EmailAddress};
+use email::message::delete::EmailDeletion;
 use jmap_client::{
     Error,
     client::Client,
     core::{
-        response::IdentityGetResponse,
+        response::{EmailSubmissionGetResponse, IdentityGetResponse},
         set::{SetError, SetErrorType, SetObject},
     },
     email_submission::{Address, Delivered, DeliveryStatus, Displayed, UndoStatus, query::Filter},
@@ -554,6 +555,50 @@ pub async fn test(test: &TestServer) {
             .is_some(),
         "Identity for a valid address was destroyed"
     );
+
+    let mut request = client.build();
+    request.get_email_submission().ids(Vec::<String>::new());
+    let state = request
+        .send_single::<EmailSubmissionGetResponse>()
+        .await
+        .unwrap()
+        .take_state();
+    let mut purged_ids = client
+        .email_submission_query(None::<Filter>, None::<Vec<_>>)
+        .await
+        .unwrap()
+        .take_ids();
+    purged_ids.retain(|id| id != &email_submission_id);
+    purged_ids.sort_unstable();
+    assert!(!purged_ids.is_empty());
+    test.server
+        .purge_email_submissions(account_id, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        client
+            .email_submission_query(None::<Filter>, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .take_ids(),
+        vec![email_submission_id.clone()]
+    );
+    for id in &purged_ids {
+        assert!(
+            client
+                .email_submission_get(id, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let mut destroyed_ids = client
+        .email_submission_changes(state, purged_ids.len() + 1)
+        .await
+        .unwrap()
+        .take_destroyed();
+    destroyed_ids.sort_unstable();
+    assert_eq!(destroyed_ids, purged_ids);
 
     // Destroy the created mailbox, identity and all submissions
     for identity_id in [

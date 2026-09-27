@@ -6,11 +6,12 @@
 
 use crate::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use crate::message::messagedata::EmailMessageData;
+use crate::submission::EmailSubmission;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
 use std::future::Future;
 use store::write::key::DeserializeBigEndian;
-use store::write::{IndexPropertyClass, SearchIndex, now};
+use store::write::{Archive, ArchiveBytes, IndexPropertyClass, SearchIndex, now};
 use store::{IterateParams, U32_LEN, U64_LEN, ValueKey};
 use store::{
     roaring::RoaringBitmap,
@@ -242,7 +243,7 @@ impl EmailDeletion for Server {
                     },
                     ValueKey {
                         account_id,
-                        collection: Collection::Email.into(),
+                        collection: Collection::EmailSubmission.into(),
                         document_id: u32::MAX,
                         class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
                             property: EmailSubmissionField::Metadata.into(),
@@ -282,14 +283,35 @@ impl EmailDeletion for Server {
             .with_collection(Collection::EmailSubmission);
 
         for (document_id, send_at) in destroy_ids {
-            batch
-                .with_document(document_id)
-                .clear(EmailSubmissionField::Metadata)
-                .clear(ValueClass::IndexProperty(IndexPropertyClass::Integer {
+            batch.with_document(document_id);
+
+            if let Some(submission) = self
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+                    account_id,
+                    Collection::EmailSubmission,
+                    document_id,
+                ))
+                .await
+                .caused_by(trc::location!())?
+            {
+                batch
+                    .custom(
+                        ObjectIndexBuilder::<_, ()>::new().with_current(
+                            submission
+                                .to_unarchived::<EmailSubmission>()
+                                .caused_by(trc::location!())?,
+                        ),
+                    )
+                    .caused_by(trc::location!())?;
+            } else {
+                batch.clear(ValueClass::IndexProperty(IndexPropertyClass::Integer {
                     property: EmailSubmissionField::Metadata.into(),
                     value: send_at,
-                }))
-                .commit_point();
+                }));
+            }
+
+            batch.commit_point();
         }
 
         self.commit_batch(batch).await?;

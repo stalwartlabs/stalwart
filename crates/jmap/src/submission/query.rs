@@ -18,9 +18,7 @@ use store::{
     ahash::AHashSet,
     roaring::RoaringBitmap,
     search::{SearchFilter, SearchQuery},
-    write::{
-        IndexPropertyClass, QueueClass, SearchIndex, ValueClass, key::DeserializeBigEndian, now,
-    },
+    write::{IndexPropertyClass, QueueClass, SearchIndex, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
 use types::{
@@ -64,7 +62,7 @@ impl EmailSubmissionQuery for Server {
                         document_id: 0,
                         class: ValueClass::IndexProperty(IndexPropertyClass::Integer {
                             property: EmailSubmissionField::Metadata.into(),
-                            value: now() - (3 * 86400),
+                            value: 0,
                         }),
                     },
                     ValueKey {
