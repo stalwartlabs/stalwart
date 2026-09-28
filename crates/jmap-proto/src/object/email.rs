@@ -86,6 +86,9 @@ pub struct HeaderProperty {
     pub form: HeaderForm,
     pub header: String,
     pub all: bool,
+    // The client spelled out ":asRaw", so the property name in the response
+    // carries it too (RFC 8621 Section 4.1.3: the name MUST be identical).
+    pub explicit_raw: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -321,6 +324,7 @@ impl HeaderProperty {
             form: HeaderForm::Raw,
             header: String::new(),
             all: false,
+            explicit_raw: false,
         };
 
         for (pos, value) in value.split(':').enumerate() {
@@ -336,7 +340,7 @@ impl HeaderProperty {
                         b"asMessageIds" => { result.form = HeaderForm::MessageIds;},
                         b"asDate" => { result.form = HeaderForm::Date;},
                         b"asURLs" => { result.form = HeaderForm::URLs;},
-                        b"asRaw"  => { result.form = HeaderForm::Raw; },
+                        b"asRaw"  => { result.form = HeaderForm::Raw; result.explicit_raw = true; },
                         b"all"  => { result.all = true; },
                         _ => {
                             return None;
@@ -361,7 +365,11 @@ impl HeaderProperty {
 impl Display for HeaderProperty {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "header:{}", self.header)?;
-        self.form.fmt(f)?;
+        if self.explicit_raw && self.form == HeaderForm::Raw {
+            write!(f, ":asRaw")?;
+        } else {
+            self.form.fmt(f)?;
+        }
         if self.all { write!(f, ":all") } else { Ok(()) }
     }
 }

@@ -266,6 +266,7 @@ impl From<&EmailPushProperty> for EmailProperty {
                 form: (&header.form).into(),
                 header: header.header.clone(),
                 all: header.all,
+                explicit_raw: false,
             }),
         }
     }
@@ -304,6 +305,7 @@ impl From<&ArchivedEmailPushProperty> for EmailProperty {
                 form: (&header.form).into(),
                 header: header.header.as_str().to_string(),
                 all: header.all,
+                explicit_raw: false,
             }),
         }
     }
