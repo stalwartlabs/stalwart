@@ -129,9 +129,21 @@ impl HeaderToValue for Vec<Header<'_>> {
     ) -> Value<'static, EmailProperty, EmailValue> {
         let mut headers = Vec::with_capacity(self.len());
         for header in self.iter() {
+            // RFC 8621 Section 4.1.2.1: the name is reported "with the same
+            // capitalization that it has in the message", so read it from the
+            // raw field rather than the canonical spelling of a known header.
+            let name = raw_message
+                .get(header.offset_field as usize..header.offset_start as usize)
+                .map(|bytes| {
+                    String::from_utf8_lossy(bytes.as_ref())
+                        .trim_end_matches([':', ' ', '\t'])
+                        .to_string()
+                })
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| header.name().to_string());
             headers.push(Value::Object(
                 Map::with_capacity(2)
-                    .with_key_value(EmailProperty::Name, header.name().to_string())
+                    .with_key_value(EmailProperty::Name, name)
                     .with_key_value(
                         EmailProperty::Value,
                         String::from_utf8_lossy(
@@ -384,9 +396,29 @@ impl HeaderToValue for ArchivedMessageMetadataPart {
     ) -> Value<'static, EmailProperty, EmailValue> {
         let mut headers = Vec::with_capacity(self.headers.len());
         for header in self.headers.iter() {
+            // RFC 8621 Section 4.1.2.1: the name is reported "with the same
+            // capitalization that it has in the message". The metadata keeps
+            // only the value range, so read the field name from the raw bytes
+            // that precede the value, back to the start of the line.
+            let value_range = header.value_range();
+            let raw_name = raw_message
+                .get(value_range.start.saturating_sub(998)..value_range.start)
+                .and_then(|bytes| {
+                    let bytes = bytes.as_ref();
+                    let line = bytes
+                        .iter()
+                        .rposition(|&b| b == b'\n')
+                        .map_or(bytes, |pos| &bytes[pos + 1..]);
+                    let name = String::from_utf8_lossy(line)
+                        .trim_end_matches([':', ' ', '\t'])
+                        .to_string();
+                    (!name.is_empty() && name.eq_ignore_ascii_case(header.name.as_str()))
+                        .then_some(name)
+                })
+                .unwrap_or_else(|| header.name.as_str().to_string());
             headers.push(Value::Object(
                 Map::with_capacity(2)
-                    .with_key_value(EmailProperty::Name, header.name.as_str().to_string())
+                    .with_key_value(EmailProperty::Name, raw_name)
                     .with_key_value(
                         EmailProperty::Value,
                         String::from_utf8_lossy(
