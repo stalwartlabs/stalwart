@@ -32,10 +32,18 @@ impl JmapAuthorization for AccessToken {
     fn assert_is_member(&self, account_id: Id) -> trc::Result<&Self> {
         if self.is_member(account_id.document_id()) {
             Ok(self)
-        } else {
+        } else if self.has_account_access(account_id.document_id()) {
             Err(trc::JmapEvent::Forbidden
                 .into_err()
                 .details(format!("You are not an owner of account {}", account_id)))
+        } else {
+            // RFC 8620 Section 3.6.2: an accountId that is not one of this
+            // session's accounts is accountNotFound, whether or not the
+            // account exists for somebody else. Answering "forbidden" would
+            // tell the caller which accounts exist.
+            Err(trc::JmapEvent::AccountNotFound
+                .into_err()
+                .details(format!("Account {} not found", account_id)))
         }
     }
 
@@ -46,11 +54,19 @@ impl JmapAuthorization for AccessToken {
     ) -> trc::Result<&Self> {
         if self.has_access(to_account_id.document_id(), to_collection) {
             Ok(self)
+        } else if self.has_account_access(to_account_id.document_id()) {
+            // The account is in the session, but not for this data type
+            // (RFC 8620 Section 3.6.2, accountNotSupportedByMethod).
+            Err(trc::JmapEvent::AccountNotSupportedByMethod
+                .into_err()
+                .details(format!(
+                    "Account {} does not share this data type with you",
+                    to_account_id
+                )))
         } else {
-            Err(trc::JmapEvent::Forbidden.into_err().details(format!(
-                "You do not have access to account {}",
-                to_account_id
-            )))
+            Err(trc::JmapEvent::AccountNotFound
+                .into_err()
+                .details(format!("Account {} not found", to_account_id)))
         }
     }
 

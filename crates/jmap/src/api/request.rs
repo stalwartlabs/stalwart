@@ -297,6 +297,13 @@ impl RequestHandler for Server {
                     self.vacation_response_get(*req).await?.into()
                 }
                 GetRequestMethod::Principal(req) => {
+                    // RFC 8620 Section 3.6.2: the accountId has to be one of the
+                    // session's accounts, for this method like any other.
+                    if !access_token.has_account_access(req.account_id.document_id()) {
+                        return Err(trc::JmapEvent::AccountNotFound
+                            .into_err()
+                            .details(format!("Account {} not found", req.account_id)));
+                    }
                     self.principal_get(*req, access_token).await?.into()
                 }
                 GetRequestMethod::Quota(mut req) => {
