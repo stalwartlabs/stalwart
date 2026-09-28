@@ -73,21 +73,21 @@ impl<'de> Visitor<'de> for CallVisitor {
         formatter.write_str("an array with 3 elements")
     }
 
-    fn visit_seq<V>(self, mut seq: V) -> Result<Call<RequestMethod<'de>>, V::Error>
+    fn visit_seq<V>(self, mut outer: V) -> Result<Call<RequestMethod<'de>>, V::Error>
     where
         V: SeqAccess<'de>,
     {
-        let method_name = seq
+        let method_name = outer
             .next_element::<std::borrow::Cow<str>>()?
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
         let name = match MethodName::parse(method_name.as_ref()) {
             Some(name) => name,
             None => {
                 // Ignore the rest of the call
-                let _ = seq
+                let _ = outer
                     .next_element::<serde::de::IgnoredAny>()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                let id = seq
+                let id = outer
                     .next_element::<String>()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
 
@@ -101,6 +101,21 @@ impl<'de> Visitor<'de> for CallVisitor {
                     name: MethodName::error(),
                 });
             }
+        };
+
+        // Take the arguments object as one raw JSON value first, and parse the
+        // method's arguments from that. If a value is invalid the error becomes
+        // a method-level invalidArguments below, and the outer parser is still
+        // positioned at the call id, whatever order the keys came in. Parsing
+        // straight from the sequence left it mid-object after a failure, so the
+        // whole request became an HTTP 400 unless the bad key happened to come
+        // after accountId.
+        let raw_args = outer
+            .next_element::<&'de serde_json::value::RawValue>()?
+            .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+        let mut seq = RawArguments::<V> {
+            raw: raw_args,
+            _marker: std::marker::PhantomData,
         };
 
         let method = match (&name.fnc, &name.obj) {
@@ -689,11 +704,26 @@ impl<'de> Visitor<'de> for CallVisitor {
             }
         };
 
-        let id = seq
+        let id = outer
             .next_element::<String>()?
             .ok_or_else(|| de::Error::invalid_length(2, &self))?;
 
         Ok(Call { id, method, name })
+    }
+}
+
+// Stands in for the SeqAccess while the method arguments are parsed, so the
+// arms above read as before but from the raw slice already consumed.
+struct RawArguments<'de, V: SeqAccess<'de>> {
+    raw: &'de serde_json::value::RawValue,
+    _marker: std::marker::PhantomData<V>,
+}
+
+impl<'de, V: SeqAccess<'de>> RawArguments<'de, V> {
+    fn next_element<T: Deserialize<'de>>(&mut self) -> Result<Option<T>, V::Error> {
+        serde_json::from_str::<T>(self.raw.get())
+            .map(Some)
+            .map_err(de::Error::custom)
     }
 }
 
