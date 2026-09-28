@@ -58,8 +58,27 @@ where
             A: MapAccess<'de>,
         {
             let mut target = T::default();
+            let mut seen: Vec<&str> = Vec::new();
 
             while let Some(key) = map.next_key::<&str>()? {
+                // RFC 8620 Section 3.7: the same argument in normal and
+                // referenced form ("foo" and "#foo") is invalidArguments.
+                let (is_ref, base) = match key.strip_prefix('#') {
+                    Some(base) => (true, base),
+                    None => (false, key),
+                };
+                if seen.iter().any(|k| {
+                    let (k_ref, k_base) = match k.strip_prefix('#') {
+                        Some(b) => (true, b),
+                        None => (false, *k),
+                    };
+                    k_base == base && k_ref != is_ref
+                }) {
+                    return Err(de::Error::custom(format!(
+                        "Argument {base:?} was given both directly and as a result reference."
+                    )));
+                }
+                seen.push(key);
                 target
                     .deserialize_argument(key, &mut map)
                     .map_err(de::Error::custom)?;
