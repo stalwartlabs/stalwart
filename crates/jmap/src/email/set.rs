@@ -24,7 +24,7 @@ use email::{
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
-    error::set::{SetError, SetErrorType},
+    error::set::{InvalidProperty, SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
     object::email::{Email, EmailProperty, EmailValue},
     references::resolve::ResolveCreatedReference,
@@ -134,20 +134,29 @@ impl EmailSet for Server {
 
             // RFC 8621 Section 4.6: within an EmailBodyValue, isEncodingProblem and
             // isTruncated MUST be either false or omitted.
+            let mut flagged_body_values: Vec<InvalidProperty<EmailProperty>> = Vec::new();
             if let Some(Value::Object(body_values)) =
                 object.get(&Key::Property(EmailProperty::BodyValues))
-                && body_values.values().any(|bv| {
-                    bv.as_object().is_some_and(|bv| {
-                        [EmailProperty::IsTruncated, EmailProperty::IsEncodingProblem]
-                            .iter()
-                            .any(|p| matches!(bv.get(&Key::Property(p.clone())), Some(Value::Bool(true))))
-                    })
-                })
             {
+                for (key, bv) in body_values.iter() {
+                    if let Some(bv) = bv.as_object() {
+                        for flag in [EmailProperty::IsTruncated, EmailProperty::IsEncodingProblem] {
+                            if matches!(bv.get(&Key::Property(flag.clone())), Some(Value::Bool(true))) {
+                                flagged_body_values.push(InvalidProperty::Path(vec![
+                                    Key::Property(EmailProperty::BodyValues),
+                                    Key::Owned(key.clone().into_string()),
+                                    Key::Property(flag),
+                                ]));
+                            }
+                        }
+                    }
+                }
+            }
+            if !flagged_body_values.is_empty() {
                 response.not_created.append(
                     id,
                     SetError::invalid_properties()
-                        .with_property(EmailProperty::BodyValues)
+                        .with_properties(flagged_body_values)
                         .with_description(
                             "isTruncated and isEncodingProblem must be false or omitted.",
                         ),
