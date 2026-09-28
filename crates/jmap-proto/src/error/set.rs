@@ -34,6 +34,12 @@ struct SetErrorInner<P: Property> {
     #[serde(skip_serializing_if = "Option::is_none")]
     existing_id: Option<Id>,
 
+    // RFC 8621 Section 4.6: blobNotFound carries every blobId that could
+    // not be found.
+    #[serde(rename = "notFound")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    not_found: Option<Vec<String>>,
+
     #[serde(rename = "objectId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     object_id: Option<ObjectId>,
@@ -171,6 +177,7 @@ impl<T: Property> SetError<T> {
             description: None,
             properties: None,
             existing_id: None,
+            not_found: None,
             object_id: None,
             linked_objects: Vec::new(),
             validation_errors: Vec::new(),
@@ -228,6 +235,11 @@ impl<T: Property> SetError<T> {
 
     pub fn with_validation_errors(mut self, validation_errors: Vec<ValidationError>) -> Self {
         self.0.validation_errors = validation_errors;
+        self
+    }
+
+    pub fn with_not_found(mut self, ids: Vec<String>) -> Self {
+        self.0.not_found = Some(ids);
         self
     }
 
@@ -344,6 +356,7 @@ impl From<PatchError> for SetError<registry::schema::properties::Property> {
             description: err.message.into(),
             properties: Some(vec![InvalidProperty::Property(Key::Owned(err.path))]),
             existing_id: None,
+            not_found: None,
             object_id: None,
             linked_objects: Vec::new(),
             validation_errors: Vec::new(),

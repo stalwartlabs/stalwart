@@ -416,6 +416,23 @@ impl EmailSet for Server {
                                                 );
                                                 continue 'create;
                                             }
+                                            (EmailProperty::BlobId, value) => {
+                                                // Not a blob id this server ever issued:
+                                                // RFC 8621 Section 4.6 makes that a
+                                                // blobNotFound SetError listing the id.
+                                                let not_found = value
+                                                    .as_str()
+                                                    .map(|s| vec![s.to_string()])
+                                                    .unwrap_or_default();
+                                                response.not_created.append(
+                                                    id,
+                                                    SetError::blob_not_found()
+                                                        .with_property((property, EmailProperty::BlobId))
+                                                        .with_not_found(not_found)
+                                                        .with_description("Blob not found."),
+                                                );
+                                                continue 'create;
+                                            }
                                             (EmailProperty::Size, _) => {
                                                 has_size = true;
                                             }
@@ -722,21 +739,6 @@ impl EmailSet for Server {
                     );
                     continue 'create;
                 }
-            }
-
-            // Make sure the message is not empty
-            if builder.headers.is_empty()
-                && builder.body.is_none()
-                && builder.html_body.is_none()
-                && builder.text_body.is_none()
-                && builder.attachments.is_none()
-            {
-                response.not_created.append(
-                    id,
-                    SetError::invalid_properties()
-                        .with_description("Message has to have at least one header or body part."),
-                );
-                continue 'create;
             }
 
             match builder
