@@ -11,7 +11,9 @@ use crate::{
         jsptr::{EvalResults, ResponsePtr},
     },
     request::reference::ResultReference,
-    response::{ChangesResponseMethod, GetResponseMethod, Response, ResponseMethod},
+    response::{
+        ChangesResponseMethod, GetResponseMethod, Response, ResponseMethod, SetResponseMethod,
+    },
 };
 use compact_str::format_compact;
 use jmap_tools::{Element, Key, Property, Value};
@@ -133,6 +135,25 @@ impl Response<'_> {
                     ResponseMethod::QueryChanges(response) => {
                         response.eval_jptr(path, &mut results)
                     }
+                    ResponseMethod::Set(response) => match response {
+                        SetResponseMethod::Email(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::Mailbox(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::Identity(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::EmailSubmission(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::PushSubscription(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::Sieve(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::VacationResponse(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::AddressBook(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::ContactCard(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::FileNode(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::ShareNotification(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::Calendar(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::CalendarEvent(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::CalendarEventNotification(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::ParticipantIdentity(r) => r.eval_jptr(path, &mut results),
+                        SetResponseMethod::Registry(r) => r.eval_jptr(path, &mut results),
+                    },
+                    ResponseMethod::ImportEmail(response) => response.eval_jptr(path, &mut results),
                     _ => false,
                 };
 

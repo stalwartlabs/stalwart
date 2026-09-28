@@ -10,7 +10,9 @@ use crate::{
         availability::{BusyPeriod, GetAvailabilityResponse},
         changes::ChangesResponse,
         get::GetResponse,
+        import::ImportEmailResponse,
         query::QueryResponse,
+        set::SetResponse,
         query_changes::{AddedItem, QueryChangesResponse},
     },
     object::{
@@ -331,5 +333,60 @@ impl EvalResults {
                     )))
             }
         })
+    }
+}
+
+// RFC 8620 Section 3.7 lets a ResultReference point at any earlier response,
+// and "/created/<creationId>/id" of a /set is the common case: create, then
+// use the id in the next call of the same request.
+impl<T: JmapObject> ResponsePtr for SetResponse<T> {
+    fn eval_jptr(&self, mut pointer: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
+        match pointer.next().and_then(|item| item.as_string_key()) {
+            Some("created") => {
+                match pointer.next() {
+                    Some(JsonPointerItem::Wildcard) => {
+                        for value in self.created.values() {
+                            value.eval_jptr(pointer.clone(), results);
+                        }
+                    }
+                    Some(item) => {
+                        if let Some(value) = item.as_string_key().and_then(|key| self.created.get(key)) {
+                            value.eval_jptr(pointer, results);
+                        }
+                    }
+                    None => {}
+                }
+                true
+            }
+            Some("destroyed") => {
+                self.destroyed.eval_jptr(pointer, results);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl ResponsePtr for ImportEmailResponse {
+    fn eval_jptr(&self, mut pointer: JsonPointerIter<'_, Null>, results: &mut EvalResults) -> bool {
+        match pointer.next().and_then(|item| item.as_string_key()) {
+            Some("created") => {
+                match pointer.next() {
+                    Some(JsonPointerItem::Wildcard) => {
+                        for value in self.created.values() {
+                            value.eval_jptr(pointer.clone(), results);
+                        }
+                    }
+                    Some(item) => {
+                        if let Some(value) = item.as_string_key().and_then(|key| self.created.get(key)) {
+                            value.eval_jptr(pointer, results);
+                        }
+                    }
+                    None => {}
+                }
+                true
+            }
+            _ => false,
+        }
     }
 }
