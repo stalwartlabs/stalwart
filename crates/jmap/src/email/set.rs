@@ -132,6 +132,29 @@ impl EmailSet for Server {
             let mut keywords = Vec::new();
             let mut received_at = None;
 
+            // RFC 8621 Section 4.6: within an EmailBodyValue, isEncodingProblem and
+            // isTruncated MUST be either false or omitted.
+            if let Some(Value::Object(body_values)) =
+                object.get(&Key::Property(EmailProperty::BodyValues))
+                && body_values.values().any(|bv| {
+                    bv.as_object().is_some_and(|bv| {
+                        [EmailProperty::IsTruncated, EmailProperty::IsEncodingProblem]
+                            .iter()
+                            .any(|p| matches!(bv.get(&Key::Property(p.clone())), Some(Value::Bool(true))))
+                    })
+                })
+            {
+                response.not_created.append(
+                    id,
+                    SetError::invalid_properties()
+                        .with_property(EmailProperty::BodyValues)
+                        .with_description(
+                            "isTruncated and isEncodingProblem must be false or omitted.",
+                        ),
+                );
+                continue 'create;
+            }
+
             // Parse body values
             let body_values = object
                 .remove(&Key::Property(EmailProperty::BodyValues))
@@ -681,6 +704,16 @@ impl EmailSet for Server {
                         }
                     }
 
+                    (EmailProperty::Header(header), _)
+                        if header.header.len() >= 8
+                            && header.header[..8].eq_ignore_ascii_case("content-") =>
+                    {
+                        // RFC 8621 Section 4.6: "Header fields beginning with
+                        // \"Content-\" MUST NOT be specified on the Email object,
+                        // only on EmailBodyPart objects."
+                        response.invalid_property_create(id, EmailProperty::Header(header));
+                        continue 'create;
+                    }
                     (EmailProperty::Header(header), value) => {
                         match builder.build_header(header, value) {
                             Ok(builder_) => {
