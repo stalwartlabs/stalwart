@@ -12,6 +12,8 @@ use jmap_proto::{
 use types::id::Id;
 
 pub struct QueryResponseBuilder {
+    // RFC 8620 Section 5.5: a limit of 0 asks for no ids at all.
+    no_ids: bool,
     requested_position: i32,
     position: i32,
     pub limit: usize,
@@ -43,6 +45,7 @@ impl QueryResponseBuilder {
         };
 
         QueryResponseBuilder {
+            no_ids: request.limit == Some(0),
             requested_position: request.position.unwrap_or(0),
             position: request.position.unwrap_or(0),
             limit: limit_total,
@@ -77,6 +80,9 @@ impl QueryResponseBuilder {
     }
 
     pub fn add_id(&mut self, id: Id) -> bool {
+        if self.no_ids {
+            return false;
+        }
         let id_u64 = id.id();
 
         // Pagination
