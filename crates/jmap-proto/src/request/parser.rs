@@ -696,12 +696,13 @@ impl<'de> Visitor<'de> for CallVisitor {
                     return Err(de::Error::invalid_length(1, &self));
                 }
             },
-            _ => {
-                return Err(de::Error::custom(format!(
-                    "Invalid method function/object combination: {}",
-                    method_name
-                )));
-            }
+            // RFC 8620 Section 3.6.2: a method the server does not implement is a
+            // method-level unknownMethod, not a request the server cannot parse.
+            _ => RequestMethod::Error(
+                trc::JmapEvent::UnknownMethod
+                    .into_err()
+                    .details(method_name.to_string()),
+            ),
         };
 
         let id = outer
