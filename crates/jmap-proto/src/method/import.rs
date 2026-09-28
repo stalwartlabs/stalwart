@@ -51,11 +51,11 @@ pub struct ImportEmailResponse {
     pub new_state: State,
 
     #[serde(rename = "created")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub created: VecMap<String, Value<'static, EmailProperty, EmailValue>>,
 
     #[serde(rename = "notCreated")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub not_created: VecMap<String, SetError<EmailProperty>>,
 }
 

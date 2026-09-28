@@ -46,11 +46,11 @@ pub struct CopyResponse<T: JmapObject> {
     pub new_state: State,
 
     #[serde(rename = "created")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub created: VecMap<Id, Value<'static, T::Property, T::Element>>,
 
     #[serde(rename = "notCreated")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub not_created: VecMap<Id, SetError<T::Property>>,
 }
 

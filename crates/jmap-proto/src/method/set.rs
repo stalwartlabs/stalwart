@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ahash_is_empty;
 use crate::{
     error::set::{InvalidProperty, SetError},
     object::{JmapObject, JmapObjectId},
@@ -49,27 +48,27 @@ pub struct SetResponse<T: JmapObject> {
     pub new_state: Option<State>,
 
     #[serde(rename = "created")]
-    #[serde(skip_serializing_if = "ahash_is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::hash_map")]
     pub created: AHashMap<String, Value<'static, T::Property, T::Element>>,
 
     #[serde(rename = "updated")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub updated: VecMap<Id, Option<Value<'static, T::Property, T::Element>>>,
 
     #[serde(rename = "destroyed")]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec")]
     pub destroyed: Vec<Id>,
 
     #[serde(rename = "notCreated")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub not_created: VecMap<String, SetError<T::Property>>,
 
     #[serde(rename = "notUpdated")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub not_updated: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
 
     #[serde(rename = "notDestroyed")]
-    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    #[serde(serialize_with = "super::null_if_empty::vec_map")]
     pub not_destroyed: VecMap<MaybeInvalid<Id>, SetError<T::Property>>,
 }
 
