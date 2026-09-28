@@ -14,7 +14,7 @@ use common::{
 #[allow(unused_imports)]
 use email::mailbox::{INBOX_ID, JUNK_ID, TRASH_ID, UidMailbox};
 use email::{
-    cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
+    cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
     mailbox::{
         Mailbox,
         destroy::{MailboxDestroy, MailboxDestroyError},
@@ -29,6 +29,8 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
+use store::ahash::AHashSet;
+use types::keyword::Keyword;
 use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::{
@@ -464,6 +466,50 @@ impl MailboxSet for Server {
                     }
                 }
 
+                (
+                    Key::Property(
+                        counter @ (MailboxProperty::TotalEmails
+                        | MailboxProperty::UnreadEmails
+                        | MailboxProperty::TotalThreads
+                        | MailboxProperty::UnreadThreads),
+                    ),
+                    value,
+                ) => {
+                    // RFC 8620 Section 5.3: server-set counts may be sent back in an
+                    // update as long as they are identical to the current value.
+                    let current: Value<'static, MailboxProperty, MailboxValue> = match update.as_ref() {
+                        Some((document_id, _)) => {
+                            let cache = self.get_cached_messages(ctx.account_id).await?;
+                            let document_id = *document_id;
+                            let n = match counter {
+                                MailboxProperty::TotalEmails => cache.in_mailbox(document_id).count(),
+                                MailboxProperty::UnreadEmails => cache
+                                    .in_mailbox_without_keyword(document_id, &Keyword::Seen)
+                                    .count(),
+                                MailboxProperty::TotalThreads => cache
+                                    .in_mailbox(document_id)
+                                    .map(|m| m.thread_id)
+                                    .collect::<AHashSet<_>>()
+                                    .len(),
+                                _ => cache
+                                    .in_mailbox_without_keyword(document_id, &Keyword::Seen)
+                                    .map(|m| m.thread_id)
+                                    .collect::<AHashSet<_>>()
+                                    .len(),
+                            };
+                            Value::Number(n.into())
+                        }
+                        None => Value::Null,
+                    };
+                    let same = serde_json::to_value(&value).ok().is_some_and(|sent| {
+                        serde_json::to_value(&current).ok().is_some_and(|now| sent == now)
+                    });
+                    if !same {
+                        return Ok(Err(SetError::invalid_properties()
+                            .with_property(counter.clone())
+                            .with_description("This count is set by the server.".to_string())));
+                    }
+                }
                 (Key::Property(MailboxProperty::MyRights), value) => {
                     // RFC 8620 Section 5.3: a server-set property may be sent in an
                     // update as long as it is identical to the current value, so
