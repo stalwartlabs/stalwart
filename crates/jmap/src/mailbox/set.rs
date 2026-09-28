@@ -464,6 +464,26 @@ impl MailboxSet for Server {
                     }
                 }
 
+                (Key::Property(MailboxProperty::MyRights), value) => {
+                    // RFC 8620 Section 5.3: a server-set property may be sent in an
+                    // update as long as it is identical to the current value, so
+                    // clients can pass whole objects back.
+                    let current = match update.as_ref() {
+                        Some((_, mailbox)) if ctx.is_shared => JmapRights::rights::<mailbox::Mailbox>(
+                            mailbox.inner.acls.effective_acl(ctx.access_token),
+                        ),
+                        Some(_) => JmapRights::all_rights::<mailbox::Mailbox>(),
+                        None => Value::Null,
+                    };
+                    let same = serde_json::to_value(&value).ok().is_some_and(|sent| {
+                        serde_json::to_value(&current).ok().is_some_and(|now| sent == now)
+                    });
+                    if !same {
+                        return Ok(Err(SetError::invalid_properties()
+                            .with_property(MailboxProperty::MyRights)
+                            .with_description("myRights is set by the server.".to_string())));
+                    }
+                }
                 (Key::Property(MailboxProperty::Id), value) => {
                     if update
                         .as_ref()
