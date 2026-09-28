@@ -595,6 +595,15 @@ impl RequestHandler for Server {
             },
             RequestMethod::Changes(mut req) => {
                 resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
+                // RFC 8620 Section 3.6.2: check the account before anything else, so
+                // a foreign accountId is accountNotFound rather than whatever the
+                // type-specific handler says about the state (Principal/changes and
+                // Quota/changes answered cannotCalculateChanges first).
+                if !access_token.has_account_access(req.account_id.document_id()) {
+                    return Err(trc::JmapEvent::AccountNotFound
+                        .into_err()
+                        .details(format!("Account {} not found", req.account_id)));
+                }
 
                 self.changes(*req, method_name.obj, access_token)
                     .await?
@@ -616,6 +625,14 @@ impl RequestHandler for Server {
                 CopyRequestMethod::Blob(mut req) => {
                     resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
                     access_token.assert_is_member(req.account_id)?;
+                    // RFC 8620 Section 3.6.2: a fromAccountId outside the session is
+                    // accountNotFound, even when there is nothing to copy; an empty
+                    // success told the caller the account exists.
+                    if !access_token.has_account_access(req.from_account_id.document_id()) {
+                        return Err(trc::JmapEvent::AccountNotFound
+                            .into_err()
+                            .details(format!("Account {} not found", req.from_account_id)));
+                    }
 
                     self.blob_copy(*req, access_token).await?.into()
                 }
