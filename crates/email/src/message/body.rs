@@ -66,7 +66,12 @@ impl ToBodyPart for Vec<MessagePart<'_>> {
                             )
                             .into()
                         }
-                        EmailProperty::Size if multipart.is_none() => match &part.body {
+                        // RFC 8621 Section 4.1.4: size is an UnsignedInt on every part.
+                        // A multipart has no blob, so report the raw octets of its body.
+                        EmailProperty::Size if multipart.is_some() => {
+                            (part.offset_end.saturating_sub(part.offset_body) as usize).into()
+                        }
+                        EmailProperty::Size => match &part.body {
                             PartType::Text(text) | PartType::Html(text) => text.len(),
                             PartType::Binary(bin) | PartType::InlineBinary(bin) => bin.len(),
                             PartType::Message(message) => message.root_part().raw_len() as usize,
@@ -88,8 +93,11 @@ impl ToBodyPart for Vec<MessagePart<'_>> {
                                 _ => None,
                             })
                             .into(),
+                        // RFC 8621 Section 4.1.4: charset is null "if the header field is
+                        // present but not of type text/*", whatever parameters it has.
                         EmailProperty::Charset => part
                             .content_type()
+                            .filter(|ct| ct.ctype().eq_ignore_ascii_case("text"))
                             .and_then(|ct| ct.attribute("charset"))
                             .or(match &part.body {
                                 PartType::Text(_) | PartType::Html(_) => Some("us-ascii"),
@@ -119,7 +127,10 @@ impl ToBodyPart for Vec<MessagePart<'_>> {
                             part.headers.header_to_value(property, raw_message)
                         }
                         EmailProperty::Headers => part.headers.headers_to_value(raw_message),
-                        EmailProperty::SubParts => continue,
+                        // RFC 8621 Section 4.1.4: subParts is null on anything that is
+                        // not multipart, so a client that asked for it gets an answer.
+                        EmailProperty::SubParts if multipart.is_some() => continue,
+                        EmailProperty::SubParts => Value::Null,
                         _ => Value::Null,
                     };
                     values.insert_unchecked(property.clone(), value);
@@ -200,7 +211,10 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                             )
                             .into()
                         }
-                        EmailProperty::Size if multipart.is_none() => {
+                        EmailProperty::Size if multipart.is_some() => {
+                            (part.offset_end.to_native().saturating_sub(part.offset_body.to_native()) as usize).into()
+                        }
+                        EmailProperty::Size => {
                             (part.flags.to_native() & PART_SIZE_MASK).into()
                         }
                         EmailProperty::Name => part.attachment_name().map(|v| v.to_string()).into(),
@@ -220,8 +234,11 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                                 _ => None,
                             })
                             .into(),
+                        // RFC 8621 Section 4.1.4: charset is null on anything that is not
+                        // text/*, whatever parameters the Content-Type carries.
                         EmailProperty::Charset => {
                             part.content_type()
+                                .filter(|ct| ct.ctype().eq_ignore_ascii_case("text"))
                                 .and_then(|ct| ct.attribute("charset"))
                                 .or(match &part.body {
                                     ArchivedMetadataPartType::Text
@@ -253,7 +270,8 @@ impl ToBodyPart for ArchivedMessageMetadataContents {
                         }
                         EmailProperty::Header(_) => part.header_to_value(property, raw_message),
                         EmailProperty::Headers => part.headers_to_value(raw_message),
-                        EmailProperty::SubParts => continue,
+                        EmailProperty::SubParts if multipart.is_some() => continue,
+                        EmailProperty::SubParts => Value::Null,
                         _ => Value::Null,
                     };
                     values.insert_unchecked(property.clone(), value);
