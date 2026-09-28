@@ -336,10 +336,18 @@ impl RequestHandler for Server {
 
                     self.file_node_get(*req, access_token).await?.into()
                 }
-                GetRequestMethod::PrincipalAvailability(req) => self
-                    .principal_get_availability(*req, access_token)
-                    .await?
-                    .into(),
+                GetRequestMethod::PrincipalAvailability(req) => {
+                    // RFC 8620 Section 3.6.2: the accountId has to be one of the
+                    // session's accounts, for this method like any other.
+                    if !access_token.has_account_access(req.account_id.document_id()) {
+                        return Err(trc::JmapEvent::AccountNotFound
+                            .into_err()
+                            .details(format!("Account {} not found", req.account_id)));
+                    }
+                    self.principal_get_availability(*req, access_token)
+                        .await?
+                        .into()
+                }
                 GetRequestMethod::Calendar(mut req) => {
                     resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
                     access_token.assert_has_access(req.account_id, Collection::Calendar)?;
@@ -411,6 +419,13 @@ impl RequestHandler for Server {
                     self.sieve_script_query(*req).await?.into()
                 }
                 QueryRequestMethod::Principal(req) => {
+                    // RFC 8620 Section 3.6.2: the accountId has to be one of the
+                    // session's accounts, for this method like any other.
+                    if !access_token.has_account_access(req.account_id.document_id()) {
+                        return Err(trc::JmapEvent::AccountNotFound
+                            .into_err()
+                            .details(format!("Account {} not found", req.account_id)));
+                    }
                     self.principal_query(*req, access_token).await?.into()
                 }
                 QueryRequestMethod::Quota(mut req) => {

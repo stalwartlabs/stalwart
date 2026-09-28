@@ -259,10 +259,22 @@ impl QueryChanges for Server {
                 up_to_id = request.up_to_id;
                 results = self.share_notification_query((*request).into()).await?;
             }
-            QueryChangesRequestMethod::Principal(_) => {
+            // RFC 8620 Section 3.6.2: an accountId outside the session is
+            // accountNotFound before anything is said about the state.
+            QueryChangesRequestMethod::Principal(request) => {
+                if !access_token.has_account_access(request.account_id.document_id()) {
+                    return Err(trc::JmapEvent::AccountNotFound
+                        .into_err()
+                        .details(format!("Account {} not found", request.account_id)));
+                }
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
             }
-            QueryChangesRequestMethod::Quota(_) => {
+            QueryChangesRequestMethod::Quota(request) => {
+                if !access_token.has_account_access(request.account_id.document_id()) {
+                    return Err(trc::JmapEvent::AccountNotFound
+                        .into_err()
+                        .details(format!("Account {} not found", request.account_id)));
+                }
                 return Err(trc::JmapEvent::CannotCalculateChanges.into_err());
             }
         }
