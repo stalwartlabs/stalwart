@@ -12,8 +12,21 @@ use std::{borrow::Cow, fmt::Display, str::FromStr};
 pub struct ResultReference {
     #[serde(rename = "resultOf")]
     pub result_of: String,
+    #[serde(deserialize_with = "lenient_method_name")]
     pub name: MethodName,
     pub path: JsonPointer<Null>,
+}
+
+// RFC 8620 Section 3.7: "If any result reference fails to resolve, the whole
+// method MUST be rejected with an invalidResultReference error." A name that
+// is not a method name cannot resolve, so keep it as a reference that will
+// fail to, rather than rejecting the arguments at parse time.
+fn lenient_method_name<'de, D>(deserializer: D) -> Result<MethodName, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Cow<str> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(MethodName::parse(value.as_ref()).unwrap_or_else(MethodName::error))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
