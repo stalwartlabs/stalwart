@@ -5,13 +5,13 @@
  */
 
 use crate::BlobStore;
+use encodify::base32::STALWART;
 use registry::schema::structs;
 use std::{io::SeekFrom, ops::Range, path::PathBuf, sync::Arc};
 use tokio::{
     fs::{self, File},
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
 };
-use utils::codec::base32_custom::Base32Writer;
 
 pub struct FsStore {
     path: PathBuf,
@@ -101,7 +101,7 @@ impl FsStore {
         for byte in key.iter().take(self.hash_levels) {
             path.push(format!("{:x}", byte));
         }
-        path.push(Base32Writer::from_bytes(key).finalize());
+        path.push(STALWART.encode(key));
         path
     }
 }

@@ -9,8 +9,7 @@ use argon2::PasswordHash;
 use argon2::PasswordHasher;
 use argon2::PasswordVerifier;
 use compact_str::CompactString;
-use mail_builder::encoders::Base64Encoder;
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::{Base64, LENIENT, Padding, STANDARD};
 use pbkdf2::Pbkdf2;
 use pwhash::{bcrypt, bsdi_crypt, md5_crypt, sha1_crypt, sha256_crypt, sha512_crypt, unix_crypt};
 use registry::schema::enums::PasswordHashAlgorithm;
@@ -147,17 +146,11 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     // SHA-1
                     let mut hasher = Sha1::new();
                     hasher.update(secret);
-                    Ok(String::from_utf8(
-                        Base64Encoder::new()
-                            .encode(&hasher.finalize()[..])
-                            .unwrap_or_default(),
-                    )
-                    .unwrap()
-                        == hashed_secret)
+                    Ok(STANDARD.encode(hasher.finalize()) == hashed_secret)
                 }
                 "SSHA" => {
                     // Salted SHA-1
-                    let decoded = base64_decode(hashed_secret.as_bytes()).unwrap_or_default();
+                    let decoded = LENIENT.decode(hashed_secret).unwrap_or_default();
                     let hash = decoded.get(..20).unwrap_or_default();
                     let salt = decoded.get(20..).unwrap_or_default();
                     let mut hasher = Sha1::new();
@@ -169,17 +162,11 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     // Verify hash
                     let mut hasher = Sha256::new();
                     hasher.update(secret);
-                    Ok(String::from_utf8(
-                        Base64Encoder::new()
-                            .encode(&hasher.finalize()[..])
-                            .unwrap_or_default(),
-                    )
-                    .unwrap()
-                        == hashed_secret)
+                    Ok(STANDARD.encode(hasher.finalize()) == hashed_secret)
                 }
                 "SSHA256" => {
                     // Salted SHA-256
-                    let decoded = base64_decode(hashed_secret.as_bytes()).unwrap_or_default();
+                    let decoded = LENIENT.decode(hashed_secret).unwrap_or_default();
                     let hash = decoded.get(..32).unwrap_or_default();
                     let salt = decoded.get(32..).unwrap_or_default();
                     let mut hasher = Sha256::new();
@@ -191,17 +178,11 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     // SHA-512
                     let mut hasher = Sha512::new();
                     hasher.update(secret);
-                    Ok(String::from_utf8(
-                        Base64Encoder::new()
-                            .encode(&hasher.finalize()[..])
-                            .unwrap_or_default(),
-                    )
-                    .unwrap()
-                        == hashed_secret)
+                    Ok(STANDARD.encode(hasher.finalize()) == hashed_secret)
                 }
                 "SSHA512" => {
                     // Salted SHA-512
-                    let decoded = base64_decode(hashed_secret.as_bytes()).unwrap_or_default();
+                    let decoded = LENIENT.decode(hashed_secret).unwrap_or_default();
                     let hash = decoded.get(..64).unwrap_or_default();
                     let salt = decoded.get(64..).unwrap_or_default();
                     let mut hasher = Sha512::new();
@@ -212,11 +193,7 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                 "MD5" => {
                     // MD5
                     let digest = md5::compute(secret);
-                    Ok(String::from_utf8(
-                        Base64Encoder::new().encode(&digest[..]).unwrap_or_default(),
-                    )
-                    .unwrap()
-                        == hashed_secret)
+                    Ok(STANDARD.encode(&digest[..]) == hashed_secret)
                 }
                 "CRYPT" => {
                     if hashed_secret.starts_with('$') {
@@ -418,26 +395,16 @@ fn is_unix_des_crypt(s: &str) -> bool {
         || (bytes.len() == 20 && bytes[0] == b'_' && bytes[1..].iter().copied().all(is_crypt_b64))
 }
 
+const STANDARD_OPTIONAL_PAD: Base64 = STANDARD.with_padding(Padding::Optional);
+
 fn b64_decoded_len_eq(body: &str, len: usize) -> bool {
-    b64_decode_loose(body)
-        .map(|d| d.len() == len)
-        .unwrap_or(false)
+    STANDARD_OPTIONAL_PAD.decoded_len(body) == Ok(len)
 }
 
 fn b64_decoded_len_ge(body: &str, min: usize) -> bool {
-    b64_decode_loose(body)
-        .map(|d| d.len() >= min)
-        .unwrap_or(false)
-}
-
-fn b64_decode_loose(s: &str) -> Option<Vec<u8>> {
-    use base64::Engine;
-    use base64::engine::general_purpose::STANDARD;
-    use base64::engine::general_purpose::STANDARD_NO_PAD;
-    STANDARD
-        .decode(s)
-        .ok()
-        .or_else(|| STANDARD_NO_PAD.decode(s).ok())
+    STANDARD_OPTIONAL_PAD
+        .decoded_len(body)
+        .is_ok_and(|len| len >= min)
 }
 
 #[cfg(test)]
@@ -445,7 +412,7 @@ mod tests {
     use super::*;
 
     fn b64(bytes: &[u8]) -> String {
-        String::from_utf8(Base64Encoder::new().encode(bytes).unwrap()).unwrap()
+        STANDARD.encode(bytes)
     }
 
     #[test]

@@ -5,7 +5,7 @@
  */
 
 use crate::auth::EncryptionKeys;
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use registry::schema::structs::PublicKey;
 use sequoia_openpgp::{Cert, parse::Parse, policy::StandardPolicy, types::KeyFlags};
 use std::borrow::Cow;
@@ -115,8 +115,9 @@ pub fn parse_public_key(pk: &PublicKey) -> Result<Option<EncryptionParams>, Cow<
         }
 
         // Decode base64
-        let cert = base64_decode(&buf)
-            .ok_or_else(|| Cow::from("Failed to decode base64 certificate."))?
+        let cert = LENIENT
+            .decode(&buf)
+            .map_err(|_| Cow::from("Failed to decode base64 certificate."))?
             .into_boxed_slice();
         match method.unwrap() {
             EncryptionMethod::PGP => match Cert::from_bytes(bytes_) {

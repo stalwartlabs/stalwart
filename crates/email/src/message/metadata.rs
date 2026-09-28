@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use encodify::{base64::MIME, qp};
 use mail_parser::{
     Addr, Address, Attribute, ContentType, DateTime, Encoding, Group, HeaderName, HeaderValue,
-    PartType,
-    decoders::{
-        base64::base64_decode, charsets::map::charset_decoder,
-        quoted_printable::quoted_printable_decode,
-    },
+    PartType, decoders::charsets::map::charset_decoder,
 };
 use rkyv::{boxed::ArchivedBox, primitive::ArchivedU16, string::ArchivedString};
 use std::{borrow::Cow, collections::VecDeque, ops::Range};
@@ -409,6 +406,18 @@ impl<'x> DecodedParts<'x> {
             )),
         }
     }
+
+    #[inline]
+    pub fn transfer_decoded_len(
+        &self,
+        message_id: usize,
+        part: &ArchivedMessageMetadataPart,
+    ) -> Option<usize> {
+        match self.raw_messages.get(message_id)? {
+            DecodedRawMessage::Borrowed(chain) => Some(part.contents_len(chain)),
+            DecodedRawMessage::Owned(vec) => Some(part.contents_len(&ChainedBytes::new(vec))),
+        }
+    }
 }
 
 impl DecodedPartContent<'_> {
@@ -540,13 +549,27 @@ impl ArchivedMessageMetadataPart {
         let bytes = raw_message.get(self.body_to_end()).unwrap_or_default();
 
         if (self.flags & PART_ENCODING_BASE64) != 0 {
-            base64_decode(bytes.as_ref()).unwrap_or_default().into()
+            MIME.decode(bytes.as_ref()).unwrap_or_default().into()
         } else if (self.flags & PART_ENCODING_QP) != 0 {
-            quoted_printable_decode(bytes.as_ref())
-                .unwrap_or_default()
-                .into()
+            match qp::BODY.decode(bytes.as_ref()) {
+                Ok(Cow::Owned(decoded)) => decoded.into(),
+                Ok(Cow::Borrowed(_)) => bytes,
+                Err(_) => Cow::Owned(Vec::new()),
+            }
         } else {
             bytes
+        }
+    }
+
+    pub fn contents_len(&self, raw_message: &ChainedBytes<'_>) -> usize {
+        let bytes = raw_message.get(self.body_to_end()).unwrap_or_default();
+
+        if (self.flags & PART_ENCODING_BASE64) != 0 {
+            MIME.decoded_len(bytes.as_ref()).unwrap_or_default()
+        } else if (self.flags & PART_ENCODING_QP) != 0 {
+            qp::BODY.decoded_len(bytes.as_ref()).unwrap_or_default()
+        } else {
+            bytes.len()
         }
     }
 
@@ -1094,6 +1117,72 @@ impl From<&ArchivedMetadataContentType> for ContentType<'static> {
                     })
                     .collect(),
             ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ArchivedMessageMetadataPart, MessageMetadataPart, MetadataPartType, PART_ENCODING_BASE64,
+        PART_ENCODING_PROBLEM, PART_ENCODING_QP,
+    };
+    use utils::chained_bytes::ChainedBytes;
+
+    const BODIES: &[&[u8]] = &[
+        b"",
+        b"SGVsbG8=\r\n",
+        b"SGVs\r\nbG8=\r\n",
+        b"SGVsbG8",
+        b"SGV",
+        b"S",
+        b"SGVs=bG8=",
+        b"SGVs!bG8=",
+        b"SGVsbG8=\r\n--boundary--\r\n",
+        b"Gr=C3=BC=C3=9Fe \r\nJ=\r\n=C3=BCrgen",
+        b"a=\r\nb=zz=4 \t\r\nc\rd\n",
+        b"trailing soft break=",
+        b"plain text\r\n",
+        b"=\xff=\x00",
+        "Gr\u{fc}\u{df}e".as_bytes(),
+    ];
+
+    #[test]
+    fn contents_len_matches_contents() {
+        for body in BODIES {
+            for flags in [
+                0,
+                PART_ENCODING_BASE64,
+                PART_ENCODING_QP,
+                PART_ENCODING_BASE64 | PART_ENCODING_PROBLEM,
+                PART_ENCODING_QP | PART_ENCODING_PROBLEM,
+            ] {
+                let part = MessageMetadataPart {
+                    headers: Box::default(),
+                    body: MetadataPartType::Text,
+                    flags,
+                    offset_header: 0,
+                    offset_body: 0,
+                    offset_end: body.len() as u32,
+                };
+                let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&part).unwrap();
+                let part =
+                    rkyv::access::<ArchivedMessageMetadataPart, rkyv::rancor::Error>(&archived)
+                        .unwrap();
+
+                let (first, last) = body.split_at(body.len() / 2);
+                for raw in [
+                    ChainedBytes::new(body),
+                    ChainedBytes::new(first).with_last(last),
+                ] {
+                    assert_eq!(
+                        part.contents_len(&raw),
+                        part.contents(&raw).len(),
+                        "body {:?} flags {flags:x}",
+                        String::from_utf8_lossy(body)
+                    );
+                }
+            }
         }
     }
 }

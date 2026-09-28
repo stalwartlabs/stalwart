@@ -8,12 +8,12 @@ use crate::{
     smtp::{inbound::TestMessage, session::TestSession},
     utils::{account::Account, dns::DnsCache, server::TestServer, server::TestServerBuilder},
 };
-use base64::{Engine, engine::general_purpose::STANDARD};
 use mail_auth::{
     DnssecStatus, MX,
     common::{crypto::Ed25519Key, parse::TxtRecordParser, verify::DomainKey},
     dkim2::{Dkim2Signer, Hop},
 };
+use encodify::base64::STANDARD;
 use registry::schema::{
     enums::{DkimCanonicalization, DkimRotationStage},
     structs::{

@@ -6,8 +6,8 @@
 
 use crate::utils::{account::Account, server::TestServerBuilder};
 use ahash::AHashMap;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::{HeaderMap, Method, StatusCode, header};
+use encodify::base64::STANDARD;
 use registry::{
     schema::{
         enums::{Permission, StorageQuota},

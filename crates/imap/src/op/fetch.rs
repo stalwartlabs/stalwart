@@ -1287,8 +1287,7 @@ impl AsImapDataItem for ArchivedMessageMetadata {
 
         match &part.body {
             ArchivedMetadataPartType::Text | ArchivedMetadataPartType::Html => decoded
-                .transfer_decoded_contents(message_id, part)
-                .map(|p| p.len())
+                .transfer_decoded_len(message_id, part)
                 .unwrap_or_default(),
             ArchivedMetadataPartType::Binary | ArchivedMetadataPartType::InlineBinary => decoded
                 .part(message_id, u32::from(part.offset_header) as usize)

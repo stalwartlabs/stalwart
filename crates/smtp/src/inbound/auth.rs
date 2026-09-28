@@ -7,7 +7,7 @@
 use crate::core::Session;
 use common::{auth::AuthRequest, network::SessionStream};
 use directory::Credentials;
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use registry::schema::enums::Permission;
 use smtp_proto::{AUTH_LOGIN, AUTH_OAUTHBEARER, AUTH_PLAIN, AUTH_XOAUTH2, IntoString};
 use trc::AuthEvent;
@@ -65,7 +65,7 @@ impl<T: SessionStream> Session<T> {
                 }
                 _ => (),
             }
-        } else if let Some(response) = base64_decode(response) {
+        } else if let Ok(response) = LENIENT.decode(response) {
             match (token.mechanism, &mut token.credentials) {
                 (AUTH_PLAIN, _) => {
                     if let Some(credentials) = Credentials::decode_sasl_challenge_plain(&response) {

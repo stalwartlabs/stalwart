@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose};
 use imap_proto::ResponseType;
+use encodify::base64::STANDARD;
 use rustls_pki_types::ServerName;
 use std::time::Duration;
 use tokio::{
@@ -39,7 +39,7 @@ impl SieveConnection {
     }
 
     pub async fn authenticate(&mut self, user: &str, pass: &str) {
-        let creds = general_purpose::STANDARD.encode(format!("\0{user}\0{pass}"));
+        let creds = STANDARD.encode(format!("\0{user}\0{pass}"));
         self.send(&format!(
             "AUTHENTICATE PLAIN {{{}+}}\r\n{creds}",
             creds.len()

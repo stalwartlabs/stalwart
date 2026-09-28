@@ -8,7 +8,6 @@ use crate::{
     config::{EcKeyCurve, build_ecdsa_pem, build_rsa_keypair},
     manager::application::Resource,
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::{
     Algorithm, EncodingKey,
     jwk::{
@@ -17,6 +16,7 @@ use jsonwebtoken::{
         PublicKeyUse, RSAKeyParameters, RSAKeyType,
     },
 };
+use encodify::base64::URL_SAFE_NO_PAD;
 use registry::schema::{enums::JwtSignatureAlgorithm, prelude::ObjectType, structs::OidcProvider};
 use std::borrow::Cow;
 use store::{

@@ -6,8 +6,8 @@
 
 use super::{GrantType, crypto::SymmetricEncrypt};
 use crate::Server;
-use base64::{Engine, engine::general_purpose};
 use compact_str::CompactString;
+use encodify::base64::URL_SAFE_NO_PAD;
 use std::time::SystemTime;
 use store::rand::{RngExt, rng};
 use utils::codec::leb128::{Leb128Iterator, Leb128Vec};
@@ -148,10 +148,10 @@ fn seal_token(key: &[u8], token: &RawToken, footer: &[u8]) -> Result<String, Str
 
     let mut out = String::with_capacity(TOKEN_HEADER.len() + (body.len() + footer.len()) * 2);
     out.push_str(TOKEN_HEADER);
-    general_purpose::URL_SAFE_NO_PAD.encode_string(&body, &mut out);
+    URL_SAFE_NO_PAD.encode_append(&body, &mut out);
     if !footer.is_empty() {
         out.push('.');
-        general_purpose::URL_SAFE_NO_PAD.encode_string(footer, &mut out);
+        URL_SAFE_NO_PAD.encode_append(footer, &mut out);
     }
 
     Ok(out)
@@ -162,15 +162,11 @@ fn open_token(key: &[u8], token: &str) -> Result<RawToken, ()> {
     let (body, footer) = match rest.split_once('.') {
         Some((body, footer)) => (
             body,
-            general_purpose::URL_SAFE_NO_PAD
-                .decode(footer.as_bytes())
-                .map_err(|_| ())?,
+            URL_SAFE_NO_PAD.decode(footer.as_bytes()).map_err(|_| ())?,
         ),
         None => (rest, Vec::new()),
     };
-    let body = general_purpose::URL_SAFE_NO_PAD
-        .decode(body.as_bytes())
-        .map_err(|_| ())?;
+    let body = URL_SAFE_NO_PAD.decode(body.as_bytes()).map_err(|_| ())?;
     if body.len() < SymmetricEncrypt::NONCE_LEN + SymmetricEncrypt::ENCRYPT_TAG_LEN {
         return Err(());
     }
@@ -270,10 +266,7 @@ mod tests {
                 assert!(!token[TOKEN_HEADER.len()..].contains('.'));
             } else {
                 let segment = token.rsplit_once('.').unwrap().1;
-                assert_eq!(
-                    general_purpose::URL_SAFE_NO_PAD.decode(segment).unwrap(),
-                    footer
-                );
+                assert_eq!(URL_SAFE_NO_PAD.decode(segment).unwrap(), footer);
             }
         }
     }
@@ -287,7 +280,7 @@ mod tests {
         )
         .unwrap();
         let footer = token.rsplit_once('.').unwrap().1;
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(footer).unwrap();
+        let decoded = URL_SAFE_NO_PAD.decode(footer).unwrap();
         assert_eq!(decoded, b"route-me@example.org");
     }
 
@@ -306,13 +299,13 @@ mod tests {
             Some((b, f)) => (b.to_string(), Some(f.to_string())),
             None => (rest.to_string(), None),
         };
-        let mut body = general_purpose::URL_SAFE_NO_PAD.decode(&body_b64).unwrap();
+        let mut body = URL_SAFE_NO_PAD.decode(&body_b64).unwrap();
 
         for idx in 0..body.len() {
             let mut tampered = body.clone();
             tampered[idx] ^= 0x01;
             let mut rebuilt = String::from(header);
-            rebuilt.push_str(&general_purpose::URL_SAFE_NO_PAD.encode(&tampered));
+            rebuilt.push_str(&URL_SAFE_NO_PAD.encode(&tampered));
             if let Some(footer) = &footer {
                 rebuilt.push('.');
                 rebuilt.push_str(footer);
@@ -335,7 +328,7 @@ mod tests {
         let (body, _) = token.rsplit_once('.').unwrap();
 
         // An attacker rewrites the clear-text account name to impersonate another account
-        let forged_footer = general_purpose::URL_SAFE_NO_PAD.encode(b"attacker@example.org");
+        let forged_footer = URL_SAFE_NO_PAD.encode(b"attacker@example.org");
         let forged = format!("{body}.{forged_footer}");
         assert!(
             open_token(KEY, &forged).is_err(),
@@ -389,10 +382,10 @@ mod tests {
         let token = seal_token(KEY, &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
         let (header, rest) = token.split_at(TOKEN_HEADER.len());
         let body_b64 = rest.split_once('.').map(|(b, _)| b).unwrap_or(rest);
-        let body = general_purpose::URL_SAFE_NO_PAD.decode(body_b64).unwrap();
+        let body = URL_SAFE_NO_PAD.decode(body_b64).unwrap();
         for len in 0..body.len() {
             let mut rebuilt = String::from(header);
-            rebuilt.push_str(&general_purpose::URL_SAFE_NO_PAD.encode(&body[..len]));
+            rebuilt.push_str(&URL_SAFE_NO_PAD.encode(&body[..len]));
             assert!(
                 open_token(KEY, &rebuilt).is_err(),
                 "truncation to {len} must be rejected"

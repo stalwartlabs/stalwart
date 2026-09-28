@@ -9,7 +9,6 @@ use crate::{
     Command,
     protocol::metadata::{Depth, Entry, EntryValue, GetArguments, Scope, SetArguments},
     receiver::{Request, Token, bad},
-    utf7::utf7_maybe_decode,
 };
 use compact_str::CompactString;
 use std::{borrow::Cow, iter::Peekable, vec::IntoIter};
@@ -50,13 +49,10 @@ impl GetArguments {
             self.parse_options(tokens)?;
         }
 
-        self.mailbox_name = utf7_maybe_decode(
-            tokens
-                .next()
-                .ok_or("Missing mailbox name.")?
-                .unwrap_string()?,
-            is_utf8,
-        );
+        self.mailbox_name = tokens
+            .next()
+            .ok_or("Missing mailbox name.")?
+            .unwrap_mailbox_name(is_utf8)?;
 
         match tokens.next().ok_or("Missing entry specifier.")? {
             Token::ParenthesisOpen
@@ -124,13 +120,10 @@ impl GetArguments {
 
 impl SetArguments {
     fn parse(&mut self, tokens: &mut IntoIter<Token>, is_utf8: bool) -> super::Result<()> {
-        self.mailbox_name = utf7_maybe_decode(
-            tokens
-                .next()
-                .ok_or("Missing mailbox name.")?
-                .unwrap_string()?,
-            is_utf8,
-        );
+        self.mailbox_name = tokens
+            .next()
+            .ok_or("Missing mailbox name.")?
+            .unwrap_mailbox_name(is_utf8)?;
 
         if tokens
             .next()

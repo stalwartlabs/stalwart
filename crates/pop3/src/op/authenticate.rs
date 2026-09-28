@@ -13,7 +13,7 @@ use common::{
     network::{SessionStream, limiter::LimiterResult},
 };
 use directory::Credentials;
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {
@@ -25,7 +25,9 @@ impl<T: SessionStream> Session<T> {
         match mechanism {
             Mechanism::Plain | Mechanism::OAuthBearer | Mechanism::XOauth2 => {
                 if !params.is_empty() {
-                    let credentials = base64_decode(params.pop().unwrap().as_bytes())
+                    let credentials = LENIENT
+                        .decode(params.pop().unwrap().as_bytes())
+                        .ok()
                         .and_then(|challenge| {
                             if mechanism == Mechanism::Plain {
                                 Credentials::decode_sasl_challenge_plain(&challenge)

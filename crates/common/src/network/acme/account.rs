@@ -9,8 +9,7 @@ use crate::network::acme::http::{get_header, https};
 use crate::network::acme::{AcmeError, AcmeResult, Directory};
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, EcdsaSigningAlgorithm};
-use base64::Engine;
-use base64::engine::general_purpose::{self, URL_SAFE_NO_PAD};
+use encodify::base64::URL_SAFE_NO_PAD;
 use registry::schema::structs::AcmeProvider;
 use reqwest::Method;
 use utils::sanitize_email;
@@ -90,7 +89,7 @@ pub async fn acme_create_account(
 
 impl EabSettings {
     pub fn new(kid: impl Into<String>, hmac_key: impl AsRef<[u8]>) -> AcmeResult<Self> {
-        let key = general_purpose::URL_SAFE_NO_PAD
+        let key = URL_SAFE_NO_PAD
             .decode(hmac_key.as_ref())
             .map_err(|err| AcmeError::Invalid(format!("Failed to decode EAB HMAC key: {}", err)))?;
         Ok(Self {

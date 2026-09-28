@@ -6,8 +6,7 @@
 
 use compact_str::CompactString;
 
-use super::quoted_string;
-use crate::utf7::quoted_mailbox_name;
+use super::{quoted_mailbox_name, quoted_string};
 use std::fmt::Display;
 use types::acl::Acl;
 

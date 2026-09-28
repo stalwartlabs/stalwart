@@ -6,7 +6,14 @@
 
 #![allow(dead_code)]
 
-use std::{borrow::Borrow, io::Write};
+use encodify::{
+    Buffer,
+    base32::{Decoder, Encoder},
+};
+use std::{
+    borrow::Borrow,
+    io::{Cursor, Write},
+};
 
 pub trait Leb128_ {
     fn to_leb128_writer(self, out: &mut impl Write) -> std::io::Result<usize>;
@@ -83,6 +90,9 @@ impl Leb128Reader for &[u8] {}
 impl Leb128Reader for Vec<u8> {}
 impl Leb128Reader for Box<[u8]> {}
 impl<'x> Leb128Iterator<&'x u8> for std::slice::Iter<'x, u8> {}
+impl Leb128Iterator<u8> for Decoder<'_> {}
+impl<B: Buffer> Leb128Writer for Encoder<'_, B> {}
+impl<const N: usize> Leb128Writer for Cursor<[u8; N]> {}
 
 // Based on leb128.rs from rustc
 macro_rules! impl_unsigned_leb128 {

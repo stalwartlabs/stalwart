@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose};
 use common::{
     Server,
     config::server::{DEFAULT_TLS_TIMEOUT, ServerProtocol},
     network::{ServerInstance, SessionStream, TcpAcceptor, limiter::ConcurrencyLimiter},
 };
+use encodify::base64::STANDARD;
 use rustls::{ServerConfig, server::ResolvesServerCert};
 use smtp::core::{Session, SessionAddress, SessionData, SessionParameters, State};
 use smtp::queue::MessageSource;
@@ -163,17 +163,15 @@ impl TestSession for Session<DummyIo> {
     async fn auth_plain(&mut self, username: &str, secret: &str, expected_code: &str) {
         let cmd = format!(
             "AUTH PLAIN {}",
-            general_purpose::STANDARD.encode(format!("\0{username}\0{secret}"))
+            STANDARD.encode(format!("\0{username}\0{secret}"))
         );
         self.cmd(&cmd, expected_code).await;
     }
 
     async fn auth_login(&mut self, username: &str, secret: &str, expected_code: &str) {
         self.cmd("AUTH LOGIN", "334").await;
-        self.cmd(&general_purpose::STANDARD.encode(username), "334")
-            .await;
-        self.cmd(&general_purpose::STANDARD.encode(secret), expected_code)
-            .await;
+        self.cmd(&STANDARD.encode(username), "334").await;
+        self.cmd(&STANDARD.encode(secret), expected_code).await;
     }
 
     async fn ehlo(&mut self, host: &str) -> Vec<String> {

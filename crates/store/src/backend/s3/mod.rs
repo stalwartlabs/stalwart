@@ -5,10 +5,10 @@
  */
 
 use crate::BlobStore;
+use encodify::base32::STALWART;
 use registry::schema::structs;
 use s3::{Bucket, Region, creds::Credentials};
-use std::{io::Write, ops::Range, sync::Arc, time::Duration};
-use utils::codec::base32_custom::Base32Writer;
+use std::{ops::Range, sync::Arc, time::Duration};
 
 pub struct S3Store {
     bucket: Box<Bucket>,
@@ -236,13 +236,12 @@ impl S3Store {
 
     fn build_key(&self, key: &[u8]) -> String {
         if let Some(prefix) = &self.prefix {
-            let mut writer =
-                Base32Writer::with_raw_capacity(prefix.len() + (key.len().div_ceil(4) * 5));
-            writer.push_string(prefix);
-            writer.write_all(key).unwrap();
-            writer.finalize()
+            let mut out = String::with_capacity(prefix.len() + STALWART.encoded_len(key.len()));
+            out.push_str(prefix);
+            STALWART.encode_append(key, &mut out);
+            out
         } else {
-            Base32Writer::from_bytes(key).finalize()
+            STALWART.encode(key)
         }
     }
 }

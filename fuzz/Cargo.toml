@@ -15,8 +15,18 @@ spam-filter = { path = "../crates/spam-filter" }
 common = { path = "../crates/common" }
 utils = { path = "../crates/utils" }
 mail-parser = { version = "0.11", features = ["full_encoding"] }
+encodify = "1.0"
 
 [workspace]
+
+[patch.crates-io]
+calcard = { path = "../../calcard" }
+dns-update = { path = "../../dns-update" }
+jmap-tools = { path = "../../jmap-tools" }
+mail-auth = { path = "../../mail-auth" }
+mail-builder = { path = "../../mail-builder" }
+encodify = { path = "../../encodify" }
+mail-parser = { path = "../../mail-parser" }
 
 [[bin]]
 name = "imap_receiver"

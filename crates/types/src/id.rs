@@ -6,11 +6,8 @@
 
 use crate::DocumentId;
 use jmap_tools::{Element, Property, Value};
-use std::{
-    ops::Deref,
-    str::{FromStr, from_utf8},
-};
-use utils::codec::base32_custom::{BASE32_ALPHABET, BASE32_INVERSE};
+use encodify::base32::{STALWART, U64Text};
+use std::{ops::Deref, str::FromStr};
 
 #[derive(
     rkyv::Archive,
@@ -29,36 +26,6 @@ use utils::codec::base32_custom::{BASE32_ALPHABET, BASE32_INVERSE};
 #[repr(transparent)]
 pub struct Id(u64);
 
-const ID_TEXT_CAPACITY: usize = 13;
-
-#[derive(Debug, Clone, Copy)]
-pub struct IdText {
-    bytes: [u8; ID_TEXT_CAPACITY],
-    len: usize,
-}
-
-impl IdText {
-    pub fn as_str(&self) -> &str {
-        self.bytes
-            .get(..self.len)
-            .and_then(|bytes| from_utf8(bytes).ok())
-            .unwrap_or_default()
-    }
-
-    fn push(&mut self, byte: u8) {
-        if let Some(slot) = self.bytes.get_mut(self.len) {
-            *slot = byte;
-            self.len += 1;
-        }
-    }
-
-    fn push_symbol(&mut self, symbol: usize) {
-        if let Some(&byte) = BASE32_ALPHABET.get(symbol) {
-            self.push(byte);
-        }
-    }
-}
-
 impl Default for Id {
     fn default() -> Self {
         Id(u64::MAX)
@@ -69,18 +36,7 @@ impl FromStr for Id {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut id = 0;
-
-        for &ch in s.as_bytes() {
-            let i = BASE32_INVERSE[ch as usize];
-            if i != u8::MAX {
-                id = (id << 5) | i as u64;
-            } else {
-                return Err(());
-            }
-        }
-
-        Ok(Id(id))
+        STALWART.decode_u64(s).map(Id).map_err(|_| ())
     }
 }
 
@@ -103,58 +59,8 @@ impl Id {
         self.text().as_str().to_string()
     }
 
-    // From https://github.com/archer884/crockford by J/A <archer884@gmail.com>
-    // License: MIT/Apache 2.0
-    pub fn text(&self) -> IdText {
-        let mut text = IdText {
-            bytes: [0; ID_TEXT_CAPACITY],
-            len: 0,
-        };
-        match self.0 {
-            0 => text.push(b'a'),
-            mut n => {
-                // Used for the initial shift.
-                const QUAD_SHIFT: usize = 60;
-                const QUAD_RESET: usize = 4;
-
-                // Used for all subsequent shifts.
-                const FIVE_SHIFT: usize = 59;
-                const FIVE_RESET: usize = 5;
-
-                // After we clear the four most significant bits, the four least significant bits will be
-                // replaced with 0001. We can then know to stop once the four most significant bits are,
-                // likewise, 0001.
-                const STOP_BIT: u64 = 1 << QUAD_SHIFT;
-
-                // Start by getting the most significant four bits. We get four here because these would be
-                // leftovers when starting from the least significant bits. In either case, tag the four least
-                // significant bits with our stop bit.
-                match (n >> QUAD_SHIFT) as usize {
-                    // Eat leading zero-bits. This should not be done if the first four bits were non-zero.
-                    // Additionally, we *must* do this in increments of five bits.
-                    0 => {
-                        n <<= QUAD_RESET;
-                        n |= 1;
-                        n <<= n.leading_zeros() / 5 * 5;
-                    }
-
-                    // Write value of first four bytes.
-                    i => {
-                        n <<= QUAD_RESET;
-                        n |= 1;
-                        text.push_symbol(i);
-                    }
-                }
-
-                // From now until we reach the stop bit, take the five most significant bits and then shift
-                // left by five bits.
-                while n != STOP_BIT {
-                    text.push_symbol((n >> FIVE_SHIFT) as usize);
-                    n <<= FIVE_RESET;
-                }
-            }
-        }
-        text
+    pub fn text(&self) -> U64Text {
+        STALWART.encode_u64(self.0)
     }
 
     #[inline(always)]
@@ -296,8 +202,6 @@ mod tests {
             let id = Id::from(number);
             assert_eq!(Id::from_str(&id.to_string()).unwrap(), id);
         }
-
-        Id::from_str("p333333333333p333333333333").unwrap();
     }
 
     #[test]
@@ -325,5 +229,21 @@ mod tests {
             assert_eq!(format!("{id:>20}"), text);
             assert_eq!(Id::from_str(text), Ok(id));
         }
+    }
+
+    #[test]
+    fn parse_rejects_invalid_text() {
+        for text in [
+            "",
+            "p333333333333p333333333333",
+            "baaaaaaaaaaaaa",
+            "q333333333333",
+            "Singleton",
+            "SINGLETON",
+            "a-b",
+        ] {
+            assert_eq!(Id::from_str(text), Err(()), "{text:?}");
+        }
+        assert_eq!(Id::from_str("aaaaaaaaaaaab"), Ok(Id::from(1u64)));
     }
 }

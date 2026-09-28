@@ -8,8 +8,6 @@ utils = { path =  "../utils" }
 store = { path =  "../store" }
 trc = { path = "../trc" }
 registry = { path = "../registry" }
-mail-parser = { version = "0.11" }
-mail-builder = { version = "1.0" } 
 tokio = { version = "1.53", features = ["net"] }
 ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 deadpool = { version = "0.13", features = ["managed", "rt_tokio_1"] }
@@ -25,7 +23,7 @@ serde = { version = "1.0", features = ["derive"]}
 totp-rs = { version = "6.0.0", features = ["otpauth"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 serde_json = "1.0"
-base64 = "0.23"
+encodify = "1.0"
 nohash-hasher = "0.2.0"
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 compact_str = "0.10.0"

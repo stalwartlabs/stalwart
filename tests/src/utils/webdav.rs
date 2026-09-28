@@ -5,7 +5,6 @@
  */
 
 use ahash::{AHashMap, AHashSet};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use dav_proto::{
     Depth,
     schema::property::{CalDavProperty, DavProperty, WebDavProperty},
@@ -13,6 +12,7 @@ use dav_proto::{
 };
 use groupware::DavResourceName;
 use hyper::{HeaderMap, Method, StatusCode, header::AUTHORIZATION};
+use encodify::base64::STANDARD;
 use quick_xml::{NsReader, Reader, XmlVersion, events::Event, name::ResolveResult};
 use std::{borrow::Cow, time::Duration};
 use store::rand::{RngExt, distr::Alphanumeric, rng};

@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::config::smtp::auth::{rsa_key_parse, simple_pem_parse};
+use crate::config::smtp::auth::{pem_or_base64_decode, rsa_key_parse};
 use dns_update::{DnsRecord, NamedDnsRecord};
 use jiff::{Timestamp, fmt::strtime, tz::TimeZone};
 use mail_auth::common::crypto::Ed25519Key;
 use mail_auth::dkim::generate::DkimKeyPair;
-use mail_builder::encoders::Base64Encoder;
+use encodify::{base64::STANDARD, pem};
 use pkcs8::Document;
 use registry::schema::enums::DkimSignatureType;
 use registry::schema::structs::DkimSignature;
@@ -36,27 +36,7 @@ pub async fn generate_dkim_private_key(
     })?;
 
     Ok(private_key
-        .map(|(private_key, pk_type)| {
-            let mut pem = format!("-----BEGIN {pk_type}-----\n").into_bytes();
-            let mut lf_count = 65;
-            for ch in Base64Encoder::new()
-                .encode(private_key.private_key())
-                .unwrap_or_default()
-            {
-                pem.push(ch);
-                lf_count -= 1;
-                if lf_count == 0 {
-                    pem.push(b'\n');
-                    lf_count = 65;
-                }
-            }
-            if lf_count != 65 {
-                pem.push(b'\n');
-            }
-            pem.extend_from_slice(format!("-----END {pk_type}-----\n").as_bytes());
-
-            String::from_utf8(pem).unwrap_or_default()
-        })
+        .map(|(private_key, pk_type)| pem::STANDARD.encode(pk_type, private_key.private_key()))
         .map_err(|err| err.to_string()))
 }
 
@@ -80,17 +60,10 @@ pub async fn generate_dkim_public_key(key: &DkimSignature) -> trc::Result<String
                         .reason(err)
                 })
             })
-            .map(|pk| {
-                String::from_utf8(
-                    Base64Encoder::new()
-                        .encode(pk.as_bytes())
-                        .unwrap_or_default(),
-                )
-                .unwrap_or_default()
-            })
+            .map(|pk| STANDARD.encode(pk.as_bytes()))
     } else {
-        simple_pem_parse(&pem)
-            .ok_or_else(|| {
+        pem_or_base64_decode(&pem)
+            .map_err(|_| {
                 trc::EventType::Dkim(trc::DkimEvent::BuildError)
                     .into_err()
                     .details("Failed to parse private key PEM")
@@ -102,14 +75,7 @@ pub async fn generate_dkim_public_key(key: &DkimSignature) -> trc::Result<String
                         .reason(err)
                 })
             })
-            .map(|pk| {
-                String::from_utf8(
-                    Base64Encoder::new()
-                        .encode(&pk.public_key())
-                        .unwrap_or_default(),
-                )
-                .unwrap_or_default()
-            })
+            .map(|pk| STANDARD.encode(pk.public_key()))
     }
 }
 

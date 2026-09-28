@@ -12,6 +12,7 @@ serde = { version = "1.0", features = ["derive"]}
 rkyv.workspace = true
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
 blake3 = "1.8.7"
+encodify = "1.0"
 
 
 [features]

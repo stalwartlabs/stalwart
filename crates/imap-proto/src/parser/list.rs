@@ -12,7 +12,6 @@ use crate::{
         status::Status,
     },
     receiver::{Request, Token, bad},
-    utf7::utf7_maybe_decode,
 };
 
 impl Request<Command> {
@@ -28,14 +27,11 @@ impl Request<Command> {
                         .unwrap()
                         .unwrap_string()
                         .map_err(|v| bad(self.tag.clone(), v))?,
-                    mailbox_name: utf7_maybe_decode(
-                        tokens
-                            .next()
-                            .unwrap()
-                            .unwrap_string()
-                            .map_err(|v| bad(self.tag.clone(), v))?,
-                        is_utf8,
-                    ),
+                    mailbox_name: tokens
+                        .next()
+                        .unwrap()
+                        .unwrap_mailbox_name(is_utf8)
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     tag: self.tag,
                 })
             }
@@ -94,12 +90,11 @@ impl Request<Command> {
                         }
                     }
                     token => {
-                        mailbox_name.push(utf7_maybe_decode(
+                        mailbox_name.push(
                             token
-                                .unwrap_string()
+                                .unwrap_mailbox_name(is_utf8)
                                 .map_err(|v| bad(self.tag.clone(), v))?,
-                            is_utf8,
-                        ));
+                        );
                     }
                 }
 

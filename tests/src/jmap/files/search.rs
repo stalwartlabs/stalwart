@@ -7,8 +7,8 @@
 use super::properties::{destroy_tree, upload_blob};
 use crate::utils::{account::Account, jmap::JmapUtils, server::TestServer};
 use ahash::AHashSet;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use jmap_proto::request::method::MethodObject;
+use encodify::base64::STANDARD;
 use serde_json::{Value, json};
 use store::{SearchStore, write::SearchIndex};
 

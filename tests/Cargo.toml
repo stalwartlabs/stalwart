@@ -48,7 +48,7 @@ managesieve = { path = "../crates/managesieve", features = ["test_mode", "enterp
 smtp-proto = { version = "0.2" }
 mail-auth = { version = "0.13", features = ["test"] }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-builder = "1.0"
+mail-builder = { version = "2.0" }
 sieve-rs = { version = "1.0" }
 utils = { path = "../crates/utils", features = ["test_mode"] }
 jmap-client = { version = "0.4", features = ["websockets", "debug", "async"] }
@@ -67,7 +67,7 @@ futures = "0.3"
 ece = "2.3"
 hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
-base64 = "0.23"
+encodify = "1.0"
 ahash = { version = "0.8" }
 serial_test = "4.0.1"
 jiff = "0.2.37"

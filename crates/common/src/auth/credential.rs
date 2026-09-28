@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use std::io::Write;
+use encodify::{base32::STALWART, base64::URL_SAFE_NO_PAD};
 use store::{
     U32_LEN,
     rand::{self},
 };
-use utils::codec::base32_custom::{Base32Reader, Base32Writer};
 
 pub struct ApiKey {
     pub account_id: u32,
     pub credential_id: u32,
     pub secret: [u8; 20],
 }
+
+const API_KEY_LEN: usize = U32_LEN * 2 + 20;
 
 pub struct AppPassword {
     pub credential_id: u32,
@@ -33,7 +33,11 @@ impl ApiKey {
     }
 
     pub fn parse(token: &str) -> Option<Self> {
-        let decoded = URL_SAFE_NO_PAD.decode(token.strip_prefix("API_")?).ok()?;
+        let mut decoded = [0u8; API_KEY_LEN];
+        URL_SAFE_NO_PAD
+            .decode_slice(token.strip_prefix("API_")?, &mut decoded)
+            .ok()
+            .filter(|&len| len == API_KEY_LEN)?;
 
         Some(ApiKey {
             account_id: u32::from_be_bytes(decoded.get(0..U32_LEN)?.try_into().ok()?),
@@ -43,11 +47,13 @@ impl ApiKey {
     }
 
     pub fn build(&self) -> String {
-        let mut bytes = Vec::with_capacity(U32_LEN * 2 + self.secret.len());
+        let mut bytes = Vec::with_capacity(API_KEY_LEN);
         bytes.extend_from_slice(&self.account_id.to_be_bytes());
         bytes.extend_from_slice(&self.credential_id.to_be_bytes());
         bytes.extend_from_slice(&self.secret);
-        format!("API_{}", URL_SAFE_NO_PAD.encode(bytes))
+        let mut token = String::from("API_");
+        URL_SAFE_NO_PAD.encode_append(bytes, &mut token);
+        token
     }
 }
 
@@ -61,7 +67,7 @@ impl AppPassword {
 
     pub fn parse(token: &str) -> Option<Self> {
         let token = token.strip_prefix("app")?;
-        let mut reader = Base32Reader::new(token.as_bytes().get(1..)?);
+        let mut reader = STALWART.decoder(token.as_bytes().get(1..)?);
         let mut credential_id = [0u8; 4];
         let mut secret = [0u8; 18];
 
@@ -84,10 +90,11 @@ impl AppPassword {
     }
 
     pub fn build(&self) -> String {
-        let mut writer = Base32Writer::with_capacity(std::mem::size_of::<Self>().div_ceil(5) * 8);
-        writer.push_string("app_");
-        let _ = writer.write(&self.credential_id.to_be_bytes());
-        let _ = writer.write_all(&self.secret);
-        writer.finalize()
+        let mut token = String::from("app_");
+        let mut encoder = STALWART.encoder(&mut token);
+        encoder.push(&self.credential_id.to_be_bytes());
+        encoder.push(&self.secret);
+        encoder.finish();
+        token
     }
 }

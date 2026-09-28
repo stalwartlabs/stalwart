@@ -15,7 +15,7 @@ use imap_proto::{
     protocol::authenticate::Mechanism,
     receiver::{self, Request},
 };
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {
@@ -36,7 +36,9 @@ impl<T: SessionStream> Session<T> {
         let credentials = match mechanism {
             Mechanism::Plain | Mechanism::OAuthBearer | Mechanism::XOauth2 => {
                 if !params.is_empty() {
-                    base64_decode(params.pop().unwrap().as_bytes())
+                    LENIENT
+                        .decode(params.pop().unwrap().as_bytes())
+                        .ok()
                         .and_then(|challenge| {
                             if mechanism == Mechanism::Plain {
                                 Credentials::decode_sasl_challenge_plain(&challenge)

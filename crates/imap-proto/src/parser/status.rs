@@ -8,7 +8,6 @@ use crate::Command;
 use crate::protocol::status;
 use crate::protocol::status::Status;
 use crate::receiver::{Request, Token, bad};
-use crate::utf7::utf7_maybe_decode;
 
 impl Request<Command> {
     pub fn parse_status(self, is_utf8: bool) -> trc::Result<status::Arguments> {
@@ -16,14 +15,11 @@ impl Request<Command> {
             0..=3 => Err(self.into_error("Missing arguments.")),
             len => {
                 let mut tokens = self.tokens.into_iter();
-                let mailbox_name = utf7_maybe_decode(
-                    tokens
-                        .next()
-                        .unwrap()
-                        .unwrap_string()
-                        .map_err(|v| bad(self.tag.clone(), v))?,
-                    is_utf8,
-                );
+                let mailbox_name = tokens
+                    .next()
+                    .unwrap()
+                    .unwrap_mailbox_name(is_utf8)
+                    .map_err(|v| bad(self.tag.clone(), v))?;
                 let mut items = Vec::with_capacity(len - 2);
 
                 if tokens

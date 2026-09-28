@@ -8,7 +8,6 @@ use crate::{
     AssertConfig,
     utils::{server::TestServer, smtp::SmtpConnection},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use common::{config::server::Listeners, network::SessionData};
 use ece::EcKeyComponents;
 use email::push::{EmailPush, Urgency};
@@ -27,6 +26,7 @@ use jmap_proto::{
     request::capability::{Capabilities, Capability},
     types::state::State,
 };
+use encodify::base64::URL_SAFE_NO_PAD;
 use registry::{
     schema::{
         enums::NetworkListenerProtocol,

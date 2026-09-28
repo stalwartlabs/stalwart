@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{literal_string, push_int, quoted_string};
-use crate::utf7::quoted_mailbox_name;
+use super::{literal_string, push_int, quoted_mailbox_name, quoted_string};
 use compact_str::CompactString;
 use std::borrow::Cow;
 

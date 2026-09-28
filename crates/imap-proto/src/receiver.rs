@@ -6,6 +6,7 @@
 
 use super::{ResponseCode, ResponseType};
 use compact_str::{CompactString, format_compact};
+use encodify::utf7::IMAP;
 use smallvec::SmallVec;
 use std::fmt::Display;
 
@@ -694,6 +695,30 @@ impl Token {
         }
     }
 
+    pub fn unwrap_mailbox_name(self, is_utf8: bool) -> crate::parser::Result<CompactString> {
+        let name = self.unwrap_string()?;
+        if is_utf8 || !name.contains('&') {
+            Ok(name)
+        } else {
+            Ok(IMAP
+                .lenient()
+                .decode(name.as_bytes())
+                .map(CompactString::from_string_buffer)
+                .unwrap_or(name))
+        }
+    }
+
+    pub fn unwrap_mailbox_name_strict(self, is_utf8: bool) -> crate::parser::Result<CompactString> {
+        let name = self.unwrap_string()?;
+        if is_utf8 || !name.contains('&') {
+            Ok(name)
+        } else {
+            IMAP.decode(name.as_bytes())
+                .map(CompactString::from_string_buffer)
+                .map_err(|err| format!("Invalid modified UTF-7 in mailbox name: {err}.").into())
+        }
+    }
+
     pub fn unwrap_bytes(self) -> ArgumentBytes {
         match self {
             Token::Argument(value) => value,
@@ -863,6 +888,123 @@ mod tests {
     use crate::Command;
 
     use super::{ArgumentBytes, Error, Receiver, Request, Token};
+
+    fn mailbox_token(name: &str) -> Token {
+        Token::Argument(ArgumentBytes::from_slice(name.as_bytes()))
+    }
+
+    #[test]
+    fn mailbox_name_decodes_modified_utf7() {
+        for (input, expected) in [
+            ("~peter/mail/&U,BTFw-/&ZeVnLIqe-", "~peter/mail/台北/日本語"),
+            ("&U,BTF2XlZyyKng-", "台北日本語"),
+            ("Hello, World&ACE-", "Hello, World!"),
+            ("Hi Mom -&Jjo--!", "Hi Mom -☺-!"),
+            ("&ZeVnLIqe-", "日本語"),
+            ("Item 3 is &AKM-1.", "Item 3 is £1."),
+            ("Plus minus &- -&- &--", "Plus minus & -& &-"),
+            (
+                "&APw-ber ihre mi&AN8-liche Lage&ADs- &ACI-wir",
+                "über ihre mißliche Lage; \"wir",
+            ),
+            (
+                concat!(
+                    "&ACI-The sayings of Confucius,&ACI- James R. Ware, trans.  &U,BTFw-:\n",
+                    "&ZYeB9FH6ckh5Pg-, 1980.\n",
+                    "&Vttm+E6UfZM-, &W4tRQ066bOg-, &UxdOrA-:  &Ti1XC2b4Xpc-, 1990."
+                ),
+                concat!(
+                    "\"The sayings of Confucius,\" James R. Ware, trans.  台北:\n",
+                    "文致出版社, 1980.\n",
+                    "四書五經, 宋元人注, 北京:  中國書店, 1990."
+                ),
+            ),
+            ("Test-ąęć-Test", "Test-ąęć-Test"),
+            (r#"&A8g- "&A9QD1APUA9gD3APcA-+""#, "ψ \"ϔϔϔϘϜϜ+\""),
+            ("&AKM", "£"),
+            ("Trailing &", "Trailing &"),
+            ("&AKM-&-!", "£&!"),
+            ("Invalid &AKM.", "Invalid &AKM."),
+            ("&2D0-", "&2D0-"),
+        ] {
+            assert_eq!(
+                mailbox_token(input).unwrap_mailbox_name(false).as_deref(),
+                Ok(expected),
+                "while decoding {input:?}"
+            );
+            assert_eq!(
+                mailbox_token(input).unwrap_mailbox_name(true).as_deref(),
+                Ok(input),
+                "while passing {input:?} through"
+            );
+        }
+    }
+
+    #[test]
+    fn mailbox_name_keeps_non_bmp_text() {
+        for (input, expected) in [
+            ("\u{1f604}", "\u{1f604}"),
+            ("a\u{1f604}b", "a\u{1f604}b"),
+            ("\u{10000}", "\u{10000}"),
+            ("\u{fffd}", "\u{fffd}"),
+            ("\u{d7ff}\u{e000}", "\u{d7ff}\u{e000}"),
+            ("\u{1f604}&AKM-", "\u{1f604}£"),
+            ("&AKM-\u{10000}", "£\u{10000}"),
+        ] {
+            assert_eq!(
+                mailbox_token(input).unwrap_mailbox_name(false).as_deref(),
+                Ok(expected),
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mailbox_name_strict_rejects_malformed_names() {
+        for (input, expected) in [
+            ("INBOX", "INBOX"),
+            ("Item 3 is &AKM-1.", "Item 3 is £1."),
+            ("~peter/mail/&U,BTFw-/&ZeVnLIqe-", "~peter/mail/台北/日本語"),
+            ("Plus minus &- -&- &--", "Plus minus & -& &-"),
+            ("&VMhUyNg93gQ-", "哈哈😄"),
+            ("&AOk-&-&AOk-", "é&é"),
+            ("Test-ąęć-Test", "Test-ąęć-Test"),
+            ("tab\tinside", "tab\tinside"),
+            ("\u{1f604}", "\u{1f604}"),
+        ] {
+            assert_eq!(
+                mailbox_token(input)
+                    .unwrap_mailbox_name_strict(false)
+                    .as_deref(),
+                Ok(expected),
+                "{input:?}"
+            );
+        }
+
+        for input in [
+            "&AKM",
+            "Trailing &",
+            "Hello, World&ACE-",
+            "&AKM-&AKM-",
+            "Test-ąęć-&AKM-",
+            "tab\t&AKM-",
+            "&2D0-",
+        ] {
+            assert!(
+                mailbox_token(input)
+                    .unwrap_mailbox_name_strict(false)
+                    .is_err(),
+                "{input:?}"
+            );
+            assert_eq!(
+                mailbox_token(input)
+                    .unwrap_mailbox_name_strict(true)
+                    .as_deref(),
+                Ok(input),
+                "{input:?}"
+            );
+        }
+    }
 
     #[test]
     fn receiver_parse_ok() {

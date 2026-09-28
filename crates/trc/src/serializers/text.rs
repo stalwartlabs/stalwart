@@ -9,11 +9,9 @@ use std::{fmt::Display, io::Write};
 use crate::{
     Error, Event, EventDetails, Key, Level, Value,
     event::KeySet,
-    serializers::{
-        escape::escape_into, timestamp::TimestampCache, write_base64, write_int, write_uint,
-    },
+    serializers::{escape::escape_into, timestamp::TimestampCache, write_int, write_uint},
 };
-use base64::{Engine, engine::general_purpose::STANDARD};
+use encodify::base64::STANDARD;
 
 #[derive(Default)]
 pub struct FmtWriter {
@@ -168,7 +166,7 @@ impl FmtWriter {
             }
             Value::Bytes(bytes) => {
                 out.extend_from_slice(b"base64:");
-                write_base64(out, bytes);
+                STANDARD.encode_append(bytes, out);
             }
             Value::Bool(true) => out.extend_from_slice(b"true"),
             Value::Bool(false) => out.extend_from_slice(b"false"),
@@ -251,7 +249,9 @@ impl Value {
             Value::Float(value) => {
                 let _ = write!(out, "{value}");
             }
-            Value::Bytes(value) => write_base64(out, value),
+            Value::Bytes(value) => {
+                STANDARD.encode_append(value, out);
+            }
             Value::Bool(true) => out.extend_from_slice(b"true"),
             Value::Bool(false) => out.extend_from_slice(b"false"),
             Value::Ipv4(value) => {
@@ -310,7 +310,7 @@ impl Display for Value {
             Value::Float(value) => value.fmt(f),
             Value::Timestamp(value) => value.fmt(f),
             Value::Duration(value) => value.fmt(f),
-            Value::Bytes(value) => STANDARD.encode(value).fmt(f),
+            Value::Bytes(value) => STANDARD.display(value).fmt(f),
             Value::Bool(value) => value.fmt(f),
             Value::Ipv4(value) => value.fmt(f),
             Value::Ipv6(value) => value.fmt(f),

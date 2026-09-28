@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use encodify::base64::URL_SAFE_NO_PAD;
 use p256::{
     SecretKey,
     ecdsa::{Signature, SigningKey, signature::Signer},
@@ -12,6 +12,8 @@ use p256::{
 };
 
 const VAPID_TOKEN_TTL: u64 = 12 * 60 * 60;
+const VAPID_PREFIX: &str = "vapid t=";
+const VAPID_JWT_HEADER: &[u8] = br#"{"typ":"JWT","alg":"ES256"}"#;
 
 #[derive(Clone)]
 pub struct Vapid {
@@ -90,16 +92,19 @@ impl VapidKey {
             claims.insert("sub".into(), sub.into());
         }
 
-        let header = URL_SAFE_NO_PAD.encode(br#"{"typ":"JWT","alg":"ES256"}"#);
-        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).ok()?);
-        let signing_input = format!("{header}.{payload}");
-        let signature: Signature = self.signing_key.sign(signing_input.as_bytes());
+        let mut authorization = String::from(VAPID_PREFIX);
+        URL_SAFE_NO_PAD.encode_append(VAPID_JWT_HEADER, &mut authorization);
+        authorization.push('.');
+        URL_SAFE_NO_PAD.encode_append(serde_json::to_vec(&claims).ok()?, &mut authorization);
+        let signature: Signature = self
+            .signing_key
+            .sign(authorization.get(VAPID_PREFIX.len()..)?.as_bytes());
+        authorization.push('.');
+        URL_SAFE_NO_PAD.encode_append(signature.to_bytes(), &mut authorization);
+        authorization.push_str(", k=");
+        authorization.push_str(&self.public_key);
 
-        Some(format!(
-            "vapid t={signing_input}.{}, k={}",
-            URL_SAFE_NO_PAD.encode(signature.to_bytes()),
-            self.public_key
-        ))
+        Some(authorization)
     }
 }
 

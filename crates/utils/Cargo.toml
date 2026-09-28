@@ -15,7 +15,7 @@ mail-auth = { version = "0.13" }
 ahash = { version = "0.8", features = ["serde"] }
 jiff = "0.2.37"
 aws-lc-rs = { version = "1" }
-base64 = "0.23"
+encodify = "1.0"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "stream"]}
 futures = "0.3"
 form_urlencoded = "1.2.2"

@@ -17,7 +17,7 @@ use crate::{
     response::Response,
 };
 use ahash::AHashMap;
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use serde::{Deserialize, Deserializer};
 use types::{blob::BlobId, id::Id};
 use utils::map::vec_map::VecMap;
@@ -121,7 +121,7 @@ impl<'de> DeserializeArguments<'de> for DataSourceObject {
                 *self = DataSourceObject::Value(map.next_value::<String>().map(|v| v.into_bytes())?);
             },
             b"data:asBase64" => {
-                *self = DataSourceObject::Value(base64_decode(map.next_value::<Cow<'_, str>>()?.as_bytes()).ok_or_else(|| serde::de::Error::custom("Failed to decode base64 data"))?);
+                *self = DataSourceObject::Value(LENIENT.decode(map.next_value::<Cow<'_, str>>()?.as_bytes()).map_err(|_| serde::de::Error::custom("Failed to decode base64 data"))?);
             },
             b"blobId" => {
                 match self {

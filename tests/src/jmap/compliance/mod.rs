@@ -7,9 +7,9 @@
 use crate::utils::account::Account;
 use crate::utils::jmap::JmapUtils;
 use crate::utils::server::{DestroyAllMailboxes, TestServer};
-use base64::{Engine, engine::general_purpose};
 use futures::FutureExt;
 use jiff::{SignedDuration, Timestamp};
+use encodify::base64::STANDARD;
 use registry::schema::{
     prelude::{ObjectType, Property},
     structs::Action,
@@ -846,7 +846,7 @@ async fn seed_emails(ctx: &mut CompCtx<'_>) {
         SeedEmail {
             key: "korean-euckr",
             rfc5322: {
-                let body_b64 = general_purpose::STANDARD.encode([
+                let body_b64 = STANDARD.encode([
                     0xc5, 0xd7, 0xbd, 0xba, 0xc6, 0xae, 0x20, 0xc0, 0xcc, 0xb8, 0xde, 0xc0, 0xcf,
                     0xc0, 0xd4, 0xb4, 0xcf, 0xb4, 0xd9,
                 ]);
@@ -1116,10 +1116,7 @@ fn build_multipart_mixed(
     ));
     lines.push("Content-Transfer-Encoding: base64".into());
     lines.push(String::new());
-    lines.push(
-        general_purpose::STANDARD
-            .encode("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"),
-    );
+    lines.push(STANDARD.encode("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"));
     lines.push(format!("--{boundary}--"));
     lines.join("\r\n")
 }
@@ -1168,7 +1165,7 @@ fn build_multipart_related(
     inline_image_cid: &str,
 ) -> String {
     let boundary = "----=_Rel_001_boundary";
-    let jpeg = general_purpose::STANDARD.encode([
+    let jpeg = STANDARD.encode([
         0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00,
         0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
     ]);

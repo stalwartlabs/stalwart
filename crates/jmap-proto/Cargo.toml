@@ -19,6 +19,7 @@ sonic-rs = "0.5.10"
 hashify = "0.3"
 rkyv.workspace = true
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
+encodify = "1.0"
 
 [dev-dependencies]
 

@@ -15,8 +15,7 @@ use crate::network::acme::{
     Order, SerializedCert,
 };
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, EcdsaSigningAlgorithm};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use encodify::base64::URL_SAFE_NO_PAD;
 use rcgen::{CustomExtension, KeyPair, PKCS_ECDSA_P256_SHA256};
 use registry::schema::structs::AcmeProvider;
 use reqwest::Method;
@@ -134,7 +133,9 @@ impl AcmeRequestBuilder {
         url: impl AsRef<str>,
         csr: Vec<u8>,
     ) -> AcmeResult<AcmeResponse<Option<String>, Order>> {
-        let payload = format!("{{\"csr\":\"{}\"}}", URL_SAFE_NO_PAD.encode(csr));
+        let mut payload = String::from("{\"csr\":\"");
+        URL_SAFE_NO_PAD.encode_append(csr, &mut payload);
+        payload.push_str("\"}");
         AcmeResponse::parse(self.request(&url, &payload).await?)
     }
 

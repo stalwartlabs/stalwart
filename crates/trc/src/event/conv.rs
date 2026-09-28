@@ -203,10 +203,6 @@ impl EventType {
         self.reason(err).details("JSON deserialization failed")
     }
 
-    pub fn from_base64_error(self, err: base64::DecodeError) -> Error {
-        self.reason(err).details("Base64 decoding failed")
-    }
-
     pub fn from_http_error(self, err: reqwest::Error) -> Error {
         self.into_err()
             .ctx_opt(

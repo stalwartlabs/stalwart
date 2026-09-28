@@ -5,10 +5,9 @@
  */
 
 use crate::{KV_QUOTA_BLOB, Server};
-use mail_parser::{
-    Encoding,
-    decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
-};
+use encodify::{base64::MIME, qp};
+use mail_parser::Encoding;
+use std::borrow::Cow;
 use store::{
     U32_LEN, U64_LEN,
     dispatch::lookup::KeyValue,
@@ -212,8 +211,12 @@ impl Server {
             .await?
             .and_then(|bytes| match Encoding::from(section.encoding) {
                 Encoding::None => Some(bytes),
-                Encoding::Base64 => base64_decode(&bytes),
-                Encoding::QuotedPrintable => quoted_printable_decode(&bytes),
+                Encoding::Base64 => MIME.decode(&bytes).ok(),
+                Encoding::QuotedPrintable => match qp::BODY.decode(&bytes) {
+                    Ok(Cow::Owned(decoded)) => Some(decoded),
+                    Ok(Cow::Borrowed(_)) => Some(bytes),
+                    Err(_) => None,
+                },
             }))
     }
 }

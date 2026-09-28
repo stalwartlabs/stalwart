@@ -4,5 +4,4 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-pub mod base32_custom;
 pub mod leb128;

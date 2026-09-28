@@ -9,8 +9,8 @@ use crate::utils::{
     jmap::{JmapResponse, JmapUtils},
     server::TestServer,
 };
-use base64::{Engine, engine::general_purpose::STANDARD};
 use jmap_proto::request::method::MethodObject;
+use encodify::base64::STANDARD;
 use serde_json::{Map, Value, json};
 use std::str::FromStr;
 use types::{

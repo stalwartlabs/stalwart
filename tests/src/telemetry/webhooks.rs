@@ -7,8 +7,8 @@
 use crate::utils::server::TestServer;
 use crate::utils::smtp::SmtpConnection;
 use aws_lc_rs::hmac;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use common::{manager::application::Resource, telemetry::tracers::store::TracingStore};
+use encodify::base64::STANDARD;
 use http_proto::{ToHttpResponse, request::fetch_body};
 use hyper::{body, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;

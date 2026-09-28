@@ -8,7 +8,6 @@ use crate::{
     Command,
     protocol::acl::{self, ModRights, ModRightsOp, Rights},
     receiver::{Request, bad},
-    utf7::utf7_maybe_decode,
 };
 
 use super::PushUnique;
@@ -37,14 +36,11 @@ impl Request<Command> {
             _ => unreachable!(),
         };
         let mut tokens = self.tokens.into_iter();
-        let mailbox_name = utf7_maybe_decode(
-            tokens
-                .next()
-                .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
-                .unwrap_string()
-                .map_err(|v| bad(self.tag.clone(), v))?,
-            is_utf8,
-        );
+        let mailbox_name = tokens
+            .next()
+            .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
+            .unwrap_mailbox_name(is_utf8)
+            .map_err(|v| bad(self.tag.clone(), v))?;
         let identifier = if has_identifier {
             tokens
                 .next()

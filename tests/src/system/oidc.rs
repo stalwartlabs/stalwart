@@ -11,7 +11,6 @@ use crate::utils::{
     server::TestServer,
     smtp::SmtpConnection,
 };
-use base64::{Engine, engine::general_purpose};
 use biscuit::{JWT, SingleOrMultiple, jwk::JWKSet};
 use bytes::Bytes;
 use common::auth::oauth::{
@@ -30,6 +29,7 @@ use jmap_client::{
     client::{Client, Credentials},
     mailbox::query::Filter,
 };
+use encodify::base64::STANDARD;
 use registry::schema::{
     enums::JwtSignatureAlgorithm,
     prelude::{ObjectType, Property},
@@ -492,11 +492,11 @@ pub async fn test(test: &mut TestServer) {
     );
 
     // Try SMTP OAUTHBEARER auth
-    let oauth_bearer_invalid_sasl = general_purpose::STANDARD.encode(format!(
+    let oauth_bearer_invalid_sasl = STANDARD.encode(format!(
         "n,a={},\u{1}auth=Bearer {}\u{1}\u{1}",
         "user@domain", "invalid_token"
     ));
-    let oauth_bearer_sasl = general_purpose::STANDARD.encode(format!(
+    let oauth_bearer_sasl = STANDARD.encode(format!(
         "n,a={},\u{1}auth=Bearer {}\u{1}\u{1}",
         "user@domain", token
     ));

@@ -8,7 +8,7 @@ use crate::{
     Error, Event, EventDetails, EventType, Key, MetricType, Value, event::KeySet,
     serializers::timestamp::TimestampCache,
 };
-use base64::{Engine, engine::general_purpose::STANDARD};
+use encodify::base64::STANDARD;
 use serde::{
     Serialize, Serializer,
     ser::{SerializeMap, SerializeSeq},
@@ -227,7 +227,7 @@ impl Serialize for Serialized<'_, &Value> {
                 serializer.serialize_str(self.ctx.value_timestamps.borrow_mut().get(*value))
             }
             Value::Duration(value) => serializer.serialize_u64(*value),
-            Value::Bytes(value) => serializer.serialize_str(&STANDARD.encode(value)),
+            Value::Bytes(value) => serializer.collect_str(&STANDARD.display(value)),
             Value::Bool(value) => serializer.serialize_bool(*value),
             Value::Ipv4(value) => value.serialize(serializer),
             Value::Ipv6(value) => value.serialize(serializer),

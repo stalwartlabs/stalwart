@@ -9,8 +9,8 @@ use crate::{
     outbound::error::{AssertReply, ClientError, ClientResult},
     queue::{Error, ErrorDetails, HostResponse, MessageWrapper, Status},
 };
-use base64::{Engine, engine::general_purpose};
 use directory::Credentials;
+use encodify::base64::STANDARD;
 use rustls::ClientConnection;
 use rustls_pki_types::ServerName;
 use smtp_proto::{
@@ -21,6 +21,7 @@ use smtp_proto::{
     },
 };
 use std::{
+    borrow::Cow,
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
@@ -84,15 +85,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         credentials: &Credentials,
     ) -> ClientResult<()> {
         let mut reply = if (mechanism & (AUTH_PLAIN | AUTH_XOAUTH2 | AUTH_OAUTHBEARER)) != 0 {
-            self.cmd(
-                format!(
-                    "AUTH {} {}\r\n",
-                    mechanism.to_mechanism(),
-                    encode_credentials(credentials, mechanism, "")?,
-                )
-                .as_bytes(),
-            )
-            .await?
+            let mut command = format!("AUTH {} ", mechanism.to_mechanism());
+            encode_credentials(credentials, mechanism, "", &mut command)?;
+            command.push_str("\r\n");
+            self.cmd(command.as_bytes()).await?
         } else {
             self.cmd(format!("AUTH {}\r\n", mechanism.to_mechanism()).as_bytes())
                 .await?
@@ -101,15 +97,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         for _ in 0..3 {
             match reply.code() {
                 334 => {
-                    reply = self
-                        .cmd(
-                            format!(
-                                "{}\r\n",
-                                encode_credentials(credentials, mechanism, reply.message())?
-                            )
-                            .as_bytes(),
-                        )
-                        .await?;
+                    let mut command = String::new();
+                    encode_credentials(credentials, mechanism, reply.message(), &mut command)?;
+                    command.push_str("\r\n");
+                    reply = self.cmd(command.as_bytes()).await?;
                 }
                 235 => {
                     return Ok(());
@@ -623,53 +614,51 @@ fn encode_credentials(
     credentials: &Credentials,
     mechanism: u64,
     challenge: &str,
-) -> ClientResult<String> {
-    Ok(general_purpose::STANDARD.encode(
-        match (mechanism, credentials) {
-            (
-                AUTH_PLAIN,
-                Credentials::Basic {
-                    username, secret, ..
-                },
-            ) => {
-                format!("\u{0}{}\u{0}{}", username, secret)
-            }
-            (
-                AUTH_LOGIN,
-                Credentials::Basic {
-                    username, secret, ..
-                },
-            ) => {
-                let challenge = general_purpose::STANDARD.decode(challenge)?;
+    out: &mut String,
+) -> ClientResult<()> {
+    let response: Cow<'_, str> = match (mechanism, credentials) {
+        (
+            AUTH_PLAIN,
+            Credentials::Basic {
+                username, secret, ..
+            },
+        ) => format!("\u{0}{}\u{0}{}", username, secret).into(),
+        (
+            AUTH_LOGIN,
+            Credentials::Basic {
+                username, secret, ..
+            },
+        ) => {
+            let challenge = STANDARD.decode(challenge)?;
 
-                if b"user name"
-                    .eq_ignore_ascii_case(challenge.get(0..9).ok_or(ClientError::InvalidChallenge)?)
-                    || b"username".eq_ignore_ascii_case(
-                        // Because Google makes its own standards
-                        challenge.get(0..8).ok_or(ClientError::InvalidChallenge)?,
-                    )
-                {
-                    &username
-                } else if b"password"
-                    .eq_ignore_ascii_case(challenge.get(0..8).ok_or(ClientError::InvalidChallenge)?)
-                {
-                    &secret
-                } else {
-                    return Err(ClientError::InvalidChallenge);
-                }
-                .to_string()
+            if b"user name"
+                .eq_ignore_ascii_case(challenge.get(0..9).ok_or(ClientError::InvalidChallenge)?)
+                || b"username".eq_ignore_ascii_case(
+                    // Because Google makes its own standards
+                    challenge.get(0..8).ok_or(ClientError::InvalidChallenge)?,
+                )
+            {
+                username.as_str().into()
+            } else if b"password"
+                .eq_ignore_ascii_case(challenge.get(0..8).ok_or(ClientError::InvalidChallenge)?)
+            {
+                secret.as_str().into()
+            } else {
+                return Err(ClientError::InvalidChallenge);
             }
-
-            (AUTH_XOAUTH2, Credentials::Bearer { token, username }) => format!(
-                "user={}\x01auth=Bearer {}\x01\x01",
-                username.as_deref().unwrap_or_default(),
-                token
-            ),
-            (AUTH_OAUTHBEARER, Credentials::Bearer { token, .. }) => token.to_string(),
-            _ => return Err(ClientError::UnsupportedAuthMechanism),
         }
-        .as_bytes(),
-    ))
+
+        (AUTH_XOAUTH2, Credentials::Bearer { token, username }) => format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            username.as_deref().unwrap_or_default(),
+            token
+        )
+        .into(),
+        (AUTH_OAUTHBEARER, Credentials::Bearer { token, .. }) => token.as_str().into(),
+        _ => return Err(ClientError::UnsupportedAuthMechanism),
+    };
+    STANDARD.encode_append(response.as_bytes(), out);
+    Ok(())
 }
 
 impl SmtpClient<TlsStream<TcpStream>> {

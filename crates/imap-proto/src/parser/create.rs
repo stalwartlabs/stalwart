@@ -10,21 +10,17 @@ use crate::{
     Command,
     protocol::{create, list::Attribute},
     receiver::{Request, Token, bad},
-    utf7::utf7_maybe_decode,
 };
 
 impl Request<Command> {
     pub fn parse_create(self, is_utf8: bool) -> trc::Result<create::Arguments> {
         if !self.tokens.is_empty() {
             let mut tokens = self.tokens.into_iter();
-            let mailbox_name = utf7_maybe_decode(
-                tokens
-                    .next()
-                    .unwrap()
-                    .unwrap_string()
-                    .map_err(|v| bad(self.tag.clone(), v))?,
-                is_utf8,
-            );
+            let mailbox_name = tokens
+                .next()
+                .unwrap()
+                .unwrap_mailbox_name_strict(is_utf8)
+                .map_err(|v| bad(self.tag.clone(), v))?;
             let mailbox_role = if let Some(Token::ParenthesisOpen) = tokens.next() {
                 match tokens.next() {
                     Some(Token::Argument(param)) if param.eq_ignore_ascii_case(b"USE") => (),
@@ -145,6 +141,51 @@ mod tests {
                     .parse_create(true)
                     .unwrap(),
                 arguments
+            );
+        }
+    }
+
+    #[test]
+    fn parse_create_decodes_modified_utf7_strictly() {
+        let mut receiver = Receiver::new();
+
+        for (command, mailbox_name) in [
+            ("A1 CREATE INBOX.Sent\r\n", "INBOX.Sent"),
+            ("A2 CREATE \"Item 3 is &AKM-1.\"\r\n", "Item 3 is £1."),
+            ("A3 CREATE &ZeVnLIqe-/&U,BTFw-\r\n", "日本語/台北"),
+            ("A4 CREATE \"Plus &- minus\"\r\n", "Plus & minus"),
+            ("A5 CREATE \"Test-ąęć-Test\"\r\n", "Test-ąęć-Test"),
+            ("A6 CREATE \"Hello, World!\"\r\n", "Hello, World!"),
+        ] {
+            assert_eq!(
+                receiver
+                    .parse(&mut command.as_bytes().iter())
+                    .unwrap()
+                    .parse_create(false)
+                    .unwrap(),
+                create::Arguments {
+                    tag: command.split_once(' ').unwrap().0.into(),
+                    mailbox_name: mailbox_name.into(),
+                    mailbox_role: None,
+                }
+            );
+        }
+
+        for command in [
+            "B1 CREATE &AKM\r\n",
+            "B2 CREATE \"Hello, World&ACE-\"\r\n",
+            "B3 CREATE &AKM-&AKM-\r\n",
+            "B4 CREATE \"Test-ąęć-&AKM-\"\r\n",
+            "B5 CREATE &2D0-\r\n",
+            "B6 CREATE \"Sent &AKM.\"\r\n",
+        ] {
+            assert!(
+                receiver
+                    .parse(&mut command.as_bytes().iter())
+                    .unwrap()
+                    .parse_create(false)
+                    .is_err(),
+                "{command:?}"
             );
         }
     }

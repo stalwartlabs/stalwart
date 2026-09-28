@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose};
+use encodify::base64::STANDARD;
 use reqwest::{
     Client, ClientBuilder,
     header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT},
@@ -186,14 +186,11 @@ pub fn build_http_headers(
     }
 
     if let (Some(name), Some(secret)) = (username, password) {
+        let mut value = String::from("Basic ");
+        STANDARD.encode_append(format!("{name}:{secret}"), &mut value);
         headers.insert(
             AUTHORIZATION,
-            format!(
-                "Basic {}",
-                general_purpose::STANDARD.encode(format!("{}:{}", name, secret))
-            )
-            .parse()
-            .unwrap(),
+            HeaderValue::try_from(value).expect("base64 is a valid header value"),
         );
     } else if let Some(token) = token {
         headers.insert(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());

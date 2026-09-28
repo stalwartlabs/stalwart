@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{
-    Engine, alphabet,
-    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
-};
 use common::{Server, auth::AccessToken, ipc::PushEvent, network::is_global_ip};
 use email::push::{EmailPush, Keys, PushSubscription, PushSubscriptions, Urgency};
 use jmap_proto::{
@@ -27,6 +23,7 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use jmap_tools::{Key, Map, Property, Value};
+use encodify::base64::{Base64, Padding, URL_SAFE};
 use rand::distr::Alphanumeric;
 use registry::schema::enums::StorageQuota;
 use reqwest::Url;
@@ -44,10 +41,7 @@ use utils::map::bitmap::Bitmap;
 
 const EXPIRES_MAX: i64 = 7 * 24 * 3600; // 7 days
 const VERIFICATION_CODE_LEN: usize = 32;
-const URL_SAFE_INDIFFERENT: GeneralPurpose = GeneralPurpose::new(
-    &alphabet::URL_SAFE,
-    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
-);
+const URL_SAFE_INDIFFERENT: Base64 = URL_SAFE.with_padding(Padding::Optional);
 
 pub trait PushSubscriptionSet: Sync + Send {
     fn push_subscription_set(
@@ -330,11 +324,11 @@ fn validate_push_value(
                 value
                     .get(&Key::Property(PushSubscriptionProperty::Auth))
                     .and_then(|v| v.as_str())
-                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_ref()).ok()),
+                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_bytes()).ok()),
                 value
                     .get(&Key::Property(PushSubscriptionProperty::P256dh))
                     .and_then(|v| v.as_str())
-                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_ref()).ok()),
+                    .and_then(|v| URL_SAFE_INDIFFERENT.decode(v.as_bytes()).ok()),
             ) {
                 if p256::PublicKey::from_sec1_bytes(&p256dh).is_err() {
                     return Err(SetError::invalid_properties()

@@ -13,7 +13,6 @@ use std::borrow::Cow;
 pub mod parser;
 pub mod protocol;
 pub mod receiver;
-pub mod utf7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Command {

@@ -5,9 +5,9 @@
  */
 
 use crate::utils::account::Account;
-use base64::{Engine, engine::general_purpose};
 use hyper::header;
 use jmap_proto::error::set::SetErrorType;
+use encodify::base64::STANDARD;
 use registry::types::error::ValidationError;
 use registry::types::id::ObjectId;
 use serde_json::{Value, json};
@@ -318,7 +318,7 @@ impl Account {
     pub fn basic_auth(&self) -> String {
         format!(
             "Basic {}",
-            general_purpose::STANDARD.encode(format!("{}:{}", self.name(), self.secret()))
+            STANDARD.encode(format!("{}:{}", self.name(), self.secret()))
         )
     }
 
@@ -450,7 +450,7 @@ impl Account {
             header::AUTHORIZATION,
             header::HeaderValue::from_str(&format!(
                 "Basic {}",
-                general_purpose::STANDARD.encode(format!("{}:{}", self.name(), self.secret()))
+                STANDARD.encode(format!("{}:{}", self.name(), self.secret()))
             ))
             .unwrap(),
         );

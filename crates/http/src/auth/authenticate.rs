@@ -10,7 +10,7 @@ use compact_str::CompactString;
 use directory::Credentials;
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
@@ -145,15 +145,13 @@ impl HttpHeaders for HttpRequest {
 }
 
 fn decode_plain_auth(token: &str) -> Option<Credentials> {
-    base64_decode(token.as_bytes())
-        .and_then(|token| String::from_utf8(token).ok())
-        .and_then(|token| {
-            token
-                .split_once(':')
-                .map(|(login, secret)| Credentials::Basic {
-                    username: login.trim().to_lowercase(),
-                    secret: secret.to_string(),
-                    mfa_token: None,
-                })
-        })
+    LENIENT.decode_to_string(token).ok().and_then(|token| {
+        token
+            .split_once(':')
+            .map(|(login, secret)| Credentials::Basic {
+                username: login.trim().to_lowercase(),
+                secret: secret.to_string(),
+                mfa_token: None,
+            })
+    })
 }

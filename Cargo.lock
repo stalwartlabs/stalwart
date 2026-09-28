@@ -1039,12 +1039,11 @@ name = "calcard"
 version = "0.4.0"
 dependencies = [
  "ahash",
- "fearless_simd",
+ "encodify",
  "hashify 0.3.0",
  "jiff",
  "jmap-tools",
- "mail-builder",
- "mail-parser",
+ "mail-parser 1.0.0",
  "memchr",
  "rkyv",
  "serde",
@@ -1301,7 +1300,6 @@ dependencies = [
  "ahash",
  "arc-swap",
  "aws-lc-rs",
- "base64 0.23.1",
  "bincode",
  "bytes",
  "calcard",
@@ -1310,6 +1308,7 @@ dependencies = [
  "decancer",
  "directory",
  "dns-update",
+ "encodify",
  "futures",
  "hashify 0.3.0",
  "hickory-proto",
@@ -1324,8 +1323,8 @@ dependencies = [
  "libc",
  "lz4_flex 0.14.0",
  "mail-auth",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "md5",
  "nlp",
  "nohash-hasher",
@@ -1922,7 +1921,7 @@ dependencies = [
  "compact_str",
  "hashify 0.3.0",
  "hyper",
- "mail-parser",
+ "mail-parser 0.11.9",
  "quick-xml 0.41.0",
  "serde",
  "serde_json",
@@ -2134,13 +2133,11 @@ version = "0.16.23"
 dependencies = [
  "ahash",
  "argon2 0.6.0",
- "base64 0.23.1",
  "compact_str",
  "deadpool",
+ "encodify",
  "jsonwebtoken",
  "ldap3",
- "mail-builder",
- "mail-parser",
  "md5",
  "nohash-hasher",
  "pbkdf2",
@@ -2202,10 +2199,10 @@ dependencies = [
 
 [[package]]
 name = "dns-update"
-version = "0.5.9"
+version = "0.5.10"
 dependencies = [
  "aws-lc-rs",
- "base64 0.23.1",
+ "encodify",
  "hex",
  "hickory-net",
  "hickory-proto",
@@ -2378,12 +2375,13 @@ dependencies = [
  "chacha20poly1305",
  "common",
  "compact_str",
+ "encodify",
  "groupware",
  "hashify 0.3.0",
  "jmap-tools",
  "jmap_proto",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "nlp",
  "rand 0.8.8",
  "rasn",
@@ -2410,6 +2408,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabffdaee24bd1bf95c5ef7cec31260444317e72ea56c4c91750e8b7ee58d5f1"
 dependencies = [
  "log",
+]
+
+[[package]]
+name = "encodify"
+version = "1.0.0"
+dependencies = [
+ "memchr",
+ "simdutf8",
 ]
 
 [[package]]
@@ -2571,12 +2577,6 @@ dependencies = [
  "serde",
  "simdutf8",
 ]
-
-[[package]]
-name = "fearless_simd"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3772b63c40606beea8fe1f7b06a60de27ceb9bfc2d9dad3427368ca41dc7e62"
 
 [[package]]
 name = "ferroid"
@@ -3332,12 +3332,12 @@ name = "http"
 version = "0.16.23"
 dependencies = [
  "async-stream",
- "base64 0.23.1",
  "common",
  "compact_str",
  "dav",
  "directory",
  "email",
+ "encodify",
  "flate2",
  "form-data",
  "groupware",
@@ -3349,8 +3349,8 @@ dependencies = [
  "jmap",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "mime",
  "percent-encoding",
  "registry",
@@ -3915,8 +3915,9 @@ dependencies = [
  "compact_str",
  "directory",
  "email",
+ "encodify",
  "imap_proto",
- "mail-parser",
+ "mail-parser 0.11.9",
  "md5",
  "nlp",
  "parking_lot",
@@ -3935,12 +3936,12 @@ name = "imap_proto"
 version = "0.16.23"
 dependencies = [
  "ahash",
- "base64 0.23.1",
  "compact_str",
+ "encodify",
  "hashify 0.3.0",
  "itoa",
  "jiff",
- "mail-parser",
+ "mail-parser 0.11.9",
  "smallvec",
  "trc",
  "types",
@@ -4193,12 +4194,12 @@ name = "jmap"
 version = "0.16.23"
 dependencies = [
  "async-stream",
- "base64 0.23.1",
  "calcard",
  "common",
  "compact_str",
  "directory",
  "email",
+ "encodify",
  "futures-util",
  "groupware",
  "hashify 0.3.0",
@@ -4210,8 +4211,8 @@ dependencies = [
  "jmap-tools",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "nlp",
  "p256",
  "rand 0.10.2",
@@ -4238,14 +4239,14 @@ dependencies = [
 
 [[package]]
 name = "jmap-client"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4deab22e057d24e32122f0fc6e2d667a124fdd6a0d8ef3ed4f8a89923c11084f"
+checksum = "f5b5bc66252cc8e779ef1238f40ab93971d54ad00b5d7afb5c1d447a9647ed62"
 dependencies = [
  "ahash",
  "async-stream",
- "base64 0.22.1",
  "chrono",
+ "encodify",
  "futures-util",
  "maybe-async",
  "parking_lot",
@@ -4274,9 +4275,10 @@ dependencies = [
  "ahash",
  "calcard",
  "compact_str",
+ "encodify",
  "hashify 0.3.0",
  "jmap-tools",
- "mail-parser",
+ "mail-parser 0.11.9",
  "registry",
  "rkyv",
  "serde",
@@ -4718,9 +4720,9 @@ dependencies = [
 
 [[package]]
 name = "mail-auth"
-version = "0.13.2"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e11f19d98aac923fc5b7ee30c3509733a013ef546a226acb959b9202f5ca58f0"
+checksum = "8505122ba86e1f4adeb664196c1e787c3f29bb6e7c128e4a366d47d209911440"
 dependencies = [
  "aws-lc-rs",
  "flate2",
@@ -4729,8 +4731,8 @@ dependencies = [
  "hashify 0.2.9",
  "hickory-resolver",
  "idna",
- "mail-builder",
- "mail-parser",
+ "mail-builder 1.0.0",
+ "mail-parser 0.11.9",
  "memchr",
  "quick-xml 0.42.0",
  "rand 0.10.2",
@@ -4753,6 +4755,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mail-builder"
+version = "2.0.0"
+dependencies = [
+ "encodify",
+ "gethostname",
+]
+
+[[package]]
 name = "mail-parser"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4766,6 +4776,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mail-parser"
+version = "1.0.0"
+dependencies = [
+ "encodify",
+ "hashify 0.3.0",
+ "memchr",
+ "simdutf8",
+]
+
+[[package]]
 name = "managesieve"
 version = "0.16.23"
 dependencies = [
@@ -4773,10 +4793,10 @@ dependencies = [
  "compact_str",
  "directory",
  "email",
+ "encodify",
  "imap",
  "imap_proto",
  "jmap_proto",
- "mail-parser",
  "registry",
  "sieve-rs",
  "store",
@@ -5994,8 +6014,8 @@ dependencies = [
  "compact_str",
  "directory",
  "email",
+ "encodify",
  "imap",
- "mail-parser",
  "registry",
  "store",
  "tokio",
@@ -7716,7 +7736,6 @@ version = "0.16.23"
 dependencies = [
  "aes-gcm 0.11.1",
  "aho-corasick",
- "base64 0.23.1",
  "calcard",
  "common",
  "compact_str",
@@ -7726,8 +7745,8 @@ dependencies = [
  "hkdf 0.13.0",
  "jmap-tools",
  "jmap_proto",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "memory-stats",
  "nlp",
  "p256",
@@ -7912,8 +7931,8 @@ dependencies = [
  "fancy-regex 0.19.2",
  "hashbrown 0.17.1",
  "hashify 0.2.9",
- "mail-builder",
- "mail-parser",
+ "mail-builder 1.0.0",
+ "mail-parser 0.11.9",
  "memchr",
  "serde",
  "smallvec",
@@ -8036,16 +8055,16 @@ name = "smtp"
 version = "0.16.23"
 dependencies = [
  "ahash",
- "base64 0.23.1",
  "blake3",
  "common",
  "compact_str",
  "directory",
  "email",
+ "encodify",
  "hashify 0.3.0",
  "mail-auth",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "parking_lot",
  "rand 0.10.2",
  "registry",
@@ -8172,7 +8191,7 @@ dependencies = [
  "idna",
  "infer 0.22.0",
  "mail-auth",
- "mail-parser",
+ "mail-parser 0.11.9",
  "nlp",
  "psl",
  "registry",
@@ -8327,6 +8346,7 @@ dependencies = [
  "compact_str",
  "deadpool",
  "deadpool-postgres",
+ "encodify",
  "flate2",
  "foundationdb",
  "futures",
@@ -8581,7 +8601,6 @@ version = "0.16.23"
 dependencies = [
  "ahash",
  "aws-lc-rs",
- "base64 0.23.1",
  "biscuit",
  "bytes",
  "calcard",
@@ -8595,6 +8614,7 @@ dependencies = [
  "dns-update",
  "ece",
  "email",
+ "encodify",
  "flate2",
  "form_urlencoded",
  "futures",
@@ -8611,8 +8631,8 @@ dependencies = [
  "jmap-tools",
  "jmap_proto",
  "mail-auth",
- "mail-builder",
- "mail-parser",
+ "mail-builder 2.0.0",
+ "mail-parser 0.11.9",
  "managesieve",
  "nlp",
  "pop3",
@@ -8657,7 +8677,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "hashify 0.3.0",
- "mail-parser",
+ "mail-parser 0.11.9",
  "md5",
  "memchr",
  "quick-xml 0.41.0",
@@ -9188,13 +9208,13 @@ name = "trc"
 version = "0.16.23"
 dependencies = [
  "ahash",
- "base64 0.23.1",
  "compact_str",
+ "encodify",
  "event_macro",
  "hashify 0.3.0",
  "itoa",
  "mail-auth",
- "mail-parser",
+ "mail-parser 0.11.9",
  "parking_lot",
  "reqwest 0.13.5",
  "rkyv",
@@ -9299,6 +9319,7 @@ version = "0.16.23"
 dependencies = [
  "blake3",
  "compact_str",
+ "encodify",
  "hashify 0.3.0",
  "jmap-tools",
  "rkyv",
@@ -9469,8 +9490,8 @@ dependencies = [
  "ahash",
  "arcstr",
  "aws-lc-rs",
- "base64 0.23.1",
  "compact_str",
+ "encodify",
  "farmhash",
  "form_urlencoded",
  "futures",
@@ -10864,3 +10885,7 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
 ]
+
+[[patch.unused]]
+name = "mail-auth"
+version = "0.14.0"

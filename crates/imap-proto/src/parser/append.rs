@@ -12,7 +12,6 @@ use crate::{
         append::{self, Message},
     },
     receiver::{Request, Token, bad},
-    utf7::utf7_maybe_decode,
 };
 
 enum State {
@@ -29,14 +28,11 @@ impl Request<Command> {
             _ => {
                 // Obtain mailbox name
                 let mut tokens = self.tokens.into_iter().peekable();
-                let mailbox_name = utf7_maybe_decode(
-                    tokens
-                        .next()
-                        .unwrap()
-                        .unwrap_string()
-                        .map_err(|v| bad(self.tag.clone(), v))?,
-                    is_utf8,
-                );
+                let mailbox_name = tokens
+                    .next()
+                    .unwrap()
+                    .unwrap_mailbox_name(is_utf8)
+                    .map_err(|v| bad(self.tag.clone(), v))?;
                 let mut messages = Vec::new();
 
                 while tokens.peek().is_some() {

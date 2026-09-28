@@ -26,6 +26,7 @@ use groupware::{
 };
 use jmap_proto::error::set::{InvalidProperty, SetError};
 use jmap_tools::{Key, Map, Property, Value};
+use encodify::base64::LENIENT;
 use std::future::Future;
 use store::{
     ValueKey,
@@ -518,7 +519,7 @@ fn data_uri_size(text: &str) -> usize {
         .rsplit_once(';')
         .is_some_and(|(_, encoding)| encoding.eq_ignore_ascii_case("base64"))
     {
-        data.trim_end_matches('=').len().saturating_mul(3) / 4
+        LENIENT.decoded_len(data).unwrap_or_default()
     } else {
         data.len()
     }
@@ -633,6 +634,9 @@ mod tests {
         assert_eq!(data_uri_size("data:text/plain;base64,AAECAwQ="), 5);
         assert_eq!(data_uri_size("data:text/plain;BASE64,AAECAwQFBgc="), 8);
         assert_eq!(data_uri_size("data:;base64,AAEC"), 3);
+        assert_eq!(data_uri_size("data:;base64,AAECAwQ"), 5);
+        assert_eq!(data_uri_size("data:;base64,AAEC\r\n AwQ="), 5);
+        assert_eq!(data_uri_size("data:;base64,AA%2BC"), 0);
         assert_eq!(data_uri_size("DATA:,hello"), 5);
         assert_eq!(data_uri_size("data:text/plain,hello"), 5);
         assert_eq!(data_uri_size("https://example.com/a.pdf"), 0);

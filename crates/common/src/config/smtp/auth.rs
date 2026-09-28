@@ -14,7 +14,7 @@ use mail_auth::{
     dkim::{Canonicalization, Done},
     dkim2::{Dkim2Signer, Done as Dkim2Done, Flag},
 };
-use mail_parser::decoders::base64::base64_decode;
+use encodify::{Error as CodecError, base64::LENIENT, pem};
 use registry::{
     schema::{
         enums::{self, Dkim2Flag, ExpressionConstant},
@@ -147,7 +147,7 @@ impl DkimSigners {
                     .secret()
                     .await
                     .map_err(|err| trc::DkimEvent::BuildError.reason(err))?;
-                let private_key = simple_pem_parse(&private_key).ok_or_else(|| {
+                let private_key = pem_or_base64_decode(&private_key).map_err(|_| {
                     trc::DkimEvent::BuildError
                         .reason("Failed to parse ED25519 private key PEM")
                         .details("Invalid PEM format")
@@ -182,7 +182,7 @@ impl DkimSigners {
                     .secret()
                     .await
                     .map_err(|err| trc::DkimEvent::BuildError.reason(err))?;
-                let private_key = simple_pem_parse(&private_key).ok_or_else(|| {
+                let private_key = pem_or_base64_decode(&private_key).map_err(|_| {
                     trc::DkimEvent::BuildError
                         .reason("Failed to parse ED25519 private key PEM")
                         .details("Invalid PEM format")
@@ -254,33 +254,12 @@ pub fn rsa_key_parse(private_key: &[u8]) -> trc::Result<RsaKey<Sha256>> {
         })
 }
 
-pub fn simple_pem_parse(contents: &str) -> Option<Vec<u8>> {
-    let mut contents = contents.as_bytes().iter().copied();
-    let mut base64 = vec![];
-
-    'outer: while let Some(ch) = contents.next() {
-        if !ch.is_ascii_whitespace() {
-            if ch == b'-' {
-                for ch in contents.by_ref() {
-                    if ch == b'\n' {
-                        break;
-                    }
-                }
-            } else {
-                base64.push(ch);
-            }
-
-            for ch in contents.by_ref() {
-                if ch == b'-' {
-                    break 'outer;
-                } else if !ch.is_ascii_whitespace() {
-                    base64.push(ch);
-                }
-            }
-        }
+pub fn pem_or_base64_decode(contents: &str) -> Result<Vec<u8>, CodecError> {
+    match pem::STANDARD.decode(contents.as_bytes()) {
+        Ok(block) => Ok(block.contents),
+        Err(CodecError::NotFound) => LENIENT.decode(contents),
+        Err(err) => Err(err),
     }
-
-    base64_decode(&base64)
 }
 
 fn build_dkim1_signer<T: SigningKey>(
@@ -377,5 +356,50 @@ impl CacheItemWeight for DkimSigners {
         (std::mem::size_of::<Self>()
             + self.dkim1.len() * std::mem::size_of::<Dkim1Signer>()
             + std::mem::size_of::<Dkim2Signer<Dkim2Done>>()) as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pem_or_base64_decode;
+    use mail_auth::{common::crypto::Ed25519Key, dkim::generate::DkimKeyPair};
+    use encodify::{
+        base64::{LineEnding, MIME, STANDARD},
+        pem,
+    };
+
+    #[test]
+    fn ed25519_keys_decode_from_pem_or_bare_base64() {
+        let key_pair = DkimKeyPair::generate_ed25519().unwrap();
+        let der = key_pair.private_key();
+        let bare = STANDARD.encode(der);
+
+        for text in [
+            pem::STANDARD.encode("PRIVATE KEY", der),
+            pem::STANDARD
+                .with_ending(LineEnding::CrLf)
+                .encode("PRIVATE KEY", der),
+            bare.clone(),
+            format!("\n  {bare}\n"),
+            MIME.encode(der),
+        ] {
+            let decoded = pem_or_base64_decode(&text).unwrap();
+            assert_eq!(decoded, der, "{text:?}");
+            assert!(Ed25519Key::from_pkcs8_maybe_unchecked_der(&decoded).is_ok());
+        }
+
+        for text in [
+            "",
+            "not base64!",
+            "-----BEGIN PRIVATE KEY-----\n!!!!\n-----END PRIVATE KEY-----\n",
+        ] {
+            assert!(
+                pem_or_base64_decode(text)
+                    .ok()
+                    .and_then(|der| Ed25519Key::from_pkcs8_maybe_unchecked_der(&der).ok())
+                    .is_none(),
+                "{text:?}"
+            );
+        }
     }
 }

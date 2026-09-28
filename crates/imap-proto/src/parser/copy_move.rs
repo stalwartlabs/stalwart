@@ -8,7 +8,6 @@ use crate::{
     Command,
     protocol::copy_move,
     receiver::{Request, bad},
-    utf7::utf7_maybe_decode,
 };
 
 use super::parse_sequence_set;
@@ -26,14 +25,11 @@ impl Request<Command> {
                         .unwrap_bytes(),
                 )
                 .map_err(|v| bad(self.tag.clone(), v))?,
-                mailbox_name: utf7_maybe_decode(
-                    tokens
-                        .next()
-                        .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
-                        .unwrap_string()
-                        .map_err(|v| bad(self.tag.clone(), v))?,
-                    is_utf8,
-                ),
+                mailbox_name: tokens
+                    .next()
+                    .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
+                    .unwrap_mailbox_name(is_utf8)
+                    .map_err(|v| bad(self.tag.clone(), v))?,
                 tag: self.tag,
             })
         } else {

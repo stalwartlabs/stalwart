@@ -5,12 +5,10 @@
  */
 use compact_str::CompactString;
 
-use crate::utf7::quoted_mailbox_name;
-
 use super::{
     ImapResponse,
     metadata::Entry,
-    quoted_string,
+    quoted_mailbox_name, quoted_string,
     status::{Status, StatusItem},
 };
 

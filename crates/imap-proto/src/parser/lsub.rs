@@ -8,7 +8,6 @@ use crate::{
     Command,
     protocol::list::{self, SelectionOption},
     receiver::{Request, bad},
-    utf7::utf7_maybe_decode,
 };
 
 impl Request<Command> {
@@ -22,14 +21,13 @@ impl Request<Command> {
                     .ok_or_else(|| bad(self.tag.clone(), "Missing reference name."))?
                     .unwrap_string()
                     .map_err(|v| bad(self.tag.clone(), v))?,
-                mailbox_name: vec![utf7_maybe_decode(
+                mailbox_name: vec![
                     tokens
                         .next()
                         .ok_or_else(|| bad(self.tag.clone(), "Missing mailbox name."))?
-                        .unwrap_string()
+                        .unwrap_mailbox_name(is_utf8)
                         .map_err(|v| bad(self.tag.clone(), v))?,
-                    is_utf8,
-                )],
+                ],
                 selection_options: vec![SelectionOption::Subscribed],
                 return_options: vec![],
                 tag: self.tag,

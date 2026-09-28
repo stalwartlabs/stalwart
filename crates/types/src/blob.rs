@@ -5,17 +5,16 @@
  */
 
 use jmap_tools::{Element, Property, Value};
-use std::{borrow::Borrow, str::FromStr, time::SystemTime};
-use utils::codec::{
-    base32_custom::{Base32Reader, Base32Writer},
-    leb128::{Leb128Iterator, Leb128Writer},
-};
+use encodify::base32::STALWART;
+use std::{borrow::Borrow, io::Cursor, str::FromStr, time::SystemTime};
+use utils::codec::leb128::{Leb128Iterator, Leb128Writer};
 
 use crate::blob_hash::BlobHash;
 
 const B_LINKED: u8 = 0x10;
 const B_RESERVED: u8 = 0x20;
 const B_EMBEDDED: u8 = 0x40;
+const MAX_SERIALIZED_LEN: usize = 72;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BlobClass {
@@ -133,7 +132,7 @@ impl BlobId {
 
     #[inline]
     pub fn from_base32(value: impl AsRef<[u8]>) -> Option<Self> {
-        BlobId::from_iter(&mut Base32Reader::new(value.as_ref()))
+        BlobId::from_iter(&mut STALWART.decoder(value.as_ref()))
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -263,11 +262,15 @@ impl<'de> serde::Deserialize<'de> for BlobId {
 }
 
 impl std::fmt::Display for BlobId {
-    #[allow(clippy::unused_io_amount)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut writer = Base32Writer::with_capacity(std::mem::size_of::<BlobId>() * 2);
-        self.serialize_as(&mut writer);
-        f.write_str(&writer.finalize())
+        let mut bytes = Cursor::new([0u8; MAX_SERIALIZED_LEN]);
+        self.serialize_as(&mut bytes);
+        let len = bytes.position() as usize;
+        write!(
+            f,
+            "{}",
+            STALWART.display(bytes.get_ref().get(..len).unwrap_or_default())
+        )
     }
 }
 

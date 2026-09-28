@@ -8,7 +8,6 @@ use crate::{
     Command,
     protocol::rename,
     receiver::{Request, bad},
-    utf7::utf7_maybe_decode,
 };
 
 impl Request<Command> {
@@ -17,22 +16,16 @@ impl Request<Command> {
             2 => {
                 let mut tokens = self.tokens.into_iter();
                 Ok(rename::Arguments {
-                    mailbox_name: utf7_maybe_decode(
-                        tokens
-                            .next()
-                            .unwrap()
-                            .unwrap_string()
-                            .map_err(|v| bad(self.tag.clone(), v))?,
-                        is_utf8,
-                    ),
-                    new_mailbox_name: utf7_maybe_decode(
-                        tokens
-                            .next()
-                            .unwrap()
-                            .unwrap_string()
-                            .map_err(|v| bad(self.tag.clone(), v))?,
-                        is_utf8,
-                    ),
+                    mailbox_name: tokens
+                        .next()
+                        .unwrap()
+                        .unwrap_mailbox_name(is_utf8)
+                        .map_err(|v| bad(self.tag.clone(), v))?,
+                    new_mailbox_name: tokens
+                        .next()
+                        .unwrap()
+                        .unwrap_mailbox_name(is_utf8)
+                        .map_err(|v| bad(self.tag.clone(), v))?,
                     tag: self.tag,
                 })
             }

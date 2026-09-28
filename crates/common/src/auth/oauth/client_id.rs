@@ -8,7 +8,7 @@ use super::{
     SCOPE_CALENDARS, SCOPE_CONTACTS, SCOPE_MAIL, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
     crypto::SymmetricEncrypt,
 };
-use base64::{Engine, engine::general_purpose};
+use encodify::base64::URL_SAFE_NO_PAD;
 use store::blake3;
 use utils::codec::leb128::{Leb128Iterator, Leb128Vec};
 
@@ -73,13 +73,13 @@ pub fn encode_client_id(key: &[u8], meta: &ClientMeta) -> Result<String, String>
 
     let mut out = String::with_capacity(CLIENT_ID_HEADER.len() + body.len().div_ceil(3) * 4);
     out.push_str(CLIENT_ID_HEADER);
-    general_purpose::URL_SAFE_NO_PAD.encode_string(&body, &mut out);
+    URL_SAFE_NO_PAD.encode_append(&body, &mut out);
 
     Ok(out)
 }
 
 pub fn decode_client_id(key: &[u8], client_id: &str) -> Option<ClientMeta> {
-    let body = general_purpose::URL_SAFE_NO_PAD
+    let body = URL_SAFE_NO_PAD
         .decode(client_id.strip_prefix(CLIENT_ID_HEADER)?.as_bytes())
         .ok()?;
     if body.len() < SymmetricEncrypt::NONCE_LEN + SymmetricEncrypt::ENCRYPT_TAG_LEN {
@@ -195,14 +195,11 @@ mod tests {
     fn tampering_is_rejected() {
         let client_id = encode_client_id(KEY, &sample()).unwrap();
         let (header, body_b64) = client_id.split_at(CLIENT_ID_HEADER.len());
-        let mut body = general_purpose::URL_SAFE_NO_PAD.decode(body_b64).unwrap();
+        let mut body = URL_SAFE_NO_PAD.decode(body_b64).unwrap();
         for idx in 0..body.len() {
             let mut tampered = body.clone();
             tampered[idx] ^= 0x01;
-            let forged = format!(
-                "{header}{}",
-                general_purpose::URL_SAFE_NO_PAD.encode(&tampered)
-            );
+            let forged = format!("{header}{}", URL_SAFE_NO_PAD.encode(&tampered));
             assert_eq!(decode_client_id(KEY, &forged), None, "byte {idx}");
         }
         body[0] ^= 0x00;

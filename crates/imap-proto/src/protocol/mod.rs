@@ -5,13 +5,12 @@
  */
 
 use crate::{Command, ResponseCode, ResponseType, StatusResponse};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use compact_str::CompactString;
+use encodify::{base32::STALWART, base64::STANDARD, utf7::IMAP};
 use std::fmt::Display;
 use types::id::Id;
 use types::keyword::Keyword;
 use utils::chained_bytes::SliceRange;
-use utils::codec::base32_custom::BASE32_ALPHABET;
 
 pub mod acl;
 pub mod append;
@@ -74,7 +73,7 @@ impl ObjectId {
                 }
                 first = false;
                 buf.extend_from_slice(key);
-                push_id(buf, *value);
+                STALWART.encode_u64_append(value.id(), buf);
             }
         }
         buf.push(b')');
@@ -197,6 +196,18 @@ pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
     buf.push(b'"');
 }
 
+pub(crate) fn quoted_mailbox_name(buf: &mut Vec<u8>, name: &str, is_utf8: bool) {
+    if is_utf8 {
+        quoted_string(buf, name);
+    } else if find_escape(name.as_bytes()).is_some() {
+        quoted_string(buf, &IMAP.encode(name));
+    } else {
+        buf.push(b'"');
+        IMAP.encode_append(name, buf);
+        buf.push(b'"');
+    }
+}
+
 pub fn quoted_or_literal_string(buf: &mut Vec<u8>, text: &str) {
     let text = text.as_bytes();
     if text.iter().any(|&ch| NEEDS_LITERAL[ch as usize]) {
@@ -234,26 +245,9 @@ const fn text_class_table() -> [u8; 256] {
 
 static TEXT_CLASS: [u8; 256] = text_class_table();
 
-#[inline(always)]
-fn base64_encoded_len(len: usize) -> usize {
-    len.div_ceil(3) * 4
-}
-
 fn push_base64_encoded(buf: &mut Vec<u8>, text: &[u8]) {
     buf.extend_from_slice(b"\"=?utf-8?B?");
-    let start = buf.len();
-    buf.resize(start + base64_encoded_len(text.len()), 0);
-    match buf
-        .get_mut(start..)
-        .ok_or(())
-        .and_then(|target| STANDARD.encode_slice(text, target).map_err(|_| ()))
-    {
-        Ok(written) => buf.truncate(start + written),
-        Err(()) => {
-            buf.truncate(start);
-            buf.extend_from_slice(STANDARD.encode(text).as_bytes());
-        }
-    }
+    STANDARD.encode_append(text, buf);
     buf.extend_from_slice(b"?=\"");
 }
 
@@ -321,41 +315,6 @@ pub fn literal_string_slice(buf: &mut Vec<u8>, text: &SliceRange<'_>) {
 pub fn push_int(buf: &mut Vec<u8>, value: impl itoa::Integer) {
     let mut int_buf = itoa::Buffer::new();
     buf.extend_from_slice(int_buf.format(value).as_bytes());
-}
-
-const ID_MAX_LEN: usize = 13;
-
-fn push_id(buf: &mut Vec<u8>, id: Id) {
-    const QUAD_SHIFT: usize = 60;
-    const QUAD_RESET: usize = 4;
-    const FIVE_SHIFT: usize = 59;
-    const FIVE_RESET: usize = 5;
-    const STOP_BIT: u64 = 1 << QUAD_SHIFT;
-
-    let mut n = id.id();
-    if n == 0 {
-        buf.push(b'a');
-        return;
-    }
-
-    buf.reserve(ID_MAX_LEN);
-    match (n >> QUAD_SHIFT) as usize {
-        0 => {
-            n <<= QUAD_RESET;
-            n |= 1;
-            n <<= n.leading_zeros() / 5 * 5;
-        }
-        i => {
-            n <<= QUAD_RESET;
-            n |= 1;
-            buf.push(BASE32_ALPHABET[i]);
-        }
-    }
-
-    while n != STOP_BIT {
-        buf.push(BASE32_ALPHABET[(n >> FIVE_SHIFT) as usize]);
-        n <<= FIVE_RESET;
-    }
 }
 
 const MONTHS_ABBREVIATED: [&[u8; 3]; 12] = [
@@ -976,8 +935,8 @@ mod tests {
     use crate::parser::parse_sequence_set;
     use crate::protocol::ObjectId;
     use crate::{Command, StatusResponse};
-    use base64::{Engine, engine::general_purpose::STANDARD};
     use jiff::Timestamp;
+    use encodify::{base64::STANDARD, utf7::IMAP};
     use mail_parser::DateTime;
     use types::id::Id;
     use utils::chained_bytes::SliceRange;
@@ -1355,6 +1314,61 @@ mod tests {
                         "quoted_or_literal_encoded_string {text:?} is_utf8={is_utf8}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn quoted_mailbox_name_encodes_modified_utf7() {
+        for (expected, name) in [
+            ("~peter/mail/&U,BTFw-/&ZeVnLIqe-", "~peter/mail/台北/日本語"),
+            ("&U,BTF2XlZyyKng-", "台北日本語"),
+            ("Hi Mom -&Jjo--!", "Hi Mom -☺-!"),
+            ("&ZeVnLIqe-", "日本語"),
+            ("Item 3 is &AKM-1.", "Item 3 is £1."),
+            ("Plus minus &- -&- &--", "Plus minus & -& &-"),
+            ("&VMhUyNg93gQ-", "哈哈😄"),
+            ("\\\"&AKM-\"", "\\\"£\""),
+        ] {
+            let mut buf = Vec::new();
+            super::quoted_mailbox_name(&mut buf, name, false);
+            let mut expected_buf = Vec::new();
+            super::quoted_string(&mut expected_buf, expected);
+            assert_eq!(buf, expected_buf, "while encoding {name:?}");
+        }
+    }
+
+    #[test]
+    fn quoted_mailbox_name_matches_quoted_encoding() {
+        for len in 0..=64usize {
+            for tail in [
+                "",
+                "&",
+                "&-",
+                "\u{7f}",
+                "\u{1f}",
+                "\t",
+                "\u{80}",
+                "\u{263a}",
+                "\u{1f604}",
+                " ",
+                "~",
+                "\"",
+                "\\",
+                "\u{263a}\"\\&",
+            ] {
+                let text = format!("{}{}", "x".repeat(len), tail);
+                let mut buf = Vec::new();
+                super::quoted_mailbox_name(&mut buf, &text, false);
+                let mut expected = Vec::new();
+                super::quoted_string(&mut expected, &IMAP.encode(&text));
+                assert_eq!(buf, expected, "{text:?}");
+
+                buf.clear();
+                super::quoted_mailbox_name(&mut buf, &text, true);
+                expected.clear();
+                super::quoted_string(&mut expected, &text);
+                assert_eq!(buf, expected, "{text:?}");
             }
         }
     }

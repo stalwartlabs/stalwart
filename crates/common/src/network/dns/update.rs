@@ -5,12 +5,12 @@
  */
 
 use crate::{Core, Server};
-use base64::{Engine, engine::general_purpose};
 use compact_str::{CompactString, ToCompactString};
 use dns_update::{
     DnsRecord, DnsRecordType, TsigAlgorithm,
     providers::{ovh::OvhEndpoint, rfc2136::DnsAddress},
 };
+use encodify::base64::STANDARD;
 use registry::schema::{
     enums,
     structs::{DnsManagement, DnsServer, Domain},
@@ -58,7 +58,7 @@ impl DnsUpdater {
                         )),
                     },
                     server.key_name,
-                    general_purpose::STANDARD
+                    STANDARD
                         .decode(server.key.secret().await?.as_bytes())
                         .map_err(|err| format!("Failed to base64 decode TSIG key: {err}"))?,
                     match server.tsig_algorithm {

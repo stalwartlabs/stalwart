@@ -9,7 +9,7 @@ use crate::{
     utils::containers,
 };
 use ahash::AHashMap;
-use base64::{Engine, engine::general_purpose::STANDARD};
+use encodify::base64::STANDARD;
 use serde_json::Value;
 
 const DRIVER: &str = include_str!("../../docker/scim/driver.py");

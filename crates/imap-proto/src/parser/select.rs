@@ -15,7 +15,6 @@ use crate::{
         select::{self, QResync},
     },
     receiver::{Request, Token, bad},
-    utf7::utf7_maybe_decode,
 };
 
 use super::{parse_number, parse_sequence_set};
@@ -26,14 +25,11 @@ impl Request<Command> {
             let mut tokens = self.tokens.into_iter().peekable();
 
             // Mailbox name
-            let mailbox_name = utf7_maybe_decode(
-                tokens
-                    .next()
-                    .unwrap()
-                    .unwrap_string()
-                    .map_err(|v| bad(self.tag.clone(), v))?,
-                is_utf8,
-            );
+            let mailbox_name = tokens
+                .next()
+                .unwrap()
+                .unwrap_mailbox_name(is_utf8)
+                .map_err(|v| bad(self.tag.clone(), v))?;
 
             // CONDSTORE parameters
             let mut condstore = false;

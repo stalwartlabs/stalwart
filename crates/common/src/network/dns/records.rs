@@ -6,11 +6,11 @@
 
 use crate::{Server, config::network::Pacc, network::dkim::generate_dkim_dns_record};
 use ahash::{AHashMap, AHashSet};
-use base64::{Engine, engine::general_purpose};
 use dns_update::{
     CAARecord, DnsRecord, KeyValue, MXRecord, NamedDnsRecord, SRVRecord, TLSARecord, TlsaCertUsage,
     TlsaMatching, TlsaSelector, bind::BindSerializer,
 };
+use encodify::base64::STANDARD;
 use registry::schema::{
     enums::{DnsRecordType, ServiceProtocol},
     prelude::{ObjectType, Property},
@@ -136,7 +136,8 @@ impl Server {
                 }
                 DnsRecordType::AutoConfig => {
                     let pacc_digest = Sha256::digest(&self.get_pacc_for_domain(domain_name).await?);
-                    let pacc_digest_encoded = general_purpose::STANDARD.encode(pacc_digest);
+                    let mut pacc_record = String::from("v=UAAC1; a=sha256; d=");
+                    STANDARD.encode_append(pacc_digest, &mut pacc_record);
 
                     records.push(NamedDnsRecord {
                         name: format!("ua-auto-config.{domain_name}."),
@@ -144,9 +145,7 @@ impl Server {
                     });
                     records.push(NamedDnsRecord {
                         name: format!("_ua-auto-config.{domain_name}."),
-                        record: DnsRecord::TXT(format!(
-                            "v=UAAC1; a=sha256; d={pacc_digest_encoded}"
-                        )),
+                        record: DnsRecord::TXT(pacc_record),
                     });
                 }
                 DnsRecordType::AutoConfigLegacy => {

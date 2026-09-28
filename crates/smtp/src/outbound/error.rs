@@ -6,6 +6,7 @@
 
 use std::fmt::Display;
 
+use encodify::Error as CodecError;
 use smtp_proto::{Response, Severity};
 
 #[derive(Debug)]
@@ -17,7 +18,7 @@ pub enum ClientError {
     Tls(Box<rustls::Error>),
 
     /// Base64 decode error
-    Base64(base64::DecodeError),
+    Base64(CodecError),
 
     // SMTP authentication error.
     InvalidChallenge,
@@ -143,8 +144,8 @@ impl From<std::io::Error> for ClientError {
     }
 }
 
-impl From<base64::DecodeError> for ClientError {
-    fn from(err: base64::DecodeError) -> Self {
+impl From<CodecError> for ClientError {
+    fn from(err: CodecError) -> Self {
         ClientError::Base64(err)
     }
 }

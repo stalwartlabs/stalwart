@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::{Engine, engine::general_purpose};
+use encodify::base64::STANDARD;
 use rustls_pki_types::ServerName;
 use std::time::Duration;
 use tokio::{
@@ -49,7 +49,7 @@ impl Pop3Connection {
     }
 
     pub async fn authenticate(&mut self, user: &str, pass: &str) {
-        let creds = general_purpose::STANDARD.encode(format!("\0{user}\0{pass}"));
+        let creds = STANDARD.encode(format!("\0{user}\0{pass}"));
         self.send(&format!("AUTH PLAIN {creds}")).await;
         self.assert_read(ResponseType::Ok).await;
     }

@@ -87,3 +87,7 @@ rpath = false
 calcard = { path = "../calcard" }
 dns-update = { path = "../dns-update" }
 jmap-tools = { path = "../jmap-tools" }
+mail-auth = { path = "../mail-auth" }
+mail-builder = { path = "../mail-builder" }
+encodify = { path = "../encodify" }
+mail-parser = { path = "../mail-parser" }

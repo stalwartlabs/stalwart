@@ -16,7 +16,7 @@ use imap_proto::{
     protocol::authenticate::Mechanism,
     receiver::{self, Request},
 };
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64::LENIENT;
 use registry::schema::enums::Permission;
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
@@ -28,8 +28,9 @@ impl<T: SessionStream> Session<T> {
         match args.mechanism {
             Mechanism::Plain | Mechanism::OAuthBearer | Mechanism::XOauth2 => {
                 if !args.params.is_empty() {
-                    let challenge = base64_decode(args.params.pop().unwrap().as_bytes())
-                        .ok_or_else(|| {
+                    let challenge = LENIENT
+                        .decode(args.params.pop().unwrap().as_bytes())
+                        .map_err(|_| {
                             trc::AuthEvent::Error
                                 .into_err()
                                 .details("Failed to decode challenge.")

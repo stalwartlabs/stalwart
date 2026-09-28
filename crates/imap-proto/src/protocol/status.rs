@@ -6,9 +6,7 @@
 use crate::protocol::push_int;
 use compact_str::CompactString;
 
-use crate::utf7::quoted_mailbox_name;
-
-use super::ObjectId;
+use super::{ObjectId, quoted_mailbox_name};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {

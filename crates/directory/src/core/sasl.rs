@@ -5,7 +5,7 @@
  */
 
 use crate::Credentials;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use encodify::base64::URL_SAFE_NO_PAD;
 
 impl Credentials {
     pub fn decode_sasl_challenge_plain(challenge: &[u8]) -> Option<Self> {

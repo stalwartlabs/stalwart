@@ -12,12 +12,12 @@ use crate::{
         oauth::GrantType,
     },
 };
-use base64::{Engine, engine::general_purpose};
 use compact_str::CompactString;
 use directory::{
     Credentials, Directory, Recipient,
     core::secret::{SecretVerificationResult, verify_mfa_secret_hash, verify_secret_hash},
 };
+use encodify::base64::URL_SAFE_NO_PAD;
 use registry::schema::{
     enums::Permission,
     structs::{self, Credential},
@@ -566,7 +566,7 @@ fn extract_jwt_domain(token: &str) -> Option<String> {
     if parts.next().is_some() {
         return None;
     }
-    let payload_bytes = general_purpose::URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let payload_bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
     for claim in ["email", "preferred_username", "upn"] {
         if let Some(val) = claims.get(claim).and_then(|v| v.as_str())

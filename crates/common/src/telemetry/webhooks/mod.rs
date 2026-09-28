@@ -6,9 +6,9 @@
 
 use crate::{LONG_1Y_SLUMBER, config::telemetry::WebhookTracer};
 use aws_lc_rs::hmac;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use compact_str::{CompactString, format_compact};
+use encodify::base64::STANDARD;
 use reqwest::header::HeaderValue;
 use std::{sync::Arc, time::Instant};
 use store::write::now;
@@ -227,7 +227,7 @@ impl Payload {
         let signature = if !settings.key.is_empty() {
             let key = hmac::Key::new(hmac::HMAC_SHA256, settings.key.as_bytes());
             let tag = hmac::sign(&key, &body);
-            HeaderValue::from_str(&STANDARD.encode(tag.as_ref())).ok()
+            HeaderValue::try_from(STANDARD.encode(tag.as_ref())).ok()
         } else {
             None
         };

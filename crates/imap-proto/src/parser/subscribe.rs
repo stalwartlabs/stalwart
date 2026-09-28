@@ -8,22 +8,19 @@ use crate::{
     Command,
     protocol::subscribe,
     receiver::{Request, bad},
-    utf7::utf7_maybe_decode,
 };
 
 impl Request<Command> {
     pub fn parse_subscribe(self, is_utf8: bool) -> trc::Result<subscribe::Arguments> {
         match self.tokens.len() {
             1 => Ok(subscribe::Arguments {
-                mailbox_name: utf7_maybe_decode(
-                    self.tokens
-                        .into_iter()
-                        .next()
-                        .unwrap()
-                        .unwrap_string()
-                        .map_err(|v| bad(self.tag.clone(), v))?,
-                    is_utf8,
-                ),
+                mailbox_name: self
+                    .tokens
+                    .into_iter()
+                    .next()
+                    .unwrap()
+                    .unwrap_mailbox_name(is_utf8)
+                    .map_err(|v| bad(self.tag.clone(), v))?,
                 tag: self.tag,
             }),
             0 => Err(self.into_error("Missing mailbox name.")),

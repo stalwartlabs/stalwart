@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use base64::Engine;
-use base64::engine::general_purpose;
+use encodify::base64::STANDARD;
 use std::env;
 use std::io::{self, Write};
 use store::write::serialize::RawValue;
@@ -265,9 +264,7 @@ fn parse_value(input: &str) -> Vec<u8> {
 }
 
 fn base64_decode(input: &str) -> Vec<u8> {
-    general_purpose::STANDARD
-        .decode(input)
-        .expect("Failed to decode base64")
+    STANDARD.decode(input).expect("Failed to decode base64")
 }
 
 fn parse_binary(input: &str) -> Vec<u8> {

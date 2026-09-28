@@ -9,10 +9,10 @@ use azure_core::{ExponentialRetryOptions, RetryOptions, StatusCode};
 use azure_storage::StorageCredentials;
 use azure_storage_blobs::prelude::{ClientBuilder, ContainerClient};
 use futures::stream::StreamExt;
+use encodify::base32::STALWART;
 use registry::schema::structs::{self};
 use std::sync::Arc;
-use std::{fmt::Display, io::Write, ops::Range};
-use utils::codec::base32_custom::Base32Writer;
+use std::{fmt::Display, ops::Range};
 
 use crate::BlobStore;
 
@@ -152,13 +152,12 @@ impl AzureStore {
 
     fn build_key(&self, key: &[u8]) -> String {
         if let Some(prefix) = &self.prefix {
-            let mut writer =
-                Base32Writer::with_raw_capacity(prefix.len() + (key.len().div_ceil(4) * 5));
-            writer.push_string(prefix);
-            writer.write_all(key).unwrap();
-            writer.finalize()
+            let mut out = String::with_capacity(prefix.len() + STALWART.encoded_len(key.len()));
+            out.push_str(prefix);
+            STALWART.encode_append(key, &mut out);
+            out
         } else {
-            Base32Writer::from_bytes(key).finalize()
+            STALWART.encode(key)
         }
     }
 }

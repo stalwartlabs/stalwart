@@ -8,7 +8,7 @@ types = { path = "../types" }
 utils = { path = "../utils" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
 ahash = { version = "0.8" }
-base64 = "0.23"
+encodify = "1.0"
 jiff = "0.2.37"
 trc = { path = "../trc" }
 hashify = { version = "0.3" }

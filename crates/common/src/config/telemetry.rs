@@ -7,8 +7,8 @@
 use crate::config::storage::Storage;
 use crate::ipc::IndexQueueNotify;
 use ahash::{AHashMap, AHashSet};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::HeaderMap;
+use encodify::base64::STANDARD;
 use opentelemetry::{InstrumentationScope, KeyValue};
 use opentelemetry_otlp::{
     LogExporter, MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig,

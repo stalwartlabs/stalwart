@@ -21,7 +21,7 @@ directory = { path =  "../directory" }
 services = { path =  "../services" }
 registry = { path =  "../registry" }
 mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
-mail-builder = { version = "1.0" }
+mail-builder = { version = "2.0" }
 mail-auth = { version = "0.13", features = ["generate", "arc"] }
 tokio = { version = "1.53", features = ["rt"] }
 hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
@@ -30,7 +30,7 @@ http-body-util = "0.1.5"
 async-stream = "0.3.6"
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-base64 = "0.23"
+encodify = "1.0"
 sha2 = "0.11"
 rkyv.workspace = true
 form-data = { version = "0.6.0", features = ["sync"], default-features = false }

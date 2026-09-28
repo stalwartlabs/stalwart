@@ -9,10 +9,6 @@ use super::{
     OAuthResponse, OAuthStatus, TokenResponse, registration::ClientRegistrationHandler,
 };
 use crate::auth::authenticate::HttpHeaders;
-use base64::{
-    Engine,
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
-};
 use common::{
     KV_OAUTH, Server,
     auth::{
@@ -22,7 +18,8 @@ use common::{
 };
 use http_proto::*;
 use hyper::StatusCode;
-use sha2::{Digest, Sha256};
+use encodify::base64::{STANDARD, URL_SAFE_NO_PAD};
+use sha2::{Digest, Sha256, digest::Output};
 use std::{borrow::Cow, future::Future};
 use store::{
     dispatch::lookup::KeyValue,
@@ -383,8 +380,7 @@ fn client_credentials<'x>(
     if (client_id.is_none() || client_secret.is_none())
         && let Some((id, secret)) = req
             .authorization_basic()
-            .and_then(|token| STANDARD.decode(token).ok())
-            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|token| STANDARD.decode_to_string(token).ok())
             .and_then(|creds| {
                 creds
                     .split_once(':')
@@ -401,6 +397,8 @@ fn client_credentials<'x>(
 
     (client_id, client_secret)
 }
+
+const PKCE_S256_LEN: usize = URL_SAFE_NO_PAD.encoded_len(size_of::<Output<Sha256>>());
 
 fn verify_pkce(stored: &ArchivedPkceCodeChallenge, verifier: Option<&str>) -> bool {
     let is_valid_pkce_challenge = |challenge: &str| {
@@ -431,8 +429,10 @@ fn verify_pkce(stored: &ArchivedPkceCodeChallenge, verifier: Option<&str>) -> bo
             if is_valid_pkce_challenge(verifier) =>
         {
             let digest = Sha256::digest(verifier.as_bytes());
-            let computed = URL_SAFE_NO_PAD.encode(digest);
-            constant_time_eq(expected.as_bytes(), computed.as_bytes())
+            let mut computed = [0u8; PKCE_S256_LEN];
+            URL_SAFE_NO_PAD
+                .encode_str(digest, &mut computed)
+                .is_ok_and(|computed| constant_time_eq(expected.as_bytes(), computed.as_bytes()))
         }
         _ => false,
     }
