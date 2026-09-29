@@ -52,10 +52,12 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
         self.messages.len() < MAX_BATCH_SIZE
     }
 
-    pub fn serialize(&self, node_id: u16) -> Vec<u8> {
-        let mut serialized =
-            Vec::with_capacity((self.messages.len() * 10) + std::mem::size_of::<u16>());
+    pub fn serialize(&self, node_id: u16, read_version: Option<u64>) -> Vec<u8> {
+        let mut serialized = Vec::with_capacity(
+            (self.messages.len() * 10) + std::mem::size_of::<u16>() + std::mem::size_of::<u64>(),
+        );
         let _ = serialized.write_leb128(node_id);
+        let _ = serialized.write_leb128(read_version.unwrap_or_default());
         for message in &self.messages {
             match message {
                 BroadcastEvent::PushNotification(notification) => match notification {
@@ -175,6 +177,12 @@ where
 {
     pub fn node_id(&mut self) -> Option<u16> {
         self.messages.next_leb128::<u16>()
+    }
+
+    pub fn read_version(&mut self) -> Option<Option<u64>> {
+        self.messages
+            .next_leb128::<u64>()
+            .map(|version| Some(version).filter(|version| *version > 0))
     }
 
     pub fn next_event(&mut self) -> Result<Option<BroadcastEvent>, ()> {

@@ -19,6 +19,7 @@ pub(crate) struct SubspaceSql {
     pub(crate) decrement: Box<str>,
     pub(crate) increment_returning: Box<str>,
     pub(crate) delete_range: Box<str>,
+    pub(crate) delete_range_limit: Box<str>,
     pub(crate) range_boundary: Box<str>,
     pub(crate) purge_zero: Box<str>,
     pub(crate) purge_zero_range: Box<str>,
@@ -67,6 +68,10 @@ impl SubspaceSql {
             )
             .into_boxed_str(),
             delete_range: format!("DELETE FROM {table} WHERE k >= ? AND k < ?").into_boxed_str(),
+            delete_range_limit: format!(
+                "DELETE FROM {table} WHERE k >= ? AND k < ? ORDER BY k ASC LIMIT ?"
+            )
+            .into_boxed_str(),
             range_boundary: format!(
                 "SELECT k FROM {table} WHERE k >= ? AND k < ? ORDER BY k ASC LIMIT ?, 1"
             )

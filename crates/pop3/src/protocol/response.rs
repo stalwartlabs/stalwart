@@ -10,12 +10,20 @@ use utils::chained_bytes::ChainedBytes;
 
 const STATUS_LINE_LEN: usize = 32;
 const STUFFING_RESERVE_DIVISOR: usize = 64;
+const BLANK_LINE_TAIL_LEN: usize = 3;
+const CRLF_LEN: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageEnd {
+    AsIs,
+    BlankLine,
+}
 
 pub enum Response<'x, T> {
     Ok(Cow<'static, str>),
     Err(Cow<'static, str>),
     List(Vec<T>),
-    Message(ChainedBytes<'x>),
+    Message(ChainedBytes<'x>, MessageEnd),
     Capability {
         mechanisms: Vec<Mechanism>,
         stls: bool,
@@ -25,19 +33,38 @@ pub enum Response<'x, T> {
 impl<'x, T> Response<'x, T> {
     pub fn message(raw_message: ChainedBytes<'x>, body_offset: usize, lines: Option<u32>) -> Self {
         let Some(lines) = lines else {
-            return Response::Message(raw_message);
+            return Response::Message(raw_message, MessageEnd::AsIs);
         };
-        let body_offset = body_offset.min(raw_message.len());
+        let len = raw_message.len();
+        let body_offset = body_offset.min(len);
+        let end = if body_offset == len && !ends_with_blank_line(&raw_message) {
+            MessageEnd::BlankLine
+        } else {
+            MessageEnd::AsIs
+        };
         let body_lines = raw_message
-            .view(body_offset..raw_message.len())
+            .view(body_offset..len)
             .unwrap_or_default()
             .line_prefix_len(lines as usize);
         Response::Message(
             raw_message
                 .view(0..body_offset + body_lines)
                 .unwrap_or(raw_message),
+            end,
         )
     }
+}
+
+fn ends_with_blank_line(bytes: &ChainedBytes<'_>) -> bool {
+    let len = bytes.len();
+    bytes
+        .get(len.saturating_sub(BLANK_LINE_TAIL_LEN)..len)
+        .is_some_and(|tail| {
+            matches!(
+                tail.as_ref(),
+                [b'\n'] | [b'\r', b'\n'] | [.., b'\n', b'\n'] | [.., b'\n', b'\r', b'\n']
+            )
+        })
 }
 
 impl<T: Display> Response<'_, T> {
@@ -69,18 +96,22 @@ impl<T: Display> Response<'_, T> {
                 buf.extend_from_slice(b".\r\n");
                 buf
             }
-            Response::Message(bytes) => {
+            Response::Message(bytes, end) => {
+                let mut octets = DotStuffer::wire_len(bytes);
+                if *end == MessageEnd::BlankLine {
+                    octets += CRLF_LEN;
+                }
                 let mut buf = Vec::with_capacity(
-                    bytes.len() + bytes.len() / STUFFING_RESERVE_DIVISOR + STATUS_LINE_LEN,
+                    octets + bytes.len() / STUFFING_RESERVE_DIVISOR + STATUS_LINE_LEN,
                 );
                 buf.extend_from_slice(b"+OK ");
-                buf.extend_from_slice(itoa::Buffer::new().format(bytes.len()).as_bytes());
+                buf.extend_from_slice(itoa::Buffer::new().format(octets).as_bytes());
                 buf.extend_from_slice(b" octets\r\n");
                 let mut stuffer = DotStuffer::default();
                 for segment in bytes.segments() {
                     stuffer.push(&mut buf, segment);
                 }
-                stuffer.finish(&mut buf);
+                stuffer.finish(&mut buf, *end);
                 buf
             }
             Response::Capability { mechanisms, stls } => {
@@ -160,10 +191,10 @@ impl SerializeResponse for trc::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::Response;
+    use super::{MessageEnd, Response};
     use crate::protocol::{
         Mechanism,
-        dot_stuffer::tests::{reference_pop3, strings_over},
+        dot_stuffer::tests::{reference_pop3_with_end, strings_over},
     };
     use utils::chained_bytes::ChainedBytes;
 
@@ -199,15 +230,29 @@ mod tests {
                             body_offset,
                             Some(lines),
                         );
-                        let Response::Message(bytes) = &response else {
+                        let Response::Message(bytes, end) = &response else {
                             panic!("TOP answers with a message");
                         };
+                        let expected_end = if clamped == message.len()
+                            && !(message.ends_with(b"\n\n")
+                                || message.ends_with(b"\n\r\n")
+                                || message == b"\n"
+                                || message == b"\r\n")
+                        {
+                            MessageEnd::BlankLine
+                        } else {
+                            MessageEnd::AsIs
+                        };
+                        assert_eq!(*end, expected_end, "{message:?} {body_offset} {lines}");
                         assert_eq!(
                             bytes.to_vec(),
                             expected,
                             "{message:?} {body_offset} {lines}"
                         );
-                        assert_eq!(response.serialize(), reference_pop3(expected));
+                        assert_eq!(
+                            response.serialize(),
+                            reference_pop3_with_end(expected, expected_end)
+                        );
                     }
                     assert!(expected.starts_with(header));
                 }
@@ -217,13 +262,45 @@ mod tests {
         let (header, body) = message.split_at(14);
         let top =
             |lines| match Response::<u32>::message(ChainedBytes::chain(header, body), 14, lines) {
-                Response::Message(bytes) => bytes.to_vec(),
+                Response::Message(bytes, _) => bytes.to_vec(),
                 _ => Vec::new(),
             };
         assert_eq!(top(Some(0)), b"Subject: x\r\n\r\n".to_vec());
         assert_eq!(top(Some(1)), b"Subject: x\r\n\r\nline 1\r\n".to_vec());
         assert_eq!(top(Some(5)), message.to_vec());
         assert_eq!(top(None), message.to_vec());
+    }
+
+    #[test]
+    fn octet_count_matches_bytes_sent_and_top_ends_headers_with_blank_line() {
+        let retr = |message: &'static [u8]| {
+            Response::<u32>::message(ChainedBytes::new(message), 0, None).serialize()
+        };
+        assert_eq!(
+            retr(b"Subject: x\n\nbody\n"),
+            b"+OK 20 octets\r\nSubject: x\r\n\r\nbody\r\n.\r\n".to_vec()
+        );
+        assert_eq!(
+            retr(b"Subject: x\r\n\r\nbody"),
+            b"+OK 20 octets\r\nSubject: x\r\n\r\nbody\r\n.\r\n".to_vec()
+        );
+
+        let top = |message: &'static [u8], lines| {
+            Response::<u32>::message(ChainedBytes::new(message), message.len(), Some(lines))
+                .serialize()
+        };
+        assert_eq!(
+            top(b"Subject: x\r\n", 0),
+            b"+OK 14 octets\r\nSubject: x\r\n\r\n.\r\n".to_vec()
+        );
+        assert_eq!(
+            top(b"Subject: x", 3),
+            b"+OK 14 octets\r\nSubject: x\r\n\r\n.\r\n".to_vec()
+        );
+        assert_eq!(
+            top(b"Subject: x\r\n\r\n", 0),
+            b"+OK 14 octets\r\nSubject: x\r\n\r\n.\r\n".to_vec()
+        );
     }
 
     #[test]
@@ -261,18 +338,18 @@ mod tests {
                 ),
             ),
             (
-                Response::Message(ChainedBytes::chain(
-                    b"Subject: test\r\n\r\n.\r\n",
-                    b"test.\r\n.test\r\na",
-                )),
-                "+OK 35 octets\r\nSubject: test\r\n\r\n..\r\ntest.\r\n..test\r\na\r\n.\r\n",
+                Response::Message(
+                    ChainedBytes::chain(b"Subject: test\r\n\r\n.\r\n", b"test.\r\n.test\r\na"),
+                    MessageEnd::AsIs,
+                ),
+                "+OK 37 octets\r\nSubject: test\r\n\r\n..\r\ntest.\r\n..test\r\na\r\n.\r\n",
             ),
             (
-                Response::Message(ChainedBytes::new(b".first\r\n")),
+                Response::Message(ChainedBytes::new(b".first\r\n"), MessageEnd::AsIs),
                 "+OK 8 octets\r\n..first\r\n.\r\n",
             ),
             (
-                Response::Message(ChainedBytes::default()),
+                Response::Message(ChainedBytes::default(), MessageEnd::AsIs),
                 "+OK 0 octets\r\n.\r\n",
             ),
         ] {

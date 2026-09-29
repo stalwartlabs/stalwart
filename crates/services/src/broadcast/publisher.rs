@@ -36,8 +36,14 @@ pub fn spawn_broadcast_publisher(inner: Arc<Inner>, mut event_rx: mpsc::Receiver
                 }
             }
 
+            let read_version = inner
+                .shared_core
+                .load()
+                .storage
+                .data
+                .read_snapshot_version();
             match coordinator
-                .publish(BROADCAST_TOPIC, batch.serialize(this_node_id))
+                .publish(BROADCAST_TOPIC, batch.serialize(this_node_id, read_version))
                 .await
             {
                 Ok(_) => {

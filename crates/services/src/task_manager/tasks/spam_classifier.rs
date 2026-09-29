@@ -19,7 +19,10 @@ use registry::{
             TaskSpamFilterMaintenance,
         },
     },
-    types::{EnumImpl, ObjectImpl},
+    types::{
+        EnumImpl, ObjectImpl,
+        index::{IndexBuilder, IndexKey},
+    },
 };
 use spam_filter::modules::classifier::SpamClassifier;
 use std::time::{Duration, Instant};
@@ -98,7 +101,7 @@ struct Rules {
     file_exts: Vec<SpamFileExtension>,
 }
 
-trait UpstreamObject: ObjectImpl + PartialEq + From<Object> + Into<ObjectInner> {
+trait UpstreamObject: ObjectImpl + Clone + PartialEq + From<Object> + Into<ObjectInner> {
     fn replacement_for(self, _local: &Self) -> Option<Self> {
         Some(self)
     }
@@ -267,51 +270,52 @@ async fn apply_upstream<T: UpstreamObject>(
     objects: Vec<T>,
 ) -> trc::Result<RuleUpdateResult> {
     let mut result = RuleUpdateResult::new(T::OBJECT);
+    let locals = registry.list::<T>().await?;
+    let mut local_keys = IndexBuilder::default();
+    let mut local_by_key = AHashMap::with_capacity(locals.len());
+    for (index, local) in locals.iter().enumerate() {
+        local.object.index(&mut local_keys);
+        for key in local_keys.keys.drain().filter(is_unique_key) {
+            local_by_key.insert(key, index);
+        }
+    }
 
     for upstream in objects {
-        let upstream = Object::from(upstream);
-        let existing_id = match registry.write(RegistryWrite::insert(&upstream)).await? {
-            RegistryWriteResult::Success(_) => {
-                result.added += 1;
-                continue;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { existing_id, .. }
-                if existing_id.object() == T::OBJECT =>
-            {
-                existing_id
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                result.unchanged += 1;
-                continue;
-            }
-            _ => {
-                result.failed += 1;
-                continue;
-            }
+        let existing = {
+            let mut upstream_keys = IndexBuilder::default();
+            upstream.index(&mut upstream_keys);
+            upstream_keys
+                .keys
+                .iter()
+                .filter(|key| is_unique_key(key))
+                .find_map(|key| local_by_key.get(key))
+                .and_then(|&index| locals.get(index))
         };
 
-        let Some(local) = registry.get(existing_id).await? else {
-            result.failed += 1;
+        let Some(local) = existing else {
+            match registry
+                .write(RegistryWrite::insert(&Object::from(upstream)))
+                .await?
+            {
+                RegistryWriteResult::Success(_) => result.added += 1,
+                RegistryWriteResult::PrimaryKeyConflict { .. } => result.unchanged += 1,
+                _ => result.failed += 1,
+            }
             continue;
         };
-        let revision = local.revision;
-        let local = T::from(local);
-        let Some(replacement) = T::from(upstream)
-            .replacement_for(&local)
-            .filter(|replacement| replacement != &local)
+
+        let Some(replacement) = upstream
+            .replacement_for(&local.object)
+            .filter(|replacement| replacement != &local.object)
         else {
             result.unchanged += 1;
             continue;
         };
 
         let replacement = Object::from(replacement);
-        let local = Object::with_revision(local.into(), revision);
+        let current = Object::with_revision(local.object.clone().into(), local.revision);
         match registry
-            .write(RegistryWrite::update(
-                existing_id.id(),
-                &replacement,
-                &local,
-            ))
+            .write(RegistryWrite::update(local.id.id(), &replacement, &current))
             .await?
         {
             RegistryWriteResult::Success(_) => result.updated += 1,
@@ -320,6 +324,10 @@ async fn apply_upstream<T: UpstreamObject>(
     }
 
     Ok(result)
+}
+
+fn is_unique_key(key: &IndexKey<'_>) -> bool {
+    matches!(key, IndexKey::Unique { .. })
 }
 
 async fn fetch_spam_rules(server: &Server) -> Result<Rules, RuleUpdateError> {

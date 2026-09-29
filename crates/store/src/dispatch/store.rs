@@ -377,4 +377,21 @@ impl Store {
             store.invalidate_read_snapshot();
         }
     }
+
+    pub fn read_snapshot_version(&self) -> Option<u64> {
+        match self {
+            #[cfg(feature = "foundation")]
+            Self::FoundationDb(store) => store.read_snapshot_version(),
+            _ => None,
+        }
+    }
+
+    pub fn advance_read_snapshot(&self, version: u64) {
+        #[cfg(feature = "foundation")]
+        if let Self::FoundationDb(store) = self {
+            store.advance_read_snapshot(version);
+        }
+        #[cfg(not(feature = "foundation"))]
+        let _ = version;
+    }
 }

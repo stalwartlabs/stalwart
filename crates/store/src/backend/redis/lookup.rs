@@ -141,21 +141,21 @@ impl RedisStore {
         match &self.pool {
             RedisPool::Single(pool) => {
                 with_conn(pool, async |conn| {
-                    Self::chunks_set_(conn, prefix, data, chunk_size, expires, previous_chunks)
+                    self.chunks_set_(conn, prefix, data, chunk_size, expires, previous_chunks)
                         .await
                 })
                 .await
             }
             RedisPool::Cluster(pool) => {
                 with_conn(pool, async |conn| {
-                    Self::chunks_set_(conn, prefix, data, chunk_size, expires, previous_chunks)
+                    self.chunks_set_(conn, prefix, data, chunk_size, expires, previous_chunks)
                         .await
                 })
                 .await
             }
             RedisPool::Sentinel(pool) => {
                 with_conn(pool, async |conn| {
-                    Self::chunks_set_(conn, prefix, data, chunk_size, expires, previous_chunks)
+                    self.chunks_set_(conn, prefix, data, chunk_size, expires, previous_chunks)
                         .await
                 })
                 .await
@@ -194,13 +194,16 @@ impl RedisStore {
         prefix: &[u8],
         count: u32,
     ) -> RedisResult<Option<Vec<u8>>> {
-        let mut pipeline = redis::pipe();
-        pipeline.atomic();
-        for index in 0..count {
-            pipeline.cmd("GET").arg(chunk_key(prefix, index));
+        if count == 0 {
+            return Ok(Some(Vec::new()));
         }
 
-        let chunks = pipeline.query_async::<Vec<Option<Vec<u8>>>>(conn).await?;
+        let mut cmd = redis::cmd("MGET");
+        for index in 0..count {
+            cmd.arg(chunk_key(prefix, index));
+        }
+
+        let chunks = cmd.query_async::<Vec<Option<Vec<u8>>>>(conn).await?;
 
         let mut data = Vec::with_capacity(chunks.iter().flatten().map(Vec::len).sum());
         for chunk in chunks {
@@ -214,6 +217,7 @@ impl RedisStore {
     }
 
     async fn chunks_set_(
+        &self,
         conn: &mut impl AsyncCommands,
         prefix: &[u8],
         data: &[u8],
@@ -221,28 +225,20 @@ impl RedisStore {
         expires: Option<u64>,
         previous_chunks: u32,
     ) -> RedisResult<()> {
-        let mut pipeline = redis::pipe();
-        pipeline.atomic();
-
-        let mut written = 0u32;
-        for (index, chunk) in data.chunks(chunk_size).enumerate() {
-            let key = chunk_key(prefix, index as u32);
-            match expires {
-                Some(expires) => {
-                    pipeline.cmd("SETEX").arg(key).arg(expires).arg(chunk);
-                }
-                None => {
-                    pipeline.cmd("SET").arg(key).arg(chunk);
-                }
-            }
-            written = index as u32 + 1;
+        let chunks = data.chunks(chunk_size);
+        let written = chunks.len() as u32;
+        let mut invocation = self.chunks_set.prepare_invoke();
+        invocation
+            .arg(expires.map_or(-1, |expires| expires as i64))
+            .arg(written);
+        for (index, chunk) in chunks.enumerate() {
+            invocation.key(chunk_key(prefix, index as u32)).arg(chunk);
         }
-
         for index in written..previous_chunks {
-            pipeline.cmd("DEL").arg(chunk_key(prefix, index));
+            invocation.key(chunk_key(prefix, index));
         }
 
-        pipeline.query_async::<()>(conn).await
+        invocation.invoke_async(conn).await
     }
 
     async fn chunks_delete_(
@@ -251,13 +247,12 @@ impl RedisStore {
         from: u32,
         to: u32,
     ) -> RedisResult<()> {
-        let mut pipeline = redis::pipe();
-        pipeline.atomic();
+        let mut cmd = redis::cmd("DEL");
         for index in from..to {
-            pipeline.cmd("DEL").arg(chunk_key(prefix, index));
+            cmd.arg(chunk_key(prefix, index));
         }
 
-        pipeline.query_async::<()>(conn).await
+        cmd.query_async::<()>(conn).await
     }
 
     pub async fn key_delete_prefix(&self, prefix: &[u8]) -> trc::Result<()> {

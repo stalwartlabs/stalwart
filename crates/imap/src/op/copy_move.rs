@@ -443,6 +443,9 @@ impl<T: SessionStream> SessionData<T> {
                     Err(err) => {
                         retry_after_conflict(err, &mut retries, &arguments.tag, trc::location!())
                             .await?;
+                        self.server
+                            .inner
+                            .mark_cache_stale(account_id, SyncCollection::Email);
                         cache = self
                             .server
                             .get_cached_messages(account_id)

@@ -28,6 +28,7 @@ pub mod pool;
 pub struct RedisStore {
     pub pool: RedisPool,
     incr_expire: Script,
+    chunks_set: Script,
 }
 
 pub struct RedisConnectionManager {
@@ -59,6 +60,21 @@ impl RedisStore {
                 "redis.call('INCRBY', KEYS[1], ARGV[1])
                  redis.call('EXPIRE', KEYS[1], ARGV[2])
                  return redis.call('GET', KEYS[1])",
+            ),
+            chunks_set: Script::new(
+                "local ttl = tonumber(ARGV[1])
+                 local written = tonumber(ARGV[2])
+                 for i = 1, written do
+                     if ttl >= 0 then
+                         redis.call('SET', KEYS[i], ARGV[i + 2], 'EX', ttl)
+                     else
+                         redis.call('SET', KEYS[i], ARGV[i + 2])
+                     end
+                 end
+                 for i = written + 1, #KEYS do
+                     redis.call('DEL', KEYS[i])
+                 end
+                 return 0",
             ),
         }
     }

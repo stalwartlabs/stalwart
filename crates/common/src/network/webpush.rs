@@ -46,18 +46,18 @@ impl Vapid {
     }
 
     pub fn authorization(&self, endpoint: &str, now: u64) -> Option<HeaderValue> {
-        let prefix = endpoint_prefix(endpoint)?;
+        let origin = endpoint_origin(endpoint)?;
         if let Some(token) = self
             .tokens
             .lock()
-            .get(prefix)
+            .get(&origin)
             .filter(|token| token.is_fresh(now))
         {
             return Some(token.authorization.clone());
         }
 
-        let authorization = HeaderValue::try_from(self.key.authorization(
-            endpoint,
+        let authorization = HeaderValue::try_from(self.key.authorization_for_origin(
+            &origin,
             self.contact.as_deref(),
             now,
         )?)
@@ -65,7 +65,7 @@ impl Vapid {
         let mut tokens = self.tokens.lock();
         tokens.retain(|_, token| token.is_fresh(now));
         tokens.insert(
-            prefix.to_string(),
+            origin,
             VapidToken {
                 authorization: authorization.clone(),
                 issued_at: now,
@@ -131,8 +131,17 @@ impl VapidKey {
     }
 
     pub fn authorization(&self, endpoint: &str, contact: Option<&str>, now: u64) -> Option<String> {
+        self.authorization_for_origin(&endpoint_origin(endpoint)?, contact, now)
+    }
+
+    fn authorization_for_origin(
+        &self,
+        origin: &str,
+        contact: Option<&str>,
+        now: u64,
+    ) -> Option<String> {
         let mut claims = serde_json::Map::new();
-        claims.insert("aud".into(), endpoint_origin(endpoint)?.into());
+        claims.insert("aud".into(), origin.into());
         claims.insert("exp".into(), (now + VAPID_TOKEN_TTL).into());
         if let Some(sub) = contact {
             claims.insert("sub".into(), sub.into());
@@ -152,12 +161,6 @@ impl VapidKey {
 
         Some(authorization)
     }
-}
-
-fn endpoint_prefix(url: &str) -> Option<&str> {
-    let (scheme, rest) = url.split_once("://")?;
-    let authority = rest.split(['/', '?', '#']).next()?;
-    url.get(..scheme.len() + "://".len() + authority.len())
 }
 
 fn endpoint_origin(url: &str) -> Option<String> {
@@ -362,6 +365,26 @@ B4yDfR2rGOd2H6Kv3fQNHPj9Nu5Tks8QYMLzrX8ONCNoFnNUQl9S0r0QS6phVqD0
                 "unexpected normalization of {input:?}"
             );
         }
+    }
+
+    #[test]
+    fn authorization_is_never_reused_across_origins_sharing_a_prefix() {
+        let vapid = Vapid::new(test_key(), None);
+        let now = 1_700_000_000;
+        let fcm = vapid
+            .authorization("https:////fcm.googleapis.com/fcm/send/x", now)
+            .unwrap();
+        let other = vapid
+            .authorization("https:////attacker.example/x", now)
+            .unwrap();
+
+        assert_ne!(fcm, other);
+        assert_eq!(
+            vapid
+                .authorization("https://fcm.googleapis.com/fcm/send/y", now)
+                .unwrap(),
+            fcm
+        );
     }
 
     #[test]

@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::response::MessageEnd;
 use memchr::memchr_iter;
+use utils::chained_bytes::ChainedBytes;
+
+const CRLF: &[u8] = b"\r\n";
 
 const DENSE_LINE_LEN: usize = 8;
 const DENSE_STREAK: u32 = 8;
@@ -29,11 +33,36 @@ impl DotStuffer {
         }
     }
 
-    pub fn finish(self, buf: &mut Vec<u8>) {
+    pub fn finish(self, buf: &mut Vec<u8>, end: MessageEnd) {
         if self.last != b'\n' {
             buf.extend_from_slice(b"\r\n");
         }
+        if end == MessageEnd::BlankLine {
+            buf.extend_from_slice(b"\r\n");
+        }
         buf.extend_from_slice(b".\r\n");
+    }
+
+    pub fn wire_len(bytes: &ChainedBytes<'_>) -> usize {
+        let mut last = b'\n';
+        let mut bare_lf = 0;
+        for segment in bytes.segments() {
+            for pos in memchr_iter(b'\n', segment) {
+                let prev = pos
+                    .checked_sub(1)
+                    .and_then(|prev| segment.get(prev))
+                    .copied()
+                    .unwrap_or(last);
+                if prev != b'\r' {
+                    bare_lf += 1;
+                }
+            }
+            if let Some(&byte) = segment.last() {
+                last = byte;
+            }
+        }
+        let final_crlf = if last != b'\n' { CRLF.len() } else { 0 };
+        bytes.len() + bare_lf + final_crlf
     }
 
     fn copy_sparse(&mut self, buf: &mut Vec<u8>, bytes: &[u8]) -> usize {
@@ -106,7 +135,7 @@ impl DotStuffer {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::DotStuffer;
-    use crate::protocol::response::Response;
+    use crate::protocol::response::{MessageEnd, Response};
     use utils::chained_bytes::ChainedBytes;
 
     const STUFFING_ALPHABET: &[u8] = b"a.\r\n";
@@ -134,28 +163,43 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn reference_pop3(message: &[u8]) -> Vec<u8> {
-        let mut out = format!("+OK {} octets\r\n", message.len()).into_bytes();
+        reference_pop3_with_end(message, MessageEnd::AsIs)
+    }
+
+    pub(crate) fn reference_pop3_with_end(message: &[u8], end: MessageEnd) -> Vec<u8> {
+        let mut body = Vec::new();
+        let mut octets = 0;
         let mut prev = b'\n';
         for &byte in message {
             if byte == b'\n' && prev != b'\r' {
-                out.push(b'\r');
+                body.push(b'\r');
+                octets += 1;
             }
             if byte == b'.' && prev == b'\n' {
-                out.push(b'.');
+                body.push(b'.');
             }
-            out.push(byte);
+            body.push(byte);
+            octets += 1;
             prev = byte;
         }
         if prev != b'\n' {
-            out.extend_from_slice(b"\r\n");
+            body.extend_from_slice(b"\r\n");
+            octets += 2;
         }
-        out.extend_from_slice(b".\r\n");
+        if end == MessageEnd::BlankLine {
+            body.extend_from_slice(b"\r\n");
+            octets += 2;
+        }
+        body.extend_from_slice(b".\r\n");
+        let mut out = format!("+OK {octets} octets\r\n").into_bytes();
+        out.extend_from_slice(&body);
         out
     }
 
     #[test]
     fn dot_stuffing_matches_reference_at_every_split() {
-        let serialize = |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes).serialize();
+        let serialize =
+            |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes, MessageEnd::AsIs).serialize();
         for message in strings_over(STUFFING_ALPHABET, STUFFING_MAX_LEN) {
             let expected = reference_pop3(&message);
             for split in 0..=message.len() {
@@ -173,20 +217,25 @@ pub(crate) mod tests {
     fn dot_stuffer_handles_many_segments() {
         for message in strings_over(STUFFING_ALPHABET, 5) {
             let expected = reference_pop3(&message);
-            let mut buf = format!("+OK {} octets\r\n", message.len()).into_bytes();
+            let mut buf = format!(
+                "+OK {} octets\r\n",
+                DotStuffer::wire_len(&ChainedBytes::new(&message))
+            )
+            .into_bytes();
             let mut stuffer = DotStuffer::default();
             for byte in message.chunks(1) {
                 stuffer.push(&mut buf, &[]);
                 stuffer.push(&mut buf, byte);
             }
-            stuffer.finish(&mut buf);
+            stuffer.finish(&mut buf, MessageEnd::AsIs);
             assert_eq!(buf, expected, "{message:?}");
         }
     }
 
     #[test]
     fn leading_dot_is_stuffed() {
-        let serialize = |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes).serialize();
+        let serialize =
+            |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes, MessageEnd::AsIs).serialize();
         assert_eq!(
             serialize(ChainedBytes::new(b".first\r\n")),
             b"+OK 8 octets\r\n..first\r\n.\r\n".to_vec()
@@ -197,13 +246,14 @@ pub(crate) mod tests {
         );
         assert_eq!(
             serialize(ChainedBytes::chain(b"a\r\n", b".b")),
-            b"+OK 5 octets\r\na\r\n..b\r\n.\r\n".to_vec()
+            b"+OK 7 octets\r\na\r\n..b\r\n.\r\n".to_vec()
         );
     }
 
     #[test]
     fn empty_message_has_no_spurious_crlf() {
-        let serialize = |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes).serialize();
+        let serialize =
+            |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes, MessageEnd::AsIs).serialize();
         assert_eq!(
             serialize(ChainedBytes::default()),
             b"+OK 0 octets\r\n.\r\n".to_vec()
@@ -216,7 +266,8 @@ pub(crate) mod tests {
 
     #[test]
     fn dot_stuffer_matches_reference_on_mixed_and_adversarial_input() {
-        let serialize = |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes).serialize();
+        let serialize =
+            |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes, MessageEnd::AsIs).serialize();
         let crlf_split_tail = [
             b"\n.second\r\n".as_slice(),
             &b"abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789ab\r\n"
@@ -290,7 +341,8 @@ pub(crate) mod tests {
 
     #[test]
     fn dot_stuffer_switches_between_dense_and_sparse_at_every_split() {
-        let serialize = |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes).serialize();
+        let serialize =
+            |bytes: ChainedBytes<'_>| Response::<u32>::Message(bytes, MessageEnd::AsIs).serialize();
         let long_lf = [vec![b'b'; 70], b"\n".to_vec()].concat();
         let long_crlf = [vec![b'c'; 70], b"\r\n".to_vec()].concat();
         let block = [

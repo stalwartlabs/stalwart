@@ -74,9 +74,18 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                         match message {
                             Some(message) => {
                                 let mut batch = BroadcastBatch::new(message.payload().iter());
-                                let node_id = match batch.node_id() {
-                                    Some(node_id) => {
+                                let node_id = match (batch.node_id(), batch.read_version()) {
+                                    (Some(node_id), Some(read_version)) => {
                                         if node_id != this_node_id {
+                                            // Invalidate FDB cache
+                                            let core = inner.shared_core.load();
+                                            match read_version {
+                                                Some(version) => {
+                                                    core.storage.data.advance_read_snapshot(version)
+                                                }
+                                                None => core.storage.data.invalidate_read_snapshot(),
+                                            }
+
                                             node_id
                                         } else {
                                             trc::event!(
@@ -86,7 +95,7 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                             continue;
                                         }
                                     }
-                                    None => {
+                                    _ => {
                                         trc::event!(
                                             Cluster(ClusterEvent::MessageInvalid),
                                             Details = message.payload()
@@ -95,12 +104,6 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                     }
                                 };
 
-                                inner
-                                    .shared_core
-                                    .load()
-                                    .storage
-                                    .data
-                                    .invalidate_read_snapshot();
 
                                 loop {
                                     match batch.next_event() {

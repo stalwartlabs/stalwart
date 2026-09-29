@@ -478,6 +478,18 @@ impl FdbStore {
     pub(crate) fn invalidate_read_snapshot(&self) {
         self.version.expire();
     }
+
+    pub(crate) fn read_snapshot_version(&self) -> Option<u64> {
+        self.version
+            .last_committed()
+            .and_then(|version| u64::try_from(version).ok())
+    }
+
+    pub(crate) fn advance_read_snapshot(&self, version: u64) {
+        if let Ok(version) = i64::try_from(version) {
+            self.version.advance(version);
+        }
+    }
 }
 
 fn streaming_mode(expected_rows: Option<usize>) -> options::StreamingMode {

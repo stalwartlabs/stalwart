@@ -30,6 +30,7 @@ pub struct FdbStore {
 pub(crate) struct ReadVersion {
     base: Instant,
     version: AtomicI64,
+    committed: AtomicI64,
     obtained: AtomicU64,
     refreshing: AtomicBool,
 }
@@ -48,7 +49,7 @@ impl ReadVersion {
             .saturating_sub(self.obtained.load(Ordering::Acquire))
     }
 
-    fn store_max(&self, version: i64) {
+    fn store_max(&self, version: i64) -> bool {
         let mut current = self.version.load(Ordering::Relaxed);
         while version > current {
             match self.version.compare_exchange_weak(
@@ -57,10 +58,11 @@ impl ReadVersion {
                 Ordering::Release,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => break,
+                Ok(_) => return true,
                 Err(actual) => current = actual,
             }
         }
+        false
     }
 
     fn refreshed(&self, version: i64) {
@@ -69,7 +71,18 @@ impl ReadVersion {
     }
 
     fn raise_floor(&self, version: i64) {
+        self.committed.fetch_max(version, Ordering::AcqRel);
         self.store_max(version);
+    }
+
+    fn advance(&self, version: i64) {
+        if self.store_max(version) {
+            self.obtained.store(self.now(), Ordering::Release);
+        }
+    }
+
+    fn last_committed(&self) -> Option<i64> {
+        Some(self.committed.load(Ordering::Acquire)).filter(|version| *version > 0)
     }
 
     fn expire(&self) {
@@ -94,6 +107,7 @@ impl Default for ReadVersion {
         Self {
             base: Instant::now(),
             version: AtomicI64::new(0),
+            committed: AtomicI64::new(0),
             obtained: AtomicU64::new(0),
             refreshing: AtomicBool::new(false),
         }
@@ -113,4 +127,39 @@ fn into_error(error: FdbError) -> trc::Error {
     trc::StoreEvent::FoundationdbError
         .reason(error.message())
         .ctx(trc::Key::Code, error.code())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReadVersion;
+
+    #[test]
+    fn local_commit_stays_visible_after_expiry() {
+        let version = ReadVersion::default();
+        version.refreshed(990);
+        version.expire();
+        version.raise_floor(1005);
+        assert_eq!(version.current(), 1005);
+        assert_eq!(version.last_committed(), Some(1005));
+
+        version.advance(1000);
+        version.refreshed(1000);
+        assert_eq!(version.current(), 1005);
+    }
+
+    #[test]
+    fn remote_commit_version_advances_without_moving_backwards() {
+        let version = ReadVersion::default();
+        version.refreshed(1000);
+        version.advance(1010);
+        assert_eq!(version.current(), 1010);
+
+        version.raise_floor(1005);
+        version.advance(1002);
+        assert_eq!(version.current(), 1010);
+
+        version.expire();
+        version.advance(1020);
+        assert_eq!(version.current(), 1020);
+    }
 }

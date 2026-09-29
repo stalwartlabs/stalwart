@@ -324,6 +324,16 @@ impl Server {
                     return Ok(AccessToken::new_admin());
                 }
 
+                if token.starts_with(TOKEN_HEADER) {
+                    let token_info = self
+                        .validate_access_token(GrantType::AccessToken.into(), token)
+                        .await?;
+                    return self
+                        .access_token(token_info.account_id)
+                        .await
+                        .and_then(|token| AccessToken::new(token, req.remote_ip));
+                }
+
                 // Obtain external directory, if any. When no username is supplied
                 // (e.g. HTTP bearer auth), peek at the JWT claims to find the
                 // user's domain so per-domain OIDC directories are reachable.

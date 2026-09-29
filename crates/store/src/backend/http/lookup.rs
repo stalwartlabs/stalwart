@@ -248,7 +248,12 @@ impl HttpStoreConfig {
 }
 
 fn lookup_key(key: &str) -> Cow<'_, str> {
-    if key.bytes().any(|b| !b.is_ascii() || b.is_ascii_uppercase()) {
+    let needs_lowercase = if key.is_ascii() {
+        key.bytes().any(|b| b.is_ascii_uppercase())
+    } else {
+        key.chars().any(|ch| !ch.to_lowercase().eq([ch]))
+    };
+    if needs_lowercase {
         Cow::Owned(key.to_lowercase())
     } else {
         Cow::Borrowed(key)
@@ -289,6 +294,14 @@ mod tests {
             config,
             client: Client::new(),
         })
+    }
+
+    #[test]
+    fn lookup_key_allocates_only_when_lowercasing_changes_it() {
+        assert!(matches!(lookup_key("example.org"), Cow::Borrowed(_)));
+        assert!(matches!(lookup_key("ñandú.example"), Cow::Borrowed(_)));
+        assert_eq!(lookup_key("Example.ORG"), "example.org");
+        assert_eq!(lookup_key("ÑANDÚ.example"), "ñandú.example");
     }
 
     #[test]

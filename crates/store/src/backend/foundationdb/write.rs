@@ -235,6 +235,9 @@ impl FdbStore {
                         };
 
                         if !matches {
+                            if let Ok(read_version) = trx.get_read_version().await {
+                                self.version.advance(read_version);
+                            }
                             trx.cancel();
                             return Err(trc::StoreEvent::AssertValueFailed.into());
                         }

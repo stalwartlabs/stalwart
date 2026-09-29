@@ -39,6 +39,15 @@ pub async fn cluster_tests() {
         "Missing coordinator type. Try running `STORE=<store_type> ",
         "COORDINATOR=<coordinator_type> cargo test`"
     ));
+    let store_type = std::env::var("STORE").unwrap_or_default();
+    assert!(
+        !matches!(store_type.as_str(), "RocksDb" | "Sqlite"),
+        concat!(
+            "Cluster tests need a data store shared by all nodes ",
+            "(FoundationDb, PostgreSql or MySql), got {}"
+        ),
+        store_type
+    );
     let coordinator = match coordinator_id.as_str() {
         "Nats" => {
             crate::utils::containers::ensure_nats().await;

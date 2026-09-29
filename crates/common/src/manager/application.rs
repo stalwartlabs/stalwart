@@ -415,7 +415,14 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
+        let path = std::mem::take(&mut self.path);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                let _ = std::fs::remove_dir_all(path);
+            });
+        } else {
+            let _ = std::fs::remove_dir_all(path);
+        }
     }
 }
 
@@ -692,6 +699,9 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&base).await;
     }
 
+    const REMOVAL_POLL_ATTEMPTS: usize = 500;
+    const REMOVAL_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
     #[tokio::test]
     async fn dropping_the_routes_removes_the_bundle_directory() {
         let apps = fixture("drop-guard", None).await;
@@ -708,7 +718,15 @@ mod tests {
 
         apps.routes.store(Arc::new(AHashMap::new()));
 
-        assert!(tokio::fs::metadata(&path).await.is_err());
+        let mut removed = false;
+        for _ in 0..REMOVAL_POLL_ATTEMPTS {
+            if tokio::fs::metadata(&path).await.is_err() {
+                removed = true;
+                break;
+            }
+            tokio::time::sleep(REMOVAL_POLL_INTERVAL).await;
+        }
+        assert!(removed);
     }
 
     #[tokio::test]

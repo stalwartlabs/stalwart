@@ -304,9 +304,27 @@ impl MysqlStore {
         let mut from = from.serialize(0);
         let to = to.serialize(0);
 
-        let delete = conn.prep(&*stmts.delete_range).await.map_err(into_error)?;
         let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
 
+        let delete_limit = conn
+            .prep(&*stmts.delete_range_limit)
+            .await
+            .map_err(into_error)?;
+        match conn
+            .exec_drop(&delete_limit, (&from, &to, DELETE_CHUNK_SIZE as u64))
+            .await
+        {
+            Ok(_) if conn.affected_rows() < DELETE_CHUNK_SIZE as u64 => return Ok(()),
+            Ok(_) => (),
+            Err(err) if is_chunk_too_large_error(&err) => {
+                if !retry.degrade().await {
+                    return Err(into_error(err));
+                }
+            }
+            Err(err) => return Err(into_error(err)),
+        }
+
+        let delete = conn.prep(&*stmts.delete_range).await.map_err(into_error)?;
         let boundary = conn
             .prep(&*stmts.range_boundary)
             .await

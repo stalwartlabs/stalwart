@@ -31,7 +31,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use trc::AddContext;
 use types::{
     acl::Acl,
-    collection::{Collection, VanishedCollection},
+    collection::{Collection, SyncCollection, VanishedCollection},
     keyword::Keyword,
 };
 
@@ -230,6 +230,9 @@ impl<T: SessionStream> SessionData<T> {
                 retries += 1;
                 let backoff = rand::rng().random_range(EXPUNGE_RETRY_BACKOFF_MS);
                 tokio::time::sleep(Duration::from_millis(backoff)).await;
+                self.server
+                    .inner
+                    .mark_cache_stale(account_id, SyncCollection::Email);
                 cache = self
                     .server
                     .get_cached_messages(account_id)
