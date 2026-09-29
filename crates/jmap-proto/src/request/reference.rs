@@ -105,6 +105,12 @@ impl<V: Default> Default for MaybeResultReference<V> {
     }
 }
 
+impl<V: FromStr> Default for MaybeIdReference<V> {
+    fn default() -> Self {
+        MaybeIdReference::Invalid(String::new())
+    }
+}
+
 impl<T: Default> MaybeResultReference<T> {
     pub fn unwrap(self) -> T {
         match self {

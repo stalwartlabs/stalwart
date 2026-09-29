@@ -43,6 +43,7 @@ use utils::DomainPart;
 
 pub const LOCK_EXPIRY: u64 = 10 * 60; // 10 minutes
 pub const QUEUE_REFRESH: u64 = 5 * 60; // 5 minutes
+pub const DSN_RETRY: u64 = 5 * 60; // 5 minutes
 pub(crate) const INFINITE_LOCK: u64 = 60 * 60 * 24 * 365; // 1 year
 const CANDIDATE_OVERSCAN: usize = 4;
 const MAX_PREALLOCATED_CANDIDATES: usize = 1024;
@@ -368,6 +369,7 @@ pub(crate) struct QueueParams<'x, 'y> {
 }
 
 impl MessageWrapper {
+    #[must_use]
     pub(crate) async fn queue<'x, 'y>(mut self, mut params: QueueParams<'x, 'y>) -> bool {
         // Add DKIM signatures
         let dkim_headers = if params.dkim_signers.is_some() {
@@ -667,7 +669,12 @@ impl MessageWrapper {
         recipient.queue = queue.virtual_queue;
     }
 
-    pub async fn save_changes(mut self, server: &Server, prev_event: Option<u64>) -> bool {
+    pub async fn save_changes(
+        mut self,
+        server: &Server,
+        prev_event: Option<u64>,
+        retry_at: Option<u64>,
+    ) -> bool {
         // Release quota for completed deliveries
         let mut batch = BatchBuilder::new();
         let released_quotas = self.release_quota(&mut batch);
@@ -682,7 +689,12 @@ impl MessageWrapper {
                 },
             )));
         }
-        for (queue_name, due) in self.message.next_events() {
+        let mut next_events = self.message.next_events();
+        if let Some(retry_at) = retry_at {
+            let due = next_events.entry(self.queue_name).or_insert(retry_at);
+            *due = std::cmp::min(*due, retry_at);
+        }
+        for (queue_name, due) in next_events {
             batch.set(
                 ValueClass::Queue(QueueClass::MessageEvent(store::write::QueueEvent {
                     due,

@@ -580,13 +580,7 @@ END:VCARD
         })
         .await;
 
-    let bill_messages = test
-        .server
-        .get_cached_messages(bill.id().document_id())
-        .await
-        .unwrap()
-        .emails
-        .len();
+    let bill_messages = inbox_count(&test.server, &bill).await;
 
     lmtp.ingest(
         "john.doe@example.org",
@@ -604,14 +598,120 @@ END:VCARD
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     assert_eq!(
-        test.server
-            .get_cached_messages(bill.id().document_id())
-            .await
-            .unwrap()
-            .emails
-            .len(),
+        inbox_count(&test.server, &bill).await,
         bill_messages + 1,
         "sub-addressed mailing list member was not delivered"
+    );
+
+    // Lists nested within lists must be expanded recursively
+    admin
+        .registry_create_object(MailingList {
+            name: "engineering".to_string(),
+            recipients: Map::new(vec!["jane.smith@example.org".to_string()]),
+            domain_id,
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MailingList {
+            name: "all-staff".to_string(),
+            recipients: Map::new(vec![
+                "engineering@example.org".to_string(),
+                "bill@example.org".to_string(),
+            ]),
+            domain_id,
+            ..Default::default()
+        })
+        .await;
+
+    let jane_messages = inbox_count(&test.server, &jane).await;
+    let bill_messages = inbox_count(&test.server, &bill).await;
+
+    lmtp.ingest(
+        "john.doe@example.org",
+        &["all-staff@example.org"],
+        concat!(
+            "From: john.doe@example.org\r\n",
+            "To: all-staff@example.org\r\n",
+            "Subject: Company picnic\r\n",
+            "\r\n",
+            "Bring your own stapler."
+        ),
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert_eq!(
+        inbox_count(&test.server, &jane).await,
+        jane_messages + 1,
+        "nested mailing list member was not delivered"
+    );
+    assert_eq!(
+        inbox_count(&test.server, &bill).await,
+        bill_messages + 1,
+        "direct mailing list member was not delivered"
+    );
+
+    // Lists that reference each other must terminate and deliver exactly once
+    admin
+        .registry_create_object(MailingList {
+            name: "ouroboros-head".to_string(),
+            recipients: Map::new(vec![
+                "ouroboros-tail@example.org".to_string(),
+                "jdoe@example.org".to_string(),
+                "bill@example.org".to_string(),
+            ]),
+            domain_id,
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(MailingList {
+            name: "ouroboros-tail".to_string(),
+            recipients: Map::new(vec![
+                "ouroboros-head@example.org".to_string(),
+                "jane.smith@example.org".to_string(),
+                "bill@example.org".to_string(),
+            ]),
+            domain_id,
+            ..Default::default()
+        })
+        .await;
+
+    let john_messages = inbox_count(&test.server, &john).await;
+    let jane_messages = inbox_count(&test.server, &jane).await;
+    let bill_messages = inbox_count(&test.server, &bill).await;
+
+    lmtp.ingest(
+        "john.doe@example.org",
+        &["ouroboros-head@example.org"],
+        concat!(
+            "From: john.doe@example.org\r\n",
+            "To: ouroboros-head@example.org\r\n",
+            "Subject: Going in circles\r\n",
+            "\r\n",
+            "Please advise."
+        ),
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert_eq!(
+        inbox_count(&test.server, &john).await,
+        john_messages + 1,
+        "cyclic mailing list did not deliver exactly once"
+    );
+    assert_eq!(
+        inbox_count(&test.server, &jane).await,
+        jane_messages + 1,
+        "cyclic mailing list did not deliver exactly once"
+    );
+    assert_eq!(
+        inbox_count(&test.server, &bill).await,
+        bill_messages + 1,
+        "member shared by two nested lists was delivered more than once"
     );
 
     // Remove test data
@@ -691,4 +791,13 @@ async fn message_metadata(server: &Server, account_id: u32, document_id: u32) ->
         .await
         .unwrap()
         .unwrap()
+}
+
+async fn inbox_count(server: &Server, account: &Account) -> usize {
+    server
+        .get_cached_messages(account.id().document_id())
+        .await
+        .unwrap()
+        .emails
+        .len()
 }

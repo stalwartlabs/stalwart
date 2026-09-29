@@ -18,7 +18,7 @@ use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::import::{ImportEmailRequest, ImportEmailResponse},
     object::email::EmailProperty,
-    request::MaybeInvalid,
+    request::reference::MaybeIdReference,
     types::state::State,
 };
 use mail_parser::MessageParser;
@@ -139,7 +139,7 @@ impl EmailImport for Server {
                 continue;
             }
 
-            let MaybeInvalid::Value(blob_id) = email.blob_id else {
+            let MaybeIdReference::Id(blob_id) = email.blob_id else {
                 response.not_created.append(
                     id,
                     SetError::invalid_properties()

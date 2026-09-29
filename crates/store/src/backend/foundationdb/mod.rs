@@ -73,7 +73,7 @@ impl ReadVersion {
     }
 
     fn expire(&self) {
-        self.obtained.store(0, Ordering::Release);
+        self.version.store(0, Ordering::Release);
     }
 
     fn try_begin_refresh(&self) -> Option<RefreshGuard<'_>> {

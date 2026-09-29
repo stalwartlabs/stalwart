@@ -94,17 +94,7 @@ impl<T: SessionStream> Session<T> {
                 .iter()
                 .map(|r| r.address_lcase.as_str())
                 .collect(),
-            env_rcpt_orig_to: self
-                .data
-                .rcpt_to
-                .iter()
-                .map(|r| {
-                    r.dsn_info
-                        .as_deref()
-                        .and_then(|info| info.strip_prefix("rfc822;"))
-                        .unwrap_or(r.address_lcase.as_str())
-                })
-                .collect(),
+            env_rcpt_orig_to: self.data.rcpt_to.iter().map(|r| r.orig_address()).collect(),
             is_test: false,
             is_train: false,
         }

@@ -1514,6 +1514,7 @@ pub enum DnsServer {
     Vultr(DnsServerCloud),
     WebSupport(DnsServerWebSupport),
     YandexCloud(DnsServerYandexCloud),
+    PowerDns(DnsServerPowerDns),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1728,6 +1729,7 @@ pub enum DnsServerBootstrap {
     Vultr(DnsServerCloud),
     WebSupport(DnsServerWebSupport),
     YandexCloud(DnsServerYandexCloud),
+    PowerDns(DnsServerPowerDns),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2475,6 +2477,31 @@ pub struct DnsServerPorkbun {
     pub api_key: String,
     #[serde(rename = "secretApiKey")]
     pub secret_api_key: SecretKey,
+    #[serde(rename = "description")]
+    pub description: String,
+    #[serde(rename = "memberTenantId")]
+    pub member_tenant_id: Option<Id>,
+    #[serde(rename = "timeout")]
+    pub timeout: Duration,
+    #[serde(rename = "ttl")]
+    pub ttl: Duration,
+    #[serde(rename = "pollingInterval")]
+    pub polling_interval: Duration,
+    #[serde(rename = "propagationTimeout")]
+    pub propagation_timeout: Duration,
+    #[serde(rename = "propagationDelay")]
+    pub propagation_delay: Option<Duration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DnsServerPowerDns {
+    #[serde(rename = "apiKey")]
+    pub api_key: SecretKey,
+    #[serde(rename = "endpoint")]
+    pub endpoint: Option<String>,
+    #[serde(rename = "serverId")]
+    pub server_id: Option<String>,
     #[serde(rename = "description")]
     pub description: String,
     #[serde(rename = "memberTenantId")]

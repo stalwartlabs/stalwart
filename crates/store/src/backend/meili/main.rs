@@ -11,14 +11,12 @@ use crate::{
         CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField, SearchField,
         SearchableField, TracingSearchField,
     },
-    write::now,
 };
 use registry::schema::structs;
 use reqwest::{Error, Response, Url};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 
-const UNCONFIRMED_TASK_RECHECK_DELAY: u64 = 600;
 pub(crate) const MAX_TOTAL_HITS: u64 = 100_000;
 
 impl MeiliSearchStore {
@@ -302,18 +300,13 @@ impl MeiliSearchStore {
             }
         }
 
-        let err = trc::StoreEvent::MeilisearchError
-            .reason("Timed out waiting for Meilisearch task")
-            .id(task_uid);
-
-        Err(if self.task_fail_on_timeout {
-            err
+        if self.task_fail_on_timeout {
+            Err(trc::StoreEvent::MeilisearchError
+                .reason("Timed out waiting for Meilisearch task")
+                .id(task_uid))
         } else {
-            err.ctx(
-                trc::Key::NextRetry,
-                now().saturating_add(UNCONFIRMED_TASK_RECHECK_DELAY),
-            )
-        })
+            Ok(true)
+        }
     }
 }
 

@@ -856,8 +856,11 @@ impl EmailSet for Server {
                         new_data.set_mailboxes(
                             ids.into_expanded_boolean_set()
                                 .filter_map(|id| {
-                                    MessageUid::new_unassigned(
-                                        id.try_into_property()?.try_into_id()?.document_id(),
+                                    let mailbox_id =
+                                        id.try_into_property()?.try_into_id()?.document_id();
+                                    MessageUid::new(
+                                        mailbox_id,
+                                        data.message_uid(mailbox_id).unwrap_or(0),
                                     )
                                     .into()
                                 })

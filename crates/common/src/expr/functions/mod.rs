@@ -46,6 +46,7 @@ pub(crate) const FUNCTIONS: &[(&str, fn(Vec<Variable>) -> Variable, u32)] = &[
     ("email_part", email::fn_email_part, 2),
     ("is_empty", misc::fn_is_empty, 1),
     ("is_number", misc::fn_is_number, 1),
+    ("bit_and", misc::fn_bit_and, 2),
     ("is_ip_addr", misc::fn_is_ip_addr, 1),
     ("is_ipv4_addr", misc::fn_is_ipv4_addr, 1),
     ("is_ipv6_addr", misc::fn_is_ipv6_addr, 1),

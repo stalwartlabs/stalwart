@@ -442,7 +442,7 @@ impl<T: SessionStream> Session<T> {
             if !rc.analysis.forward {
                 self.data
                     .rcpt_to
-                    .retain(|rcpt| !rc.analysis.is_report_address(rcpt.report_address()));
+                    .retain(|rcpt| !rc.analysis.is_report_address(rcpt.orig_address()));
             }
 
             if self.data.rcpt_to.is_empty() {
@@ -616,6 +616,9 @@ impl<T: SessionStream> Session<T> {
                     .map(|s| (s, name))
             })
         {
+            let edited_parsed_message = edited_message
+                .as_deref()
+                .and_then(|message| MessageParser::new().parse(message));
             let mut params = self
                 .build_script_parameters("data")
                 .with_auth_headers(&headers);
@@ -669,7 +672,7 @@ impl<T: SessionStream> Session<T> {
                         .map(|a| a.as_str())
                         .unwrap_or_default(),
                 )
-                .with_message(&parsed_message);
+                .with_message(edited_parsed_message.as_ref().unwrap_or(&parsed_message));
 
             let modifications = match self.run_script(script_id, script, params).await {
                 ScriptResult::Accept { modifications } => modifications,

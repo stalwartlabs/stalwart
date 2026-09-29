@@ -23,6 +23,13 @@ pub(crate) fn fn_is_number(v: Vec<Variable>) -> Variable {
     matches!(&v[0], Variable::Integer(_) | Variable::Float(_)).into()
 }
 
+pub(crate) fn fn_bit_and(v: Vec<Variable>) -> Variable {
+    match (v[0].to_integer(), v[1].to_integer()) {
+        (Some(lhs), Some(rhs)) => Variable::Integer(lhs & rhs),
+        _ => Variable::Integer(0),
+    }
+}
+
 pub(crate) fn fn_is_ip_addr(v: Vec<Variable>) -> Variable {
     v[0].to_string()
         .as_str()

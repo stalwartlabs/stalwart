@@ -57,7 +57,7 @@ pub async fn insert_test_data(server: &Server) {
             server.inner.data.queue_id_gen.generate(),
             QueueName::default(),
         );
-        assert!(qm.save_changes(server, None).await);
+        assert!(qm.save_changes(server, None, None).await);
     }
 
     for report in sample_tls_internal_reports() {
@@ -163,7 +163,7 @@ fn sample_queued_messages(blob_hashes: Vec<BlobHash>) -> Vec<Message> {
                         },
                     })),
                     flags: RCPT_DSN_SENT,
-                    orcpt: Some("rfc822;bob@example.org".into()),
+                    orcpt: Some("bob@example.org".into()),
                 },
             ],
             received_from_ip: std::net::IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),

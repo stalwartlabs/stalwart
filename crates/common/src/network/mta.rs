@@ -21,6 +21,7 @@ use crate::{
     manager::SPAM_CLASSIFIER_KEY,
     network::RcptResolution,
 };
+use ahash::AHashSet;
 use compact_str::{CompactString, ToCompactString};
 use directory::Recipient;
 use mail_auth::IpLookupStrategy;
@@ -37,6 +38,7 @@ use store::{
 };
 use trc::{AddContext, SpamEvent};
 use types::id::Id;
+use utils::DomainPart;
 
 impl Server {
     pub async fn rcpt_resolve(
@@ -177,7 +179,10 @@ impl Server {
                 }
                 EmailCache::MailingList(id) => {
                     if let Some(list) = self.try_list(id).await? {
-                        return Ok(RcptResolution::Expand(list.recipients.clone()));
+                        return Ok(RcptResolution::Expand(
+                            self.expand_nested_lists(id, list.recipients.clone())
+                                .await?,
+                        ));
                     } else {
                         self.inner
                             .cache
@@ -207,6 +212,56 @@ impl Server {
         } else {
             Ok(RcptResolution::UnknownRecipient)
         }
+    }
+
+    async fn expand_nested_lists(
+        &self,
+        list_id: u32,
+        recipients: Arc<[Box<str>]>,
+    ) -> trc::Result<Arc<[Box<str>]>> {
+        let mut has_nested = false;
+        for member in recipients.iter() {
+            if let Some(EmailCache::MailingList(_)) = self.rcpt_id_from_email(member).await? {
+                has_nested = true;
+                break;
+            }
+        }
+        if !has_nested {
+            return Ok(recipients);
+        }
+
+        let mut expanded = Vec::with_capacity(recipients.len());
+        let mut seen: AHashSet<Box<str>> = AHashSet::with_capacity(recipients.len());
+        let mut visited = AHashSet::from_iter([list_id]);
+        let mut pending: Vec<Arc<[Box<str>]>> = Vec::new();
+        let mut members = recipients;
+
+        loop {
+            for member in members.iter() {
+                if let Some(EmailCache::MailingList(nested_id)) =
+                    self.rcpt_id_from_email(member).await?
+                {
+                    if !visited.insert(nested_id) {
+                        continue;
+                    }
+                    if let Some(nested) = self.try_list(nested_id).await? {
+                        pending.push(nested.recipients.clone());
+                        continue;
+                    }
+                }
+
+                if seen.insert(member.to_canonical_address().into()) {
+                    expanded.push(member.clone());
+                }
+            }
+
+            let Some(next) = pending.pop() else {
+                break;
+            };
+            members = next;
+        }
+
+        Ok(expanded.into())
     }
 
     pub async fn get_dkim_signers(

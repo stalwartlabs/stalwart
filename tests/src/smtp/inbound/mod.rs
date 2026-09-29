@@ -34,6 +34,7 @@ pub mod rcpt;
 pub mod rewrite;
 pub mod scripts;
 pub mod sign;
+pub mod spam_rules;
 pub mod throttle;
 pub mod vrfy;
 

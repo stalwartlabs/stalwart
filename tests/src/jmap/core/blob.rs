@@ -367,6 +367,82 @@ pub async fn test(test: &TestServer) {
     }
     test.blob_expire_all().await;
 
+    let inbox_id = Id::from(INBOX_ID).to_string();
+    let response = account
+        .jmap_method_calls(json!([
+          [
+            "Blob/upload",
+            {
+              "accountId": account.id_string(),
+              "create": {
+                "m0": {
+                  "data": [
+                    {
+                      "data:asText": concat!(
+                          "From: bill@example.com\r\n",
+                          "To: jdoe@example.com\r\n",
+                          "Subject: Blob reference import\r\n",
+                          "\r\n",
+                          "Imported through a Blob/upload creation id."
+                      )
+                    }
+                  ],
+                  "type": "message/rfc822"
+                }
+              }
+            },
+            "U0"
+          ],
+          [
+            "Email/import",
+            {
+              "accountId": account.id_string(),
+              "emails": {
+                "i0": {
+                  "blobId": "#m0",
+                  "mailboxIds": { (inbox_id.as_str()): true }
+                }
+              }
+            },
+            "I0"
+          ],
+          [
+            "Email/import",
+            {
+              "accountId": account.id_string(),
+              "emails": {
+                "i1": {
+                  "blobId": "#missing",
+                  "mailboxIds": { (inbox_id.as_str()): true }
+                }
+              }
+            },
+            "I1"
+          ]
+        ]))
+        .await;
+
+    assert_eq!(response.name_at(1), "Email/import", "{response:?}");
+    assert!(
+        response
+            .pointer("/methodResponses/1/1/created/i0/id")
+            .and_then(|v| v.as_str())
+            .is_some(),
+        "{response:?}"
+    );
+    assert!(
+        response
+            .pointer("/methodResponses/1/1/notCreated")
+            .is_none(),
+        "{response:?}"
+    );
+    assert_eq!(
+        response.error_type_at(2),
+        Some("invalidResultReference"),
+        "{response:?}"
+    );
+    test.blob_expire_all().await;
+
     // Blob/lookup
     let client = account.jmap_client().await;
     let blob_id = client

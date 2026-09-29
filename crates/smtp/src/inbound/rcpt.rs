@@ -199,8 +199,8 @@ impl<T: SessionStream> Session<T> {
                 let mut new_addr = SessionAddress::new(address);
 
                 if !self.data.rcpt_to.contains(&new_addr) {
-                    new_addr.dsn_info = format!("rfc822;{}", orig_addr.address_lcase).into();
                     new_addr.flags = orig_addr.flags;
+                    new_addr.dsn_info = orig_addr.address_lcase.into();
                     self.data.rcpt_to.push(new_addr);
                 } else {
                     trc::event!(
@@ -350,7 +350,6 @@ impl<T: SessionStream> Session<T> {
         // Expand list
         if let Some(members) = rcpt_members {
             let list_addr = self.data.rcpt_to.pop().unwrap();
-            let orcpt = format!("rfc822;{}", list_addr.address_lcase);
             for member in members.as_ref() {
                 let member_lcase = member.to_lowercase();
                 let is_local = match self
@@ -396,7 +395,7 @@ impl<T: SessionStream> Session<T> {
                 if !self.data.rcpt_to.contains(&member_addr)
                     && member_addr.address_lcase != list_addr.address_lcase
                 {
-                    member_addr.dsn_info = orcpt.clone().into();
+                    member_addr.dsn_info = list_addr.address_lcase.clone().into();
                     member_addr.flags = list_addr.flags;
                     self.data.rcpt_to.push(member_addr);
                 }

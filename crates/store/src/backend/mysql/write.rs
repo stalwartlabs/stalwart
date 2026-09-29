@@ -6,7 +6,7 @@
 
 use super::{
     DELETE_CHUNK_SIZE, ER_DUP_ENTRY, ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT, MIN_DELETE_CHUNK_SIZE,
-    MysqlStore, into_error, is_timeout_error, sql::SubspaceSql,
+    MysqlStore, into_error, is_chunk_too_large_error, sql::SubspaceSql,
 };
 use crate::{
     Key, Shape, Subspace,
@@ -305,13 +305,6 @@ impl MysqlStore {
         let to = to.serialize(0);
 
         let delete = conn.prep(&*stmts.delete_range).await.map_err(into_error)?;
-
-        match conn.exec_drop(&delete, (&from, &to)).await {
-            Ok(_) => return Ok(()),
-            Err(err) if is_timeout_error(&err) => (),
-            Err(err) => return Err(into_error(err)),
-        }
-
         let mut retry = ChunkedRetry::bounded(DELETE_CHUNK_SIZE, MIN_DELETE_CHUNK_SIZE);
 
         let boundary = conn
@@ -328,7 +321,7 @@ impl MysqlStore {
                     .await
                 {
                     Ok(next) => next,
-                    Err(err) if is_timeout_error(&err) => {
+                    Err(err) if is_chunk_too_large_error(&err) => {
                         if !retry.degrade().await {
                             return Err(into_error(err));
                         }
@@ -342,7 +335,7 @@ impl MysqlStore {
                     .await
                 {
                     Ok(_) => retry.progressed(),
-                    Err(err) if is_timeout_error(&err) => {
+                    Err(err) if is_chunk_too_large_error(&err) => {
                         if !retry.degrade().await {
                             return Err(into_error(err));
                         }
@@ -365,7 +358,7 @@ async fn purge_table(conn: &mut Conn, stmts: &SubspaceSql) -> trc::Result<()> {
 
     match conn.exec_drop(&s, ()).await {
         Ok(_) => return Ok(()),
-        Err(err) if is_timeout_error(&err) => (),
+        Err(err) if is_chunk_too_large_error(&err) => (),
         Err(err) => return Err(into_error(err)),
     }
 
@@ -393,7 +386,7 @@ async fn purge_table(conn: &mut Conn, stmts: &SubspaceSql) -> trc::Result<()> {
                 .await
             {
                 Ok(next) => next,
-                Err(err) if is_timeout_error(&err) => {
+                Err(err) if is_chunk_too_large_error(&err) => {
                     if !retry.degrade().await {
                         return Err(into_error(err));
                     }
@@ -409,7 +402,7 @@ async fn purge_table(conn: &mut Conn, stmts: &SubspaceSql) -> trc::Result<()> {
 
             match result {
                 Ok(_) => retry.progressed(),
-                Err(err) if is_timeout_error(&err) => {
+                Err(err) if is_chunk_too_large_error(&err) => {
                     if !retry.degrade().await {
                         return Err(into_error(err));
                     }

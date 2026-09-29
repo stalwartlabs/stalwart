@@ -4,20 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{HttpStore, HttpStoreConfig};
+use crate::{Value, backend::http::HttpStoreFormat, write::now};
+use ahash::AHashMap;
+use compact_str::ToCompactString;
+use rand::seq::IndexedRandom;
 use std::{
+    borrow::Cow,
     io::{BufRead, BufReader},
     sync::{Arc, atomic::Ordering},
     time::Instant,
 };
-
-use ahash::AHashMap;
-use compact_str::ToCompactString;
-use rand::seq::IndexedRandom;
 use utils::HttpLimitResponse;
-
-use crate::{Value, backend::http::HttpStoreFormat, write::now};
-
-use super::HttpStore;
 
 const BROWSER_USER_AGENTS: [&str; 5] = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -36,7 +34,7 @@ pub(crate) trait HttpStoreGet {
 impl HttpStoreGet for Arc<HttpStore> {
     fn get(&self, key: &str) -> Option<Value<'static>> {
         self.refresh();
-        self.entries.load().get(key).cloned()
+        self.entries.load().get(lookup_key(key).as_ref()).cloned()
     }
 
     fn contains(&self, key: &str) -> bool {
@@ -59,7 +57,7 @@ impl HttpStoreGet for Arc<HttpStore> {
         }
 
         self.refresh();
-        self.entries.load().contains_key(key)
+        self.entries.load().contains_key(lookup_key(key).as_ref())
     }
 
     fn refresh(&self) {
@@ -142,9 +140,10 @@ impl HttpStore {
             Box::new(&bytes[..])
         };
 
-        let mut entries = AHashMap::new();
-        for (pos, line) in BufReader::new(reader).lines().enumerate() {
-            let line_ = line.map_err(|err| {
+        let entries = self
+            .config
+            .parse_entries(BufReader::new(reader))
+            .map_err(|err| {
                 trc::StoreEvent::HttpStoreError
                     .into_err()
                     .reason(err)
@@ -153,11 +152,31 @@ impl HttpStore {
                     .details("Failed to read line")
             })?;
 
-            match &self.config.format {
+        trc::event!(
+            Store(trc::StoreEvent::HttpStoreFetch),
+            Url = self.config.url.to_compact_string(),
+            Total = entries.len(),
+            Elapsed = time.elapsed(),
+        );
+
+        Ok(entries)
+    }
+}
+
+impl HttpStoreConfig {
+    fn parse_entries(
+        &self,
+        reader: impl BufRead,
+    ) -> std::io::Result<AHashMap<String, Value<'static>>> {
+        let mut entries = AHashMap::new();
+        for (pos, line) in reader.lines().enumerate() {
+            let line_ = line?;
+
+            match &self.format {
                 HttpStoreFormat::List => {
                     let line = line_.trim();
                     if !line.is_empty() {
-                        entries.insert(line.to_string(), Value::Integer(1));
+                        entries.insert(lookup_key(line).into_owned(), Value::Integer(1));
                     }
                 }
                 HttpStoreFormat::Csv {
@@ -188,12 +207,12 @@ impl HttpStore {
                                     }
                                 } else if col_num == *index_key {
                                     entry_key.push(ch);
-                                    if entry_key.len() > self.config.max_entry_size {
+                                    if entry_key.len() > self.max_entry_size {
                                         break;
                                     }
                                 } else if index_value.is_some_and(|v| col_num == v) {
                                     entry_value.push(ch);
-                                    if entry_value.len() > self.config.max_entry_size {
+                                    if entry_value.len() > self.max_entry_size {
                                         break;
                                     }
                                 }
@@ -209,24 +228,122 @@ impl HttpStore {
                         } else {
                             Value::Integer(1)
                         };
+                        let entry_key = match lookup_key(&entry_key) {
+                            Cow::Owned(key) => key,
+                            Cow::Borrowed(_) => entry_key,
+                        };
                         entries.insert(entry_key, entry_value);
                     }
                 }
                 _ => (),
             }
 
-            if entries.len() == self.config.max_entries {
+            if entries.len() == self.max_entries {
                 break;
             }
         }
 
-        trc::event!(
-            Store(trc::StoreEvent::HttpStoreFetch),
-            Url = self.config.url.to_compact_string(),
-            Total = entries.len(),
-            Elapsed = time.elapsed(),
+        Ok(entries)
+    }
+}
+
+fn lookup_key(key: &str) -> Cow<'_, str> {
+    if key.bytes().any(|b| !b.is_ascii() || b.is_ascii_uppercase()) {
+        Cow::Owned(key.to_lowercase())
+    } else {
+        Cow::Borrowed(key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arc_swap::ArcSwap;
+    use reqwest::Client;
+    use std::{
+        sync::atomic::{AtomicBool, AtomicU64},
+        time::Duration,
+    };
+
+    fn http_store(format: HttpStoreFormat, feed: &str) -> Arc<HttpStore> {
+        let config = HttpStoreConfig {
+            id: "test".into(),
+            url: "https://lists.example.org/feed".into(),
+            retry: 0,
+            refresh: 0,
+            timeout: Duration::from_secs(1),
+            gzipped: false,
+            max_size: 1024 * 1024,
+            max_entries: 100,
+            max_entry_size: 512,
+            format,
+        };
+        let entries = config
+            .parse_entries(feed.as_bytes())
+            .expect("feed is readable");
+
+        Arc::new(HttpStore {
+            entries: ArcSwap::from_pointee(entries),
+            expires: AtomicU64::new(u64::MAX),
+            in_flight: AtomicBool::new(false),
+            config,
+            client: Client::new(),
+        })
+    }
+
+    #[test]
+    fn list_keys_ignore_case() {
+        let store = http_store(
+            HttpStoreFormat::List,
+            "https://phish.example.org/Account/Verify?Token=AbC123\n\
+             https://PHISH.example.net/lower\n",
         );
 
-        Ok(entries)
+        assert!(store.contains("https://phish.example.org/account/verify?token=abc123"));
+        assert!(store.contains("https://phish.example.org/Account/Verify?Token=AbC123"));
+        assert!(store.contains("https://phish.example.net/lower"));
+        assert!(store.contains("HTTPS://PHISH.EXAMPLE.NET/LOWER"));
+        assert!(!store.contains("https://phish.example.org/account/verify"));
+    }
+
+    #[test]
+    fn csv_keys_ignore_case() {
+        let store = http_store(
+            HttpStoreFormat::Csv {
+                index_key: 1,
+                index_value: None,
+                separator: ',',
+                skip_first: true,
+            },
+            "phish_id,url,phish_detail_url\n\
+             1,\"https://phish.example.org/Login.PHP?Id=Xy\",https://phishtank.example/1\n",
+        );
+
+        assert!(store.contains("https://phish.example.org/login.php?id=xy"));
+        assert!(store.contains("https://phish.example.org/Login.PHP?Id=Xy"));
+        assert!(!store.contains("phish_id"));
+        assert!(!store.contains("url"));
+    }
+
+    #[test]
+    fn csv_values_keep_case() {
+        let store = http_store(
+            HttpStoreFormat::Csv {
+                index_key: 0,
+                index_value: Some(1),
+                separator: ',',
+                skip_first: false,
+            },
+            "Example.ORG,Some Value\n",
+        );
+
+        assert_eq!(
+            store.get("example.org"),
+            Some(Value::Text("Some Value".into()))
+        );
+        assert_eq!(
+            store.get("EXAMPLE.org"),
+            Some(Value::Text("Some Value".into()))
+        );
     }
 }

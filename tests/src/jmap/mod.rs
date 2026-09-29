@@ -99,6 +99,7 @@ pub async fn jmap_tests() {
                 push_throttle: 500u64.into(),
                 websocket_throttle: 500u64.into(),
                 push_attempt_wait: 500u64.into(),
+                push_verify_timeout: 5000u64.into(),
                 ..Default::default()
             },
             &[
@@ -108,6 +109,7 @@ pub async fn jmap_tests() {
                 Property::PushThrottle,
                 Property::WebsocketThrottle,
                 Property::PushAttemptWait,
+                Property::PushVerifyTimeout,
             ],
         )
         .await;

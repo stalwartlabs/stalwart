@@ -475,8 +475,8 @@ impl SieveScriptIngest for Server {
         ctx.set_user_address(mail_from);
         ctx.set_envelope(Envelope::From, envelope_from);
         ctx.set_envelope(Envelope::To, envelope_to.address.as_str());
-        if let Some(orcpt) = &envelope_to.orcpt {
-            ctx.set_envelope(Envelope::Orcpt, orcpt.as_str());
+        if let Some(orcpt) = envelope_to.orcpt_parameter() {
+            ctx.set_envelope(Envelope::Orcpt, orcpt);
         }
         ctx.set_spam_status(spam_status(envelope_to.spam_percentage));
 

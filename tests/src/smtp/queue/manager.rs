@@ -33,15 +33,15 @@ async fn queue_due() {
 
     let mut message = new_message(0);
     message.message.recipients.push(build_rcpt("c", 3, 8, 9));
-    message.save_changes(&local.server, 0.into()).await;
+    message.save_changes(&local.server, 0.into(), None).await;
 
     let mut message = new_message(1);
     message.message.recipients.push(build_rcpt("b", 2, 6, 7));
-    message.save_changes(&local.server, 0.into()).await;
+    message.save_changes(&local.server, 0.into(), None).await;
 
     let mut message = new_message(2);
     message.message.recipients.push(build_rcpt("a", 1, 4, 5));
-    message.save_changes(&local.server, 0.into()).await;
+    message.save_changes(&local.server, 0.into(), None).await;
 
     for domain in vec!["a", "b", "c"].into_iter() {
         let now = now();

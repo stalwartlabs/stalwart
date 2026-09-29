@@ -12,7 +12,7 @@ use common::{
 };
 use std::{sync::Arc, time::Instant};
 use store::ahash::AHashMap;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 use trc::ServerEvent;
 
 #[derive(Default)]
@@ -84,7 +84,7 @@ pub fn spawn_push_router(inner: Arc<Inner>, mut change_rx: mpsc::Receiver<PushEv
                 } => {
                     // Publish event to cluster
                     if broadcast
-                        && let Some(broadcast_tx) = &inner.ipc.broadcast_tx.clone()
+                        && let Some(broadcast_tx) = inner.ipc.broadcast_tx.as_ref()
                         && broadcast_tx
                             .send(BroadcastEvent::PushNotification(notification.clone()))
                             .await
@@ -102,26 +102,30 @@ pub fn spawn_push_router(inner: Arc<Inner>, mut change_rx: mpsc::Receiver<PushEv
                         for subscriber in &subscribers.ipc {
                             if let Some(notification) = notification.filter_types(&subscriber.types)
                             {
-                                if subscriber.is_valid() {
-                                    let subscriber_tx = subscriber.tx.clone();
+                                match subscriber.tx.try_send(notification) {
+                                    Ok(()) => {}
+                                    Err(TrySendError::Full(notification)) => {
+                                        let subscriber_tx = subscriber.tx.clone();
 
-                                    tokio::spawn(async move {
-                                        // Timeout after 500ms in case there is a blocked client
-                                        if subscriber_tx
-                                            .send_timeout(notification, SEND_TIMEOUT)
-                                            .await
-                                            .is_err()
-                                        {
-                                            trc::event!(
-                                                Server(ServerEvent::ThreadError),
-                                                Details =
-                                                    "Error sending state change to subscriber.",
-                                                CausedBy = trc::location!()
-                                            );
-                                        }
-                                    });
-                                } else {
-                                    purge_needed = true;
+                                        tokio::spawn(async move {
+                                            // Timeout after 500ms in case there is a blocked client
+                                            if subscriber_tx
+                                                .send_timeout(notification, SEND_TIMEOUT)
+                                                .await
+                                                .is_err()
+                                            {
+                                                trc::event!(
+                                                    Server(ServerEvent::ThreadError),
+                                                    Details =
+                                                        "Error sending state change to subscriber.",
+                                                    CausedBy = trc::location!()
+                                                );
+                                            }
+                                        });
+                                    }
+                                    Err(TrySendError::Closed(_)) => {
+                                        purge_needed = true;
+                                    }
                                 }
                             }
                         }
@@ -144,7 +148,7 @@ pub fn spawn_push_router(inner: Arc<Inner>, mut change_rx: mpsc::Receiver<PushEv
                 } => {
                     // Publish event to cluster
                     if broadcast
-                        && let Some(broadcast_tx) = &inner.ipc.broadcast_tx.clone()
+                        && let Some(broadcast_tx) = inner.ipc.broadcast_tx.as_ref()
                         && broadcast_tx
                             .send(BroadcastEvent::PushServerUpdate(account_id))
                             .await

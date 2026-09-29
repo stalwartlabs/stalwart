@@ -336,6 +336,10 @@ impl ResolveReference for ImportEmailRequest {
     fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()> {
         // Resolve email mailbox references
         for email in self.emails.values_mut() {
+            if let MaybeIdReference::Reference(ir) = &email.blob_id {
+                email.blob_id = MaybeIdReference::Id(response.eval_blob_id_reference(ir)?);
+            }
+
             match &mut email.mailbox_ids {
                 MaybeResultReference::Reference(reference) => {
                     email.mailbox_ids = MaybeResultReference::Value(

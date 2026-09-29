@@ -12,8 +12,11 @@ use registry::schema::{enums::CompressionAlgo, structs::Application};
 use std::{
     borrow::Cow,
     io::{self, Cursor, Read},
-    path::PathBuf,
-    sync::Arc,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 use store::{
@@ -37,16 +40,18 @@ enum IndexEdit<'x> {
 pub struct WebApplications {
     applications: ArcSwap<Vec<WebApplicationManager>>,
     routes: ArcSwap<AHashMap<String, Arc<AppRoutes>>>,
+    generation: AtomicU64,
 }
 
 pub struct AppRoutes {
     resources: AHashMap<String, Resource<PathBuf>>,
     oauth_client_id_meta: Option<String>,
+    _bundle_dir: TempDir,
 }
 
 #[derive(Clone)]
 pub struct WebApplicationManager {
-    bundle_path: TempDir,
+    base_path: PathBuf,
     prefixes: Vec<String>,
     description: String,
     url: String,
@@ -80,6 +85,7 @@ impl WebApplications {
         Self {
             applications: ArcSwap::new(Arc::new(Vec::new())),
             routes: ArcSwap::new(Arc::new(AHashMap::new())),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -129,47 +135,54 @@ impl WebApplications {
     }
 
     pub async fn unpack_all(&self, server: &Server, update: bool) {
-        let mut routes = AHashMap::new();
+        let previous = self.routes.load_full();
+        let sweep_orphans = previous.is_empty();
+        let mut routes = AHashMap::with_capacity(previous.len());
+
         for app in self.applications.load().as_ref() {
-            if update && let Err(err) = app.delete(server).await {
-                trc::event!(
-                    Resource(trc::ResourceEvent::Error),
-                    Reason = err,
-                    Url = app.url.clone(),
-                    Details = format_compact!(
-                        "Failed to delete application bundle for prefixes: {}",
-                        app.prefixes.join(", ")
-                    )
-                );
-            }
-            match app.unpack(server).await {
-                Ok(resources) => {
-                    let app_routes = Arc::new(AppRoutes {
-                        resources,
-                        oauth_client_id_meta: app
-                            .oauth_client_id
-                            .as_deref()
-                            .map(oauth_client_id_meta),
-                    });
+            match app
+                .unpack(server, self.next_generation(), update, sweep_orphans)
+                .await
+            {
+                Ok(app_routes) => {
+                    let app_routes = Arc::new(app_routes);
 
                     for prefix in &app.prefixes {
                         routes.insert(prefix.clone(), app_routes.clone());
                     }
                 }
                 Err(err) => {
+                    let mut is_retained = false;
+                    for prefix in &app.prefixes {
+                        if let Some(app_routes) = previous.get(prefix) {
+                            routes.insert(prefix.clone(), app_routes.clone());
+                            is_retained = true;
+                        }
+                    }
+
                     trc::event!(
                         Resource(trc::ResourceEvent::Error),
                         Reason = err,
                         Url = app.url.clone(),
                         Details = format_compact!(
-                            "Failed to unpack application for prefixes: {}",
-                            app.prefixes.join(", ")
+                            "Failed to unpack application for prefixes: {}, {}",
+                            app.prefixes.join(", "),
+                            if is_retained {
+                                "the previously unpacked bundle remains in service"
+                            } else {
+                                "no bundle is available to serve"
+                            }
                         )
                     );
                 }
             }
         }
+
         self.routes.store(Arc::new(routes));
+    }
+
+    fn next_generation(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -183,7 +196,7 @@ impl WebApplicationManager {
             .join(app.id.id().to_string());
 
         Self {
-            bundle_path: TempDir::new(base_path),
+            base_path,
             blob_key: BlobHash::generate(format!("{}{}", APP_BLOB_PREFIX, app.id.id()).as_bytes()),
             url: app.object.resource_url,
             description: app.object.description,
@@ -203,82 +216,43 @@ impl WebApplicationManager {
         }
     }
 
-    async fn unpack(&self, server: &Server) -> trc::Result<AHashMap<String, Resource<PathBuf>>> {
-        // Delete any existing bundles
-        self.bundle_path.clean().await.map_err(unpack_error)?;
-
-        // Obtain application bundle
-        let bundle = if let Some(bundle) = server
-            .blob_store()
-            .get_blob(self.blob_key.as_slice(), 0..usize::MAX)
-            .await?
-        {
-            bundle
+    async fn unpack(
+        &self,
+        server: &Server,
+        generation: u64,
+        force_refresh: bool,
+        sweep_orphans: bool,
+    ) -> trc::Result<AppRoutes> {
+        let cached = if force_refresh {
+            None
         } else {
-            // Fetch app bundle
-            let resource = fetch_resource(&self.url, None, Duration::from_secs(60), MAX_APP_SIZE)
-                .await
-                .map_err(|err| {
-                    trc::ResourceEvent::Error
-                        .caused_by(trc::location!())
-                        .ctx(Key::Url, self.url.clone())
-                        .reason(err)
-                        .details("Failed to fetch application bundle")
-                })?;
-
-            // Store in blob store for future use
             server
                 .blob_store()
-                .put_blob(self.blob_key.as_slice(), &resource, CompressionAlgo::None)
-                .await
-                .caused_by(trc::location!())?;
-
-            // Schedule expiration
-            let mut batch = BatchBuilder::new();
-            batch
-                .set(
-                    BlobOp::Link {
-                        hash: self.blob_key.clone(),
-                        to: BlobLink::Temporary {
-                            until: now() + self.expiry,
-                        },
-                    },
-                    vec![],
-                )
-                .set(
-                    BlobOp::Commit {
-                        hash: self.blob_key.clone(),
-                    },
-                    Vec::new(),
-                );
-            server
-                .store()
-                .write_batch(&mut batch)
-                .await
-                .caused_by(trc::location!())?;
-
-            trc::event!(
-                Resource(trc::ResourceEvent::ApplicationUpdated),
-                Url = self.url.clone(),
-                Details = self.description.clone(),
-            );
-
-            resource
+                .get_blob(self.blob_key.as_slice(), 0..usize::MAX)
+                .await?
+        };
+        let is_cached = cached.is_some();
+        let bundle = match cached {
+            Some(bundle) => bundle,
+            None => self.fetch().await?,
         };
 
+        let staging = TempDir::new(self.base_path.join(format!("{:x}-{generation:x}", now())));
+        staging.create().await.map_err(unpack_error)?;
+
         let url = self.url.clone();
-        let bundle_path = self.bundle_path.path.clone();
-        let routes = tokio::task::spawn_blocking(move || -> trc::Result<_> {
-            let mut bundle = zip::ZipArchive::new(Cursor::new(bundle)).map_err(|err| {
+        let bundle_path = staging.path.clone();
+        let (resources, bundle) = tokio::task::spawn_blocking(move || -> trc::Result<_> {
+            let mut archive = zip::ZipArchive::new(Cursor::new(bundle)).map_err(|err| {
                 trc::ResourceEvent::Error
                     .caused_by(trc::location!())
                     .reason(err)
                     .ctx(Key::Url, url.clone())
                     .details("Failed to decompress application bundle")
             })?;
-            let mut routes = AHashMap::new();
-            for i in 0..bundle.len() {
-                let mut file = bundle.by_index(i).map_err(|err| {
+            let mut resources = AHashMap::with_capacity(archive.len());
+            for i in 0..archive.len() {
+                let mut file = archive.by_index(i).map_err(|err| {
                     trc::ResourceEvent::Error
                         .caused_by(trc::location!())
                         .reason(err)
@@ -316,9 +290,9 @@ impl WebApplicationManager {
                     contents: path,
                 };
 
-                routes.insert(file_name, resource);
+                resources.insert(file_name, resource);
             }
-            Ok(routes)
+            Ok((resources, archive.into_inner().into_inner()))
         })
         .await
         .map_err(|err| {
@@ -328,21 +302,81 @@ impl WebApplicationManager {
                 .details("Bundle unpack task panicked")
         })??;
 
+        if !is_cached && let Err(err) = self.cache(server, &bundle).await {
+            trc::event!(
+                Resource(trc::ResourceEvent::Error),
+                Reason = err,
+                Url = self.url.clone(),
+                Details = "Failed to cache application bundle, it will be downloaded again"
+            );
+        }
+
+        if sweep_orphans {
+            remove_siblings(&self.base_path, &staging.path).await;
+        }
+
         trc::event!(
             Resource(trc::ResourceEvent::ApplicationUnpacked),
             Url = self.url.clone(),
-            Path = CompactString::from(self.bundle_path.path.to_string_lossy()),
+            Path = CompactString::from(staging.path.to_string_lossy()),
         );
 
-        Ok(routes)
+        Ok(AppRoutes {
+            resources,
+            oauth_client_id_meta: self.oauth_client_id.as_deref().map(oauth_client_id_meta),
+            _bundle_dir: staging,
+        })
     }
 
-    async fn delete(&self, server: &Server) -> trc::Result<()> {
+    async fn fetch(&self) -> trc::Result<Vec<u8>> {
+        fetch_resource(&self.url, None, Duration::from_secs(60), MAX_APP_SIZE)
+            .await
+            .map_err(|err| {
+                trc::ResourceEvent::Error
+                    .caused_by(trc::location!())
+                    .ctx(Key::Url, self.url.clone())
+                    .reason(err)
+                    .details("Failed to fetch application bundle")
+            })
+    }
+
+    async fn cache(&self, server: &Server, bundle: &[u8]) -> trc::Result<()> {
         server
             .blob_store()
-            .delete_blob(self.blob_key.as_slice())
+            .put_blob(self.blob_key.as_slice(), bundle, CompressionAlgo::None)
             .await
-            .map(|_| ())
+            .caused_by(trc::location!())?;
+
+        let mut batch = BatchBuilder::new();
+        batch
+            .set(
+                BlobOp::Link {
+                    hash: self.blob_key.clone(),
+                    to: BlobLink::Temporary {
+                        until: now() + self.expiry,
+                    },
+                },
+                vec![],
+            )
+            .set(
+                BlobOp::Commit {
+                    hash: self.blob_key.clone(),
+                },
+                Vec::new(),
+            );
+        server
+            .store()
+            .write_batch(&mut batch)
+            .await
+            .caused_by(trc::location!())?;
+
+        trc::event!(
+            Resource(trc::ResourceEvent::ApplicationUpdated),
+            Url = self.url.clone(),
+            Details = self.description.clone(),
+        );
+
+        Ok(())
     }
 
     pub async fn delete_bundle(server: &Server, app_id: Id) -> trc::Result<()> {
@@ -362,7 +396,6 @@ impl Resource<Vec<u8>> {
     }
 }
 
-#[derive(Clone)]
 pub struct TempDir {
     pub path: PathBuf,
 }
@@ -372,11 +405,36 @@ impl TempDir {
         TempDir { path }
     }
 
-    pub async fn clean(&self) -> io::Result<()> {
+    pub async fn create(&self) -> io::Result<()> {
         if tokio::fs::metadata(&self.path).await.is_ok() {
             let _ = tokio::fs::remove_dir_all(&self.path).await;
         }
-        tokio::fs::create_dir(&self.path).await
+        tokio::fs::create_dir_all(&self.path).await
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+async fn remove_siblings(base_path: &Path, keep: &Path) {
+    let Ok(mut entries) = tokio::fs::read_dir(base_path).await else {
+        return;
+    };
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+
+        if matches!(entry.file_type().await, Ok(file_type) if file_type.is_dir()) {
+            let _ = tokio::fs::remove_dir_all(&path).await;
+        } else {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
     }
 }
 
@@ -384,12 +442,6 @@ fn unpack_error(err: std::io::Error) -> trc::Error {
     trc::ResourceEvent::Error
         .reason(err)
         .details("Failed to unpack application bundle")
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
-    }
 }
 
 impl Default for WebApplications {
@@ -522,9 +574,9 @@ mod tests {
         );
     }
 
-    async fn fixture(name: &str, client_id: Option<&str>) -> (WebApplications, TempDir) {
+    async fn fixture(name: &str, client_id: Option<&str>) -> WebApplications {
         let dir = TempDir::new(std::env::temp_dir().join(format!("stalwart-app-{name}")));
-        dir.clean().await.unwrap();
+        dir.create().await.unwrap();
         tokio::fs::write(dir.path.join("index.html"), INDEX)
             .await
             .unwrap();
@@ -545,6 +597,7 @@ mod tests {
         let routes = Arc::new(AppRoutes {
             resources,
             oauth_client_id_meta: client_id.map(oauth_client_id_meta),
+            _bundle_dir: dir,
         });
 
         let mut map = AHashMap::new();
@@ -554,7 +607,7 @@ mod tests {
         let apps = WebApplications::new();
         apps.routes.store(Arc::new(map));
 
-        (apps, dir)
+        apps
     }
 
     async fn serve_html(apps: &WebApplications, prefix: &str, path: &str) -> String {
@@ -566,7 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn serving_index_injects_the_prefix_and_client_id() {
-        let (apps, _dir) = fixture("serve-configured", Some("pocket-id-client")).await;
+        let apps = fixture("serve-configured", Some("pocket-id-client")).await;
 
         let html = serve_html(&apps, "admin", "index.html").await;
         assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
@@ -585,7 +638,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_paths_fall_back_to_a_rewritten_index() {
-        let (apps, _dir) = fixture("serve-fallback", Some("pocket-id-client")).await;
+        let apps = fixture("serve-fallback", Some("pocket-id-client")).await;
 
         let html = serve_html(&apps, "admin", "settings/directory").await;
         assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
@@ -597,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn assets_and_unknown_prefixes_are_untouched() {
-        let (apps, _dir) = fixture("serve-assets", Some("pocket-id-client")).await;
+        let apps = fixture("serve-assets", Some("pocket-id-client")).await;
 
         let served = apps.serve("admin", "app.js").await.unwrap().unwrap();
         assert_eq!(served.resource.contents, b"export const x = 1;\n");
@@ -609,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn serving_index_without_a_client_id_keeps_the_placeholder() {
-        let (apps, _dir) = fixture("serve-unconfigured", None).await;
+        let apps = fixture("serve-unconfigured", None).await;
 
         let html = serve_html(&apps, "admin", "index.html").await;
         assert!(html.contains("<base href=\"/admin/\" />"), "{html}");
@@ -624,5 +677,66 @@ mod tests {
         let bundle = "<head><title>x</title></head>";
 
         assert_eq!(rewrite_index(bundle, "admin", None), bundle.as_bytes());
+    }
+    #[tokio::test]
+    async fn missing_parent_directories_are_created() {
+        let base = std::env::temp_dir().join("stalwart-app-nested");
+        let _ = tokio::fs::remove_dir_all(&base).await;
+
+        let dir = TempDir::new(base.join("webui").join("0"));
+        dir.create().await.unwrap();
+
+        assert!(tokio::fs::metadata(&dir.path).await.is_ok());
+
+        drop(dir);
+        let _ = tokio::fs::remove_dir_all(&base).await;
+    }
+
+    #[tokio::test]
+    async fn dropping_the_routes_removes_the_bundle_directory() {
+        let apps = fixture("drop-guard", None).await;
+        let path = apps
+            .routes
+            .load()
+            .get("admin")
+            .unwrap()
+            ._bundle_dir
+            .path
+            .clone();
+
+        assert!(tokio::fs::metadata(&path).await.is_ok());
+
+        apps.routes.store(Arc::new(AHashMap::new()));
+
+        assert!(tokio::fs::metadata(&path).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn sweeping_orphans_spares_the_current_generation() {
+        let base = std::env::temp_dir().join("stalwart-app-sweep");
+        let _ = tokio::fs::remove_dir_all(&base).await;
+
+        let current = TempDir::new(base.join("1"));
+        current.create().await.unwrap();
+        let orphan = base.join("0");
+        tokio::fs::create_dir_all(&orphan).await.unwrap();
+        let stray = base.join("webui.zip");
+        tokio::fs::write(&stray, b"not a bundle").await.unwrap();
+
+        remove_siblings(&base, &current.path).await;
+
+        assert!(tokio::fs::metadata(&current.path).await.is_ok());
+        assert!(tokio::fs::metadata(&orphan).await.is_err());
+        assert!(tokio::fs::metadata(&stray).await.is_err());
+
+        drop(current);
+        let _ = tokio::fs::remove_dir_all(&base).await;
+    }
+
+    #[test]
+    fn generations_never_repeat() {
+        let apps = WebApplications::new();
+
+        assert_ne!(apps.next_generation(), apps.next_generation());
     }
 }

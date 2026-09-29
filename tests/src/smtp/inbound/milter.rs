@@ -26,9 +26,12 @@ use registry::{
     schema::{
         enums::{self, MtaStage},
         prelude::{ObjectType, Property},
-        structs::{Expression, MtaHook, MtaMilter, MtaStageRcpt},
+        structs::{
+            Expression, ExpressionMatch, MtaHook, MtaMilter, MtaStageData, MtaStageRcpt,
+            SieveSystemScript,
+        },
     },
-    types::map::Map,
+    types::{list::List, map::Map},
 };
 use serde::Deserialize;
 use smtp::{
@@ -236,6 +239,34 @@ async fn mta_hook_session() {
             ..Default::default()
         })
         .await;
+    admin
+        .registry_create_object(MtaStageData {
+            script: Expression {
+                match_: List::from_iter([ExpressionMatch {
+                    if_: "sender = 'quarantine@doe.org'".into(),
+                    then: "'tag_quarantine'".into(),
+                }]),
+                else_: "false".into(),
+            },
+            ..Default::default()
+        })
+        .await;
+    admin
+        .registry_create_object(SieveSystemScript {
+            contents: concat!(
+                "require [\"editheader\"];\n",
+                "addheader \"X-Sieve\" \"Seen\";\n",
+                "if exists \"X-Quarantine\" {\n",
+                "  deleteheader \"Subject\";\n",
+                "  addheader \"Subject\" \"INFECTED\";\n",
+                "}\n"
+            )
+            .into(),
+            description: None,
+            is_active: true,
+            name: "tag_quarantine".into(),
+        })
+        .await;
     admin.reload_settings().await;
     test.reload_core();
     test.expect_reload_settings().await;
@@ -353,6 +384,41 @@ async fn mta_hook_session() {
         .await
         .assert_contains("X-Spam: Yes")
         .assert_contains("123456");
+
+    // Test quarantine
+    session
+        .send_message(
+            "quarantine_only@doe.org",
+            &["bill@foobar.org"],
+            "test:no_dkim",
+            "250 2.0.0",
+        )
+        .await;
+    test.expect_message()
+        .await
+        .read_lines(&test)
+        .await
+        .assert_contains("X-Quarantine: true")
+        .assert_contains("Subject: Is dinner ready?")
+        .assert_contains("Are you hungry yet?");
+
+    // Test that a DATA stage Sieve script sees and preserves hook modifications
+    session
+        .send_message(
+            "quarantine@doe.org",
+            &["bill@foobar.org"],
+            "test:no_dkim",
+            "250 2.0.0",
+        )
+        .await;
+    test.expect_message()
+        .await
+        .read_lines(&test)
+        .await
+        .assert_contains("X-Quarantine: true")
+        .assert_contains("X-Sieve: Seen")
+        .assert_contains("Subject: INFECTED")
+        .assert_contains("Are you hungry yet?");
 }
 
 #[test]
@@ -868,6 +934,11 @@ fn handle_mta_hook(request: Request, tests: Arc<Vec<HeaderTest>>) -> hooks::Resp
         },
         "discard" => hooks::Response {
             action: hooks::Action::Discard,
+            response: None,
+            modifications: vec![],
+        },
+        "quarantine" | "quarantine_only" => hooks::Response {
+            action: hooks::Action::Quarantine,
             response: None,
             modifications: vec![],
         },

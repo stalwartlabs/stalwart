@@ -115,7 +115,7 @@ impl SpamFilterAnalyzeUrl for Server {
 
                     if !ctx.result.has_tag("URL_REDIRECTOR_NESTED") {
                         let mut redirect_count = 1;
-                        let mut url_redirect = Cow::Borrowed(url.element.url.as_str());
+                        let mut url_redirect = url.element.request_url();
 
                         while redirect_count <= 3 {
                             match http_get_header(
@@ -136,7 +136,8 @@ impl SpamFilterAnalyzeUrl for Server {
                                         )
                                         .await
                                         {
-                                            url_redirect = Cow::Owned(location.url);
+                                            url_redirect =
+                                                Cow::Owned(location.request_url().into_owned());
                                             redirect_count += 1;
                                             continue;
                                         } else {
@@ -510,6 +511,15 @@ impl<'x> UrlParts<'x> {
                 .is_some_and(|url| url.host.fqdn.starts_with("www."))
     }
 
+    pub fn request_url(&self) -> Cow<'_, str> {
+        let url = self.url_original.trim();
+        if self.has_scheme {
+            Cow::Borrowed(url)
+        } else {
+            Cow::Owned([HTTPS_SCHEME, url].concat())
+        }
+    }
+
     fn parse(url: &str) -> Option<UrlParsed> {
         match url.as_bytes().first() {
             None | Some(b'/') => return None,
@@ -531,5 +541,21 @@ impl<'x> UrlParts<'x> {
             url_parsed: self.url_parsed.clone(),
             has_scheme: self.has_scheme,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_url_keeps_case() {
+        let url = UrlParts::new(" https://Bit.ly/3AbCdEf ");
+        assert_eq!(url.url, "https://bit.ly/3abcdef");
+        assert_eq!(url.request_url(), "https://Bit.ly/3AbCdEf");
+
+        let url = UrlParts::no_scheme("Bit.ly/3AbCdEf");
+        assert_eq!(url.url, "https://bit.ly/3abcdef");
+        assert_eq!(url.request_url(), "https://Bit.ly/3AbCdEf");
     }
 }

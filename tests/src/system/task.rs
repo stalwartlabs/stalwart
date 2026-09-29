@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::{account::Account, server::TestServer};
+use crate::utils::{account::Account, jmap::JmapUtils, server::TestServer};
 use registry::{
     schema::{
         enums::TaskStoreMaintenanceType,
@@ -297,14 +297,29 @@ impl Account {
         .await
     }
 
-    pub async fn tasks(&self) -> Vec<TaskId> {
+    pub async fn tasks(&self) -> Option<Vec<TaskId>> {
         let ids = self.task_ids().await;
-        let mut results = Vec::with_capacity(ids.len());
-        for id in ids {
-            let sample = self.registry_get::<Task>(id).await;
-            results.push(TaskId { id, task: sample });
+        if ids.is_empty() {
+            return Some(Vec::new());
         }
-        results
+
+        let response = self.registry_get_many(ObjectType::Task, &ids).await;
+        if response.not_found().next().is_some() {
+            return None;
+        }
+
+        Some(
+            response
+                .list()
+                .iter()
+                .map(|item| TaskId {
+                    id: item.object_id(),
+                    task: serde_json::from_str(&item.to_string()).unwrap_or_else(|err| {
+                        panic!("Failed to deserialize {item}: {err}");
+                    }),
+                })
+                .collect(),
+        )
     }
 
     async fn assert_no_tasks(&self) {
@@ -340,19 +355,28 @@ impl Account {
     ) -> Vec<TaskId> {
         let mut attempt = 0;
         loop {
-            let tasks = self.tasks().await;
-            if tasks.len() == count && tasks.iter().all(&is_expected) {
-                return tasks;
+            match self.tasks().await {
+                Some(tasks) if tasks.len() == count && tasks.iter().all(&is_expected) => {
+                    return tasks;
+                }
+                Some(tasks) => {
+                    attempt += 1;
+                    assert!(
+                        attempt < TASK_WAIT_ATTEMPTS,
+                        "Expected {} tasks, found {}: {:?}",
+                        count,
+                        tasks.len(),
+                        tasks
+                    );
+                }
+                None => {
+                    attempt += 1;
+                    assert!(
+                        attempt < TASK_WAIT_ATTEMPTS,
+                        "Task/query keeps returning ids that Task/get reports as not found"
+                    );
+                }
             }
-
-            attempt += 1;
-            assert!(
-                attempt < TASK_WAIT_ATTEMPTS,
-                "Expected {} tasks, found {}: {:?}",
-                count,
-                tasks.len(),
-                tasks
-            );
             tokio::time::sleep(TASK_WAIT_INTERVAL).await;
         }
     }

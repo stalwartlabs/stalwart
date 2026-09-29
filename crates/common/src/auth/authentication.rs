@@ -9,7 +9,7 @@ use crate::{
     auth::{
         AccessToken, AuthRequest, DomainCache,
         credential::{ApiKey, AppPassword},
-        oauth::GrantType,
+        oauth::{GrantType, token::TOKEN_HEADER},
     },
 };
 use compact_str::CompactString;
@@ -22,7 +22,8 @@ use registry::schema::{
     enums::Permission,
     structs::{self, Credential},
 };
-use std::{net::IpAddr, sync::Arc};
+use serde::Deserialize;
+use std::{borrow::Cow, net::IpAddr, sync::Arc};
 use store::write::now;
 use trc::AddContext;
 
@@ -326,19 +327,12 @@ impl Server {
                 // Obtain external directory, if any. When no username is supplied
                 // (e.g. HTTP bearer auth), peek at the JWT claims to find the
                 // user's domain so per-domain OIDC directories are reachable.
-                let directory = if let Some(username) = username.as_deref().map(UsernameParts::new)
-                {
-                    if let Some(domain_name) = username.auth_as().domain() {
-                        self.get_directory_for_domain(domain_name).await?
-                    } else if let Some(domain_name) = extract_jwt_domain(token) {
-                        self.get_directory_for_domain(&domain_name).await?
-                    } else {
-                        self.get_default_directory()
-                    }
-                } else if let Some(domain_name) = extract_jwt_domain(token) {
-                    self.get_directory_for_domain(&domain_name).await?
-                } else {
-                    self.get_default_directory()
+                let directory = match username.as_deref().map(UsernameParts::new) {
+                    Some(username) => match username.auth_as().domain() {
+                        Some(domain_name) => self.get_directory_for_domain(domain_name).await?,
+                        None => self.get_directory_for_token(token).await?,
+                    },
+                    None => self.get_directory_for_token(token).await?,
                 };
 
                 // Try external directory authentication first if supported, then fallback to internal OAuth.
@@ -541,6 +535,45 @@ impl Server {
         Ok(self.get_default_directory())
     }
 
+    async fn get_directory_for_token(&self, token: &str) -> trc::Result<Option<&Arc<Directory>>> {
+        let Some(payload) = JwtClaims::decode_payload(token) else {
+            return Ok(self.get_default_directory());
+        };
+        let Some(claims) = JwtClaims::parse(&payload) else {
+            return Ok(self.get_default_directory());
+        };
+
+        match (claims.domain(), claims.iss.as_deref()) {
+            (Some(domain_name), _) => self.get_directory_for_domain(domain_name).await,
+            (None, Some(issuer)) => Ok(self
+                .get_directory_for_issuer(issuer)
+                .or_else(|| self.get_default_directory())),
+            (None, None) => Ok(self.get_default_directory()),
+        }
+    }
+
+    fn get_directory_for_issuer(&self, issuer: &str) -> Option<&Arc<Directory>> {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if self.core.is_enterprise_edition() {
+            let mut matches = self.core.storage.directories.values().filter(|directory| {
+                directory
+                    .oidc_discovery_document()
+                    .is_some_and(|discovery| discovery.document.issuer == issuer)
+            });
+
+            return match (matches.next(), matches.next()) {
+                (Some(directory), None) => Some(directory),
+                _ => None,
+            };
+        }
+        // SPDX-SnippetEnd
+
+        None
+    }
+
     pub fn get_directory_for_cached_domain(&self, domain: &DomainCache) -> Option<&Arc<Directory>> {
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -558,25 +591,50 @@ impl Server {
     }
 }
 
-fn extract_jwt_domain(token: &str) -> Option<String> {
-    let mut parts = token.split('.');
-    let _header = parts.next()?;
-    let payload = parts.next()?;
-    let _signature = parts.next()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    let payload_bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let claims: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
-    for claim in ["email", "preferred_username", "upn"] {
-        if let Some(val) = claims.get(claim).and_then(|v| v.as_str())
-            && let Some((_, domain)) = val.rsplit_once('@')
-            && !domain.is_empty()
-        {
-            return Some(domain.to_ascii_lowercase());
+#[derive(Deserialize)]
+struct JwtClaims<'x> {
+    #[serde(borrow, default)]
+    iss: Option<Cow<'x, str>>,
+    #[serde(borrow, default)]
+    email: Option<Cow<'x, str>>,
+    #[serde(borrow, default)]
+    preferred_username: Option<Cow<'x, str>>,
+    #[serde(borrow, default)]
+    upn: Option<Cow<'x, str>>,
+}
+
+impl<'x> JwtClaims<'x> {
+    fn decode_payload(token: &str) -> Option<Vec<u8>> {
+        if token.starts_with(TOKEN_HEADER) {
+            return None;
         }
+
+        let mut parts = token.split('.');
+        let _header = parts.next()?;
+        let payload = parts.next()?;
+        let _signature = parts.next()?;
+        if parts.next().is_some() {
+            return None;
+        }
+
+        URL_SAFE_NO_PAD.decode(payload).ok()
     }
-    None
+
+    fn parse(payload: &'x [u8]) -> Option<Self> {
+        serde_json::from_slice(payload).ok()
+    }
+
+    fn domain(&self) -> Option<&str> {
+        [&self.email, &self.preferred_username, &self.upn]
+            .into_iter()
+            .flatten()
+            .find_map(|claim| {
+                claim
+                    .rsplit_once('@')
+                    .map(|(_, domain)| domain)
+                    .filter(|domain| !domain.is_empty())
+            })
+    }
 }
 
 impl UsernameParts {
@@ -671,6 +729,79 @@ impl AuthRequest {
         match &self.credentials {
             Credentials::Basic { username, .. } => Some(username.as_str()),
             Credentials::Bearer { username, .. } => username.as_deref(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn jwt(payload: &str) -> String {
+        format!(
+            "eyJhbGciOiJSUzI1NiJ9.{}.c2lnbmF0dXJl",
+            URL_SAFE_NO_PAD.encode(payload)
+        )
+    }
+
+    fn hints(token: &str) -> Option<(Option<String>, Option<String>)> {
+        let payload = JwtClaims::decode_payload(token)?;
+        let claims = JwtClaims::parse(&payload)?;
+
+        Some((
+            claims.domain().map(str::to_string),
+            claims.iss.as_deref().map(str::to_string),
+        ))
+    }
+
+    #[test]
+    fn jwt_claims_are_extracted() {
+        for (payload, domain, issuer) in [
+            (
+                r#"{"iss":"https://idp.example.org","email":"John@Example.ORG"}"#,
+                Some("Example.ORG"),
+                Some("https://idp.example.org"),
+            ),
+            (
+                r#"{"preferred_username":"jane@example.net","upn":"jane@example.com"}"#,
+                Some("example.net"),
+                None,
+            ),
+            (
+                r#"{"email":"broken@","upn":"jane@example.com"}"#,
+                Some("example.com"),
+                None,
+            ),
+            (
+                r#"{"iss":"https://idp.example.org","sub":"5db2d1b6","aud":["a","b"],"scope":"openid"}"#,
+                None,
+                Some("https://idp.example.org"),
+            ),
+            (r#"{"sub":"5db2d1b6"}"#, None, None),
+            (r#"{"email":"jane@example.net"}"#, Some("example.net"), None),
+        ] {
+            assert_eq!(
+                hints(&jwt(payload)),
+                Some((domain.map(str::to_string), issuer.map(str::to_string))),
+                "Unexpected claims for {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_jwt_tokens_are_ignored() {
+        for token in [
+            "sw1.eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlLm9yZyJ9",
+            "sw1.eyJhbGciOiJSUzI1NiJ9",
+            "opaque-token",
+            "one.two",
+            "one.two.three.four",
+            "",
+        ] {
+            assert!(
+                JwtClaims::decode_payload(token).is_none(),
+                "Token {token:?} was parsed as a JWT"
+            );
         }
     }
 }

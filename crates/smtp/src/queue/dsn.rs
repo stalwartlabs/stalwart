@@ -10,10 +10,11 @@ use super::{
     Recipient, Status,
 };
 use crate::inbound::dkim::DkimSign;
-use crate::queue::spool::QueueParams;
+use crate::queue::spool::{DSN_RETRY, QueueParams};
 use crate::queue::{MessageWrapper, UnexpectedResponse};
 use common::Server;
 use compact_str::{CompactString, ToCompactString};
+use email::message::delivery::ORCPT_ADDR_TYPE;
 use mail_builder::MessageBuilder;
 use mail_builder::headers::HeaderType;
 use mail_builder::headers::content_type::ContentType;
@@ -26,15 +27,23 @@ use std::fmt::Write;
 use std::future::Future;
 use store::write::now;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DsnStatus {
+    Completed,
+    Deferred,
+}
+
 pub trait SendDsn: Sync + Send {
-    fn send_dsn(&self, message: &mut MessageWrapper) -> impl Future<Output = ()> + Send;
+    fn send_dsn(&self, message: &mut MessageWrapper) -> impl Future<Output = DsnStatus> + Send;
     fn log_dsn(&self, message: &MessageWrapper) -> impl Future<Output = ()> + Send;
 }
 
 impl SendDsn for Server {
-    async fn send_dsn(&self, message: &mut MessageWrapper) {
+    async fn send_dsn(&self, message: &mut MessageWrapper) -> DsnStatus {
         // Send DSN events
         self.log_dsn(message).await;
+
+        let mut status = DsnStatus::Completed;
 
         if !message.message.return_path.is_empty() {
             // Build DSN
@@ -52,12 +61,19 @@ impl SendDsn for Server {
                         message.span_id,
                     )
                     .await;
-                dsn_message
+                if dsn_message
                     .queue(
                         QueueParams::new(&dsn, message.span_id, self)
                             .with_dkim_signers(dkim_signers),
                     )
-                    .await;
+                    .await
+                {
+                    message.mark_dsn_sent();
+                } else {
+                    status = DsnStatus::Deferred;
+                }
+            } else {
+                message.mark_dsn_sent();
             }
         } else {
             // Handle double bounce
@@ -65,7 +81,9 @@ impl SendDsn for Server {
         }
 
         // Update next DSN notify times
-        message.update_next_dsn(self).await;
+        message.update_next_dsn(self, status).await;
+
+        status
     }
 
     async fn log_dsn(&self, message: &MessageWrapper) {
@@ -133,7 +151,7 @@ impl SendDsn for Server {
 const MAX_HEADER_SIZE: usize = 4096;
 
 impl MessageWrapper {
-    pub async fn build_dsn(&mut self, server: &Server) -> Option<Vec<u8>> {
+    pub async fn build_dsn(&self, server: &Server) -> Option<Vec<u8>> {
         let config = &server.core.smtp.queue;
         let now = now();
 
@@ -142,13 +160,12 @@ impl MessageWrapper {
         let mut txt_failed = String::new();
         let mut dsn = String::new();
 
-        for rcpt in &mut self.message.recipients {
+        for rcpt in &self.message.recipients {
             if rcpt.has_flag(RCPT_DSN_SENT | RCPT_NOTIFY_NEVER) {
                 continue;
             }
             match &rcpt.status {
                 Status::Completed(response) => {
-                    rcpt.flags |= RCPT_DSN_SENT;
                     if !rcpt.has_flag(RCPT_NOTIFY_SUCCESS) {
                         continue;
                     }
@@ -165,7 +182,6 @@ impl MessageWrapper {
                     response.write_dsn_text(&rcpt.address, &mut txt_delay);
                 }
                 Status::PermanentFailure(response) => {
-                    rcpt.flags |= RCPT_DSN_SENT;
                     if !rcpt.has_flag(RCPT_NOTIFY_FAILURE) {
                         continue;
                     }
@@ -358,7 +374,7 @@ impl MessageWrapper {
             .into()
     }
 
-    pub async fn update_next_dsn(&mut self, server: &Server) {
+    pub async fn update_next_dsn(&mut self, server: &Server, status: DsnStatus) {
         let now = now();
         let mut notify_changes = Vec::new();
         for (rcpt_idx, rcpt) in self.message.recipients.iter().enumerate() {
@@ -367,6 +383,11 @@ impl MessageWrapper {
                 Status::TemporaryFailure(_) | Status::Scheduled
             ) && rcpt.notify.due <= now
             {
+                if status == DsnStatus::Deferred {
+                    notify_changes.push((rcpt_idx, 0, now + DSN_RETRY));
+                    continue;
+                }
+
                 let envelope = QueueEnvelope::new(&self.message, rcpt);
 
                 let queue_id = server
@@ -389,6 +410,19 @@ impl MessageWrapper {
             let rcpt = &mut self.message.recipients[rcpt_idx];
             rcpt.notify.inner += inner;
             rcpt.notify.due = due;
+        }
+    }
+
+    fn mark_dsn_sent(&mut self) {
+        for rcpt in &mut self.message.recipients {
+            if !rcpt.has_flag(RCPT_DSN_SENT | RCPT_NOTIFY_NEVER)
+                && matches!(
+                    rcpt.status,
+                    Status::Completed(_) | Status::PermanentFailure(_)
+                )
+            {
+                rcpt.flags |= RCPT_DSN_SENT;
+            }
         }
     }
 
@@ -524,7 +558,7 @@ impl Message {
 impl Recipient {
     fn write_dsn(&self, dsn: &mut String) {
         if let Some(orcpt) = &self.orcpt {
-            let _ = write!(dsn, "Original-Recipient: rfc822;{orcpt}\r\n");
+            let _ = write!(dsn, "Original-Recipient: {ORCPT_ADDR_TYPE}{orcpt}\r\n");
         }
         let _ = write!(dsn, "Final-Recipient: rfc822;{}\r\n", self.address);
     }

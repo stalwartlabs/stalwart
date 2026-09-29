@@ -4,35 +4,81 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use ahash::AHashMap;
 use encodify::base64::URL_SAFE_NO_PAD;
 use p256::{
     SecretKey,
     ecdsa::{Signature, SigningKey, signature::Signer},
     pkcs8::{DecodePrivateKey, PrivateKeyInfo, der::SecretDocument},
 };
+use parking_lot::Mutex;
+use reqwest::{Url, header::HeaderValue};
+use std::sync::Arc;
 
 const VAPID_TOKEN_TTL: u64 = 12 * 60 * 60;
 const VAPID_PREFIX: &str = "vapid t=";
 const VAPID_JWT_HEADER: &[u8] = br#"{"typ":"JWT","alg":"ES256"}"#;
+const VAPID_TOKEN_REFRESH: u64 = VAPID_TOKEN_TTL / 2;
 
 #[derive(Clone)]
 pub struct Vapid {
     key: VapidKey,
     contact: Option<String>,
+    tokens: Arc<Mutex<AHashMap<String, VapidToken>>>,
+}
+
+struct VapidToken {
+    authorization: HeaderValue,
+    issued_at: u64,
 }
 
 impl Vapid {
     pub fn new(key: VapidKey, contact: Option<String>) -> Self {
-        Self { key, contact }
+        Self {
+            key,
+            contact,
+            tokens: Arc::default(),
+        }
     }
 
     pub fn public_key(&self) -> &str {
         self.key.public_key()
     }
 
-    pub fn authorization(&self, endpoint: &str, now: u64) -> Option<String> {
-        self.key
-            .authorization(endpoint, self.contact.as_deref(), now)
+    pub fn authorization(&self, endpoint: &str, now: u64) -> Option<HeaderValue> {
+        let prefix = endpoint_prefix(endpoint)?;
+        if let Some(token) = self
+            .tokens
+            .lock()
+            .get(prefix)
+            .filter(|token| token.is_fresh(now))
+        {
+            return Some(token.authorization.clone());
+        }
+
+        let authorization = HeaderValue::try_from(self.key.authorization(
+            endpoint,
+            self.contact.as_deref(),
+            now,
+        )?)
+        .ok()?;
+        let mut tokens = self.tokens.lock();
+        tokens.retain(|_, token| token.is_fresh(now));
+        tokens.insert(
+            prefix.to_string(),
+            VapidToken {
+                authorization: authorization.clone(),
+                issued_at: now,
+            },
+        );
+        Some(authorization)
+    }
+}
+
+impl VapidToken {
+    fn is_fresh(&self, now: u64) -> bool {
+        now.checked_sub(self.issued_at)
+            .is_some_and(|age| age < VAPID_TOKEN_REFRESH)
     }
 }
 
@@ -108,41 +154,15 @@ impl VapidKey {
     }
 }
 
-fn endpoint_origin(url: &str) -> Option<String> {
+fn endpoint_prefix(url: &str) -> Option<&str> {
     let (scheme, rest) = url.split_once("://")?;
-    let scheme = scheme.to_ascii_lowercase();
     let authority = rest.split(['/', '?', '#']).next()?;
-    let authority = authority
-        .rsplit_once('@')
-        .map(|(_, host)| host)
-        .unwrap_or(authority);
-    if authority.is_empty() {
-        return None;
-    }
+    url.get(..scheme.len() + "://".len() + authority.len())
+}
 
-    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
-        let (addr, tail) = rest.split_once(']')?;
-        (
-            format!("[{}]", addr.to_ascii_lowercase()),
-            tail.strip_prefix(':').filter(|port| !port.is_empty()),
-        )
-    } else if let Some((host, port)) = authority.rsplit_once(':') {
-        (
-            host.to_ascii_lowercase(),
-            Some(port).filter(|p| !p.is_empty()),
-        )
-    } else {
-        (authority.to_ascii_lowercase(), None)
-    };
-
-    match port {
-        Some(port)
-            if !((scheme == "https" && port == "443") || (scheme == "http" && port == "80")) =>
-        {
-            Some(format!("{scheme}://{host}:{port}"))
-        }
-        _ => Some(format!("{scheme}://{host}")),
-    }
+fn endpoint_origin(url: &str) -> Option<String> {
+    let origin = Url::parse(url).ok()?.origin();
+    origin.is_tuple().then(|| origin.ascii_serialization())
 }
 
 pub fn normalize_contact(contact: &str) -> Option<String> {
@@ -209,7 +229,12 @@ mod tests {
             endpoint_origin("http://[2001:DB8::1]:80/p").unwrap(),
             "http://[2001:db8::1]"
         );
+        assert_eq!(
+            endpoint_origin("https://attacker.example\\@fcm.googleapis.com/fcm/send/x").unwrap(),
+            "https://attacker.example"
+        );
         assert!(endpoint_origin("not-a-url").is_none());
+        assert!(endpoint_origin("mailto:admin@example.org").is_none());
     }
 
     #[test]
@@ -337,6 +362,47 @@ B4yDfR2rGOd2H6Kv3fQNHPj9Nu5Tks8QYMLzrX8ONCNoFnNUQl9S0r0QS6phVqD0
                 "unexpected normalization of {input:?}"
             );
         }
+    }
+
+    #[test]
+    fn authorization_is_reused_per_endpoint_prefix() {
+        let vapid = Vapid::new(test_key(), None);
+        let now = 1_700_000_000;
+        let token = vapid
+            .authorization("https://push.example.com/push/a", now)
+            .unwrap();
+
+        assert_eq!(
+            vapid
+                .authorization("https://push.example.com/push/b?x=1", now + 60)
+                .unwrap(),
+            token
+        );
+        assert_ne!(
+            vapid
+                .authorization("https://other.example.com/push/a", now)
+                .unwrap(),
+            token
+        );
+        assert_ne!(
+            vapid
+                .authorization("https://push.example.com/push/a", now - 1)
+                .unwrap(),
+            token
+        );
+        let refreshed = vapid
+            .authorization("https://push.example.com/push/a", now + VAPID_TOKEN_REFRESH)
+            .unwrap();
+        assert_ne!(refreshed, token);
+        assert_eq!(
+            vapid
+                .authorization(
+                    "https://push.example.com/push/c",
+                    now + VAPID_TOKEN_REFRESH + 1
+                )
+                .unwrap(),
+            refreshed
+        );
     }
 
     #[test]

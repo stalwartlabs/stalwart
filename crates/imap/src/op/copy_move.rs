@@ -21,8 +21,13 @@ use email::{
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::copy_move::Arguments, receiver::Request,
 };
+use rand::RngExt;
 use registry::schema::enums::Permission;
-use std::{sync::Arc, time::Instant};
+use std::{
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
@@ -38,6 +43,8 @@ use types::{
 
 const TOO_MANY_MAILBOXES: &str = "Message belongs to too many mailboxes.";
 const TOO_MANY_KEYWORDS: &str = "Message exceeds the keyword limits of the destination.";
+const MAX_MOVE_RETRIES: u32 = 3;
+const MOVE_RETRY_BACKOFF_MS: RangeInclusive<u64> = 1..=15;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_copy_move(
@@ -124,7 +131,7 @@ impl<T: SessionStream> SessionData<T> {
         message_limit: u32,
         op_start: Instant,
     ) -> trc::Result<()> {
-        let cache = caches
+        let mut cache = caches
             .fetch(&self.server, src_mailbox.id.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
@@ -261,10 +268,16 @@ impl<T: SessionStream> SessionData<T> {
             // Mailboxes are in the same account
             let account_id = src_mailbox.id.account_id;
             let dest_mailbox_id = MessageUid::new_unassigned(dest_mailbox_id);
-            let mut batch = BatchBuilder::new();
-            let mut pending_copied_ids: Vec<(u32, Slot)> = Vec::with_capacity(ids.len());
+            let mut written_ids = RoaringBitmap::new();
+            let mut retries = 0;
 
-            {
+            loop {
+                let mut batch = BatchBuilder::new();
+                let mut pending_copied_ids: Vec<(u32, Slot)> = Vec::with_capacity(ids.len());
+                copied_ids.clear();
+                did_move = false;
+                error = None;
+
                 for imap_id in &ids {
                     let id = imap_id.id;
                     // Obtain mailbox tags
@@ -286,6 +299,13 @@ impl<T: SessionStream> SessionData<T> {
                         .iter()
                         .any(|mailbox| mailbox.mailbox_id == src_mailbox.id.mailbox_id)
                     {
+                        // Moved by a chunk of a previous attempt
+                        if written_ids.contains(id)
+                            && let Some(uid) = data.message_uid(dest_mailbox_id.mailbox_id)
+                        {
+                            copied_ids.push((imap_id.uid, uid));
+                            did_move = true;
+                        }
                         continue;
                     }
 
@@ -315,6 +335,7 @@ impl<T: SessionStream> SessionData<T> {
                                     (src_mailbox.id.mailbox_id, imap_id.uid),
                                 )
                                 .commit_point();
+                            written_ids.insert(id);
                             did_move = true;
                         }
 
@@ -366,6 +387,7 @@ impl<T: SessionStream> SessionData<T> {
                             },
                         ))
                         .imap_ctx(&arguments.tag, trc::location!())?;
+                    written_ids.insert(id);
                     if is_move {
                         batch.log_vanished_item(
                             VanishedCollection::Email,
@@ -409,16 +431,25 @@ impl<T: SessionStream> SessionData<T> {
                 }
 
                 // Write changes
-                let assigned_ids = self
-                    .server
-                    .commit_batch(batch)
-                    .await
-                    .imap_ctx(&arguments.tag, trc::location!())?;
-                copied_ids.extend(
-                    pending_copied_ids
-                        .into_iter()
-                        .map(|(src_uid, slot)| (src_uid, assigned_ids.slot(slot))),
-                );
+                match self.server.commit_batch(batch).await {
+                    Ok(assigned_ids) => {
+                        copied_ids.extend(
+                            pending_copied_ids
+                                .into_iter()
+                                .map(|(src_uid, slot)| (src_uid, assigned_ids.slot(slot))),
+                        );
+                        break;
+                    }
+                    Err(err) => {
+                        retry_after_conflict(err, &mut retries, &arguments.tag, trc::location!())
+                            .await?;
+                        cache = self
+                            .server
+                            .get_cached_messages(account_id)
+                            .await
+                            .imap_ctx(&arguments.tag, trc::location!())?;
+                    }
+                }
             }
         } else {
             // Obtain quota for target account
@@ -426,7 +457,17 @@ impl<T: SessionStream> SessionData<T> {
             let mut dest_change_id = None;
             let dest_account_id = dest_mailbox.account_id;
             let mut destroy_ids = RoaringBitmap::new();
-            for imap_id in &ids {
+            let train_spam = if dest_mailbox_id == JUNK_ID {
+                Some(true)
+            } else if src_mailbox.id.mailbox_id == JUNK_ID && dest_mailbox_id != TRASH_ID {
+                Some(false)
+            } else {
+                None
+            };
+            let mut train_batch = BatchBuilder::new();
+            let mut did_train = false;
+            train_batch.with_account_id(src_account_id);
+            'next_message: for imap_id in &ids {
                 let id = imap_id.id;
                 let email = cache.email_by_id(&id);
                 let keywords = email
@@ -487,17 +528,22 @@ impl<T: SessionStream> SessionData<T> {
                         {
                             copied_ids.push((imap_id.uid, uid));
                         } else {
-                            let Some(data) = self
-                                .get_message_data(dest_account_id, existing_id)
-                                .await
-                                .imap_ctx(&arguments.tag, trc::location!())?
-                            else {
-                                continue;
-                            };
+                            let mut retries = 0;
 
-                            if let Some(uid) = data.message_uid(dest_mailbox_id) {
-                                copied_ids.push((imap_id.uid, uid));
-                            } else {
+                            loop {
+                                let Some(data) = self
+                                    .get_message_data(dest_account_id, existing_id)
+                                    .await
+                                    .imap_ctx(&arguments.tag, trc::location!())?
+                                else {
+                                    continue 'next_message;
+                                };
+
+                                if let Some(uid) = data.message_uid(dest_mailbox_id) {
+                                    copied_ids.push((imap_id.uid, uid));
+                                    break;
+                                }
+
                                 let mut new_data = data.clone();
                                 new_data.add_mailbox(MessageUid::new_unassigned(dest_mailbox_id));
                                 if self
@@ -512,7 +558,7 @@ impl<T: SessionStream> SessionData<T> {
                                     .is_err()
                                 {
                                     error = Some((ResponseCode::Limit, TOO_MANY_MAILBOXES));
-                                    continue;
+                                    continue 'next_message;
                                 }
 
                                 let mut batch = BatchBuilder::new();
@@ -542,20 +588,27 @@ impl<T: SessionStream> SessionData<T> {
                                     )
                                     .imap_ctx(&arguments.tag, trc::location!())?;
 
-                                let assigned_ids = self
-                                    .server
-                                    .commit_batch(batch)
-                                    .await
-                                    .imap_ctx(&arguments.tag, trc::location!())?;
-
-                                dest_change_id = assigned_ids
-                                    .last_change_id(dest_account_id, SyncCollection::Email)
-                                    .into();
-
-                                copied_ids.push((
-                                    imap_id.uid,
-                                    assigned_slot.map_or(0, |slot| assigned_ids.slot(slot)),
-                                ));
+                                match self.server.commit_batch(batch).await {
+                                    Ok(assigned_ids) => {
+                                        dest_change_id = assigned_ids
+                                            .last_change_id(dest_account_id, SyncCollection::Email)
+                                            .into();
+                                        copied_ids.push((
+                                            imap_id.uid,
+                                            assigned_slot.map_or(0, |slot| assigned_ids.slot(slot)),
+                                        ));
+                                        break;
+                                    }
+                                    Err(err) => {
+                                        retry_after_conflict(
+                                            err,
+                                            &mut retries,
+                                            &arguments.tag,
+                                            trc::location!(),
+                                        )
+                                        .await?
+                                    }
+                                }
                             }
                         }
                     }
@@ -568,27 +621,61 @@ impl<T: SessionStream> SessionData<T> {
                     }
                 };
 
+                if let Some(is_spam) = train_spam {
+                    self.server
+                        .add_account_spam_sample(
+                            &mut train_batch,
+                            src_account_id,
+                            id,
+                            is_spam,
+                            self.session_id,
+                        )
+                        .await
+                        .imap_ctx(&arguments.tag, trc::location!())?;
+                    train_batch.commit_point();
+                    did_train = true;
+                }
+
                 if is_move {
                     destroy_ids.insert(id);
                 }
             }
 
-            // Untag or delete emails
-            if !destroy_ids.is_empty() {
-                let mut batch = BatchBuilder::new();
-                self.email_untag_or_delete(
-                    src_account_id,
-                    src_mailbox.id.mailbox_id,
-                    &destroy_ids,
-                    &mut batch,
-                )
-                .await
-                .imap_ctx(&arguments.tag, trc::location!())?;
-
+            if did_train {
                 self.server
-                    .commit_batch(batch)
+                    .commit_batch(train_batch)
                     .await
                     .imap_ctx(&arguments.tag, trc::location!())?;
+            }
+
+            // Untag or delete emails
+            if !destroy_ids.is_empty() {
+                let mut retries = 0;
+
+                loop {
+                    let mut batch = BatchBuilder::new();
+                    self.email_untag_or_delete(
+                        src_account_id,
+                        src_mailbox.id.mailbox_id,
+                        &destroy_ids,
+                        &mut batch,
+                    )
+                    .await
+                    .imap_ctx(&arguments.tag, trc::location!())?;
+
+                    match self.server.commit_batch(batch).await {
+                        Ok(_) => break,
+                        Err(err) => {
+                            retry_after_conflict(
+                                err,
+                                &mut retries,
+                                &arguments.tag,
+                                trc::location!(),
+                            )
+                            .await?
+                        }
+                    }
+                }
 
                 did_move = true;
             }
@@ -748,5 +835,26 @@ impl<T: SessionStream> SessionData<T> {
 
             Ok(None)
         }
+    }
+}
+
+async fn retry_after_conflict(
+    err: trc::Error,
+    retries: &mut u32,
+    tag: &str,
+    location: &'static str,
+) -> trc::Result<()> {
+    if !err.is_assertion_failure() {
+        Err(err).imap_ctx(tag, location)
+    } else if *retries < MAX_MOVE_RETRIES {
+        *retries += 1;
+        let backoff = rand::rng().random_range(MOVE_RETRY_BACKOFF_MS);
+        tokio::time::sleep(Duration::from_millis(backoff)).await;
+        Ok(())
+    } else {
+        Err(trc::ImapEvent::Error
+            .into_err()
+            .details("Some messages were modified by another process.")
+            .id(tag.to_string()))
     }
 }

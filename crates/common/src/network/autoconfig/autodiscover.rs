@@ -8,8 +8,9 @@ use crate::{Server, manager::application::Resource};
 use quick_xml::Reader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
-use registry::schema::enums::ServiceProtocol;
+use registry::schema::{enums::ServiceProtocol, structs::Service};
 use std::fmt::Write;
+use utils::map::vec_map::VecMap;
 
 impl Server {
     pub async fn handle_autodiscover_request(
@@ -24,79 +25,91 @@ impl Server {
                     .details("Failed to parse autodiscover request")
                     .ctx(trc::Key::Reason, err)
             })?;
-        let default_host = &self.core.network.server_name;
-
-        // Build XML response
-        let mut config = String::with_capacity(1024);
-        let _ = writeln!(&mut config, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        let _ = writeln!(
-            &mut config,
-            "<Autodiscover xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">"
-        );
-        let _ = writeln!(
-            &mut config,
-            "\t<Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a\">"
-        );
-        let _ = writeln!(&mut config, "\t\t<User>");
-        let _ = writeln!(
-            &mut config,
-            "\t\t\t<DisplayName>{emailaddress}</DisplayName>"
-        );
-        let _ = writeln!(
-            &mut config,
-            "\t\t\t<AutoDiscoverSMTPAddress>{emailaddress}</AutoDiscoverSMTPAddress>"
-        );
-        // DeploymentId is a required field of User but we are not a MS Exchange server so use a random value
-        let _ = writeln!(
-            &mut config,
-            "\t\t\t<DeploymentId>644560b8-a1ce-429c-8ace-23395843f701</DeploymentId>"
-        );
-        let _ = writeln!(&mut config, "\t\t</User>");
-        let _ = writeln!(&mut config, "\t\t<Account>");
-        let _ = writeln!(&mut config, "\t\t\t<AccountType>email</AccountType>");
-        let _ = writeln!(&mut config, "\t\t\t<Action>settings</Action>");
-        for (protocol, service) in &self.core.network.info.services {
-            let (protocol, ports) = match protocol {
-                ServiceProtocol::Imap => ("IMAP", [143, 993]),
-                ServiceProtocol::Pop3 => ("POP3", [110, 995]),
-                ServiceProtocol::Smtp => ("SMTP", [587, 465]),
-                _ => continue,
-            };
-
-            for (is_tls, port) in ports.into_iter().enumerate() {
-                if is_tls == 1 || service.cleartext {
-                    let server_name = service.hostname.as_deref().unwrap_or(default_host);
-                    let _ = writeln!(&mut config, "\t\t\t<Protocol>");
-                    let _ = writeln!(&mut config, "\t\t\t\t<Type>{protocol}</Type>",);
-                    let _ = writeln!(&mut config, "\t\t\t\t<Server>{server_name}</Server>");
-                    let _ = writeln!(&mut config, "\t\t\t\t<Port>{port}</Port>");
-                    let _ = writeln!(&mut config, "\t\t\t\t<LoginName>{emailaddress}</LoginName>");
-                    let _ = writeln!(&mut config, "\t\t\t\t<AuthRequired>on</AuthRequired>");
-                    let _ = writeln!(&mut config, "\t\t\t\t<DirectoryPort>0</DirectoryPort>");
-                    let _ = writeln!(&mut config, "\t\t\t\t<ReferralPort>0</ReferralPort>");
-                    let _ = writeln!(
-                        &mut config,
-                        "\t\t\t\t<SSL>{}</SSL>",
-                        if is_tls == 1 { "on" } else { "off" }
-                    );
-                    if is_tls == 1 {
-                        let _ = writeln!(&mut config, "\t\t\t\t<Encryption>TLS</Encryption>");
-                    }
-                    let _ = writeln!(&mut config, "\t\t\t\t<SPA>off</SPA>");
-                    let _ = writeln!(&mut config, "\t\t\t</Protocol>");
-                }
-            }
-        }
-
-        let _ = writeln!(&mut config, "\t\t</Account>");
-        let _ = writeln!(&mut config, "\t</Response>");
-        let _ = writeln!(&mut config, "</Autodiscover>");
 
         Ok(Resource::new(
             "application/xml; charset=utf-8",
-            config.into_bytes(),
+            build_autodiscover_response(
+                &emailaddress,
+                &self.core.network.server_name,
+                &self.core.network.info.services,
+            )
+            .into_bytes(),
         ))
     }
+}
+
+fn build_autodiscover_response(
+    emailaddress: &str,
+    default_host: &str,
+    services: &VecMap<ServiceProtocol, Service>,
+) -> String {
+    // Build XML response
+    let mut config = String::with_capacity(1024);
+    let _ = writeln!(&mut config, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    let _ = writeln!(
+        &mut config,
+        "<Autodiscover xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">"
+    );
+    let _ = writeln!(
+        &mut config,
+        "\t<Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a\">"
+    );
+    let _ = writeln!(&mut config, "\t\t<User>");
+    let _ = writeln!(
+        &mut config,
+        "\t\t\t<DisplayName>{emailaddress}</DisplayName>"
+    );
+    let _ = writeln!(
+        &mut config,
+        "\t\t\t<AutoDiscoverSMTPAddress>{emailaddress}</AutoDiscoverSMTPAddress>"
+    );
+    // DeploymentId is a required field of User but we are not a MS Exchange server so use a random value
+    let _ = writeln!(
+        &mut config,
+        "\t\t\t<DeploymentId>644560b8-a1ce-429c-8ace-23395843f701</DeploymentId>"
+    );
+    let _ = writeln!(&mut config, "\t\t</User>");
+    let _ = writeln!(&mut config, "\t\t<Account>");
+    let _ = writeln!(&mut config, "\t\t\t<AccountType>email</AccountType>");
+    let _ = writeln!(&mut config, "\t\t\t<Action>settings</Action>");
+    for (protocol, service) in services {
+        let (protocol, ports) = match protocol {
+            ServiceProtocol::Imap => ("IMAP", [(993, true), (143, false)]),
+            ServiceProtocol::Pop3 => ("POP3", [(995, true), (110, false)]),
+            ServiceProtocol::Smtp => ("SMTP", [(465, true), (587, false)]),
+            _ => continue,
+        };
+
+        // Implicit TLS is listed first so that it is preferred (RFC 8314)
+        for (port, is_tls) in ports {
+            if is_tls || service.cleartext {
+                let server_name = service.hostname.as_deref().unwrap_or(default_host);
+                let _ = writeln!(&mut config, "\t\t\t<Protocol>");
+                let _ = writeln!(&mut config, "\t\t\t\t<Type>{protocol}</Type>",);
+                let _ = writeln!(&mut config, "\t\t\t\t<Server>{server_name}</Server>");
+                let _ = writeln!(&mut config, "\t\t\t\t<Port>{port}</Port>");
+                let _ = writeln!(&mut config, "\t\t\t\t<LoginName>{emailaddress}</LoginName>");
+                let _ = writeln!(&mut config, "\t\t\t\t<AuthRequired>on</AuthRequired>");
+                let _ = writeln!(&mut config, "\t\t\t\t<DirectoryPort>0</DirectoryPort>");
+                let _ = writeln!(&mut config, "\t\t\t\t<ReferralPort>0</ReferralPort>");
+                let (ssl, encryption) = if is_tls {
+                    ("on", "SSL")
+                } else {
+                    ("off", "TLS")
+                };
+                let _ = writeln!(&mut config, "\t\t\t\t<SSL>{ssl}</SSL>");
+                let _ = writeln!(&mut config, "\t\t\t\t<Encryption>{encryption}</Encryption>");
+                let _ = writeln!(&mut config, "\t\t\t\t<SPA>off</SPA>");
+                let _ = writeln!(&mut config, "\t\t\t</Protocol>");
+            }
+        }
+    }
+
+    let _ = writeln!(&mut config, "\t\t</Account>");
+    let _ = writeln!(&mut config, "\t</Response>");
+    let _ = writeln!(&mut config, "</Autodiscover>");
+
+    config
 }
 
 fn parse_autodiscover_request(bytes: &[u8]) -> Result<String, String> {
@@ -200,5 +213,79 @@ mod tests {
             super::parse_autodiscover_request(r.as_bytes()).unwrap(),
             "email@example.com"
         );
+    }
+
+    #[test]
+    fn autodiscover_encryption() {
+        use registry::schema::{enums::ServiceProtocol, structs::Service};
+        use utils::map::vec_map::VecMap;
+
+        fn tag<'x>(block: &'x str, name: &str) -> &'x str {
+            block
+                .split_once(&format!("<{name}>"))
+                .and_then(|(_, rest)| rest.split_once(&format!("</{name}>")))
+                .map(|(value, _)| value)
+                .unwrap()
+        }
+
+        for (cleartext, expected) in [
+            (
+                false,
+                vec![
+                    ("IMAP", "993", "on", "SSL"),
+                    ("POP3", "995", "on", "SSL"),
+                    ("SMTP", "465", "on", "SSL"),
+                ],
+            ),
+            (
+                true,
+                vec![
+                    ("IMAP", "993", "on", "SSL"),
+                    ("IMAP", "143", "off", "TLS"),
+                    ("POP3", "995", "on", "SSL"),
+                    ("POP3", "110", "off", "TLS"),
+                    ("SMTP", "465", "on", "SSL"),
+                    ("SMTP", "587", "off", "TLS"),
+                ],
+            ),
+        ] {
+            let services: VecMap<ServiceProtocol, Service> = [
+                ServiceProtocol::Imap,
+                ServiceProtocol::Pop3,
+                ServiceProtocol::Smtp,
+                ServiceProtocol::Jmap,
+            ]
+            .into_iter()
+            .map(|protocol| {
+                (
+                    protocol,
+                    Service {
+                        hostname: None,
+                        cleartext,
+                    },
+                )
+            })
+            .collect();
+            let response = super::build_autodiscover_response(
+                "user@example.com",
+                "mail.example.com",
+                &services,
+            );
+
+            assert_eq!(
+                response
+                    .split("<Protocol>")
+                    .skip(1)
+                    .map(|block| (
+                        tag(block, "Type"),
+                        tag(block, "Port"),
+                        tag(block, "SSL"),
+                        tag(block, "Encryption"),
+                    ))
+                    .collect::<Vec<_>>(),
+                expected,
+                "cleartext: {cleartext}"
+            );
+        }
     }
 }

@@ -352,10 +352,37 @@ impl NextHop<'_> {
         }
     }
 
-    fn dnssec_status(&self) -> DnssecStatus {
+    pub fn dnssec_status(&self) -> DnssecStatus {
         match self {
             NextHop::MX { dnssec_status, .. } => *dnssec_status,
             NextHop::Relay(_) => DnssecStatus::Indeterminate,
+        }
+    }
+
+    fn with_dnssec_status(&self, dnssec_status: DnssecStatus) -> Self {
+        match self {
+            NextHop::MX {
+                is_implicit,
+                host,
+                config,
+                ..
+            } => NextHop::MX {
+                is_implicit: *is_implicit,
+                host,
+                config,
+                dnssec_status,
+            },
+            NextHop::Relay(relay) => NextHop::Relay(relay),
+        }
+    }
+
+    pub fn dane_status(&self, addresses: DnssecStatus) -> (DnssecStatus, &'static str) {
+        match self.dnssec_status() {
+            DnssecStatus::Secure => match addresses {
+                status @ (DnssecStatus::Insecure | DnssecStatus::Bogus) => (status, "A/AAAA"),
+                _ => (DnssecStatus::Secure, "MX"),
+            },
+            status => (status, "MX"),
         }
     }
 }

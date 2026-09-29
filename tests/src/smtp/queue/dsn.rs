@@ -8,11 +8,12 @@ use crate::utils::server::{TestServer, TestServerBuilder};
 use common::config::smtp::queue::{QueueExpiry, QueueName};
 use registry::schema::{
     enums::CompressionAlgo,
-    structs::{DsnReportSettings, Expression, ReportSettings},
+    structs::{DsnReportSettings, Expression, FileSystemStore, ReportSettings},
 };
 use smtp::queue::{
-    Error, ErrorDetails, HostResponse, Message, MessageWrapper, Recipient, Schedule, Status,
-    UnexpectedResponse, dsn::SendDsn,
+    Error, ErrorDetails, HostResponse, Message, MessageWrapper, RCPT_DSN_SENT, Recipient, Schedule,
+    Status, UnexpectedResponse,
+    dsn::{DsnStatus, SendDsn},
 };
 use smtp_proto::{RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_SUCCESS, Response};
 use std::{
@@ -21,7 +22,7 @@ use std::{
     path::PathBuf,
     time::SystemTime,
 };
-use store::write::now;
+use store::{BlobStore, backend::fs::FsStore, write::now};
 use types::blob_hash::BlobHash;
 
 #[tokio::test]
@@ -194,9 +195,65 @@ async fn generate_dsn() {
     // Load queue
     let queue = local.read_queued_messages().await;
     assert_eq!(queue.len(), 4);
+
+    // A DSN that cannot be written is retried rather than marked as sent
+    message.message.recipients = vec![Recipient {
+        address: "carol@example.org".into(),
+        status: Status::PermanentFailure(Box::new(ErrorDetails {
+            entity: "mx.example.org".into(),
+            details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
+                command: "RCPT TO:<carol@example.org>".into(),
+                response: Response {
+                    code: 550,
+                    esc: [5, 1, 2],
+                    message: "User does not exist".into(),
+                },
+            })),
+        })),
+        flags,
+        orcpt: None,
+        retry: Schedule::now(),
+        notify: Schedule::now(),
+        expires: QueueExpiry::Ttl(10),
+        queue: QueueName::default(),
+    }];
+
+    let blob_store = local.server.blob_store().clone();
+    local.set_blob_store(unwritable_blob_store(local.tmp_dir()).await);
+    assert_eq!(
+        local.server.send_dsn(&mut message).await,
+        DsnStatus::Deferred
+    );
+    assert_eq!(message.message.recipients[0].flags & RCPT_DSN_SENT, 0);
+    local.assert_no_events();
+    assert_eq!(local.read_queued_messages().await.len(), 4);
+
+    local.set_blob_store(blob_store);
+    assert_eq!(
+        local.server.send_dsn(&mut message).await,
+        DsnStatus::Completed
+    );
+    assert_ne!(message.message.recipients[0].flags & RCPT_DSN_SENT, 0);
+    local.expect_message().await;
+    assert_eq!(local.read_queued_messages().await.len(), 5);
+}
+
+async fn unwritable_blob_store(tmp_dir: &str) -> BlobStore {
+    let path = format!("{tmp_dir}/unwritable-blob-store");
+    fs::write(&path, b"").unwrap();
+
+    FsStore::open(FileSystemStore { path, depth: 0 })
+        .await
+        .unwrap()
 }
 
 impl TestServer {
+    fn set_blob_store(&mut self, blob: BlobStore) {
+        let mut core = self.server.core.as_ref().clone();
+        core.storage.blob = blob;
+        self.server.core = core.into();
+    }
+
     async fn compare_dsn(&self, message: Message, test: &str) {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("resources");

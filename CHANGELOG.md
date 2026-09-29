@@ -2,15 +2,71 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
-## [0.16.23] - 2026-09-XX
+## [0.16.24] - 2026-09-27
 
 If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If you are upgrading from v0.15.x and below, please read the [upgrading documentation](https://github.com/stalwartlabs/stalwart/blob/main/UPGRADING/v0_16.md) for more information on how to upgrade from previous versions.
 
 ## Added
+- DNS: PowerDNS Authoritative provider for automatic DNS record management.
 
 ## Changed
 
 ## Fixed
+- Troubleshoot tool: `TLSA` records are looked up for every MX host, including hosts whose zone is not DNSSEC signed.
+- Spam filter:
+  - OpenPhish and PhishTank entries containing uppercase characters never match, since message URLs are lowercased while HTTP lookup entries keep their original case. HTTP lookups now match keys case-insensitively.
+  - URL shortener links are followed using the lowercased URL, so case-sensitive short links resolve to the wrong destination or not at all.
+  - Incremental training never advances its position past the first run, so every retained sample added since then is trained again, and counted again in the reservoir, on each run until it expires.
+  - Updating the rules only adds new objects, so upstream changes to existing rules, DNSBL servers, HTTP lookups, lookup keys and file extensions never reach an existing installation.
+  - Updating the rules reports success when objects fail to import, or when a configuration error stops the updated settings from being activated.
+- JMAP:
+  - A `PushSubscription` created within the verification rate limit window of another one on the same account never receives its `PushVerification`, since the blocked verification is dropped instead of being sent once the window expires.
+  - A push notification retried after a failed delivery can report an older state than a change queued during the failed attempt, since the older state changes are merged last and overwrite the newer ones.
+  - Changes made while a push request is in flight are not delivered until the next change reaches the same subscription, since a successful delivery cancels the pending retry.
+  - The VAPID `aud` claim is derived from a hand-written parse of the push URL, so a crafted push URL can make the server sign a token for a push service other than the one the request is sent to.
+  - `Email/import` rejects a `blobId` that refers to a `Blob/upload` creation id in the same request (`"#u0"`) with `Invalid blob id.`.
+  - `Email/set` with a full `mailboxIds` object identical to the current mailboxes, together with a keyword change, stores the message with IMAP UID 0, so IMAP clients stop seeing it.
+- MTA:
+  - A node without the `outboundMta` role stops replying to `DATA` and to JMAP submissions once about 1024 messages have been queued on it.
+  - MX records are resolved through the DNSSEC-validating resolver even when DANE is disabled.
+  - A `DATA` stage Sieve script does not see headers added by milters or MTA hooks, and discards every milter and MTA hook change when it edits the message.
+- MySQL: Range deletions and search index removals start with a single unbounded `DELETE` and switch to chunks only after a timeout.
+- IMAP: `COPY` and `MOVE` fail with `NO [CONTACTADMIN]` when another session changes the same message at the same time.
+- Autodiscover: Implicit TLS ports (993, 995, 465) are advertised with `<Encryption>TLS</Encryption>`, which Outlook reads as STARTTLS.
+- HTTP: Idle keep-alive connections are never closed.
+
+## [0.16.23] - 2026-09-21
+
+If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If you are upgrading from v0.15.x and below, please read the [upgrading documentation](https://github.com/stalwartlabs/stalwart/blob/main/UPGRADING/v0_16.md) for more information on how to upgrade from previous versions.
+
+## Added
+- Expressions: `bit_and` function.
+
+## Changed
+
+## Fixed
+- MTA: 
+  - A mailing list whose recipients include another mailing list is accepted at `RCPT TO` and then rejected at local delivery with `550 5.5.0 Mailbox not found`.
+  - DMARC aggregate reports carry two `spf` elements per record and the `version` element of a DMARC aggregate report is written as `1` instead of `1.0`.
+  - DSNs generated for an alias rewrite or a list expansion emit a doubled `addr-type` in `Original-Recipient` (`rfc822;rfc822;user@example.org`).
+  - DSNs that cannot be written to the store are discarded, the recipients are flagged as notified and the original message is removed from the queue, losing both the bounce and the message.
+- POP3:
+  - `TOP msg n` counts the `n` lines from the first byte of the message instead of from the first byte of the body.
+  - A message whose very first line begins with `.` is not byte-stuffed.
+- Spam filter: Moving or copying a message from one account into another creates no training sample, so the classifier never learns from it.
+- Sieve: `envelope "orcpt"` yields the bare address for an `ORCPT` supplied over SMTP. It now carries the `addr-type` prefix in every case, as required by RFC 6009.
+- ACME: The `_acme-challenge` TXT records published for a DNS-01 authorization are never removed.
+- DNS: The DNSSEC resolver queries a single nameserver at a time, working around a `hickory-resolver` race that cancels the TCP retry when two nameservers return a truncated response in parallel.
+- Troubleshoot tool:
+  - MX records are resolved through the DNSSEC-validating resolver, matching the resolver used by the delivery path.
+  - A TLSA lookup that fails or returns bogus records stops the delivery attempt for that host, instead of continuing without DANE.
+- OIDC: Bearer tokens that carry no `email`, `preferred_username` or `upn` claim are always authenticated against the default directory.
+- Meilisearch: A confirmation timeout is treated as a failed write even when `failOnTimeout` is disabled, so an index whose batches take longer than `pollInterval` x `maxRetries` never completes an indexing task and resubmits the same batch indefinitely.
+- WebUI: A failed update no longer takes an `Application` offline.
+- FoundationDB: The cached read version is invalidated when any broadcast is received from another node.
+- Redis:
+  - On a cluster, the rate limiter and the blob upload quota issue `INCR` and `EXPIRE` as a `MULTI`/`EXEC` transaction, whose `MOVED` redirects collapse into a single `EXECABORT` that never refreshes the slot map.
+  - A connection that fails because it is addressing the wrong server is returned to the pool and reused, since the recycle check only issues `PING`.
 
 ## [0.16.22] - 2026-09-13
 

@@ -11064,6 +11064,7 @@ impl ObjectImpl for DnsServer {
             DnsServer::Vultr(inner) => inner.validate(errors),
             DnsServer::WebSupport(inner) => inner.validate(errors),
             DnsServer::YandexCloud(inner) => inner.validate(errors),
+            DnsServer::PowerDns(inner) => inner.validate(errors),
         }
     }
 
@@ -11274,6 +11275,9 @@ impl ObjectImpl for DnsServer {
                 object.index(i);
             }
             DnsServer::YandexCloud(object) => {
+                object.index(i);
+            }
+            DnsServer::PowerDns(object) => {
                 object.index(i);
             }
         }
@@ -11565,6 +11569,10 @@ impl Pickle for DnsServer {
                 69u16.pickle(out);
                 inner.pickle(out);
             }
+            DnsServer::PowerDns(inner) => {
+                70u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -11639,6 +11647,7 @@ impl Pickle for DnsServer {
             67 => Pickle::unpickle(stream).map(DnsServer::Vultr),
             68 => Pickle::unpickle(stream).map(DnsServer::WebSupport),
             69 => Pickle::unpickle(stream).map(DnsServer::YandexCloud),
+            70 => Pickle::unpickle(stream).map(DnsServer::PowerDns),
             1 => Some(Self::default()),
             _ => None,
         }
@@ -12131,6 +12140,13 @@ impl IntoValue for DnsServer {
                     .insert_unchecked(Property::Type, JmapValue::Str("YandexCloud".into()));
                 obj
             }
+            DnsServer::PowerDns(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("PowerDns".into()));
+                obj
+            }
         }
     }
 }
@@ -12214,6 +12230,7 @@ impl RegistryJsonPatch for DnsServer {
                 DnsServerType::Vultr => *self = DnsServer::Vultr(Default::default()),
                 DnsServerType::WebSupport => *self = DnsServer::WebSupport(Default::default()),
                 DnsServerType::YandexCloud => *self = DnsServer::YandexCloud(Default::default()),
+                DnsServerType::PowerDns => *self = DnsServer::PowerDns(Default::default()),
             }
         }
         match self {
@@ -12286,6 +12303,7 @@ impl RegistryJsonPatch for DnsServer {
             DnsServer::Vultr(inner) => inner.patch(pointer, value),
             DnsServer::WebSupport(inner) => inner.patch(pointer, value),
             DnsServer::YandexCloud(inner) => inner.patch(pointer, value),
+            DnsServer::PowerDns(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -12362,6 +12380,7 @@ impl DnsServer {
             DnsServer::Vultr(_) => DnsServerType::Vultr,
             DnsServer::WebSupport(_) => DnsServerType::WebSupport,
             DnsServer::YandexCloud(_) => DnsServerType::YandexCloud,
+            DnsServer::PowerDns(_) => DnsServerType::PowerDns,
         }
     }
 }
@@ -13196,6 +13215,7 @@ impl DnsServerBootstrap {
             DnsServerBootstrap::Vultr(inner) => inner.validate(errors),
             DnsServerBootstrap::WebSupport(inner) => inner.validate(errors),
             DnsServerBootstrap::YandexCloud(inner) => inner.validate(errors),
+            DnsServerBootstrap::PowerDns(inner) => inner.validate(errors),
         }
     }
 }
@@ -13488,6 +13508,10 @@ impl Pickle for DnsServerBootstrap {
                 70u16.pickle(out);
                 inner.pickle(out);
             }
+            DnsServerBootstrap::PowerDns(inner) => {
+                71u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -13563,6 +13587,7 @@ impl Pickle for DnsServerBootstrap {
             68 => Pickle::unpickle(stream).map(DnsServerBootstrap::Vultr),
             69 => Pickle::unpickle(stream).map(DnsServerBootstrap::WebSupport),
             70 => Pickle::unpickle(stream).map(DnsServerBootstrap::YandexCloud),
+            71 => Pickle::unpickle(stream).map(DnsServerBootstrap::PowerDns),
             2 => Some(Self::default()),
             _ => None,
         }
@@ -14060,6 +14085,13 @@ impl IntoValue for DnsServerBootstrap {
                     .insert_unchecked(Property::Type, JmapValue::Str("YandexCloud".into()));
                 obj
             }
+            DnsServerBootstrap::PowerDns(obj) => {
+                let mut obj = obj.into_value();
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("PowerDns".into()));
+                obj
+            }
         }
     }
 }
@@ -14276,6 +14308,9 @@ impl RegistryJsonPatch for DnsServerBootstrap {
                 DnsServerBootstrapType::YandexCloud => {
                     *self = DnsServerBootstrap::YandexCloud(Default::default())
                 }
+                DnsServerBootstrapType::PowerDns => {
+                    *self = DnsServerBootstrap::PowerDns(Default::default())
+                }
             }
         }
         match self {
@@ -14349,6 +14384,7 @@ impl RegistryJsonPatch for DnsServerBootstrap {
             DnsServerBootstrap::Vultr(inner) => inner.patch(pointer, value),
             DnsServerBootstrap::WebSupport(inner) => inner.patch(pointer, value),
             DnsServerBootstrap::YandexCloud(inner) => inner.patch(pointer, value),
+            DnsServerBootstrap::PowerDns(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -14426,6 +14462,7 @@ impl DnsServerBootstrap {
             DnsServerBootstrap::Vultr(_) => DnsServerBootstrapType::Vultr,
             DnsServerBootstrap::WebSupport(_) => DnsServerBootstrapType::WebSupport,
             DnsServerBootstrap::YandexCloud(_) => DnsServerBootstrapType::YandexCloud,
+            DnsServerBootstrap::PowerDns(_) => DnsServerBootstrapType::PowerDns,
         }
     }
 }
@@ -18689,6 +18726,148 @@ impl RegistryJsonPropertyPatch for DnsServerPorkbun {
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::SecretApiKey) => self.secret_api_key.patch(pointer, value),
             Some(property @ Property::Secret) => Ok(MaybeUnpatched::Unpatched { property, value }),
+            Some(Property::Description) => self
+                .description
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::MemberTenantId) => self
+                .member_tenant_id
+                .patch(pointer.assert_can_set_tenant()?, value),
+            Some(Property::Timeout) => self.timeout.patch(pointer, value),
+            Some(Property::Ttl) => self.ttl.patch(pointer, value),
+            Some(Property::PollingInterval) => self.polling_interval.patch(pointer, value),
+            Some(Property::PropagationTimeout) => self.propagation_timeout.patch(pointer, value),
+            Some(Property::PropagationDelay) => self.propagation_delay.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl DnsServerPowerDns {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.api_key;
+        value.validate(errors);
+        if let Some(value) = &self.endpoint {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Endpoint));
+            }
+        }
+        if let Some(value) = &self.server_id {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ServerId));
+            }
+        }
+        let value = &self.description;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Description));
+        }
+        if let Some(value) = &self.member_tenant_id {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::MemberTenantId));
+            }
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.foreign_key(ObjectType::Tenant, self.member_tenant_id, None);
+        if let Some(value) = &self.member_tenant_id {
+            i.search(Property::MemberTenantId, value);
+        }
+    }
+}
+
+impl Pickle for DnsServerPowerDns {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        self.api_key.pickle(out);
+        self.endpoint.pickle(out);
+        self.server_id.pickle(out);
+        self.description.pickle(out);
+        self.member_tenant_id.pickle(out);
+        self.timeout.pickle(out);
+        self.ttl.pickle(out);
+        self.polling_interval.pickle(out);
+        self.propagation_timeout.pickle(out);
+        self.propagation_delay.pickle(out);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let mut this = Self::default();
+        this.api_key = Pickle::unpickle(stream)?;
+        this.endpoint = Pickle::unpickle(stream)?;
+        this.server_id = Pickle::unpickle(stream)?;
+        this.description = Pickle::unpickle(stream)?;
+        this.member_tenant_id = Pickle::unpickle(stream)?;
+        this.timeout = Pickle::unpickle(stream)?;
+        this.ttl = Pickle::unpickle(stream)?;
+        this.polling_interval = Pickle::unpickle(stream)?;
+        this.propagation_timeout = Pickle::unpickle(stream)?;
+        this.propagation_delay = Pickle::unpickle(stream)?;
+        Some(this)
+    }
+}
+
+impl Default for DnsServerPowerDns {
+    fn default() -> Self {
+        Self {
+            api_key: Default::default(),
+            endpoint: Default::default(),
+            server_id: Default::default(),
+            description: Default::default(),
+            member_tenant_id: Default::default(),
+            timeout: Duration::from_millis(30000),
+            ttl: Duration::from_millis(300000),
+            polling_interval: Duration::from_millis(15000),
+            propagation_timeout: Duration::from_millis(60000),
+            propagation_delay: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for DnsServerPowerDns {
+    fn into_value(self) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(12);
+        map.insert_unchecked(Property::ApiKey, self.api_key.into_value());
+        map.insert_unchecked(Property::Endpoint, self.endpoint.into_value());
+        map.insert_unchecked(Property::ServerId, self.server_id.into_value());
+        map.insert_unchecked(Property::Description, self.description.into_value());
+        map.insert_unchecked(Property::MemberTenantId, self.member_tenant_id.into_value());
+        map.insert_unchecked(Property::Timeout, self.timeout.into_value());
+        map.insert_unchecked(Property::Ttl, self.ttl.into_value());
+        map.insert_unchecked(
+            Property::PollingInterval,
+            self.polling_interval.into_value(),
+        );
+        map.insert_unchecked(
+            Property::PropagationTimeout,
+            self.propagation_timeout.into_value(),
+        );
+        map.insert_unchecked(
+            Property::PropagationDelay,
+            self.propagation_delay.into_value(),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for DnsServerPowerDns {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::ApiKey) => self.api_key.patch(pointer, value),
+            Some(Property::Endpoint) => self
+                .endpoint
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::ServerId) => self
+                .server_id
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::Description) => self
                 .description
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),

@@ -45,7 +45,7 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
         self.data
             .rcpt_to
             .iter()
-            .any(|addr| analysis.is_report_address(addr.report_address()))
+            .any(|addr| analysis.is_report_address(addr.orig_address()))
     }
 }
 

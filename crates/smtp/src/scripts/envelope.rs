@@ -12,6 +12,7 @@ use smtp_proto::{
 use utils::DomainPart;
 
 use crate::core::{SessionAddress, SessionData};
+use email::message::delivery::ORCPT_ADDR_TYPE;
 
 impl SessionData {
     pub fn apply_envelope_modification(&mut self, envelope: Envelope, value: String) {
@@ -111,7 +112,11 @@ impl SessionData {
             }
             Envelope::Orcpt => {
                 if let Some(rcpt_to) = self.rcpt_to.last_mut() {
-                    rcpt_to.dsn_info = value.into();
+                    rcpt_to.dsn_info = value
+                        .strip_prefix(ORCPT_ADDR_TYPE)
+                        .map(str::to_string)
+                        .unwrap_or(value)
+                        .into();
                 }
             }
             Envelope::Envid => {

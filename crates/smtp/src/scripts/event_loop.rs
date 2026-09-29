@@ -576,7 +576,7 @@ impl QueueSieveMessage for Server {
             None => None,
         };
 
-        message
+        let _ = message
             .queue(
                 QueueParams::new(raw_message, session_id, self)
                     .with_dkim_signers(dkim_signers)

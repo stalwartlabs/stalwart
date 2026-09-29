@@ -11,6 +11,7 @@ use common::{
     config::smtp::auth::VerifyStrategy,
     network::{ServerInstance, asn::AsnGeoLookupResult},
 };
+use email::message::delivery::ORCPT_ADDR_TYPE;
 use mail_auth::{IprevOutput, SpfOutput};
 use smtp_proto::request::receiver::{
     BdatReceiver, DataReceiver, DummyDataReceiver, DummyLineReceiver, LineReceiver, RequestReceiver,
@@ -306,10 +307,13 @@ impl SessionAddress {
         }
     }
 
-    pub fn report_address(&self) -> &str {
+    pub fn orig_address(&self) -> &str {
+        self.dsn_info.as_deref().unwrap_or(&self.address_lcase)
+    }
+
+    pub fn orcpt_parameter(&self) -> Option<String> {
         self.dsn_info
-            .as_ref()
-            .and_then(|v| v.strip_prefix("rfc822;"))
-            .unwrap_or(&self.address_lcase)
+            .as_deref()
+            .map(|orcpt| format!("{ORCPT_ADDR_TYPE}{}", orcpt.to_lowercase()))
     }
 }

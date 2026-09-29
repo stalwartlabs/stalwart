@@ -35,8 +35,11 @@ fn into_error(err: impl Display) -> trc::Error {
 }
 
 const ER_DUP_ENTRY: u16 = 1062;
+const ER_UNKNOWN_ERROR: u16 = 1105;
+const ER_TRANS_CACHE_FULL: u16 = 1197;
 const ER_LOCK_WAIT_TIMEOUT: u16 = 1205;
 const ER_LOCK_DEADLOCK: u16 = 1213;
+const ER_LOCK_TABLE_FULL: u16 = 1206;
 const ER_STATEMENT_TIMEOUT: u16 = 1969;
 const ER_QUERY_TIMEOUT: u16 = 3024;
 
@@ -53,6 +56,17 @@ pub(crate) fn is_timeout_error(err: &mysql_async::Error) -> bool {
             ER_LOCK_WAIT_TIMEOUT | ER_STATEMENT_TIMEOUT | ER_QUERY_TIMEOUT
         )
     )
+}
+
+#[inline(always)]
+pub(crate) fn is_chunk_too_large_error(err: &mysql_async::Error) -> bool {
+    is_timeout_error(err)
+        || matches!(err, mysql_async::Error::Server(err)
+            if matches!(
+                err.code,
+                ER_UNKNOWN_ERROR | ER_TRANS_CACHE_FULL | ER_LOCK_TABLE_FULL
+            )
+        )
 }
 
 impl SearchIndex {

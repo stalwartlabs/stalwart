@@ -104,7 +104,7 @@ impl MtaReportSend for Server {
         let dkim_signers = self
             .eval_signers(sign_config, &message.message, parent_session_id)
             .await;
-        message
+        let _ = message
             .queue(
                 QueueParams::new(&report, parent_session_id, self).with_dkim_signers(dkim_signers),
             )
@@ -136,7 +136,7 @@ impl MtaReportSend for Server {
         } else {
             None
         };
-        message
+        let _ = message
             .queue(
                 QueueParams::new(&raw_message, parent_session_id, self)
                     .with_dkim_signers(dkim_signers),

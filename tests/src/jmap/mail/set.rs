@@ -8,7 +8,7 @@ use crate::{
     jmap::{find_values, replace_blob_ids, replace_boundaries, replace_values},
     utils::server::TestServer,
 };
-use ::email::mailbox::INBOX_ID;
+use ::email::{mailbox::INBOX_ID, message::messagedata::MessageData};
 use ahash::AHashSet;
 use jmap_client::{
     Error, Set,
@@ -18,8 +18,9 @@ use jmap_client::{
     mailbox::Role,
 };
 use registry::schema::prelude::ObjectType;
-use std::{fs, path::PathBuf};
-use types::id::Id;
+use std::{fs, path::PathBuf, str::FromStr};
+use store::ValueKey;
+use types::{collection::Collection, id::Id};
 
 pub async fn test(test: &TestServer) {
     println!("Running Email Set tests...");
@@ -29,6 +30,7 @@ pub async fn test(test: &TestServer) {
 
     create(&client, &mailbox_id).await;
     update(&client, &mailbox_id).await;
+    update_preserves_uids(test, &client, account.id().document_id(), &mailbox_id).await;
 
     test.destroy_all_mailboxes(account).await;
     test.account("admin@example.com")
@@ -294,6 +296,95 @@ async fn update(client: &Client, root_mailbox_id: &str) {
         .mailbox_destroy(&test_mailbox2_id, true)
         .await
         .unwrap();
+}
+
+async fn update_preserves_uids(
+    test: &TestServer,
+    client: &Client,
+    account_id: u32,
+    root_mailbox_id: &str,
+) {
+    let email_id = client
+        .email_query(
+            email::query::Filter::in_mailbox(root_mailbox_id).into(),
+            None::<Vec<_>>,
+        )
+        .await
+        .unwrap()
+        .take_ids()
+        .pop()
+        .unwrap();
+    let document_id = Id::from_str(&email_id).unwrap().document_id();
+    let test_mailbox_id = client
+        .mailbox_create("UID Test", None::<String>, Role::None)
+        .await
+        .unwrap()
+        .take_id();
+    let test_mailbox_document_id = Id::from_str(&test_mailbox_id).unwrap().document_id();
+    let uids = message_uids(test, account_id, document_id).await;
+    let inbox_uid = uids[&INBOX_ID];
+    assert_ne!(inbox_uid, 0);
+
+    // Full mailboxIds identical to the current ones plus a keyword change must keep the UID
+    let mut request = client.build();
+    request
+        .set_email()
+        .update(&email_id)
+        .mailbox_ids([root_mailbox_id])
+        .keywords(["uid-test"]);
+    request
+        .send_set_email()
+        .await
+        .unwrap()
+        .updated(&email_id)
+        .unwrap();
+    assert_eq!(
+        message_uids(test, account_id, document_id).await,
+        [(INBOX_ID, inbox_uid)].into_iter().collect()
+    );
+
+    // Full mailboxIds that keeps a mailbox and adds another must only assign a UID to the new one
+    let mut request = client.build();
+    request
+        .set_email()
+        .update(&email_id)
+        .mailbox_ids([root_mailbox_id, test_mailbox_id.as_str()]);
+    request
+        .send_set_email()
+        .await
+        .unwrap()
+        .updated(&email_id)
+        .unwrap();
+    let uids = message_uids(test, account_id, document_id).await;
+    assert_eq!(uids.len(), 2);
+    assert_eq!(uids[&INBOX_ID], inbox_uid);
+    assert_ne!(uids[&test_mailbox_document_id], 0);
+
+    client
+        .mailbox_destroy(&test_mailbox_id, true)
+        .await
+        .unwrap();
+}
+
+async fn message_uids(
+    test: &TestServer,
+    account_id: u32,
+    document_id: u32,
+) -> std::collections::BTreeMap<u32, u32> {
+    test.server
+        .store()
+        .get_value::<MessageData>(ValueKey::archive(
+            account_id,
+            Collection::Email,
+            document_id,
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .mailboxes
+        .iter()
+        .map(|m| (m.mailbox_id, m.uid))
+        .collect()
 }
 
 pub async fn assert_email_properties(

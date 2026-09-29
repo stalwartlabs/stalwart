@@ -962,6 +962,20 @@ impl DnsUpdater {
                 )
                 .map_err(|err| format!("Failed to build DNS updater: {}", err))?,
             }),
+            DnsServer::PowerDns(server) => Ok(DnsUpdater {
+                polling_interval: server.polling_interval.into_inner(),
+                propagation_timeout: server.propagation_timeout.into_inner(),
+                propagation_delay: server.propagation_delay.map(|d| d.into_inner()),
+                ttl: server.ttl.into_inner(),
+                core,
+                updater: dns_update::DnsUpdater::new_pdns(
+                    server.api_key.secret().await?,
+                    server.endpoint,
+                    server.server_id,
+                    server.timeout.into_inner().into(),
+                )
+                .map_err(|err| format!("Failed to build DNS updater: {}", err))?,
+            }),
             DnsServer::Safedns(server) => Ok(DnsUpdater {
                 polling_interval: server.polling_interval.into_inner(),
                 propagation_timeout: server.propagation_timeout.into_inner(),
@@ -1147,6 +1161,36 @@ impl DnsUpdater {
             Type = record_type.as_str(),
             Value = record_values,
         );
+        Ok(())
+    }
+
+    pub async fn delete_rrset(
+        &self,
+        origin: &str,
+        name: &str,
+        record_type: DnsRecordType,
+    ) -> Result<(), String> {
+        if let Err(err) = self
+            .updater
+            .set_rrset(
+                name,
+                record_type,
+                self.ttl.as_secs() as u32,
+                Vec::new(),
+                origin,
+            )
+            .await
+        {
+            trc::event!(
+                Dns(DnsEvent::RecordDeletionFailed),
+                Hostname = CompactString::from(name),
+                Details = CompactString::from(origin),
+                Type = record_type.as_str(),
+                Reason = err.to_compact_string(),
+            );
+            return Err(format!("Failed to delete DNS RRSet: {}", err));
+        }
+
         Ok(())
     }
 

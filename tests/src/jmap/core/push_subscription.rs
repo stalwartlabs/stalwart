@@ -195,13 +195,37 @@ pub async fn test(test: &TestServer) {
     client.push_subscription_destroy(&push_id).await.unwrap();
 
     // Only one verification per minute is allowed
-    let push_id = client
-        .push_subscription_create("invalid", "https://127.0.0.1:19000/push", None)
+    let first_id = client
+        .push_subscription_create(
+            "first",
+            "https://127.0.0.1:19000/push?skip_checks=true",
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
+    let verification = expect_push(&mut event_rx).await.unwrap_verification();
+    assert_eq!(verification.push_subscription_id, first_id);
+    let deferred_id = client
+        .push_subscription_create("deferred", "https://127.0.0.1:19000/push", None)
         .await
         .unwrap()
         .take_id();
     expect_nothing(&mut event_rx).await;
-    client.push_subscription_destroy(&push_id).await.unwrap();
+    let verification = expect_push_within(&mut event_rx, Duration::from_secs(8))
+        .await
+        .unwrap_verification();
+    assert_eq!(verification.push_subscription_id, deferred_id);
+    account
+        .jmap_request(
+            &["urn:ietf:params:jmap:core"],
+            json!([[
+                "PushSubscription/set",
+                { "destroy": [first_id, deferred_id] },
+                "0"
+            ]]),
+        )
+        .await;
 
     // Register push notification (with encryption)
     let push_id = client
@@ -738,7 +762,14 @@ fn assert_vapid_authorization(header: &str, expected_key: &str, expected_origin:
 }
 
 async fn expect_push(event_rx: &mut mpsc::Receiver<PushMessage>) -> PushMessage {
-    match tokio::time::timeout(Duration::from_millis(1500), event_rx.recv()).await {
+    expect_push_within(event_rx, Duration::from_millis(1500)).await
+}
+
+async fn expect_push_within(
+    event_rx: &mut mpsc::Receiver<PushMessage>,
+    wait: Duration,
+) -> PushMessage {
+    match tokio::time::timeout(wait, event_rx.recv()).await {
         Ok(Some(push)) => {
             //println!("Push received: {:?}", push);
             push

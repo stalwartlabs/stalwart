@@ -9,7 +9,7 @@ use super::{
     ece::{ECE_WEBPUSH_MAX_PLAINTEXT_SIZE, WEBPUSH_MAX_BODY_SIZE, ece_encrypt},
     email_push::build_email_push_object,
 };
-use crate::state_manager::PushRegistration;
+use crate::state_manager::{PushBatch, PushRegistration};
 use calcard::jscalendar::JSCalendarDateTime;
 use common::{Server, ipc::PushNotification, network::webpush::Vapid};
 use compact_str::{CompactString, ToCompactString};
@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use store::write::now;
 use tokio::sync::mpsc;
 use trc::PushSubscriptionEvent;
-use types::{id::Id, type_state::DataType};
+use types::id::Id;
 use utils::map::vec_map::VecMap;
 
 const MAX_ERROR_RESPONSE_LEN: usize = 1024;
@@ -49,34 +49,29 @@ impl PushRegistration {
     pub fn send(
         &mut self,
         id: Id,
+        push_client: &Client,
         push_tx: mpsc::Sender<Event>,
         push_timeout: Duration,
         server: Server,
     ) {
         let subscription = self.server.clone();
-        let push_client = self.client.clone();
-        let notifications = std::mem::take(&mut self.notifications);
+        let push_client = push_client.clone();
+        let batch = std::mem::take(&mut self.pending);
 
         self.in_flight = true;
         self.last_request = Instant::now();
 
         tokio::spawn(async move {
-            let mut changed: VecMap<Id, VecMap<DataType, State>> = VecMap::new();
+            let vapid = server.core.jmap.vapid.as_ref();
             let mut email_pushes: VecMap<Id, EmailPushObject> = VecMap::new();
 
-            let mut failed_state_change = false;
+            let mut failed = PushBatch::default();
             let mut failed_email_pushes = Vec::new();
             let mut failed_calendar_alerts = Vec::new();
 
-            for notification in &notifications {
+            for notification in &batch.notifications {
                 match notification {
-                    PushNotification::StateChange(state_change) => {
-                        for type_state in state_change.types {
-                            changed
-                                .get_mut_or_insert(state_change.account_id.into())
-                                .set(type_state, State::Exact(state_change.change_id));
-                        }
-                    }
+                    PushNotification::StateChange(_) => {}
                     PushNotification::CalendarAlert(calendar_alert) => {
                         let payload = PushObject::CalendarAlert {
                             account_id: calendar_alert.event_account_id.into(),
@@ -87,12 +82,12 @@ impl PushRegistration {
                             }),
                             alert_id: calendar_alert.alert_id.clone(),
                         };
-                        if !http_request(
+                        if !post_object(
                             &push_client,
                             &subscription,
-                            serde_json::to_string(&payload).unwrap().into_bytes(),
+                            &payload,
                             push_timeout,
-                            server.core.jmap.vapid.as_ref(),
+                            vapid,
                             Urgency::Normal,
                         )
                         .await
@@ -156,18 +151,23 @@ impl PushRegistration {
                 }
             }
 
-            if !changed.is_empty() {
-                failed_state_change = !http_request(
+            if !batch.state_changes.is_empty() {
+                let payload = PushObject::StateChange {
+                    changed: batch.state_changes,
+                };
+                if !post_object(
                     &push_client,
                     &subscription,
-                    serde_json::to_string(&PushObject::StateChange { changed })
-                        .unwrap()
-                        .into_bytes(),
+                    &payload,
                     push_timeout,
-                    server.core.jmap.vapid.as_ref(),
+                    vapid,
                     Urgency::Normal,
                 )
-                .await;
+                .await
+                    && let PushObject::StateChange { changed } = payload
+                {
+                    failed.state_changes = changed;
+                }
             }
 
             for (account_id, email_push) in email_pushes {
@@ -181,12 +181,12 @@ impl PushRegistration {
                     state: email_push.change_id.map(State::Exact),
                 };
 
-                if !http_request(
+                if !post_object(
                     &push_client,
                     &subscription,
-                    serde_json::to_string(&payload).unwrap().into_bytes(),
+                    &payload,
                     push_timeout,
-                    server.core.jmap.vapid.as_ref(),
+                    vapid,
                     email_push.urgency,
                 )
                 .await
@@ -195,48 +195,62 @@ impl PushRegistration {
                 }
             }
 
-            let result = if !failed_state_change
+            let result = if failed.state_changes.is_empty()
                 && failed_email_pushes.is_empty()
                 && failed_calendar_alerts.is_empty()
             {
                 Event::DeliverySuccess { id }
             } else {
-                let mut failed_notifications = Vec::with_capacity(
-                    failed_state_change as usize
-                        + failed_email_pushes.len()
-                        + failed_calendar_alerts.len(),
-                );
-
-                for notification in notifications {
-                    match &notification {
-                        PushNotification::StateChange(_) => {
-                            if failed_state_change {
-                                failed_notifications.push(notification);
-                            }
-                        }
+                failed.notifications = batch
+                    .notifications
+                    .into_iter()
+                    .filter(|notification| match notification {
+                        PushNotification::StateChange(_) => false,
                         PushNotification::EmailPush(email_push) => {
-                            if failed_email_pushes.contains(&email_push.account_id) {
-                                failed_notifications.push(notification);
-                            }
+                            failed_email_pushes.contains(&email_push.account_id)
                         }
-                        PushNotification::CalendarAlert(calendar_alert) => {
-                            if failed_calendar_alerts
-                                .contains(&(calendar_alert.account_id, calendar_alert.event_id))
-                            {
-                                failed_notifications.push(notification);
-                            }
-                        }
-                    }
-                }
+                        PushNotification::CalendarAlert(calendar_alert) => failed_calendar_alerts
+                            .contains(&(calendar_alert.account_id, calendar_alert.event_id)),
+                    })
+                    .collect();
 
-                Event::DeliveryFailure {
-                    id,
-                    notifications: failed_notifications,
-                }
+                Event::DeliveryFailure { id, failed }
             };
 
             push_tx.send(result).await.ok();
         });
+    }
+}
+
+async fn post_object(
+    push_client: &Client,
+    subscription: &PushSubscription,
+    object: &PushObject,
+    push_timeout: Duration,
+    vapid: Option<&Vapid>,
+    urgency: Urgency,
+) -> bool {
+    match serde_json::to_vec(object) {
+        Ok(body) => {
+            http_request(
+                push_client,
+                subscription,
+                body,
+                push_timeout,
+                vapid,
+                urgency,
+            )
+            .await
+        }
+        Err(err) => {
+            trc::event!(
+                PushSubscription(PushSubscriptionEvent::Error),
+                Details = "Failed to serialize push object",
+                Url = subscription.url.to_string(),
+                Reason = err.to_string()
+            );
+            true
+        }
     }
 }
 

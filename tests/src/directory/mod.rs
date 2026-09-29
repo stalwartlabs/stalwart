@@ -6,6 +6,7 @@
 
 pub mod discovery;
 pub mod integration;
+pub mod issuer;
 pub mod ldap;
 pub mod oidc;
 #[cfg(feature = "sqlite")]
@@ -19,6 +20,7 @@ pub async fn directory_tests() {
     oidc::test().await;
     unavailable::test().await;
     discovery::test().await;
+    issuer::test().await;
     #[cfg(feature = "sqlite")]
     sql::test().await;
     synchronization::test().await;

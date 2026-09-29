@@ -363,9 +363,6 @@ impl<T: SessionStream> Session<T> {
         if let Some(dkim2_output) = dkim2_output {
             report_record = report_record.with_dkim2_output(dkim2_output);
         }
-        if let Some(spf_ehlo) = &self.data.spf_ehlo {
-            report_record = report_record.with_spf_output(spf_ehlo, SpfScope::Helo);
-        }
         if let Some(spf_mail_from) = &self.data.spf_mail_from {
             report_record = report_record.with_spf_output(spf_mail_from, SpfScope::MailFrom);
         }

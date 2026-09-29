@@ -12,7 +12,7 @@ use common::{
     },
 };
 use hyper::body::{Bytes, Frame};
-use mail_auth::{IpLookupStrategy, mta_sts::TlsRptRecord};
+use mail_auth::{DnssecStatus, IpLookupStrategy, mta_sts::TlsRptRecord};
 use serde::{Deserialize, Serialize};
 use smtp::outbound::{
     client::{SmtpClient, StartTlsResult},
@@ -230,14 +230,7 @@ async fn delivery_diagnose(
 
     // Lookup MX
     let now = Instant::now();
-    let mxs = match server
-        .core
-        .smtp
-        .resolvers
-        .dns
-        .mx_lookup(&domain, Some(&server.inner.cache.dns_mx))
-        .await
-    {
+    let mxs = match server.mx_lookup(domain.as_str()).await {
         Ok(mxs) => mxs,
         Err(err) => {
             tx.send(DeliveryStage::MxLookupError {
@@ -389,78 +382,25 @@ async fn delivery_diagnose(
             }
         }
 
-        // Fetch TLSA record
-        tx.send(DeliveryStage::TlsaLookupStart).await?;
-
-        let now = Instant::now();
-        let dane_policy = match server.tlsa_lookup(format!("_25._tcp.{hostname}.")).await {
-            Ok(TlsaResult::Secure(tlsa)) if tlsa.has_end_entities => {
-                tx.send(DeliveryStage::TlsaLookupSuccess {
-                    record: tlsa.as_ref().clone(),
-                    elapsed: now.elapsed_ms(),
-                })
-                .await?;
-
-                Some(tlsa)
-            }
-            Ok(TlsaResult::Secure(_)) => {
-                tx.send(DeliveryStage::TlsaLookupError {
-                    elapsed: now.elapsed_ms(),
-                    reason: "TLSA record does not have end entities".to_string(),
-                })
-                .await?;
-
-                None
-            }
-            Ok(TlsaResult::Bogus) => {
-                tx.send(DeliveryStage::TlsaLookupError {
-                    elapsed: now.elapsed_ms(),
-                    reason: "Bogus TLSA record".to_string(),
-                })
-                .await?;
-
-                None
-            }
-            Ok(TlsaResult::Missing) => {
-                tx.send(DeliveryStage::TlsaNotFound {
-                    elapsed: now.elapsed_ms(),
-                    reason: "No TLSA DNSSEC records found".to_string(),
-                })
-                .await?;
-
-                None
-            }
-            Err(err) => {
-                if matches!(
-                    &err,
-                    mail_auth::Error::Dns(mail_auth::DnsError::RecordNotFound(_))
-                ) {
-                    tx.send(DeliveryStage::TlsaNotFound {
-                        elapsed: now.elapsed_ms(),
-                        reason: "No TLSA records found for MX".to_string(),
-                    })
-                    .await?;
-                } else {
-                    tx.send(DeliveryStage::TlsaLookupError {
-                        elapsed: now.elapsed_ms(),
-                        reason: err.to_string(),
-                    })
-                    .await?;
-                }
-                None
-            }
-        };
-
         tx.send(DeliveryStage::IpLookupStart).await?;
 
         let now = Instant::now();
-        let remote_ips = match host.fqdn_hostname() {
+        let validate_addresses = server.core.smtp.resolvers.dnssec_available
+            && host.dnssec_status() == DnssecStatus::Secure;
+        let (remote_ips, addresses_dnssec_status) = match host.fqdn_hostname() {
             HostOrIp::Host(hostname) => {
                 match server
-                    .ip_lookup(&hostname, IpLookupStrategy::Ipv4thenIpv6, usize::MAX, false)
+                    .ip_lookup(
+                        &hostname,
+                        IpLookupStrategy::Ipv4thenIpv6,
+                        usize::MAX,
+                        validate_addresses,
+                    )
                     .await
                 {
-                    Ok((remote_ips, _)) if !remote_ips.is_empty() => remote_ips,
+                    Ok((remote_ips, dnssec_status)) if !remote_ips.is_empty() => {
+                        (remote_ips, dnssec_status)
+                    }
                     Ok(_) => {
                         tx.send(DeliveryStage::IpLookupError {
                             reason: "No IP addresses found for host".to_string(),
@@ -479,7 +419,7 @@ async fn delivery_diagnose(
                     }
                 }
             }
-            HostOrIp::Ip(ip) => vec![ip],
+            HostOrIp::Ip(ip) => (vec![ip], DnssecStatus::Indeterminate),
         };
 
         tx.send(DeliveryStage::IpLookupSuccess {
@@ -487,6 +427,95 @@ async fn delivery_diagnose(
             elapsed: now.elapsed_ms(),
         })
         .await?;
+
+        // Fetch TLSA record
+        tx.send(DeliveryStage::TlsaLookupStart).await?;
+
+        let now = Instant::now();
+        let dane_policy = match host.dane_status(addresses_dnssec_status) {
+            (DnssecStatus::Secure, _) => {
+                match server.tlsa_lookup(format!("_25._tcp.{hostname}.")).await {
+                    Ok(TlsaResult::Secure(tlsa)) if tlsa.has_end_entities => {
+                        tx.send(DeliveryStage::TlsaLookupSuccess {
+                            record: tlsa.as_ref().clone(),
+                            elapsed: now.elapsed_ms(),
+                        })
+                        .await?;
+
+                        Some(tlsa)
+                    }
+                    Ok(TlsaResult::Secure(_)) => {
+                        tx.send(DeliveryStage::TlsaLookupError {
+                            elapsed: now.elapsed_ms(),
+                            reason: "TLSA record does not have end entities".to_string(),
+                        })
+                        .await?;
+
+                        None
+                    }
+                    Ok(TlsaResult::Bogus) => {
+                        tx.send(DeliveryStage::TlsaLookupError {
+                            elapsed: now.elapsed_ms(),
+                            reason: "Bogus TLSA record".to_string(),
+                        })
+                        .await?;
+
+                        continue 'outer;
+                    }
+                    Ok(TlsaResult::Missing) => {
+                        tx.send(DeliveryStage::TlsaNotFound {
+                            elapsed: now.elapsed_ms(),
+                            reason: "No TLSA DNSSEC records found".to_string(),
+                        })
+                        .await?;
+
+                        None
+                    }
+                    Err(err) => {
+                        if matches!(
+                            &err,
+                            mail_auth::Error::Dns(mail_auth::DnsError::RecordNotFound(_))
+                        ) {
+                            tx.send(DeliveryStage::TlsaNotFound {
+                                elapsed: now.elapsed_ms(),
+                                reason: "No TLSA records found for MX".to_string(),
+                            })
+                            .await?;
+
+                            None
+                        } else {
+                            tx.send(DeliveryStage::TlsaLookupError {
+                                elapsed: now.elapsed_ms(),
+                                reason: err.to_string(),
+                            })
+                            .await?;
+
+                            continue 'outer;
+                        }
+                    }
+                }
+            }
+            (DnssecStatus::Bogus, dnssec_entity) => {
+                tx.send(DeliveryStage::TlsaLookupError {
+                    elapsed: now.elapsed_ms(),
+                    reason: format!("Bogus {dnssec_entity} records were found"),
+                })
+                .await?;
+
+                continue 'outer;
+            }
+            (_, dnssec_entity) => {
+                tx.send(DeliveryStage::TlsaNotFound {
+                    elapsed: now.elapsed_ms(),
+                    reason: format!(
+                        "{dnssec_entity} records are not DNSSEC signed, DANE does not apply"
+                    ),
+                })
+                .await?;
+
+                None
+            }
+        };
 
         for remote_ip in remote_ips {
             // Start connection

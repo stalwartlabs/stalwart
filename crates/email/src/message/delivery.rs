@@ -18,6 +18,8 @@ use std::{borrow::Cow, future::Future};
 use store::ahash::AHashMap;
 use types::blob_hash::BlobHash;
 
+pub const ORCPT_ADDR_TYPE: &str = "rfc822;";
+
 #[derive(Debug)]
 pub struct IngestMessage {
     pub sender_address: String,
@@ -36,6 +38,12 @@ pub struct IngestRecipient {
 }
 
 impl IngestRecipient {
+    pub fn orcpt_parameter(&self) -> Option<String> {
+        self.orcpt
+            .as_deref()
+            .map(|orcpt| format!("{ORCPT_ADDR_TYPE}{orcpt}"))
+    }
+
     pub fn is_spam(&self) -> bool {
         self.spam_percentage
             .is_some_and(|percentage| percentage >= 50)

@@ -95,6 +95,13 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                     }
                                 };
 
+                                inner
+                                    .shared_core
+                                    .load()
+                                    .storage
+                                    .data
+                                    .invalidate_read_snapshot();
+
                                 loop {
                                     match batch.next_event() {
                                         Ok(Some(event)) => {
@@ -158,9 +165,7 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                             .await;
                                                 }
                                                 BroadcastEvent::QueueRefresh => {
-                                                    let core = inner.shared_core.load_full();
-                                                    if core.network.roles.outbound_mta {
-                                                        core.storage.data.invalidate_read_snapshot();
+                                                    if inner.shared_core.load().network.roles.outbound_mta {
                                                         let _ = inner
                                                                 .ipc
                                                                 .queue_tx
@@ -175,9 +180,7 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                                                     inner.ipc.index_tx.notify_one();
                                                 }
                                                 BroadcastEvent::RegistryChange(change) => {
-                                                    let server = inner.build_server();
-                                                    server.store().invalidate_read_snapshot();
-                                                    match Box::pin(server.reload_registry(change)).await {
+                                                    match Box::pin(inner.build_server().reload_registry(change)).await {
                                                         Ok(result) => {
                                                             result.log();
                                                         }

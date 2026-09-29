@@ -214,6 +214,7 @@ impl Resolvers {
         let config_dnssec = resolver_config.clone();
         let mut opts_dnssec = opts.clone();
         opts_dnssec.validate = true;
+        opts_dnssec.num_concurrent_reqs = 1;
 
         let dnssec = DnssecResolver {
             resolver: TokioResolver::builder_with_config(
@@ -343,6 +344,7 @@ impl Default for Resolvers {
         let config_dnssec = config.clone();
         let mut opts_dnssec = opts.clone();
         opts_dnssec.validate = true;
+        opts_dnssec.num_concurrent_reqs = 1;
 
         Self {
             dns: MessageAuthenticator::new(config, opts).expect("Failed to build DNS resolver"),

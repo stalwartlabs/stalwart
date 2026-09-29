@@ -95,10 +95,8 @@ impl<T: SessionStream> Session<T> {
                     params
                         .envelope
                         .push((Envelope::To, rcpt.address_lcase.as_str().into()));
-                    if let Some(orcpt) = &rcpt.dsn_info {
-                        params
-                            .envelope
-                            .push((Envelope::Orcpt, orcpt.as_str().to_lowercase().into()));
+                    if let Some(orcpt) = rcpt.orcpt_parameter() {
+                        params.envelope.push((Envelope::Orcpt, orcpt.into()));
                     }
                 }
             } else {
@@ -109,10 +107,10 @@ impl<T: SessionStream> Session<T> {
 
                 for rcpt in &self.data.rcpt_to {
                     recipients.push(Variable::from(rcpt.address_lcase.as_str()));
-                    orcpts.push(match &rcpt.dsn_info {
+                    orcpts.push(match rcpt.orcpt_parameter() {
                         Some(orcpt) => {
                             has_orcpts = true;
-                            Variable::from(orcpt.as_str().to_lowercase())
+                            Variable::from(orcpt)
                         }
                         None => Variable::default(),
                     });

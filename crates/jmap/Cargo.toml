@@ -1,6 +1,6 @@
 [package]
 name = "jmap"
-version = "0.16.23"
+version = "0.16.24"
 edition = "2024"
 
 [dependencies]

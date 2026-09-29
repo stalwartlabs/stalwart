@@ -14,6 +14,7 @@ pub mod dkim;
 pub mod http;
 pub mod report;
 pub mod secret;
+pub mod spam;
 pub mod task;
 
 impl Roles {

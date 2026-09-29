@@ -174,4 +174,53 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
         .assert_contains("COPYUID");
+
+    move_store_race(imap, imap_check).await;
+}
+
+async fn move_store_race(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
+    const RACE_MESSAGES: usize = 10;
+    const RACE_ROUNDS: usize = 20;
+
+    // A MOVE that loses a race with a STORE on the same messages in another
+    // session is retried instead of failing with CONTACTADMIN
+    imap.send_ok("CREATE \"Race Left\"").await;
+    imap.send_ok("CREATE \"Race Right\"").await;
+    for i in 0..RACE_MESSAGES {
+        imap.append(
+            "Race Left",
+            &format!("From: race@example.com\r\nSubject: Move race {i}\r\n\r\nrace\r\n"),
+        )
+        .await;
+    }
+
+    for round in 0..RACE_ROUNDS {
+        let (src, dest, store) = if round % 2 == 0 {
+            ("Race Left", "Race Right", "UID STORE 1:* +FLAGS (\\Seen)")
+        } else {
+            ("Race Right", "Race Left", "UID STORE 1:* -FLAGS (\\Seen)")
+        };
+        imap.send_ok(&format!("SELECT \"{src}\"")).await;
+        imap_check.send_ok(&format!("SELECT \"{src}\"")).await;
+
+        // The STORE may lose the race instead, so only the MOVE is checked
+        imap.send(&format!("UID MOVE 1:* \"{dest}\"")).await;
+        imap_check.send(store).await;
+        let (moved, _) = tokio::join!(
+            imap.assert_read(Type::Tagged, ResponseType::Ok),
+            imap_check.read(Type::Tagged)
+        );
+        moved.assert_contains("COPYUID");
+
+        imap.send(&format!("STATUS \"{dest}\" (MESSAGES)")).await;
+        imap.assert_read(Type::Tagged, ResponseType::Ok)
+            .await
+            .assert_contains(&format!("(MESSAGES {RACE_MESSAGES})"));
+    }
+
+    // Restore the state the following tests expect
+    imap.send_ok("SELECT \"Burrata al Tartufo\"").await;
+    imap_check.send_ok("SELECT \"Burrata al Tartufo\"").await;
+    imap.send_ok("DELETE \"Race Left\"").await;
+    imap.send_ok("DELETE \"Race Right\"").await;
 }

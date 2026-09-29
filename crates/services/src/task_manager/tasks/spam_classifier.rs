@@ -13,17 +13,18 @@ use common::{
 use registry::{
     schema::{
         enums::TaskSpamFilterMaintenanceType,
-        prelude::ObjectType,
+        prelude::{Object, ObjectInner, ObjectType},
         structs::{
             HttpLookup, MemoryLookupKey, SpamDnsblServer, SpamFileExtension, SpamRule, SpamTag,
             TaskSpamFilterMaintenance,
         },
     },
-    types::EnumImpl,
+    types::{EnumImpl, ObjectImpl},
 };
 use spam_filter::modules::classifier::SpamClassifier;
 use std::time::{Duration, Instant};
 use store::{
+    RegistryStore,
     ahash::AHashMap,
     registry::write::{RegistryWrite, RegistryWriteResult},
 };
@@ -97,11 +98,65 @@ struct Rules {
     file_exts: Vec<SpamFileExtension>,
 }
 
-#[derive(Default)]
+trait UpstreamObject: ObjectImpl + PartialEq + From<Object> + Into<ObjectInner> {
+    fn replacement_for(self, _local: &Self) -> Option<Self> {
+        Some(self)
+    }
+}
+
+impl UpstreamObject for SpamRule {
+    fn replacement_for(mut self, local: &Self) -> Option<Self> {
+        self.set_enable(local.enable());
+        Some(self)
+    }
+}
+
+impl UpstreamObject for SpamDnsblServer {
+    fn replacement_for(mut self, local: &Self) -> Option<Self> {
+        self.set_enable(local.enable());
+        Some(self)
+    }
+}
+
+impl UpstreamObject for HttpLookup {
+    fn replacement_for(mut self, local: &Self) -> Option<Self> {
+        self.enable = local.enable;
+        Some(self)
+    }
+}
+
+impl UpstreamObject for SpamTag {
+    fn replacement_for(self, _local: &Self) -> Option<Self> {
+        None
+    }
+}
+
+impl UpstreamObject for MemoryLookupKey {}
+
+impl UpstreamObject for SpamFileExtension {}
+
 struct RuleUpdateResult {
-    success: usize,
-    already_exists: usize,
+    object_type: ObjectType,
+    added: usize,
+    updated: usize,
+    unchanged: usize,
     failed: usize,
+}
+
+impl RuleUpdateResult {
+    fn new(object_type: ObjectType) -> Self {
+        RuleUpdateResult {
+            object_type,
+            added: 0,
+            updated: 0,
+            unchanged: 0,
+            failed: 0,
+        }
+    }
+
+    fn has_changes(&self) -> bool {
+        self.added + self.updated > 0
+    }
 }
 
 async fn update_spam_rules(server: &Server) -> trc::Result<TaskResult> {
@@ -118,170 +173,52 @@ async fn update_spam_rules(server: &Server) -> trc::Result<TaskResult> {
     };
 
     let registry = server.registry();
-    let mut stats: AHashMap<ObjectType, RuleUpdateResult> = AHashMap::new();
+    let settings = [
+        apply_upstream(registry, rules.rules).await?,
+        apply_upstream(registry, rules.dnsbls).await?,
+        apply_upstream(registry, rules.tags).await?,
+        apply_upstream(registry, rules.file_exts).await?,
+    ];
+    let lookups = [
+        apply_upstream(registry, rules.http_lookups).await?,
+        apply_upstream(registry, rules.key_lookups).await?,
+    ];
 
-    let mut reload_settings = false;
-    let mut reload_lookups = false;
-
-    for rule in rules.rules {
-        match registry.write(RegistryWrite::insert(&rule.into())).await? {
-            RegistryWriteResult::Success(_) => {
-                stats.entry(ObjectType::SpamRule).or_default().success += 1;
-                reload_settings = true;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                stats
-                    .entry(ObjectType::SpamRule)
-                    .or_default()
-                    .already_exists += 1;
-            }
-            _ => {
-                stats.entry(ObjectType::SpamRule).or_default().failed += 1;
-            }
+    let mut reload_errors = Vec::new();
+    for object in [
+        settings
+            .iter()
+            .any(RuleUpdateResult::has_changes)
+            .then_some(ObjectType::SpamRule),
+        lookups
+            .iter()
+            .any(RuleUpdateResult::has_changes)
+            .then_some(ObjectType::MemoryLookupKey),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Err(reason) = reload_and_broadcast(server, object).await {
+            reload_errors.push(reason);
         }
     }
-
-    for dnsbl in rules.dnsbls {
-        match registry.write(RegistryWrite::insert(&dnsbl.into())).await? {
-            RegistryWriteResult::Success(_) => {
-                stats
-                    .entry(ObjectType::SpamDnsblServer)
-                    .or_default()
-                    .success += 1;
-                reload_settings = true;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                stats
-                    .entry(ObjectType::SpamDnsblServer)
-                    .or_default()
-                    .already_exists += 1;
-            }
-            _ => {
-                stats.entry(ObjectType::SpamDnsblServer).or_default().failed += 1;
-            }
-        }
-    }
-
-    for tag in rules.tags {
-        match registry.write(RegistryWrite::insert(&tag.into())).await? {
-            RegistryWriteResult::Success(_) => {
-                stats.entry(ObjectType::SpamTag).or_default().success += 1;
-                reload_settings = true;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                stats.entry(ObjectType::SpamTag).or_default().already_exists += 1;
-            }
-            _ => {
-                stats.entry(ObjectType::SpamTag).or_default().failed += 1;
-            }
-        }
-    }
-
-    for lookup in rules.http_lookups {
-        match registry
-            .write(RegistryWrite::insert(&lookup.into()))
-            .await?
-        {
-            RegistryWriteResult::Success(_) => {
-                stats.entry(ObjectType::HttpLookup).or_default().success += 1;
-                reload_lookups = true;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                stats
-                    .entry(ObjectType::HttpLookup)
-                    .or_default()
-                    .already_exists += 1;
-            }
-            _ => {
-                stats.entry(ObjectType::HttpLookup).or_default().failed += 1;
-            }
-        }
-    }
-
-    for key_lookup in rules.key_lookups {
-        match registry
-            .write(RegistryWrite::insert(&key_lookup.into()))
-            .await?
-        {
-            RegistryWriteResult::Success(_) => {
-                stats
-                    .entry(ObjectType::MemoryLookupKey)
-                    .or_default()
-                    .success += 1;
-                reload_lookups = true;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                stats
-                    .entry(ObjectType::MemoryLookupKey)
-                    .or_default()
-                    .already_exists += 1;
-            }
-            _ => {
-                stats.entry(ObjectType::MemoryLookupKey).or_default().failed += 1;
-            }
-        }
-    }
-
-    for ext in rules.file_exts {
-        match registry.write(RegistryWrite::insert(&ext.into())).await? {
-            RegistryWriteResult::Success(_) => {
-                stats
-                    .entry(ObjectType::SpamFileExtension)
-                    .or_default()
-                    .success += 1;
-                reload_settings = true;
-            }
-            RegistryWriteResult::PrimaryKeyConflict { .. } => {
-                stats
-                    .entry(ObjectType::SpamFileExtension)
-                    .or_default()
-                    .already_exists += 1;
-            }
-            _ => {
-                stats
-                    .entry(ObjectType::SpamFileExtension)
-                    .or_default()
-                    .failed += 1;
-            }
-        }
-    }
-
-    if reload_settings {
-        if let Err(err) =
-            Box::pin(server.reload_registry(RegistryChange::Reload(ObjectType::SpamRule))).await
-        {
-            trc::error!(err.details("Failed to reload registry after updating spam rules"));
-        }
-        server
-            .cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Reload(
-                ObjectType::SpamRule,
-            )))
-            .await;
-    }
-
-    if reload_lookups {
-        if let Err(err) =
-            Box::pin(server.reload_registry(RegistryChange::Reload(ObjectType::MemoryLookupKey)))
-                .await
-        {
-            trc::error!(err.details("Failed to reload registry after updating spam rules"));
-        }
-        server
-            .cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Reload(
-                ObjectType::MemoryLookupKey,
-            )))
-            .await;
-    }
+    let failed: usize = settings
+        .iter()
+        .chain(&lookups)
+        .map(|result| result.failed)
+        .sum();
 
     trc::event!(
         Spam(SpamEvent::RulesUpdated),
-        Details = stats
+        Details = settings
             .into_iter()
-            .map(|(object_type, result)| {
+            .chain(lookups)
+            .map(|result| {
                 Value::Array(vec![
-                    Value::String(object_type.as_str().into()),
-                    Value::from(result.success),
-                    Value::from(result.already_exists),
+                    Value::String(result.object_type.as_str().into()),
+                    Value::from(result.added),
+                    Value::from(result.updated),
+                    Value::from(result.unchanged),
                     Value::from(result.failed),
                 ])
             })
@@ -289,7 +226,100 @@ async fn update_spam_rules(server: &Server) -> trc::Result<TaskResult> {
         Elapsed = started.elapsed(),
     );
 
-    Ok(TaskResult::Success(vec![]))
+    if !reload_errors.is_empty() {
+        Ok(TaskResult::permanent(format!(
+            "Spam rules were stored but not activated ({}); fix the logged errors and run Reload settings",
+            reload_errors.join("; ")
+        )))
+    } else if failed > 0 {
+        Ok(TaskResult::permanent(format!(
+            "{failed} spam filter objects failed to import or update"
+        )))
+    } else {
+        Ok(TaskResult::Success(vec![]))
+    }
+}
+
+async fn reload_and_broadcast(server: &Server, object: ObjectType) -> Result<(), String> {
+    match Box::pin(server.reload_registry(RegistryChange::Reload(object))).await {
+        Ok(result) => {
+            result.log();
+            if result.has_errors() {
+                return Err(format!("{} configuration errors", result.errors.len()));
+            }
+            server
+                .cluster_broadcast(BroadcastEvent::RegistryChange(RegistryChange::Reload(
+                    object,
+                )))
+                .await;
+            Ok(())
+        }
+        Err(err) => {
+            let reason = err.to_string();
+            trc::error!(err.details("Failed to reload registry after updating spam rules"));
+            Err(reason)
+        }
+    }
+}
+
+async fn apply_upstream<T: UpstreamObject>(
+    registry: &RegistryStore,
+    objects: Vec<T>,
+) -> trc::Result<RuleUpdateResult> {
+    let mut result = RuleUpdateResult::new(T::OBJECT);
+
+    for upstream in objects {
+        let upstream = Object::from(upstream);
+        let existing_id = match registry.write(RegistryWrite::insert(&upstream)).await? {
+            RegistryWriteResult::Success(_) => {
+                result.added += 1;
+                continue;
+            }
+            RegistryWriteResult::PrimaryKeyConflict { existing_id, .. }
+                if existing_id.object() == T::OBJECT =>
+            {
+                existing_id
+            }
+            RegistryWriteResult::PrimaryKeyConflict { .. } => {
+                result.unchanged += 1;
+                continue;
+            }
+            _ => {
+                result.failed += 1;
+                continue;
+            }
+        };
+
+        let Some(local) = registry.get(existing_id).await? else {
+            result.failed += 1;
+            continue;
+        };
+        let revision = local.revision;
+        let local = T::from(local);
+        let Some(replacement) = T::from(upstream)
+            .replacement_for(&local)
+            .filter(|replacement| replacement != &local)
+        else {
+            result.unchanged += 1;
+            continue;
+        };
+
+        let replacement = Object::from(replacement);
+        let local = Object::with_revision(local.into(), revision);
+        match registry
+            .write(RegistryWrite::update(
+                existing_id.id(),
+                &replacement,
+                &local,
+            ))
+            .await?
+        {
+            RegistryWriteResult::Success(_) => result.updated += 1,
+            _ => result.failed += 1,
+        }
+    }
+
+    Ok(result)
 }
 
 async fn fetch_spam_rules(server: &Server) -> Result<Rules, RuleUpdateError> {

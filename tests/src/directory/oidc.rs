@@ -197,7 +197,7 @@ async fn get_token(username: &str, password: &str) -> String {
     .await
 }
 
-async fn get_token_for_client(
+pub(super) async fn get_token_for_client(
     client_id: &str,
     client_secret: &str,
     username: &str,

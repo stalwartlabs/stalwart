@@ -11,7 +11,11 @@ use crate::{
 use common::{MAX_RECEIVED_AT, Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
-    message::copy::{CopyMessageError, EmailCopy},
+    mailbox::JUNK_ID,
+    message::{
+        copy::{CopyMessageError, EmailCopy},
+        ingest::EmailIngest,
+    },
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -32,7 +36,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Value};
 use std::future::Future;
-use store::write::now;
+use store::write::{BatchBuilder, now};
 use trc::AddContext;
 use types::acl::Acl;
 use utils::map::vec_map::VecMap;
@@ -91,6 +95,9 @@ impl JmapEmailCopy for Server {
         };
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
+        let mut train_batch = BatchBuilder::new();
+        let mut did_train = false;
+        train_batch.with_account_id(from_account_id);
 
         'create: for (id, create) in request.create {
             let mut from_message_id = None;
@@ -227,6 +234,7 @@ impl JmapEmailCopy for Server {
             }
 
             // Add response
+            let train_spam = mailboxes.contains(&JUNK_ID);
             match self
                 .copy_message(
                     from_account_id,
@@ -245,6 +253,20 @@ impl JmapEmailCopy for Server {
                 .await?
             {
                 Ok(email) => {
+                    if train_spam {
+                        self.add_account_spam_sample(
+                            &mut train_batch,
+                            from_account_id,
+                            from_message_id.document_id(),
+                            true,
+                            session.session_id,
+                        )
+                        .await
+                        .caused_by(trc::location!())?;
+                        train_batch.commit_point();
+                        did_train = true;
+                    }
+
                     response
                         .created
                         .append(id, ingested_into_object(email).into());
@@ -267,6 +289,12 @@ impl JmapEmailCopy for Server {
             if on_success_delete {
                 destroy_ids.push(MaybeInvalid::Value(from_message_id));
             }
+        }
+
+        if did_train {
+            self.commit_batch(train_batch)
+                .await
+                .caused_by(trc::location!())?;
         }
 
         // Update state

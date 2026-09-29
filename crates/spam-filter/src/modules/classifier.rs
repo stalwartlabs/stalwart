@@ -258,9 +258,7 @@ impl SpamClassifier for Server {
                         remove_entries = true;
                     }
 
-                    if trainer.last_id == 0 {
-                        trainer.last_id = id;
-                    }
+                    trainer.last_id = trainer.last_id.max(id);
 
                     Ok(true)
                 },
