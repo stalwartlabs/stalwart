@@ -11,7 +11,7 @@ use common::{Server, auth::BuildAccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{INBOX_ID, JUNK_ID, SENT_ID},
-    message::metadata::MessageMetadata,
+    message::metadata::MetadataRow,
 };
 use groupware::DavResourceName;
 use jmap::blob::download::BlobDownload;
@@ -29,11 +29,7 @@ use registry::{
 };
 use serde_json::json;
 use std::time::Duration;
-use store::{
-    ValueKey,
-    roaring::RoaringBitmap,
-    write::{Archive, ArchiveBytes, now},
-};
+use store::{ValueKey, roaring::RoaringBitmap, write::now};
 use types::{
     blob::{BlobClass, BlobId},
     collection::Collection,
@@ -526,24 +522,24 @@ END:VCARD
         let access_token = test.server.access_token(account_id).await.unwrap().build();
 
         for document_id in cache.in_mailbox(INBOX_ID).map(|e| e.document_id()) {
-            let metadata = message_metadata(&test.server, account_id, document_id).await;
+            let row = message_metadata(&test.server, account_id, document_id).await;
+            let metadata = row.unarchive().unwrap();
             let partial_message = test
                 .server
                 .blob_store()
-                .get_blob(metadata.blob_hash.0.as_ref(), 0..usize::MAX)
+                .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
                 .await
                 .unwrap()
                 .unwrap();
 
-            assert_ne!(metadata.blob_body_offset, 0);
+            assert_ne!(metadata.blob_body_offset(), 0);
             let expected_full_message = String::from_utf8(
-                ChainedBytes::new(metadata.raw_headers.as_ref())
-                    .with_last(
-                        partial_message
-                            .get(metadata.blob_body_offset as usize..)
-                            .unwrap_or_default(),
-                    )
-                    .to_bytes(),
+                ChainedBytes::from_blob(
+                    &row.raw_headers().unwrap(),
+                    &partial_message,
+                    metadata.blob_body_offset(),
+                )
+                .to_vec(),
             )
             .unwrap();
             assert!(
@@ -555,7 +551,7 @@ END:VCARD
                 test.server
                     .blob_download(
                         &BlobId {
-                            hash: metadata.blob_hash,
+                            hash: metadata.blob_hash(),
                             class: BlobClass::Linked {
                                 account_id,
                                 collection: Collection::Email.into(),
@@ -673,20 +669,20 @@ async fn assert_message_headers_contains(
 }
 
 async fn message_headers(server: &Server, account_id: u32, document_id: u32) -> String {
-    std::str::from_utf8(
+    String::from_utf8(
         message_metadata(server, account_id, document_id)
             .await
-            .raw_headers
-            .as_ref(),
+            .raw_headers()
+            .unwrap()
+            .into_owned(),
     )
     .unwrap()
-    .to_string()
 }
 
-async fn message_metadata(server: &Server, account_id: u32, document_id: u32) -> MessageMetadata {
+async fn message_metadata(server: &Server, account_id: u32, document_id: u32) -> MetadataRow {
     server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
+        .get_value::<MetadataRow>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,
@@ -694,7 +690,5 @@ async fn message_metadata(server: &Server, account_id: u32, document_id: u32) ->
         ))
         .await
         .unwrap()
-        .unwrap()
-        .deserialize::<MessageMetadata>()
         .unwrap()
 }

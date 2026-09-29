@@ -10,10 +10,10 @@ use crate::{
 };
 use common::{config::smtp::report::AggregateFrequency, ipc::TlsEvent};
 use mail_auth::{
-    common::parse::TxtRecordParser,
+    dns::TxtRecordParser,
     flate2::read::GzDecoder,
-    mta_sts::TlsRpt,
-    report::tlsrpt::{FailureDetails, PolicyType, ResultType, TlsReport},
+    mta_sts::TlsRptRecord,
+    report::tlsrpt::{FailureDetails, FailureType, PolicyType, TlsReport},
 };
 use registry::schema::structs::{Expression, ReportSettings, TlsInternalReport, TlsReportSettings};
 use smtp::reporting::tls::{TLS_HTTP_REPORT, TlsReporting};
@@ -79,7 +79,13 @@ async fn report_tls() {
     test.expect_reload_settings().await;
 
     // Schedule TLS reports to be delivered via email
-    let tls_record = Arc::new(TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.org").unwrap());
+    let tls_record = Arc::new(
+        TlsRptRecord::parse(
+            b"v=TLSRPTv1;rua=mailto:reports@foobar.org,mailto:rep<orts@foobar.org,mailto:rep>orts@foobar.org,mailto:rep\"orts@foobar.org",
+        )
+        .unwrap(),
+    );
+    assert_eq!(tls_record.rua.len(), 4);
 
     for _ in 0..2 {
         // Add two successful records
@@ -98,20 +104,23 @@ async fn report_tls() {
     for (policy, rt) in [
         (
             common::ipc::PolicyType::None, // Quota limited at 1532 bytes, this should not be included in the report.
-            ResultType::CertificateExpired,
-        ),
-        (common::ipc::PolicyType::Tlsa(None), ResultType::TlsaInvalid),
-        (
-            common::ipc::PolicyType::Sts(None),
-            ResultType::StsPolicyFetchError,
+            FailureType::CertificateExpired,
         ),
         (
-            common::ipc::PolicyType::Sts(None),
-            ResultType::StsPolicyInvalid,
+            common::ipc::PolicyType::Tlsa(None),
+            FailureType::TlsaInvalid,
         ),
         (
             common::ipc::PolicyType::Sts(None),
-            ResultType::StsWebpkiInvalid,
+            FailureType::StsPolicyFetchError,
+        ),
+        (
+            common::ipc::PolicyType::Sts(None),
+            FailureType::StsPolicyInvalid,
+        ),
+        (
+            common::ipc::PolicyType::Sts(None),
+            FailureType::StsWebpkiInvalid,
         ),
     ] {
         test.server
@@ -139,6 +148,7 @@ async fn report_tls() {
 
     // Expect report
     let message = test.expect_message().await;
+    assert_eq!(message.message.recipients.len(), 1);
     assert_eq!(
         message.message.recipients.last().unwrap().address(),
         "reports@foobar.org"
@@ -163,49 +173,49 @@ async fn report_tls() {
         match policy.policy.policy_type {
             PolicyType::Tlsa => {
                 seen[0] = true;
-                assert_eq!(policy.summary.total_failure, 1);
-                assert_eq!(policy.summary.total_success, 0);
+                assert_eq!(policy.summary.failed_sessions, 1);
+                assert_eq!(policy.summary.successful_sessions, 0);
                 assert_eq!(policy.policy.policy_domain, "foobar.org");
                 assert_eq!(policy.failure_details.len(), 1);
                 assert_eq!(
                     policy.failure_details.first().unwrap().result_type,
-                    ResultType::TlsaInvalid
+                    FailureType::TlsaInvalid
                 );
             }
             PolicyType::Sts => {
                 seen[1] = true;
-                assert_eq!(policy.summary.total_failure, 3);
-                assert_eq!(policy.summary.total_success, 0);
+                assert_eq!(policy.summary.failed_sessions, 3);
+                assert_eq!(policy.summary.successful_sessions, 0);
                 assert_eq!(policy.policy.policy_domain, "foobar.org");
                 assert_eq!(policy.failure_details.len(), 3);
                 assert!(
                     policy
                         .failure_details
                         .iter()
-                        .any(|d| d.result_type == ResultType::StsPolicyFetchError)
+                        .any(|d| d.result_type == FailureType::StsPolicyFetchError)
                 );
                 assert!(
                     policy
                         .failure_details
                         .iter()
-                        .any(|d| d.result_type == ResultType::StsPolicyInvalid)
+                        .any(|d| d.result_type == FailureType::StsPolicyInvalid)
                 );
                 assert!(
                     policy
                         .failure_details
                         .iter()
-                        .any(|d| d.result_type == ResultType::StsWebpkiInvalid)
+                        .any(|d| d.result_type == FailureType::StsWebpkiInvalid)
                 );
             }
             PolicyType::NoPolicyFound => {
                 seen[2] = true;
-                assert_eq!(policy.summary.total_failure, 1);
-                assert_eq!(policy.summary.total_success, 2);
+                assert_eq!(policy.summary.failed_sessions, 1);
+                assert_eq!(policy.summary.successful_sessions, 2);
                 assert_eq!(policy.policy.policy_domain, "foobar.org");
                 assert_eq!(policy.failure_details.len(), 1);
                 /*assert_eq!(
                     policy.failure_details.first().unwrap().result_type,
-                    ResultType::CertificateExpired
+                    FailureType::CertificateExpired
                 );*/
             }
             PolicyType::Other => unreachable!(),
@@ -217,7 +227,8 @@ async fn report_tls() {
     assert!(seen[2]);
 
     // Schedule TLS reports to be delivered via https
-    let tls_record = Arc::new(TlsRpt::parse(b"v=TLSRPTv1;rua=https://127.0.0.1/tls").unwrap());
+    let tls_record =
+        Arc::new(TlsRptRecord::parse(b"v=TLSRPTv1;rua=https://127.0.0.1/tls").unwrap());
 
     for _ in 0..2 {
         // Add two successful records

@@ -217,9 +217,9 @@ impl<T: ResolveVariable> ResolveVariable for SpamFilterResolver<'_, T> {
                 .ctx
                 .input
                 .message
-                .html_body
-                .first()
-                .and_then(|idx| self.ctx.output.text_parts.get(*idx as usize))
+                .html_body()
+                .next()
+                .and_then(|part| self.ctx.output.text_parts.get(part.id() as usize))
                 .map(|part| {
                     if let TextPart::Html { text_body, .. } = part {
                         text_body.as_str()
@@ -229,9 +229,9 @@ impl<T: ResolveVariable> ResolveVariable for SpamFilterResolver<'_, T> {
                 })
                 .unwrap_or_default()
                 .into(),
-            ExpressionVariable::BodyRaw => Variable::from(CompactString::from_utf8_lossy(
-                self.ctx.input.message.raw_message(),
-            )),
+            ExpressionVariable::BodyRaw => {
+                Variable::from(CompactString::from_utf8_lossy(self.ctx.input.message.raw()))
+            }
             ExpressionVariable::Subject => self.ctx.output.subject_lc.as_str().into(),
             ExpressionVariable::SubjectThread => self.ctx.output.subject_thread_lc.as_str().into(),
             ExpressionVariable::Location => self.location.as_str().into(),
@@ -253,9 +253,9 @@ impl<T: ResolveVariable> ResolveVariable for SpamFilterResolver<'_, T> {
                 .ctx
                 .input
                 .message
-                .html_body
-                .first()
-                .and_then(|idx| self.ctx.output.text_parts.get(*idx as usize))
+                .html_body()
+                .next()
+                .and_then(|part| self.ctx.output.text_parts.get(part.id() as usize))
                 .map(|part| match part {
                     TextPart::Plain { tokens, .. } | TextPart::Html { tokens, .. } => tokens
                         .iter()
@@ -281,25 +281,33 @@ impl<T: ResolveVariable> ResolveVariable for SpamFilterResolver<'_, T> {
 }
 
 pub(crate) struct EmailHeader<'x> {
-    pub header: &'x Header<'x>,
+    pub header: Header<'x>,
     pub raw: &'x str,
 }
 
 impl ResolveVariable for EmailHeader<'_> {
     fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
         match variable {
-            ExpressionVariable::Name => self.header.name().into(),
+            ExpressionVariable::Name => self.header.raw_name().into(),
             ExpressionVariable::NameLower => {
-                CompactString::from_str_to_lowercase(self.header.name()).into()
+                CompactString::from_str_to_lowercase(self.header.raw_name()).into()
             }
             ExpressionVariable::Value
             | ExpressionVariable::ValueLower
-            | ExpressionVariable::Attributes => match &self.header.value {
+            | ExpressionVariable::Attributes => match self.header.value() {
                 HeaderValue::Text(text) => {
                     if variable == ExpressionVariable::ValueLower {
                         CompactString::from_str_to_lowercase(text).into()
                     } else {
-                        text.as_ref().into()
+                        text.into()
+                    }
+                }
+                HeaderValue::TextList(list) if list.len() == 1 => {
+                    let text = list.first().unwrap_or_default();
+                    if variable == ExpressionVariable::ValueLower {
+                        CompactString::from_str_to_lowercase(text).into()
+                    } else {
+                        text.into()
                     }
                 }
                 HeaderValue::TextList(list) => Variable::Array(
@@ -308,7 +316,7 @@ impl ResolveVariable for EmailHeader<'_> {
                             Variable::String(if variable == ExpressionVariable::ValueLower {
                                 StringCow::Owned(CompactString::from_str_to_lowercase(text))
                             } else {
-                                StringCow::Borrowed(text.as_ref())
+                                StringCow::Borrowed(text)
                             })
                         })
                         .collect(),
@@ -316,16 +324,16 @@ impl ResolveVariable for EmailHeader<'_> {
                 HeaderValue::Address(address) => {
                     Variable::Array(if matches!(variable, ExpressionVariable::ValueLower) {
                         address
-                            .iter()
+                            .mailboxes()
                             .filter_map(|a| {
-                                a.address.as_ref().map(|text| {
+                                a.address().map(|text| {
                                     Variable::String(
                                         if variable == ExpressionVariable::ValueLower {
                                             StringCow::Owned(CompactString::from_str_to_lowercase(
                                                 text,
                                             ))
                                         } else {
-                                            StringCow::Borrowed(text.as_ref())
+                                            StringCow::Borrowed(text)
                                         },
                                     )
                                 })
@@ -333,16 +341,16 @@ impl ResolveVariable for EmailHeader<'_> {
                             .collect()
                     } else {
                         address
-                            .iter()
+                            .mailboxes()
                             .filter_map(|a| {
-                                a.name.as_ref().map(|text| {
+                                a.name().map(|text| {
                                     Variable::String(
                                         if variable == ExpressionVariable::ValueLower {
                                             StringCow::Owned(CompactString::from_str_to_lowercase(
                                                 text,
                                             ))
                                         } else {
-                                            StringCow::Borrowed(text.as_ref())
+                                            StringCow::Borrowed(text)
                                         },
                                     )
                                 })
@@ -363,16 +371,10 @@ impl ResolveVariable for EmailHeader<'_> {
                     } else {
                         Variable::Array(
                             ct.attributes()
-                                .map(|attr| {
-                                    attr.iter()
-                                        .map(|attr| {
-                                            Variable::from(format_compact!(
-                                                "{}={}", attr.name, attr.value
-                                            ))
-                                        })
-                                        .collect::<Vec<_>>()
+                                .map(|(name, value)| {
+                                    Variable::from(format_compact!("{}={}", name, value))
                                 })
-                                .unwrap_or_default(),
+                                .collect(),
                         )
                     }
                 }
@@ -500,5 +502,64 @@ impl ResolveVariable for StringListResolver<'_> {
 
     fn resolve_global(&self, _: &str) -> Variable<'_> {
         Variable::Integer(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EmailHeader;
+    use common::expr::{Variable, functions::ResolveVariable};
+    use mail_parser::MessageParser;
+    use registry::schema::enums::ExpressionVariable;
+
+    fn strings(variable: Variable<'_>) -> Result<String, Vec<String>> {
+        match variable {
+            Variable::String(text) => Ok(text.to_string()),
+            Variable::Array(items) => Err(items
+                .into_iter()
+                .map(|item| match item {
+                    Variable::String(text) => text.to_string(),
+                    other => panic!("unexpected item {other:?}"),
+                })
+                .collect()),
+            other => panic!("unexpected variable {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_item_lists_resolve_to_strings() {
+        let raw = concat!(
+            "Message-ID: <One@Example.COM>\r\n",
+            "References: <a@example.com> <B@example.com>\r\n",
+            "Keywords: Alpha\r\n",
+            "\r\n",
+            "body\r\n",
+        );
+        let message = MessageParser::new().parse(raw.as_bytes()).expect("parses");
+        let headers = message.root_part().headers();
+        let mut headers = headers.iter().map(|header| EmailHeader { header, raw: "" });
+        let message_id = headers.next().expect("message id");
+        let references = headers.next().expect("references");
+        let keywords = headers.next().expect("keywords");
+
+        assert_eq!(
+            strings(message_id.resolve_variable(ExpressionVariable::Value)),
+            Ok("One@Example.COM".to_string())
+        );
+        assert_eq!(
+            strings(message_id.resolve_variable(ExpressionVariable::ValueLower)),
+            Ok("one@example.com".to_string())
+        );
+        assert_eq!(
+            strings(keywords.resolve_variable(ExpressionVariable::Value)),
+            Ok("Alpha".to_string())
+        );
+        assert_eq!(
+            strings(references.resolve_variable(ExpressionVariable::ValueLower)),
+            Err(vec![
+                "a@example.com".to_string(),
+                "b@example.com".to_string()
+            ])
+        );
     }
 }

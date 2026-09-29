@@ -1,23 +1,35 @@
 use std::path::Path;
 
-use email::message::metadata::ArchivedMessageMetadata;
+use common::config::mailstore::email::ExtractLimits;
+use email::message::metadata::{ArchivedMessageMetadata, MetadataRow};
 use mail_parser::MessageParser;
 use nlp::language::Language;
 use store::{
+    Deserialize,
     ahash::{AHashMap, AHashSet},
     search::{
         CalendarSearchField, ContactSearchField, EmailSearchField, FileSearchField, IndexDocument,
         SearchField,
     },
-    write::{SearchIndex, serialize::rkyv_unarchive},
+    write::SearchIndex,
 };
 use utils::cheeky_hash::CheekyHash;
 
 use crate::{
-    corpus::{Corpus, Rng, Stats, archive, collect_files, normalize_crlf},
+    corpus::{Corpus, Rng, Stats, collect_files, normalize_crlf},
     metadata::{split_mbox, unescape_mbox, with_ingest_headers},
 };
 
+const EXTRACT_LIMITS: ExtractLimits = ExtractLimits {
+    max_document_size: 64 << 20,
+    max_text_size: 4 << 20,
+    max_decompressed_size: 256 << 20,
+    max_part_size: 64 << 20,
+    max_parts: 10_000,
+    max_archive_entries: 10_000,
+    max_pdf_objects: 1 << 20,
+    max_rtf_depth: 256,
+};
 const MIN_WORD_LEN: usize = 2;
 const WORDS_PER_LANGUAGE: usize = 50000;
 const SYNTHETIC_SEED: u64 = 0x7e12_d0c5;
@@ -65,15 +77,6 @@ const HEADER_VALUES: [&str; 16] = [
     "beef4567 mail example com",
     "no reply example com",
     "bulk",
-];
-
-const MEDIA_NAMES: [&str; 10] = [
-    "report", "invoice", "agenda", "minutes", "budget", "photo", "contract", "receipt", "draft",
-    "notes",
-];
-
-const FILE_EXTENSIONS: [&str; 10] = [
-    "pdf", "docx", "xlsx", "png", "jpg", "txt", "csv", "zip", "odt", "pptx",
 ];
 
 const CONTACT_KINDS: [&str; 4] = ["individual", "group", "org", "location"];
@@ -520,16 +523,6 @@ fn file_document(entry: &LanguageWords, rng: &mut Rng, document_id: u32) -> Vec<
         .with_account_id(1)
         .with_document_id(document_id);
 
-    document.index_text(
-        FileSearchField::Name,
-        &format!(
-            "{} {}.{}",
-            MEDIA_NAMES[rng.below(MEDIA_NAMES.len())],
-            entry.pick(rng),
-            FILE_EXTENSIONS[rng.below(FILE_EXTENSIONS.len())]
-        ),
-        Language::None,
-    );
     if rng.chance(70) {
         document.index_text(
             FileSearchField::Content,
@@ -561,18 +554,19 @@ pub fn build(
 
         for message in split_mbox(&raw) {
             let message = with_ingest_headers(&normalize_crlf(&unescape_mbox(message)));
-            let Some(metadata) = crate::metadata::metadata(&parser, &message) else {
-                stats.skipped += 1;
-                continue;
-            };
-            let bytes = archive(&metadata);
-            let Ok(metadata) = rkyv_unarchive::<email::message::metadata::MessageMetadata>(&bytes)
+            let Some(row) = crate::metadata::metadata(&parser, &message)
+                .and_then(|metadata| metadata.encode().ok())
+                .and_then(|row| MetadataRow::deserialize(&row).ok())
             else {
                 stats.skipped += 1;
                 continue;
             };
+            let (Ok(headers), Ok(metadata)) = (row.raw_headers(), row.unarchive()) else {
+                stats.skipped += 1;
+                continue;
+            };
 
-            let sample = term_document(metadata, &message, &index_fields, document_id);
+            let sample = term_document(metadata, &headers, &message, &index_fields, document_id);
             document_id = document_id.wrapping_add(1);
             if sample.is_empty() {
                 stats.skipped += 1;
@@ -610,11 +604,20 @@ pub fn build(
 
 fn term_document(
     metadata: &ArchivedMessageMetadata,
+    headers: &[u8],
     raw_message: &[u8],
     index_fields: &AHashSet<SearchField>,
     document_id: u32,
 ) -> Vec<u8> {
     metadata
-        .index_document(1, document_id, raw_message, index_fields, Language::Unknown)
+        .index_document(
+            1,
+            document_id,
+            headers,
+            raw_message,
+            index_fields,
+            Language::Unknown,
+            &EXTRACT_LIMITS,
+        )
         .into_term_document(document_id)
 }

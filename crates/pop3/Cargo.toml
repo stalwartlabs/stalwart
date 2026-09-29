@@ -17,6 +17,8 @@ encodify = "1.0"
 tokio = { version = "1.53", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 compact_str = "0.10.0"
+memchr = "2.8"
+itoa = "1"
 
 [features]
 test_mode = []

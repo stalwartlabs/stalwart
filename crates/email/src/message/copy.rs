@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{
-    ingest::{EmailIngest, IngestedEmail},
-    metadata::MessageMetadata,
-};
+use super::ingest::{EmailIngest, IngestedEmail};
 use crate::cache::MessageCacheFetch;
 use crate::message::{
-    index::extractors::VisitTextArchived,
+    index::extractors::VisitText,
     ingest::ThreadInfo,
     messagedata::{MessageData, PendingMessageData},
-    metadata::{ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue},
+    metadata::{HeaderId, HeaderSelection, MetadataRow},
     sortkeys::MessageSortKeys,
 };
 use common::{MessageUid, Server, storage::index::ObjectIndexBuilder};
-use mail_parser::{DateTime, parsers::fields::thread::thread_name};
+use mail_parser::HeaderForm;
 use registry::{
     schema::{
         enums::StorageQuota,
@@ -27,7 +24,7 @@ use registry::{
 };
 use store::{
     Deserialize, ValueKey,
-    write::{Archive, ArchiveBytes, QueueDocumentId, SearchIndex, serialize::RawValue},
+    write::{QueueDocumentId, SearchIndex, serialize::RawValue},
 };
 use store::{
     write::{BatchBuilder, IndexPropertyClass, ValueClass},
@@ -37,11 +34,20 @@ use tinyvec::TinyVec;
 use trc::AddContext;
 use types::{
     blob::{BlobClass, BlobId},
-    blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
     field::EmailField,
     keyword::Keyword,
 };
+
+const COPY_FIELDS: [HeaderId; 7] = [
+    HeaderId::MESSAGE_ID,
+    HeaderId::IN_REPLY_TO,
+    HeaderId::REFERENCES,
+    HeaderId::RESENT_MESSAGE_ID,
+    HeaderId::SUBJECT,
+    HeaderId::FROM,
+    HeaderId::TO,
+];
 
 pub enum CopyMessageError {
     NotFound,
@@ -93,14 +99,11 @@ impl EmailCopy for Server {
         let Some(metadata_bytes) = metadata_bytes else {
             return Ok(Err(CopyMessageError::NotFound));
         };
-        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(&metadata_bytes.0)
-            .caused_by(trc::location!())?;
-        let metadata = archive
-            .unarchive::<MessageMetadata>()
-            .caused_by(trc::location!())?;
+        let row = MetadataRow::deserialize(&metadata_bytes.0).caused_by(trc::location!())?;
+        let metadata = row.unarchive().caused_by(trc::location!())?;
 
         // Check quota
-        let size = metadata.root_part().offset_end.to_native();
+        let size = u32::try_from(metadata.size()).unwrap_or(u32::MAX);
         let to_account = self.account(to_account_id).await?;
         let quota_result = match self.has_available_quota(&to_account, size as u64).await {
             Ok(_) => match self.object_quota_limit(&to_account, StorageQuota::MaxEmails) {
@@ -130,51 +133,38 @@ impl EmailCopy for Server {
         }
 
         // Obtain threadId
+        let headers = row.raw_headers().caused_by(trc::location!())?;
         let mut message_ids = Vec::new();
-        let mut subject = "";
-        let mut sent_at = None;
-        for header in metadata.root_part().headers.iter() {
-            match &header.name {
-                ArchivedMetadataHeaderName::MessageId => {
-                    header.value.visit_text(|id| {
-                        if !id.is_empty() {
-                            message_ids.push(xxh3_128(id.as_bytes()));
-                        }
-                    });
-                }
-                ArchivedMetadataHeaderName::InReplyTo
-                | ArchivedMetadataHeaderName::References
-                | ArchivedMetadataHeaderName::ResentMessageId => {
-                    header.value.visit_text(|id| {
-                        if !id.is_empty() {
-                            message_ids.push(xxh3_128(id.as_bytes()));
-                        }
-                    });
-                }
-                ArchivedMetadataHeaderName::Subject if subject.is_empty() => {
-                    subject = thread_name(match &header.value {
-                        ArchivedMetadataHeaderValue::Text(text) => text.as_ref(),
-                        ArchivedMetadataHeaderValue::TextList(list) if !list.is_empty() => {
-                            list.first().unwrap().as_ref()
-                        }
-                        _ => "",
-                    });
-                }
-                ArchivedMetadataHeaderName::Date => {
-                    if let ArchivedMetadataHeaderValue::DateTime(date) = &header.value {
-                        sent_at = Some(DateTime::from(date).to_timestamp());
+        let root_headers = metadata
+            .root()
+            .root_part()
+            .selected_headers(&headers, HeaderSelection::Ids(&COPY_FIELDS));
+        for header in root_headers.list().iter() {
+            if matches!(
+                header.id(),
+                HeaderId::MESSAGE_ID
+                    | HeaderId::IN_REPLY_TO
+                    | HeaderId::REFERENCES
+                    | HeaderId::RESENT_MESSAGE_ID
+            ) && let Some(raw) = headers.get(header.value_range())
+            {
+                HeaderForm::MessageIds.parse(raw).value().visit_text(|id| {
+                    if !id.is_empty() {
+                        message_ids.push(xxh3_128(id.as_bytes()));
                     }
-                }
-                _ => (),
+                });
             }
         }
+        let envelope = metadata.root().envelope();
+        let subject = metadata.thread_subject_with(root_headers.list(), &headers);
+        let sent_at = envelope.datetime().map(|date| date.to_timestamp());
 
         message_ids.sort_unstable();
         message_ids.dedup();
 
         // Obtain threadId
         let thread_result = self
-            .find_thread_id(to_account_id, subject, &message_ids)
+            .find_thread_id(to_account_id, &subject, &message_ids)
             .await
             .caused_by(trc::location!())?;
 
@@ -187,7 +177,7 @@ impl EmailCopy for Server {
             size: size as usize,
             ..Default::default()
         };
-        let blob_hash = BlobHash::from(&metadata.blob_hash);
+        let blob_hash = metadata.blob_hash();
 
         let mut keywords_flags = 0;
         let mut keywords_extra = Vec::new();
@@ -231,9 +221,7 @@ impl EmailCopy for Server {
                 size,
                 keywords_extra,
                 received_at,
-                sent_at: sent_at
-                    .map(|sent_at| (sent_at - received_at as i64) as i32)
-                    .unwrap_or_default(),
+                sent_at: MessageData::sent_at_offset(sent_at, received_at),
                 change_id: 0,
             },
             uid_slots,
@@ -275,12 +263,10 @@ impl EmailCopy for Server {
 
         let sort_keys = match sort_keys_bytes {
             Some(sort_keys) => sort_keys.0,
-            None => MessageSortKeys::from_metadata(
-                &archive
-                    .deserialize::<MessageMetadata>()
-                    .caused_by(trc::location!())?,
-            )
-            .serialize(),
+            None if metadata.completeness().is_truncated() => {
+                MessageSortKeys::from_headers(root_headers.list(), &headers).serialize()
+            }
+            None => MessageSortKeys::from_envelope(envelope).serialize(),
         };
 
         metadata.index_verbatim(&mut batch, metadata_bytes.0, sort_keys);

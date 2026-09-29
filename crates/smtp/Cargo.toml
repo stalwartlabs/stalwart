@@ -20,11 +20,11 @@ email = { path =  "../email" }
 registry = { path =  "../registry" }
 spam-filter = { path =  "../spam-filter" }
 trc = { path = "../trc" }
-mail-auth = { version = "0.13", features = ["rkyv"] }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
+mail-auth = { version = "0.14" }
+mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" } 
 smtp-proto = { version = "0.2.3", features = ["rkyv", "serde"] }
-sieve-rs = { version = "1.0" }
+sieve-rs = { version = "2.0" }
 ahash = { version = "0.8" }
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 rustls-pki-types = { version = "1", features = ["std"] }
@@ -43,6 +43,9 @@ rkyv.workspace = true
 compact_str = "0.10.0"
 hashify = { version = "0.3" }
 encodify = "1.0"
+
+[dev-dependencies]
+mail-auth = { version = "0.14", features = ["test"] }
 
 [features]
 test_mode = ["mail-auth/test"]

@@ -1,0 +1,135 @@
+{
+  "mailboxIds": null,
+  "size": 501,
+  "messageId": [
+    "level-two@example.com"
+  ],
+  "from": [
+    {
+      "name": "Level Two",
+      "email": "two@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "Recipient",
+      "email": "rcpt@example.com"
+    }
+  ],
+  "subject": "Level two",
+  "sentAt": "2021-12-14T10:50:00Z",
+  "bodyStructure": {
+    "headers": [
+      {
+        "name": "From",
+        "value": " Level Two <two@example.com>"
+      },
+      {
+        "name": "To",
+        "value": " Recipient <rcpt@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": " Level two"
+      },
+      {
+        "name": "Message-ID",
+        "value": " <level-two@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": " Tue, 14 Dec 2021 11:50:00 +0100"
+      },
+      {
+        "name": "MIME-Version",
+        "value": " 1.0"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/alternative; boundary=\"two\""
+      }
+    ],
+    "type": "multipart/alternative",
+    "subParts": [
+      {
+        "partId": "1",
+        "blobId": "blob_0",
+        "size": 61,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/plain; charset=utf-8"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " quoted-printable"
+          }
+        ],
+        "type": "text/plain",
+        "charset": "utf-8"
+      },
+      {
+        "partId": "2",
+        "blobId": "blob_1",
+        "size": 40,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/html; charset=utf-8"
+          }
+        ],
+        "type": "text/html",
+        "charset": "utf-8"
+      }
+    ]
+  },
+  "bodyValues": {
+    "1": {
+      "value": "Text of the second nested message, café in quoted-printable.",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "2": {
+      "value": "<p>HTML of the second nested message</p>",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "textBody": [
+    {
+      "partId": "1",
+      "blobId": "blob_0",
+      "size": 61,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8"
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "2",
+      "blobId": "blob_1",
+      "size": 40,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/html; charset=utf-8"
+        }
+      ],
+      "type": "text/html",
+      "charset": "utf-8"
+    }
+  ],
+  "attachments": [],
+  "hasAttachment": false,
+  "preview": "Text of the second nested message, café in quoted-printable."
+}

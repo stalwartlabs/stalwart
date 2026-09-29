@@ -1,20 +1,14 @@
 use std::path::Path;
 
-use email::message::{index::PREVIEW_LENGTH, metadata::MessageMetadata};
-use mail_parser::{
-    MessageParser, PartType, decoders::html::html_to_text, parsers::preview::preview_text,
-};
+use email::message::metadata::{ExtraHeaders, HeaderId, MessageMetadata, NewMetadata};
+use mail_parser::MessageParser;
 use types::blob_hash::BlobHash;
 
-use crate::corpus::{Corpus, Stats, archive, collect_files, normalize_crlf};
+use crate::corpus::{Corpus, Stats, collect_files, normalize_crlf};
 
-const MAX_MESSAGE_PARTS: usize = 1000;
-
-const INGEST_HEADERS: &str = concat!(
-    "Return-Path: <>\r\n",
-    "Delivered-To: <recipient@example.org>\r\n",
-    "X-Spam-Status: No\r\n",
-);
+const INGEST_HEADERS: &str = "Return-Path: <>\r\n";
+const DELIVERED_TO: &str = "<recipient@example.org>";
+const SPAM_STATUS: &str = "No";
 
 pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
     let files = collect_files(dir, &["eml", "mbox", "msg", "txt"])?;
@@ -33,7 +27,7 @@ pub fn build(dir: &Path, stats: &mut Stats) -> std::io::Result<Corpus> {
                 stats.skipped += 1;
                 continue;
             };
-            corpus.push_both(archive(&metadata));
+            corpus.push_both(metadata.raw_headers);
             stats.read += 1;
         }
     }
@@ -93,48 +87,15 @@ pub fn split_mbox(raw: &[u8]) -> Vec<&[u8]> {
     messages
 }
 
-pub fn metadata(parser: &MessageParser, raw: &[u8]) -> Option<MessageMetadata> {
+pub fn metadata(parser: &MessageParser, raw: &[u8]) -> Option<NewMetadata> {
     let message = parser.parse(raw)?;
-    if message.parts.is_empty() {
-        return None;
-    }
-
-    let preview_part_id = message
-        .text_body
-        .first()
-        .or_else(|| message.html_body.first())
-        .copied()
-        .unwrap_or(u32::MAX);
-    let mut preview = None;
-
-    for (part_id, part) in message.parts.iter().take(MAX_MESSAGE_PARTS).enumerate() {
-        if part_id as u32 != preview_part_id {
-            continue;
-        }
-        match &part.body {
-            PartType::Text(text) => {
-                preview = preview_text(text.replace('\r', "").into(), PREVIEW_LENGTH).into();
-            }
-            PartType::Html(html) => {
-                let text = html_to_text(html);
-                preview = preview_text(text.replace('\r', "").into(), PREVIEW_LENGTH).into();
-            }
-            _ => {}
-        }
-    }
-
-    let root_part = message.root_part();
-    let blob_body_offset = root_part.offset_body;
-    let raw_headers = raw
-        .get(root_part.offset_header as usize..root_part.offset_body as usize)
-        .unwrap_or_default()
-        .to_vec();
-
-    Some(MessageMetadata {
-        preview: preview.unwrap_or_default().into_owned().into_boxed_str(),
-        raw_headers: raw_headers.into_boxed_slice(),
-        contents: email::message::metadata::build_metadata_contents(message),
-        blob_hash: BlobHash::generate(raw),
-        blob_body_offset,
-    })
+    let mut extra = ExtraHeaders::default();
+    extra
+        .push(HeaderId::DELIVERED_TO, DELIVERED_TO)
+        .push(HeaderId::X_SPAM_STATUS, SPAM_STATUS);
+    Some(MessageMetadata::build(
+        &message,
+        &extra,
+        BlobHash::generate(raw),
+    ))
 }

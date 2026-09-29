@@ -11,11 +11,11 @@ use common::{
     network::{SessionStream, limiter::LimiterResult},
 };
 use directory::Credentials;
+use encodify::base64::LENIENT;
 use imap_proto::{
     protocol::authenticate::Mechanism,
     receiver::{self, Request},
 };
-use encodify::base64::LENIENT;
 use registry::schema::enums::Permission;
 
 impl<T: SessionStream> Session<T> {

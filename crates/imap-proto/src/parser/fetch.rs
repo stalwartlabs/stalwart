@@ -149,95 +149,8 @@ impl Request<Command> {
                                 }
                             };
 
-                            // Parse section-spect
-                            let mut sections = Vec::new();
-                            while let Some(token) = tokens.next() {
-                                match token {
-                                    Token::BracketClose => break,
-                                    Token::Argument(value) => {
-                                        let section = if value.eq_ignore_ascii_case(b"HEADER") {
-                                            if let Some(Token::Dot) = tokens.peek() {
-                                                tokens.next();
-                                                if tokens.next().is_none_or( |token| {
-                                                    !token.eq_ignore_ascii_case(b"FIELDS")
-                                                }) {
-                                                    return Err(bad(
-                                                        self.tag,
-                                                        "Expected 'FIELDS' after 'HEADER.'.",
-                                                    ));
-                                                }
-                                                let is_not = if let Some(Token::Dot) = tokens.peek() {
-                                                    tokens.next();
-                                                    if tokens.next().is_none_or( |token| {
-                                                        !token.eq_ignore_ascii_case(b"NOT")
-                                                    }) {
-                                                        return Err(bad(
-                                                            self.tag,
-                                                            "Expected 'NOT' after 'HEADER.FIELDS.'.",
-                                                        ));
-                                                    }
-                                                    true
-                                                } else {
-                                                    false
-                                                };
-                                                if tokens
-                                                    .next()
-                                                    .is_none_or( |token| !token.is_parenthesis_open())
-                                                {
-                                                    return Err(bad(
-                                                        self.tag,
-                                                        "Expected '(' after 'HEADER.FIELDS'.",
-                                                    ));
-                                                }
-                                                let mut fields =
-                                                    Vec::with_capacity(tokens.len().min(FIELDS_INIT_LEN));
-                                                while let Some(token) = tokens.next() {
-                                                    match token {
-                                                        Token::ParenthesisClose => break,
-                                                        Token::Argument(value) => {
-                                                            fields.push(String::from_utf8(value.into_vec()).map_err(
-                                                            |_| bad(self.tag.clone(),"Invalid UTF-8 in header field name."),
-                                                        )?);
-                                                        }
-                                                        _ => {
-                                                            return Err(bad(
-                                                                self.tag,
-                                                                "Expected field name.",
-                                                            ))
-                                                        }
-                                                    }
-                                                }
-                                                Section::HeaderFields {
-                                                    not: is_not,
-                                                    fields,
-                                                }
-                                            } else {
-                                                Section::Header
-                                            }
-                                        } else if value.eq_ignore_ascii_case(b"TEXT") {
-                                            Section::Text
-                                        } else if value.eq_ignore_ascii_case(b"MIME") {
-                                            Section::Mime
-                                        } else {
-                                            Section::Part {
-                                                num: parse_number::<u32>(&value)
-                                                    .map_err(|v| bad(self.tag.clone(), v))?,
-                                            }
-                                        };
-                                        sections.push(section);
-                                    }
-                                    Token::Dot => (),
-                                    _ => {
-                                        return Err(bad(
-                                            self.tag,
-                                            format_compact!(
-                                                "Invalid token {:?} found in section-spect.",
-                                                token
-                                            ),
-                                        ))
-                                    }
-                                }
-                            }
+                            let sections = Section::parse_section_spec(&mut tokens)
+                                .map_err(|v| bad(self.tag.clone(), v))?;
 
                             attributes.push_unique(Attribute::BodySection {
                                 peek: is_peek,
@@ -269,32 +182,11 @@ impl Request<Command> {
                                 (false, false)
                             };
 
-                            // Parse section-part
                             if tokens.next().is_none_or( |token| !token.is_bracket_open()) {
                                 return Err(bad(self.tag.clone(), "Expected '[' after 'BINARY'."));
                             }
-                            let mut sections = Vec::new();
-                            while let Some(token) = tokens.next() {
-                                match token {
-                                    Token::Argument(value) => {
-                                        sections.push(
-                                            parse_number::<u32>(&value)
-                                                .map_err(|v| bad(self.tag.clone(), v))?,
-                                        );
-                                    }
-                                    Token::Dot => (),
-                                    Token::BracketClose => break,
-                                    _ => {
-                                        return Err(bad(
-                                            self.tag,
-                                            format_compact!(
-                                                "Expected part section integer, got {:?}.",
-                                                token.to_string()
-                                            ),
-                                        ))
-                                    }
-                                }
-                            }
+                            let sections = Section::parse_section_part(&mut tokens)
+                                .map_err(|v| bad(self.tag.clone(), v))?;
                             attributes.push_unique(if !is_size {
                                 Attribute::Binary {
                                     peek: is_peek,
@@ -451,6 +343,155 @@ pub fn parse_partial(tokens: &mut Peekable<IntoIter<Token>>) -> super::Result<Op
     Ok(Some((start, end)))
 }
 
+#[derive(Debug, Clone, Copy)]
+enum SectionPosition {
+    Start,
+    AfterPart,
+    AfterDot,
+    AfterText,
+}
+
+impl Section {
+    fn parse_section_spec(tokens: &mut Peekable<IntoIter<Token>>) -> super::Result<Vec<Section>> {
+        let mut sections = Vec::new();
+        let mut position = SectionPosition::Start;
+        loop {
+            let token = tokens
+                .next()
+                .ok_or_else(|| Cow::from("Expected ']' after section-spec."))?;
+            position = match (position, token) {
+                (
+                    SectionPosition::Start
+                    | SectionPosition::AfterPart
+                    | SectionPosition::AfterText,
+                    Token::BracketClose,
+                ) => return Ok(sections),
+                (SectionPosition::AfterPart, Token::Dot) => SectionPosition::AfterDot,
+                (SectionPosition::Start | SectionPosition::AfterDot, Token::Argument(value)) => {
+                    if let Some(num) = Section::part_number(&value) {
+                        sections.push(Section::Part { num });
+                        SectionPosition::AfterPart
+                    } else if value.eq_ignore_ascii_case(b"MIME") {
+                        if matches!(position, SectionPosition::Start) {
+                            return Err("Expected a part number before 'MIME'.".into());
+                        }
+                        sections.push(Section::Mime);
+                        SectionPosition::AfterText
+                    } else {
+                        sections.push(Section::parse_section_msgtext(&value, tokens)?);
+                        SectionPosition::AfterText
+                    }
+                }
+                (_, token) => {
+                    return Err(
+                        format!("Unexpected {:?} in section-spec.", token.to_string()).into(),
+                    );
+                }
+            };
+        }
+    }
+
+    fn parse_section_msgtext(
+        value: &[u8],
+        tokens: &mut Peekable<IntoIter<Token>>,
+    ) -> super::Result<Section> {
+        if value.eq_ignore_ascii_case(b"TEXT") {
+            return Ok(Section::Text);
+        }
+        if !value.eq_ignore_ascii_case(b"HEADER") {
+            return Err(format!(
+                "Expected a part number, 'HEADER', 'TEXT' or 'MIME', found {:?}.",
+                String::from_utf8_lossy(value)
+            )
+            .into());
+        }
+        if tokens.next_if(Token::is_dot).is_none() {
+            return Ok(Section::Header);
+        }
+        if tokens
+            .next()
+            .is_none_or(|token| !token.eq_ignore_ascii_case(b"FIELDS"))
+        {
+            return Err("Expected 'FIELDS' after 'HEADER.'.".into());
+        }
+        let not = tokens.next_if(Token::is_dot).is_some();
+        if not
+            && tokens
+                .next()
+                .is_none_or(|token| !token.eq_ignore_ascii_case(b"NOT"))
+        {
+            return Err("Expected 'NOT' after 'HEADER.FIELDS.'.".into());
+        }
+        if tokens
+            .next()
+            .is_none_or(|token| !token.is_parenthesis_open())
+        {
+            return Err("Expected '(' after 'HEADER.FIELDS'.".into());
+        }
+        let mut fields = Vec::with_capacity(tokens.len().min(FIELDS_INIT_LEN));
+        loop {
+            match tokens.next() {
+                Some(Token::ParenthesisClose) if !fields.is_empty() => {
+                    return Ok(Section::HeaderFields { not, fields });
+                }
+                Some(Token::Argument(value)) if Section::is_field_name(&value) => fields.push(
+                    String::from_utf8(value.into_vec())
+                        .map_err(|_| Cow::from("Invalid UTF-8 in header field name."))?,
+                ),
+                Some(Token::Argument(_) | Token::Nil) => {
+                    return Err(
+                        "Header field names must be RFC 5322 field-names (printable US-ASCII except ':').".into(),
+                    );
+                }
+                _ => return Err("Expected a header field name.".into()),
+            }
+        }
+    }
+
+    fn parse_section_part(tokens: &mut Peekable<IntoIter<Token>>) -> super::Result<Vec<u32>> {
+        let mut sections = Vec::new();
+        let mut position = SectionPosition::Start;
+        loop {
+            let token = tokens
+                .next()
+                .ok_or_else(|| Cow::from("Expected ']' after section-part."))?;
+            position = match (position, token) {
+                (SectionPosition::Start | SectionPosition::AfterPart, Token::BracketClose) => {
+                    return Ok(sections);
+                }
+                (SectionPosition::AfterPart, Token::Dot) => SectionPosition::AfterDot,
+                (SectionPosition::Start | SectionPosition::AfterDot, Token::Argument(value)) => {
+                    sections.push(Section::part_number(&value).ok_or_else(|| {
+                        Cow::from(format!(
+                            "Expected a non-zero part number, found {:?}.",
+                            String::from_utf8_lossy(&value)
+                        ))
+                    })?);
+                    SectionPosition::AfterPart
+                }
+                (_, token) => {
+                    return Err(
+                        format!("Unexpected {:?} in section-part.", token.to_string()).into(),
+                    );
+                }
+            };
+        }
+    }
+
+    fn is_field_name(value: &[u8]) -> bool {
+        !value.is_empty() && value.iter().all(|ch| matches!(ch, 33..=57 | 59..=126))
+    }
+
+    fn part_number(value: &[u8]) -> Option<u32> {
+        match value {
+            [b'1'..=b'9', rest @ ..] if rest.iter().all(u8::is_ascii_digit) => {
+                std::str::from_utf8(value).ok()?.parse().ok()
+            }
+            _ => None,
+        }
+    }
+}
+
 /*
 
    fetch           = "FETCH" SP sequence-set SP (
@@ -496,6 +537,7 @@ pub fn parse_partial(tokens: &mut Peekable<IntoIter<Token>>) -> super::Result<Op
 #[cfg(test)]
 mod tests {
     use crate::{
+        Command, ResponseType,
         protocol::{
             Sequence,
             fetch::{self, Attribute, Section},
@@ -594,14 +636,14 @@ mod tests {
                 },
             ),
             (
-                "A001 FETCH 1 (BODY[MIME] BODY[TEXT] PREVIEW)\r\n",
+                "A001 FETCH 1 (BODY[1.MIME] BODY[TEXT] PREVIEW)\r\n",
                 fetch::Arguments {
                     tag: "A001".into(),
                     sequence_set: Sequence::number(1),
                     attributes: vec![
                         Attribute::BodySection {
                             peek: false,
-                            sections: vec![Section::Mime],
+                            sections: vec![Section::Part { num: 1 }, Section::Mime],
                             partial: None,
                         },
                         Attribute::BodySection {
@@ -815,6 +857,259 @@ mod tests {
                 "{}",
                 command
             );
+        }
+    }
+
+    #[test]
+    fn mime_requires_a_part_number() {
+        let mut receiver = Receiver::new();
+        for command in [
+            "A001 FETCH 1 BODY[MIME]\r\n",
+            "A002 FETCH 1 BODY.PEEK[MIME]<0.10>\r\n",
+            "A003 FETCH 1 (UID BODY[HEADER.MIME])\r\n",
+            "A004 FETCH 1 BODY[TEXT.MIME]\r\n",
+        ] {
+            let err = receiver
+                .parse(&mut command.as_bytes().iter())
+                .expect("command is framed")
+                .parse_fetch()
+                .expect_err(command);
+            assert_eq!(
+                err.value_as_str(trc::Key::Type),
+                Some(ResponseType::Bad.as_str()),
+                "{command}"
+            );
+        }
+        for command in [
+            "A005 FETCH 1 BODY[1.MIME]\r\n",
+            "A006 FETCH 1 BODY[4.2.MIME]<0.10>\r\n",
+        ] {
+            receiver
+                .parse(&mut command.as_bytes().iter())
+                .expect("command is framed")
+                .parse_fetch()
+                .expect(command);
+        }
+    }
+
+    fn fetch_attribute(receiver: &mut Receiver<Command>, item: &str) -> trc::Result<Attribute> {
+        let command = format!("A1 FETCH 1 {item}\r\n");
+        receiver
+            .parse(&mut command.as_bytes().iter())
+            .expect("command is framed")
+            .parse_fetch()
+            .map(|mut arguments| arguments.attributes.remove(0))
+    }
+
+    #[test]
+    fn header_field_names_are_rfc_5322_field_names() {
+        let mut receiver = Receiver::new();
+        for (list, names) in [
+            ("(Subject)", vec!["Subject"]),
+            (
+                "(X-Spam-Status Message-ID)",
+                vec!["X-Spam-Status", "Message-ID"],
+            ),
+            ("(\"X(Y\" \"A]\" \"%*{\")", vec!["X(Y", "A]", "%*{"]),
+            ("(\"A\\\"B\" \"C\\\\D\")", vec!["A\"B", "C\\D"]),
+            ("({3+}\r\n!~;)", vec!["!~;"]),
+        ] {
+            for not in ["", ".NOT"] {
+                let item = format!("BODY.PEEK[HEADER.FIELDS{not} {list}]");
+                match fetch_attribute(&mut receiver, &item) {
+                    Ok(Attribute::BodySection { sections, .. }) => assert_eq!(
+                        sections,
+                        vec![Section::HeaderFields {
+                            not: !not.is_empty(),
+                            fields: names.iter().map(|name| name.to_string()).collect(),
+                        }],
+                        "{item}"
+                    ),
+                    other => panic!("{item}: {other:?}"),
+                }
+            }
+        }
+        for list in [
+            "(\"A B\")",
+            "(\"\")",
+            "(\"A:B\")",
+            "(Subject \":\")",
+            "(\"A\tB\")",
+            "(\"A\u{7f}B\")",
+            "(\"caf\u{e9}\")",
+            "(\"\u{1}\")",
+            "({3+}\r\nA\rB)",
+            "({3+}\r\nA\nB)",
+            "({4+}\r\nA\r\nB)",
+            "({3+}\r\nA\u{0}B)",
+            "({0+}\r\n)",
+        ] {
+            for item in [
+                format!("BODY[HEADER.FIELDS {list}]"),
+                format!("BODY.PEEK[1.HEADER.FIELDS.NOT {list}]<0.5>"),
+            ] {
+                let err = fetch_attribute(&mut receiver, &item).expect_err(&item);
+                assert_eq!(
+                    err.value_as_str(trc::Key::Type),
+                    Some(ResponseType::Bad.as_str()),
+                    "{item:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sections_follow_the_rfc_9051_grammar() {
+        let part = |num| Section::Part { num };
+        let fields = |not, names: &[&str]| Section::HeaderFields {
+            not,
+            fields: names.iter().map(|name| name.to_string()).collect(),
+        };
+        let mut receiver = Receiver::new();
+        for (spec, sections) in [
+            ("", vec![]),
+            ("HEADER", vec![Section::Header]),
+            ("header", vec![Section::Header]),
+            ("HEADER.FIELDS (From)", vec![fields(false, &["From"])]),
+            ("HEADER.FIELDS.NOT (A B)", vec![fields(true, &["A", "B"])]),
+            ("TEXT", vec![Section::Text]),
+            ("1", vec![part(1)]),
+            ("4294967295", vec![part(u32::MAX)]),
+            ("1.2.30", vec![part(1), part(2), part(30)]),
+            ("1.MIME", vec![part(1), Section::Mime]),
+            ("2.1.MIME", vec![part(2), part(1), Section::Mime]),
+            ("3.HEADER", vec![part(3), Section::Header]),
+            ("3.1.TEXT", vec![part(3), part(1), Section::Text]),
+            (
+                "3.HEADER.FIELDS (Subject)",
+                vec![part(3), fields(false, &["Subject"])],
+            ),
+            (
+                "3.2.HEADER.FIELDS.NOT (Subject To)",
+                vec![part(3), part(2), fields(true, &["Subject", "To"])],
+            ),
+        ] {
+            for item in [format!("BODY[{spec}]"), format!("BODY.PEEK[{spec}]<0.5>")] {
+                match fetch_attribute(&mut receiver, &item) {
+                    Ok(Attribute::BodySection {
+                        sections: parsed, ..
+                    }) => assert_eq!(parsed, sections, "{item}"),
+                    other => panic!("{item}: {other:?}"),
+                }
+            }
+        }
+        for (spec, sections) in [
+            ("", vec![]),
+            ("1", vec![1]),
+            ("1.2.3", vec![1, 2, 3]),
+            ("4294967295", vec![u32::MAX]),
+        ] {
+            for item in [
+                format!("BINARY[{spec}]"),
+                format!("BINARY.PEEK[{spec}]<0.5>"),
+                format!("BINARY.SIZE[{spec}]"),
+            ] {
+                match fetch_attribute(&mut receiver, &item) {
+                    Ok(
+                        Attribute::Binary {
+                            sections: parsed, ..
+                        }
+                        | Attribute::BinarySize { sections: parsed },
+                    ) => assert_eq!(parsed, sections, "{item}"),
+                    other => panic!("{item}: {other:?}"),
+                }
+            }
+        }
+
+        for spec in [
+            "MIME",
+            "0.MIME",
+            "1.MIME.TEXT",
+            "TEXT.1.MIME",
+            "MIME.1",
+            "1.MIME.MIME",
+            "1.MIME.1",
+            "1.MIME.HEADER",
+            "1.HEADER.FIELDS (A).MIME",
+            "1.HEADER.TEXT",
+            "1.TEXT.2",
+            "HEADER.MIME",
+            "HEADER.TEXT",
+            "HEADER.1",
+            "HEADER.HEADER",
+            "TEXT.MIME",
+            "TEXT.HEADER",
+            "TEXT.1",
+            "TEXT.TEXT",
+            "0",
+            "1.0",
+            "01",
+            "1.02",
+            "+1",
+            "-1",
+            "4294967296",
+            ".1",
+            "1.",
+            "1..2",
+            ".",
+            "1 2",
+            "1.2 3",
+            "HEADER.FIELDS",
+            "HEADER.FIELDS ()",
+            "HEADER.FIELDS.NOT ()",
+            "1.HEADER.FIELDS ()",
+            "HEADER.FIELDS.NOT",
+            "HEADER.FIELDS.X (A)",
+            "HEADER.X",
+            "HEADERS",
+            "BODY",
+            "1.BODY",
+        ] {
+            for item in [format!("BODY[{spec}]"), format!("BODY.PEEK[{spec}]<0.5>")] {
+                let err = fetch_attribute(&mut receiver, &item).expect_err(&item);
+                assert_eq!(
+                    err.value_as_str(trc::Key::Type),
+                    Some(ResponseType::Bad.as_str()),
+                    "{item}"
+                );
+            }
+        }
+        for item in ["BODY[1", "BODY[HEADER", "BODY[1.MIME", "BINARY[1"] {
+            let err = fetch_attribute(&mut receiver, item).expect_err(item);
+            assert_eq!(
+                err.value_as_str(trc::Key::Type),
+                Some(ResponseType::Bad.as_str()),
+                "{item}"
+            );
+        }
+        for spec in [
+            "0",
+            "1.0",
+            "01",
+            "+1",
+            ".1",
+            "1.",
+            "1..2",
+            ".",
+            "1 2",
+            "1.MIME",
+            "MIME",
+            "TEXT",
+            "HEADER",
+            "4294967296",
+        ] {
+            for item in [
+                format!("BINARY[{spec}]"),
+                format!("BINARY.PEEK[{spec}]"),
+                format!("BINARY.SIZE[{spec}]"),
+            ] {
+                let err = fetch_attribute(&mut receiver, &item).expect_err(&item);
+                assert_eq!(
+                    err.value_as_str(trc::Key::Type),
+                    Some(ResponseType::Bad.as_str()),
+                    "{item}"
+                );
+            }
         }
     }
 }

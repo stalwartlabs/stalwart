@@ -80,12 +80,7 @@ pub async fn test(test: &TestServer) {
             .await;
 
         let message = MessageParser::new().parse(&contents).unwrap();
-        let contents = message
-            .html_bodies()
-            .next()
-            .unwrap()
-            .text_contents()
-            .unwrap();
+        let contents = message.body_html(0).unwrap();
 
         if idx == 0 {
             // First alarm does not have a summary or description
@@ -124,8 +119,7 @@ pub async fn test(test: &TestServer) {
         );
 
         // The logo is an inline part, so the template must reference it by cid: URI
-        let html = message.html_bodies().next().unwrap().contents().to_vec();
-        let html = String::from_utf8(html).unwrap();
+        let html = message.body_html(0).unwrap().into_owned();
         assert!(
             html.contains("src=\"cid:logo."),
             "alarm logo must be referenced as a cid: URI: {html}"

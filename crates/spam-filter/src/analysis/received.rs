@@ -27,16 +27,8 @@ impl SpamFilterAnalyzeReceived for Server {
         let has_recipients = ctx.output.all_recipients().next().is_some();
 
         for header in ctx.input.message.headers() {
-            if let HeaderName::Received = &header.name {
-                if !is_smtputf8
-                    && !ctx
-                        .input
-                        .message
-                        .raw_message()
-                        .get(header.offset_start as usize..header.offset_end as usize)
-                        .unwrap_or_default()
-                        .is_ascii()
-                {
+            if header.name() == HeaderName::Received {
+                if !is_smtputf8 && !header.raw_value().is_ascii() {
                     // Received headers have non-ASCII characters
                     ctx.result.add_tag("RCVD_ILLEGAL_CHARS");
                 }
@@ -51,7 +43,7 @@ impl SpamFilterAnalyzeReceived for Server {
                         ctx.result.add_tag("RCVD_HELO_USER");
                     } else if let (Some(Host::Name(helo_domain)), Some(ip_rev)) =
                         (helo_domain, ip_rev)
-                        && !eq_lowercase_str(helo_domain.as_ref(), ip_rev)
+                        && !eq_lowercase_str(helo_domain, ip_rev)
                     {
                         // HELO domain does not match PTR record
                         ctx.result.add_tag("FORGED_RCVD_TRAIL");
@@ -68,7 +60,7 @@ impl SpamFilterAnalyzeReceived for Server {
                         ctx.result.add_tag("PREVIOUSLY_DELIVERED");
                     }
 
-                    if matches!(received.from, Some(Host::IpAddr(_))) {
+                    if matches!(received.from(), Some(Host::IpAddr(_))) {
                         // Received from an IP address rather than a FQDN
                         rcvd_from_ip += 1;
                     }

@@ -14,11 +14,11 @@ BODYSTRUCTURE (
    (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 79 1 "b35878dedb7cd0aa6934f90df9d517b0" NIL NIL NIL
+      ) NIL NIL "7bit" 79 1 NIL NIL NIL NIL
    )(
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 76 2 "d3905bfd2a53ad0a4438d01bf271677a" NIL NIL NIL
+      ) NIL NIL "7bit" 76 2 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "simple boundary"
    ) NIL NIL NIL
@@ -28,11 +28,11 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 79 1 "b35878dedb7cd0aa6934f90df9d517b0" NIL NIL NIL
+      ) NIL NIL "7bit" 79 1 NIL NIL NIL NIL
    )(
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 76 2 "d3905bfd2a53ad0a4438d01bf271677a" NIL NIL NIL
+      ) NIL NIL "7bit" 76 2 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "simple boundary"
    ) NIL NIL NIL
@@ -126,7 +126,7 @@ This is the epilogue.  It is also to be ignored.
 
 ----------------------------------
 BODY[MIME] {60}
-Content-Type: multipart/mixed; boundary="simple boundary"
+Content-type: multipart/mixed; boundary="simple boundary"
 
 
 ----------------------------------
@@ -207,7 +207,7 @@ From: Nathaniel Borenstein <nsb@bellcore.com>
 To: Ned Freed <ned@innosoft.com>
 Date: Sun, 21 Mar 1993 23:56:48 -0800 (PST)
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="simple boundary"
+Content-type: multipart/mixed; boundary="simple boundary"
 
 
 ----------------------------------

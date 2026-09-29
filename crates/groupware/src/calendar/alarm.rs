@@ -839,7 +839,7 @@ pub trait EventAlarmData {
                 .into_iter()
                 .flatten()
                 .chain(single)
-                .map(|offset| offset as i64 + base_offset)
+                .map(|offset| base_offset.saturating_add(offset as i64))
             {
                 let best_so_far = next_alarm.as_ref().map(|next| next.alarm_time);
                 let pending = PendingAlarms::of(&candidates);
@@ -847,7 +847,7 @@ pub trait EventAlarmData {
                     break;
                 }
 
-                let end_date_naive = start_date_naive + duration;
+                let end_date_naive = start_date_naive.saturating_add(duration);
                 let mut instance_key = None;
                 let mut resolved = None;
 

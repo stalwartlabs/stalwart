@@ -9,7 +9,7 @@ use crate::{
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use common::{BuildServer, ipc::QueueEvent};
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::NetworkListenerProtocol,
@@ -121,7 +121,7 @@ async fn concurrent_queue() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -146,7 +146,7 @@ async fn concurrent_queue() {
         let server = inner.build_server();
         server.mx_add(
             "foobar.org",
-            vec![MX {
+            vec![Mx {
                 exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
                 preference: 10,
             }],

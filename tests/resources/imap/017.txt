@@ -1,0 +1,26 @@
+From: Integrity Checker <check@example.com>
+To: rcpt@example.com
+Subject: Content-MD5 and default encodings
+Date: Mon, 28 Sep 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="md5"
+
+--md5
+Content-Type: text/plain; charset=us-ascii
+Content-MD5: Q2hlY2sgSW50ZWdyaXR5IQ==
+
+Check Integrity!
+--md5
+Content-Type: image/gif; name="dot.gif"
+Content-Disposition: attachment; filename="dot.gif"
+
+GIF89a
+--md5
+Content-Type: message/rfc822
+
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+line one
+line two
+--md5--

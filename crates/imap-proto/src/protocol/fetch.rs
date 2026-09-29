@@ -7,14 +7,11 @@ use crate::protocol::push_int;
 use compact_str::CompactString;
 
 use super::{
-    Flag, ImapResponse, ObjectId, Sequence, literal_string, quoted_or_literal_encoded_string,
-    quoted_or_literal_encoded_string_or_nil, quoted_or_literal_string,
-    quoted_or_literal_string_or_nil, quoted_rfc2822_or_nil, quoted_timestamp,
+    Flag, ObjectId, Sequence, WriteLiteral, literal_string, quoted_or_literal_string,
+    quoted_timestamp,
 };
-use crate::protocol::literal_string_slice;
-use mail_parser::DateTime;
-use std::borrow::Cow;
-use utils::chained_bytes::SliceRange;
+use std::borrow::{Borrow, Cow};
+use utils::chained_bytes::ChainedBytes;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Arguments {
@@ -23,6 +20,34 @@ pub struct Arguments {
     pub attributes: Vec<Attribute>,
     pub changed_since: Option<u64>,
     pub include_vanished: bool,
+}
+
+impl Flag {
+    pub fn write_fetch_item<F: Borrow<Flag>>(
+        buf: &mut Vec<u8>,
+        flags: impl IntoIterator<Item = F>,
+    ) {
+        buf.extend_from_slice(b"FLAGS (");
+        for (pos, flag) in flags.into_iter().enumerate() {
+            if pos > 0 {
+                buf.push(b' ');
+            }
+            flag.borrow().serialize(buf);
+        }
+        buf.push(b')');
+    }
+}
+
+impl Attribute {
+    pub fn header_fields(&self) -> Option<&[String]> {
+        match self {
+            Attribute::BodySection { sections, .. } => match sections.last() {
+                Some(Section::HeaderFields { fields, .. }) => Some(fields),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl Arguments {
@@ -38,13 +63,6 @@ impl Arguments {
         })
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Response<'x> {
-    pub is_uid: bool,
-    pub is_utf8: bool,
-    pub items: Vec<FetchItem<'x>>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchItem<'x> {
     pub id: u32,
@@ -96,27 +114,18 @@ pub enum Section {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataItem<'x> {
     Binary {
-        sections: Vec<u32>,
+        sections: Cow<'x, [u32]>,
         offset: Option<u32>,
         contents: BodyContents<'x>,
     },
     BinarySize {
-        sections: Vec<u32>,
+        sections: Cow<'x, [u32]>,
         size: usize,
     },
-    Body {
-        part: Box<BodyPart<'x>>,
-    },
-    BodyStructure {
-        part: Box<BodyPart<'x>>,
-    },
     BodySection {
-        sections: Vec<Section>,
+        sections: Cow<'x, [Section]>,
         origin_octet: Option<u32>,
-        contents: Cow<'x, [u8]>,
-    },
-    Envelope {
-        envelope: Box<Envelope<'x>>,
+        contents: BodyContents<'x>,
     },
     Flags {
         flags: Vec<Flag>,
@@ -128,16 +137,16 @@ pub enum DataItem<'x> {
         uid: u32,
     },
     Rfc822 {
-        contents: SliceRange<'x>,
+        contents: ChainedBytes<'x>,
     },
     Rfc822Header {
-        contents: SliceRange<'x>,
+        contents: ChainedBytes<'x>,
     },
     Rfc822Size {
         size: usize,
     },
     Rfc822Text {
-        contents: SliceRange<'x>,
+        contents: ChainedBytes<'x>,
     },
     Preview {
         contents: Option<Cow<'x, [u8]>>,
@@ -149,463 +158,63 @@ pub enum DataItem<'x> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Address<'x> {
-    Single(EmailAddress<'x>),
-    Group(AddressGroup<'x>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AddressGroup<'x> {
-    pub name: Option<Cow<'x, str>>,
-    pub addresses: Vec<EmailAddress<'x>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmailAddress<'x> {
-    pub name: Option<Cow<'x, str>>,
-    pub address: Cow<'x, str>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BodyContents<'x> {
     Text(Cow<'x, str>),
-    Bytes(Cow<'x, [u8]>),
+    Bytes(ChainedBytes<'x>),
+    Owned(Vec<u8>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Envelope<'x> {
-    pub date: Option<DateTime>,
-    pub subject: Option<Cow<'x, str>>,
-    pub from: Vec<Address<'x>>,
-    pub sender: Vec<Address<'x>>,
-    pub reply_to: Vec<Address<'x>>,
-    pub to: Vec<Address<'x>>,
-    pub cc: Vec<Address<'x>>,
-    pub bcc: Vec<Address<'x>>,
-    pub in_reply_to: Option<Cow<'x, str>>,
-    pub message_id: Option<Cow<'x, str>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::type_complexity)]
-pub enum BodyPart<'x> {
-    Multipart {
-        body_parts: Vec<BodyPart<'x>>,
-        body_subtype: Cow<'x, str>,
-        // Extension data
-        body_parameters: Option<Vec<(Cow<'x, str>, Cow<'x, str>)>>,
-        extension: BodyPartExtension<'x>,
-    },
-    Basic {
-        body_type: Option<Cow<'x, str>>,
-        fields: BodyPartFields<'x>,
-        // Extension data
-        body_md5: Option<Cow<'x, str>>,
-        extension: BodyPartExtension<'x>,
-    },
-    Text {
-        fields: BodyPartFields<'x>,
-        body_size_lines: usize,
-        // Extension data
-        body_md5: Option<Cow<'x, str>>,
-        extension: BodyPartExtension<'x>,
-    },
-    Message {
-        fields: BodyPartFields<'x>,
-        envelope: Option<Box<Envelope<'x>>>,
-        body: Option<Box<BodyPart<'x>>>,
-        body_size_lines: usize,
-        // Extension data
-        body_md5: Option<Cow<'x, str>>,
-        extension: BodyPartExtension<'x>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct BodyPartFields<'x> {
-    pub body_subtype: Option<Cow<'x, str>>,
-    pub body_parameters: Option<Vec<(Cow<'x, str>, Cow<'x, str>)>>,
-    pub body_id: Option<Cow<'x, str>>,
-    pub body_description: Option<Cow<'x, str>>,
-    pub body_encoding: Option<Cow<'x, str>>,
-    pub body_size_octets: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[allow(clippy::type_complexity)]
-pub struct BodyPartExtension<'x> {
-    pub body_disposition: Option<(Cow<'x, str>, Vec<(Cow<'x, str>, Cow<'x, str>)>)>,
-    pub body_language: Option<Vec<Cow<'x, str>>>,
-    pub body_location: Option<Cow<'x, str>>,
-}
-
-impl Address<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
+impl<'x> BodyContents<'x> {
+    pub fn as_chained(&self) -> ChainedBytes<'_> {
         match self {
-            Address::Single(addr) => addr.serialize(buf, is_utf8),
-            Address::Group(addr) => addr.serialize(buf, is_utf8),
+            BodyContents::Text(text) => ChainedBytes::new(text.as_bytes()),
+            BodyContents::Bytes(bytes) => *bytes,
+            BodyContents::Owned(bytes) => ChainedBytes::new(bytes),
         }
     }
 
-    pub fn into_owned<'y>(self) -> Address<'y> {
+    pub fn len(&self) -> usize {
         match self {
-            Address::Single(addr) => Address::Single(addr.into_owned()),
-            Address::Group(addr) => Address::Group(addr.into_owned()),
+            BodyContents::Text(text) => text.len(),
+            BodyContents::Bytes(bytes) => bytes.len(),
+            BodyContents::Owned(bytes) => bytes.len(),
         }
     }
-}
 
-impl EmailAddress<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        buf.push(b'(');
-        if let Some(name) = &self.name {
-            quoted_or_literal_encoded_string(buf, name, is_utf8);
-        } else {
-            buf.extend_from_slice(b"NIL");
-        }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
-        let addr = if let Some((route, addr)) = self.address.split_once(':') {
-            buf.push(b' ');
-            quoted_or_literal_string(buf, route);
-            buf.push(b' ');
-            addr
-        } else {
-            buf.extend_from_slice(b" NIL ");
-            &self.address
+    pub fn partial(self, partial: Option<(u32, u32)>) -> Self {
+        let Some((start, len)) = partial else {
+            return self;
         };
-
-        if let Some((local, host)) = addr.rsplit_once('@') {
-            quoted_or_literal_string(buf, local);
-            buf.push(b' ');
-            quoted_or_literal_string(buf, host);
-        } else {
-            quoted_or_literal_string(buf, &self.address);
-            buf.extend_from_slice(b" \"\"");
-        }
-        buf.push(b')');
-    }
-
-    pub fn into_owned<'y>(self) -> EmailAddress<'y> {
-        EmailAddress {
-            name: self.name.map(|n| n.into_owned().into()),
-            address: self.address.into_owned().into(),
+        let start = start as usize;
+        let end = start.saturating_add(len as usize);
+        match self {
+            BodyContents::Bytes(bytes) => {
+                BodyContents::Bytes(bytes.view(start..end.min(bytes.len())).unwrap_or_default())
+            }
+            BodyContents::Owned(mut bytes) => {
+                bytes.truncate(end);
+                bytes.drain(..start.min(bytes.len()));
+                BodyContents::Owned(bytes)
+            }
+            BodyContents::Text(text) => BodyContents::Owned(
+                text.as_bytes()
+                    .get(start..end.min(text.len()))
+                    .unwrap_or_default()
+                    .to_vec(),
+            ),
         }
     }
 }
 
-impl AddressGroup<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        buf.extend_from_slice(b"(NIL NIL ");
-        if let Some(name) = &self.name {
-            quoted_or_literal_encoded_string(buf, name, is_utf8);
-        } else {
-            buf.extend_from_slice(b"\"\"");
-        }
-        buf.extend_from_slice(b" NIL)");
-        for addr in &self.addresses {
-            addr.serialize(buf, is_utf8);
-        }
-        buf.extend_from_slice(b"(NIL NIL NIL NIL)");
-    }
-
-    pub fn into_owned<'y>(self) -> AddressGroup<'y> {
-        AddressGroup {
-            name: self.name.map(|n| n.into_owned().into()),
-            addresses: self
-                .addresses
-                .into_iter()
-                .map(|addr| addr.into_owned())
-                .collect(),
-        }
-    }
-}
-
-impl<'x> BodyPart<'x> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_extended: bool, is_utf8: bool) {
-        buf.push(b'(');
-        match self {
-            BodyPart::Multipart {
-                body_parts,
-                body_subtype,
-                body_parameters,
-                extension,
-            } => {
-                for part in body_parts.iter() {
-                    part.serialize(buf, is_extended, is_utf8);
-                }
-                buf.push(b' ');
-                quoted_or_literal_string(buf, body_subtype);
-                if is_extended {
-                    if let Some(body_parameters) = body_parameters {
-                        buf.extend_from_slice(b" (");
-                        for (pos, (key, value)) in body_parameters.iter().enumerate() {
-                            if pos > 0 {
-                                buf.push(b' ');
-                            }
-                            quoted_or_literal_string(buf, key);
-                            buf.push(b' ');
-                            quoted_or_literal_encoded_string(buf, value, is_utf8);
-                        }
-                        buf.push(b')');
-                    } else {
-                        buf.extend_from_slice(b" NIL");
-                    }
-                    buf.push(b' ');
-                    extension.serialize(buf, is_utf8);
-                }
-            }
-            BodyPart::Basic {
-                body_type,
-                fields,
-                body_md5,
-                extension,
-            } => {
-                quoted_or_literal_string_or_nil(buf, body_type.as_deref());
-                buf.push(b' ');
-                fields.serialize(buf, is_utf8);
-                if is_extended {
-                    buf.push(b' ');
-                    quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
-                    buf.push(b' ');
-                    extension.serialize(buf, is_utf8);
-                }
-            }
-            BodyPart::Text {
-                fields,
-                body_size_lines,
-                body_md5,
-                extension,
-            } => {
-                buf.extend_from_slice(b"\"text\" ");
-                fields.serialize(buf, is_utf8);
-                buf.push(b' ');
-                push_int(buf, *body_size_lines);
-                if is_extended {
-                    buf.push(b' ');
-                    quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
-                    buf.push(b' ');
-                    extension.serialize(buf, is_utf8);
-                }
-            }
-            BodyPart::Message {
-                fields,
-                envelope,
-                body,
-                body_size_lines,
-                body_md5,
-                extension,
-            } => {
-                buf.extend_from_slice(b"\"message\" ");
-                fields.serialize(buf, is_utf8);
-                buf.push(b' ');
-                if let Some(envelope) = envelope {
-                    envelope.serialize(buf, is_utf8);
-                } else {
-                    buf.extend_from_slice(b"NIL");
-                }
-                buf.push(b' ');
-                if let Some(body) = body {
-                    body.serialize(buf, is_extended, is_utf8);
-                } else {
-                    buf.extend_from_slice(b"NIL");
-                }
-                buf.push(b' ');
-                push_int(buf, *body_size_lines);
-                if is_extended {
-                    buf.push(b' ');
-                    quoted_or_literal_string_or_nil(buf, body_md5.as_deref());
-                    buf.push(b' ');
-                    extension.serialize(buf, is_utf8);
-                }
-            }
-        }
-        buf.push(b')');
-    }
-
-    pub fn add_part(&mut self, part: BodyPart<'x>) {
-        match self {
-            BodyPart::Multipart { body_parts, .. } => body_parts.push(part),
-            BodyPart::Message { body, .. } => *body = Box::new(part).into(),
-            _ => debug_assert!(false, "Cannot add a part to a non-multipart body part"),
-        }
-    }
-
-    pub fn set_envelope(&mut self, envelope_: Envelope<'x>) {
-        match self {
-            BodyPart::Message { envelope, .. } => *envelope = Some(Box::new(envelope_)),
-            _ => debug_assert!(false, "Cannot set envelope on a non-message body part"),
-        }
-    }
-
-    pub fn into_owned<'y>(self) -> BodyPart<'y> {
-        match self {
-            BodyPart::Multipart {
-                body_parts,
-                body_subtype,
-                body_parameters,
-                extension,
-            } => BodyPart::Multipart {
-                body_parts: body_parts.into_iter().map(|v| v.into_owned()).collect(),
-                body_subtype: body_subtype.into_owned().into(),
-                body_parameters: body_parameters.map(|b| {
-                    b.into_iter()
-                        .map(|(k, v)| (k.into_owned().into(), v.into_owned().into()))
-                        .collect::<Vec<_>>()
-                }),
-                extension: extension.into_owned(),
-            },
-            BodyPart::Basic {
-                body_type,
-                fields,
-                body_md5,
-                extension,
-            } => BodyPart::Basic {
-                body_type: body_type.map(|v| v.into_owned().into()),
-                fields: fields.into_owned(),
-                body_md5: body_md5.map(|v| v.into_owned().into()),
-                extension: extension.into_owned(),
-            },
-            BodyPart::Text {
-                fields,
-                body_size_lines,
-                body_md5,
-                extension,
-            } => BodyPart::Text {
-                fields: fields.into_owned(),
-                body_size_lines,
-                body_md5: body_md5.map(|v| v.into_owned().into()),
-                extension: extension.into_owned(),
-            },
-            BodyPart::Message {
-                fields,
-                envelope,
-                body,
-                body_size_lines,
-                body_md5,
-                extension,
-            } => BodyPart::Message {
-                fields: fields.into_owned(),
-                envelope: envelope.map(|v| Box::new(v.into_owned())),
-                body: body.map(|b| Box::new(b.into_owned())),
-                body_size_lines,
-                body_md5: body_md5.map(|v| v.into_owned().into()),
-                extension: extension.into_owned(),
-            },
-        }
-    }
-}
-
-impl BodyPartFields<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        quoted_or_literal_string_or_nil(buf, self.body_subtype.as_deref());
-        if let Some(body_parameters) = &self.body_parameters {
-            buf.extend_from_slice(b" (");
-            for (pos, (key, value)) in body_parameters.iter().enumerate() {
-                if pos > 0 {
-                    buf.push(b' ');
-                }
-                quoted_or_literal_string(buf, key);
-                buf.push(b' ');
-                quoted_or_literal_encoded_string(buf, value, is_utf8);
-            }
-            buf.push(b')');
-        } else {
-            buf.extend_from_slice(b" NIL");
-        }
-        for item in [&self.body_id, &self.body_description, &self.body_encoding] {
-            buf.push(b' ');
-            quoted_or_literal_encoded_string_or_nil(buf, item.as_deref(), is_utf8);
-        }
-        buf.push(b' ');
-        push_int(buf, self.body_size_octets);
-    }
-
-    pub fn into_owned<'y>(self) -> BodyPartFields<'y> {
-        BodyPartFields {
-            body_subtype: self.body_subtype.map(|v| v.into_owned().into()),
-            body_parameters: self.body_parameters.map(|b| {
-                b.into_iter()
-                    .map(|(k, v)| (k.into_owned().into(), v.into_owned().into()))
-                    .collect::<Vec<_>>()
-            }),
-            body_id: self.body_id.map(|v| v.into_owned().into()),
-            body_description: self.body_description.map(|v| v.into_owned().into()),
-            body_encoding: self.body_encoding.map(|v| v.into_owned().into()),
-            body_size_octets: self.body_size_octets,
-        }
-    }
-}
-
-impl BodyPartExtension<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        if let Some((disposition, parameters)) = &self.body_disposition {
-            buf.push(b'(');
-            quoted_or_literal_string(buf, disposition);
-            if !parameters.is_empty() {
-                buf.extend_from_slice(b" (");
-                for (pos, (key, value)) in parameters.iter().enumerate() {
-                    if pos > 0 {
-                        buf.push(b' ');
-                    }
-                    quoted_or_literal_string(buf, key);
-                    buf.push(b' ');
-                    quoted_or_literal_encoded_string(buf, value, is_utf8);
-                }
-                buf.extend_from_slice(b"))");
-            } else {
-                buf.extend_from_slice(b" NIL)");
-            }
-        } else {
-            buf.extend_from_slice(b"NIL");
-        }
-        if let Some(body_language) = &self.body_language {
-            match body_language.as_slice() {
-                [] => buf.extend_from_slice(b" NIL"),
-                [language] => {
-                    buf.push(b' ');
-                    quoted_or_literal_string(buf, language);
-                }
-                languages => {
-                    buf.extend_from_slice(b" (");
-                    for (pos, language) in languages.iter().enumerate() {
-                        if pos > 0 {
-                            buf.push(b' ');
-                        }
-                        quoted_or_literal_string(buf, language);
-                    }
-                    buf.push(b')');
-                }
-            }
-        } else {
-            buf.extend_from_slice(b" NIL");
-        }
-        buf.push(b' ');
-        quoted_or_literal_string_or_nil(buf, self.body_location.as_deref());
-    }
-
-    pub fn into_owned<'y>(self) -> BodyPartExtension<'y> {
-        BodyPartExtension {
-            body_disposition: self.body_disposition.map(|(a, b)| {
-                (
-                    a.into_owned().into(),
-                    b.into_iter()
-                        .map(|(k, v)| (k.into_owned().into(), v.into_owned().into()))
-                        .collect::<Vec<_>>(),
-                )
-            }),
-            body_language: self
-                .body_language
-                .map(|v| v.into_iter().map(|a| a.into_owned().into()).collect()),
-            body_location: self.body_location.map(|v| v.into_owned().into()),
-        }
-    }
-}
-
-impl BodyContents<'_> {
-    pub fn into_owned<'y>(self) -> BodyContents<'y> {
-        match self {
-            BodyContents::Text(text) => BodyContents::Text(text.into_owned().into()),
-            BodyContents::Bytes(bytes) => BodyContents::Bytes(bytes.into_owned().into()),
+impl<'x> From<Cow<'x, [u8]>> for BodyContents<'x> {
+    fn from(bytes: Cow<'x, [u8]>) -> Self {
+        match bytes {
+            Cow::Borrowed(bytes) => BodyContents::Bytes(ChainedBytes::new(bytes)),
+            Cow::Owned(bytes) => BodyContents::Owned(bytes),
         }
     }
 }
@@ -631,8 +240,17 @@ impl Section {
                     }
                     let start = buf.len();
                     buf.extend_from_slice(field.as_bytes());
-                    if let Some(field) = buf.get_mut(start..) {
-                        field.make_ascii_uppercase();
+                    let is_atom = buf.get_mut(start..).is_some_and(|written| {
+                        let mut is_atom = !written.is_empty();
+                        for ch in written.iter_mut() {
+                            is_atom &= ATOM_CHAR[*ch as usize];
+                            ch.make_ascii_uppercase();
+                        }
+                        is_atom
+                    });
+                    if !is_atom {
+                        buf.truncate(start);
+                        quoted_or_literal_string(buf, &field.to_ascii_uppercase());
                     }
                 }
                 buf.push(b')');
@@ -647,88 +265,8 @@ impl Section {
     }
 }
 
-static DUMMY_ADDRESS: [Address; 1] = [Address::Single(EmailAddress {
-    name: None,
-    address: Cow::Borrowed("unknown@localhost"),
-})];
-
-impl Envelope<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        buf.push(b'(');
-        quoted_rfc2822_or_nil(buf, &self.date);
-        buf.push(b' ');
-        quoted_or_literal_encoded_string_or_nil(buf, self.subject.as_deref(), is_utf8);
-
-        // Note: [RFC-2822] requires that all messages have a valid
-        // From header.  Therefore, the from, sender, and reply-to
-        // members in the envelope can not be NIL.
-
-        let from = if !self.from.is_empty() {
-            &self.from[..]
-        } else {
-            &DUMMY_ADDRESS[..]
-        };
-
-        self.serialize_addresses(buf, from, is_utf8);
-        self.serialize_addresses(
-            buf,
-            if !self.sender.is_empty() {
-                &self.sender
-            } else {
-                from
-            },
-            is_utf8,
-        );
-        self.serialize_addresses(
-            buf,
-            if !self.reply_to.is_empty() {
-                &self.reply_to
-            } else {
-                from
-            },
-            is_utf8,
-        );
-        self.serialize_addresses(buf, &self.to, is_utf8);
-        self.serialize_addresses(buf, &self.cc, is_utf8);
-        self.serialize_addresses(buf, &self.bcc, is_utf8);
-        for item in [&self.in_reply_to, &self.message_id] {
-            buf.push(b' ');
-            quoted_or_literal_string_or_nil(buf, item.as_deref());
-        }
-        buf.push(b')');
-    }
-
-    fn serialize_addresses(&self, buf: &mut Vec<u8>, addresses: &[Address], is_utf8: bool) {
-        buf.push(b' ');
-        if !addresses.is_empty() {
-            buf.push(b'(');
-            for address in addresses {
-                address.serialize(buf, is_utf8);
-            }
-            buf.push(b')');
-        } else {
-            buf.extend_from_slice(b"NIL");
-        }
-    }
-
-    pub fn into_owned<'y>(self) -> Envelope<'y> {
-        Envelope {
-            date: self.date,
-            subject: self.subject.map(|v| v.into_owned().into()),
-            from: self.from.into_iter().map(|v| v.into_owned()).collect(),
-            sender: self.sender.into_iter().map(|v| v.into_owned()).collect(),
-            reply_to: self.reply_to.into_iter().map(|v| v.into_owned()).collect(),
-            to: self.to.into_iter().map(|v| v.into_owned()).collect(),
-            cc: self.cc.into_iter().map(|v| v.into_owned()).collect(),
-            bcc: self.bcc.into_iter().map(|v| v.into_owned()).collect(),
-            in_reply_to: self.in_reply_to.map(|v| v.into_owned().into()),
-            message_id: self.message_id.map(|v| v.into_owned().into()),
-        }
-    }
-}
-
 impl DataItem<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
         match self {
             DataItem::Binary {
                 sections,
@@ -749,16 +287,11 @@ impl DataItem<'_> {
                 } else {
                     buf.extend_from_slice(b"] ");
                 }
-                match contents {
-                    BodyContents::Text(text) => {
-                        literal_string(buf, text.as_bytes());
-                    }
-                    BodyContents::Bytes(bytes) => {
-                        buf.extend_from_slice(b"~{");
-                        push_int(buf, bytes.len());
-                        buf.extend_from_slice(b"}\r\n");
-                        buf.extend_from_slice(bytes);
-                    }
+                if let BodyContents::Text(text) = contents {
+                    literal_string(buf, text.as_bytes());
+                } else {
+                    buf.push(b'~');
+                    contents.as_chained().write_literal(buf);
                 }
             }
             DataItem::BinarySize { sections, size } => {
@@ -771,14 +304,6 @@ impl DataItem<'_> {
                 }
                 buf.extend_from_slice(b"] ");
                 push_int(buf, *size);
-            }
-            DataItem::Body { part } => {
-                buf.extend_from_slice(b"BODY ");
-                part.serialize(buf, false, is_utf8);
-            }
-            DataItem::BodyStructure { part } => {
-                buf.extend_from_slice(b"BODYSTRUCTURE ");
-                part.serialize(buf, true, is_utf8);
             }
             DataItem::BodySection {
                 sections,
@@ -799,22 +324,9 @@ impl DataItem<'_> {
                 } else {
                     buf.extend_from_slice(b"] ");
                 }
-                literal_string(buf, contents);
+                contents.as_chained().write_literal(buf);
             }
-            DataItem::Envelope { envelope } => {
-                buf.extend_from_slice(b"ENVELOPE ");
-                envelope.serialize(buf, is_utf8);
-            }
-            DataItem::Flags { flags } => {
-                buf.extend_from_slice(b"FLAGS (");
-                for (pos, flag) in flags.iter().enumerate() {
-                    if pos > 0 {
-                        buf.push(b' ');
-                    }
-                    flag.serialize(buf);
-                }
-                buf.push(b')');
-            }
+            DataItem::Flags { flags } => Flag::write_fetch_item(buf, flags),
             DataItem::InternalDate { date } => {
                 buf.extend_from_slice(b"INTERNALDATE ");
                 quoted_timestamp(buf, *date);
@@ -825,11 +337,11 @@ impl DataItem<'_> {
             }
             DataItem::Rfc822 { contents } => {
                 buf.extend_from_slice(b"RFC822 ");
-                literal_string_slice(buf, contents);
+                contents.write_literal(buf);
             }
             DataItem::Rfc822Header { contents } => {
                 buf.extend_from_slice(b"RFC822.HEADER ");
-                literal_string_slice(buf, contents);
+                contents.write_literal(buf);
             }
             DataItem::Rfc822Size { size } => {
                 buf.extend_from_slice(b"RFC822.SIZE ");
@@ -837,7 +349,7 @@ impl DataItem<'_> {
             }
             DataItem::Rfc822Text { contents } => {
                 buf.extend_from_slice(b"RFC822.TEXT ");
-                literal_string_slice(buf, contents);
+                contents.write_literal(buf);
             }
             DataItem::Preview { contents } => {
                 buf.extend_from_slice(b"PREVIEW ");
@@ -860,41 +372,51 @@ impl DataItem<'_> {
 }
 
 impl FetchItem<'_> {
-    pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
+    pub fn write_open(buf: &mut Vec<u8>, id: u32, is_uidonly: bool) {
         buf.extend_from_slice(b"* ");
-        push_int(buf, self.id);
-        buf.extend_from_slice(if self.is_uidonly {
+        push_int(buf, id);
+        buf.extend_from_slice(if is_uidonly {
             b" UIDFETCH (".as_slice()
         } else {
             b" FETCH (".as_slice()
         });
+    }
+
+    pub fn write_close(buf: &mut Vec<u8>) {
+        buf.extend_from_slice(b")\r\n");
+    }
+
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
+        Self::write_open(buf, self.id, self.is_uidonly);
         for (pos, item) in self.items.iter().enumerate() {
             if pos > 0 {
                 buf.push(b' ');
             }
-            item.serialize(buf, is_utf8);
+            item.serialize(buf);
         }
-        buf.extend_from_slice(b")\r\n");
+        Self::write_close(buf);
     }
 }
 
-impl ImapResponse for Response<'_> {
-    fn serialize_into(&self, buf: &mut Vec<u8>) {
-        for item in &self.items {
-            item.serialize(buf, self.is_utf8);
-        }
+const fn atom_char_table() -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut ch = 0x21;
+    while ch < 0x7f {
+        table[ch] = !matches!(
+            ch as u8,
+            b'(' | b')' | b'{' | b'%' | b'*' | b'"' | b'\\' | b']'
+        );
+        ch += 1;
     }
-
-    fn size_hint(&self) -> usize {
-        self.items.iter().map(FetchItem::size_hint).sum()
-    }
+    table
 }
+
+static ATOM_CHAR: [bool; 256] = atom_char_table();
 
 const SECTION_FRAMING_LEN: usize = 20;
 const ITEM_FRAMING_LEN: usize = 16;
 const INT_LEN: usize = 11;
 const SIZE_LEN: usize = 20;
-const STRUCTURED_ITEM_LEN: usize = 512;
 const OBJECT_ID_LEN: usize = 96;
 
 impl Section {
@@ -915,19 +437,10 @@ impl DataItem<'_> {
         match self {
             DataItem::Binary {
                 sections, contents, ..
-            } => {
-                ITEM_FRAMING_LEN
-                    + sections.len() * INT_LEN
-                    + INT_LEN
-                    + match contents {
-                        BodyContents::Text(text) => text.len(),
-                        BodyContents::Bytes(bytes) => bytes.len(),
-                    }
-            }
+            } => ITEM_FRAMING_LEN + sections.len() * INT_LEN + INT_LEN + contents.len(),
             DataItem::BinarySize { sections, .. } => {
                 ITEM_FRAMING_LEN + sections.len() * INT_LEN + SIZE_LEN
             }
-            DataItem::Body { .. } | DataItem::BodyStructure { .. } => STRUCTURED_ITEM_LEN,
             DataItem::BodySection {
                 sections, contents, ..
             } => {
@@ -939,7 +452,6 @@ impl DataItem<'_> {
                     + INT_LEN
                     + contents.len()
             }
-            DataItem::Envelope { .. } => STRUCTURED_ITEM_LEN,
             DataItem::Flags { flags } => ITEM_FRAMING_LEN + flags.len() * 16,
             DataItem::InternalDate { .. } => ITEM_FRAMING_LEN + 28,
             DataItem::Uid { .. } => ITEM_FRAMING_LEN,
@@ -970,443 +482,40 @@ impl FetchItem<'_> {
     }
 }
 
-/*
-
-   body            = "(" (body-type-1part / body-type-mpart) ")"
-
-   body-type-1part = (body-type-basic / body-type-msg / body-type-text)
-                     [SP body-ext-1part]
-
-   body-type-basic = media-basic SP body-fields
-                       ; MESSAGE subtype MUST NOT be "RFC822" or
-                       ; "GLOBAL"
-
-   body-type-mpart = 1*body SP media-subtype
-                     [SP body-ext-mpart]
-                       ; MULTIPART body part
-
-   body-type-msg   = media-message SP body-fields SP envelope
-                     SP body SP body-fld-lines
-
-   body-type-text  = media-text SP body-fields SP body-fld-lines
-
-   body-fields     = body-fld-param SP body-fld-id SP body-fld-desc SP
-                     body-fld-enc SP body-fld-octets
-
-   media-message   = DQUOTE "MESSAGE" DQUOTE SP
-                     DQUOTE ("RFC822" / "GLOBAL") DQUOTE
-                       ; Defined in [MIME-IMT]
-
-   media-basic     = ((DQUOTE ("APPLICATION" / "AUDIO" / "IMAGE" /
-                     "FONT" / "MESSAGE" / "MODEL" / "VIDEO" ) DQUOTE)
-                     / string)
-                     SP media-subtype
-
-   envelope        = "(" env-date SP env-subject SP env-from SP
-                     env-sender SP env-reply-to SP env-to SP env-cc SP
-                     env-bcc SP env-in-reply-to SP env-message-id ")"
-
-   body-fld-lines  = number64
-
-*/
-
 #[cfg(test)]
 mod tests {
 
-    use mail_parser::DateTime;
-    use utils::chained_bytes::SliceRange;
+    use std::borrow::Cow;
+    use utils::chained_bytes::ChainedBytes;
 
-    use crate::protocol::{Flag, ImapResponse};
+    use crate::protocol::Flag;
 
-    use super::{
-        Address, AddressGroup, BodyPart, BodyPartExtension, BodyPartFields, DataItem, EmailAddress,
-        Envelope, FetchItem, Response, Section,
-    };
+    use super::{Attribute, BodyContents, FetchItem, Section};
+
+    const PARTIAL_BUFFER_LEN: usize = 40;
 
     #[test]
     fn serialize_fetch_data_item() {
         for (item, expected_response) in [
             (
-                super::DataItem::Envelope {
-                    envelope: Box::new(Envelope {
-                        date: DateTime::from_timestamp(837570205).into(),
-                        subject: Some("IMAP4rev2 WG mtg summary and minutes".into()),
-                        from: vec![Address::Single(EmailAddress {
-                            name: Some("Terry Gray".into()),
-                            address: "gray@cac.washington.edu".into(),
-                        })],
-                        sender: vec![Address::Single(EmailAddress {
-                            name: Some("Terry Gray".into()),
-                            address: "gray@cac.washington.edu".into(),
-                        })],
-                        reply_to: vec![Address::Single(EmailAddress {
-                            name: Some("Terry Gray".into()),
-                            address: "gray@cac.washington.edu".into(),
-                        })],
-                        to: vec![Address::Single(EmailAddress {
-                            name: None,
-                            address: "imap@cac.washington.edu".into(),
-                        })],
-                        cc: vec![
-                            Address::Single(EmailAddress {
-                                name: None,
-                                address: "minutes@CNRI.Reston.VA.US".into(),
-                            }),
-                            Address::Single(EmailAddress {
-                                name: Some("John Klensin".into()),
-                                address: "KLENSIN@MIT.EDU".into(),
-                            }),
-                        ],
-                        bcc: vec![],
-                        in_reply_to: None,
-                        message_id: Some("<B27397-0100000@cac.washington.ed>".into()),
-                    }),
-                },
-                concat!(
-                    "ENVELOPE (\"Wed, 17 Jul 1996 02:23:25 +0000\" ",
-                    "\"IMAP4rev2 WG mtg summary and minutes\" ",
-                    "((\"Terry Gray\" NIL \"gray\" \"cac.washington.edu\")) ",
-                    "((\"Terry Gray\" NIL \"gray\" \"cac.washington.edu\")) ",
-                    "((\"Terry Gray\" NIL \"gray\" \"cac.washington.edu\")) ",
-                    "((NIL NIL \"imap\" \"cac.washington.edu\")) ",
-                    "((NIL NIL \"minutes\" \"CNRI.Reston.VA.US\")",
-                    "(\"John Klensin\" NIL \"KLENSIN\" \"MIT.EDU\")) NIL NIL ",
-                    "\"<B27397-0100000@cac.washington.ed>\")"
-                ),
-            ),
-            (
-                super::DataItem::Envelope {
-                    envelope: Box::new(Envelope {
-                        date: DateTime::from_timestamp(837570205).into(),
-                        subject: Some("Group test".into()),
-                        from: vec![Address::Single(EmailAddress {
-                            name: Some("Bill Foobar".into()),
-                            address: "foobar@example.com".into(),
-                        })],
-                        sender: vec![],
-                        reply_to: vec![],
-                        to: vec![Address::Group(AddressGroup {
-                            name: Some("Friends and Family".into()),
-                            addresses: vec![
-                                EmailAddress {
-                                    name: Some("John Doe".into()),
-                                    address: "jdoe@example.com".into(),
-                                },
-                                EmailAddress {
-                                    name: Some("Jane Smith".into()),
-                                    address: "jane.smith@example.com".into(),
-                                },
-                            ],
-                        })],
-                        cc: vec![],
-                        bcc: vec![],
-                        in_reply_to: None,
-                        message_id: Some("<B27397-0100000@cac.washington.ed>".into()),
-                    }),
-                },
-                concat!(
-                    "ENVELOPE (\"Wed, 17 Jul 1996 02:23:25 +0000\" ",
-                    "\"Group test\" ",
-                    "((\"Bill Foobar\" NIL \"foobar\" \"example.com\")) ",
-                    "((\"Bill Foobar\" NIL \"foobar\" \"example.com\")) ",
-                    "((\"Bill Foobar\" NIL \"foobar\" \"example.com\")) ",
-                    "((NIL NIL \"Friends and Family\" NIL)",
-                    "(\"John Doe\" NIL \"jdoe\" \"example.com\")",
-                    "(\"Jane Smith\" NIL \"jane.smith\" \"example.com\")",
-                    "(NIL NIL NIL NIL)) ",
-                    "NIL NIL NIL \"<B27397-0100000@cac.washington.ed>\")"
-                ),
-            ),
-            (
-                super::DataItem::Body {
-                    part: Box::new(BodyPart::Text {
-                        fields: BodyPartFields {
-                            body_subtype: Some("PLAIN".into()),
-                            body_parameters: vec![("CHARSET".into(), "US-ASCII".into())].into(),
-                            body_id: None,
-                            body_description: None,
-                            body_encoding: Some("7BIT".into()),
-                            body_size_octets: 2279,
-                        },
-                        body_size_lines: 48,
-                        body_md5: None,
-                        extension: BodyPartExtension {
-                            body_disposition: None,
-                            body_language: None,
-                            body_location: None,
-                        },
-                    }),
-                },
-                "BODY (\"text\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\") NIL NIL \"7BIT\" 2279 48)",
-            ),
-            (
-                super::DataItem::Body {
-                    part: Box::new(BodyPart::Message {
-                        fields: BodyPartFields {
-                            body_subtype: Some("RFC822".into()),
-                            body_parameters: None,
-                            body_id: Some("<abc@123>".into()),
-                            body_description: Some("An attached email".into()),
-                            body_encoding: Some("quoted-printable".into()),
-                            body_size_octets: 9323,
-                        },
-                        envelope: Box::new(Envelope {
-                            date: DateTime::from_timestamp(837570205).into(),
-                            subject: Some("Hello world!".into()),
-                            from: vec![Address::Single(EmailAddress {
-                                name: Some("Terry Gray".into()),
-                                address: "gray@cac.washington.edu".into(),
-                            })],
-                            sender: vec![Address::Single(EmailAddress {
-                                name: Some("Terry Gray".into()),
-                                address: "gray@cac.washington.edu".into(),
-                            })],
-                            reply_to: vec![Address::Single(EmailAddress {
-                                name: Some("Terry Gray".into()),
-                                address: "gray@cac.washington.edu".into(),
-                            })],
-                            to: vec![Address::Single(EmailAddress {
-                                name: None,
-                                address: "imap@cac.washington.edu".into(),
-                            })],
-                            cc: vec![],
-                            bcc: vec![],
-                            in_reply_to: None,
-                            message_id: Some("<4234324@domain.com>".into()),
-                        })
-                        .into(),
-                        body: Box::new(BodyPart::Text {
-                            fields: BodyPartFields {
-                                body_subtype: Some("HTML".into()),
-                                body_parameters: None,
-                                body_id: None,
-                                body_description: None,
-                                body_encoding: Some("8BIT".into()),
-                                body_size_octets: 4234,
-                            },
-                            body_size_lines: 431,
-                            body_md5: None,
-                            extension: BodyPartExtension {
-                                body_disposition: None,
-                                body_language: None,
-                                body_location: None,
-                            },
-                        })
-                        .into(),
-                        body_size_lines: 908,
-                        body_md5: None,
-                        extension: BodyPartExtension {
-                            body_disposition: None,
-                            body_language: None,
-                            body_location: None,
-                        },
-                    }),
-                },
-                concat!(
-                    "BODY (\"message\" \"RFC822\" NIL \"<abc@123>\" \"An attached email\" ",
-                    "\"quoted-printable\" 9323 (\"Wed, 17 Jul 1996 02:23:25 +0000\" ",
-                    "\"Hello world!\" ",
-                    "((\"Terry Gray\" NIL \"gray\" \"cac.washington.edu\")) ",
-                    "((\"Terry Gray\" NIL \"gray\" \"cac.washington.edu\")) ",
-                    "((\"Terry Gray\" NIL \"gray\" \"cac.washington.edu\")) ",
-                    "((NIL NIL \"imap\" \"cac.washington.edu\")) NIL NIL NIL ",
-                    "\"<4234324@domain.com>\") (\"text\" \"HTML\" NIL NIL NIL ",
-                    "\"8BIT\" 4234 431) 908)"
-                ),
-            ),
-            (
-                super::DataItem::Body {
-                    part: Box::new(BodyPart::Multipart {
-                        body_parts: vec![
-                            BodyPart::Text {
-                                fields: BodyPartFields {
-                                    body_subtype: Some("PLAIN".into()),
-                                    body_parameters: vec![("CHARSET".into(), "US-ASCII".into())]
-                                        .into(),
-                                    body_id: None,
-                                    body_description: None,
-                                    body_encoding: Some("7BIT".into()),
-                                    body_size_octets: 1152,
-                                },
-                                body_size_lines: 23,
-                                body_md5: None,
-                                extension: BodyPartExtension {
-                                    body_disposition: None,
-                                    body_language: None,
-                                    body_location: None,
-                                },
-                            },
-                            BodyPart::Text {
-                                fields: BodyPartFields {
-                                    body_subtype: Some("PLAIN".into()),
-                                    body_parameters: vec![
-                                        ("CHARSET".into(), "US-ASCII".into()),
-                                        ("NAME".into(), "cc.diff".into()),
-                                    ]
-                                    .into(),
-                                    body_id: Some(
-                                        "<960723163407.20117h@cac.washington.edu>".into(),
-                                    ),
-                                    body_description: Some("Compiler diff".into()),
-                                    body_encoding: Some("BASE64".into()),
-                                    body_size_octets: 4554,
-                                },
-                                body_size_lines: 73,
-                                body_md5: None,
-                                extension: BodyPartExtension {
-                                    body_disposition: None,
-                                    body_language: None,
-                                    body_location: None,
-                                },
-                            },
-                        ],
-                        body_subtype: "MIXED".into(),
-                        body_parameters: None,
-                        extension: BodyPartExtension {
-                            body_disposition: None,
-                            body_language: None,
-                            body_location: None,
-                        },
-                    }),
-                },
-                concat!(
-                    "BODY ((\"text\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\") ",
-                    "NIL NIL \"7BIT\" 1152 23)",
-                    "(\"text\" \"PLAIN\" (\"CHARSET\" \"US-ASCII\" \"NAME\" \"cc.diff\") ",
-                    "\"<960723163407.20117h@cac.washington.edu>\" \"Compiler diff\" ",
-                    "\"BASE64\" 4554 73) \"MIXED\")",
-                ),
-            ),
-            (
-                DataItem::BodyStructure {
-                    part: Box::new(BodyPart::Multipart {
-                        body_parts: vec![
-                            BodyPart::Multipart {
-                                body_parts: vec![
-                                    BodyPart::Text {
-                                        fields: BodyPartFields {
-                                            body_subtype: Some("PLAIN".into()),
-                                            body_parameters: vec![(
-                                                "CHARSET".into(),
-                                                "UTF-8".into(),
-                                            )]
-                                            .into(),
-                                            body_id: Some("<111@domain.com>".into()),
-                                            body_description: Some("Text part".into()),
-                                            body_encoding: Some("7BIT".into()),
-                                            body_size_octets: 1152,
-                                        },
-                                        body_size_lines: 23,
-                                        body_md5: Some("8o3456".into()),
-                                        extension: BodyPartExtension {
-                                            body_disposition: ("inline".into(), vec![]).into(),
-                                            body_language: vec!["en-US".into()].into(),
-                                            body_location: Some("right here".into()),
-                                        },
-                                    },
-                                    BodyPart::Text {
-                                        fields: BodyPartFields {
-                                            body_subtype: Some("HTML".into()),
-                                            body_parameters: vec![(
-                                                "CHARSET".into(),
-                                                "UTF-8".into(),
-                                            )]
-                                            .into(),
-                                            body_id: Some("<54535@domain.com>".into()),
-                                            body_description: Some("HTML part".into()),
-                                            body_encoding: Some("8BIT".into()),
-                                            body_size_octets: 45345,
-                                        },
-                                        body_size_lines: 994,
-                                        body_md5: Some("53454".into()),
-                                        extension: BodyPartExtension {
-                                            body_disposition: (
-                                                "attachment".into(),
-                                                vec![("filename".into(), "myfile.txt".into())],
-                                            )
-                                                .into(),
-                                            body_language: vec!["en-US".into(), "de-DE".into()]
-                                                .into(),
-                                            body_location: Some("right there".into()),
-                                        },
-                                    },
-                                ],
-                                body_subtype: "ALTERNATIVE".into(),
-                                body_parameters: vec![(
-                                    "x-param".into(),
-                                    "a very special parameter".into(),
-                                )]
-                                .into(),
-                                extension: BodyPartExtension {
-                                    body_disposition: None,
-                                    body_language: vec!["en-US".into()].into(),
-                                    body_location: Some("unknown".into()),
-                                },
-                            },
-                            BodyPart::Basic {
-                                body_type: Some("APPLICATION".into()),
-                                fields: BodyPartFields {
-                                    body_subtype: Some("MSWORD".into()),
-                                    body_parameters: vec![(
-                                        "NAME".into(),
-                                        "chimichangas.docx".into(),
-                                    )]
-                                    .into(),
-                                    body_id: Some("<4444@chimi.changa>".into()),
-                                    body_description: Some("Chimichangas recipe".into()),
-                                    body_encoding: Some("base64".into()),
-                                    body_size_octets: 84723,
-                                },
-                                body_md5: Some("1234".into()),
-                                extension: BodyPartExtension {
-                                    body_disposition: (
-                                        "attachment".into(),
-                                        vec![("filename".into(), "chimichangas.docx".into())],
-                                    )
-                                        .into(),
-                                    body_language: vec!["en-MX".into()].into(),
-                                    body_location: Some("secret location".into()),
-                                },
-                            },
-                        ],
-                        body_subtype: "MIXED".into(),
-                        body_parameters: None,
-                        extension: BodyPartExtension {
-                            body_disposition: None,
-                            body_language: None,
-                            body_location: None,
-                        },
-                    }),
-                },
-                concat!(
-                    "BODYSTRUCTURE (((\"text\" \"PLAIN\" (\"CHARSET\" \"UTF-8\") ",
-                    "\"<111@domain.com>\" \"Text part\" \"7BIT\" 1152 23 \"8o3456\" ",
-                    "(\"inline\" NIL) \"en-US\" \"right here\")",
-                    "(\"text\" \"HTML\" (\"CHARSET\" \"UTF-8\") ",
-                    "\"<54535@domain.com>\" \"HTML part\" \"8BIT\" 45345 994 \"53454\" ",
-                    "(\"attachment\" (\"filename\" \"myfile.txt\")) ",
-                    "(\"en-US\" \"de-DE\") ",
-                    "\"right there\") \"ALTERNATIVE\" (\"x-param\" ",
-                    "\"a very special parameter\") ",
-                    "NIL \"en-US\" \"unknown\")",
-                    "(\"APPLICATION\" \"MSWORD\" (\"NAME\" \"chimichangas.docx\") ",
-                    "\"<4444@chimi.changa>\" \"Chimichangas recipe\" \"base64\"",
-                    " 84723 \"1234\" ",
-                    "(\"attachment\" (\"filename\" \"chimichangas.docx\")) \"en-MX\" ",
-                    "\"secret location\") \"MIXED\" NIL NIL NIL NIL)",
-                ),
-            ),
-            (
                 super::DataItem::Binary {
-                    sections: vec![1, 2, 3],
+                    sections: vec![1, 2, 3].into(),
                     offset: 10.into(),
-                    contents: super::BodyContents::Bytes(b"hello".to_vec().into()),
+                    contents: BodyContents::Bytes(ChainedBytes::chain(b"he", b"llo")),
                 },
                 "BINARY[1.2.3]<10> ~{5}\r\nhello",
             ),
             (
                 super::DataItem::Binary {
-                    sections: vec![1, 2, 3],
+                    sections: vec![4].into(),
+                    offset: None,
+                    contents: BodyContents::Owned(b"bye".to_vec()),
+                },
+                "BINARY[4] ~{3}\r\nbye",
+            ),
+            (
+                super::DataItem::Binary {
+                    sections: vec![1, 2, 3].into(),
                     offset: None,
                     contents: super::BodyContents::Text("hello".into()),
                 },
@@ -1418,9 +527,10 @@ mod tests {
                         Section::Part { num: 1 },
                         Section::Part { num: 2 },
                         Section::Mime,
-                    ],
+                    ]
+                    .into(),
                     origin_octet: 11.into(),
-                    contents: b"howdy"[..].into(),
+                    contents: BodyContents::Bytes(ChainedBytes::chain(b"how", b"dy")),
                 },
                 "BODY[1.2.MIME]<11> {5}\r\nhowdy",
             ),
@@ -1429,9 +539,10 @@ mod tests {
                     sections: vec![Section::HeaderFields {
                         not: true,
                         fields: vec!["Subject".into(), "x-special".into()],
-                    }],
+                    }]
+                    .into(),
                     origin_octet: None,
-                    contents: b"howdy"[..].into(),
+                    contents: BodyContents::from(Cow::Borrowed(&b"howdy"[..])),
                 },
                 "BODY[HEADER.FIELDS.NOT (SUBJECT X-SPECIAL)] {5}\r\nhowdy",
             ),
@@ -1440,9 +551,10 @@ mod tests {
                     sections: vec![Section::HeaderFields {
                         not: false,
                         fields: vec!["From".into(), "List-Archive".into()],
-                    }],
+                    }]
+                    .into(),
                     origin_octet: None,
-                    contents: b"howdy"[..].into(),
+                    contents: BodyContents::from(Cow::Borrowed(&b"howdy"[..])),
                 },
                 "BODY[HEADER.FIELDS (FROM LIST-ARCHIVE)] {5}\r\nhowdy",
             ),
@@ -1459,7 +571,7 @@ mod tests {
         ] {
             let mut buf = Vec::with_capacity(100);
 
-            item.serialize(&mut buf, false);
+            item.serialize(&mut buf);
 
             assert_eq!(String::from_utf8(buf).unwrap(), expected_response);
         }
@@ -1467,39 +579,186 @@ mod tests {
 
     #[test]
     fn serialize_fetch() {
+        let item = FetchItem {
+            id: 123,
+            is_uidonly: false,
+            items: vec![
+                super::DataItem::Flags {
+                    flags: vec![Flag::Deleted, Flag::Flagged],
+                },
+                super::DataItem::Uid { uid: 983 },
+                super::DataItem::Rfc822Size { size: 443 },
+                super::DataItem::Rfc822Text {
+                    contents: ChainedBytes::new(b"hi"),
+                },
+                super::DataItem::Rfc822Header {
+                    contents: ChainedBytes::chain(b"hea", b"der"),
+                },
+                super::DataItem::Rfc822 {
+                    contents: ChainedBytes::default(),
+                },
+            ],
+        };
+        let mut buf = Vec::new();
+        item.serialize(&mut buf);
         assert_eq!(
-            String::from_utf8(
-                Response {
-                    is_uid: false,
-                    is_utf8: false,
-                    items: vec![FetchItem {
-                        id: 123,
-                        is_uidonly: false,
-                        items: vec![
-                            super::DataItem::Flags {
-                                flags: vec![Flag::Deleted, Flag::Flagged],
-                            },
-                            super::DataItem::Uid { uid: 983 },
-                            super::DataItem::Rfc822Size { size: 443 },
-                            super::DataItem::Rfc822Text {
-                                contents: SliceRange::Single(&b"hi"[..]),
-                            },
-                            super::DataItem::Rfc822Header {
-                                contents: SliceRange::Single(&b"header"[..]),
-                            },
-                        ],
-                    }],
-                }
-                .serialize(),
-            )
-            .unwrap(),
+            String::from_utf8(buf).unwrap(),
             concat!(
                 "* 123 FETCH (FLAGS (\\Deleted \\Flagged) ",
                 "UID 983 ",
                 "RFC822.SIZE 443 ",
                 "RFC822.TEXT {2}\r\nhi ",
-                "RFC822.HEADER {6}\r\nheader)\r\n",
+                "RFC822.HEADER {6}\r\nheader ",
+                "RFC822 {0}\r\n)\r\n",
             )
         );
+
+        let mut uidonly = Vec::new();
+        FetchItem::write_open(&mut uidonly, 7, true);
+        Flag::write_fetch_item(&mut uidonly, [Flag::Seen]);
+        FetchItem::write_close(&mut uidonly);
+        assert_eq!(
+            String::from_utf8(uidonly).unwrap(),
+            "* 7 UIDFETCH (FLAGS (\\Seen))\r\n"
+        );
+    }
+
+    fn buffer(len: usize) -> Vec<u8> {
+        (0..len).map(|i| b'a' + (i % 26) as u8).collect()
+    }
+
+    #[test]
+    fn body_contents_partial_matches_naive_windows() {
+        let buf = buffer(PARTIAL_BUFFER_LEN);
+        let edges = [
+            0u32,
+            1,
+            2,
+            19,
+            20,
+            21,
+            38,
+            39,
+            40,
+            41,
+            100,
+            u32::MAX - 40,
+            u32::MAX - 1,
+            u32::MAX,
+        ];
+        for split in 0..=PARTIAL_BUFFER_LEN {
+            let (head, tail) = buf.split_at(split);
+            for start in edges {
+                for len in edges.into_iter().skip(1) {
+                    let window_start = start as usize;
+                    let window_end = window_start
+                        .saturating_add(len as usize)
+                        .min(PARTIAL_BUFFER_LEN);
+                    let expected = buf.get(window_start..window_end).unwrap_or_default();
+                    let partial = Some((start, len));
+                    let bytes =
+                        BodyContents::Bytes(ChainedBytes::chain(head, tail)).partial(partial);
+                    assert_eq!(bytes.as_chained().to_vec(), expected, "bytes {start}.{len}");
+                    assert_eq!(bytes.len(), expected.len());
+                    assert_eq!(bytes.is_empty(), expected.is_empty());
+                    let owned = BodyContents::Owned(buf.clone()).partial(partial);
+                    assert_eq!(owned.as_chained().to_vec(), expected, "owned {start}.{len}");
+                    let text = BodyContents::Text(String::from_utf8_lossy(&buf)).partial(partial);
+                    assert_eq!(text.as_chained().to_vec(), expected, "text {start}.{len}");
+                }
+            }
+        }
+        let untouched = BodyContents::Bytes(ChainedBytes::new(&buf)).partial(None);
+        assert_eq!(untouched.as_chained().to_vec(), buf);
+        let past_u32 = BodyContents::Bytes(ChainedBytes::new(&buf)).partial(Some((1, u32::MAX)));
+        assert_eq!(
+            past_u32.as_chained().to_vec(),
+            buf.get(1..).unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn body_contents_from_cow_keeps_ownership() {
+        assert_eq!(
+            BodyContents::from(Cow::Borrowed(&b"abc"[..])),
+            BodyContents::Bytes(ChainedBytes::new(b"abc"))
+        );
+        assert_eq!(
+            BodyContents::from(Cow::Owned(b"abc".to_vec())),
+            BodyContents::Owned(b"abc".to_vec())
+        );
+    }
+
+    #[test]
+    fn header_list_echo_quotes_names_that_are_not_atoms() {
+        for (not, fields, expected) in [
+            (
+                false,
+                vec!["From", "x-spam-status", "Message-ID"],
+                "HEADER.FIELDS (FROM X-SPAM-STATUS MESSAGE-ID)",
+            ),
+            (
+                true,
+                vec!["x(y", "a]", "%", "*", "{b", "c)"],
+                "HEADER.FIELDS.NOT (\"X(Y\" \"A]\" \"%\" \"*\" \"{B\" \"C)\")",
+            ),
+            (
+                false,
+                vec!["a\"b", "c\\d", "", "e f"],
+                "HEADER.FIELDS ({3}\r\nA\"B {3}\r\nC\\D \"\" \"E F\")",
+            ),
+        ] {
+            let mut buf = Vec::new();
+            Section::HeaderFields {
+                not,
+                fields: fields.iter().map(|field| field.to_string()).collect(),
+            }
+            .serialize(&mut buf);
+            assert_eq!(String::from_utf8(buf), Ok(expected.to_string()));
+        }
+    }
+
+    #[test]
+    fn header_fields_of_every_header_fields_section() {
+        let fields = vec!["Subject".to_string(), "X-Custom".to_string()];
+        let header_fields = |sections: Vec<Section>, partial: Option<(u32, u32)>| {
+            Attribute::BodySection {
+                peek: true,
+                sections,
+                partial,
+            }
+            .header_fields()
+            .map(<[String]>::to_vec)
+        };
+        let named = |not: bool| Section::HeaderFields {
+            not,
+            fields: fields.clone(),
+        };
+        assert_eq!(
+            header_fields(vec![named(false)], None),
+            Some(fields.clone())
+        );
+        assert_eq!(
+            header_fields(vec![named(true)], Some((0, 10))),
+            Some(fields.clone())
+        );
+        assert_eq!(
+            header_fields(
+                vec![
+                    Section::Part { num: 2 },
+                    Section::Part { num: 1 },
+                    named(true)
+                ],
+                Some((3, 4))
+            ),
+            Some(fields.clone())
+        );
+        assert_eq!(header_fields(vec![Section::Header], None), None);
+        assert_eq!(
+            header_fields(vec![Section::Part { num: 1 }, Section::Mime], None),
+            None
+        );
+        assert_eq!(header_fields(Vec::new(), None), None);
+        assert_eq!(Attribute::BodyStructure.header_fields(), None);
     }
 }

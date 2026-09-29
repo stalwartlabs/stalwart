@@ -14,7 +14,7 @@ use common::{
     config::mailstore::spamfilter::{Element, IpResolver, Location},
 };
 use mail_auth::IprevResult;
-use mail_parser::{HeaderName, HeaderValue, Host};
+use mail_parser::Host;
 use nlp::tokenizers::types::TokenType;
 use std::future::Future;
 use store::ahash::AHashSet;
@@ -34,35 +34,29 @@ impl SpamFilterAnalyzeIp for Server {
         ips.insert(ElementLocation::new(ctx.input.remote_ip, Location::Tcp));
 
         // Obtain IP addresses from Received headers
-        for header in ctx.input.message.headers() {
-            if let (HeaderName::Received, HeaderValue::Received(received)) =
-                (&header.name, &header.value)
+        for received in ctx.input.message.headers().all_received() {
+            if let Some(ip) = received.from_ip()
+                && !ip.is_loopback()
+                && !self.is_ip_allowed(ip)
             {
-                if let Some(ip) = received.from_ip()
+                ips.insert(ElementLocation::new(ip, Location::HeaderReceived));
+            }
+            for host in [received.from(), received.helo(), received.by()]
+                .into_iter()
+                .flatten()
+            {
+                if let Host::IpAddr(ip) = host
                     && !ip.is_loopback()
                     && !self.is_ip_allowed(ip)
                 {
                     ips.insert(ElementLocation::new(ip, Location::HeaderReceived));
-                }
-                for host in [&received.from, &received.helo, &received.by]
-                    .into_iter()
-                    .flatten()
-                {
-                    if let Host::IpAddr(ip) = host
-                        && !ip.is_loopback()
-                        && !self.is_ip_allowed(*ip)
-                    {
-                        ips.insert(ElementLocation::new(*ip, Location::HeaderReceived));
-                    }
                 }
             }
         }
 
         // Obtain IP addresses from the message body
         for (part_id, part) in ctx.output.text_parts.iter().enumerate() {
-            let part_id = part_id as u32;
-            let is_body = ctx.input.message.text_body.contains(&part_id)
-                || ctx.input.message.html_body.contains(&part_id);
+            let is_body = ctx.input.is_body(part_id as u32);
             match part {
                 TextPart::Plain { tokens, .. } | TextPart::Html { tokens, .. } => {
                     ips.extend(tokens.iter().filter_map(|t| {

@@ -9,7 +9,7 @@ types = { path = "../types" }
 hashify = "0.3"
 quick-xml = "0.41"
 calcard = { version = "0.4", features = ["rkyv"] }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] }
+mail-parser = { version = "1.0", features = ["full_encoding"] }
 hyper = "1.11.1"
 compact_str = "0.10.0"
 unicode-normalization = "0.1.25"

@@ -14,7 +14,7 @@ use groupware::{
         DefaultAlert, ParticipantIdentities, ParticipantIdentity, Timezone,
     },
     contact::{AddressBook, AddressBookPreferences},
-    file::{FileNode, FileProperties},
+    file::{FileNode, FileNodeContent, FileProperties},
 };
 use smtp::queue::{
     Error as QueueError, ErrorDetails, HostResponse, Message, Metadata, Recipient, Schedule, Status,
@@ -388,6 +388,9 @@ fn participant_identities(rng: &mut Rng) -> ParticipantIdentities {
             .collect(),
         default_name: rng.token(default_len),
         default: 0,
+        change_id: 0,
+        trimmed_change_id: 0,
+        changes: Vec::new(),
     }
 }
 
@@ -489,6 +492,7 @@ fn file_node(rng: &mut Rng) -> FileNode {
     let stem_len = rng.range(4, 28);
     let stem = rng.token(stem_len);
     let created = 1_750_000_000 + rng.below(86400 * 365) as i64;
+    let modified = created + rng.below(86400 * 30) as i64;
 
     FileNode {
         parent_id: if rng.chance(40) {
@@ -502,16 +506,24 @@ fn file_node(rng: &mut Rng) -> FileNode {
             format!("{stem}.{}", rng.pick(&FILE_EXTENSIONS))
         },
         display_name: rng.chance(15).then(|| stem.clone()),
-        file: (!is_folder).then(|| FileProperties {
-            blob_hash: BlobHash::generate(stem.as_bytes()),
-            size: rng.range(512, 4 << 20) as u32,
-            media_type: rng
-                .chance(90)
-                .then(|| (*rng.pick(&MEDIA_TYPES)).to_string()),
-            executable: rng.chance(2),
-        }),
+        content: if is_folder {
+            FileNodeContent::Directory
+        } else {
+            FileNodeContent::File(FileProperties {
+                blob_hash: BlobHash::generate(stem.as_bytes()),
+                size: rng.range(512, 4 << 20) as u32,
+                media_type: rng
+                    .chance(90)
+                    .then(|| (*rng.pick(&MEDIA_TYPES)).to_string()),
+                executable: rng.chance(2),
+            })
+        },
+        role: None,
         created,
-        modified: created + rng.below(86400 * 30) as i64,
+        modified,
+        accessed: modified,
+        changed: modified,
+        unsubscribed: Vec::new(),
         dead_properties: dead_properties(rng),
         acls: acls(rng),
     }

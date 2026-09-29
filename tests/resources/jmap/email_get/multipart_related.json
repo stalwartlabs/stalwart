@@ -28,7 +28,7 @@
   "bodyStructure": {
     "headers": [
       {
-        "name": "Message-ID",
+        "name": "Message-Id",
         "value": " <4.2.0.58.20000519003556.00a918e0@pop.example.com>"
       },
       {
@@ -60,7 +60,7 @@
         "value": " =?iso-8859-1?Q?Die_Hasen_und_die_Frosche?="
       },
       {
-        "name": "MIME-Version",
+        "name": "Mime-Version",
         "value": " 1.0"
       },
       {
@@ -91,7 +91,7 @@
               {
                 "partId": "3",
                 "blobId": "blob_0",
-                "size": 779,
+                "size": 763,
                 "headers": [
                   {
                     "name": "Content-Type",
@@ -108,7 +108,7 @@
               {
                 "partId": "4",
                 "blobId": "blob_1",
-                "size": 1154,
+                "size": 1138,
                 "headers": [
                   {
                     "name": "Content-Type",
@@ -242,7 +242,7 @@
     {
       "partId": "3",
       "blobId": "blob_0",
-      "size": 779,
+      "size": 763,
       "headers": [
         {
           "name": "Content-Type",
@@ -261,7 +261,7 @@
     {
       "partId": "4",
       "blobId": "blob_1",
-      "size": 1154,
+      "size": 1138,
       "headers": [
         {
           "name": "Content-Type",

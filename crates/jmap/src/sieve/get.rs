@@ -120,11 +120,7 @@ impl SieveScriptGet for Server {
                                 collection: Collection::SieveScript.into(),
                                 document_id,
                             },
-                            section: BlobSection {
-                                size: u32::from(sieve.size) as usize,
-                                ..Default::default()
-                            }
-                            .into(),
+                            section: BlobSection::new(0, u32::from(sieve.size) as usize, 0).into(),
                         };
 
                         result.insert_unchecked(

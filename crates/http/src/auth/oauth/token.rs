@@ -16,9 +16,9 @@ use common::{
         oauth::{GrantType, oidc::StandardClaims},
     },
 };
+use encodify::base64::{STANDARD, URL_SAFE_NO_PAD};
 use http_proto::*;
 use hyper::StatusCode;
-use encodify::base64::{STANDARD, URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256, digest::Output};
 use std::{borrow::Cow, future::Future};
 use store::{

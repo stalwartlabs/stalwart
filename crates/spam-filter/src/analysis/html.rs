@@ -11,7 +11,6 @@ use crate::{
 };
 use common::Server;
 use hyper::Uri;
-use mail_parser::MimeHeaders;
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 use std::{borrow::Cow, future::Future};
 
@@ -42,9 +41,7 @@ impl SpamFilterAnalyzeHtml for Server {
         }
 
         for (part_id, part) in ctx.output.text_parts.iter().enumerate() {
-            let part_id = part_id as u32;
-            let is_body_part = ctx.input.message.text_body.contains(&part_id)
-                || ctx.input.message.html_body.contains(&part_id);
+            let is_body_part = ctx.input.is_body(part_id as u32);
 
             let (html_tokens, tokens) = if let TextPart::Html {
                 html_tokens,

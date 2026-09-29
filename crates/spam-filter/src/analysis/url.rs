@@ -250,9 +250,7 @@ pub fn collect_urls(
         }
     }
     for (part_id, part) in ctx.output.text_parts.iter().enumerate() {
-        let part_id = part_id as u32;
-        let is_body = ctx.input.message.text_body.contains(&part_id)
-            || ctx.input.message.html_body.contains(&part_id);
+        let is_body = ctx.input.is_body(part_id as u32);
         let text_location = if is_body {
             Location::BodyText
         } else {

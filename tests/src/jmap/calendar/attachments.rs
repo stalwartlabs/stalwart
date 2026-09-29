@@ -9,8 +9,8 @@ use crate::utils::{
     jmap::{JmapResponse, JmapUtils},
     server::TestServer,
 };
-use jmap_proto::request::method::MethodObject;
 use encodify::base64::STANDARD;
+use jmap_proto::request::method::MethodObject;
 use serde_json::{Map, Value, json};
 use std::str::FromStr;
 use types::{
@@ -22,6 +22,7 @@ const PNG: &[u8] = &[
     0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0x01, 0x02, 0x80, 0x90,
 ];
 const PDF: &[u8] = b"%PDF-1.4 embedded attachment \xE2\x28\xA1";
+const SECRET: &[u8] = b"private blob of another account";
 const MAX_RECURRENCE_EXPANSIONS: usize = 3000;
 const MAX_ICALENDAR_SIZE: usize = 524_288;
 const LARGE_ATTACHMENT_SIZE: usize = 150_000;
@@ -604,6 +605,55 @@ pub async fn test(test: &TestServer) {
         .await;
     assert_eq!(response.not_created(0).typ(), "tooLarge", "{response:?}");
 
+    assert_eq!(
+        upload_from(john, &event_png).await,
+        Ok(PNG.len()),
+        "an embedded blob id is a valid upload data source"
+    );
+    let secret_blob = upload(john, SECRET, "application/octet-stream").await;
+    let jane_calendar = jane
+        .jmap_create(
+            MethodObject::Calendar,
+            [json!({"name": "Mine"})],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let jane_event = jane
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [json!({
+                "calendarIds": { &jane_calendar: true },
+                "title": "Own event",
+                "start": "2030-01-01T09:00:00",
+                "timeZone": "Etc/UTC",
+                "links": {
+                    "pdf": {"@type": "Link", "blobId": &jane_blob, "contentType": "application/pdf"}
+                }
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let own_embedded = get_event(jane, jane, &jane_event).await["links"]["pdf"]["blobId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("missing embedded blob of the attacker's own event"))
+        .to_string();
+    assert_eq!(upload_from(jane, &own_embedded).await, Ok(PDF.len()));
+    let mut forged_upload = BlobId::from_str(&own_embedded).expect("valid blob id");
+    forged_upload.hash = BlobId::from_str(&secret_blob).expect("valid blob id").hash;
+    let forged_upload = forged_upload.to_string();
+    assert_eq!(
+        upload_from(jane, &forged_upload).await,
+        Err("blobNotFound".to_string()),
+        "another account's blob hash under the attacker's own event id is refused"
+    );
+    assert_eq!(blob_data(jane, &jane_id, &forged_upload).await, None);
+
     john.destroy_all_calendars().await;
     john.destroy_all_addressbooks().await;
     jane.destroy_all_calendars().await;
@@ -627,6 +677,26 @@ async fn upload(account: &Account, data: &[u8], content_type: &str) -> String {
         .as_str()
         .unwrap_or_else(|| panic!("upload failed: {response:?}"))
         .to_string()
+}
+
+async fn upload_from(account: &Account, blob_id: &str) -> Result<usize, String> {
+    let response = account
+        .jmap_method_call(
+            "Blob/upload",
+            json!({
+                "accountId": account.id_string(),
+                "create": { "b": { "data": [{"blobId": blob_id}] } }
+            }),
+        )
+        .await;
+    let result = response.method_response();
+    match result["created"]["b"]["size"].as_u64() {
+        Some(size) => Ok(size as usize),
+        None => Err(result["notCreated"]["b"]["type"]
+            .as_str()
+            .unwrap_or_else(|| panic!("unexpected Blob/upload response: {response:?}"))
+            .to_string()),
+    }
 }
 
 async fn get_event(caller: &Account, owner: &Account, event_id: &str) -> Value {

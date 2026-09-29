@@ -41,7 +41,7 @@ use config::{
     telemetry::Metrics,
 };
 use ipc::{BroadcastEvent, PushEvent, QueueEvent, ReportingEvent};
-use mail_auth::{MX, RecordSet, Txt};
+use mail_auth::{Mx, RecordSet, TxtRecord};
 use manager::application::Resource;
 use parking_lot::{Mutex, RwLock};
 use rustls::sign::CertifiedKey;
@@ -202,8 +202,8 @@ pub struct Caches {
 
     pub dkim_signers: Cache<u32, Arc<DkimSigners>>,
 
-    pub dns_txt: CacheWithTtl<Box<str>, Txt>,
-    pub dns_mx: CacheWithTtl<Box<str>, RecordSet<MX>>,
+    pub dns_txt: CacheWithTtl<Box<str>, TxtRecord>,
+    pub dns_mx: CacheWithTtl<Box<str>, RecordSet<Mx>>,
     pub dns_ptr: CacheWithTtl<IpAddr, RecordSet<Box<str>>>,
     pub dns_ipv4: CacheWithTtl<Box<str>, RecordSet<Ipv4Addr>>,
     pub dns_ipv6: CacheWithTtl<Box<str>, RecordSet<Ipv6Addr>>,

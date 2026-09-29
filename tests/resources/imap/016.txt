@@ -1,0 +1,25 @@
+From: Outer Sender <outer@example.com>
+To: rcpt@example.com
+Subject: Forwarded encoded message
+Date: Mon, 28 Sep 2026 10:00:00 +0000
+Message-ID: <outer@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: text/plain; charset=us-ascii
+
+See the attached message.
+--outer
+Content-Type: message/rfc822
+Content-Transfer-Encoding: base64
+
+RnJvbTogSW5uZXIgU2VuZGVyIDxpbm5lckBleGFtcGxlLmNvbT4NClRvOiByY3B0QGV4YW1wbGUu
+Y29tDQpTdWJqZWN0OiBJbm5lciBtZXNzYWdlDQpEYXRlOiBTdW4sIDI3IFNlcCAyMDI2IDA5OjAw
+OjAwICswMDAwDQpNZXNzYWdlLUlEOiA8aW5uZXJAZXhhbXBsZS5jb20+DQpNSU1FLVZlcnNpb246
+IDEuMA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvYWx0ZXJuYXRpdmU7IGJvdW5kYXJ5PSJpbm5l
+ciINCg0KLS1pbm5lcg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04DQpD
+b250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCkNhZj1DMz1BOSBh
+dSBsYWl0DQotLWlubmVyDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0K
+DQo8cD5DYWYmZWFjdXRlOyBhdSBsYWl0PC9wPg0KLS1pbm5lci0tDQo=
+--outer--

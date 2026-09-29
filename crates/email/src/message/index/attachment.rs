@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::message::metadata::{
-    ArchivedMessageMetadata, ArchivedMessageMetadataPart, ArchivedMetadataPartType,
-    DecodedPartContent, PART_SIZE_MASK,
-};
+use crate::message::metadata::{ArchivedMessageMetadata, PartKind, PartSource, PartView};
 use common::config::mailstore::email::ExtractLimits;
 use nlp::language::{
     Language,
@@ -16,7 +13,6 @@ use nlp::language::{
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use store::search::{EmailSearchField, IndexDocument, SearchField};
 use text_extract::{Extractor, Format, Hints, Limits};
-use utils::chained_bytes::ChainedBytes;
 
 const MESSAGE_TEXT_DOCUMENTS: usize = 2;
 const MAX_LANGUAGE_SAMPLE: usize = 64 << 10;
@@ -42,8 +38,8 @@ pub fn document_limits(config: &ExtractLimits) -> Limits {
     }
 }
 
-impl ArchivedMessageMetadataPart {
-    pub fn extraction_hints(&self) -> Hints<'_> {
+impl<'a> PartView<'a> {
+    pub fn extraction_hints(&self) -> Hints<'a> {
         let mut hints = Hints::new();
         if let Some(content_type) = self.content_type() {
             hints = hints.with_media_type_parts(
@@ -58,9 +54,9 @@ impl ArchivedMessageMetadataPart {
     }
 
     pub fn has_extractable_text(&self) -> bool {
-        match self.body {
-            ArchivedMetadataPartType::Binary => self.extraction_hints().may_be_supported(),
-            ArchivedMetadataPartType::Text => self.is_rtf_text(),
+        match self.kind() {
+            PartKind::Binary => self.extraction_hints().may_be_supported(),
+            PartKind::Text => self.is_rtf_text(),
             _ => false,
         }
     }
@@ -73,20 +69,11 @@ impl ArchivedMessageMetadataPart {
             _ => self.extraction_hints().format() == Some(Format::Rtf),
         }
     }
-
-    fn decoded_size(&self) -> usize {
-        (self.flags.to_native() & PART_SIZE_MASK) as usize
-    }
 }
 
 impl ArchivedMessageMetadata {
     pub fn has_extractable_attachments(&self) -> bool {
-        self.contents.iter().any(|contents| {
-            contents
-                .parts
-                .iter()
-                .any(ArchivedMessageMetadataPart::has_extractable_text)
-        })
+        self.parts().any(|part| part.has_extractable_text())
     }
 }
 
@@ -103,8 +90,8 @@ impl AttachmentText {
 
     pub(super) fn index_binary(
         &mut self,
-        part: &ArchivedMessageMetadataPart,
-        raw_message: &ChainedBytes<'_>,
+        part: PartView<'_>,
+        source: &PartSource<'_>,
         document: &mut IndexDocument,
         detector: &mut LanguageDetector,
         language: Language,
@@ -112,13 +99,11 @@ impl AttachmentText {
         let hints = part.extraction_hints();
         if !hints.may_be_supported()
             || self.remaining_text == 0
-            || part.decoded_size() > self.limits.max_input_bytes
+            || part.decoded_size() as usize > self.limits.max_input_bytes
         {
             return;
         }
-        if let DecodedPartContent::Binary(contents) = part.decode_contents(raw_message)
-            && self.extract(&contents, hints)
-        {
+        if self.extract(&part.decoded(source), hints) {
             self.index(document, detector, language);
         }
     }
@@ -126,7 +111,7 @@ impl AttachmentText {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn index_rtf(
         &mut self,
-        part: &ArchivedMessageMetadataPart,
+        part: PartView<'_>,
         contents: &str,
         document: &mut IndexDocument,
         detector: &mut LanguageDetector,
@@ -217,14 +202,13 @@ fn language_sample(text: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use crate::message::metadata::{
-        ArchivedMessageMetadata, MessageMetadata, build_metadata_contents,
-    };
+    use crate::message::metadata::{ExtraHeaders, MessageMetadata, MetadataRow};
     use common::config::mailstore::email::ExtractLimits;
     use mail_builder::MessageBuilder;
     use mail_parser::MessageParser;
     use nlp::language::Language;
     use store::{
+        Deserialize,
         ahash::AHashSet,
         search::{EmailSearchField, IndexDocument, SearchField, SearchValue},
     };
@@ -253,20 +237,20 @@ mod tests {
         let message = MessageParser::new()
             .parse(raw_message)
             .unwrap_or_else(|| panic!("message did not parse"));
-        let metadata = MessageMetadata {
-            contents: build_metadata_contents(message),
-            blob_hash: BlobHash::default(),
-            blob_body_offset: 0,
-            preview: Default::default(),
-            raw_headers: Default::default(),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&metadata)
-            .unwrap_or_else(|err| panic!("archive: {err}"));
-        let archived = rkyv::access::<ArchivedMessageMetadata, rkyv::rancor::Error>(&bytes)
+        let row = MessageMetadata::build(&message, &ExtraHeaders::default(), BlobHash::default())
+            .encode()
+            .unwrap_or_else(|err| panic!("encode: {err}"));
+        let row = MetadataRow::deserialize(&row).unwrap_or_else(|err| panic!("row: {err}"));
+        let headers = row
+            .raw_headers()
+            .unwrap_or_else(|err| panic!("headers: {err}"));
+        let archived = row
+            .unarchive()
             .unwrap_or_else(|err| panic!("access: {err}"));
         let document = archived.index_document(
             1,
             2,
+            &headers,
             raw_message,
             &AHashSet::default(),
             Language::English,

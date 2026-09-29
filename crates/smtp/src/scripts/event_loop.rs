@@ -15,7 +15,7 @@ use common::{
     scripts::{ScriptModification, plugins::PluginContext},
 };
 use compact_str::{CompactString, ToCompactString, format_compact};
-use mail_parser::{Encoding, Message, MessagePart, PartType};
+use mail_parser::Message;
 use sieve::{
     Arena, Context, Handler, Input, Mailbox, MatchAs, MessageSource as SieveMessageSource,
     Recipient, Reply, Sieve, SieveAction, Status,
@@ -219,28 +219,13 @@ impl RunScript for Server {
         // Create filter instance
         let time = Instant::now();
         let session_id = params.session_id;
+        let empty = Message::default();
         let mut arena = Arena::new();
         let mut ctx = self
             .core
             .sieve
             .trusted_runtime
-            .filter_parsed(
-                params.message.take().unwrap_or_else(|| Message {
-                    parts: vec![MessagePart {
-                        headers: vec![],
-                        is_encoding_problem: false,
-                        body: PartType::Text("".into()),
-                        encoding: Encoding::None,
-                        offset_header: 0,
-                        offset_body: 0,
-                        offset_end: 0,
-                    }],
-                    raw_message: b""[..].into(),
-                    ..Default::default()
-                }),
-                script,
-                &mut arena,
-            )
+            .filter_parsed(params.message.take().unwrap_or(&empty), script, &mut arena)
             .with_vars_env(std::mem::take(&mut params.variables))
             .with_envelope_list(std::mem::take(&mut params.envelope))
             .with_user_address(&params.from_addr)
@@ -326,7 +311,7 @@ impl RunScript for Server {
                         }) => {
                             self.queue_sieve_message(
                                 &handler.messages,
-                                ctx.message().raw_message(),
+                                ctx.message().raw(),
                                 &params,
                                 &script_id,
                                 source,

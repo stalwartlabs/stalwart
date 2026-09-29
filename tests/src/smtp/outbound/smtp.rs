@@ -12,7 +12,7 @@ use crate::{
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use common::{config::smtp::queue::QueueName, ipc::QueueEvent};
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::NetworkListenerProtocol,
@@ -216,7 +216,7 @@ async fn smtp_delivery() {
     for domain in ["foobar.org", "foobar.net", "foobar.com"] {
         local.server.mx_add(
             domain,
-            vec![MX {
+            vec![Mx {
                 exchanges: vec![
                     format!("mx1.{domain}").into(),
                     format!("mx2.{domain}").into(),

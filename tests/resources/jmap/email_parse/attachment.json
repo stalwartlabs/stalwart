@@ -37,7 +37,7 @@
         "value": " Mon, 13 Aug 1998 17:42:41 +1000"
       },
       {
-        "name": "Message-ID",
+        "name": "Message-Id",
         "value": " <199804130742.RAA20366@mai1host.whitehouse.gov>"
       },
       {
@@ -193,30 +193,7 @@
       "disposition": "inline"
     }
   ],
-  "attachments": [
-    {
-      "partId": "2",
-      "blobId": "blob_1",
-      "size": 288,
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": " image/gif; name=\"map_of_Argentina.gif\""
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": " base64"
-        },
-        {
-          "name": "Content-Disposition",
-          "value": " inline; fi1ename=\"map_of_Argentina.gif\""
-        }
-      ],
-      "name": "map_of_Argentina.gif",
-      "type": "image/gif",
-      "disposition": "inline"
-    }
-  ],
+  "attachments": [],
   "hasAttachment": false,
   "preview": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au files next week!\n\nAnyway, the attached image is really too small to get a good look at\nArgentina.  Try this for a much better map:\n\n     http://www.1one1yp..."
 }

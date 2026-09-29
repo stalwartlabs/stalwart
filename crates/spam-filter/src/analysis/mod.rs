@@ -8,7 +8,7 @@ use crate::{
     Recipient, SpamFilterContext, SpamFilterInput, SpamFilterOutput, SpamFilterResult, TextPart,
 };
 use common::{Server, config::mailstore::spamfilter::Location};
-use mail_parser::{Header, parsers::MessageStream};
+use mail_parser::{Header, HeaderForm};
 use std::{
     borrow::Cow,
     hash::{Hash, Hasher},
@@ -44,14 +44,14 @@ pub mod llm;
 // SPDX-SnippetEnd
 
 impl SpamFilterInput<'_> {
-    pub fn header_as_address(&self, header: &Header<'_>) -> Option<Cow<'_, str>> {
-        self.message
-            .raw_message()
-            .get(header.offset_start as usize..header.offset_end as usize)
-            .map(|bytes| MessageStream::new(bytes).parse_address())
-            .and_then(|addr| addr.into_address())
-            .and_then(|addr| addr.into_list().into_iter().next())
-            .and_then(|addr| addr.address)
+    pub fn header_as_address(&self, header: &Header<'_>) -> Option<String> {
+        HeaderForm::Addresses
+            .parse(header.raw_value())
+            .value()
+            .as_address()?
+            .first()?
+            .address()
+            .map(str::to_string)
     }
 }
 
@@ -67,11 +67,8 @@ impl SpamFilterOutput<'_> {
 impl SpamFilterContext<'_> {
     pub fn text_body(&self) -> Option<&str> {
         self.input
-            .message
-            .text_body
-            .first()
-            .or_else(|| self.input.message.html_body.first())
-            .and_then(|idx| self.output.text_parts.get(*idx as usize))
+            .first_body_part()
+            .and_then(|idx| self.output.text_parts.get(idx as usize))
             .and_then(|part| match part {
                 TextPart::Plain { text_body, .. } => Some(*text_body),
                 TextPart::Html { text_body, .. } => Some(text_body.as_str()),

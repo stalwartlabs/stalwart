@@ -12,7 +12,7 @@ use common::{
     config::smtp::queue::{ConnectionStrategy, HostOrIp, IpAndHost, MxConfig},
     expr::functions::ResolveVariable,
 };
-use mail_auth::{DnssecStatus, IpLookupStrategy, MX, RecordSet};
+use mail_auth::{DnssecStatus, IpLookupStrategy, Mx, RecordSet};
 use rand::{RngExt, seq::SliceRandom};
 use registry::schema::enums::ExpressionVariable;
 use std::{future::Future, net::IpAddr, sync::Arc};
@@ -69,10 +69,10 @@ impl DnsLookup for Server {
 
             match result {
                 Ok(addrs) => {
-                    if !addrs.rrset.is_empty() {
+                    if !addrs.records.is_empty() {
                         dnssec_status = Some(addrs.dnssec_status);
                     }
-                    addrs.rrset
+                    addrs.records
                 }
                 Err(_) if has_ipv6 => Arc::new([]),
                 Err(err) => return Err(err),
@@ -95,13 +95,13 @@ impl DnsLookup for Server {
 
             match result {
                 Ok(addrs) => {
-                    if !addrs.rrset.is_empty() {
+                    if !addrs.records.is_empty() {
                         dnssec_status = Some(match dnssec_status {
                             Some(status) => least_secure(status, addrs.dnssec_status),
                             None => addrs.dnssec_status,
                         });
                     }
-                    addrs.rrset
+                    addrs.records
                 }
                 Err(_) if !ipv4_addrs.is_empty() => Arc::new([]),
                 Err(err) => return Err(err),
@@ -239,17 +239,17 @@ pub trait ToNextHop {
     ) -> Option<Vec<NextHop<'x>>>;
 }
 
-impl ToNextHop for RecordSet<MX> {
+impl ToNextHop for RecordSet<Mx> {
     fn to_remote_hosts<'x, 'y: 'x>(
         &'x self,
         domain: &'y str,
         config: &'x MxConfig,
     ) -> Option<Vec<NextHop<'x>>> {
-        if !self.rrset.is_empty() {
+        if !self.records.is_empty() {
             // Obtain max number of MX hosts to process
             let mut remote_hosts = Vec::with_capacity(config.max_mx);
 
-            'outer: for mx in self.rrset.iter() {
+            'outer: for mx in self.records.iter() {
                 if mx.exchanges.len() > 1 {
                     let mut slice = mx.exchanges.iter().collect::<Vec<_>>();
                     slice.shuffle(&mut rand::rng());

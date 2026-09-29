@@ -65,7 +65,7 @@
         "size": 111,
         "headers": [
           {
-            "name": "Content-Type",
+            "name": "Content-type",
             "value": " text/plain; charset=US-ASCII"
           }
         ],
@@ -84,7 +84,7 @@
           {
             "partId": "4",
             "blobId": "blob_2",
-            "size": 85,
+            "size": 45,
             "headers": [
               {
                 "name": "Content-Type",
@@ -95,13 +95,12 @@
                 "value": " base64"
               }
             ],
-            "type": "audio/basic",
-            "charset": "us-ascii"
+            "type": "audio/basic"
           },
           {
             "partId": "5",
             "blobId": "blob_3",
-            "size": 44,
+            "size": 22,
             "headers": [
               {
                 "name": "Content-Type",
@@ -112,8 +111,7 @@
                 "value": " base64"
               }
             ],
-            "type": "image/jpeg",
-            "charset": "us-ascii"
+            "type": "image/jpeg"
           }
         ]
       },
@@ -123,7 +121,7 @@
         "size": 140,
         "headers": [
           {
-            "name": "Content-Type",
+            "name": "Content-type",
             "value": " text/enriched"
           }
         ],
@@ -176,12 +174,44 @@
       "size": 111,
       "headers": [
         {
-          "name": "Content-Type",
+          "name": "Content-type",
           "value": " text/plain; charset=US-ASCII"
         }
       ],
       "type": "text/plain",
       "charset": "US-ASCII"
+    },
+    {
+      "partId": "4",
+      "blobId": "blob_2",
+      "size": 45,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " audio/basic"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
+        }
+      ],
+      "type": "audio/basic"
+    },
+    {
+      "partId": "5",
+      "blobId": "blob_3",
+      "size": 22,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " image/jpeg"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
+        }
+      ],
+      "type": "image/jpeg"
     }
   ],
   "htmlBody": [
@@ -199,19 +229,17 @@
       "size": 111,
       "headers": [
         {
-          "name": "Content-Type",
+          "name": "Content-type",
           "value": " text/plain; charset=US-ASCII"
         }
       ],
       "type": "text/plain",
       "charset": "US-ASCII"
-    }
-  ],
-  "attachments": [
+    },
     {
       "partId": "4",
       "blobId": "blob_2",
-      "size": 85,
+      "size": 45,
       "headers": [
         {
           "name": "Content-Type",
@@ -222,13 +250,12 @@
           "value": " base64"
         }
       ],
-      "type": "audio/basic",
-      "charset": "us-ascii"
+      "type": "audio/basic"
     },
     {
       "partId": "5",
       "blobId": "blob_3",
-      "size": 44,
+      "size": 22,
       "headers": [
         {
           "name": "Content-Type",
@@ -239,16 +266,17 @@
           "value": " base64"
         }
       ],
-      "type": "image/jpeg",
-      "charset": "us-ascii"
-    },
+      "type": "image/jpeg"
+    }
+  ],
+  "attachments": [
     {
       "partId": "6",
       "blobId": "blob_4",
       "size": 140,
       "headers": [
         {
-          "name": "Content-Type",
+          "name": "Content-type",
           "value": " text/enriched"
         }
       ],

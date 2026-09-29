@@ -4,25 +4,43 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::Mechanism;
+use super::{Mechanism, dot_stuffer::DotStuffer};
 use std::{borrow::Cow, fmt::Display};
-use utils::chained_bytes::SliceRange;
+use utils::chained_bytes::ChainedBytes;
+
+const STATUS_LINE_LEN: usize = 32;
+const STUFFING_RESERVE_DIVISOR: usize = 64;
 
 pub enum Response<'x, T> {
     Ok(Cow<'static, str>),
     Err(Cow<'static, str>),
     List(Vec<T>),
-    Message {
-        bytes: SliceRange<'x>,
-        lines: u32,
-    },
+    Message(ChainedBytes<'x>),
     Capability {
         mechanisms: Vec<Mechanism>,
         stls: bool,
     },
 }
 
-impl<'x, T: Display> Response<'x, T> {
+impl<'x, T> Response<'x, T> {
+    pub fn message(raw_message: ChainedBytes<'x>, body_offset: usize, lines: Option<u32>) -> Self {
+        let Some(lines) = lines else {
+            return Response::Message(raw_message);
+        };
+        let body_offset = body_offset.min(raw_message.len());
+        let body_lines = raw_message
+            .view(body_offset..raw_message.len())
+            .unwrap_or_default()
+            .line_prefix_len(lines as usize);
+        Response::Message(
+            raw_message
+                .view(0..body_offset + body_lines)
+                .unwrap_or(raw_message),
+        )
+    }
+}
+
+impl<T: Display> Response<'_, T> {
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             Response::Ok(message) => {
@@ -51,41 +69,18 @@ impl<'x, T: Display> Response<'x, T> {
                 buf.extend_from_slice(b".\r\n");
                 buf
             }
-            Response::Message { bytes, lines } => {
-                let mut buf = Vec::with_capacity(bytes.len() + 10);
+            Response::Message(bytes) => {
+                let mut buf = Vec::with_capacity(
+                    bytes.len() + bytes.len() / STUFFING_RESERVE_DIVISOR + STATUS_LINE_LEN,
+                );
                 buf.extend_from_slice(b"+OK ");
-                buf.extend_from_slice(bytes.len().to_string().as_bytes());
+                buf.extend_from_slice(itoa::Buffer::new().format(bytes.len()).as_bytes());
                 buf.extend_from_slice(b" octets\r\n");
-
-                let mut line_count = 0;
-                let mut last_byte = 0;
-
-                // Transparency procedure
-                for &byte in bytes.into_iter() {
-                    // POP3 requires that lines end with CRLF, do this check to ensure that
-                    if byte == b'\n' && last_byte != b'\r' {
-                        buf.push(b'\r');
-                    }
-
-                    if byte == b'.' && last_byte == b'\n' {
-                        buf.push(b'.');
-                    }
-                    buf.push(byte);
-                    last_byte = byte;
-
-                    if *lines > 0 && byte == b'\n' {
-                        line_count += 1;
-                        if line_count == *lines {
-                            break;
-                        }
-                    }
+                let mut stuffer = DotStuffer::default();
+                for segment in bytes.segments() {
+                    stuffer.push(&mut buf, segment);
                 }
-
-                if last_byte != b'\n' {
-                    buf.extend_from_slice(b"\r\n");
-                }
-
-                buf.extend_from_slice(b".\r\n");
+                stuffer.finish(&mut buf);
                 buf
             }
             Response::Capability { mechanisms, stls } => {
@@ -166,8 +161,70 @@ impl SerializeResponse for trc::Error {
 #[cfg(test)]
 mod tests {
     use super::Response;
-    use crate::protocol::Mechanism;
-    use utils::chained_bytes::SliceRange;
+    use crate::protocol::{
+        Mechanism,
+        dot_stuffer::tests::{reference_pop3, strings_over},
+    };
+    use utils::chained_bytes::ChainedBytes;
+
+    const TOP_ALPHABET: &[u8] = b"a\r\n.";
+    const TOP_MAX_LEN: usize = 6;
+    const TOP_MAX_LINES: u32 = 4;
+
+    fn naive_line_prefix_len(bytes: &[u8], lines: usize) -> usize {
+        if lines == 0 {
+            return 0;
+        }
+        bytes
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'\n')
+            .nth(lines - 1)
+            .map_or(bytes.len(), |(pos, _)| pos + 1)
+    }
+
+    #[test]
+    fn top_returns_header_blank_line_and_n_body_lines() {
+        for message in strings_over(TOP_ALPHABET, TOP_MAX_LEN) {
+            for body_offset in 0..=message.len() + 1 {
+                for lines in 0..=TOP_MAX_LINES {
+                    let clamped = body_offset.min(message.len());
+                    let (header, body) = message.split_at(clamped);
+                    let prefix_len = clamped + naive_line_prefix_len(body, lines as usize);
+                    let expected = message.get(..prefix_len).unwrap_or_default();
+                    for split in [0, clamped, message.len()] {
+                        let (head, tail) = message.split_at(split);
+                        let response = Response::<u32>::message(
+                            ChainedBytes::chain(head, tail),
+                            body_offset,
+                            Some(lines),
+                        );
+                        let Response::Message(bytes) = &response else {
+                            panic!("TOP answers with a message");
+                        };
+                        assert_eq!(
+                            bytes.to_vec(),
+                            expected,
+                            "{message:?} {body_offset} {lines}"
+                        );
+                        assert_eq!(response.serialize(), reference_pop3(expected));
+                    }
+                    assert!(expected.starts_with(header));
+                }
+            }
+        }
+        let message = b"Subject: x\r\n\r\nline 1\r\nline 2\r\n";
+        let (header, body) = message.split_at(14);
+        let top =
+            |lines| match Response::<u32>::message(ChainedBytes::chain(header, body), 14, lines) {
+                Response::Message(bytes) => bytes.to_vec(),
+                _ => Vec::new(),
+            };
+        assert_eq!(top(Some(0)), b"Subject: x\r\n\r\n".to_vec());
+        assert_eq!(top(Some(1)), b"Subject: x\r\n\r\nline 1\r\n".to_vec());
+        assert_eq!(top(Some(5)), message.to_vec());
+        assert_eq!(top(None), message.to_vec());
+    }
 
     #[test]
     fn serialize_response() {
@@ -204,11 +261,19 @@ mod tests {
                 ),
             ),
             (
-                Response::Message {
-                    bytes: SliceRange::Split(b"Subject: test\r\n\r\n.\r\n", b"test.\r\n.test\r\na"),
-                    lines: 0,
-                },
+                Response::Message(ChainedBytes::chain(
+                    b"Subject: test\r\n\r\n.\r\n",
+                    b"test.\r\n.test\r\na",
+                )),
                 "+OK 35 octets\r\nSubject: test\r\n\r\n..\r\ntest.\r\n..test\r\na\r\n.\r\n",
+            ),
+            (
+                Response::Message(ChainedBytes::new(b".first\r\n")),
+                "+OK 8 octets\r\n..first\r\n.\r\n",
+            ),
+            (
+                Response::Message(ChainedBytes::default()),
+                "+OK 0 octets\r\n.\r\n",
             ),
         ] {
             assert_eq!(expected, String::from_utf8(cmd.serialize()).unwrap());

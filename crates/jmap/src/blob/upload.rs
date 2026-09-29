@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{UploadResponse, download::BlobDownload};
+use super::{UploadResponse, download::BlobDownload, embedded::EmbeddedBlobs};
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
     error::set::SetError,
@@ -16,7 +16,7 @@ use jmap_proto::{
 use registry::schema::enums::Permission;
 use std::future::Future;
 use trc::AddContext;
-use types::id::Id;
+use types::{blob::BlobClass, id::Id};
 
 #[cfg(feature = "test_mode")]
 pub static DISABLE_UPLOAD_QUOTA: std::sync::atomic::AtomicBool =
@@ -100,19 +100,23 @@ impl BlobUpload for Server {
                         let length = length
                             .map(|length| length.saturating_add(offset))
                             .unwrap_or(usize::MAX);
-                        let bytes = if let Some(section) = &id.section {
-                            self.get_blob_section(&id.hash, section)
-                                .await?
-                                .map(|bytes| {
-                                    if offset == 0 && length == usize::MAX {
-                                        bytes
-                                    } else {
-                                        bytes
-                                            .get(offset..std::cmp::min(length, bytes.len()))
-                                            .unwrap_or_default()
-                                            .to_vec()
-                                    }
-                                })
+                        let window = |bytes: Vec<u8>| {
+                            if offset == 0 && length == usize::MAX {
+                                bytes
+                            } else {
+                                bytes
+                                    .get(offset..std::cmp::min(length, bytes.len()))
+                                    .unwrap_or_default()
+                                    .to_vec()
+                            }
+                        };
+                        let bytes = if matches!(id.class, BlobClass::Embedded { .. }) {
+                            self.embedded_blob(&id)
+                                .await
+                                .caused_by(trc::location!())?
+                                .map(window)
+                        } else if let Some(section) = &id.section {
+                            self.get_blob_section(&id.hash, section).await?.map(window)
                         } else {
                             self.blob_store()
                                 .get_blob(id.hash.as_slice(), offset..length)

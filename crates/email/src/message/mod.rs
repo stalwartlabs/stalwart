@@ -12,6 +12,8 @@ pub mod delivery;
 pub mod headers;
 pub mod index;
 pub mod ingest;
+pub mod jmap;
 pub mod messagedata;
 pub mod metadata;
 pub mod sortkeys;
+pub mod thread;

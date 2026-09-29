@@ -6,7 +6,7 @@
 
 use crate::task_manager::TaskResult;
 use common::{Server, cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation};
-use email::{message::metadata::MessageMetadata, sieve::SieveScript};
+use email::{message::metadata::MetadataStructure, sieve::SieveScript};
 use groupware::file::FileNode;
 use registry::{
     schema::{
@@ -19,7 +19,10 @@ use store::{
     SerializeInfallible, ValueKey,
     registry::RegistryQuery,
     search::SearchQuery,
-    write::{BatchBuilder, BlobLink, BlobOp, RegistryClass, SearchIndex, ValueClass},
+    write::{
+        Archive, ArchiveBytes, BatchBuilder, BlobLink, BlobOp, RegistryClass, SearchIndex,
+        ValueClass,
+    },
 };
 use trc::AddContext;
 use types::{
@@ -183,52 +186,44 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
 
 pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Result<()> {
     let mut delete_keys = Vec::new();
-    for (collection, class) in [
-        (
+    server
+        .all_values(
+            account_id,
             Collection::Email,
             ValueClass::Immutable(EmailField::Metadata.into()),
-        ),
-        (
-            Collection::FileNode,
-            ValueClass::Property(Field::ARCHIVE.into()),
-        ),
-        (
-            Collection::SieveScript,
-            ValueClass::Property(Field::ARCHIVE.into()),
-        ),
-    ] {
-        server
-            .all_archives(account_id, collection, class, |document_id, archive| {
-                match collection {
-                    Collection::Email => {
-                        let message = archive.unarchive::<MessageMetadata>()?;
-                        delete_keys.push((
-                            collection,
-                            document_id,
-                            BlobHash::from(&message.blob_hash),
-                        ));
-                    }
-                    Collection::FileNode => {
-                        if let Some(file) = archive.unarchive::<FileNode>()?.file() {
-                            delete_keys.push((
-                                collection,
-                                document_id,
-                                BlobHash::from(&file.blob_hash),
-                            ));
-                        }
-                    }
-                    Collection::SieveScript => {
-                        let sieve = archive.unarchive::<SieveScript>()?;
-                        delete_keys.push((
-                            collection,
-                            document_id,
-                            BlobHash::from(&sieve.blob_hash),
-                        ));
-                    }
-                    _ => {}
-                }
+            |document_id, structure: MetadataStructure| {
+                delete_keys.push((
+                    Collection::Email,
+                    document_id,
+                    structure.unarchive()?.blob_hash(),
+                ));
                 Ok(())
-            })
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+    for collection in [Collection::FileNode, Collection::SieveScript] {
+        server
+            .all_values(
+                account_id,
+                collection,
+                ValueClass::Property(Field::ARCHIVE.into()),
+                |document_id, archive: Archive<ArchiveBytes>| {
+                    let blob_hash = match collection {
+                        Collection::FileNode => archive
+                            .unarchive::<FileNode>()?
+                            .file()
+                            .map(|file| BlobHash::from(&file.blob_hash)),
+                        _ => Some(BlobHash::from(
+                            &archive.unarchive::<SieveScript>()?.blob_hash,
+                        )),
+                    };
+                    if let Some(blob_hash) = blob_hash {
+                        delete_keys.push((collection, document_id, blob_hash));
+                    }
+                    Ok(())
+                },
+            )
             .await
             .caused_by(trc::location!())?;
     }

@@ -387,12 +387,7 @@ pub async fn test(test: &TestServer) {
         .document_id();
     let contents = test.fetch_email(bill_client.account_id, document_id).await;
     let message = MessageParser::new().parse(&contents).unwrap();
-    let contents = message
-        .html_bodies()
-        .next()
-        .unwrap()
-        .text_contents()
-        .unwrap();
+    let contents = message.body_html(0).unwrap();
     let url = contents
         .split("href=\"")
         .filter_map(|s| {

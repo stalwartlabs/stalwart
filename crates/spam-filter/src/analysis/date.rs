@@ -22,7 +22,8 @@ impl SpamFilterAnalyzeDate for Server {
         match ctx
             .input
             .message
-            .header(HeaderName::Date)
+            .headers()
+            .value(HeaderName::Date)
             .map(|h| h.as_datetime())
         {
             Some(Some(date)) => {

@@ -6,7 +6,7 @@
 
 use crate::{
     jmap::mail::set::assert_email_properties,
-    utils::{dns::DnsCache, server::TestServer},
+    utils::{dns::DnsCache, server::TestServer, smtp::SmtpConnection},
 };
 use ahash::AHashMap;
 use common::auth::{AccountCache, EmailAddress};
@@ -18,6 +18,7 @@ use jmap_client::{
         response::{EmailSubmissionGetResponse, IdentityGetResponse},
         set::{SetError, SetErrorType, SetObject},
     },
+    email::query::Filter as EmailFilter,
     email_submission::{Address, Delivered, DeliveryStatus, Displayed, UndoStatus, query::Filter},
     mailbox::Role,
 };
@@ -235,6 +236,63 @@ pub async fn test(test: &TestServer) {
         ),
     )
     .await;
+
+    let mut lmtp = SmtpConnection::connect().await;
+    lmtp.ingest(
+        "bill@remote.org",
+        &["jdoe@example.com"],
+        concat!(
+            "From: bill@remote.org\r\n",
+            "Bcc: ann@remote.org\r\n",
+            "To: jane_smith@remote.org\r\n",
+            "Subject: blind copies over lmtp\r\n",
+            "Bcc: \"Tom\" <tom@remote.org>,\r\n",
+            " zoe@remote.org\r\n",
+            "\r\n",
+            "test"
+        ),
+    )
+    .await;
+    lmtp.quit().await;
+    let delivered_id = client
+        .email_query(
+            EmailFilter::subject("blind copies over lmtp").into(),
+            None::<Vec<_>>,
+        )
+        .await
+        .unwrap()
+        .take_ids()
+        .pop()
+        .unwrap();
+    client
+        .email_submission_create(&delivered_id, &identity_id)
+        .await
+        .unwrap();
+    let mut message = expect_message_delivery(&mut smtp_rx).await;
+    message.rcpt_to.sort_unstable();
+    assert_eq!(message.mail_from, "<jdoe@example.com>");
+    assert_eq!(
+        message.rcpt_to,
+        [
+            "<ann@remote.org>",
+            "<jane_smith@remote.org>",
+            "<tom@remote.org>",
+            "<zoe@remote.org>"
+        ]
+    );
+    let stripped_body = concat!(
+        "From: bill@remote.org\r\n",
+        "To: jane_smith@remote.org\r\n",
+        "Subject: blind copies over lmtp\r\n",
+        "\r\n",
+        "test"
+    );
+    assert!(
+        message.message.contains(stripped_body) && !message.message.contains("Bcc:"),
+        "Got [{}], Expected[{}]",
+        message.message,
+        stripped_body
+    );
 
     // Manually add recipients to the envelope and confirm submission
     let email_submission_id = client

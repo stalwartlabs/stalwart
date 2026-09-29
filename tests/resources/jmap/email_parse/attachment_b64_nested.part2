@@ -1,0 +1,18 @@
+From: Level Two <two@example.com>
+To: Recipient <rcpt@example.com>
+Subject: Level two
+Message-ID: <level-two@example.com>
+Date: Tue, 14 Dec 2021 11:50:00 +0100
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="two"
+
+--two
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Text of the second nested message, caf=C3=A9 in quoted-printable.
+--two
+Content-Type: text/html; charset=utf-8
+
+<p>HTML of the second nested message</p>
+--two--

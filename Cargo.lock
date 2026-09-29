@@ -1040,10 +1040,10 @@ version = "0.4.0"
 dependencies = [
  "ahash",
  "encodify",
- "hashify 0.3.0",
+ "hashify",
  "jiff",
  "jmap-tools",
- "mail-parser 1.0.0",
+ "mail-parser",
  "memchr",
  "rkyv",
  "serde",
@@ -1310,7 +1310,7 @@ dependencies = [
  "dns-update",
  "encodify",
  "futures",
- "hashify 0.3.0",
+ "hashify",
  "hickory-proto",
  "hostname",
  "hyper",
@@ -1324,7 +1324,7 @@ dependencies = [
  "lz4_flex 0.14.0",
  "mail-auth",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "md5",
  "nlp",
  "nohash-hasher",
@@ -1900,7 +1900,7 @@ dependencies = [
  "dav-proto",
  "directory",
  "groupware",
- "hashify 0.3.0",
+ "hashify",
  "http_proto",
  "hyper",
  "nlp",
@@ -1919,9 +1919,9 @@ version = "0.16.23"
 dependencies = [
  "calcard",
  "compact_str",
- "hashify 0.3.0",
+ "hashify",
  "hyper",
- "mail-parser 0.11.9",
+ "mail-parser",
  "quick-xml 0.41.0",
  "serde",
  "serde_json",
@@ -2371,17 +2371,18 @@ version = "0.16.23"
 dependencies = [
  "aes 0.9.3",
  "aes-gcm 0.11.1",
+ "bytecount",
  "cbc 0.2.1",
  "chacha20poly1305",
  "common",
  "compact_str",
  "encodify",
  "groupware",
- "hashify 0.3.0",
+ "hashify",
  "jmap-tools",
  "jmap_proto",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "nlp",
  "rand 0.8.8",
  "rasn",
@@ -2412,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "encodify"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "memchr",
  "simdutf8",
@@ -3033,7 +3034,7 @@ dependencies = [
  "calcard",
  "common",
  "compact_str",
- "hashify 0.3.0",
+ "hashify",
  "icu_datetime",
  "icu_locale_core",
  "icu_plurals",
@@ -3121,18 +3122,6 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
-]
-
-[[package]]
-name = "hashify"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd1246c0e5493286aeb2dde35b1f4eb9c4ce00e628641210a5e553fc001a1f26"
-dependencies = [
- "indexmap 2.14.2",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -3341,7 +3330,7 @@ dependencies = [
  "flate2",
  "form-data",
  "groupware",
- "hashify 0.3.0",
+ "hashify",
  "http-body-util",
  "http_proto",
  "hyper",
@@ -3350,7 +3339,7 @@ dependencies = [
  "jmap_proto",
  "mail-auth",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "mime",
  "percent-encoding",
  "registry",
@@ -3917,8 +3906,7 @@ dependencies = [
  "email",
  "encodify",
  "imap_proto",
- "mail-parser 0.11.9",
- "md5",
+ "mail-parser",
  "nlp",
  "parking_lot",
  "rand 0.10.2",
@@ -3938,10 +3926,10 @@ dependencies = [
  "ahash",
  "compact_str",
  "encodify",
- "hashify 0.3.0",
+ "hashify",
  "itoa",
  "jiff",
- "mail-parser 0.11.9",
+ "mail-parser",
  "smallvec",
  "trc",
  "types",
@@ -4202,7 +4190,7 @@ dependencies = [
  "encodify",
  "futures-util",
  "groupware",
- "hashify 0.3.0",
+ "hashify",
  "http-body-util",
  "http_proto",
  "hyper",
@@ -4212,7 +4200,7 @@ dependencies = [
  "jmap_proto",
  "mail-auth",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "nlp",
  "p256",
  "rand 0.10.2",
@@ -4276,9 +4264,9 @@ dependencies = [
  "calcard",
  "compact_str",
  "encodify",
- "hashify 0.3.0",
+ "hashify",
  "jmap-tools",
- "mail-parser 0.11.9",
+ "mail-parser",
  "registry",
  "rkyv",
  "serde",
@@ -4720,27 +4708,26 @@ dependencies = [
 
 [[package]]
 name = "mail-auth"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8505122ba86e1f4adeb664196c1e787c3f29bb6e7c128e4a366d47d209911440"
+version = "0.14.0"
 dependencies = [
  "aws-lc-rs",
+ "encodify",
  "flate2",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
- "hashify 0.2.9",
+ "hashify",
  "hickory-resolver",
  "idna",
- "mail-builder 1.0.0",
- "mail-parser 0.11.9",
+ "mail-builder 2.0.0",
+ "mail-parser",
  "memchr",
  "quick-xml 0.42.0",
  "rand 0.10.2",
- "rkyv",
  "rsa",
  "rustls-pki-types",
  "serde",
  "serde_json",
+ "simdutf8",
  "similar",
  "zip",
 ]
@@ -4764,24 +4751,13 @@ dependencies = [
 
 [[package]]
 name = "mail-parser"
-version = "0.11.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ec00bda90c6e645a54506c630c2820cd6b1890cfd2b0a169b50f74b2b8c7c86"
-dependencies = [
- "encoding_rs",
- "hashify 0.2.9",
- "memchr",
- "rkyv",
- "serde",
-]
-
-[[package]]
-name = "mail-parser"
 version = "1.0.0"
 dependencies = [
  "encodify",
- "hashify 0.3.0",
+ "encoding_rs",
+ "hashify",
  "memchr",
+ "serde",
  "simdutf8",
 ]
 
@@ -5196,7 +5172,7 @@ name = "nlp"
 version = "0.16.23"
 dependencies = [
  "ahash",
- "hashify 0.3.0",
+ "hashify",
  "jieba-rs",
  "maplit",
  "memchr",
@@ -6016,6 +5992,8 @@ dependencies = [
  "email",
  "encodify",
  "imap",
+ "itoa",
+ "memchr",
  "registry",
  "store",
  "tokio",
@@ -6835,7 +6813,7 @@ version = "0.16.23"
 dependencies = [
  "ahash",
  "compact_str",
- "hashify 0.3.0",
+ "hashify",
  "jmap-tools",
  "lz4_flex 0.14.0",
  "mail-auth",
@@ -7408,7 +7386,7 @@ dependencies = [
 name = "scim-proto"
 version = "0.16.23"
 dependencies = [
- "hashify 0.3.0",
+ "hashify",
  "serde",
  "serde_json",
 ]
@@ -7746,7 +7724,7 @@ dependencies = [
  "jmap-tools",
  "jmap_proto",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "memory-stats",
  "nlp",
  "p256",
@@ -7922,17 +7900,15 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sieve-rs"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d7883691ad0829824f2330f2ffc3ed41a6517bf84e202ba3274a3e2cf558b8"
+version = "2.0.0"
 dependencies = [
  "ahash",
  "bumpalo",
  "fancy-regex 0.19.2",
  "hashbrown 0.17.1",
- "hashify 0.2.9",
+ "hashify",
  "mail-builder 1.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "memchr",
  "serde",
  "smallvec",
@@ -8061,10 +8037,10 @@ dependencies = [
  "directory",
  "email",
  "encodify",
- "hashify 0.3.0",
+ "hashify",
  "mail-auth",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "parking_lot",
  "rand 0.10.2",
  "registry",
@@ -8186,12 +8162,12 @@ dependencies = [
  "common",
  "compact_str",
  "decancer",
- "hashify 0.3.0",
+ "hashify",
  "hyper",
  "idna",
  "infer 0.22.0",
  "mail-auth",
- "mail-parser 0.11.9",
+ "mail-parser",
  "nlp",
  "psl",
  "registry",
@@ -8632,7 +8608,7 @@ dependencies = [
  "jmap_proto",
  "mail-auth",
  "mail-builder 2.0.0",
- "mail-parser 0.11.9",
+ "mail-parser",
  "managesieve",
  "nlp",
  "pop3",
@@ -8676,8 +8652,8 @@ dependencies = [
  "aws-lc-rs",
  "encoding_rs",
  "flate2",
- "hashify 0.3.0",
- "mail-parser 0.11.9",
+ "hashify",
+ "mail-parser",
  "md5",
  "memchr",
  "quick-xml 0.41.0",
@@ -9211,10 +9187,10 @@ dependencies = [
  "compact_str",
  "encodify",
  "event_macro",
- "hashify 0.3.0",
+ "hashify",
  "itoa",
  "mail-auth",
- "mail-parser 0.11.9",
+ "mail-parser",
  "parking_lot",
  "reqwest 0.13.5",
  "rkyv",
@@ -9320,7 +9296,7 @@ dependencies = [
  "blake3",
  "compact_str",
  "encodify",
- "hashify 0.3.0",
+ "hashify",
  "jmap-tools",
  "rkyv",
  "serde",
@@ -9498,6 +9474,7 @@ dependencies = [
  "idna",
  "jiff",
  "mail-auth",
+ "memchr",
  "nohash-hasher",
  "privdrop",
  "psl",
@@ -10885,7 +10862,3 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
 ]
-
-[[patch.unused]]
-name = "mail-auth"
-version = "0.14.0"

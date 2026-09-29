@@ -30,21 +30,10 @@ impl SpamFilterAnalyzeRecipient for Server {
         let mut has_list_id = false;
 
         for header in ctx.input.message.headers() {
-            match &header.name {
-                HeaderName::To | HeaderName::Cc | HeaderName::Bcc => {
-                    let raw = ctx
-                        .input
-                        .message
-                        .raw_message()
-                        .get(header.offset_start as usize..header.offset_end as usize)
-                        .unwrap_or_default();
-                    match header.name {
-                        HeaderName::To => to_raw = raw,
-                        HeaderName::Cc => cc_raw = raw,
-                        HeaderName::Bcc => bcc_raw = raw,
-                        _ => unreachable!(),
-                    }
-                }
+            match header.name() {
+                HeaderName::To => to_raw = header.raw_value(),
+                HeaderName::Cc => cc_raw = header.raw_value(),
+                HeaderName::Bcc => bcc_raw = header.raw_value(),
                 HeaderName::ListUnsubscribe => {
                     has_list_unsubscribe = true;
                 }

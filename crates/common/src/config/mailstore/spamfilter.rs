@@ -10,7 +10,7 @@ use crate::expr::{
     if_block::{BootstrapExprExt, IfBlock},
 };
 use ahash::AHashSet;
-use mail_auth::common::resolver::ToReverseName;
+use mail_auth::dns::ToReverseName;
 use nlp::classifier::model::{CcfhClassifier, FhClassifier};
 use registry::schema::{
     enums::{ExpressionVariable, ModelSize},

@@ -14,7 +14,7 @@ use common::{
 use email::message::delivery::{IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery};
 use http_proto::*;
 use hyper::StatusCode;
-use mail_auth::common::cache::NoCache;
+use mail_auth::NoCache;
 use mail_builder::{
     MessageBuilder,
     headers::{
@@ -101,7 +101,7 @@ impl FormHandler for Server {
                     .smtp
                     .resolvers
                     .dns
-                    .mx_lookup(domain, None::<&NoCache<_, _>>)
+                    .mx_lookup(domain, None::<&NoCache>)
                     .await
                     .is_err()
                 {

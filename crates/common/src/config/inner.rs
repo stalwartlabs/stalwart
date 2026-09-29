@@ -23,7 +23,7 @@ use crate::{
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
-use mail_auth::{MX, Parameters, RecordSet, Txt};
+use mail_auth::{DnsCache, Mx, Parameters, RecordSet, TxtRecord};
 use parking_lot::RwLock;
 use registry::schema::{prelude::ObjectType, structs};
 use std::{
@@ -173,8 +173,11 @@ impl Caches {
                 (std::mem::size_of::<DkimSigners>() + 255) as u64,
             )
             .with_name("dkimSignatures"),
-            dns_txt: CacheWithTtl::new(cache.dns_txt, (std::mem::size_of::<Txt>() + 255) as u64),
-            dns_mx: CacheWithTtl::new(cache.dns_mx, ((std::mem::size_of::<MX>() + 255) * 2) as u64),
+            dns_txt: CacheWithTtl::new(
+                cache.dns_txt,
+                (std::mem::size_of::<TxtRecord>() + 255) as u64,
+            ),
+            dns_mx: CacheWithTtl::new(cache.dns_mx, ((std::mem::size_of::<Mx>() + 255) * 2) as u64),
             dns_ptr: CacheWithTtl::new(cache.dns_ptr, (std::mem::size_of::<IpAddr>() + 255) as u64),
             dns_ipv4: CacheWithTtl::new(
                 cache.dns_ipv4,
@@ -201,28 +204,37 @@ impl Caches {
         (caches, swap_rx)
     }
 
-    #[allow(clippy::type_complexity)]
     #[inline(always)]
-    pub fn build_auth_parameters<T>(
-        &self,
-        params: T,
-    ) -> Parameters<
-        '_,
-        T,
-        CacheWithTtl<Box<str>, Txt>,
-        CacheWithTtl<Box<str>, RecordSet<MX>>,
-        CacheWithTtl<Box<str>, RecordSet<Ipv4Addr>>,
-        CacheWithTtl<Box<str>, RecordSet<Ipv6Addr>>,
-        CacheWithTtl<IpAddr, RecordSet<Box<str>>>,
-    > {
-        Parameters {
-            params,
-            cache_txt: Some(&self.dns_txt),
-            cache_mx: Some(&self.dns_mx),
-            cache_ptr: Some(&self.dns_ptr),
-            cache_ipv4: Some(&self.dns_ipv4),
-            cache_ipv6: Some(&self.dns_ipv6),
-        }
+    pub fn build_auth_parameters<T>(&self, params: T) -> Parameters<'_, T, Caches> {
+        Parameters::new(params).with_cache(self)
+    }
+}
+
+impl DnsCache for Caches {
+    type Txt = CacheWithTtl<Box<str>, TxtRecord>;
+    type Mx = CacheWithTtl<Box<str>, RecordSet<Mx>>;
+    type Ipv4 = CacheWithTtl<Box<str>, RecordSet<Ipv4Addr>>;
+    type Ipv6 = CacheWithTtl<Box<str>, RecordSet<Ipv6Addr>>;
+    type Ptr = CacheWithTtl<IpAddr, RecordSet<Box<str>>>;
+
+    fn txt(&self) -> Option<&Self::Txt> {
+        Some(&self.dns_txt)
+    }
+
+    fn mx(&self) -> Option<&Self::Mx> {
+        Some(&self.dns_mx)
+    }
+
+    fn ipv4(&self) -> Option<&Self::Ipv4> {
+        Some(&self.dns_ipv4)
+    }
+
+    fn ipv6(&self) -> Option<&Self::Ipv6> {
+        Some(&self.dns_ipv6)
+    }
+
+    fn ptr(&self) -> Option<&Self::Ptr> {
+        Some(&self.dns_ptr)
     }
 }
 

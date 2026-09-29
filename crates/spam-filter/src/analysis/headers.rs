@@ -44,13 +44,14 @@ impl SpamFilterAnalyzeHeaders for Server {
     async fn spam_filter_analyze_headers(&self, ctx: &mut SpamFilterContext<'_>) {
         let mut list_score = 0.0;
         let mut unique_headers = AHashSet::with_capacity(13);
-        let raw_message = ctx.input.message.raw_message();
+        let raw_message = ctx.input.message.raw();
 
         for header in ctx.input.message.headers() {
             // Add header exists tag
-            ctx.result.add_tag(header_exists_tag(header.name()));
+            let name = header.name();
+            ctx.result.add_tag(header_exists_tag(name.as_str()));
 
-            match &header.name {
+            match name {
                 HeaderName::ContentType
                 | HeaderName::ContentTransferEncoding
                 | HeaderName::Date
@@ -64,12 +65,12 @@ impl SpamFilterAnalyzeHeaders for Server {
                 | HeaderName::MessageId
                 | HeaderName::References
                 | HeaderName::InReplyTo => {
-                    if !unique_headers.insert(header.name.clone()) {
+                    if !unique_headers.insert(name) {
                         ctx.result.add_tag("MULTIPLE_UNIQUE_HEADERS");
                     }
 
                     let mut value = raw_message
-                        .get(header.offset_start as usize..)
+                        .get(header.offset_start() as usize..)
                         .unwrap_or_default()
                         .iter();
                     loop {
@@ -101,40 +102,40 @@ impl SpamFilterAnalyzeHeaders for Server {
                     list_score += 0.25;
                     ctx.result.add_tag("HAS_LIST_UNSUB");
                 }
-                HeaderName::Other(name) => {
-                    if name.eq_ignore_ascii_case("Precedence") {
-                        let value = header.value().as_text().unwrap_or_default().trim();
+                HeaderName::Precedence => {
+                    let value = header.value().as_text().unwrap_or_default().trim();
 
-                        if eq_lowercase(value, "bulk") {
-                            list_score += 0.25;
-                            ctx.result.add_tag("PRECEDENCE_BULK");
-                        } else if eq_lowercase(value, "list") {
-                            list_score += 0.25;
-                        }
-                    } else if name.eq_ignore_ascii_case("X-Loop") {
-                        list_score += 0.125;
-                    } else if name.eq_ignore_ascii_case("X-Priority") {
-                        let value = header.value().as_text().unwrap_or_default().trim();
-
-                        match value.parse::<i32>().unwrap_or(i32::MAX) {
-                            0 => {
-                                ctx.result.add_tag("HAS_X_PRIO_ZERO");
-                            }
-                            1 => {
-                                ctx.result.add_tag("HAS_X_PRIO_ONE");
-                            }
-                            2 => {
-                                ctx.result.add_tag("HAS_X_PRIO_TWO");
-                            }
-                            3 | 4 => {
-                                ctx.result.add_tag("HAS_X_PRIO_THREE");
-                            }
-                            4..=10000 => {
-                                ctx.result.add_tag("HAS_X_PRIO_FIVE");
-                            }
-                            _ => {}
-                        }
+                    if eq_lowercase(value, "bulk") {
+                        list_score += 0.25;
+                        ctx.result.add_tag("PRECEDENCE_BULK");
+                    } else if eq_lowercase(value, "list") {
+                        list_score += 0.25;
                     }
+                }
+                HeaderName::XPriority => {
+                    let value = header.value().as_text().unwrap_or_default().trim();
+
+                    match value.parse::<i32>().unwrap_or(i32::MAX) {
+                        0 => {
+                            ctx.result.add_tag("HAS_X_PRIO_ZERO");
+                        }
+                        1 => {
+                            ctx.result.add_tag("HAS_X_PRIO_ONE");
+                        }
+                        2 => {
+                            ctx.result.add_tag("HAS_X_PRIO_TWO");
+                        }
+                        3 | 4 => {
+                            ctx.result.add_tag("HAS_X_PRIO_THREE");
+                        }
+                        4..=10000 => {
+                            ctx.result.add_tag("HAS_X_PRIO_FIVE");
+                        }
+                        _ => {}
+                    }
+                }
+                HeaderName::Other(name) if name.eq_ignore_ascii_case("X-Loop") => {
+                    list_score += 0.125;
                 }
                 _ => {}
             }

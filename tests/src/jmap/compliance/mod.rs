@@ -7,9 +7,9 @@
 use crate::utils::account::Account;
 use crate::utils::jmap::JmapUtils;
 use crate::utils::server::{DestroyAllMailboxes, TestServer};
+use encodify::base64::STANDARD;
 use futures::FutureExt;
 use jiff::{SignedDuration, Timestamp};
-use encodify::base64::STANDARD;
 use registry::schema::{
     prelude::{ObjectType, Property},
     structs::Action,

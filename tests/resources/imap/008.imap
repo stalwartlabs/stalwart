@@ -32,7 +32,7 @@ BODY (
                "charset" "utf-8"
             ) NIL NIL "7bit" 173 8
          ) "alternative"
-      ) 0
+      ) 15
    ) "mixed"
 )
 
@@ -40,7 +40,7 @@ BODYSTRUCTURE (
    (
       "text" "plain" (
          "charset" "utf-8"
-      ) NIL NIL "7bit" 54 0 "e377afc895a2c4c0d17b378f355de59e" NIL NIL NIL
+      ) NIL NIL "7bit" 54 0 NIL NIL NIL NIL
    )(
       "message" "rfc822" NIL NIL NIL "base64" 1179 (
          "Tue, 14 Dec 2021 11:48:25 +0100" "HTML test" (
@@ -64,15 +64,15 @@ BODYSTRUCTURE (
          (
             "text" "plain" (
                "charset" "utf-8" "format" "flowed"
-            ) NIL NIL "7bit" 30 0 "6891396510cbadf4e2cfe31aee5bd25f" NIL NIL NIL
+            ) NIL NIL "7bit" 30 0 NIL NIL NIL NIL
          )(
             "text" "html" (
                "charset" "utf-8"
-            ) NIL NIL "7bit" 173 8 "1a04bd2ec90f44a42792eacdc14fe8ea" NIL NIL NIL
+            ) NIL NIL "7bit" 173 8 NIL NIL NIL NIL
          ) "alternative" (
             "boundary" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
          ) NIL "en-US" NIL
-      ) 0 "eb1ac6e049a544c2bda1b7787e03db50" (
+      ) 15 NIL (
          "attachment" (
             "filename" "attached_email.eml"
          )
@@ -86,7 +86,7 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "plain" (
          "charset" "utf-8"
-      ) NIL NIL "7bit" 54 0 "e377afc895a2c4c0d17b378f355de59e" NIL NIL NIL
+      ) NIL NIL "7bit" 54 0 NIL NIL NIL NIL
    )(
       "message" "rfc822" NIL NIL NIL "base64" 1179 (
          "Tue, 14 Dec 2021 11:48:25 +0100" "HTML test" (
@@ -110,15 +110,15 @@ BODYSTRUCTURE UTF8=ACCEPT (
          (
             "text" "plain" (
                "charset" "utf-8" "format" "flowed"
-            ) NIL NIL "7bit" 30 0 "6891396510cbadf4e2cfe31aee5bd25f" NIL NIL NIL
+            ) NIL NIL "7bit" 30 0 NIL NIL NIL NIL
          )(
             "text" "html" (
                "charset" "utf-8"
-            ) NIL NIL "7bit" 173 8 "1a04bd2ec90f44a42792eacdc14fe8ea" NIL NIL NIL
+            ) NIL NIL "7bit" 173 8 NIL NIL NIL NIL
          ) "alternative" (
             "boundary" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
          ) NIL "en-US" NIL
-      ) 0 "eb1ac6e049a544c2bda1b7787e03db50" (
+      ) 15 NIL (
          "attachment" (
             "filename" "attached_email.eml"
          )
@@ -281,25 +281,37 @@ CiAgPC9oZWFkPg0KICA8Ym9keT4NCiAgICBUaGlzIGlzIGFuIDxiPkhUTUw8L2I+IHRlc3QgbWVz
 c2FnZQ0KICA8L2JvZHk+DQo8L2h0bWw+DQoNCi0tYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
 YWFhYWFhYWFhYWFhYS0tDQo=
 BINARY[2] {872}
-Content-Type: multipart/mixed;
- boundary=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+To: "email@example.com" <email@example.com>
+From: Name <email@example.com>
+Subject: HTML test
+Message-ID: <random-message-id@example.com>
+Date: Tue, 14 Dec 2021 11:48:25 +0100
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+Content-Language: en-US
 
---bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-Content-Type: text/plain; charset=utf-8
+This is a multi-part message in MIME format.
+--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Content-Type: text/plain; charset=utf-8; format=flowed
 Content-Transfer-Encoding: 7bit
 
-This is a message with a base64 encoded attached email
---bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-Content-Disposition: attachment; filename="attached_email.eml"
-Content-Type: message/rfc822
-Content-Transfer-Encoding: base64
+This is an *HTML* test message
+--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
 
-VG86ICJlbWFpbEBleGFtcGxlLmNvbSIgPGVtYWlsQGV4YW1wbGUuY29tPg0KRnJvbTogTmFtZSA8
-ZW1haWxAZXhhbXBsZS5jb20+DQpTdWJqZWN0OiBIVE1MIHRlc3QNCk1lc3NhZ2UtSUQ6IDxyYW5k
-b20tbWVzc2FnZS1pZEBleGFtcGxlLmNvbT4NCkRhdGU6IFR1ZSwgMTQgRGVjIDIwMjEgMTE6NDg6
-MjUgKzAxMDANCk1JTUUtVmVyc2lvbjogMS4wDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9hbHRl
-cm5hdGl2ZTsNCiBib3VuZGFyeT0iYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
-YWFhYSINCkNvbnRlbnQtTGFuZ3VhZ2U6IGVuLVVTDQoNClRoaXMgaXMgYSBtdWx
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  </head>
+  <body>
+    This is an <b>HTML</b> test message
+  </body>
+</html>
+
+--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--
+
 BINARY.SIZE[2] 872
 ----------------------------------
 BODY[2.HEADER] {319}

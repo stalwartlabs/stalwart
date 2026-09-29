@@ -20,6 +20,7 @@ use common::auth::oauth::{
         ClientRegistrationRequest, ClientRegistrationResponse, TokenEndpointAuthMethod,
     },
 };
+use encodify::base64::STANDARD;
 use http::auth::oauth::{
     DeviceAuthResponse, ErrorType, TokenResponse,
     auth::{LoginRequest, LoginResponse},
@@ -29,7 +30,6 @@ use jmap_client::{
     client::{Client, Credentials},
     mailbox::query::Filter,
 };
-use encodify::base64::STANDARD;
 use registry::schema::{
     enums::JwtSignatureAlgorithm,
     prelude::{ObjectType, Property},

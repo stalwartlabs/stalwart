@@ -11,7 +11,7 @@ use crate::{
     },
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::MtaRequiredOrOptional,
@@ -115,7 +115,7 @@ async fn starttls_optional() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],

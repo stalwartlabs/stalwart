@@ -9,8 +9,9 @@ use ahash::AHashMap;
 use common::USER_AGENT;
 use compact_str::{CompactString, format_compact};
 use mail_auth::report::{
-    ActionDisposition, AuthFailureType, DeliveryResult, DmarcResult, Feedback, FeedbackType,
-    Report, tlsrpt::TlsReport,
+    arf::{AuthFailureType, DeliveryResult, FeedbackReport, FeedbackType},
+    dmarc::{AggregateReport, Disposition, DmarcStatus},
+    tlsrpt::TlsReport,
 };
 use std::{collections::hash_map::Entry, time::SystemTime};
 use store::write::now;
@@ -18,22 +19,24 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use trc::IncomingReportEvent;
 
 impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
-    pub fn new_auth_failure(&self, ft: AuthFailureType, rejected: bool) -> Feedback<'_> {
-        Feedback::new(FeedbackType::AuthFailure)
-            .with_auth_failure(ft)
-            .with_arrival_date(
+    pub fn new_auth_failure(&self, ft: AuthFailureType, rejected: bool) -> FeedbackReport<'_> {
+        FeedbackReport {
+            auth_failure: ft,
+            arrival_date: Some(
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .map_or(0, |d| d.as_secs()) as i64,
-            )
-            .with_source_ip(self.data.remote_ip)
-            .with_reporting_mta(&self.hostname)
-            .with_user_agent(USER_AGENT)
-            .with_delivery_result(if rejected {
+            ),
+            source_ip: Some(self.data.remote_ip),
+            reporting_mta: Some(self.hostname.as_str().into()),
+            user_agent: Some(USER_AGENT.into()),
+            delivery_result: if rejected {
                 DeliveryResult::Reject
             } else {
                 DeliveryResult::Unspecified
-            })
+            },
+            ..FeedbackReport::new(FeedbackType::AuthFailure)
+        }
     }
 
     pub fn is_report(&self) -> bool {
@@ -50,7 +53,7 @@ pub(crate) trait LogReport {
     fn log(&self);
 }
 
-impl LogReport for Report {
+impl LogReport for AggregateReport {
     fn log(&self) {
         let mut dmarc_pass = 0;
         let mut dmarc_quarantine = 0;
@@ -63,42 +66,43 @@ impl LogReport for Report {
         let mut spf_fail = 0;
         let mut spf_none = 0;
 
-        for record in self.records() {
-            let count = std::cmp::min(record.count(), 1);
+        for record in &self.records {
+            let count = std::cmp::min(record.row.count, 1);
+            let evaluated = &record.row.policy_evaluated;
 
-            match record.action_disposition() {
-                ActionDisposition::Pass => {
+            match evaluated.disposition {
+                Disposition::Pass => {
                     dmarc_pass += count;
                 }
-                ActionDisposition::Quarantine => {
+                Disposition::Quarantine => {
                     dmarc_quarantine += count;
                 }
-                ActionDisposition::Reject => {
+                Disposition::Reject => {
                     dmarc_reject += count;
                 }
-                ActionDisposition::None | ActionDisposition::Unspecified => {
+                Disposition::None | Disposition::Unspecified => {
                     dmarc_none += count;
                 }
             }
-            match record.dmarc_dkim_result() {
-                DmarcResult::Pass => {
+            match evaluated.dkim {
+                DmarcStatus::Pass => {
                     dkim_pass += count;
                 }
-                DmarcResult::Fail => {
+                DmarcStatus::Fail => {
                     dkim_fail += count;
                 }
-                DmarcResult::Unspecified => {
+                DmarcStatus::Unspecified => {
                     dkim_none += count;
                 }
             }
-            match record.dmarc_spf_result() {
-                DmarcResult::Pass => {
+            match evaluated.spf {
+                DmarcStatus::Pass => {
                     spf_pass += count;
                 }
-                DmarcResult::Fail => {
+                DmarcStatus::Fail => {
                     spf_fail += count;
                 }
-                DmarcResult::Unspecified => {
+                DmarcStatus::Unspecified => {
                     spf_none += count;
                 }
             }
@@ -112,11 +116,11 @@ impl LogReport for Report {
                     IncomingReportEvent::DmarcReport
                 }
             ),
-            RangeFrom = trc::Value::Timestamp(self.date_range_begin()),
-            RangeTo = trc::Value::Timestamp(self.date_range_end()),
-            Domain = CompactString::from(self.domain()),
-            From = CompactString::from(self.email()),
-            Id = CompactString::from(self.report_id()),
+            RangeFrom = trc::Value::Timestamp(self.report_metadata.date_range.begin),
+            RangeTo = trc::Value::Timestamp(self.report_metadata.date_range.end),
+            Domain = CompactString::from(&self.policy_published.domain),
+            From = CompactString::from(&self.report_metadata.email),
+            Id = CompactString::from(&self.report_metadata.report_id),
             DmarcPass = dmarc_pass,
             DmarcQuarantine = dmarc_quarantine,
             DmarcReject = dmarc_reject,
@@ -148,7 +152,7 @@ impl LogReport for TlsReport {
             }
 
             trc::event!(
-                IncomingReport(if policy.summary.total_failure > 0 {
+                IncomingReport(if policy.summary.failed_sessions > 0 {
                     IncomingReportEvent::TlsReportWithWarnings
                 } else {
                     IncomingReportEvent::TlsReport
@@ -160,47 +164,49 @@ impl LogReport for TlsReport {
                 From = CompactString::from(self.contact_info.as_deref().unwrap_or_default()),
                 Id = self.report_id.clone(),
                 Policy = format_compact!("{:?}", policy.policy.policy_type),
-                TotalSuccesses = policy.summary.total_success,
-                TotalFailures = policy.summary.total_failure,
+                TotalSuccesses = policy.summary.successful_sessions,
+                TotalFailures = policy.summary.failed_sessions,
                 Details = format_compact!("{details:?}"),
             );
         }
     }
 }
 
-impl LogReport for Feedback<'_> {
+impl LogReport for FeedbackReport<'_> {
     fn log(&self) {
         trc::event!(
-            IncomingReport(match self.feedback_type() {
-                mail_auth::report::FeedbackType::Abuse => IncomingReportEvent::AbuseReport,
-                mail_auth::report::FeedbackType::AuthFailure =>
-                    IncomingReportEvent::AuthFailureReport,
-                mail_auth::report::FeedbackType::Fraud => IncomingReportEvent::FraudReport,
-                mail_auth::report::FeedbackType::NotSpam => IncomingReportEvent::NotSpamReport,
-                mail_auth::report::FeedbackType::Other => IncomingReportEvent::OtherReport,
-                mail_auth::report::FeedbackType::Virus => IncomingReportEvent::VirusReport,
+            IncomingReport(match self.feedback_type {
+                FeedbackType::Abuse => IncomingReportEvent::AbuseReport,
+                FeedbackType::AuthFailure => IncomingReportEvent::AuthFailureReport,
+                FeedbackType::Fraud => IncomingReportEvent::FraudReport,
+                FeedbackType::NotSpam => IncomingReportEvent::NotSpamReport,
+                FeedbackType::Other => IncomingReportEvent::OtherReport,
+                FeedbackType::Virus => IncomingReportEvent::VirusReport,
             }),
             RangeFrom = trc::Value::Timestamp(
-                self.arrival_date()
+                self.arrival_date
                     .map(|d| d as u64)
                     .unwrap_or_else(|| { now() })
             ),
             Domain = self
-                .reported_domain()
+                .reported_domains
                 .iter()
                 .map(|d| trc::Value::String(d.as_ref().into()))
                 .collect::<Vec<_>>(),
-            Hostname = self.reporting_mta().map(|d| trc::Value::String(d.into())),
+            Hostname = self
+                .reporting_mta
+                .as_deref()
+                .map(|d| trc::Value::String(d.into())),
             Url = self
-                .reported_uri()
+                .reported_uris
                 .iter()
                 .map(|d| trc::Value::String(d.as_ref().into()))
                 .collect::<Vec<_>>(),
-            RemoteIp = self.source_ip(),
-            Total = self.incidents(),
-            Result = format_compact!("{:?}", self.delivery_result()),
+            RemoteIp = self.source_ip,
+            Total = self.incidents,
+            Result = format_compact!("{:?}", self.delivery_result),
             Details = self
-                .authentication_results()
+                .authentication_results
                 .iter()
                 .map(|d| trc::Value::String(d.as_ref().into()))
                 .collect::<Vec<_>>(),

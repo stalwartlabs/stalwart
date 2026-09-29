@@ -6,7 +6,7 @@
 
 use crate::expr::Variable;
 use compact_str::CompactString;
-use mail_auth::common::resolver::ToReverseName;
+use mail_auth::dns::ToReverseName;
 use registry::types::ipmask::IpAddrOrMask;
 use std::{net::IpAddr, str::FromStr};
 

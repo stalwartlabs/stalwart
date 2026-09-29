@@ -264,7 +264,7 @@ impl<T: SessionStream> Session<T> {
 
             // Headers
             client
-                .headers(message.raw_parsed_headers().iter().map(|(k, v)| {
+                .headers(message.headers().iter().map(|(k, v)| {
                     (
                         std::str::from_utf8(k).unwrap_or_default(),
                         std::str::from_utf8(v).unwrap_or_default(),
@@ -392,7 +392,7 @@ impl SessionData {
                 Modification::ChangeHeader { index, name, value } => {
                     if value.is_empty()
                         || message
-                            .raw_parsed_headers()
+                            .headers()
                             .iter()
                             .any(|(n, _)| n.eq_ignore_ascii_case(name.as_bytes()))
                     {
@@ -428,7 +428,7 @@ impl SessionData {
 
         if needs_rewrite {
             let mut headers = message
-                .raw_parsed_headers()
+                .headers()
                 .iter()
                 .map(|(h, v)| (Cow::from(*h), Cow::from(*v)))
                 .collect::<Vec<_>>();

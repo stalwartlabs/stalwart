@@ -125,6 +125,27 @@ impl Deserialize for Archive<ArchiveBytes> {
     }
 }
 
+impl Archive<ArchiveBytes> {
+    pub fn deserialize_with_prefix(prefix: &[u8], bytes: &[u8]) -> trc::Result<Self> {
+        let (encoding, contents, version) =
+            validate_marker_and_contents(bytes).ok_or_else(|| {
+                trc::StoreEvent::DataCorruption
+                    .into_err()
+                    .details("Archive integrity compromised")
+                    .ctx(trc::Key::Value, bytes)
+                    .caused_by(trc::location!())
+            })?;
+
+        let inner = match encoding {
+            Encoding::Plain => [prefix, contents].concat(),
+            Encoding::Zstd => [prefix, zstd_inflate(contents)?.as_slice()].concat(),
+            Encoding::Lz4 => [prefix, lz4_deflate(contents)?.as_slice()].concat(),
+        };
+
+        Ok(Archive { version, inner })
+    }
+}
+
 #[inline]
 fn zstd_inflate(archive: &[u8]) -> trc::Result<ArchiveBytes> {
     decompress(archive).map_err(|err| {
@@ -812,6 +833,39 @@ mod tests {
                 .expect("unarchive"),
             Tiny { value: 42 }
         );
+    }
+
+    #[test]
+    fn prefixed_archives_keep_the_prefix_and_unarchive() {
+        let prefix = b"raw header block\r\n";
+        let plain = Archiver::with_compression(sample(64), Compression::None)
+            .serialize()
+            .expect("serialize");
+        let compressed = Archiver::new(sample(64)).serialize().expect("serialize");
+        assert_ne!(compressed[compressed.len() - 1] & ZSTD_COMPRESSED, 0);
+
+        for bytes in [plain, compressed] {
+            let expected =
+                <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes).expect("read");
+            for prefix in [&prefix[..], &[][..]] {
+                let archive =
+                    Archive::<ArchiveBytes>::deserialize_with_prefix(prefix, &bytes).expect("read");
+                assert_eq!(archive.version, expected.version);
+                assert_eq!(archive.inner.get(..prefix.len()), Some(prefix));
+                assert_eq!(archive.inner.get(prefix.len()..), Some(expected.as_bytes()));
+                assert_eq!(
+                    archive.deserialize::<Compressible>().expect("unarchive"),
+                    sample(64)
+                );
+            }
+        }
+
+        let mut corrupted = Archiver::with_compression(sample(4), Compression::None)
+            .serialize()
+            .expect("serialize");
+        corrupted[0] ^= 0xff;
+        assert!(Archive::<ArchiveBytes>::deserialize_with_prefix(prefix, &corrupted).is_err());
+        assert!(Archive::<ArchiveBytes>::deserialize_with_prefix(prefix, &[]).is_err());
     }
 
     #[test]

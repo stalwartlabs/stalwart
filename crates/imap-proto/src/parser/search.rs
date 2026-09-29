@@ -9,7 +9,7 @@ use std::iter::Peekable;
 use std::vec::IntoIter;
 
 use mail_parser::decoders::charsets::DecoderFnc;
-use mail_parser::decoders::charsets::map::charset_decoder;
+use mail_parser::decoders::charsets::charset_decoder;
 
 use crate::Command;
 use crate::protocol::search::{self, Filter};

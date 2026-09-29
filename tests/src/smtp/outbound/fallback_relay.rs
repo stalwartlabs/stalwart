@@ -8,7 +8,7 @@ use crate::{
     smtp::session::TestSession,
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::MtaProtocol,
@@ -98,7 +98,7 @@ async fn fallback_relay() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["_dns_error.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],

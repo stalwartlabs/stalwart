@@ -9,6 +9,7 @@ use ::email::mailbox::INBOX_ID;
 use jmap_client::email::{self, Header, HeaderForm, import::EmailImportResponse};
 use mail_parser::HeaderName;
 use registry::schema::prelude::ObjectType;
+use serde_json::json;
 use std::{fs, path::PathBuf};
 use types::id::Id;
 
@@ -165,6 +166,92 @@ pub async fn test(test: &TestServer) {
             panic!("Test failed, output saved to {}", file_name.display());
         }
     }
+
+    let email_id = client
+        .email_import(
+            concat!(
+                "From: Sender <sender@example.com>\r\n",
+                "Subject: forms\r\n",
+                "Content-Type: text/plain; charset=utf-8\r\n",
+                "\r\n",
+                "body\r\n"
+            )
+            .as_bytes()
+            .to_vec(),
+            [&mailbox_id],
+            None::<Vec<&str>>,
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
+    for (properties, body_properties) in [
+        (vec!["header:From:asText"], vec![]),
+        (vec!["header:Subject:asAddresses:all"], vec![]),
+        (vec!["header:Received:asText"], vec![]),
+        (vec!["textBody"], vec!["partId", "header:Date:asText"]),
+    ] {
+        let response = account
+            .jmap_method_call(
+                "Email/get",
+                json!({
+                    "accountId": account.id_string(),
+                    "ids": [&email_id],
+                    "properties": properties,
+                    "bodyProperties": body_properties,
+                }),
+            )
+            .await;
+        assert_eq!(
+            response.error_type_at(0),
+            Some("invalidArguments"),
+            "{properties:?} {body_properties:?}: {:?}",
+            response.0
+        );
+    }
+    let response = account
+        .jmap_method_call(
+            "Email/get",
+            json!({
+                "accountId": account.id_string(),
+                "ids": [&email_id],
+                "properties": [
+                    "blobId",
+                    "header:Content-Type:asText",
+                    "header:From:asAddresses",
+                    "header:X-Missing:asDate"
+                ],
+            }),
+        )
+        .await;
+    let email = &response.method_response()["list"][0];
+    assert_eq!(
+        email["header:Content-Type:asText"],
+        json!("text/plain; charset=utf-8"),
+        "{email}"
+    );
+    assert_eq!(
+        email["header:From:asAddresses"],
+        json!([{"name": "Sender", "email": "sender@example.com"}]),
+        "{email}"
+    );
+    assert_eq!(email["header:X-Missing:asDate"], json!(null), "{email}");
+    let response = account
+        .jmap_method_call(
+            "Email/parse",
+            json!({
+                "accountId": account.id_string(),
+                "blobIds": [email["blobId"]],
+                "properties": ["header:From:asDate"],
+            }),
+        )
+        .await;
+    assert_eq!(
+        response.error_type_at(0),
+        Some("invalidArguments"),
+        "{:?}",
+        response.0
+    );
 
     test.destroy_all_mailboxes(account).await;
     test.account("admin@example.com")

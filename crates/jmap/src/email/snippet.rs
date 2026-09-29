@@ -7,9 +7,7 @@
 use common::{Server, auth::AccessToken};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    message::metadata::{
-        ArchivedMetadataPartType, DecodedPartContent, MessageMetadata, MetadataHeaderName,
-    },
+    message::metadata::{MetadataStructure, PartKind, PartSource},
 };
 use jmap_proto::{
     method::{
@@ -19,17 +17,11 @@ use jmap_proto::{
     object::email::EmailFilter,
     request::MaybeInvalid,
 };
-use mail_parser::decoders::html::html_to_text;
 use nlp::language::{Language, search_snippet::generate_snippet, stemmer::Stemmer};
 use std::future::Future;
-use store::{
-    ValueKey,
-    backend::MAX_TOKEN_LENGTH,
-    write::{Archive, ArchiveBytes},
-};
+use store::{ValueKey, backend::MAX_TOKEN_LENGTH};
 use trc::AddContext;
 use types::{acl::Acl, collection::Collection, field::EmailField};
-use utils::chained_bytes::ChainedBytes;
 
 pub trait EmailSearchSnippet: Sync + Send {
     fn email_search_snippet(
@@ -137,9 +129,9 @@ impl EmailSearchSnippet for Server {
                 response.list.push(snippet);
                 continue;
             }
-            let metadata_ = match self
+            let structure = match self
                 .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
+                .get_value::<MetadataStructure>(ValueKey::immutable(
                     account_id,
                     Collection::Email,
                     document_id,
@@ -147,41 +139,37 @@ impl EmailSearchSnippet for Server {
                 ))
                 .await?
             {
-                Some(metadata) => metadata,
+                Some(structure) => structure,
                 None => {
                     not_found.push(MaybeInvalid::Value(email_id));
                     continue;
                 }
             };
-            let metadata = metadata_
-                .unarchive::<MessageMetadata>()
-                .caused_by(trc::location!())?;
+            let metadata = structure.unarchive().caused_by(trc::location!())?;
+            let root = metadata.root();
 
             // Add subject snippet
-            let contents = &metadata.contents[0];
-            if let Some(subject) = contents
-                .root_part()
-                .header_value(&MetadataHeaderName::Subject)
-                .and_then(|v| v.as_text())
-                .and_then(|v| generate_snippet(v, &terms, language, is_exact))
+            if let Some(subject) = root
+                .envelope()
+                .subject()
+                .and_then(|subject| generate_snippet(subject, &terms, language, is_exact))
             {
                 snippet.subject = subject.into();
             }
 
             // Download message
-            let raw_body = if let Some(raw_body) = self
+            let blob_hash = metadata.blob_hash();
+            let Some(raw_body) = self
                 .blob_store()
-                .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
+                .get_blob(blob_hash.as_slice(), 0..usize::MAX)
                 .await?
-            {
-                raw_body
-            } else {
+            else {
                 trc::event!(
                     Store(trc::StoreEvent::NotFound),
                     AccountId = account_id,
                     DocumentId = email_id.document_id(),
                     Collection = Collection::Email,
-                    BlobId = metadata.blob_hash.0.as_slice(),
+                    BlobId = blob_hash.as_slice(),
                     Details = "Blob not found.",
                     CausedBy = trc::location!(),
                 );
@@ -189,67 +177,40 @@ impl EmailSearchSnippet for Server {
                 not_found.push(MaybeInvalid::Value(email_id));
                 continue;
             };
-            let raw_message = ChainedBytes::new(metadata.raw_headers.as_ref()).with_last(
-                raw_body
-                    .get(metadata.blob_body_offset.to_native() as usize..)
-                    .unwrap_or_default(),
-            );
+            let raw = metadata.raw_message(None, &raw_body);
+            let source = PartSource::Raw(raw);
 
             // Find a matching part
-            'outer: for part in contents.parts.iter() {
-                match &part.body {
-                    ArchivedMetadataPartType::Text => {
-                        let text = match part.decode_contents(&raw_message) {
-                            DecodedPartContent::Text(text) => text,
-                            _ => unreachable!(),
-                        };
-
-                        if let Some(body) = generate_snippet(&text, &terms, language, is_exact) {
+            'outer: for part in root.parts() {
+                match part.kind() {
+                    PartKind::Text | PartKind::Html => {
+                        if let Some(body) = part
+                            .plain_text(&source)
+                            .and_then(|text| generate_snippet(&text, &terms, language, is_exact))
+                        {
                             snippet.preview = body.into();
                             break;
                         }
                     }
-                    ArchivedMetadataPartType::Html => {
-                        let text = match part.decode_contents(&raw_message) {
-                            DecodedPartContent::Text(html) => html_to_text(&html),
-                            _ => unreachable!(),
+                    PartKind::Message => {
+                        let Some(nested) = part.nested() else {
+                            continue;
                         };
-
-                        if let Some(body) = generate_snippet(&text, &terms, language, is_exact) {
-                            snippet.preview = body.into();
-                            break;
-                        }
-                    }
-                    ArchivedMetadataPartType::Message(message) => {
-                        for part in metadata.contents[u16::from(message) as usize].parts.iter() {
-                            if let ArchivedMetadataPartType::Text | ArchivedMetadataPartType::Html =
-                                part.body
-                            {
-                                let text = match (part.decode_contents(&raw_message), &part.body) {
-                                    (
-                                        DecodedPartContent::Text(text),
-                                        ArchivedMetadataPartType::Text,
-                                    ) => text,
-                                    (
-                                        DecodedPartContent::Text(html),
-                                        ArchivedMetadataPartType::Html,
-                                    ) => html_to_text(&html).into(),
-                                    _ => unreachable!(),
-                                };
-
-                                if let Some(body) =
-                                    generate_snippet(&text, &terms, language, is_exact)
-                                {
-                                    snippet.preview = body.into();
-                                    break 'outer;
-                                }
+                        let Some(nested_source) = metadata.source(nested, raw) else {
+                            continue;
+                        };
+                        for part in nested.parts().filter(|part| part.is_text()) {
+                            if let Some(body) = part.plain_text(&nested_source).and_then(|text| {
+                                generate_snippet(&text, &terms, language, is_exact)
+                            }) {
+                                snippet.preview = body.into();
+                                break 'outer;
                             }
                         }
                     }
                     _ => (),
                 }
             }
-            //}
 
             response.list.push(snippet);
         }

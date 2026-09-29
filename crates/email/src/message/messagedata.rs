@@ -120,6 +120,15 @@ impl EmailMessageData for Server {
 }
 
 impl MessageData {
+    pub fn sent_at_offset(sent_at: Option<i64>, received_at: u64) -> i32 {
+        sent_at.map_or(0, |sent_at| {
+            let received_at = i64::try_from(received_at).unwrap_or(i64::MAX);
+            sent_at
+                .saturating_sub(received_at)
+                .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+        })
+    }
+
     pub fn set_keywords(&mut self, keywords: Vec<Keyword>) {
         self.keywords &= (1 << HASATTACHMENT) | (1 << HASNOATTACHMENT);
         self.keywords_extra.clear();
@@ -594,6 +603,43 @@ mod tests {
         };
         data.set_keywords(keywords.iter().map(|name| Keyword::parse(name)).collect());
         data
+    }
+
+    #[test]
+    fn sent_at_offsets_saturate_instead_of_wrapping() {
+        let received_at = 1_790_000_000u64;
+        let message = mail_parser::MessageParser::new()
+            .parse(&b"Date: 1 Jan 1900 00:00:00 +0000\r\nSubject: old\r\n\r\nbody\r\n"[..])
+            .expect("message parses");
+        let year_1900 = crate::message::thread::ThreadFields::scan(&message)
+            .sent_at
+            .expect("date parses");
+        let offset_1900 = year_1900 - received_at as i64;
+        assert!(offset_1900 < i64::from(i32::MIN));
+        assert!(offset_1900 as i32 > 0);
+        let year_2200 = mail_parser::DateTime::parse_rfc822("1 Jan 2200 00:00:00 +0000")
+            .expect("date")
+            .to_timestamp();
+        for (sent_at, expected) in [
+            (None, 0),
+            (Some(received_at as i64 - 3_600), -3_600),
+            (Some(received_at as i64 + 60), 60),
+            (Some(year_1900), i32::MIN),
+            (Some(year_2200), i32::MAX),
+            (Some(i64::MIN), i32::MIN),
+            (Some(i64::MAX), i32::MAX),
+        ] {
+            let offset = MessageData::sent_at_offset(sent_at, received_at);
+            assert_eq!(offset, expected, "{sent_at:?}");
+            if let Some(sent_at) = sent_at {
+                let restored = received_at as i64 + i64::from(offset);
+                assert_eq!(
+                    restored.cmp(&(received_at as i64)),
+                    sent_at.cmp(&(received_at as i64)),
+                    "{sent_at}"
+                );
+            }
+        }
     }
 
     #[test]

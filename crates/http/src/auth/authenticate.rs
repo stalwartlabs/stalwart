@@ -8,9 +8,9 @@ use common::auth::AccessToken;
 use common::{HttpAuthCache, Server, auth::AuthRequest, network::limiter::InFlight};
 use compact_str::CompactString;
 use directory::Credentials;
+use encodify::base64::LENIENT;
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
-use encodify::base64::LENIENT;
 use std::future::Future;
 use std::time::{Duration, Instant};
 

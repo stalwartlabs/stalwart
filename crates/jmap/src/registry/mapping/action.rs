@@ -28,7 +28,7 @@ use registry::{
 };
 use smtp_proto::{MAIL_BODY_7BIT, MAIL_BODY_8BITMIME, MAIL_BODY_BINARYMIME, MAIL_SMTPUTF8};
 use spam_filter::{
-    SpamFilterInput,
+    MessageTexts, SpamFilterInput,
     analysis::{init::SpamFilterInit, score::SpamFilterAnalyzeScore},
 };
 use std::time::Instant;
@@ -240,7 +240,7 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
     let raw_message = request.message.as_bytes();
     let message = MessageParser::new()
         .parse(raw_message)
-        .filter(|m| m.root_part().headers().iter().any(|h| !h.name.is_other()))?;
+        .filter(|m| m.headers().has_known())?;
 
     let remote_ip = request.remote_ip.into_inner();
     let ehlo_domain = request.ehlo_domain.to_lowercase();
@@ -257,11 +257,7 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
             server
                 .inner
                 .cache
-                .build_auth_parameters(SpfParameters::verify_ehlo(
-                    remote_ip,
-                    &ehlo_domain,
-                    local_host,
-                )),
+                .build_auth_parameters(SpfParameters::helo(remote_ip, &ehlo_domain, local_host)),
         )
         .await;
 
@@ -344,7 +340,7 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
             message: &auth_message,
             dkim_output: &dkim_output,
             dkim2_output: Some(&dkim2_output),
-            rfc5321_mail_from_domain: mail_from_domain.unwrap_or(ehlo_domain.as_str()),
+            mail_from_domain: mail_from_domain.unwrap_or(ehlo_domain.as_str()),
             spf_output: &spf_mail_from_result,
         }))
         .await;
@@ -353,8 +349,10 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
 
     let asn_geo = server.lookup_asn_country(remote_ip).await;
 
+    let texts = MessageTexts::new(&message);
     let input = SpamFilterInput {
         message: &message,
+        texts: &texts,
         span_id: 0,
         arc_result: Some(&arc_output),
         spf_ehlo_result: Some(&spf_ehlo_result),
@@ -442,11 +440,7 @@ async fn dmarc_troubleshoot(
             server
                 .inner
                 .cache
-                .build_auth_parameters(SpfParameters::verify_ehlo(
-                    remote_ip,
-                    &ehlo_domain,
-                    local_host,
-                )),
+                .build_auth_parameters(SpfParameters::helo(remote_ip, &ehlo_domain, local_host)),
         )
         .await;
 
@@ -536,7 +530,7 @@ async fn dmarc_troubleshoot(
             message: &auth_message,
             dkim_output: &dkim_output,
             dkim2_output: Some(&dkim2_output),
-            rfc5321_mail_from_domain: mail_from_domain.unwrap_or(ehlo_domain.as_str()),
+            mail_from_domain: mail_from_domain.unwrap_or(ehlo_domain.as_str()),
             spf_output: &mail_spf_output,
         }))
         .await;

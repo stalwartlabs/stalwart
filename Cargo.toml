@@ -91,3 +91,4 @@ mail-auth = { path = "../mail-auth" }
 mail-builder = { path = "../mail-builder" }
 encodify = { path = "../encodify" }
 mail-parser = { path = "../mail-parser" }
+sieve-rs = { path = "../sieve" }

@@ -10,10 +10,10 @@ use common::{
     Server,
     scripts::{
         IsMixedCharset,
-        functions::{array::cosine_similarity, unicode::CharUtils},
+        functions::{array::cosine_similarity, sniff::SniffPrefix, unicode::CharUtils},
     },
 };
-use mail_parser::{HeaderName, MimeHeaders, PartType};
+use mail_parser::{HeaderName, PartFlags};
 use nlp::tokenizers::types::TokenType;
 use std::{collections::HashSet, future::Future, vec};
 
@@ -35,14 +35,12 @@ impl SpamFilterAnalyzeMime for Server {
         let mut is_plain_text = false;
 
         for header in ctx.input.message.headers() {
-            match &header.name {
+            match header.name() {
                 HeaderName::MimeVersion => {
-                    if ctx
-                        .input
-                        .message
-                        .raw_message()
-                        .get(header.offset_field as usize..header.offset_start as usize - 1)
-                        != Some(b"MIME-Version")
+                    if ctx.input.message.raw().get(
+                        header.offset_field() as usize
+                            ..(header.offset_start() as usize).saturating_sub(1),
+                    ) != Some(b"MIME-Version")
                     {
                         ctx.result.add_tag("MV_CASE");
                     }
@@ -89,8 +87,6 @@ impl SpamFilterAnalyzeMime for Server {
             // Only Content-Type header without other MIME headers
             ctx.result.add_tag("MIME_HEADER_CTYPE_ONLY");
         }
-        let raw_message = ctx.input.message.raw_message();
-
         let mut has_text_part = false;
         let mut is_encrypted = false;
         let mut is_encrypted_smime = false;
@@ -99,18 +95,18 @@ impl SpamFilterAnalyzeMime for Server {
         let mut num_parts = 0;
         let mut num_parts_size = 0;
 
-        for (part_id, part) in ctx.input.message.parts.iter().enumerate() {
-            let part_id = part_id as u32;
+        for part in ctx.input.message.root().parts() {
+            let part_id = part.id();
             let mut ct = None;
             let mut cd = None;
             let mut ct_type = "";
             let mut ct_subtype = "";
             let mut cte = "";
-            let mut is_attachment = ctx.input.message.attachments.contains(&part_id);
+            let mut is_attachment = part.is_attachment();
             let mut has_content_id = false;
 
             for header in part.headers() {
-                match &header.name {
+                match header.name() {
                     HeaderName::ContentType => {
                         if let Some(ct_) = header.value().as_content_type() {
                             ct_type = ct_.ctype();
@@ -130,11 +126,7 @@ impl SpamFilterAnalyzeMime for Server {
                             ctx.result.add_tag("HAS_MESSAGE_PARTS");
                         }
 
-                        if raw_message
-                            .get(header.offset_start as usize..header.offset_end as usize)
-                            .and_then(|s| s.trim_ascii_end().last())
-                            == Some(&b';')
-                        {
+                        if header.raw_value().trim_ascii_end().last() == Some(&b';') {
                             // Content-Type header ends with a semi-colon
                             ctx.result.add_tag("CT_EXTRA_SEMI");
                         }
@@ -157,11 +149,6 @@ impl SpamFilterAnalyzeMime for Server {
             }
 
             if ct_type.eq_ignore_ascii_case("multipart") {
-                let part_ids = match &part.body {
-                    PartType::Multipart(parts) => parts.as_slice(),
-                    _ => &[],
-                };
-
                 if ct_subtype.eq_ignore_ascii_case("alternative") {
                     let mut has_plain_part = false;
                     let mut has_html_part = false;
@@ -172,9 +159,9 @@ impl SpamFilterAnalyzeMime for Server {
                     let mut html_part_words = vec![];
                     let mut html_part_uris = 0;
 
-                    for text_part in part_ids
-                        .iter()
-                        .map(|id| &ctx.output.text_parts[*id as usize])
+                    for text_part in part
+                        .children()
+                        .filter_map(|child| ctx.output.text_parts.get(child.id() as usize))
                     {
                         let (tokens, words, uri_count) = match text_part {
                             TextPart::Plain { tokens, .. } if !has_plain_part => {
@@ -233,18 +220,13 @@ impl SpamFilterAnalyzeMime for Server {
                     let mut num_text_parts = 0;
                     let mut has_other_parts = false;
 
-                    for (sub_part_id, sub_part) in part_ids
-                        .iter()
-                        .map(|id| (*id, &ctx.input.message.parts[*id as usize]))
-                    {
+                    for sub_part in part.children() {
                         let ctype = sub_part
                             .content_type()
                             .map(|ct| ct.ctype())
                             .unwrap_or_default();
 
-                        if ctype.eq_ignore_ascii_case("text")
-                            && !ctx.input.message.attachments.contains(&sub_part_id)
-                        {
+                        if ctype.eq_ignore_ascii_case("text") && !sub_part.is_attachment() {
                             num_text_parts += 1;
                         } else if !ctype.eq_ignore_ascii_case("multipart") {
                             has_other_parts = true;
@@ -263,16 +245,18 @@ impl SpamFilterAnalyzeMime for Server {
             } else if ct_type.eq_ignore_ascii_case("text") {
                 let mut is_7bit = false;
                 if cte.is_empty() || cte.eq_ignore_ascii_case("7bit") {
-                    if raw_message
-                        .get(part.raw_body_offset() as usize..part.raw_end_offset() as usize)
-                        .is_some_and(|bytes| !bytes.is_ascii())
-                    {
+                    if !part.raw_body().is_ascii() {
                         // MIME text part claims to be ASCII but isn't
                         ctx.result.add_tag("BAD_CTE_7BIT");
                     }
                     is_7bit = true;
                 } else if cte.eq_ignore_ascii_case("base64") {
-                    if part.contents().is_ascii() {
+                    if ctx
+                        .input
+                        .texts
+                        .get(part_id)
+                        .map_or_else(|| part.decoded().is_ascii(), str::is_ascii)
+                    {
                         // Has text part encoded in base64 that does not contain any 8bit characters
                         ctx.result.add_tag("MIME_BASE64_TEXT_BOGUS");
                     } else {
@@ -295,10 +279,7 @@ impl SpamFilterAnalyzeMime for Server {
                     .output
                     .text_parts
                     .get(part_id as usize)
-                    .filter(|_| {
-                        ctx.input.message.text_body.contains(&part_id)
-                            || ctx.input.message.html_body.contains(&part_id)
-                    })
+                    .filter(|_| ctx.input.is_body(part_id))
                     .is_some_and(|p| match p {
                         TextPart::Plain { text_body, .. } => text_body.is_mixed_charset(),
                         TextPart::Html { text_body, .. } => text_body.is_mixed_charset(),
@@ -329,7 +310,7 @@ impl SpamFilterAnalyzeMime for Server {
                     && !is_encrypted
                     && !has_content_id
                     && cd.is_none_or(|cd| {
-                        !cd.c_type.eq_ignore_ascii_case("attachment")
+                        !cd.ctype().eq_ignore_ascii_case("attachment")
                             && !cd.has_attribute("filename")
                     })
                 {
@@ -338,7 +319,11 @@ impl SpamFilterAnalyzeMime for Server {
             }
 
             num_parts += 1;
-            num_parts_size += part.len();
+            num_parts_size += ctx
+                .input
+                .texts
+                .get(part_id)
+                .map_or_else(|| part.decoded_len(), str::len);
 
             let is_octet_stream = ct_type.eq_ignore_ascii_case("application")
                 && ct_subtype.eq_ignore_ascii_case("octet-stream");
@@ -346,7 +331,7 @@ impl SpamFilterAnalyzeMime for Server {
             if is_attachment {
                 // Has a MIME attachment
                 ctx.result.add_tag("HAS_ATTACHMENT");
-                if !is_octet_stream && let Some(t) = infer::get(part.contents()) {
+                if !is_octet_stream && let Some(t) = infer::get(&part.sniff_prefix()) {
                     match mime_match(t.mime_type(), &content_type_full(ct_type, ct_subtype)) {
                         MimeMatch::Equal => {
                             // Known content-type
@@ -418,6 +403,13 @@ impl SpamFilterAnalyzeMime for Server {
         if has_text_part && (is_encrypted_pgp || is_encrypted_smime) {
             // Message contains both text and encrypted parts
             ctx.result.add_tag("BOGUS_ENCRYPTED_AND_TEXT");
+        }
+
+        if ctx.input.message.parts().any(|part| {
+            part.flags()
+                .intersects(PartFlags::LIMIT_REACHED | PartFlags::NESTING_LIMIT)
+        }) {
+            ctx.result.add_tag("MIME_LIMIT_EXCEEDED");
         }
     }
 }

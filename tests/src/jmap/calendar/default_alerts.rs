@@ -984,12 +984,7 @@ async fn sharee_email_alert(test: &TestServer, john: &Account) {
         tokio::time::sleep(Duration::from_millis(250)).await;
     };
     let message = MessageParser::new().parse(&message).unwrap();
-    let html = message
-        .html_bodies()
-        .next()
-        .and_then(|body| body.text_contents())
-        .unwrap_or_default()
-        .to_string();
+    let html = message.body_html(0).unwrap_or_default().into_owned();
     assert!(html.contains("Sharee email reminder"), "{html}");
     assert!(html.contains("jdoe@example.com"), "{html}");
     assert!(!html.contains("hidden.guest@example.net"), "{html}");

@@ -12,7 +12,7 @@ use crate::{
 };
 use common::Server;
 use mail_auth::DmarcResult;
-use mail_parser::{Addr, Address, HeaderName, PartType, parsers::fields::thread::thread_name};
+use mail_parser::{HeaderName, Mailbox, PartKind, thread_name};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 use std::borrow::Cow;
 
@@ -41,25 +41,16 @@ impl<'x> SpamFilterContext<'x> {
         let mut found_spam_status = false;
 
         for header in input.message.headers() {
-            match &header.name {
+            let name = header.name();
+            match name {
                 HeaderName::To | HeaderName::Cc | HeaderName::Bcc => {
-                    let recipients = match &header.name {
+                    let recipients = match name {
                         HeaderName::To => &mut recipients_to,
                         HeaderName::Cc => &mut recipients_cc,
                         _ => &mut recipients_bcc,
                     };
-                    match header.value().as_address() {
-                        Some(Address::List(list)) => {
-                            recipients.reserve(list.len());
-                            recipients.extend(list.iter().map(as_recipient));
-                        }
-                        Some(Address::Group(groups)) => {
-                            for group in groups {
-                                recipients.reserve(group.addresses.len());
-                                recipients.extend(group.addresses.iter().map(as_recipient));
-                            }
-                        }
-                        None => {}
+                    if let Some(addresses) = header.value().as_address() {
+                        recipients.extend(addresses.mailboxes().map(Recipient::from));
                     }
                 }
                 HeaderName::ReplyTo => {
@@ -80,9 +71,7 @@ impl<'x> SpamFilterContext<'x> {
                 HeaderName::From => {
                     from = header.value().as_address().and_then(|addrs| addrs.first());
                 }
-                HeaderName::Other(name)
-                    if input.is_train && !found_spam_status && name.eq("X-Spam-Result") =>
-                {
+                HeaderName::XSpamResult if input.is_train && !found_spam_status => {
                     for token in header
                         .value()
                         .as_text()
@@ -113,51 +102,28 @@ impl<'x> SpamFilterContext<'x> {
         let subject_tokens = tokenize(subject, borrowed);
 
         // Tokenize and convert text parts
-        let mut text_parts = Vec::with_capacity(input.message.parts.len());
-        let mut text_parts_nested = Vec::new();
-        let mut message_stack = Vec::new();
-        let mut message_iter = input.message.parts.iter();
+        let texts = input.texts;
+        let text_parts = input
+            .message
+            .parts()
+            .map(|part| match (part.kind(), texts.get(part.id())) {
+                (PartKind::Text, Some(text)) => TextPart::Plain {
+                    text_body: text,
+                    tokens: tokenize(text, borrowed),
+                },
+                (PartKind::Html, Some(html)) => {
+                    let html_tokens = html_to_tokens(html);
+                    let text_body = html_text_body(&html_tokens);
 
-        loop {
-            while let Some(part) = message_iter.next() {
-                let is_main_message = message_stack.is_empty();
-                let text_part = match &part.body {
-                    PartType::Text(text) => TextPart::Plain {
-                        text_body: text.as_ref(),
-                        tokens: tokenize(text.as_ref(), borrowed),
-                    },
-                    PartType::Html(html) => {
-                        let html_tokens = html_to_tokens(html);
-                        let text_body = html_text_body(&html_tokens);
-
-                        TextPart::Html {
-                            tokens: tokenize(&text_body, detached),
-                            html_tokens,
-                            text_body,
-                        }
+                    TextPart::Html {
+                        tokens: tokenize(&text_body, detached),
+                        html_tokens,
+                        text_body,
                     }
-                    PartType::Message(message) => {
-                        message_stack.push(message_iter);
-                        message_iter = message.parts.iter();
-                        TextPart::None
-                    }
-                    _ => TextPart::None,
-                };
-
-                if is_main_message {
-                    text_parts.push(text_part);
-                } else if !matches!(text_part, TextPart::None) {
-                    text_parts_nested.push(text_part);
                 }
-            }
-
-            if let Some(iter) = message_stack.pop() {
-                message_iter = iter;
-            } else {
-                break;
-            }
-        }
-        text_parts.extend(text_parts_nested);
+                _ => TextPart::None,
+            })
+            .collect();
 
         let subject_thread = thread_name(subject).to_string();
         let env_from_addr = Email::new(input.env_from);
@@ -249,10 +215,12 @@ pub(crate) fn detached(text: &str) -> Cow<'static, str> {
     Cow::Owned(text.to_string())
 }
 
-fn as_recipient(addr: &Addr<'_>) -> Recipient {
-    Recipient {
-        email: Email::new(addr.address().unwrap_or_default()),
-        name: addr.name().and_then(trimmed_name),
+impl From<Mailbox<'_>> for Recipient {
+    fn from(addr: Mailbox<'_>) -> Self {
+        Recipient {
+            email: Email::new(addr.address().unwrap_or_default()),
+            name: addr.name().and_then(trimmed_name),
+        }
     }
 }
 

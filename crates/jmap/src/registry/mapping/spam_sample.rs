@@ -15,7 +15,7 @@ use crate::{
 use compact_str::format_compact;
 use jmap_proto::{error::set::SetError, types::state::State};
 use jmap_tools::JsonPointer;
-use mail_parser::{MessageParser, parsers::fields::thread::thread_name};
+use mail_parser::{MessageParser, thread_name};
 use registry::{
     jmap::{IntoValue, JsonPointerPatch, RegistryJsonPatch},
     schema::{

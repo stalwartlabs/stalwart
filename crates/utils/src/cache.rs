@@ -5,7 +5,7 @@
  */
 
 use arcstr::ArcStr;
-use mail_auth::{DnssecStatus, MX, RecordSet, ResolverCache, Txt};
+use mail_auth::{DnssecStatus, Mx, RecordSet, ResolverCache, TxtRecord};
 use quick_cache::{
     Equivalent, Options, OptionsBuilder, Weighter,
     sync::{DefaultLifecycle, PlaceholderGuard},
@@ -364,7 +364,7 @@ impl<T: CacheItemWeight> CacheItemWeight for Arc<[T]> {
 
 impl<T: CacheItemWeight> CacheItemWeight for RecordSet<T> {
     fn weight(&self) -> u64 {
-        self.rrset.weight() + std::mem::size_of::<DnssecStatus>() as u64
+        self.records.weight() + std::mem::size_of::<DnssecStatus>() as u64
     }
 }
 
@@ -392,19 +392,19 @@ impl CacheItemWeight for Ipv6Addr {
     }
 }
 
-impl CacheItemWeight for MX {
+impl CacheItemWeight for Mx {
     fn weight(&self) -> u64 {
         self.exchanges
             .iter()
             .map(|e| e.len() as u64 + std::mem::size_of::<Box<str>>() as u64)
             .sum::<u64>()
-            + std::mem::size_of::<MX>() as u64
+            + std::mem::size_of::<Mx>() as u64
     }
 }
 
-impl CacheItemWeight for Txt {
+impl CacheItemWeight for TxtRecord {
     fn weight(&self) -> u64 {
-        std::mem::size_of::<Txt>() as u64
+        std::mem::size_of::<TxtRecord>() as u64
     }
 }
 

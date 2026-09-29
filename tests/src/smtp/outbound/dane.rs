@@ -16,10 +16,10 @@ use common::{
     ipc::PolicyType,
 };
 use mail_auth::{
-    DnssecStatus, MX,
-    common::parse::TxtRecordParser,
-    mta_sts::{ReportUri, TlsRpt},
-    report::tlsrpt::ResultType,
+    DnssecStatus, Mx,
+    dns::TxtRecordParser,
+    mta_sts::{ReportUri, TlsRptRecord},
+    report::tlsrpt::FailureType,
 };
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
@@ -117,7 +117,7 @@ async fn dane_verify() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -131,7 +131,7 @@ async fn dane_verify() {
     );
     local.server.txt_add(
         "_smtp._tls.foobar.org",
-        TlsRpt::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
+        TlsRptRecord::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
         Instant::now() + Duration::from_secs(10),
     );
 
@@ -156,7 +156,7 @@ async fn dane_verify() {
     assert_eq!(report.policy, PolicyType::Tlsa(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::DaneRequired
+        FailureType::DaneRequired
     );
     assert_eq!(
         report.failure.as_ref().unwrap().receiving_mx_hostname,
@@ -199,7 +199,7 @@ async fn dane_verify() {
     assert_eq!(report.policy, PolicyType::Tlsa(tlsa.into()));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::ValidationFailure
+        FailureType::ValidationFailure
     );
     remote.assert_no_events();
 
@@ -247,7 +247,7 @@ async fn dane_verify() {
     // even when valid records are cached.
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -268,7 +268,7 @@ async fn dane_verify() {
     assert_eq!(report.policy, PolicyType::Tlsa(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::DaneRequired
+        FailureType::DaneRequired
     );
     remote.assert_no_events();
 }
@@ -332,7 +332,7 @@ async fn dane_tlsa_lookup_error_defers() {
 
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx._dns_error.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -422,7 +422,7 @@ async fn dane_skipped_when_mx_host_zone_is_insecure() {
 
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx._dns_error.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -526,7 +526,7 @@ async fn dane_required_fails_when_mx_host_zone_is_insecure() {
 
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx._dns_error.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -541,7 +541,7 @@ async fn dane_required_fails_when_mx_host_zone_is_insecure() {
     );
     local.server.txt_add(
         "_smtp._tls.foobar.org",
-        TlsRpt::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
+        TlsRptRecord::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
         Instant::now() + Duration::from_secs(10),
     );
 
@@ -566,7 +566,7 @@ async fn dane_required_fails_when_mx_host_zone_is_insecure() {
     assert_eq!(report.policy, PolicyType::Tlsa(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::DaneRequired
+        FailureType::DaneRequired
     );
     assert_eq!(
         report.failure.as_ref().unwrap().failure_reason_code,
@@ -622,7 +622,7 @@ async fn dane_bogus_dnssec_temp_fails() {
 
     local.server.txt_add(
         "_smtp._tls.foobar.org",
-        TlsRpt::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
+        TlsRptRecord::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
         Instant::now() + Duration::from_secs(30),
     );
     local.server.ipv4_add(
@@ -643,7 +643,7 @@ async fn dane_bogus_dnssec_temp_fails() {
 
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -665,7 +665,7 @@ async fn dane_bogus_dnssec_temp_fails() {
     assert_eq!(report.policy, PolicyType::Tlsa(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::DnssecInvalid
+        FailureType::DnssecInvalid
     );
     assert_eq!(
         report.failure.as_ref().unwrap().receiving_mx_hostname,
@@ -674,7 +674,7 @@ async fn dane_bogus_dnssec_temp_fails() {
 
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx._dnssec_bogus.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -696,7 +696,7 @@ async fn dane_bogus_dnssec_temp_fails() {
     assert_eq!(report.policy, PolicyType::Tlsa(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::DnssecInvalid
+        FailureType::DnssecInvalid
     );
     assert_eq!(
         report.failure.as_ref().unwrap().receiving_mx_hostname,

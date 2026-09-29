@@ -11,8 +11,8 @@ use crate::{
         server::TestServer,
     },
 };
-use imap_proto::ResponseType;
 use encodify::base64::STANDARD;
+use imap_proto::ResponseType;
 use registry::schema::{
     enums::Permission,
     structs::{Account, Permissions, PermissionsList},

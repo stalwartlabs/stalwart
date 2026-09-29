@@ -10,7 +10,7 @@ use std::{fmt::Display, sync::Arc, time::Duration};
 pub static STS_TEST_POLICY: parking_lot::Mutex<Vec<u8>> = parking_lot::Mutex::new(Vec::new());
 
 use common::{Server, config::smtp::resolver::Policy};
-use mail_auth::{mta_sts::MtaSts, report::tlsrpt::ResultType};
+use mail_auth::{mta_sts::MtaStsRecord, report::tlsrpt::FailureType};
 
 use super::{Error, parse::ParsePolicy};
 
@@ -41,7 +41,7 @@ impl MtaStsLookup for Server {
             .smtp
             .resolvers
             .dns
-            .txt_lookup::<MtaSts>(
+            .txt_lookup::<MtaStsRecord>(
                 format!("_mta-sts.{domain}."),
                 Some(&self.inner.cache.dns_txt),
             )
@@ -101,11 +101,11 @@ impl MtaStsLookup for Server {
     }
 }
 
-impl From<&Error> for ResultType {
+impl From<&Error> for FailureType {
     fn from(err: &Error) -> Self {
         match &err {
-            Error::InvalidPolicy(_) => ResultType::StsPolicyInvalid,
-            _ => ResultType::StsPolicyFetchError,
+            Error::InvalidPolicy(_) => FailureType::StsPolicyInvalid,
+            _ => FailureType::StsPolicyFetchError,
         }
     }
 }

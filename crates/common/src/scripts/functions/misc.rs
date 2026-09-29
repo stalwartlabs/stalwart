@@ -6,14 +6,14 @@
 
 use std::{net::IpAddr, str::FromStr};
 
-use mail_auth::common::resolver::ToReverseName;
+use mail_auth::dns::ToReverseName;
 use registry::types::ipmask::IpAddrOrMask;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use sieve::{Context, runtime::Variable};
 use utils::HexEncode;
 
-use super::ApplyString;
+use super::{ApplyString, sniff::SniffPrefix};
 
 pub fn fn_is_empty<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     match &v[0] {
@@ -68,7 +68,7 @@ pub fn fn_detect_file_type<'x>(ctx: &Context<'x>, v: &[Variable<'x>]) -> Variabl
     let as_extension = v[0].to_string() == "ext";
     ctx.message()
         .part(ctx.part())
-        .and_then(|p| infer::get(p.contents()))
+        .and_then(|p| infer::get(&p.sniff_prefix()))
         .map(|file_type| {
             Variable::borrowed(if as_extension {
                 file_type.extension()

@@ -14,7 +14,7 @@ use analysis::url::UrlParts;
 use mail_auth::{
     ArcOutput, DkimOutput, DmarcResult, IprevOutput, SpfOutput, dkim2::Dkim2Output, dmarc::Policy,
 };
-use mail_parser::Message;
+use mail_parser::{Message, PartId};
 use modules::html::HtmlToken;
 use nlp::tokenizers::types::TokenType;
 use std::borrow::Cow;
@@ -27,6 +27,7 @@ pub type ContextToken<'x> = TokenType<Cow<'x, str>, Box<Email>, Box<UrlParts<'x>
 
 pub struct SpamFilterInput<'x> {
     pub message: &'x Message<'x>,
+    pub texts: &'x MessageTexts<'x>,
     pub span_id: u64,
 
     // Sender authentication
@@ -87,6 +88,10 @@ pub struct SpamFilterOutput<'x> {
     pub text_parts: Vec<TextPart<'x>>,
 }
 
+pub struct MessageTexts<'x> {
+    texts: Vec<Option<Cow<'x, str>>>,
+}
+
 #[derive(Debug)]
 pub struct IpParts {
     pub ip: Option<IpAddr>,
@@ -143,10 +148,27 @@ pub struct Recipient {
     pub name: Option<String>,
 }
 
+impl<'x> MessageTexts<'x> {
+    pub fn new(message: &'x Message<'x>) -> Self {
+        MessageTexts {
+            texts: message.parts().map(|part| part.text()).collect(),
+        }
+    }
+
+    pub fn get(&self, part_id: PartId) -> Option<&str> {
+        self.texts.get(part_id as usize)?.as_deref()
+    }
+}
+
 impl<'x> SpamFilterInput<'x> {
-    pub fn from_message(message: &'x Message<'x>, span_id: u64) -> Self {
+    pub fn from_message(
+        message: &'x Message<'x>,
+        texts: &'x MessageTexts<'x>,
+        span_id: u64,
+    ) -> Self {
         Self {
             message,
+            texts,
             span_id,
             arc_result: None,
             spf_ehlo_result: None,
@@ -174,6 +196,32 @@ impl<'x> SpamFilterInput<'x> {
     pub fn train_mode(mut self) -> Self {
         self.is_train = true;
         self
+    }
+
+    pub fn is_text_body(&self, part_id: PartId) -> bool {
+        self.message
+            .part(part_id)
+            .is_some_and(|part| part.message().id() == 0 && part.in_text_body())
+    }
+
+    pub fn is_html_body(&self, part_id: PartId) -> bool {
+        self.message
+            .part(part_id)
+            .is_some_and(|part| part.message().id() == 0 && part.in_html_body())
+    }
+
+    pub fn is_body(&self, part_id: PartId) -> bool {
+        self.message.part(part_id).is_some_and(|part| {
+            part.message().id() == 0 && (part.in_text_body() || part.in_html_body())
+        })
+    }
+
+    pub fn first_body_part(&self) -> Option<PartId> {
+        self.message
+            .text_body()
+            .next()
+            .or_else(|| self.message.html_body().next())
+            .map(|part| part.id())
     }
 }
 

@@ -19,6 +19,7 @@ use calcard::{
     vcard::VCard,
 };
 use common::{Server, auth::AccessToken};
+use encodify::base64::LENIENT;
 use groupware::{
     cache::GroupwareCache,
     calendar::{CalendarEventContent, privacy::EventPrivacy},
@@ -26,7 +27,6 @@ use groupware::{
 };
 use jmap_proto::error::set::{InvalidProperty, SetError};
 use jmap_tools::{Key, Map, Property, Value};
-use encodify::base64::LENIENT;
 use std::future::Future;
 use store::{
     ValueKey,

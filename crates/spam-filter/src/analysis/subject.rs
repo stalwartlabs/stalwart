@@ -55,13 +55,8 @@ impl SpamFilterAnalyzeSubject for Server {
         let mut subject_raw = b"".as_slice();
 
         for header in ctx.input.message.headers() {
-            if header.name == HeaderName::Subject {
-                subject_raw = ctx
-                    .input
-                    .message
-                    .raw_message()
-                    .get(header.offset_start as usize..header.offset_end as usize)
-                    .unwrap_or_default();
+            if header.name() == HeaderName::Subject {
+                subject_raw = header.raw_value();
                 break;
             }
         }

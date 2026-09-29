@@ -11,12 +11,12 @@ use common::{
 };
 use compact_str::CompactString;
 use directory::Credentials;
+use encodify::base64::LENIENT;
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::authenticate::Mechanism,
     receiver::{self, Request},
 };
-use encodify::base64::LENIENT;
 use registry::schema::enums::Permission;
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;

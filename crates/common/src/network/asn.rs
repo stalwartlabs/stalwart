@@ -13,7 +13,7 @@ use std::{
 
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
-use mail_auth::common::resolver::ToReverseName;
+use mail_auth::dns::ToReverseName;
 use store::write::now;
 use tokio::sync::Semaphore;
 

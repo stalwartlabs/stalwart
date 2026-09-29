@@ -5,8 +5,8 @@
  */
 
 use crate::DocumentId;
-use jmap_tools::{Element, Property, Value};
 use encodify::base32::{STALWART, U64Text};
+use jmap_tools::{Element, Property, Value};
 use std::{ops::Deref, str::FromStr};
 
 #[derive(

@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::SpamFilterInput;
 use common::config::mailstore::spamfilter::PyzorConfig;
 use compact_str::ToCompactString;
-use mail_parser::{Message, PartType};
+use mail_parser::PartKind;
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 
 use super::html::{TEXT_STOP, byte_table, push_span, scan_until};
@@ -33,61 +34,6 @@ pub struct PyzorResponse {
     pub code: u32,
     pub count: u64,
     pub wl_count: u64,
-}
-
-pub(crate) async fn pyzor_check(
-    message: &Message<'_>,
-    config: &PyzorConfig,
-) -> trc::Result<Option<PyzorResponse>> {
-    // Make sure there is at least one text part
-    if !message
-        .parts
-        .iter()
-        .any(|p| matches!(p.body, PartType::Text(_) | PartType::Html(_)))
-    {
-        return Ok(None);
-    }
-
-    // Hash message
-    let request = message.pyzor_check_message();
-
-    #[cfg(feature = "test_mode")]
-    {
-        if request.contains("b5b476f0b5ba6e1c038361d3ded5818dd39c90a2") {
-            return Ok(PyzorResponse {
-                code: 200,
-                count: 1000,
-                wl_count: 0,
-            }
-            .into());
-        } else if request.contains("d67d4b8bfc3860449e3418bb6017e2612f3e2a99") {
-            return Ok(PyzorResponse {
-                code: 200,
-                count: 60,
-                wl_count: 10,
-            }
-            .into());
-        } else if request.contains("81763547012b75e57a20d18ce0b93014208cdfdb") {
-            return Ok(PyzorResponse {
-                code: 200,
-                count: 50,
-                wl_count: 20,
-            }
-            .into());
-        }
-    }
-
-    // Send message to address
-    pyzor_send_message(config.address, config.timeout, &request)
-        .await
-        .map(Into::into)
-        .map_err(|err| {
-            trc::SpamEvent::PyzorError
-                .into_err()
-                .ctx(trc::Key::Url, config.address.to_compact_string())
-                .reason(err)
-                .details("Pyzor failed")
-        })
 }
 
 async fn pyzor_send_message(
@@ -162,64 +108,102 @@ impl PyzorWrite for Sha1 {
     }
 }
 
-pub trait PyzorDigest<W: PyzorWrite> {
-    fn pyzor_digest(&self, writer: W) -> W;
-}
+impl SpamFilterInput<'_> {
+    pub(crate) async fn pyzor_check(
+        &self,
+        config: &PyzorConfig,
+    ) -> trc::Result<Option<PyzorResponse>> {
+        if !self.message.root().parts().any(|part| part.is_text()) {
+            return Ok(None);
+        }
 
-pub trait PyzorCheck {
-    fn pyzor_check_message(&self) -> String;
-}
+        let request = self.pyzor_check_message();
 
-impl<W: PyzorWrite> PyzorDigest<W> for Message<'_> {
-    fn pyzor_digest(&self, writer: W) -> W {
-        let mut parts = Vec::with_capacity(self.parts.len());
-        parts.extend(self.parts.iter().filter_map(|part| match &part.body {
-            PartType::Text(text) => Some(Cow::Borrowed(text.as_ref())),
-            PartType::Html(html) => Some(Cow::Owned(html_to_text(html.as_ref()))),
-            _ => None,
-        }));
+        #[cfg(feature = "test_mode")]
+        {
+            if request.contains("b5b476f0b5ba6e1c038361d3ded5818dd39c90a2") {
+                return Ok(PyzorResponse {
+                    code: 200,
+                    count: 1000,
+                    wl_count: 0,
+                }
+                .into());
+            } else if request.contains("d67d4b8bfc3860449e3418bb6017e2612f3e2a99") {
+                return Ok(PyzorResponse {
+                    code: 200,
+                    count: 60,
+                    wl_count: 10,
+                }
+                .into());
+            } else if request.contains("81763547012b75e57a20d18ce0b93014208cdfdb") {
+                return Ok(PyzorResponse {
+                    code: 200,
+                    count: 50,
+                    wl_count: 20,
+                }
+                .into());
+            }
+        }
+
+        pyzor_send_message(config.address, config.timeout, &request)
+            .await
+            .map(Into::into)
+            .map_err(|err| {
+                trc::SpamEvent::PyzorError
+                    .into_err()
+                    .ctx(trc::Key::Url, config.address.to_compact_string())
+                    .reason(err)
+                    .details("Pyzor failed")
+            })
+    }
+
+    pub fn pyzor_digest<W: PyzorWrite>(&self, writer: W) -> W {
+        let texts = self.texts;
+        let parts = self
+            .message
+            .root()
+            .parts()
+            .filter_map(|part| match part.kind() {
+                PartKind::Text => texts.get(part.id()).map(Cow::Borrowed),
+                PartKind::Html => Some(Cow::Owned(html_to_text(texts.get(part.id())?))),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
 
         pyzor_digest(writer, parts.iter().flat_map(|text| text.lines()))
     }
-}
 
-impl PyzorCheck for Message<'_> {
-    fn pyzor_check_message(&self) -> String {
+    pub fn pyzor_check_message(&self) -> String {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
 
-        pyzor_create_message(
-            self,
+        self.pyzor_create_message(
             time,
             (time & 0xFFFF) as u16 ^ ((time >> 16) & 0xFFFF) as u16,
         )
     }
-}
 
-fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> String {
-    // Hash message
-    let hash = message.pyzor_digest(Sha1::new()).finalize().hex_encode();
-    // Hash key
-    let mut hash_key = Sha1::new();
-    hash_key.update("anonymous:".as_bytes());
-    let hash_key = hash_key.finalize().hex_encode();
+    fn pyzor_create_message(&self, time: u64, thread: u16) -> String {
+        let hash = self.pyzor_digest(Sha1::new()).finalize().hex_encode();
+        let mut hash_key = Sha1::new();
+        hash_key.update("anonymous:".as_bytes());
+        let hash_key = hash_key.finalize().hex_encode();
 
-    // Hash message
-    let message = format!(
-        "Op: check\nOp-Digest: {hash}\nThread: {thread}\nPV: 2.1\nUser: anonymous\nTime: {time}"
-    );
-    let mut msg_hash = Sha1::new();
-    msg_hash.update(message.as_bytes());
-    let msg_hash = msg_hash.finalize();
+        let message = format!(
+            "Op: check\nOp-Digest: {hash}\nThread: {thread}\nPV: 2.1\nUser: anonymous\nTime: {time}"
+        );
+        let mut msg_hash = Sha1::new();
+        msg_hash.update(message.as_bytes());
+        let msg_hash = msg_hash.finalize();
 
-    // Sign
-    let mut sig = Sha1::new();
-    sig.update(msg_hash);
-    sig.update(format!(":{time}:{hash_key}"));
-    let sig = sig.finalize().hex_encode();
+        let mut sig = Sha1::new();
+        sig.update(msg_hash);
+        sig.update(format!(":{time}:{hash_key}"));
+        let sig = sig.finalize().hex_encode();
 
-    format!("{message}\nSig: {sig}\n")
+        format!("{message}\nSig: {sig}\n")
+    }
 }
 
 pub fn pyzor_digest<'x, I, W>(mut writer: W, lines: I) -> W
@@ -480,14 +464,14 @@ pub fn html_to_text(input: &str) -> String {
 mod test {
     use std::time::Duration;
 
+    use crate::{MessageTexts, SpamFilterInput};
     use mail_parser::MessageParser;
     use sha1::Digest;
     use sha1::Sha1;
     use utils::HexEncode;
 
-    use super::pyzor_create_message;
     use super::pyzor_send_message;
-    use super::{PyzorDigest, html_to_text, pyzor_digest};
+    use super::{html_to_text, pyzor_digest};
 
     use super::PyzorResponse;
 
@@ -520,11 +504,10 @@ mod test {
 
     #[test]
     fn message_pyzor() {
-        let message = pyzor_create_message(
-            &MessageParser::new().parse(HTML_TEXT_STYLE_SCRIPT).unwrap(),
-            1697468672,
-            49005,
-        );
+        let message = MessageParser::new().parse(HTML_TEXT_STYLE_SCRIPT).unwrap();
+        let texts = MessageTexts::new(&message);
+        let message = SpamFilterInput::from_message(&message, &texts, 0)
+            .pyzor_create_message(1697468672, 49005);
 
         assert_eq!(
             message,
@@ -623,12 +606,11 @@ mod test {
             (TEXT_ATTACHMENT_W_SUBJECT_NULL, "Thisisatestmailing"),
             (TEXT_ATTACHMENT_W_CONTENTTYPE_NULL, "Thisisatestmailing"),
         ] {
+            let message = MessageParser::new().parse(input).unwrap();
+            let texts = MessageTexts::new(&message);
             assert_eq!(
                 String::from_utf8(
-                    MessageParser::new()
-                        .parse(input)
-                        .unwrap()
-                        .pyzor_digest(Vec::new(),)
+                    SpamFilterInput::from_message(&message, &texts, 0).pyzor_digest(Vec::new())
                 )
                 .unwrap(),
                 expected,
@@ -637,11 +619,11 @@ mod test {
         }
 
         // Test SHA hash
+        let message = MessageParser::new().parse(HTML_TEXT_STYLE_SCRIPT).unwrap();
+        let texts = MessageTexts::new(&message);
         assert_eq!(
-            MessageParser::new()
-                .parse(HTML_TEXT_STYLE_SCRIPT)
-                .unwrap()
-                .pyzor_digest(Sha1::new(),)
+            SpamFilterInput::from_message(&message, &texts, 0)
+                .pyzor_digest(Sha1::new())
                 .finalize()
                 .hex_encode(),
             "b2c27325a034c581df0c9ef37e4a0d63208a3e7e",

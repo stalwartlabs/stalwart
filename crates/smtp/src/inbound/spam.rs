@@ -9,7 +9,7 @@ use common::{config::mailstore::spamfilter::SpamFilterAction, network::SessionSt
 use mail_auth::{ArcOutput, DkimOutput, DmarcResult, dkim2::Dkim2Output, dmarc::Policy};
 use mail_parser::Message;
 use spam_filter::{
-    SpamFilterInput,
+    MessageTexts, SpamFilterInput,
     analysis::{
         init::SpamFilterInit,
         score::{SpamFilterAnalyzeScore, SpamFilterScore},
@@ -27,8 +27,10 @@ impl<T: SessionStream> Session<T> {
         dmarc_policy: Option<&'x Policy>,
     ) -> SpamFilterAction<SpamFilterScore> {
         let server = &self.server;
+        let texts = MessageTexts::new(message);
         let mut ctx = server.spam_filter_init(self.build_spam_input(
             message,
+            &texts,
             dkim_result,
             dkim2_result,
             arc_result,
@@ -45,9 +47,11 @@ impl<T: SessionStream> Session<T> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn build_spam_input<'x>(
         &'x self,
         message: &'x Message<'x>,
+        texts: &'x MessageTexts<'x>,
         dkim_result: &'x [DkimOutput<'x>],
         dkim2_result: Option<&'x Dkim2Output<'x>>,
         arc_result: Option<&'x ArcOutput>,
@@ -56,6 +60,7 @@ impl<T: SessionStream> Session<T> {
     ) -> SpamFilterInput<'x> {
         SpamFilterInput {
             message,
+            texts,
             span_id: self.data.session_id,
             arc_result,
             spf_ehlo_result: self.data.spf_ehlo.as_ref(),

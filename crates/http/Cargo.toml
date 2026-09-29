@@ -20,9 +20,9 @@ types = { path = "../types" }
 directory = { path =  "../directory" }
 services = { path =  "../services" }
 registry = { path =  "../registry" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
+mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.13", features = ["generate", "arc"] }
+mail-auth = { version = "0.14", features = ["generate", "arc"] }
 tokio = { version = "1.53", features = ["rt"] }
 hyper = { version = "1.11.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }

@@ -6,12 +6,10 @@
 
 use crate::{
     cache::email::{MessageCacheAccess, thread_keywords},
-    message::metadata::{
-        MessageMetadata, MetadataAddress, MetadataHeaderName, MetadataHeaderValue,
-    },
+    message::metadata::{AddressHeader, EnvelopeView, HeaderId, HeaderList, Mailbox, Occurrence},
 };
 use common::{MessageStoreCache, Server};
-use mail_parser::parsers::fields::thread::thread_name;
+use mail_parser::{HeaderForm, HeaderName, ParsedValue, thread_name};
 use store::{
     IterateParams, U32_LEN, ValueKey,
     ahash::AHashMap,
@@ -164,9 +162,7 @@ impl EmailSortKeys for Server {
             let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
             if documents.contains(document_id) {
                 for field in fields {
-                    if let Some(sort_key) = MessageSortKeys::deserialize_field(value, *field)
-                        && !sort_key.is_empty()
-                    {
+                    if let Some(sort_key) = MessageSortKeys::deserialize_field(value, *field) {
                         let sort_key = &sort_key.as_bytes()[..sort_key.len().min(MAX_SORT_KEY_LEN)];
                         let mut padded_sort_key: SortKey = [0u8; MAX_SORT_KEY_LEN];
                         padded_sort_key[..sort_key.len()].copy_from_slice(sort_key);
@@ -308,47 +304,58 @@ fn cache_comparator(
 }
 
 impl MessageSortKeys {
-    pub fn from_metadata(metadata: &MessageMetadata) -> Self {
-        let mut keys = MessageSortKeys::default();
-        let Some(part) = metadata
-            .contents
-            .first()
-            .and_then(|part| part.parts.first())
-        else {
-            return keys;
-        };
-
-        let (mut has_from, mut has_to, mut has_subject) = (false, false, false);
-        for header in part.headers.iter().rev() {
-            match &header.name {
-                MetadataHeaderName::From if !has_from => {
-                    keys.from = address_sort_key(&header.value);
-                    has_from = true;
-                }
-                MetadataHeaderName::To if !has_to => {
-                    keys.to = address_sort_key(&header.value);
-                    has_to = true;
-                }
-                MetadataHeaderName::Subject if !has_subject => {
-                    keys.subject = match &header.value {
-                        MetadataHeaderValue::Text(text) => sort_key([thread_name(text)]),
-                        MetadataHeaderValue::TextList(texts) => texts
-                            .first()
-                            .map(|text| sort_key([thread_name(text)]))
-                            .unwrap_or_default(),
-                        _ => String::new(),
-                    };
-                    has_subject = true;
-                }
-                _ => (),
-            }
-
-            if has_from && has_to && has_subject {
-                break;
-            }
+    pub fn new(from: Option<Mailbox<'_>>, to: Option<Mailbox<'_>>, subject: Option<&str>) -> Self {
+        MessageSortKeys {
+            from: from.map(Mailbox::sort_key).unwrap_or_default(),
+            to: to.map(Mailbox::sort_key).unwrap_or_default(),
+            subject: subject
+                .map(|subject| sort_key([thread_name(subject)]))
+                .unwrap_or_default(),
         }
+    }
 
-        keys
+    pub fn from_message(message: &mail_parser::Message<'_>) -> Self {
+        let headers = message.root().headers();
+        let first_mailbox = |name: HeaderName<'static>| {
+            headers
+                .get(name)
+                .and_then(|header| header.value().as_address())
+                .and_then(|list| list.mailboxes().next())
+                .map(|mailbox| Mailbox {
+                    name: mailbox.name(),
+                    address: mailbox.address(),
+                })
+        };
+        MessageSortKeys::new(
+            first_mailbox(HeaderName::From),
+            first_mailbox(HeaderName::To),
+            headers.subject(),
+        )
+    }
+
+    pub fn from_headers(root: HeaderList<'_>, headers: &[u8]) -> Self {
+        let from = root.last_parsed(HeaderId::FROM, headers, HeaderForm::Addresses);
+        let to = root.last_parsed(HeaderId::TO, headers, HeaderForm::Addresses);
+        let subject = root.last_parsed(HeaderId::SUBJECT, headers, HeaderForm::Text);
+        MessageSortKeys::new(
+            from.as_ref().and_then(Mailbox::first_of),
+            to.as_ref().and_then(Mailbox::first_of),
+            subject
+                .as_ref()
+                .and_then(|subject| subject.value().as_text()),
+        )
+    }
+
+    pub fn from_envelope(envelope: EnvelopeView<'_>) -> Self {
+        MessageSortKeys::new(
+            envelope
+                .addresses(AddressHeader::From, Occurrence::Last)
+                .first(),
+            envelope
+                .addresses(AddressHeader::To, Occurrence::Last)
+                .first(),
+            envelope.subject(),
+        )
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -378,21 +385,24 @@ impl MessageSortKeys {
     }
 }
 
-fn address_sort_key(value: &MetadataHeaderValue) -> String {
-    let address = match value {
-        MetadataHeaderValue::AddressList(addresses) => addresses.first(),
-        MetadataHeaderValue::AddressGroup(groups) => {
-            groups.iter().find_map(|group| group.addresses.first())
-        }
-        _ => None,
-    };
+impl<'x> Mailbox<'x> {
+    pub fn first_of(parsed: &'x ParsedValue<'_>) -> Option<Self> {
+        parsed
+            .value()
+            .as_address()?
+            .mailboxes()
+            .next()
+            .map(|mailbox| Mailbox {
+                name: mailbox.name(),
+                address: mailbox.address(),
+            })
+    }
 
-    match address {
-        Some(MetadataAddress { name, address }) => sort_key([
-            name.as_deref().unwrap_or_default(),
-            address.as_deref().unwrap_or_default(),
-        ]),
-        None => String::new(),
+    fn sort_key(self) -> String {
+        sort_key([
+            self.name.unwrap_or_default(),
+            self.address.unwrap_or_default(),
+        ])
     }
 }
 
@@ -413,7 +423,7 @@ fn sort_key<const N: usize>(values: [&str; N]) -> String {
                 pending_space = false;
             }
 
-            for ch in ch.to_lowercase() {
+            for ch in ch.to_uppercase() {
                 if sort_key.len() + ch.len_utf8() > MAX_SORT_KEY_LEN {
                     return sort_key;
                 }
@@ -429,35 +439,25 @@ fn sort_key<const N: usize>(values: [&str; N]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::metadata::build_metadata_contents;
+    use crate::message::metadata::{ExtraHeaders, MessageMetadata, MetadataStructure};
     use mail_parser::MessageParser;
+    use store::Deserialize;
     use types::blob_hash::BlobHash;
-
-    fn sort_keys_of(raw_message: &str) -> MessageSortKeys {
-        let message = MessageParser::new().parse(raw_message.as_bytes()).unwrap();
-        MessageSortKeys::from_metadata(&MessageMetadata {
-            contents: build_metadata_contents(message),
-            blob_hash: BlobHash::default(),
-            blob_body_offset: 0,
-            preview: Default::default(),
-            raw_headers: Default::default(),
-        })
-    }
 
     #[test]
     fn sort_key_normalization() {
         assert_eq!(
             sort_key(["  John\tDOE  ", "jdoe@Example.com"]),
-            "john doe jdoe@example.com"
+            "JOHN DOE JDOE@EXAMPLE.COM"
         );
-        assert_eq!(sort_key(["", "jdoe@example.com"]), "jdoe@example.com");
+        assert_eq!(sort_key(["", "jdoe@example.com"]), "JDOE@EXAMPLE.COM");
         assert_eq!(sort_key(["", ""]), "");
         assert_eq!(
             sort_key([
                 "Bartolomeo Cristofori di Francesco",
                 "b.cristofori@example.com"
             ]),
-            "bartolomeo cristofori di francesco b.cri"
+            "BARTOLOMEO CRISTOFORI DI FRANCESCO B.CRI"
         );
     }
 
@@ -491,26 +491,84 @@ mod tests {
     }
 
     #[test]
-    fn sort_keys_from_metadata() {
-        let keys = sort_keys_of(concat!(
-            "From: \"Doe, John\" <jdoe@example.com>\r\n",
-            "To: Jane Roe <jroe@example.com>, Other <other@example.com>\r\n",
-            "Subject: Re: Fwd: Hello   World\r\n",
-            "\r\n",
-            "body\r\n"
-        ));
-        assert_eq!(keys.from, "doe, john jdoe@example.com");
-        assert_eq!(keys.to, "jane roe jroe@example.com");
-        assert_eq!(keys.subject, "hello world");
-
-        let keys = sort_keys_of(concat!(
-            "From: jdoe@example.com\r\n",
-            "To: Undisclosed recipients:;\r\n",
-            "\r\n",
-            "body\r\n"
-        ));
-        assert_eq!(keys.from, "jdoe@example.com");
-        assert_eq!(keys.to, "");
-        assert_eq!(keys.subject, "");
+    fn sort_keys_from_message_and_envelope() {
+        for (raw, from, to, subject) in [
+            (
+                concat!(
+                    "From: \"Doe, John\" <jdoe@example.com>\r\n",
+                    "To: Jane Roe <jroe@example.com>, Other <other@example.com>\r\n",
+                    "Subject: Re: Fwd: Hello   World\r\n",
+                    "\r\n",
+                    "body\r\n"
+                ),
+                "DOE, JOHN JDOE@EXAMPLE.COM",
+                "JANE ROE JROE@EXAMPLE.COM",
+                "HELLO WORLD",
+            ),
+            (
+                concat!(
+                    "From: jdoe@example.com\r\n",
+                    "To: Undisclosed recipients:;\r\n",
+                    "\r\n",
+                    "body\r\n"
+                ),
+                "JDOE@EXAMPLE.COM",
+                "",
+                "",
+            ),
+            (
+                concat!(
+                    "From: first@example.com\r\n",
+                    "To: Team: Ann <ann@example.com>, bob@example.com;, carl@example.com\r\n",
+                    "Subject: first\r\n",
+                    "From: Last Sender <last@example.com>\r\n",
+                    "Subject: Fwd: second\r\n",
+                    "\r\n",
+                    "body\r\n"
+                ),
+                "LAST SENDER LAST@EXAMPLE.COM",
+                "ANN ANN@EXAMPLE.COM",
+                "SECOND",
+            ),
+            (
+                concat!(
+                    "From: _under@example.com\r\n",
+                    "Subject: Ad: Re: Ad: Re: Ad: x\r\n",
+                    "\r\n",
+                    "body\r\n"
+                ),
+                "_UNDER@EXAMPLE.COM",
+                "",
+                "X",
+            ),
+            (
+                concat!(
+                    "Subject: [list] Re: caf\u{e9} stra\u{df}e\r\n",
+                    "\r\n",
+                    "body\r\n"
+                ),
+                "",
+                "",
+                "CAF\u{c9} STRASSE",
+            ),
+        ] {
+            let message = MessageParser::new()
+                .parse(raw.as_bytes())
+                .expect("message parses");
+            let row =
+                MessageMetadata::build(&message, &ExtraHeaders::default(), BlobHash::default())
+                    .encode()
+                    .expect("row encodes");
+            let structure = MetadataStructure::deserialize(&row).expect("structure");
+            let meta = structure.unarchive().expect("archive");
+            for keys in [
+                MessageSortKeys::from_message(&message),
+                MessageSortKeys::from_envelope(meta.root().envelope()),
+            ] {
+                assert_eq!(keys.from, from, "{raw:?}");
+                assert_eq!(keys.to, to, "{raw:?}");
+                assert_eq!(keys.subject, subject, "{raw:?}");
+            }
+        }
     }
 }

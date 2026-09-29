@@ -22,14 +22,11 @@ impl SpamFilterAnalyzeMid for Server {
         let mut mid_raw = "";
 
         for header in ctx.input.message.headers() {
-            if let (HeaderName::MessageId, value) = (&header.name, &header.value) {
-                mid = value.as_text().unwrap_or_default();
-                mid_raw = std::str::from_utf8(
-                    &ctx.input.message.raw_message()
-                        [header.offset_start as usize..header.offset_end as usize],
-                )
-                .unwrap_or_default()
-                .trim();
+            if header.name() == HeaderName::MessageId {
+                mid = header.value().as_text().unwrap_or_default();
+                mid_raw = std::str::from_utf8(header.raw_value())
+                    .unwrap_or_default()
+                    .trim();
                 break;
             }
         }

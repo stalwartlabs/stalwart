@@ -31,17 +31,15 @@ use compact_str::{CompactString, ToCompactString};
 use mail_auth::{
     AuthenticatedMessage, AuthenticationResults, Dkim2Result, DkimResult, DmarcResult, ReceivedSpf,
     SpfOutput, SpfResult,
-    common::{
-        crypto::Algorithm,
-        headers::{Header, HeaderWriter},
-        verify::VerifySignature,
-    },
+    crypto::Algorithm,
     dkim::DkimError,
     dkim2::{Dkim2Dsn, Dkim2DsnFailure, Envelope as Dkim2Envelope},
     dmarc::{self, verify::DmarcParameters},
+    headers::HeaderWriter,
+    spf::verify::SpfParameters,
 };
 use mail_builder::headers::{date::Date, message_id::generate_message_id_header};
-use mail_parser::{MessageParser, MimeHeaders, parsers::fields::thread::thread_name};
+use mail_parser::{MessageParser, PartKind, thread_name};
 use registry::schema::structs::Rate;
 use sieve::runtime::Variable;
 use smtp_proto::{
@@ -60,7 +58,7 @@ impl<T: SessionStream> Session<T> {
         let raw_message = std::mem::take(&mut self.data.message);
         let parsed_message = match MessageParser::new()
             .parse(&raw_message)
-            .filter(|p| p.headers().iter().any(|h| !h.name.is_other()))
+            .filter(|p| p.headers().has_known())
         {
             Some(parsed_message) => parsed_message,
             None => {
@@ -116,20 +114,13 @@ impl<T: SessionStream> Session<T> {
             .unwrap_or(VerifyStrategy::Relaxed);
         let dkim_output = if dkim.verify() || dmarc.verify() {
             // Remove insecure DKIM signatures before verification
-            auth_message.dkim_headers.retain(|header| {
-                let signature = &header.header;
-                if signature.algorithm() == Algorithm::RsaSha1
-                    || (signature.algorithm() == Algorithm::RsaSha256 && signature.b.len() < 128)
+            auth_message.retain_dkim_signatures(|signature| {
+                if signature.a == Algorithm::RsaSha1
+                    || (signature.a == Algorithm::RsaSha256 && signature.b.len() < 128)
                 {
-                    auth_message.errors.push(Header {
-                        name: header.name,
-                        value: header.value,
-                        header: mail_auth::Error::Dkim(DkimError::UnsupportedAlgorithm),
-                    });
-                    auth_message.has_dkim_errors = true;
-                    false
+                    Err(DkimError::UnsupportedAlgorithm)
                 } else {
-                    true
+                    Ok(())
                 }
             });
 
@@ -155,7 +146,7 @@ impl<T: SessionStream> Session<T> {
                 .await
             {
                 for output in &dkim_output {
-                    if let Some(rcpt) = output.failure_report_addr() {
+                    if let Some(rcpt) = output.report_address() {
                         Box::pin(self.send_dkim_report(
                             rcpt,
                             &auth_message,
@@ -245,11 +236,11 @@ impl<T: SessionStream> Session<T> {
         // Verify DKIM2
         let mail_from = self.data.mail_from.as_ref().unwrap();
         let dkim2_output = if (dkim.verify() || dmarc.verify())
-            && (!auth_message.dkim2_signatures.is_empty() || auth_message.has_dkim2_errors)
+            && (!auth_message.dkim2_signatures().is_empty() || auth_message.has_dkim2_errors())
         {
             // Discard forged DKIM2-signed delivery status notifications
             if dkim.verify()
-                && !auth_message.dkim2_signatures.is_empty()
+                && !auth_message.dkim2_signatures().is_empty()
                 && let Some(dsn) =
                     parse_dkim2_dsn(&parsed_message, &auth_message, raw_message.as_slice())
                 && let Err(failure) = self
@@ -328,7 +319,8 @@ impl<T: SessionStream> Session<T> {
         // Build authentication results header
         let mut auth_results = AuthenticationResults::new(&self.hostname);
         if !dkim_output.is_empty() {
-            auth_results = auth_results.with_dkim_results(&dkim_output, auth_message.from())
+            auth_results =
+                auth_results.with_dkim_results(&dkim_output, auth_message.first_from_address())
         }
         if let Some(dkim2_output) = &dkim2_output
             && (!matches!(dkim2_output.result(), Dkim2Result::None)
@@ -337,18 +329,20 @@ impl<T: SessionStream> Session<T> {
             auth_results = auth_results.with_dkim2_result(dkim2_output);
         }
         if let Some(spf_ehlo) = &self.data.spf_ehlo {
-            auth_results = auth_results.with_spf_ehlo_result(
+            auth_results = auth_results.with_spf_result(
                 spf_ehlo,
-                self.data.remote_ip,
-                &self.data.helo_domain,
+                &SpfParameters::helo(self.data.remote_ip, &self.data.helo_domain, &self.hostname),
             );
         }
         if let Some(spf_mail_from) = &self.data.spf_mail_from {
-            auth_results = auth_results.with_spf_mailfrom_result(
+            auth_results = auth_results.with_spf_result(
                 spf_mail_from,
-                self.data.remote_ip,
-                &mail_from.address,
-                &self.data.helo_domain,
+                &SpfParameters::mail_from(
+                    self.data.remote_ip,
+                    &self.data.helo_domain,
+                    &self.hostname,
+                    &mail_from.address,
+                ),
             );
         }
         if let Some(iprev) = &self.data.iprev {
@@ -379,7 +373,7 @@ impl<T: SessionStream> Session<T> {
                                 message: &auth_message,
                                 dkim_output: &dkim_output,
                                 dkim2_output: dkim2_output.as_ref(),
-                                rfc5321_mail_from_domain: if !mail_from.domain.is_empty() {
+                                mail_from_domain: if !mail_from.domain.is_empty() {
                                     &mail_from.domain
                                 } else {
                                     &self.data.helo_domain
@@ -416,7 +410,7 @@ impl<T: SessionStream> Session<T> {
                 );
 
                 // Send DMARC report
-                if dmarc_output.requested_reports() && !is_report && !(rejected && is_temp_fail) {
+                if dmarc_output.requests_reports() && !is_report && !(rejected && is_temp_fail) {
                     Box::pin(self.send_dmarc_report(
                         &auth_message,
                         &auth_results,
@@ -452,37 +446,13 @@ impl<T: SessionStream> Session<T> {
             }
 
             if self.data.rcpt_to.is_empty() {
-                self.server.analyze_report(
-                    mail_parser::Message {
-                        html_body: parsed_message.html_body,
-                        text_body: parsed_message.text_body,
-                        attachments: parsed_message.attachments,
-                        parts: parsed_message
-                            .parts
-                            .into_iter()
-                            .map(|p| p.into_owned())
-                            .collect(),
-                        raw_message: b"".into(),
-                    },
-                    self.data.session_id,
-                );
+                self.server
+                    .analyze_report(parsed_message.into_owned(), self.data.session_id);
                 self.data.messages_sent += 1;
                 return (b"250 2.0.0 Message queued for delivery.\r\n"[..]).into();
             } else {
-                self.server.analyze_report(
-                    mail_parser::Message {
-                        html_body: parsed_message.html_body.clone(),
-                        text_body: parsed_message.text_body.clone(),
-                        attachments: parsed_message.attachments.clone(),
-                        parts: parsed_message
-                            .parts
-                            .iter()
-                            .map(|p| p.clone().into_owned())
-                            .collect(),
-                        raw_message: b"".into(),
-                    },
-                    self.data.session_id,
-                );
+                self.server
+                    .analyze_report(parsed_message.clone().into_owned(), self.data.session_id);
             }
         }
 
@@ -518,10 +488,12 @@ impl<T: SessionStream> Session<T> {
         {
             ReceivedSpf::new(
                 spf_output,
-                self.data.remote_ip,
-                &self.data.helo_domain,
-                &mail_from.address_lcase,
-                &self.hostname,
+                &SpfParameters::mail_from(
+                    self.data.remote_ip,
+                    &self.data.helo_domain,
+                    &self.hostname,
+                    &mail_from.address_lcase,
+                ),
             )
             .write_header(&mut headers);
         }
@@ -676,8 +648,7 @@ impl<T: SessionStream> Session<T> {
                         .iter()
                         .filter_map(|r| {
                             if matches!(r.result(), DkimResult::Pass) {
-                                r.signature()
-                                    .map(|s| Variable::from(s.domain().to_lowercase()))
+                                r.signature().map(|s| Variable::from(s.d.to_lowercase()))
                             } else {
                                 None
                             }
@@ -698,7 +669,7 @@ impl<T: SessionStream> Session<T> {
                         .map(|a| a.as_str())
                         .unwrap_or_default(),
                 )
-                .with_message(parsed_message);
+                .with_message(&parsed_message);
 
             let modifications = match self.run_script(script_id, script, params).await {
                 ScriptResult::Accept { modifications } => modifications,
@@ -1086,19 +1057,19 @@ fn parse_dkim2_dsn<'x, 'r>(
     }) {
         return None;
     }
-    let mail_parser::PartType::Multipart(children) = &parsed_message.root_part().body else {
+    let root_part = parsed_message.root_part();
+    if !matches!(root_part.kind(), PartKind::Multipart) {
         return None;
-    };
+    }
 
     let mut returned = &b""[..];
     let mut returned_full = false;
-    for child in children {
-        let part = parsed_message.parts.get(*child as usize)?;
+    for part in root_part.children() {
         if part.is_content_type("message", "rfc822") {
-            returned = raw_message.get(part.offset_body as usize..part.offset_end as usize)?;
+            returned = raw_message.get(part.offset_body() as usize..part.offset_end() as usize)?;
             returned_full = true;
         } else if part.is_content_type("text", "rfc822-headers") {
-            returned = raw_message.get(part.offset_body as usize..part.offset_end as usize)?;
+            returned = raw_message.get(part.offset_body() as usize..part.offset_end() as usize)?;
             returned_full = false;
         }
     }

@@ -79,7 +79,7 @@ impl Server {
         })
     }
 
-    pub async fn all_archives<CB>(
+    pub async fn all_values<T, CB>(
         &self,
         account_id: u32,
         collection: Collection,
@@ -87,7 +87,8 @@ impl Server {
         mut cb: CB,
     ) -> trc::Result<()>
     where
-        CB: FnMut(u32, Archive<ArchiveBytes>) -> trc::Result<()> + Send + Sync,
+        T: Deserialize,
+        CB: FnMut(u32, T) -> trc::Result<()> + Send + Sync,
     {
         let collection: u8 = collection.into();
 
@@ -111,8 +112,7 @@ impl Server {
                 ),
                 |key, value| {
                     let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(value)?;
-                    cb(document_id, archive)?;
+                    cb(document_id, T::deserialize(value)?)?;
 
                     Ok(true)
                 },

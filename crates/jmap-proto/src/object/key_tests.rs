@@ -643,3 +643,90 @@ fn nested_pointer_keys_stop_at_the_depth_limit() {
         .join()
         .expect("finishes");
 }
+
+#[test]
+fn header_form_rules() {
+    const ALL_FORMS: [HeaderForm; 7] = [
+        HeaderForm::Raw,
+        HeaderForm::Text,
+        HeaderForm::Addresses,
+        HeaderForm::GroupedAddresses,
+        HeaderForm::MessageIds,
+        HeaderForm::Date,
+        HeaderForm::URLs,
+    ];
+    let rules: [(&[&str], &[HeaderForm]); 7] = [
+        (&["Subject", "Comments", "Keywords"], &[HeaderForm::Text]),
+        (
+            &[
+                "From",
+                "Sender",
+                "Reply-To",
+                "To",
+                "Cc",
+                "Bcc",
+                "Resent-From",
+                "Resent-Sender",
+                "Resent-To",
+                "Resent-Cc",
+                "Resent-Bcc",
+            ],
+            &[HeaderForm::Addresses, HeaderForm::GroupedAddresses],
+        ),
+        (
+            &[
+                "Message-ID",
+                "In-Reply-To",
+                "References",
+                "Resent-Message-ID",
+            ],
+            &[HeaderForm::MessageIds],
+        ),
+        (&["Date", "Resent-Date"], &[HeaderForm::Date]),
+        (
+            &[
+                "List-Help",
+                "List-Unsubscribe",
+                "List-Subscribe",
+                "List-Post",
+                "List-Owner",
+                "List-Archive",
+            ],
+            &[HeaderForm::URLs],
+        ),
+        (&["Return-Path", "Received"], &[]),
+        (
+            &[
+                "X-Custom",
+                "List-Id",
+                "Resent-Reply-To",
+                "Content-Type",
+                "Content-Disposition",
+                "Delivered-To",
+            ],
+            &ALL_FORMS,
+        ),
+    ];
+    for (names, allowed) in rules {
+        for name in names {
+            for spelling in [
+                name.to_string(),
+                name.to_ascii_lowercase(),
+                name.to_ascii_uppercase(),
+            ] {
+                for form in ALL_FORMS {
+                    let property = HeaderProperty {
+                        form,
+                        header: spelling.clone(),
+                        all: false,
+                    };
+                    assert_eq!(
+                        property.is_allowed_form(),
+                        form == HeaderForm::Raw || allowed.contains(&form),
+                        "header:{spelling}{form}"
+                    );
+                }
+            }
+        }
+    }
+}

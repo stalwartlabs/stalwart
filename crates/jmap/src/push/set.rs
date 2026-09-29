@@ -6,6 +6,7 @@
 
 use common::{Server, auth::AccessToken, ipc::PushEvent, network::is_global_ip};
 use email::push::{EmailPush, Keys, PushSubscription, PushSubscriptions, Urgency};
+use encodify::base64::{Base64, Padding, URL_SAFE};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::{
@@ -23,7 +24,6 @@ use jmap_proto::{
     types::date::UTCDate,
 };
 use jmap_tools::{Key, Map, Property, Value};
-use encodify::base64::{Base64, Padding, URL_SAFE};
 use rand::distr::Alphanumeric;
 use registry::schema::enums::StorageQuota;
 use reqwest::Url;

@@ -1,0 +1,374 @@
+BODY (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 25 0
+   )(
+      "message" "rfc822" NIL NIL NIL "base64" 602 (
+         "Sun, 27 Sep 2026 09:00:00 +0000" "Inner message" (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "rcpt" "example.com"
+            )
+         ) NIL NIL NIL "<inner@example.com>"
+      ) (
+         (
+            "text" "plain" (
+               "charset" "utf-8"
+            ) NIL NIL "quoted-printable" 17 0
+         )(
+            "text" "html" (
+               "charset" "utf-8"
+            ) NIL NIL "7bit" 26 0
+         ) "alternative"
+      ) 7
+   ) "mixed"
+)
+
+BODYSTRUCTURE (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 25 0 NIL NIL NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL "base64" 602 (
+         "Sun, 27 Sep 2026 09:00:00 +0000" "Inner message" (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "rcpt" "example.com"
+            )
+         ) NIL NIL NIL "<inner@example.com>"
+      ) (
+         (
+            "text" "plain" (
+               "charset" "utf-8"
+            ) NIL NIL "quoted-printable" 17 0 NIL NIL NIL NIL
+         )(
+            "text" "html" (
+               "charset" "utf-8"
+            ) NIL NIL "7bit" 26 0 NIL NIL NIL NIL
+         ) "alternative" (
+            "boundary" "inner"
+         ) NIL NIL NIL
+      ) 7 NIL NIL NIL NIL
+   ) "mixed" (
+      "boundary" "outer"
+   ) NIL NIL NIL
+)
+
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 25 0 NIL NIL NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL "base64" 602 (
+         "Sun, 27 Sep 2026 09:00:00 +0000" "Inner message" (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               "Inner Sender" NIL "inner" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "rcpt" "example.com"
+            )
+         ) NIL NIL NIL "<inner@example.com>"
+      ) (
+         (
+            "text" "plain" (
+               "charset" "utf-8"
+            ) NIL NIL "quoted-printable" 17 0 NIL NIL NIL NIL
+         )(
+            "text" "html" (
+               "charset" "utf-8"
+            ) NIL NIL "7bit" 26 0 NIL NIL NIL NIL
+         ) "alternative" (
+            "boundary" "inner"
+         ) NIL NIL NIL
+      ) 7 NIL NIL NIL NIL
+   ) "mixed" (
+      "boundary" "outer"
+   ) NIL NIL NIL
+)
+
+BODY[] {1013}
+From: Outer Sender <outer@example.com>
+To: rcpt@example.com
+Subject: Forwarded encoded message
+Date: Mon, 28 Sep 2026 10:00:00 +0000
+Message-ID: <outer@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: text/plain; charset=us-ascii
+
+See the attached message.
+--outer
+Content-Type: message/rfc822
+Content-Transfer-Encoding: base64
+
+RnJvbTogSW5uZXIgU2VuZGVyIDxpbm5lckBleGFtcGxlLmNvbT4NClRvOiByY3B0QGV4YW1wbGUu
+Y29tDQpTdWJqZWN0OiBJbm5lciBtZXNzYWdlDQpEYXRlOiBTdW4sIDI3IFNlcCAyMDI2IDA5OjAw
+OjAwICswMDAwDQpNZXNzYWdlLUlEOiA8aW5uZXJAZXhhbXBsZS5jb20+DQpNSU1FLVZlcnNpb246
+IDEuMA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvYWx0ZXJuYXRpdmU7IGJvdW5kYXJ5PSJpbm5l
+ciINCg0KLS1pbm5lcg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04DQpD
+b250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCkNhZj1DMz1BOSBh
+dSBsYWl0DQotLWlubmVyDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0K
+DQo8cD5DYWYmZWFjdXRlOyBhdSBsYWl0PC9wPg0KLS1pbm5lci0tDQo=
+--outer--
+
+BINARY[] {1013}
+From: Outer Sender <outer@example.com>
+To: rcpt@example.com
+Subject: Forwarded encoded message
+Date: Mon, 28 Sep 2026 10:00:00 +0000
+Message-ID: <outer@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: text/plain; charset=us-ascii
+
+See the attached message.
+--outer
+Content-Type: message/rfc822
+Content-Transfer-Encoding: base64
+
+RnJvbTogSW5uZXIgU2VuZGVyIDxpbm5lckBleGFtcGxlLmNvbT4NClRvOiByY3B0QGV4YW1wbGUu
+Y29tDQpTdWJqZWN0OiBJbm5lciBtZXNzYWdlDQpEYXRlOiBTdW4sIDI3IFNlcCAyMDI2IDA5OjAw
+OjAwICswMDAwDQpNZXNzYWdlLUlEOiA8aW5uZXJAZXhhbXBsZS5jb20+DQpNSU1FLVZlcnNpb246
+IDEuMA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvYWx0ZXJuYXRpdmU7IGJvdW5kYXJ5PSJpbm5l
+ciINCg0KLS1pbm5lcg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04DQpD
+b250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCkNhZj1DMz1BOSBh
+dSBsYWl0DQotLWlubmVyDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0K
+DQo8cD5DYWYmZWFjdXRlOyBhdSBsYWl0PC9wPg0KLS1pbm5lci0tDQo=
+--outer--
+
+BINARY.SIZE[] 1013
+----------------------------------
+BODY[HEADER] {240}
+From: Outer Sender <outer@example.com>
+To: rcpt@example.com
+Subject: Forwarded encoded message
+Date: Mon, 28 Sep 2026 10:00:00 +0000
+Message-ID: <outer@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+
+----------------------------------
+BODY[TEXT] {773}
+--outer
+Content-Type: text/plain; charset=us-ascii
+
+See the attached message.
+--outer
+Content-Type: message/rfc822
+Content-Transfer-Encoding: base64
+
+RnJvbTogSW5uZXIgU2VuZGVyIDxpbm5lckBleGFtcGxlLmNvbT4NClRvOiByY3B0QGV4YW1wbGUu
+Y29tDQpTdWJqZWN0OiBJbm5lciBtZXNzYWdlDQpEYXRlOiBTdW4sIDI3IFNlcCAyMDI2IDA5OjAw
+OjAwICswMDAwDQpNZXNzYWdlLUlEOiA8aW5uZXJAZXhhbXBsZS5jb20+DQpNSU1FLVZlcnNpb246
+IDEuMA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvYWx0ZXJuYXRpdmU7IGJvdW5kYXJ5PSJpbm5l
+ciINCg0KLS1pbm5lcg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04DQpD
+b250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCkNhZj1DMz1BOSBh
+dSBsYWl0DQotLWlubmVyDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0K
+DQo8cD5DYWYmZWFjdXRlOyBhdSBsYWl0PC9wPg0KLS1pbm5lci0tDQo=
+--outer--
+
+----------------------------------
+BODY[MIME] {51}
+Content-Type: multipart/mixed; boundary="outer"
+
+
+----------------------------------
+BODY[1] {25}
+See the attached message.
+BINARY[1] {25}
+See the attached message.
+BINARY.SIZE[1] 25
+----------------------------------
+BODY[1.HEADER] {46}
+Content-Type: text/plain; charset=us-ascii
+
+
+----------------------------------
+BODY[1.TEXT] {25}
+See the attached message.
+----------------------------------
+BODY[1.MIME] {46}
+Content-Type: text/plain; charset=us-ascii
+
+
+----------------------------------
+BODY[1.1] {25}
+See the attached message.
+BINARY[1.1] {25}
+See the attached message.
+BINARY.SIZE[1.1] 25
+----------------------------------
+BODY[2] {602}
+RnJvbTogSW5uZXIgU2VuZGVyIDxpbm5lckBleGFtcGxlLmNvbT4NClRvOiByY3B0QGV4YW1wbGUu
+Y29tDQpTdWJqZWN0OiBJbm5lciBtZXNzYWdlDQpEYXRlOiBTdW4sIDI3IFNlcCAyMDI2IDA5OjAw
+OjAwICswMDAwDQpNZXNzYWdlLUlEOiA8aW5uZXJAZXhhbXBsZS5jb20+DQpNSU1FLVZlcnNpb246
+IDEuMA0KQ29udGVudC1UeXBlOiBtdWx0aXBhcnQvYWx0ZXJuYXRpdmU7IGJvdW5kYXJ5PSJpbm5l
+ciINCg0KLS1pbm5lcg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04DQpD
+b250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCkNhZj1DMz1BOSBh
+dSBsYWl0DQotLWlubmVyDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD11dGYtOA0K
+DQo8cD5DYWYmZWFjdXRlOyBhdSBsYWl0PC9wPg0KLS1pbm5lci0tDQo=
+BINARY[2] {440}
+From: Inner Sender <inner@example.com>
+To: rcpt@example.com
+Subject: Inner message
+Date: Sun, 27 Sep 2026 09:00:00 +0000
+Message-ID: <inner@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Caf=C3=A9 au lait
+--inner
+Content-Type: text/html; charset=utf-8
+
+<p>Caf&eacute; au lait</p>
+--inner--
+
+BINARY.SIZE[2] 440
+----------------------------------
+BODY[2.HEADER] {234}
+From: Inner Sender <inner@example.com>
+To: rcpt@example.com
+Subject: Inner message
+Date: Sun, 27 Sep 2026 09:00:00 +0000
+Message-ID: <inner@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="inner"
+
+
+----------------------------------
+BODY[2.TEXT] {206}
+--inner
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Caf=C3=A9 au lait
+--inner
+Content-Type: text/html; charset=utf-8
+
+<p>Caf&eacute; au lait</p>
+--inner--
+
+----------------------------------
+BODY[2.MIME] {67}
+Content-Type: message/rfc822
+Content-Transfer-Encoding: base64
+
+
+----------------------------------
+BODY[2.1] {17}
+Caf=C3=A9 au lait
+BINARY[2.1] {13}
+Café au lait
+BINARY.SIZE[2.1] 13
+----------------------------------
+BODY[2.1.HEADER] {88}
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+
+----------------------------------
+BODY[2.1.TEXT] {17}
+Caf=C3=A9 au lait
+----------------------------------
+BODY[2.1.MIME] {88}
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+
+----------------------------------
+BODY[2.1.1] {17}
+Caf=C3=A9 au lait
+BINARY[2.1.1] {13}
+Café au lait
+BINARY.SIZE[2.1.1] 13
+----------------------------------
+BODY[2.2] {26}
+<p>Caf&eacute; au lait</p>
+BINARY[2.2] {26}
+<p>Caf&eacute; au lait</p>
+BINARY.SIZE[2.2] 26
+----------------------------------
+BODY[2.2.HEADER] {42}
+Content-Type: text/html; charset=utf-8
+
+
+----------------------------------
+BODY[2.2.TEXT] {26}
+<p>Caf&eacute; au lait</p>
+----------------------------------
+BODY[2.2.MIME] {42}
+Content-Type: text/html; charset=utf-8
+
+
+----------------------------------
+BODY[2.2.1] {26}
+<p>Caf&eacute; au lait</p>
+BINARY[2.2.1] {26}
+<p>Caf&eacute; au lait</p>
+BINARY.SIZE[2.2.1] 26
+----------------------------------
+BODY[HEADER.FIELDS (FROM TO)] {64}
+From: Outer Sender <outer@example.com>
+To: rcpt@example.com
+
+
+----------------------------------
+BODY[HEADER.FIELDS (FROM TO)]<10> {25}
+r Sender <outer@example.c
+----------------------------------
+BODY[HEADER.FIELDS.NOT (SUBJECT CC)] {204}
+From: Outer Sender <outer@example.com>
+To: rcpt@example.com
+Date: Mon, 28 Sep 2026 10:00:00 +0000
+Message-ID: <outer@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+
+----------------------------------
+BODY[HEADER.FIELDS.NOT (SUBJECT CC)]<10> {25}
+r Sender <outer@example.c
+----------------------------------

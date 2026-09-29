@@ -15,7 +15,11 @@ use crate::index_queue::{
     Sink,
 };
 use common::{BuildServer, Inner, Server};
-use email::message::metadata::MessageMetadata;
+use email::message::{
+    metadata::{MetadataRow, MetadataStructure},
+    thread::ThreadSubject,
+};
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -24,8 +28,8 @@ use store::{
     IterateParams, U32_LEN, ValueKey,
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery},
     write::{
-        Archive, ArchiveBytes, BatchBuilder, QueueDocumentId, SearchIndex, SearchIndexClass,
-        ValueClass, key::DeserializeBigEndian,
+        BatchBuilder, QueueDocumentId, SearchIndex, SearchIndexClass, ValueClass,
+        key::DeserializeBigEndian,
     },
 };
 use tokio::sync::{mpsc, oneshot};
@@ -646,25 +650,47 @@ async fn delete_email_metadata(
     account_id: u32,
     document_id: u32,
 ) -> trc::Result<()> {
+    let key = ValueKey::immutable(
+        account_id,
+        Collection::Email,
+        document_id,
+        EmailField::Metadata,
+    );
     match server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
-            account_id,
-            Collection::Email,
-            document_id,
-            EmailField::Metadata,
-        ))
+        .get_value::<MetadataStructure>(key.clone())
         .await?
     {
-        Some(metadata_) => {
+        Some(structure) => {
             batch
                 .with_account_id(account_id)
                 .with_collection(Collection::Email)
                 .with_document(document_id);
-            let metadata = metadata_
-                .unarchive::<MessageMetadata>()
+            let metadata = structure.unarchive().caused_by(trc::location!())?;
+            let row = match metadata.thread_subject() {
+                ThreadSubject::Resolved(_) => None,
+                ThreadSubject::InHeaders => server.store().get_value::<MetadataRow>(key).await?,
+            };
+            let headers = row
+                .as_ref()
+                .map(MetadataRow::raw_headers)
+                .transpose()
                 .caused_by(trc::location!())?;
-            metadata.unindex(batch);
+            let complete = match (&row, &headers) {
+                (Some(row), Some(headers)) => Some((
+                    row.unarchive().caused_by(trc::location!())?,
+                    headers.as_ref(),
+                )),
+                _ => None,
+            };
+            let thread_subject = match (metadata.thread_subject(), complete) {
+                (ThreadSubject::Resolved(name), _) => Cow::Borrowed(name),
+                (ThreadSubject::InHeaders, Some((row, headers))) => {
+                    Cow::Owned(row.thread_subject_in(headers).into_owned())
+                }
+                (ThreadSubject::InHeaders, None) => Cow::Borrowed(""),
+            };
+            metadata.unindex(batch, &thread_subject);
 
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -673,14 +699,14 @@ async fn delete_email_metadata(
             // Hold blob for undeletion
             #[cfg(feature = "enterprise")]
             {
-                use email::message::metadata::ArchivedMetadataHeaderName;
-
                 if let Some(undelete_retention) = server
                     .core
                     .enterprise
                     .as_ref()
                     .and_then(|e| e.deleted_items_retention.as_ref())
                 {
+                    use email::message::metadata::{AddressHeader, HeaderId, Mailbox, Occurrence};
+                    use mail_parser::HeaderForm;
                     use registry::{
                         schema::{
                             prelude::{ObjectType, Property},
@@ -692,44 +718,32 @@ async fn delete_email_metadata(
                         SerializeInfallible,
                         write::{BlobLink, BlobOp, RegistryClass, now},
                     };
-                    use types::{blob::BlobId, blob_hash::BlobHash};
+                    use types::blob::BlobId;
 
-                    let root_part = metadata.root_part();
-                    let mut from = None;
-                    let mut subject = None;
-                    let mut date = None;
-
-                    for header in root_part.headers.iter().rev() {
-                        match header.name {
-                            ArchivedMetadataHeaderName::From if from.is_none() => {
-                                from = header.value.as_single_address().and_then(|addr| {
-                                    match (addr.address.as_ref(), addr.name.as_ref()) {
-                                        (Some(address), Some(name)) => {
-                                            Some(format!("{} <{}>", name, address))
-                                        }
-                                        (Some(address), None) => Some(address.as_ref().into()),
-                                        (None, Some(name)) => Some(name.as_ref().into()),
-                                        (None, None) => None,
-                                    }
-                                });
-                            }
-                            ArchivedMetadataHeaderName::Subject if subject.is_none() => {
-                                subject = header.value.as_text().map(Into::into)
-                            }
-                            ArchivedMetadataHeaderName::Date => {
-                                if let Some(dt) = header.value.as_datetime() {
-                                    use mail_parser::DateTime;
-
-                                    date = Some(DateTime::from(dt).to_timestamp());
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    let envelope = metadata.root().envelope();
+                    let describe = |mailbox: Mailbox<'_>| match (mailbox.address, mailbox.name) {
+                        (Some(address), Some(name)) => Some(format!("{name} <{address}>")),
+                        (Some(address), None) => Some(address.into()),
+                        (None, Some(name)) => Some(name.into()),
+                        (None, None) => None,
+                    };
+                    let from = match complete {
+                        Some((row, headers)) if metadata.completeness().is_truncated() => row
+                            .root_field_in(headers, HeaderId::FROM, HeaderForm::Addresses)
+                            .as_ref()
+                            .and_then(Mailbox::first_of)
+                            .and_then(describe),
+                        _ => envelope
+                            .addresses(AddressHeader::From, Occurrence::Last)
+                            .first()
+                            .and_then(describe),
+                    };
+                    let subject = envelope.subject().map(Into::into);
+                    let date = envelope.datetime().map(|date| date.to_timestamp());
 
                     let now = now();
                     let until = now + undelete_retention.as_secs();
-                    let blob_hash = BlobHash::from(&metadata.blob_hash);
+                    let blob_hash = metadata.blob_hash();
 
                     let item = ArchivedItem::Email(ArchivedEmail {
                         account_id: account_id.into(),
@@ -741,7 +755,7 @@ async fn delete_email_metadata(
                             .map(UTCDateTime::from_timestamp)
                             .unwrap_or_else(UTCDateTime::now),
                         subject: subject.unwrap_or_default(),
-                        size: root_part.offset_end.to_native() as u64,
+                        size: metadata.size() as u64,
                     })
                     .to_pickled_vec();
                     let object_id = ObjectType::ArchivedItem.to_id();

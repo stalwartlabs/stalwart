@@ -15,9 +15,9 @@ use common::auth::{
     ACCOUNT_FLAG_ENCRYPT_ALGO_CHACHA20_POLY1305, ACCOUNT_FLAG_ENCRYPT_APPEND,
     ACCOUNT_FLAG_ENCRYPT_METHOD_PGP, ACCOUNT_FLAG_ENCRYPT_TRAIN_SPAM_FILTER, EncryptionKeys,
 };
-use mail_builder::mime::make_boundary;
 use encodify::base64::MIME;
-use mail_parser::{Message, MimeHeaders, PartType};
+use mail_builder::mime::make_boundary;
+use mail_parser::{Message, PartKind};
 use openpgp::{
     parse::Parse,
     serialize::stream,
@@ -61,6 +61,7 @@ pub trait EncryptMessage {
         flags: u64,
     ) -> Result<Vec<u8>, EncryptMessageError>;
     fn is_encrypted(&self) -> bool;
+    fn split_mime_headers(&self) -> (Vec<u8>, Vec<u8>);
 }
 
 impl EncryptMessage for Message<'_> {
@@ -76,24 +77,7 @@ impl EncryptMessage for Message<'_> {
             ));
         }
 
-        let root = self.root_part();
-        let raw_message = self.raw_message();
-        let mut outer_message = Vec::with_capacity((raw_message.len() as f64 * 1.5) as usize);
-        let mut inner_message = Vec::with_capacity(raw_message.len());
-
-        // Move MIME headers and body to inner message
-        for header in root.headers() {
-            (if header.name.is_mime_header() {
-                &mut inner_message
-            } else {
-                &mut outer_message
-            })
-            .extend_from_slice(
-                &raw_message[header.offset_field() as usize..header.offset_end() as usize],
-            );
-        }
-        inner_message.extend_from_slice(b"\r\n");
-        inner_message.extend_from_slice(&raw_message[root.raw_body_offset() as usize..]);
+        let (mut outer_message, inner_message) = self.split_mime_headers();
 
         // Encrypt inner message
         if flags & ACCOUNT_FLAG_ENCRYPT_METHOD_PGP != 0 {
@@ -339,14 +323,38 @@ impl EncryptMessage for Message<'_> {
         Ok(outer_message)
     }
 
+    fn split_mime_headers(&self) -> (Vec<u8>, Vec<u8>) {
+        let root = self.root_part();
+        let raw_message = self.raw();
+        let mut outer_message = Vec::with_capacity((raw_message.len() as f64 * 1.5) as usize);
+        let mut inner_message = Vec::with_capacity(raw_message.len());
+        for header in root.headers() {
+            let target = if header.name().is_mime_header() {
+                &mut inner_message
+            } else {
+                &mut outer_message
+            };
+            let field = raw_message
+                .get(header.offset_field() as usize..header.offset_end() as usize)
+                .unwrap_or_default();
+            target.extend_from_slice(field);
+            if !field.ends_with(b"\n") {
+                target.extend_from_slice(b"\r\n");
+            }
+        }
+        inner_message.extend_from_slice(b"\r\n");
+        inner_message.extend_from_slice(
+            raw_message
+                .get(root.offset_body() as usize..)
+                .unwrap_or_default(),
+        );
+        (outer_message, inner_message)
+    }
+
     fn is_encrypted(&self) -> bool {
         if self.content_type().is_some_and(|ct| {
-            let main_type = ct.c_type.as_ref();
-            let sub_type = ct
-                .c_subtype
-                .as_ref()
-                .map(|s| s.as_ref())
-                .unwrap_or_default();
+            let main_type = ct.ctype();
+            let sub_type = ct.subtype().unwrap_or_default();
 
             (main_type.eq_ignore_ascii_case("application")
                 && (sub_type.eq_ignore_ascii_case("pkcs7-mime")
@@ -362,16 +370,18 @@ impl EncryptMessage for Message<'_> {
             return true;
         }
 
-        if self.parts.len() <= 2 {
+        let root = self.root();
+        let num_parts = root.parts().count();
+        if num_parts <= 2 {
             let mut text_part = None;
             let mut is_multipart = false;
 
-            for part in &self.parts {
-                match &part.body {
-                    PartType::Text(text) => {
-                        text_part = Some(text.as_ref());
+            for part in root.parts() {
+                match part.kind() {
+                    PartKind::Text => {
+                        text_part = part.text();
                     }
-                    PartType::Multipart(_) => {
+                    PartKind::Multipart => {
                         is_multipart = true;
                     }
                     _ => (),
@@ -380,7 +390,7 @@ impl EncryptMessage for Message<'_> {
 
             match text_part {
                 Some(text)
-                    if (self.parts.len() == 1 || is_multipart)
+                    if (num_parts == 1 || is_multipart)
                         && text.trim_start().starts_with("-----BEGIN PGP MESSAGE-----") =>
                 {
                     return true;
@@ -591,4 +601,73 @@ fn encode_null() -> Result<Vec<u8>, EncryptMessageError> {
     rasn::der::encode(&()).map_err(|err| {
         EncryptMessageError::Error(format!("Failed to encode NULL parameters: {}", err))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EncryptMessage;
+    use common::{
+        auth::{ACCOUNT_FLAG_ENCRYPT_ALGO_AES256, ACCOUNT_FLAG_ENCRYPT_METHOD_SMIME},
+        storage::encryption::parse_public_key,
+    };
+    use mail_parser::MessageParser;
+    use registry::schema::structs::PublicKey;
+    use std::path::PathBuf;
+
+    #[test]
+    fn fields_without_a_line_break_are_terminated() {
+        for (raw, outer, inner) in [
+            (
+                &b"From: a@b.com\r\nSubject: Hello"[..],
+                &b"From: a@b.com\r\nSubject: Hello\r\n"[..],
+                &b"\r\n"[..],
+            ),
+            (
+                b"Subject: Hello\r\nContent-Type: text/plain",
+                b"Subject: Hello\r\n",
+                b"Content-Type: text/plain\r\n\r\n",
+            ),
+            (
+                b"Subject: Hello\nContent-Type: text/plain\n\nbody",
+                b"Subject: Hello\n",
+                b"Content-Type: text/plain\n\r\nbody",
+            ),
+        ] {
+            let message = MessageParser::new().parse(raw).expect("message parses");
+            let (split_outer, split_inner) = message.split_mime_headers();
+            assert_eq!(split_outer, outer, "{:?}", String::from_utf8_lossy(raw));
+            assert_eq!(split_inner, inner, "{:?}", String::from_utf8_lossy(raw));
+        }
+    }
+
+    #[tokio::test]
+    async fn encrypted_messages_keep_the_last_field_intact() {
+        let key = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/resources/crypto/cert_smime.pem"),
+        )
+        .expect("certificate");
+        let params = parse_public_key(&PublicKey {
+            key,
+            ..Default::default()
+        })
+        .expect("key parses")
+        .expect("key");
+        let message = MessageParser::new()
+            .parse(&b"From: a@b.com\r\nSubject: Hello"[..])
+            .expect("message parses");
+        let encrypted = message
+            .encrypt(
+                &params.certs,
+                ACCOUNT_FLAG_ENCRYPT_METHOD_SMIME | ACCOUNT_FLAG_ENCRYPT_ALGO_AES256,
+            )
+            .await
+            .expect("encrypts");
+        let stored = MessageParser::new()
+            .parse(&encrypted)
+            .expect("encrypted message parses");
+        assert_eq!(stored.subject(), Some("Hello"));
+        assert!(stored.is_content_type("application", "pkcs7-mime"));
+        assert!(stored.is_encrypted());
+    }
 }

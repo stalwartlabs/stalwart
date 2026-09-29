@@ -10,9 +10,9 @@ use dav_proto::{
     schema::property::{CalDavProperty, DavProperty, WebDavProperty},
     xml_pretty_print,
 };
+use encodify::base64::STANDARD;
 use groupware::DavResourceName;
 use hyper::{HeaderMap, Method, StatusCode, header::AUTHORIZATION};
-use encodify::base64::STANDARD;
 use quick_xml::{NsReader, Reader, XmlVersion, events::Event, name::ResolveResult};
 use std::{borrow::Cow, time::Duration};
 use store::rand::{RngExt, distr::Alphanumeric, rng};

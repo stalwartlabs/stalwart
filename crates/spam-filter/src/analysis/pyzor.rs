@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{SpamFilterContext, modules::pyzor::pyzor_check};
+use crate::SpamFilterContext;
 use common::Server;
 use std::{future::Future, time::Instant};
 
@@ -19,7 +19,7 @@ impl SpamFilterAnalyzePyzor for Server {
     async fn spam_filter_analyze_pyzor(&self, ctx: &mut SpamFilterContext<'_>) {
         if let Some(config) = &self.core.spam.pyzor {
             let time = Instant::now();
-            match pyzor_check(ctx.input.message, config).await {
+            match ctx.input.pyzor_check(config).await {
                 Ok(Some(result)) => {
                     let is_spam = result.code == 200
                         && result.count > config.min_count

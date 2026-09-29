@@ -9,12 +9,13 @@ use crate::expr::{
     if_block::{BootstrapExprExt, IfBlock},
 };
 use compact_str::ToCompactString;
-use mail_auth::{
-    common::crypto::{Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
-    dkim::{Canonicalization, Done},
-    dkim2::{Dkim2Signer, Done as Dkim2Done, Flag},
-};
 use encodify::{Error as CodecError, base64::LENIENT, pem};
+use mail_auth::{
+    crypto::{Ed25519Key, HashAlgorithm, RsaKey, Sha256, SigningKey},
+    dkim::Canonicalization,
+    dkim2::{Dkim2Signer, Flag},
+    signer::Ready,
+};
 use registry::{
     schema::{
         enums::{self, Dkim2Flag, ExpressionConstant},
@@ -74,14 +75,14 @@ pub enum VerifyStrategy {
 }
 
 pub enum Dkim1Signer {
-    RsaSha256(mail_auth::dkim::DkimSigner<RsaKey<Sha256>, Done>),
-    Ed25519Sha256(mail_auth::dkim::DkimSigner<Ed25519Key, Done>),
+    RsaSha256(mail_auth::dkim::DkimSigner<RsaKey<Sha256>, Ready>),
+    Ed25519Sha256(mail_auth::dkim::DkimSigner<Ed25519Key, Ready>),
 }
 
 #[derive(Default)]
 pub struct DkimSigners {
     pub dkim1: Vec<Dkim1Signer>,
-    pub dkim2: Option<Dkim2Signer<Dkim2Done>>,
+    pub dkim2: Option<Dkim2Signer<Ready>>,
 }
 
 impl MailAuthConfig {
@@ -266,7 +267,7 @@ fn build_dkim1_signer<T: SigningKey>(
     domain: String,
     signature: Dkim1Signature,
     key: T,
-) -> mail_auth::dkim::DkimSigner<T, Done> {
+) -> mail_auth::dkim::DkimSigner<T, Ready> {
     let mut signer = mail_auth::dkim::DkimSigner::from_key(key)
         .domain(domain)
         .selector(signature.selector)
@@ -297,11 +298,11 @@ fn build_dkim1_signer<T: SigningKey>(
     }
 
     if let Some(expire) = signature.expire {
-        signer = signer.expiration(expire.into_inner().as_secs());
+        signer = signer.expiration(expire.into_inner());
     }
 
     if let Some(auid) = signature.auid {
-        signer = signer.agent_user_identifier(auid);
+        signer = signer.identity(auid);
     }
 
     if let Some(atps) = signature.third_party {
@@ -309,7 +310,7 @@ fn build_dkim1_signer<T: SigningKey>(
     }
 
     if let Some(atpsh) = signature.third_party_hash {
-        signer = signer.atpsh(match atpsh {
+        signer = signer.atps_hash(match atpsh {
             enums::DkimHash::Sha256 => HashAlgorithm::Sha256,
             enums::DkimHash::Sha1 => HashAlgorithm::Sha1,
         });
@@ -355,18 +356,18 @@ impl CacheItemWeight for DkimSigners {
     fn weight(&self) -> u64 {
         (std::mem::size_of::<Self>()
             + self.dkim1.len() * std::mem::size_of::<Dkim1Signer>()
-            + std::mem::size_of::<Dkim2Signer<Dkim2Done>>()) as u64
+            + std::mem::size_of::<Dkim2Signer<Ready>>()) as u64
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::pem_or_base64_decode;
-    use mail_auth::{common::crypto::Ed25519Key, dkim::generate::DkimKeyPair};
     use encodify::{
         base64::{LineEnding, MIME, STANDARD},
         pem,
     };
+    use mail_auth::{crypto::Ed25519Key, dkim::generate::DkimKeyPair};
 
     #[test]
     fn ed25519_keys_decode_from_pem_or_bare_base64() {

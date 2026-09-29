@@ -12,7 +12,7 @@ use crate::{
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use common::config::smtp::queue::QueueName;
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::MtaOutboundThrottleKey,
@@ -235,7 +235,7 @@ async fn throttle_outbound() {
     // Expect concurrency throttle for mx 'mx.test.org'
     local.server.mx_add(
         "test.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.test.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -266,7 +266,7 @@ async fn throttle_outbound() {
     // Expect rate limit throttle for mx 'mx.test.net'
     local.server.mx_add(
         "test.net",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.test.net".into()].into_boxed_slice(),
             preference: 10,
         }],

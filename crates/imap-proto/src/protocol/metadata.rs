@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{literal_string, push_int, quoted_mailbox_name, quoted_string};
+use super::{literal_string, literal8_string, push_int, quoted_mailbox_name, quoted_string};
 use compact_str::CompactString;
 use std::borrow::Cow;
 
@@ -99,10 +99,7 @@ impl EntryValue<'_> {
             Some(value) if value.iter().all(|ch| (0x20..0x7f).contains(ch)) => {
                 quoted_string(buf, std::str::from_utf8(value).unwrap_or_default())
             }
-            Some(value) if value.contains(&0) => {
-                buf.push(b'~');
-                literal_string(buf, value);
-            }
+            Some(value) if value.contains(&0) => literal8_string(buf, value),
             Some(value) => literal_string(buf, value),
             None => buf.extend_from_slice(b"NIL"),
         }

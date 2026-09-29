@@ -25,14 +25,9 @@ impl SpamFilterAnalyzeReplyTo for Server {
         let mut is_from_list = false;
 
         for header in ctx.input.message.headers() {
-            match &header.name {
+            match header.name() {
                 HeaderName::ReplyTo => {
-                    reply_to_raw = ctx
-                        .input
-                        .message
-                        .raw_message()
-                        .get(header.offset_start as usize..header.offset_end as usize)
-                        .unwrap_or_default();
+                    reply_to_raw = header.raw_value();
                 }
                 HeaderName::ListUnsubscribe | HeaderName::ListId => {
                     is_from_list = true;

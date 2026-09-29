@@ -261,11 +261,7 @@ impl SieveScriptSet for Server {
                                     collection: Collection::SieveScript.into(),
                                     document_id,
                                 },
-                                section: BlobSection {
-                                    size: sieve.size as usize,
-                                    ..Default::default()
-                                }
-                                .into(),
+                                section: BlobSection::new(0, sieve.size as usize, 0).into(),
                             }
                             .into()
                         } else {
@@ -412,11 +408,7 @@ impl SieveScriptSet for Server {
                                 collection: Collection::SieveScript.into(),
                                 document_id,
                             },
-                            section: BlobSection {
-                                size: create.blob_size,
-                                ..Default::default()
-                            }
-                            .into(),
+                            section: BlobSection::new(0, create.blob_size, 0).into(),
                         }),
                     );
                 if create.is_active {

@@ -16,17 +16,24 @@ smtp = { path = "../../crates/smtp" }
 store = { path = "../../crates/store", features = ["test_mode"] }
 types = { path = "../../crates/types" }
 utils = { path = "../../crates/utils" }
-calcard = { version = "0.3", features = ["rkyv"] }
+calcard = { version = "0.4", features = ["rkyv"] }
 mail-builder = { version = "2.0" }
-mail-parser = { version = "0.11", features = ["full_encoding"] }
-rkyv = { version = "0.8.17", features = ["little_endian", "unaligned"] }
+mail-parser = { version = "1.0", features = ["full_encoding"] }
+rkyv = { version = "0.8.18", features = ["little_endian", "unaligned"] }
 serde_json = "1.0"
-sieve-rs = { version = "1.0" }
+sieve-rs = { version = "2.0" }
 smtp-proto = { version = "0.2.3", features = ["rkyv"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 zstd = { version = "0.13", features = ["zdict_builder", "experimental"] }
 
 [patch.crates-io]
+calcard = { path = "../../../calcard" }
+dns-update = { path = "../../../dns-update" }
+jmap-tools = { path = "../../../jmap-tools" }
+mail-auth = { path = "../../../mail-auth" }
+mail-builder = { path = "../../../mail-builder" }
+encodify = { path = "../../../encodify" }
+mail-parser = { path = "../../../mail-parser" }
 sieve-rs = { path = "../../../sieve" }
 
 [profile.release]

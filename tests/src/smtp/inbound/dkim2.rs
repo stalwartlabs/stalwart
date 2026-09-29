@@ -8,12 +8,14 @@ use crate::{
     smtp::{inbound::TestMessage, session::TestSession},
     utils::{account::Account, dns::DnsCache, server::TestServer, server::TestServerBuilder},
 };
-use mail_auth::{
-    DnssecStatus, MX,
-    common::{crypto::Ed25519Key, parse::TxtRecordParser, verify::DomainKey},
-    dkim2::{Dkim2Signer, Hop},
-};
 use encodify::base64::STANDARD;
+use mail_auth::{
+    DnssecStatus, Mx,
+    crypto::Ed25519Key,
+    dkim::DomainKey,
+    dkim2::{Dkim2Signer, Hop},
+    dns::TxtRecordParser,
+};
 use registry::schema::{
     enums::{DkimCanonicalization, DkimRotationStage},
     structs::{
@@ -467,7 +469,7 @@ async fn build_signer_and_verifier(
     // Route foobar.org deliveries back to the local (in-process) receiver
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],

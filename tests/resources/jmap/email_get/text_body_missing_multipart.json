@@ -173,5 +173,6 @@
       "disposition": "attachment"
     }
   ],
-  "hasAttachment": true
+  "hasAttachment": true,
+  "preview": ""
 }

@@ -14,11 +14,11 @@ BODYSTRUCTURE (
    (
       "text" "plain" (
          "charset" "koi8-r"
-      ) NIL NIL "quoted-printable" 9 0 "bbf9afe7431caf5f89a608bc31e8d822" NIL NIL NIL
+      ) NIL NIL "quoted-printable" 9 0 NIL NIL NIL NIL
    )(
       "application" "vnd.openxmlformats-officedocument.wordprocessingml.document" (
          "name" "=?utf-8?B?0JfQsNC/0YDQvtGBINCk0JjQoSDQotCXLmRvY3g=?="
-      ) NIL "=?utf-8?B?0L/RgNC40LvQvtC20LXQvdC40LU=?=" "base64" 8 "5fa62ae6176f3746142503a6ebe96cb3" (
+      ) NIL "=?utf-8?B?0L/RgNC40LvQvtC20LXQvdC40LU=?=" "base64" 8 NIL (
          "attachment" (
             "filename" "=?utf-8?B?0JfQsNC/0YDQvtGBINCk0JjQoSDQotCXLmRvY3g=?=" "size" "10"
          )
@@ -32,11 +32,11 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "plain" (
          "charset" "koi8-r"
-      ) NIL NIL "quoted-printable" 9 0 "bbf9afe7431caf5f89a608bc31e8d822" NIL NIL NIL
+      ) NIL NIL "quoted-printable" 9 0 NIL NIL NIL NIL
    )(
       "application" "vnd.openxmlformats-officedocument.wordprocessingml.document" (
          "name" "Запрос ФИС ТЗ.docx"
-      ) NIL "приложение" "base64" 8 "5fa62ae6176f3746142503a6ebe96cb3" (
+      ) NIL "приложение" "base64" 8 NIL (
          "attachment" (
             "filename" "Запрос ФИС ТЗ.docx" "size" "10"
          )

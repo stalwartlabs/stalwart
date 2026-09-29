@@ -57,7 +57,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
             .await
         {
             Ok(result) => result
-                .rrset
+                .records
                 .iter()
                 .flat_map(|mx| {
                     mx.exchanges
@@ -100,7 +100,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
                 .await
             {
                 Ok(result) => result
-                    .rrset
+                    .records
                     .iter()
                     .map(|host| Variable::from(host.to_string()))
                     .collect::<Vec<_>>()
@@ -129,7 +129,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
             .await
         {
             Ok(result) => result
-                .rrset
+                .records
                 .iter()
                 .map(|ip| Variable::from(ip.to_string()))
                 .collect::<Vec<_>>()
@@ -147,7 +147,7 @@ pub async fn exec(ctx: PluginContext<'_>) -> trc::Result<Variable<'static>> {
             .await
         {
             Ok(result) => result
-                .rrset
+                .records
                 .iter()
                 .map(|ip| Variable::from(ip.to_string()))
                 .collect::<Vec<_>>()

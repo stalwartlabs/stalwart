@@ -10,10 +10,7 @@ use common::{
     network::SessionStream,
 };
 use compact_str::CompactString;
-use mail_auth::{
-    SpfResult,
-    spf::verify::{HasValidLabels, SpfParameters},
-};
+use mail_auth::{SpfResult, dns::has_valid_labels, spf::verify::SpfParameters};
 use smtp_proto::*;
 use std::{
     borrow::Cow,
@@ -27,7 +24,7 @@ impl<T: SessionStream> Session<T> {
 
         if domain != self.data.helo_domain {
             // Reject non-FQDN EHLO domains - simply checks that the hostname has at least one dot
-            if self.params.ehlo_reject_non_fqdn && !domain.as_ref().has_valid_labels() {
+            if self.params.ehlo_reject_non_fqdn && !has_valid_labels(domain.as_ref()) {
                 trc::event!(
                     Smtp(SmtpEvent::InvalidEhlo),
                     SpanId = self.data.session_id,
@@ -48,20 +45,20 @@ impl<T: SessionStream> Session<T> {
                 std::mem::replace(&mut self.data.helo_domain, domain.into_owned());
             if self.params.spf_ehlo.verify() {
                 let time = Instant::now();
-                let spf_output = self
-                    .server
-                    .core
-                    .smtp
-                    .resolvers
-                    .dns
-                    .verify_spf(self.server.inner.cache.build_auth_parameters(
-                        SpfParameters::verify_ehlo(
-                            self.data.remote_ip,
-                            &self.data.helo_domain,
-                            &self.hostname,
-                        ),
-                    ))
-                    .await;
+                let spf_output =
+                    self.server
+                        .core
+                        .smtp
+                        .resolvers
+                        .dns
+                        .verify_spf(self.server.inner.cache.build_auth_parameters(
+                            SpfParameters::helo(
+                                self.data.remote_ip,
+                                &self.data.helo_domain,
+                                &self.hostname,
+                            ),
+                        ))
+                        .await;
 
                 trc::event!(
                     Smtp(if matches!(spf_output.result(), SpfResult::Pass) {

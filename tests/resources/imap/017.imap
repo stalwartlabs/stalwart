@@ -1,0 +1,319 @@
+BODY (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 16 0
+   )(
+      "image" "gif" (
+         "name" "dot.gif"
+      ) NIL NIL "7bit" 6
+   )(
+      "message" "rfc822" NIL NIL NIL "7bit" 86 (
+         NIL "Forwarded without encoding" (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) NIL NIL NIL NIL NIL
+      ) (
+         "text" "plain" (
+            "charset" "us-ascii"
+         ) NIL NIL "7bit" 18 1
+      ) 4
+   ) "mixed"
+)
+
+BODYSTRUCTURE (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 16 0 "Q2hlY2sgSW50ZWdyaXR5IQ==" NIL NIL NIL
+   )(
+      "image" "gif" (
+         "name" "dot.gif"
+      ) NIL NIL "7bit" 6 NIL (
+         "attachment" (
+            "filename" "dot.gif"
+         )
+      ) NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL "7bit" 86 (
+         NIL "Forwarded without encoding" (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) NIL NIL NIL NIL NIL
+      ) (
+         "text" "plain" (
+            "charset" "us-ascii"
+         ) NIL NIL "7bit" 18 1 NIL NIL NIL NIL
+      ) 4 NIL NIL NIL NIL
+   ) "mixed" (
+      "boundary" "md5"
+   ) NIL NIL NIL
+)
+
+BODYSTRUCTURE UTF8=ACCEPT (
+   (
+      "text" "plain" (
+         "charset" "us-ascii"
+      ) NIL NIL "7bit" 16 0 "Q2hlY2sgSW50ZWdyaXR5IQ==" NIL NIL NIL
+   )(
+      "image" "gif" (
+         "name" "dot.gif"
+      ) NIL NIL "7bit" 6 NIL (
+         "attachment" (
+            "filename" "dot.gif"
+         )
+      ) NIL NIL
+   )(
+      "message" "rfc822" NIL NIL NIL "7bit" 86 (
+         NIL "Forwarded without encoding" (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) (
+            (
+               NIL NIL "forwarded" "example.com"
+            )
+         ) NIL NIL NIL NIL NIL
+      ) (
+         "text" "plain" (
+            "charset" "us-ascii"
+         ) NIL NIL "7bit" 18 1 NIL NIL NIL NIL
+      ) 4 NIL NIL NIL NIL
+   ) "mixed" (
+      "boundary" "md5"
+   ) NIL NIL NIL
+)
+
+BODY[] {575}
+From: Integrity Checker <check@example.com>
+To: rcpt@example.com
+Subject: Content-MD5 and default encodings
+Date: Mon, 28 Sep 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="md5"
+
+--md5
+Content-Type: text/plain; charset=us-ascii
+Content-MD5: Q2hlY2sgSW50ZWdyaXR5IQ==
+
+Check Integrity!
+--md5
+Content-Type: image/gif; name="dot.gif"
+Content-Disposition: attachment; filename="dot.gif"
+
+GIF89a
+--md5
+Content-Type: message/rfc822
+
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+line one
+line two
+--md5--
+
+BINARY[] {575}
+From: Integrity Checker <check@example.com>
+To: rcpt@example.com
+Subject: Content-MD5 and default encodings
+Date: Mon, 28 Sep 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="md5"
+
+--md5
+Content-Type: text/plain; charset=us-ascii
+Content-MD5: Q2hlY2sgSW50ZWdyaXR5IQ==
+
+Check Integrity!
+--md5
+Content-Type: image/gif; name="dot.gif"
+Content-Disposition: attachment; filename="dot.gif"
+
+GIF89a
+--md5
+Content-Type: message/rfc822
+
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+line one
+line two
+--md5--
+
+BINARY.SIZE[] 575
+----------------------------------
+BODY[HEADER] {218}
+From: Integrity Checker <check@example.com>
+To: rcpt@example.com
+Subject: Content-MD5 and default encodings
+Date: Mon, 28 Sep 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="md5"
+
+
+----------------------------------
+BODY[TEXT] {357}
+--md5
+Content-Type: text/plain; charset=us-ascii
+Content-MD5: Q2hlY2sgSW50ZWdyaXR5IQ==
+
+Check Integrity!
+--md5
+Content-Type: image/gif; name="dot.gif"
+Content-Disposition: attachment; filename="dot.gif"
+
+GIF89a
+--md5
+Content-Type: message/rfc822
+
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+line one
+line two
+--md5--
+
+----------------------------------
+BODY[MIME] {49}
+Content-Type: multipart/mixed; boundary="md5"
+
+
+----------------------------------
+BODY[1] {16}
+Check Integrity!
+BINARY[1] {16}
+Check Integrity!
+BINARY.SIZE[1] 16
+----------------------------------
+BODY[1.HEADER] {85}
+Content-Type: text/plain; charset=us-ascii
+Content-MD5: Q2hlY2sgSW50ZWdyaXR5IQ==
+
+
+----------------------------------
+BODY[1.TEXT] {16}
+Check Integrity!
+----------------------------------
+BODY[1.MIME] {85}
+Content-Type: text/plain; charset=us-ascii
+Content-MD5: Q2hlY2sgSW50ZWdyaXR5IQ==
+
+
+----------------------------------
+BODY[1.1] {16}
+Check Integrity!
+BINARY[1.1] {16}
+Check Integrity!
+BINARY.SIZE[1.1] 16
+----------------------------------
+BODY[2] {6}
+GIF89a
+BINARY[2] {6}
+GIF89a
+BINARY.SIZE[2] 6
+----------------------------------
+BODY[2.HEADER] {96}
+Content-Type: image/gif; name="dot.gif"
+Content-Disposition: attachment; filename="dot.gif"
+
+
+----------------------------------
+BODY[2.TEXT] {6}
+GIF89a
+----------------------------------
+BODY[2.MIME] {96}
+Content-Type: image/gif; name="dot.gif"
+Content-Disposition: attachment; filename="dot.gif"
+
+
+----------------------------------
+BODY[2.1] {6}
+GIF89a
+BINARY[2.1] {6}
+GIF89a
+BINARY.SIZE[2.1] 6
+----------------------------------
+BODY[3] {86}
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+line one
+line two
+BINARY[3] {86}
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+line one
+line two
+BINARY.SIZE[3] 86
+----------------------------------
+BODY[3.HEADER] {68}
+From: forwarded@example.com
+Subject: Forwarded without encoding
+
+
+----------------------------------
+BODY[3.TEXT] {18}
+line one
+line two
+----------------------------------
+BODY[3.MIME] {32}
+Content-Type: message/rfc822
+
+
+----------------------------------
+BODY[3.1] {18}
+line one
+line two
+BINARY[3.1] {18}
+line one
+line two
+BINARY.SIZE[3.1] 18
+----------------------------------
+BODY[3.1.MIME] {2}
+
+
+----------------------------------
+BODY[HEADER.FIELDS (FROM TO)] {69}
+From: Integrity Checker <check@example.com>
+To: rcpt@example.com
+
+
+----------------------------------
+BODY[HEADER.FIELDS (FROM TO)]<10> {25}
+grity Checker <check@exam
+----------------------------------
+BODY[HEADER.FIELDS.NOT (SUBJECT CC)] {174}
+From: Integrity Checker <check@example.com>
+To: rcpt@example.com
+Date: Mon, 28 Sep 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="md5"
+
+
+----------------------------------
+BODY[HEADER.FIELDS.NOT (SUBJECT CC)]<10> {25}
+grity Checker <check@exam
+----------------------------------

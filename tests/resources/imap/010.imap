@@ -1,5 +1,5 @@
 BODY (
-   "message" "rfc822" NIL NIL NIL NIL 88 (
+   "message" "rfc822" NIL NIL NIL "7bit" 88 (
       "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
          (
             NIL NIL "sub" "domain.org"
@@ -17,11 +17,11 @@ BODY (
       "text" "plain" (
          "charset" "us-ascii"
       ) NIL NIL "7bit" 12 1
-   ) 0
+   ) 5
 )
 
 BODYSTRUCTURE (
-   "message" "rfc822" NIL NIL NIL NIL 88 (
+   "message" "rfc822" NIL NIL NIL "7bit" 88 (
       "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
          (
             NIL NIL "sub" "domain.org"
@@ -38,12 +38,12 @@ BODYSTRUCTURE (
    ) (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 12 1 "f0ef7081e1539ac00ef5b761b4fb01b3" NIL NIL NIL
-   ) 0 "dfea5a78f321b331e6d7983a1f9cc6b7" NIL NIL NIL
+      ) NIL NIL "7bit" 12 1 NIL NIL NIL NIL
+   ) 5 NIL NIL NIL NIL
 )
 
 BODYSTRUCTURE UTF8=ACCEPT (
-   "message" "rfc822" NIL NIL NIL NIL 88 (
+   "message" "rfc822" NIL NIL NIL "7bit" 88 (
       "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
          (
             NIL NIL "sub" "domain.org"
@@ -60,8 +60,8 @@ BODYSTRUCTURE UTF8=ACCEPT (
    ) (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 12 1 "f0ef7081e1539ac00ef5b761b4fb01b3" NIL NIL NIL
-   ) 0 "dfea5a78f321b331e6d7983a1f9cc6b7" NIL NIL NIL
+      ) NIL NIL "7bit" 12 1 NIL NIL NIL NIL
+   ) 5 NIL NIL NIL NIL
 )
 
 BODY[] {196}
@@ -146,6 +146,10 @@ Hello world
 
 BINARY.SIZE[1.1] 12
 ----------------------------------
+BODY[1.1.MIME] {2}
+
+
+----------------------------------
 BODY[HEADER.FIELDS (FROM TO)] {24}
 From: user@domain.org
 
@@ -159,7 +163,7 @@ BODY[HEADER.FIELDS (FROM TO)]<10> {14}
 BODY[HEADER.FIELDS.NOT (SUBJECT CC)] {109}
 From: user@domain.org
 Date: Sat, 24 Mar 2007 23:00:00 +0200
-MIME-Version: 1.0
+Mime-Version: 1.0
 Content-Type: message/rfc822
 
 

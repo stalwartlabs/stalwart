@@ -7,7 +7,7 @@
 use super::AggregateTimestamp;
 use crate::{
     queue::RecipientDomain,
-    reporting::{index::InternalReportIndex, send::MtaReportSend},
+    reporting::{ReportAddress, index::InternalReportIndex, send::MtaReportSend},
 };
 use common::{
     Server, USER_AGENT,
@@ -20,8 +20,8 @@ use common::{
 use compact_str::{CompactString, ToCompactString};
 use mail_auth::{
     flate2::{Compression, write::GzEncoder},
-    mta_sts::{ReportUri, TlsRpt},
-    report::tlsrpt::{FailureDetails, PolicyDetails},
+    mta_sts::{ReportUri, TlsRptRecord},
+    report::{ReportEnvelope, tlsrpt::TlsReport as ExportedTlsReport},
 };
 use registry::{
     schema::{
@@ -43,15 +43,8 @@ use trc::{AddContext, OutgoingReportEvent};
 
 #[derive(Debug, Clone)]
 pub struct TlsRptOptions {
-    pub record: Arc<TlsRpt>,
+    pub record: Arc<TlsRptRecord>,
     pub interval: AggregateFrequency,
-}
-
-#[derive(Debug, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, serde::Serialize)]
-pub struct TlsFormat {
-    pub rua: Vec<ReportUri>,
-    pub policy: PolicyDetails,
-    pub records: Vec<Option<FailureDetails>>,
 }
 
 #[cfg(feature = "test_mode")]
@@ -109,22 +102,24 @@ impl TlsReporting for Server {
         );
 
         // Generate report
-        let exported_report = mail_auth::report::tlsrpt::TlsReport::from(report.report);
-        let json = exported_report.to_json();
-        let mut e = GzEncoder::new(Vec::with_capacity(json.len()), Compression::default());
-        let json = match std::io::Write::write_all(&mut e, json.as_bytes()).and_then(|_| e.finish())
-        {
-            Ok(report) => report,
-            Err(err) => {
-                trc::event!(
-                    OutgoingReport(OutgoingReportEvent::SubmissionError),
-                    SpanId = span_id,
-                    Reason = err.to_compact_string(),
-                    Details = "Failed to compress report"
-                );
+        let json = ExportedTlsReport::from(report.report).to_json();
+        let compressed_json = if !report.http_rua.is_empty() {
+            let mut e = GzEncoder::new(Vec::with_capacity(json.len()), Compression::default());
+            match std::io::Write::write_all(&mut e, json.as_bytes()).and_then(|_| e.finish()) {
+                Ok(report) => report,
+                Err(err) => {
+                    trc::event!(
+                        OutgoingReport(OutgoingReportEvent::SubmissionError),
+                        SpanId = span_id,
+                        Reason = err.to_compact_string(),
+                        Details = "Failed to compress report"
+                    );
 
-                return Ok(());
+                    return Ok(());
+                }
             }
+        } else {
+            Vec::new()
         };
 
         // Try delivering report over HTTP
@@ -132,7 +127,7 @@ impl TlsReporting for Server {
             {
                 #[cfg(feature = "test_mode")]
                 if uri == "https://127.0.0.1/tls" {
-                    TLS_HTTP_REPORT.lock().extend_from_slice(&json);
+                    TLS_HTTP_REPORT.lock().extend_from_slice(&compressed_json);
 
                     return Ok(());
                 }
@@ -145,7 +140,7 @@ impl TlsReporting for Server {
                     .timeout(Duration::from_secs(2 * 60))
                     .header(reqwest::header::USER_AGENT, USER_AGENT)
                     .header(CONTENT_TYPE, "application/tlsrpt+gzip")
-                    .body(json.to_vec())
+                    .body(compressed_json.clone())
                     .send()
                     .await
                 {
@@ -183,45 +178,58 @@ impl TlsReporting for Server {
         }
 
         // Deliver report over SMTP
-        if !report.mail_rua.is_empty() {
+        let mail_rua = report
+            .mail_rua
+            .iter()
+            .filter(|rcpt| ReportAddress::checked(rcpt.as_str(), span_id).is_some())
+            .map(|rcpt| rcpt.as_str())
+            .collect::<Vec<_>>();
+        if !mail_rua.is_empty() {
             let config = &self.core.smtp.report.tls;
             let from_addr = self
                 .eval_if(&config.address, &RecipientDomain::new(domain_name), span_id)
                 .await
                 .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_string());
+            let submitter = self
+                .eval_if(
+                    &self.core.smtp.report.submitter,
+                    &RecipientDomain::new(domain_name),
+                    span_id,
+                )
+                .await
+                .unwrap_or_else(|| "localhost".to_string());
+            let from_name = self
+                .eval_if(&config.name, &RecipientDomain::new(domain_name), span_id)
+                .await
+                .unwrap_or_else(|| "Mail Delivery Subsystem".to_string());
             let mut message = Vec::with_capacity(2048);
-            let _ = exported_report.write_rfc5322_from_bytes(
-                domain_name,
-                &self
-                    .eval_if(
-                        &self.core.smtp.report.submitter,
-                        &RecipientDomain::new(domain_name),
+            let envelope = ReportEnvelope {
+                from: (from_name.as_str(), from_addr.as_str()).into(),
+                to: mail_rua,
+                submitter: &submitter,
+                report_domain: domain_name,
+                subject: None,
+            };
+            match ExportedTlsReport::write_rfc5322_json(json.as_bytes(), &envelope, &mut message) {
+                Ok(()) => {
+                    self.send_report(
+                        &from_addr,
+                        envelope.to.iter(),
+                        message,
+                        &config.sign,
+                        false,
                         span_id,
                     )
-                    .await
-                    .unwrap_or_else(|| "localhost".to_string()),
-                (
-                    self.eval_if(&config.name, &RecipientDomain::new(domain_name), span_id)
-                        .await
-                        .unwrap_or_else(|| "Mail Delivery Subsystem".to_string())
-                        .as_str(),
-                    from_addr.as_str(),
-                ),
-                report.mail_rua.iter().map(|v| v.as_str()),
-                &json,
-                &mut message,
-            );
-
-            // Send report
-            self.send_report(
-                &from_addr,
-                report.mail_rua.iter().map(|v| v.as_str()),
-                message,
-                &config.sign,
-                false,
-                span_id,
-            )
-            .await;
+                    .await;
+                }
+                Err(err) => {
+                    trc::event!(
+                        OutgoingReport(OutgoingReportEvent::SubmissionError),
+                        SpanId = span_id,
+                        Reason = err.to_string(),
+                    );
+                }
+            }
         } else {
             trc::event!(
                 OutgoingReport(OutgoingReportEvent::NoRecipientsFound),

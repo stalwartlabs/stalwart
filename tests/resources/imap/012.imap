@@ -4,7 +4,7 @@ BODY (
          "charset" "us-ascii"
       ) NIL NIL "7bit" 6 1
    )(
-      "message" "rfc822" NIL NIL NIL NIL 280 (
+      "message" "rfc822" NIL NIL NIL "7bit" 280 (
          "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
             (
                NIL NIL "sub" "domain.org"
@@ -28,7 +28,7 @@ BODY (
                "charset" "us-ascii"
             ) NIL NIL "7bit" 20 1
          ) "alternative"
-      ) 0
+      ) 18
    ) "mixed"
 )
 
@@ -36,9 +36,9 @@ BODYSTRUCTURE (
    (
       "text" "x-myown" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 6 1 "b1946ac92492d2347c6235b4d2611184" NIL NIL NIL
+      ) NIL NIL "7bit" 6 1 NIL NIL NIL NIL
    )(
-      "message" "rfc822" NIL NIL NIL NIL 280 (
+      "message" "rfc822" NIL NIL NIL "7bit" 280 (
          "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
             (
                NIL NIL "sub" "domain.org"
@@ -56,15 +56,15 @@ BODYSTRUCTURE (
          (
             "text" "html" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 19 1 "35c5b687e359e8ce7be1f1ecafd9b475" NIL NIL NIL
+            ) NIL NIL "7bit" 19 1 NIL NIL NIL NIL
          )(
             "text" "plain" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 20 1 "deeff770fadb17c664d431b97bcd05c5" NIL NIL NIL
+            ) NIL NIL "7bit" 20 1 NIL NIL NIL NIL
          ) "alternative" (
             "boundary" "sub1"
          ) NIL NIL NIL
-      ) 0 "735ed696bc05fdf6840de404781d5d77" NIL NIL NIL
+      ) 18 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "foo bar"
    ) NIL NIL NIL
@@ -74,9 +74,9 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "x-myown" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 6 1 "b1946ac92492d2347c6235b4d2611184" NIL NIL NIL
+      ) NIL NIL "7bit" 6 1 NIL NIL NIL NIL
    )(
-      "message" "rfc822" NIL NIL NIL NIL 280 (
+      "message" "rfc822" NIL NIL NIL "7bit" 280 (
          "Sun, 12 Aug 2012 12:34:56 +0300" "submsg" (
             (
                NIL NIL "sub" "domain.org"
@@ -94,15 +94,15 @@ BODYSTRUCTURE UTF8=ACCEPT (
          (
             "text" "html" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 19 1 "35c5b687e359e8ce7be1f1ecafd9b475" NIL NIL NIL
+            ) NIL NIL "7bit" 19 1 NIL NIL NIL NIL
          )(
             "text" "plain" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 20 1 "deeff770fadb17c664d431b97bcd05c5" NIL NIL NIL
+            ) NIL NIL "7bit" 20 1 NIL NIL NIL NIL
          ) "alternative" (
             "boundary" "sub1"
          ) NIL NIL NIL
-      ) 0 "735ed696bc05fdf6840de404781d5d77" NIL NIL NIL
+      ) 18 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "foo bar"
    ) NIL NIL NIL
@@ -411,7 +411,7 @@ BODY[HEADER.FIELDS (FROM TO)]<10> {14}
 BODY[HEADER.FIELDS.NOT (SUBJECT CC)] {131}
 From: user@domain.org
 Date: Sat, 24 Mar 2007 23:00:00 +0200
-MIME-Version: 1.0
+Mime-Version: 1.0
 Content-Type: multipart/mixed; boundary="foo
  bar"
 

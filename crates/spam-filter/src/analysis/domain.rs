@@ -18,7 +18,7 @@ use common::{
     config::mailstore::spamfilter::{Element, Location},
 };
 use mail_auth::DkimResult;
-use mail_parser::{HeaderName, HeaderValue, Host, parsers::MessageStream};
+use mail_parser::{HeaderForm, HeaderName, HeaderValue, Host};
 use nlp::tokenizers::types::TokenType;
 use std::{collections::HashSet, future::Future};
 
@@ -102,14 +102,14 @@ pub fn collect_domains_and_emails(ctx: &mut SpamFilterContext<'_>) -> DomainsAnd
 
     // Add Received headers
     for header in ctx.input.message.headers() {
-        match (&header.name, &header.value) {
+        match (header.name(), header.value()) {
             (HeaderName::Received, HeaderValue::Received(received)) => {
-                for host in [&received.from, &received.helo, &received.by]
+                for host in [received.from(), received.helo(), received.by()]
                     .into_iter()
                     .flatten()
                 {
                     if let Host::Name(name) = host {
-                        let host = Hostname::new(name.as_ref());
+                        let host = Hostname::new(name);
 
                         if host.sld.is_some() {
                             domains
@@ -132,17 +132,12 @@ pub fn collect_domains_and_emails(ctx: &mut SpamFilterContext<'_>) -> DomainsAnd
                 }
             }
             (HeaderName::DispositionNotificationTo, _) => {
-                if let Some(address) = MessageStream::new(
-                    ctx.input
-                        .message
-                        .raw_message
-                        .get(header.offset_start as usize..header.offset_end as usize)
-                        .unwrap_or_default(),
-                )
-                .parse_address()
-                .as_address()
+                if let Some(address) = HeaderForm::Addresses
+                    .parse(header.raw_value())
+                    .value()
+                    .as_address()
                 {
-                    for addr in address.iter() {
+                    for addr in address.mailboxes() {
                         if let Some(email) = addr.address() {
                             emails.insert(ElementLocation::new(
                                 Recipient {
@@ -193,9 +188,7 @@ pub fn collect_domains_and_emails(ctx: &mut SpamFilterContext<'_>) -> DomainsAnd
 
     // Add emails found in the message
     for (part_id, part) in ctx.output.text_parts.iter().enumerate() {
-        let part_id = part_id as u32;
-        let is_body = ctx.input.message.text_body.contains(&part_id)
-            || ctx.input.message.html_body.contains(&part_id);
+        let is_body = ctx.input.is_body(part_id as u32);
         let tokens = match part {
             TextPart::Plain { tokens, .. } => tokens,
             TextPart::Html {

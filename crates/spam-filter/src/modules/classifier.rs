@@ -10,13 +10,13 @@ use crate::analysis::is_trusted_domain;
 use crate::analysis::url::{SpamFilterAnalyzeUrl, UrlParsed};
 use crate::modules::html::{A, ALT, HREF, HtmlToken, IMG, SRC, TITLE};
 use crate::{Email, SpamFilterContext, TextPart};
-use crate::{Hostname, SpamFilterInput};
+use crate::{Hostname, MessageTexts, SpamFilterInput};
 use common::config::mailstore::spamfilter;
 use common::manager::{SPAM_CLASSIFIER_KEY, SPAM_TRAINER_KEY};
 use common::{Server, config::mailstore::spamfilter::Location, ipc::BroadcastEvent};
 use compact_str::CompactString;
 use mail_auth::DmarcResult;
-use mail_parser::{MessageParser, MimeHeaders};
+use mail_parser::MessageParser;
 use nlp::classifier::feature::{
     CcfhFeature, CcfhFeatureBuilder, FeatureBuilder, FhFeature, FhFeatureBuilder, Sample,
     UnprocessedFeature,
@@ -407,8 +407,10 @@ impl SpamClassifier for Server {
                     );
                     continue;
                 };
-                let mut ctx =
-                    self.spam_filter_init(SpamFilterInput::from_message(&message, 0).train_mode());
+                let texts = MessageTexts::new(&message);
+                let mut ctx = self.spam_filter_init(
+                    SpamFilterInput::from_message(&message, &texts, 0).train_mode(),
+                );
                 self.spam_filter_analyze_domain(&mut ctx).await;
                 self.spam_filter_analyze_url(&mut ctx).await;
                 let mut tokens = self.spam_build_tokens(&ctx).await.0;
@@ -867,7 +869,7 @@ pub fn spam_collect_tokens<'x>(ctx: &'x SpamFilterContext<'_>) -> TokenBuilder<'
     }
 
     // Add MIME and attachment indicators
-    for part in &ctx.input.message.parts {
+    for part in ctx.input.message.root().parts() {
         if let Some(name) = part.attachment_name()
             && let Some((name, ext)) = name.rsplit_once('.')
         {
@@ -894,13 +896,12 @@ pub fn spam_collect_tokens<'x>(ctx: &'x SpamFilterContext<'_>) -> TokenBuilder<'
         }
 
         if let Some(ct) = part.content_type() {
-            let mut ct_lower = String::with_capacity(
-                ct.c_type.len() + ct.c_subtype.as_ref().map_or(0, |s| s.len() + 1),
-            );
-            ct_lower.push_str(ct.c_type.as_ref());
-            if let Some(st) = &ct.c_subtype {
+            let mut ct_lower =
+                String::with_capacity(ct.ctype().len() + ct.subtype().map_or(0, |s| s.len() + 1));
+            ct_lower.push_str(ct.ctype());
+            if let Some(st) = ct.subtype() {
                 ct_lower.push('/');
-                ct_lower.push_str(st.as_ref());
+                ct_lower.push_str(st);
             }
             ct_lower.make_ascii_lowercase();
 
@@ -920,17 +921,14 @@ pub fn spam_collect_tokens<'x>(ctx: &'x SpamFilterContext<'_>) -> TokenBuilder<'
     let body_idx = ctx
         .input
         .message
-        .html_body
-        .first()
-        .or_else(|| ctx.input.message.text_body.first())
-        .map(|idx| *idx as usize);
+        .html_body()
+        .next()
+        .or_else(|| ctx.input.message.text_body().next())
+        .map(|part| part.id() as usize);
     let mut alt_tokens = Tokens::default();
     for (idx, part) in ctx.output.text_parts.iter().enumerate() {
         let is_body = Some(idx) == body_idx;
-        if is_body
-            || (!ctx.input.message.text_body.contains(&(idx as u32))
-                && !ctx.input.message.html_body.contains(&(idx as u32)))
-        {
+        if is_body || !ctx.input.is_body(idx as u32) {
             tokens.insert_text_part(part, is_body);
         } else {
             alt_tokens.insert_text_part(part, false);

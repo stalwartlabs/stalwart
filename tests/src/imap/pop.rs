@@ -122,16 +122,31 @@ pub async fn test(test: &TestServer) {
     pop3.assert_read(ResponseType::Err).await;
 
     // TOP
+    pop3.send("TOP 1 0").await;
+    let lines = assert_sent_octets(pop3.assert_read(ResponseType::Multiline).await)
+        .assert_contains("Subject: TPS Report 0")
+        .assert_not_contains("I'm going to need those TPS 0 reports ASAP.");
+    assert_eq!(lines.iter().rev().nth(1).map(String::as_str), Some(""));
+    pop3.send("TOP 1 1").await;
+    let lines = assert_sent_octets(pop3.assert_read(ResponseType::Multiline).await)
+        .assert_contains("Subject: TPS Report 0");
+    assert_eq!(
+        lines.iter().rev().nth(1).map(String::as_str),
+        Some("I'm going to need those TPS 0 reports ASAP.")
+    );
+    pop3.send("TOP 1 2").await;
+    let lines = assert_sent_octets(pop3.assert_read(ResponseType::Multiline).await)
+        .assert_contains("I'm going to need those TPS 0 reports ASAP.")
+        .assert_not_contains("So, if you could do that, that'd be great.");
+    assert_eq!(lines.iter().rev().nth(1).map(String::as_str), Some(".."));
     pop3.send("TOP 1 4").await;
     pop3.assert_read(ResponseType::Multiline)
         .await
         .assert_contains("+OK 203 octets")
         .assert_contains("Subject: TPS Report 0")
-        .assert_not_contains("I'm going to need those TPS 0 reports ASAP.");
-    pop3.send("TOP 3 4").await;
-    pop3.assert_read(ResponseType::Multiline)
-        .await
-        .assert_contains("+OK 203 octets")
+        .assert_contains("So, if you could do that, that'd be great.");
+    pop3.send("TOP 3 0").await;
+    assert_sent_octets(pop3.assert_read(ResponseType::Multiline).await)
         .assert_contains("Subject: TPS Report 2")
         .assert_not_contains("I'm going to need those TPS 2 reports ASAP.");
 
@@ -183,4 +198,21 @@ pub async fn test(test: &TestServer) {
         .await
         .assert_contains("+OK 0 0");
     pop3.send("QUIT").await;
+}
+
+fn assert_sent_octets(lines: Vec<String>) -> Vec<String> {
+    let (status, rest) = lines.split_first().expect("status line");
+    let (terminator, payload) = rest.split_last().expect("termination line");
+    assert_eq!(terminator, ".");
+    let octets = status
+        .strip_prefix("+OK ")
+        .and_then(|status| status.strip_suffix(" octets"))
+        .and_then(|octets| octets.parse::<usize>().ok())
+        .expect("octet count");
+    let sent = payload
+        .iter()
+        .map(|line| line.strip_prefix('.').unwrap_or(line).len() + 2)
+        .sum::<usize>();
+    assert_eq!(octets, sent, "{lines:?}");
+    lines
 }

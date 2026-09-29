@@ -10,7 +10,11 @@ use crate::{
 };
 use common::{config::server::Listeners, network::SessionData};
 use ece::EcKeyComponents;
-use email::push::{EmailPush, Urgency};
+use email::{
+    cache::MessageCacheFetch,
+    push::{EmailPush, Urgency},
+};
+use encodify::base64::URL_SAFE_NO_PAD;
 use http_proto::{HtmlResponse, ToHttpResponse, request::fetch_body};
 use hyper::{
     StatusCode, body,
@@ -26,7 +30,6 @@ use jmap_proto::{
     request::capability::{Capabilities, Capability},
     types::state::State,
 };
-use encodify::base64::URL_SAFE_NO_PAD;
 use registry::{
     schema::{
         enums::NetworkListenerProtocol,
@@ -63,6 +66,10 @@ pub async fn test(test: &TestServer) {
     // Create test account
     let account = test.account("robert@example.com");
     let client = account.jmap_client().await;
+    test.server
+        .get_cached_messages(account.id().document_id())
+        .await
+        .expect("The system folders must exist before a push subscription is active");
 
     // Create channels
     let (event_tx, mut event_rx) = mpsc::channel::<PushMessage>(100);

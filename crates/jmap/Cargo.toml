@@ -21,10 +21,10 @@ groupware = { path = "../groupware" }
 registry = { path = "../registry" }
 calcard = { version = "0.4" }
 smtp-proto = { version = "0.2" }
-mail-parser = { version = "0.11", features = ["full_encoding", "rkyv"] } 
+mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.13", features = ["generate", "arc"] }
-sieve-rs = { version = "1.0" }
+mail-auth = { version = "0.14", features = ["generate", "arc"] }
+sieve-rs = { version = "2.0" }
 jmap-tools = { version = "0.1.9", features = ["rkyv"] }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"

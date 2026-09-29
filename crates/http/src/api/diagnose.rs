@@ -12,7 +12,7 @@ use common::{
     },
 };
 use hyper::body::{Bytes, Frame};
-use mail_auth::{IpLookupStrategy, mta_sts::TlsRpt};
+use mail_auth::{IpLookupStrategy, mta_sts::TlsRptRecord};
 use serde::{Deserialize, Serialize};
 use smtp::outbound::{
     client::{SmtpClient, StartTlsResult},
@@ -252,14 +252,14 @@ async fn delivery_diagnose(
 
     // Obtain remote host list
     let mx_config = MxConfig {
-        max_mx: mxs.rrset.len(),
+        max_mx: mxs.records.len(),
         max_multi_homed: 10,
         ip_lookup_strategy: IpLookupStrategy::Ipv4thenIpv6,
     };
     let hosts = if let Some(hosts) = mxs.to_remote_hosts(&domain, &mx_config) {
         tx.send(DeliveryStage::MxLookupSuccess {
             mxs: mxs
-                .rrset
+                .records
                 .iter()
                 .map(|mx| MX {
                     exchanges: mx.exchanges.iter().map(|e| e.to_string()).collect(),
@@ -323,7 +323,7 @@ async fn delivery_diagnose(
         .smtp
         .resolvers
         .dns
-        .txt_lookup::<TlsRpt>(
+        .txt_lookup::<TlsRptRecord>(
             format!("_smtp._tls.{domain}."),
             Some(&server.inner.cache.dns_txt),
         )

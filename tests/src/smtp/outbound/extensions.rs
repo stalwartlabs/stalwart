@@ -11,7 +11,7 @@ use crate::{
     },
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::schema::structs::{Expression, MtaStageData};
 use smtp_proto::{MAIL_REQUIRETLS, MAIL_RET_HDRS, MAIL_SMTPUTF8, RCPT_NOTIFY_NEVER};
 use std::time::{Duration, Instant};
@@ -94,7 +94,7 @@ async fn extensions() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],

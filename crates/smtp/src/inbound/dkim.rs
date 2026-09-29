@@ -12,10 +12,10 @@ use common::{
 };
 use mail_auth::{
     AuthenticatedMessage,
-    common::headers::HeaderWriter,
     dkim2::{Hop, MessageInstance},
+    headers::HeaderWriter,
 };
-use mail_parser::{Address, parsers::MessageStream};
+use mail_parser::HeaderForm;
 use std::{collections::HashSet, sync::Arc};
 use utils::sanitize_email;
 
@@ -101,14 +101,14 @@ impl DkimSign for Server {
                         envelopes.disclosed_recipients,
                     ),
                 ) {
-                    Ok(signature) => {
+                    Ok(signed) => {
                         if envelopes.undisclosed_recipients.is_empty() {
                             // Happy path: no undisclosed recipients, serialize signature straight to blob
-                            signature.write_header(&mut headers);
+                            signed.signature.write_header(&mut headers);
                         } else {
                             // Undisclosed recipients present, serialize signature to metadata
                             let mut header = Vec::with_capacity(64);
-                            signature.write_header(&mut header);
+                            signed.signature.write_header(&mut header);
                             params.metadata.push(Metadata::Headers {
                                 value: header.into_boxed_slice(),
                                 id: u64::MAX,
@@ -132,10 +132,10 @@ impl DkimSign for Server {
                     instance.as_ref(),
                     Hop::real(message.message.return_path.as_ref(), [rcpt]),
                 ) {
-                    Ok(signature) => {
+                    Ok(signed) => {
                         // Serialize signature to metadata
                         let mut header = Vec::with_capacity(64);
-                        signature.write_header(&mut header);
+                        signed.signature.write_header(&mut header);
                         params.metadata.push(Metadata::Headers {
                             value: header.into_boxed_slice(),
                             id: pos as u64,
@@ -196,35 +196,19 @@ impl MessageWrapper {
 
         let mut recipients = HashSet::with_capacity(self.message.recipients.len());
 
-        for addr in message.headers.iter().filter_map(|(name, value)| {
+        for (name, value) in message.headers() {
             let name = name.trim_ascii();
             if name.len() == 2
                 && (name.eq_ignore_ascii_case(b"to") || name.eq_ignore_ascii_case(b"cc"))
             {
-                MessageStream::new(value).parse_address().into_address()
-            } else {
-                None
-            }
-        }) {
-            match addr {
-                Address::List(addrs) => {
+                let parsed = HeaderForm::Addresses.parse(value);
+                if let Some(addresses) = parsed.value().as_address() {
                     recipients.extend(
-                        addrs
-                            .iter()
+                        addresses
+                            .mailboxes()
                             .filter_map(|a| a.address())
                             .map(sanitize_or_lower),
                     );
-                }
-                Address::Group(groups) => {
-                    for group in groups {
-                        recipients.extend(
-                            group
-                                .addresses
-                                .iter()
-                                .filter_map(|a| a.address())
-                                .map(sanitize_or_lower),
-                        );
-                    }
                 }
             }
         }

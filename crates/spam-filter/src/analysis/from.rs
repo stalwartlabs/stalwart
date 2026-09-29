@@ -50,27 +50,16 @@ pub fn analyze_from(ctx: &mut SpamFilterContext<'_>) {
     let mut dnt = None;
 
     for header in ctx.input.message.headers() {
-        match &header.name {
+        match header.name() {
             HeaderName::From => {
                 from_count += 1;
-                from_raw = ctx
-                    .input
-                    .message
-                    .raw_message()
-                    .get(header.offset_start as usize..header.offset_end as usize)
-                    .unwrap_or_default();
+                from_raw = header.raw_value();
             }
             HeaderName::DispositionNotificationTo => {
-                dnt = ctx
-                    .input
-                    .header_as_address(header)
-                    .map(|s| Email::new(s.as_ref()));
+                dnt = ctx.input.header_as_address(&header).map(|s| Email::new(&s));
             }
             HeaderName::Other(name) if name.eq_ignore_ascii_case("X-Confirm-Reading-To") => {
-                crt = ctx
-                    .input
-                    .header_as_address(header)
-                    .map(|s| Email::new(s.as_ref()));
+                crt = ctx.input.header_as_address(&header).map(|s| Email::new(&s));
             }
             _ => {}
         }

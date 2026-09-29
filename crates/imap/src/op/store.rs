@@ -55,7 +55,6 @@ impl<T: SessionStream> Session<T> {
         let arguments = request.parse_store()?;
         let (data, mailbox) = self.state.select_data();
         let is_condstore = self.is_condstore || mailbox.is_condstore;
-        let is_utf8 = self.is_utf8;
         let is_uidonly = self.is_uidonly;
         let message_limit = self.server.core.imap.max_messages_per_command;
 
@@ -65,7 +64,6 @@ impl<T: SessionStream> Session<T> {
                 mailbox,
                 is_uid,
                 is_condstore,
-                is_utf8,
                 is_uidonly,
                 message_limit,
                 op_start,
@@ -238,7 +236,6 @@ impl<T: SessionStream> SessionData<T> {
         mailbox: Arc<SelectedMailbox>,
         is_uid: bool,
         is_condstore: bool,
-        is_utf8: bool,
         is_uidonly: bool,
         message_limit: u32,
         op_start: Instant,
@@ -369,7 +366,6 @@ impl<T: SessionStream> SessionData<T> {
         }
 
         let mut items = Response {
-            is_utf8,
             items: Vec::with_capacity(ids.len()),
         };
 

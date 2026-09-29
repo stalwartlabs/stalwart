@@ -9,10 +9,10 @@ use common::{Server, psl};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_auth::{
     flate2::read::GzDecoder,
-    report::{Feedback, Report, tlsrpt::TlsReport},
+    report::{arf::FeedbackReport, dmarc::AggregateReport, tlsrpt::TlsReport},
     zip,
 };
-use mail_parser::{Message, MessagePart, MimeHeaders, PartType};
+use mail_parser::{Message, MessagePart, PartKind};
 use registry::{
     schema::structs::{ArfExternalReport, DmarcExternalReport, TlsExternalReport},
     types::datetime::UTCDateTime,
@@ -42,13 +42,26 @@ enum Format<D, T, A> {
 pub(crate) struct ReportData<'x> {
     compression: Compression,
     format: Format<(), (), ()>,
-    data: &'x [u8],
+    data: Cow<'x, [u8]>,
 }
 
 impl<'x> ReportData<'x> {
-    fn from_part(part: &'x MessagePart<'x>) -> Option<Self> {
-        match &part.body {
-            PartType::Text(report) => {
+    fn from_part(part: MessagePart<'x>) -> Option<Self> {
+        let (compression, format) = Self::classify(&part)?;
+        Some(ReportData {
+            compression,
+            format,
+            data: match part.text() {
+                Some(Cow::Borrowed(text)) => Cow::Borrowed(text.as_bytes()),
+                Some(Cow::Owned(text)) => Cow::Owned(text.into_bytes()),
+                None => part.decoded(),
+            },
+        })
+    }
+
+    fn classify(part: &MessagePart<'_>) -> Option<(Compression, Format<(), (), ()>)> {
+        match part.kind() {
+            PartKind::Text => {
                 if part
                     .content_type()
                     .and_then(|ct| ct.subtype())
@@ -58,28 +71,16 @@ impl<'x> ReportData<'x> {
                         .and_then(|n| n.rsplit_once('.'))
                         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("xml"))
                 {
-                    Some(ReportData {
-                        compression: Compression::None,
-                        format: Format::Dmarc(()),
-                        data: report.as_bytes(),
-                    })
+                    Some((Compression::None, Format::Dmarc(())))
                 } else if part.is_content_type("message", "feedback-report") {
-                    Some(ReportData {
-                        compression: Compression::None,
-                        format: Format::Arf(()),
-                        data: report.as_bytes(),
-                    })
+                    Some((Compression::None, Format::Arf(())))
                 } else {
                     None
                 }
             }
-            PartType::Binary(report) | PartType::InlineBinary(report) => {
+            PartKind::Binary | PartKind::InlineBinary => {
                 if part.is_content_type("message", "feedback-report") {
-                    return Some(ReportData {
-                        compression: Compression::None,
-                        format: Format::Arf(()),
-                        data: report.as_ref(),
-                    });
+                    return Some((Compression::None, Format::Arf(())));
                 }
 
                 let subtype = part
@@ -110,25 +111,21 @@ impl<'x> ReportData<'x> {
                     }
                 };
 
-                Some(ReportData {
-                    compression,
-                    format,
-                    data: report.as_ref(),
-                })
+                Some((compression, format))
             }
             _ => None,
         }
     }
 
     fn extract(message: &'x Message<'x>) -> Vec<Self> {
-        message.parts.iter().filter_map(Self::from_part).collect()
+        message.root().parts().filter_map(Self::from_part).collect()
     }
 
     pub(crate) fn is_present(message: &Message<'_>) -> bool {
         message
-            .parts
-            .iter()
-            .any(|part| ReportData::from_part(part).is_some())
+            .root()
+            .parts()
+            .any(|part| ReportData::classify(&part).is_some())
     }
 }
 
@@ -147,7 +144,7 @@ impl AnalyzeReport for Server {
                 .unwrap_or_default()
                 .into();
             let to: Vec<String> = message.to().map_or_else(Vec::new, |a| {
-                a.iter()
+                a.mailboxes()
                     .filter_map(|a| a.address())
                     .map(|a| a.into())
                     .collect()
@@ -158,9 +155,9 @@ impl AnalyzeReport for Server {
 
             for report in reports {
                 let data = match report.compression {
-                    Compression::None => Cow::Borrowed(report.data),
+                    Compression::None => report.data,
                     Compression::Gzip => {
-                        match read_capped(GzDecoder::new(report.data), 0, max_size) {
+                        match read_capped(GzDecoder::new(report.data.as_ref()), 0, max_size) {
                             Ok(buf) => Cow::Owned(buf),
                             Err(err) => {
                                 trc::event!(
@@ -218,7 +215,7 @@ impl AnalyzeReport for Server {
                 };
 
                 let report = match report.format {
-                    Format::Dmarc(_) => match Report::parse_xml(&data) {
+                    Format::Dmarc(_) => match AggregateReport::parse_xml(&data) {
                         Ok(report) => {
                             // Log
                             report.log();
@@ -229,7 +226,7 @@ impl AnalyzeReport for Server {
                                 IncomingReport(IncomingReportEvent::DmarcParseFailed),
                                 SpanId = session_id,
                                 From = CompactString::from(&from),
-                                Reason = err,
+                                Reason = err.to_compact_string(),
                                 CausedBy = trc::location!()
                             );
 
@@ -254,17 +251,18 @@ impl AnalyzeReport for Server {
                             continue;
                         }
                     },
-                    Format::Arf(_) => match Feedback::parse_arf(&data) {
-                        Some(report) => {
+                    Format::Arf(_) => match FeedbackReport::parse_arf(&data) {
+                        Ok(report) => {
                             // Log
                             report.log();
                             Format::Arf(report.into_owned())
                         }
-                        None => {
+                        Err(err) => {
                             trc::event!(
                                 IncomingReport(IncomingReportEvent::ArfParseFailed),
                                 SpanId = session_id,
                                 From = CompactString::from(&from),
+                                Reason = err.to_compact_string(),
                                 CausedBy = trc::location!()
                             );
 

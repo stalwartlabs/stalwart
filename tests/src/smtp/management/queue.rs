@@ -9,7 +9,7 @@ use crate::{
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
 use ahash::{AHashMap, HashMap, HashSet};
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::NetworkListenerProtocol,
@@ -130,7 +130,7 @@ async fn manage_queue() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx1.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],

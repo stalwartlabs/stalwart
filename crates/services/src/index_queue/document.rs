@@ -5,7 +5,7 @@
  */
 
 use common::{Core, Server};
-use email::message::metadata::MessageMetadata;
+use email::message::metadata::MetadataRow;
 use groupware::{calendar::CalendarEventContent, contact::ContactCardContent};
 use store::{
     ValueKey,
@@ -32,9 +32,9 @@ pub(crate) async fn build_email_document(
         return Ok(None);
     }
 
-    let Some(archive) = server
+    let Some(row) = server
         .store()
-        .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
+        .get_value::<MetadataRow>(ValueKey::immutable(
             account_id,
             Collection::Email,
             document_id,
@@ -45,12 +45,10 @@ pub(crate) async fn build_email_document(
         return Ok(None);
     };
 
-    let metadata = archive
-        .unarchive::<MessageMetadata>()
-        .caused_by(trc::location!())?;
+    let metadata = row.unarchive().caused_by(trc::location!())?;
     let raw_message = server
         .blob_store()
-        .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
+        .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
         .await
         .caused_by(trc::location!())?
         .ok_or_else(|| {
@@ -60,19 +58,12 @@ pub(crate) async fn build_email_document(
         })?;
 
     if !metadata.has_extractable_attachments() {
-        return email_document(
-            &server.core,
-            &archive,
-            account_id,
-            document_id,
-            &raw_message,
-        )
-        .map(Some);
+        return email_document(&server.core, &row, account_id, document_id, &raw_message).map(Some);
     }
 
     let core = server.core.clone();
     tokio::task::spawn_blocking(move || {
-        email_document(&core, &archive, account_id, document_id, &raw_message)
+        email_document(&core, &row, account_id, document_id, &raw_message)
     })
     .await
     .map_err(|err| {
@@ -86,7 +77,7 @@ pub(crate) async fn build_email_document(
 
 fn email_document(
     core: &Core,
-    archive: &Archive<ArchiveBytes>,
+    row: &MetadataRow,
     account_id: u32,
     document_id: u32,
     raw_message: &[u8],
@@ -96,17 +87,16 @@ fn email_document(
         .index_fields
         .get(&SearchIndex::Email)
         .ok_or_else(|| trc::StoreEvent::UnexpectedError.into_err())?;
-    Ok(archive
-        .unarchive::<MessageMetadata>()
-        .caused_by(trc::location!())?
-        .index_document(
-            account_id,
-            document_id,
-            raw_message,
-            index_fields,
-            core.email.default_language,
-            &core.email.extract_limits,
-        ))
+    let headers = row.raw_headers().caused_by(trc::location!())?;
+    Ok(row.unarchive().caused_by(trc::location!())?.index_document(
+        account_id,
+        document_id,
+        &headers,
+        raw_message,
+        index_fields,
+        core.email.default_language,
+        &core.email.extract_limits,
+    ))
 }
 
 pub(crate) async fn build_calendar_document(

@@ -8,7 +8,7 @@ use crate::{
     smtp::session::{TestSession, VerifyResponse},
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
-use mail_auth::{IprevResult, SpfResult, common::parse::TxtRecordParser, spf::Spf};
+use mail_auth::{IprevResult, SpfResult, dns::TxtRecordParser, spf::SpfRecord};
 use mail_parser::DateTime;
 use registry::{
     schema::{
@@ -142,12 +142,12 @@ async fn mail() {
 
     test.server.txt_add(
         "foobar.org",
-        Spf::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
+        SpfRecord::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
     test.server.txt_add(
         "mx1.foobar.org",
-        Spf::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
+        SpfRecord::parse(b"v=spf1 ip4:10.0.0.1 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
     test.server.ptr_add(
@@ -271,7 +271,7 @@ async fn mail() {
     session.response().assert_code("550 5.7.23");
     test.server.txt_add(
         "foobar.org",
-        Spf::parse(b"v=spf1 ip4:10.0.0.1 ip4:10.0.0.2 -all").unwrap(),
+        SpfRecord::parse(b"v=spf1 ip4:10.0.0.1 ip4:10.0.0.2 -all").unwrap(),
         Instant::now() + Duration::from_secs(5),
     );
     session

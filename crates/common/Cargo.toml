@@ -14,10 +14,10 @@ coordinator = { path = "../coordinator" }
 types = { path = "../types" }
 registry = { path = "../registry" }
 jmap_proto = { path = "../jmap-proto" }
-sieve-rs = { version = "1.0", features = ["serde"] }
-mail-parser = { version = "0.11", features = ["full_encoding"] } 
+sieve-rs = { version = "2.0", features = ["serde"] }
+mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.13", features = ["generate", "arc"] }
+mail-auth = { version = "0.14", features = ["generate", "arc"] }
 smtp-proto = { version = "0.2.3", features = ["rkyv"] }
 dns-update = { version = "0.5" }
 calcard = { version = "0.4", features = ["rkyv"] }

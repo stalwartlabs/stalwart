@@ -7,7 +7,6 @@
 use std::{borrow::Cow, fmt::Debug, str::FromStr, time::Duration};
 
 use compact_str::{CompactString, ToCompactString, format_compact};
-use mail_auth::common::verify::VerifySignature;
 
 use crate::*;
 
@@ -222,9 +221,7 @@ impl EventType {
 impl From<mail_auth::Error> for Error {
     fn from(err: mail_auth::Error) -> Self {
         match err {
-            mail_auth::Error::ParseError => {
-                EventType::MailAuth(MailAuthEvent::ParseError).into_err()
-            }
+            mail_auth::Error::Parse => EventType::MailAuth(MailAuthEvent::ParseError).into_err(),
             mail_auth::Error::MissingParameters => {
                 EventType::MailAuth(MailAuthEvent::MissingParameters).into_err()
             }
@@ -239,15 +236,15 @@ impl From<mail_auth::Error> for Error {
                 EventType::MailAuth(MailAuthEvent::PolicyNotAligned).into_err()
             }
             mail_auth::Error::Crypto(err) => match err {
-                mail_auth::common::crypto::CryptoError::Library(details) => {
+                mail_auth::crypto::CryptoError::Library(details) => {
                     EventType::MailAuth(MailAuthEvent::Crypto)
                         .into_err()
                         .details(CompactString::from(details))
                 }
-                mail_auth::common::crypto::CryptoError::FailedVerification => {
+                mail_auth::crypto::CryptoError::FailedVerification => {
                     EventType::Dkim(DkimEvent::FailedVerification).into_err()
                 }
-                mail_auth::common::crypto::CryptoError::IncompatibleAlgorithms => {
+                mail_auth::crypto::CryptoError::IncompatibleAlgorithms => {
                     EventType::Dkim(DkimEvent::IncompatibleAlgorithms).into_err()
                 }
             },
@@ -279,19 +276,19 @@ impl From<mail_auth::Error> for Error {
                 mail_auth::dkim::DkimError::UnsupportedKeyType => {
                     EventType::Dkim(DkimEvent::UnsupportedKeyType).into_err()
                 }
-                mail_auth::dkim::DkimError::FailedBodyHashMatch => {
+                mail_auth::dkim::DkimError::BodyHashMismatch => {
                     EventType::Dkim(DkimEvent::FailedBodyHashMatch).into_err()
                 }
-                mail_auth::dkim::DkimError::FailedAuidMatch => {
+                mail_auth::dkim::DkimError::AuidMismatch => {
                     EventType::Dkim(DkimEvent::FailedAuidMatch).into_err()
                 }
-                mail_auth::dkim::DkimError::RevokedPublicKey => {
+                mail_auth::dkim::DkimError::PublicKeyRevoked => {
                     EventType::Dkim(DkimEvent::RevokedPublicKey).into_err()
                 }
                 mail_auth::dkim::DkimError::SignatureExpired => {
                     EventType::Dkim(DkimEvent::SignatureExpired).into_err()
                 }
-                mail_auth::dkim::DkimError::SignatureLength => {
+                mail_auth::dkim::DkimError::BodyLengthTag => {
                     EventType::Dkim(DkimEvent::SignatureLength).into_err()
                 }
             },
@@ -302,7 +299,7 @@ impl From<mail_auth::Error> for Error {
                 mail_auth::arc::ArcError::InvalidInstance(instance) => {
                     EventType::Arc(ArcEvent::InvalidInstance).ctx(Key::Id, instance)
                 }
-                mail_auth::arc::ArcError::InvalidCV => {
+                mail_auth::arc::ArcError::InvalidChainValidation => {
                     EventType::Arc(ArcEvent::InvalidCv).into_err()
                 }
                 mail_auth::arc::ArcError::HasHeaderTag => {
@@ -311,13 +308,13 @@ impl From<mail_auth::Error> for Error {
                 mail_auth::arc::ArcError::BrokenChain => {
                     EventType::Arc(ArcEvent::BrokenChain).into_err()
                 }
-                mail_auth::arc::ArcError::FailedBodyHashMatch => {
+                mail_auth::arc::ArcError::BodyHashMismatch => {
                     EventType::Dkim(DkimEvent::FailedBodyHashMatch).into_err()
                 }
                 mail_auth::arc::ArcError::SignatureExpired => {
                     EventType::Dkim(DkimEvent::SignatureExpired).into_err()
                 }
-                mail_auth::arc::ArcError::SignatureLength => {
+                mail_auth::arc::ArcError::BodyLengthTag => {
                     EventType::Dkim(DkimEvent::SignatureLength).into_err()
                 }
             },
@@ -418,6 +415,9 @@ impl From<mail_auth::Error> for Error {
                 mail_auth::dkim2::Dkim2Error::Exploded => {
                     EventType::Dkim(DkimEvent::Exploded).into_err()
                 }
+                mail_auth::dkim2::Dkim2Error::RecipeSyntax => {
+                    EventType::Dkim(DkimEvent::InstanceSyntax).into_err()
+                }
             },
         }
     }
@@ -496,7 +496,7 @@ impl From<&mail_auth::DkimOutput<'_>> for Error {
     fn from(value: &mail_auth::DkimOutput<'_>) -> Self {
         Error::from(value.result()).ctx_opt(
             Key::Domain,
-            value.signature().map(|s| s.domain().to_compact_string()),
+            value.signature().map(|s| s.d.to_compact_string()),
         )
     }
 }

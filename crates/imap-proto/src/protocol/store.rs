@@ -26,14 +26,13 @@ pub enum Operation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response<'x> {
-    pub is_utf8: bool,
     pub items: Vec<FetchItem<'x>>,
 }
 
 impl ImapResponse for Response<'_> {
     fn serialize_into(&self, buf: &mut Vec<u8>) {
         for item in &self.items {
-            item.serialize(buf, self.is_utf8);
+            item.serialize(buf);
         }
     }
 

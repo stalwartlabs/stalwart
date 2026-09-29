@@ -5,9 +5,8 @@
  */
 
 use crate::{KV_QUOTA_BLOB, Server};
-use encodify::{base64::MIME, qp};
 use mail_parser::Encoding;
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Range};
 use store::{
     U32_LEN, U64_LEN,
     dispatch::lookup::KeyValue,
@@ -26,6 +25,45 @@ const SIZE_MASK: u64 = (1u64 << COUNT_SHIFT) - 1;
 pub struct BlobQuotaStatus {
     pub allowed: bool,
     pub expires_in: u64,
+}
+
+pub trait SectionDecode {
+    fn fetch_range(&self) -> Range<usize>;
+
+    fn decode_fetched(&self, fetched: Vec<u8>) -> Option<Vec<u8>>;
+}
+
+impl SectionDecode for BlobSection {
+    fn fetch_range(&self) -> Range<usize> {
+        self.outermost().range()
+    }
+
+    fn decode_fetched(&self, fetched: Vec<u8>) -> Option<Vec<u8>> {
+        let Some((outermost, containers)) = self.containers().split_first() else {
+            return Some(
+                match Encoding::from(self.part().encoding).decode(&fetched) {
+                    Cow::Owned(decoded) => decoded,
+                    Cow::Borrowed(decoded) if decoded.len() != fetched.len() => decoded.to_vec(),
+                    Cow::Borrowed(_) => fetched,
+                },
+            );
+        };
+        let mut buffer = Vec::new();
+        Encoding::from(outermost.encoding).decode_append(&fetched, &mut buffer);
+        drop(fetched);
+        for container in containers {
+            let mut decoded = Vec::new();
+            Encoding::from(container.encoding)
+                .decode_append(buffer.get(container.range())?, &mut decoded);
+            buffer = decoded;
+        }
+        let part = self.part();
+        Some(
+            Encoding::from(part.encoding)
+                .decode(buffer.get(part.range())?)
+                .into_owned(),
+        )
+    }
 }
 
 impl Server {
@@ -204,19 +242,8 @@ impl Server {
     ) -> trc::Result<Option<Vec<u8>>> {
         Ok(self
             .blob_store()
-            .get_blob(
-                hash.as_slice(),
-                (section.offset_start)..(section.offset_start.saturating_add(section.size)),
-            )
+            .get_blob(hash.as_slice(), section.fetch_range())
             .await?
-            .and_then(|bytes| match Encoding::from(section.encoding) {
-                Encoding::None => Some(bytes),
-                Encoding::Base64 => MIME.decode(&bytes).ok(),
-                Encoding::QuotedPrintable => match qp::BODY.decode(&bytes) {
-                    Ok(Cow::Owned(decoded)) => Some(decoded),
-                    Ok(Cow::Borrowed(_)) => Some(bytes),
-                    Err(_) => None,
-                },
-            }))
+            .and_then(|bytes| section.decode_fetched(bytes)))
     }
 }

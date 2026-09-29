@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 use common::network::SessionStream;
 
-use mail_auth::common::resolver::ToReverseName;
+use mail_auth::dns::ToReverseName;
 use sieve::{Envelope, Sieve, runtime::Variable};
 use smtp_proto::*;
 

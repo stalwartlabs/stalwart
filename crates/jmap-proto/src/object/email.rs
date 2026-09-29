@@ -381,7 +381,71 @@ impl EmailProperty {
     }
 }
 
+const FORM_TEXT: u8 = 1;
+const FORM_ADDRESSES: u8 = 1 << 1;
+const FORM_MESSAGE_IDS: u8 = 1 << 2;
+const FORM_DATE: u8 = 1 << 3;
+const FORM_URLS: u8 = 1 << 4;
+const FORM_ANY: u8 = u8::MAX;
+
+impl HeaderForm {
+    fn mask(self) -> u8 {
+        match self {
+            HeaderForm::Raw => FORM_ANY,
+            HeaderForm::Text => FORM_TEXT,
+            HeaderForm::Addresses | HeaderForm::GroupedAddresses => FORM_ADDRESSES,
+            HeaderForm::MessageIds => FORM_MESSAGE_IDS,
+            HeaderForm::Date => FORM_DATE,
+            HeaderForm::URLs => FORM_URLS,
+        }
+    }
+}
+
+impl EmailProperty {
+    pub fn is_allowed_form(&self) -> bool {
+        match self {
+            EmailProperty::Header(header) => header.is_allowed_form(),
+            _ => true,
+        }
+    }
+}
+
 impl HeaderProperty {
+    pub fn is_allowed_form(&self) -> bool {
+        let allowed = hashify::fnc_map_ignore_case!(self.header.as_bytes(),
+            "Subject" => FORM_TEXT,
+            "Comments" => FORM_TEXT,
+            "Keywords" => FORM_TEXT,
+            "From" => FORM_ADDRESSES,
+            "Sender" => FORM_ADDRESSES,
+            "Reply-To" => FORM_ADDRESSES,
+            "To" => FORM_ADDRESSES,
+            "Cc" => FORM_ADDRESSES,
+            "Bcc" => FORM_ADDRESSES,
+            "Resent-From" => FORM_ADDRESSES,
+            "Resent-Sender" => FORM_ADDRESSES,
+            "Resent-To" => FORM_ADDRESSES,
+            "Resent-Cc" => FORM_ADDRESSES,
+            "Resent-Bcc" => FORM_ADDRESSES,
+            "Message-ID" => FORM_MESSAGE_IDS,
+            "In-Reply-To" => FORM_MESSAGE_IDS,
+            "References" => FORM_MESSAGE_IDS,
+            "Resent-Message-ID" => FORM_MESSAGE_IDS,
+            "Date" => FORM_DATE,
+            "Resent-Date" => FORM_DATE,
+            "List-Help" => FORM_URLS,
+            "List-Unsubscribe" => FORM_URLS,
+            "List-Subscribe" => FORM_URLS,
+            "List-Post" => FORM_URLS,
+            "List-Owner" => FORM_URLS,
+            "List-Archive" => FORM_URLS,
+            "Return-Path" => 0,
+            "Received" => 0,
+            _ => FORM_ANY
+        );
+        self.form == HeaderForm::Raw || self.form.mask() & allowed != 0
+    }
+
     fn parse(value: &str) -> Option<Self> {
         let mut result = HeaderProperty {
             form: HeaderForm::Raw,

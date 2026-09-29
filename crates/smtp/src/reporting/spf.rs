@@ -4,10 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{core::Session, reporting::send::MtaReportSend};
+use crate::{
+    core::Session,
+    reporting::{ReportAddress, send::MtaReportSend},
+};
 use common::network::SessionStream;
 use compact_str::CompactString;
-use mail_auth::{AuthenticationResults, SpfOutput, report::AuthFailureType};
+use mail_auth::{
+    AuthenticationResults, SpfOutput,
+    report::{
+        ReportEnvelope,
+        arf::{AuthFailureType, FeedbackReport},
+    },
+    spf::verify::SpfParameters,
+};
 use registry::schema::structs::Rate;
 use trc::OutgoingReportEvent;
 
@@ -19,6 +29,10 @@ impl<T: SessionStream> Session<T> {
         rejected: bool,
         output: &SpfOutput,
     ) {
+        if ReportAddress::checked(rcpt, self.data.session_id).is_none() {
+            return;
+        }
+
         // Throttle recipient
         if !self.throttle_rcpt(rcpt, rate, "spf").await {
             trc::event!(
@@ -41,44 +55,55 @@ impl<T: SessionStream> Session<T> {
             .eval_if(&config.address, self, self.data.session_id)
             .await
             .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_string());
+        let from_name = self
+            .server
+            .eval_if(&config.name, self, self.data.session_id)
+            .await
+            .unwrap_or_else(|| "Mailer Daemon".to_string());
+        let subject = self
+            .server
+            .eval_if(&config.subject, self, self.data.session_id)
+            .await
+            .unwrap_or_else(|| "SPF Report".to_string());
+        let spf_params = if let Some(mail_from) = &self.data.mail_from {
+            SpfParameters::mail_from(
+                self.data.remote_ip,
+                &self.data.helo_domain,
+                &self.hostname,
+                &mail_from.address,
+            )
+        } else {
+            SpfParameters::helo(self.data.remote_ip, &self.data.helo_domain, &self.hostname)
+        };
         let mut report = Vec::with_capacity(128);
-        self.new_auth_failure(AuthFailureType::Spf, rejected)
-            .with_authentication_results(
-                if let Some(mail_from) = &self.data.mail_from {
-                    AuthenticationResults::new(&self.hostname).with_spf_mailfrom_result(
-                        output,
-                        self.data.remote_ip,
-                        &mail_from.address,
-                        &self.data.helo_domain,
-                    )
-                } else {
-                    AuthenticationResults::new(&self.hostname).with_spf_ehlo_result(
-                        output,
-                        self.data.remote_ip,
-                        &self.data.helo_domain,
-                    )
-                }
-                .to_string(),
-            )
-            .with_spf_dns(format!("txt : {} : v=SPF1", output.domain())) // TODO use DNS record
-            .write_rfc5322(
-                (
-                    self.server
-                        .eval_if(&config.name, self, self.data.session_id)
-                        .await
-                        .unwrap_or_else(|| "Mailer Daemon".to_string())
-                        .as_str(),
-                    from_addr.as_str(),
-                ),
-                rcpt,
-                &self
-                    .server
-                    .eval_if(&config.subject, self, self.data.session_id)
-                    .await
-                    .unwrap_or_else(|| "SPF Report".to_string()),
-                &mut report,
-            )
-            .ok();
+        if let Err(err) = (FeedbackReport {
+            authentication_results: vec![
+                AuthenticationResults::new(&self.hostname)
+                    .with_spf_result(output, &spf_params)
+                    .to_string()
+                    .into(),
+            ],
+            spf_dns: Some(format!("txt : {} : v=SPF1", output.domain()).into()),
+            ..self.new_auth_failure(AuthFailureType::Spf, rejected)
+        })
+        .write_rfc5322(
+            &ReportEnvelope {
+                from: (from_name.as_str(), from_addr.as_str()).into(),
+                to: vec![rcpt],
+                submitter: &self.hostname,
+                report_domain: "",
+                subject: Some(&subject),
+            },
+            &mut report,
+        ) {
+            trc::event!(
+                OutgoingReport(OutgoingReportEvent::SubmissionError),
+                SpanId = self.data.session_id,
+                To = CompactString::from(rcpt),
+                Reason = err.to_string(),
+            );
+            return;
+        }
 
         trc::event!(
             OutgoingReport(OutgoingReportEvent::SpfReport),

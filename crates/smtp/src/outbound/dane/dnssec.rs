@@ -10,8 +10,8 @@ use common::{
 };
 pub use mail_auth::DnssecStatus;
 use mail_auth::{
-    MX, RecordSet,
-    common::resolver::ToFqdn,
+    Mx, RecordSet,
+    dns::ToFqdn,
     hickory_resolver::{
         net::{DnsError, NetError},
         proto::{
@@ -35,7 +35,7 @@ pub trait TlsaLookup: Sync + Send {
     fn mx_lookup(
         &self,
         key: impl ToFqdn + Sync + Send,
-    ) -> impl Future<Output = mail_auth::Result<RecordSet<MX>>> + Send;
+    ) -> impl Future<Output = mail_auth::Result<RecordSet<Mx>>> + Send;
 
     fn tlsa_lookup(
         &self,
@@ -60,7 +60,7 @@ pub enum TlsaResult {
 }
 
 impl TlsaLookup for Server {
-    async fn mx_lookup(&self, key: impl ToFqdn + Sync + Send) -> mail_auth::Result<RecordSet<MX>> {
+    async fn mx_lookup(&self, key: impl ToFqdn + Sync + Send) -> mail_auth::Result<RecordSet<Mx>> {
         if !self.core.smtp.resolvers.dnssec_available {
             return self
                 .core
@@ -80,7 +80,7 @@ impl TlsaLookup for Server {
 
         #[cfg(any(test, feature = "test_mode"))]
         if true {
-            return mail_auth::common::resolver::mock_resolve(key.as_ref());
+            return mail_auth::dns::mock_resolve(key.as_ref());
         }
 
         let mx_lookup = match self
@@ -98,7 +98,7 @@ impl TlsaLookup for Server {
                     && denial.response_code == ResponseCode::NoError
                 {
                     let records = RecordSet {
-                        rrset: Arc::new([]),
+                        records: Arc::new([]),
                         dnssec_status: denial.dnssec_status,
                     };
                     if let Some(valid_until) = denial.valid_until {
@@ -135,15 +135,15 @@ impl TlsaLookup for Server {
         }
 
         records.sort_unstable_by_key(|a| a.0);
-        let rrset: Arc<[MX]> = records
+        let rrset: Arc<[Mx]> = records
             .into_iter()
-            .map(|(preference, exchanges)| MX {
+            .map(|(preference, exchanges)| Mx {
                 preference,
                 exchanges: exchanges.into_boxed_slice(),
             })
-            .collect::<Arc<[MX]>>();
+            .collect::<Arc<[Mx]>>();
         let records = RecordSet {
-            rrset,
+            records: rrset,
             dnssec_status: dnssec_status.unwrap_or(DnssecStatus::Indeterminate),
         };
 
@@ -169,7 +169,7 @@ impl TlsaLookup for Server {
             if key.as_ref().contains("_dnssec_bogus.") {
                 return Ok(TlsaResult::Bogus);
             }
-            return mail_auth::common::resolver::mock_resolve(key.as_ref());
+            return mail_auth::dns::mock_resolve(key.as_ref());
         }
 
         let tlsa_lookup = match self
@@ -287,7 +287,7 @@ impl TlsaLookup for Server {
 
         #[cfg(any(test, feature = "test_mode"))]
         if true {
-            return mail_auth::common::resolver::mock_resolve(key.as_ref());
+            return mail_auth::dns::mock_resolve(key.as_ref());
         }
 
         let name = Name::from_str_relaxed::<&str>(key.as_ref())?;
@@ -306,7 +306,7 @@ impl TlsaLookup for Server {
                     && denial.response_code == ResponseCode::NoError
                 {
                     let records = RecordSet {
-                        rrset: Arc::new([]),
+                        records: Arc::new([]),
                         dnssec_status: denial.dnssec_status,
                     };
                     if let Some(valid_until) = denial.valid_until {
@@ -324,7 +324,7 @@ impl TlsaLookup for Server {
 
         let answers = lookup.answers();
         let records = RecordSet {
-            rrset: answers
+            records: answers
                 .iter()
                 .filter_map(|record| match &record.data {
                     RData::A(addr) => Some(addr.0),
@@ -365,7 +365,7 @@ impl TlsaLookup for Server {
 
         #[cfg(any(test, feature = "test_mode"))]
         if true {
-            return mail_auth::common::resolver::mock_resolve(key.as_ref());
+            return mail_auth::dns::mock_resolve(key.as_ref());
         }
 
         let name = Name::from_str_relaxed::<&str>(key.as_ref())?;
@@ -384,7 +384,7 @@ impl TlsaLookup for Server {
                     && denial.response_code == ResponseCode::NoError
                 {
                     let records = RecordSet {
-                        rrset: Arc::new([]),
+                        records: Arc::new([]),
                         dnssec_status: denial.dnssec_status,
                     };
                     if let Some(valid_until) = denial.valid_until {
@@ -402,7 +402,7 @@ impl TlsaLookup for Server {
 
         let answers = lookup.answers();
         let records = RecordSet {
-            rrset: answers
+            records: answers
                 .iter()
                 .filter_map(|record| match &record.data {
                     RData::AAAA(addr) => Some(addr.0),

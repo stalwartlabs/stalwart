@@ -37,7 +37,7 @@ pub enum ScriptResult {
 }
 
 pub struct ScriptParameters<'x> {
-    message: Option<Message<'x>>,
+    message: Option<&'x Message<'x>>,
     headers: Option<&'x [u8]>,
     variables: AHashMap<Cow<'static, str>, Variable<'x>>,
     envelope: Vec<(Envelope, Variable<'x>)>,
@@ -88,7 +88,7 @@ impl<'x> ScriptParameters<'x> {
         self
     }
 
-    pub fn with_message(self, message: Message<'x>) -> Self {
+    pub fn with_message(self, message: &'x Message<'x>) -> Self {
         Self {
             message: message.into(),
             ..self

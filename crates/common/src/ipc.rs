@@ -11,9 +11,9 @@ use crate::config::smtp::{
 };
 use ahash::RandomState;
 use mail_auth::{
-    dmarc::Dmarc,
-    mta_sts::TlsRpt,
-    report::{Record, tlsrpt::FailureDetails},
+    dmarc::DmarcRecord,
+    mta_sts::TlsRptRecord,
+    report::{dmarc::Record, tlsrpt::FailureDetails},
 };
 use registry::{schema::prelude::ObjectType, types::id::ObjectId};
 use std::sync::{
@@ -162,7 +162,7 @@ pub enum ReportingEvent {
 pub struct DmarcEvent {
     pub domain: String,
     pub report_record: Record,
-    pub dmarc_record: Arc<Dmarc>,
+    pub dmarc_record: Arc<DmarcRecord>,
     pub interval: AggregateFrequency,
     pub span_id: u64,
 }
@@ -172,7 +172,7 @@ pub struct TlsEvent {
     pub domain: String,
     pub policy: PolicyType,
     pub failure: Option<FailureDetails>,
-    pub tls_record: Arc<TlsRpt>,
+    pub tls_record: Arc<TlsRptRecord>,
     pub interval: AggregateFrequency,
     pub span_id: u64,
 }
@@ -230,7 +230,7 @@ pub trait ToHash {
     fn to_hash(&self) -> u64;
 }
 
-impl ToHash for Dmarc {
+impl ToHash for DmarcRecord {
     fn to_hash(&self) -> u64 {
         RandomState::with_seeds(1, 9, 7, 9).hash_one(self)
     }

@@ -8,12 +8,11 @@ use super::embedded::EmbeddedBlobs;
 use common::{Server, auth::AccessToken};
 use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
-use email::message::metadata::MessageMetadata;
+use email::message::metadata::MetadataRow;
 use groupware::cache::GroupwareCache;
 use registry::schema::enums::Permission;
 use std::future::Future;
 use store::ValueKey;
-use store::write::{Archive, ArchiveBytes};
 use trc::AddContext;
 use types::acl::Acl;
 use types::blob::{BlobClass, BlobId};
@@ -21,12 +20,23 @@ use types::collection::{Collection, SyncCollection};
 use types::field::EmailField;
 use utils::chained_bytes::ChainedBytes;
 
+pub struct DownloadedBlob {
+    pub bytes: Vec<u8>,
+    pub extra_headers_len: usize,
+}
+
 pub trait BlobDownload: Sync + Send {
     fn blob_download(
         &self,
         blob_id: &BlobId,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<Option<Vec<u8>>>> + Send;
+
+    fn blob_download_with_extra(
+        &self,
+        blob_id: &BlobId,
+        access_token: &AccessToken,
+    ) -> impl Future<Output = trc::Result<Option<DownloadedBlob>>> + Send;
 
     fn has_access_blob(
         &self,
@@ -36,21 +46,39 @@ pub trait BlobDownload: Sync + Send {
 }
 
 impl BlobDownload for Server {
-    #[allow(clippy::blocks_in_conditions)]
     async fn blob_download(
         &self,
         blob_id: &BlobId,
         access_token: &AccessToken,
     ) -> trc::Result<Option<Vec<u8>>> {
+        self.blob_download_with_extra(blob_id, access_token)
+            .await
+            .map(|blob| blob.map(|blob| blob.bytes))
+    }
+
+    #[allow(clippy::blocks_in_conditions)]
+    async fn blob_download_with_extra(
+        &self,
+        blob_id: &BlobId,
+        access_token: &AccessToken,
+    ) -> trc::Result<Option<DownloadedBlob>> {
+        let plain = |bytes: Option<Vec<u8>>| {
+            bytes.map(|bytes| DownloadedBlob {
+                bytes,
+                extra_headers_len: 0,
+            })
+        };
         if self.has_access_blob(blob_id, access_token).await? {
             if matches!(blob_id.class, BlobClass::Embedded { .. }) {
                 self.embedded_blob(blob_id)
                     .await
                     .caused_by(trc::location!())
+                    .map(plain)
             } else if let Some(section) = &blob_id.section {
                 self.get_blob_section(&blob_id.hash, section)
                     .await
                     .caused_by(trc::location!())
+                    .map(plain)
             } else {
                 let blob = self
                     .blob_store()
@@ -66,9 +94,9 @@ impl BlobDownload for Server {
                         },
                         Ok(Some(data)),
                     ) if *collection == Collection::Email as u8 => {
-                        let Some(archive) = self
+                        let Some(row) = self
                             .store()
-                            .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
+                            .get_value::<MetadataRow>(ValueKey::immutable(
                                 *account_id,
                                 Collection::Email,
                                 *document_id,
@@ -77,23 +105,22 @@ impl BlobDownload for Server {
                             .await
                             .caused_by(trc::location!())?
                         else {
-                            return Ok(Some(data));
+                            return Ok(plain(Some(data)));
                         };
-                        let metadata = archive
-                            .to_unarchived::<MessageMetadata>()
-                            .caused_by(trc::location!())?;
-                        let body_offset = metadata.inner.blob_body_offset.to_native();
-                        if metadata.inner.root_part().offset_body.to_native() != body_offset {
-                            let raw_message = ChainedBytes::new(
-                                metadata.inner.raw_headers.as_ref(),
-                            )
-                            .with_last(data.get(body_offset as usize..).unwrap_or_default());
-                            Ok(Some(raw_message.to_bytes()))
+                        let metadata = row.unarchive().caused_by(trc::location!())?;
+                        let body_offset = metadata.blob_body_offset();
+                        if metadata.headers_len() != body_offset {
+                            let headers = row.raw_headers().caused_by(trc::location!())?;
+                            Ok(Some(DownloadedBlob {
+                                bytes: ChainedBytes::from_blob(&headers, &data, body_offset)
+                                    .to_vec(),
+                                extra_headers_len: metadata.extra_headers_len(),
+                            }))
                         } else {
-                            Ok(Some(data))
+                            Ok(plain(Some(data)))
                         }
                     }
-                    (_, blob) => blob,
+                    (_, blob) => blob.map(plain),
                 }
             }
         } else {

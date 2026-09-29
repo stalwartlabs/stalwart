@@ -4,7 +4,7 @@ BODY (
          "charset" "us-ascii"
       ) NIL NIL "base64" 239 3
    )(
-      "message" "rfc822" NIL NIL NIL NIL 723 (
+      "message" "rfc822" NIL NIL NIL "7bit" 723 (
          NIL "Exporting my book about coffee tables" (
             (
                "Cosmo Kramer" NIL "kramer" "kramerica.com"
@@ -28,7 +28,7 @@ BODY (
                "name" "=?utf-8?B?Qm9vayBhYm91dCDimJUgdGFibGVzLmdpZg==?="
             ) NIL NIL "Base64" 56
          ) "mixed"
-      ) 0
+      ) 19
    ) "mixed"
 )
 
@@ -36,9 +36,9 @@ BODYSTRUCTURE (
    (
       "text" "html" (
          "charset" "us-ascii"
-      ) NIL NIL "base64" 239 3 "07aab44e51c5f1833a5d19f2e1804c4b" NIL NIL NIL
+      ) NIL NIL "base64" 239 3 NIL NIL NIL NIL
    )(
-      "message" "rfc822" NIL NIL NIL NIL 723 (
+      "message" "rfc822" NIL NIL NIL "7bit" 723 (
          NIL "Exporting my book about coffee tables" (
             (
                "Cosmo Kramer" NIL "kramer" "kramerica.com"
@@ -56,17 +56,17 @@ BODYSTRUCTURE (
          (
             "text" "plain" (
                "charset" "utf-16"
-            ) NIL NIL "quoted-printable" 228 3 "3a942a99cdd8a099ae107d3867ec20fb" NIL NIL NIL
+            ) NIL NIL "quoted-printable" 228 3 NIL NIL NIL NIL
          )(
             "image" "gif" (
                "name" "=?utf-8?B?Qm9vayBhYm91dCDimJUgdGFibGVzLmdpZg==?="
-            ) NIL NIL "Base64" 56 "d40fa7f401e9dc2df56cbb740d65ff52" (
+            ) NIL NIL "Base64" 56 NIL (
                "attachment" NIL
             ) NIL NIL
          ) "mixed" (
             "boundary" "giddyup"
          ) NIL NIL NIL
-      ) 0 "cdb0382a03a15601fb1b3c7422521620" NIL NIL NIL
+      ) 19 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "festivus"
    ) NIL NIL NIL
@@ -76,9 +76,9 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "html" (
          "charset" "us-ascii"
-      ) NIL NIL "base64" 239 3 "07aab44e51c5f1833a5d19f2e1804c4b" NIL NIL NIL
+      ) NIL NIL "base64" 239 3 NIL NIL NIL NIL
    )(
-      "message" "rfc822" NIL NIL NIL NIL 723 (
+      "message" "rfc822" NIL NIL NIL "7bit" 723 (
          NIL "Exporting my book about coffee tables" (
             (
                "Cosmo Kramer" NIL "kramer" "kramerica.com"
@@ -96,17 +96,17 @@ BODYSTRUCTURE UTF8=ACCEPT (
          (
             "text" "plain" (
                "charset" "utf-16"
-            ) NIL NIL "quoted-printable" 228 3 "3a942a99cdd8a099ae107d3867ec20fb" NIL NIL NIL
+            ) NIL NIL "quoted-printable" 228 3 NIL NIL NIL NIL
          )(
             "image" "gif" (
                "name" "Book about ☕ tables.gif"
-            ) NIL NIL "Base64" 56 "d40fa7f401e9dc2df56cbb740d65ff52" (
+            ) NIL NIL "Base64" 56 NIL (
                "attachment" NIL
             ) NIL NIL
          ) "mixed" (
             "boundary" "giddyup"
          ) NIL NIL NIL
-      ) 0 "cdb0382a03a15601fb1b3c7422521620" NIL NIL NIL
+      ) 19 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "festivus"
    ) NIL NIL NIL

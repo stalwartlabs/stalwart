@@ -14,48 +14,49 @@ use crate::{
 };
 use mail_auth::{
     IprevOutput, IprevResult, SpfOutput,
-    report::{tlsrpt::*, *},
+    dmarc::{Alignment, Policy},
+    report::{arf::*, dmarc::*, tlsrpt::*},
 };
 use std::borrow::Cow;
 
-impl From<enums::DmarcAlignment> for Alignment {
+impl From<enums::DmarcAlignment> for Option<Alignment> {
     fn from(value: enums::DmarcAlignment) -> Self {
         match value {
-            enums::DmarcAlignment::Relaxed => Alignment::Relaxed,
-            enums::DmarcAlignment::Strict => Alignment::Strict,
-            enums::DmarcAlignment::Unspecified => Alignment::Unspecified,
+            enums::DmarcAlignment::Relaxed => Some(Alignment::Relaxed),
+            enums::DmarcAlignment::Strict => Some(Alignment::Strict),
+            enums::DmarcAlignment::Unspecified => None,
         }
     }
 }
 
-impl From<Alignment> for enums::DmarcAlignment {
-    fn from(value: Alignment) -> Self {
+impl From<Option<Alignment>> for enums::DmarcAlignment {
+    fn from(value: Option<Alignment>) -> Self {
         match value {
-            Alignment::Relaxed => enums::DmarcAlignment::Relaxed,
-            Alignment::Strict => enums::DmarcAlignment::Strict,
-            Alignment::Unspecified => enums::DmarcAlignment::Unspecified,
+            Some(Alignment::Relaxed) => enums::DmarcAlignment::Relaxed,
+            Some(Alignment::Strict) => enums::DmarcAlignment::Strict,
+            None => enums::DmarcAlignment::Unspecified,
         }
     }
 }
 
-impl From<enums::DmarcDisposition> for Disposition {
+impl From<enums::DmarcDisposition> for Policy {
     fn from(value: enums::DmarcDisposition) -> Self {
         match value {
-            enums::DmarcDisposition::None => Disposition::None,
-            enums::DmarcDisposition::Quarantine => Disposition::Quarantine,
-            enums::DmarcDisposition::Reject => Disposition::Reject,
-            enums::DmarcDisposition::Unspecified => Disposition::Unspecified,
+            enums::DmarcDisposition::None => Policy::None,
+            enums::DmarcDisposition::Quarantine => Policy::Quarantine,
+            enums::DmarcDisposition::Reject => Policy::Reject,
+            enums::DmarcDisposition::Unspecified => Policy::Unspecified,
         }
     }
 }
 
-impl From<Disposition> for enums::DmarcDisposition {
-    fn from(value: Disposition) -> Self {
+impl From<Policy> for enums::DmarcDisposition {
+    fn from(value: Policy) -> Self {
         match value {
-            Disposition::None => enums::DmarcDisposition::None,
-            Disposition::Quarantine => enums::DmarcDisposition::Quarantine,
-            Disposition::Reject => enums::DmarcDisposition::Reject,
-            Disposition::Unspecified => enums::DmarcDisposition::Unspecified,
+            Policy::None => enums::DmarcDisposition::None,
+            Policy::Quarantine => enums::DmarcDisposition::Quarantine,
+            Policy::Reject => enums::DmarcDisposition::Reject,
+            Policy::Unspecified => enums::DmarcDisposition::Unspecified,
         }
     }
 }
@@ -80,46 +81,46 @@ impl From<Discovery> for enums::DmarcDiscovery {
     }
 }
 
-impl From<enums::DmarcActionDisposition> for ActionDisposition {
+impl From<enums::DmarcActionDisposition> for Disposition {
     fn from(value: enums::DmarcActionDisposition) -> Self {
         match value {
-            enums::DmarcActionDisposition::None => ActionDisposition::None,
-            enums::DmarcActionDisposition::Pass => ActionDisposition::Pass,
-            enums::DmarcActionDisposition::Quarantine => ActionDisposition::Quarantine,
-            enums::DmarcActionDisposition::Reject => ActionDisposition::Reject,
-            enums::DmarcActionDisposition::Unspecified => ActionDisposition::Unspecified,
+            enums::DmarcActionDisposition::None => Disposition::None,
+            enums::DmarcActionDisposition::Pass => Disposition::Pass,
+            enums::DmarcActionDisposition::Quarantine => Disposition::Quarantine,
+            enums::DmarcActionDisposition::Reject => Disposition::Reject,
+            enums::DmarcActionDisposition::Unspecified => Disposition::Unspecified,
         }
     }
 }
 
-impl From<ActionDisposition> for enums::DmarcActionDisposition {
-    fn from(value: ActionDisposition) -> Self {
+impl From<Disposition> for enums::DmarcActionDisposition {
+    fn from(value: Disposition) -> Self {
         match value {
-            ActionDisposition::None => enums::DmarcActionDisposition::None,
-            ActionDisposition::Pass => enums::DmarcActionDisposition::Pass,
-            ActionDisposition::Quarantine => enums::DmarcActionDisposition::Quarantine,
-            ActionDisposition::Reject => enums::DmarcActionDisposition::Reject,
-            ActionDisposition::Unspecified => enums::DmarcActionDisposition::Unspecified,
+            Disposition::None => enums::DmarcActionDisposition::None,
+            Disposition::Pass => enums::DmarcActionDisposition::Pass,
+            Disposition::Quarantine => enums::DmarcActionDisposition::Quarantine,
+            Disposition::Reject => enums::DmarcActionDisposition::Reject,
+            Disposition::Unspecified => enums::DmarcActionDisposition::Unspecified,
         }
     }
 }
 
-impl From<enums::DmarcResult> for DmarcResult {
+impl From<enums::DmarcResult> for DmarcStatus {
     fn from(value: enums::DmarcResult) -> Self {
         match value {
-            enums::DmarcResult::Pass => DmarcResult::Pass,
-            enums::DmarcResult::Fail => DmarcResult::Fail,
-            enums::DmarcResult::Unspecified => DmarcResult::Unspecified,
+            enums::DmarcResult::Pass => DmarcStatus::Pass,
+            enums::DmarcResult::Fail => DmarcStatus::Fail,
+            enums::DmarcResult::Unspecified => DmarcStatus::Unspecified,
         }
     }
 }
 
-impl From<DmarcResult> for enums::DmarcResult {
-    fn from(value: DmarcResult) -> Self {
+impl From<DmarcStatus> for enums::DmarcResult {
+    fn from(value: DmarcStatus) -> Self {
         match value {
-            DmarcResult::Pass => enums::DmarcResult::Pass,
-            DmarcResult::Fail => enums::DmarcResult::Fail,
-            DmarcResult::Unspecified => enums::DmarcResult::Unspecified,
+            DmarcStatus::Pass => enums::DmarcResult::Pass,
+            DmarcStatus::Fail => enums::DmarcResult::Fail,
+            DmarcStatus::Unspecified => enums::DmarcResult::Unspecified,
         }
     }
 }
@@ -152,78 +153,78 @@ impl From<PolicyOverride> for enums::DmarcPolicyOverride {
     }
 }
 
-impl From<enums::DkimAuthResult> for DkimResult {
+impl From<enums::DkimAuthResult> for DkimStatus {
     fn from(value: enums::DkimAuthResult) -> Self {
         match value {
-            enums::DkimAuthResult::None => DkimResult::None,
-            enums::DkimAuthResult::Pass => DkimResult::Pass,
-            enums::DkimAuthResult::Fail => DkimResult::Fail,
-            enums::DkimAuthResult::Policy => DkimResult::Policy,
-            enums::DkimAuthResult::Neutral => DkimResult::Neutral,
-            enums::DkimAuthResult::TempError => DkimResult::TempError,
-            enums::DkimAuthResult::PermError => DkimResult::PermError,
+            enums::DkimAuthResult::None => DkimStatus::None,
+            enums::DkimAuthResult::Pass => DkimStatus::Pass,
+            enums::DkimAuthResult::Fail => DkimStatus::Fail,
+            enums::DkimAuthResult::Policy => DkimStatus::Policy,
+            enums::DkimAuthResult::Neutral => DkimStatus::Neutral,
+            enums::DkimAuthResult::TempError => DkimStatus::TempError,
+            enums::DkimAuthResult::PermError => DkimStatus::PermError,
         }
     }
 }
 
-impl From<DkimResult> for enums::DkimAuthResult {
-    fn from(value: DkimResult) -> Self {
+impl From<DkimStatus> for enums::DkimAuthResult {
+    fn from(value: DkimStatus) -> Self {
         match value {
-            DkimResult::None => enums::DkimAuthResult::None,
-            DkimResult::Pass => enums::DkimAuthResult::Pass,
-            DkimResult::Fail => enums::DkimAuthResult::Fail,
-            DkimResult::Policy => enums::DkimAuthResult::Policy,
-            DkimResult::Neutral => enums::DkimAuthResult::Neutral,
-            DkimResult::TempError => enums::DkimAuthResult::TempError,
-            DkimResult::PermError => enums::DkimAuthResult::PermError,
+            DkimStatus::None => enums::DkimAuthResult::None,
+            DkimStatus::Pass => enums::DkimAuthResult::Pass,
+            DkimStatus::Fail => enums::DkimAuthResult::Fail,
+            DkimStatus::Policy => enums::DkimAuthResult::Policy,
+            DkimStatus::Neutral => enums::DkimAuthResult::Neutral,
+            DkimStatus::TempError => enums::DkimAuthResult::TempError,
+            DkimStatus::PermError => enums::DkimAuthResult::PermError,
         }
     }
 }
 
-impl From<enums::SpfAuthResult> for SpfResult {
+impl From<enums::SpfAuthResult> for SpfStatus {
     fn from(value: enums::SpfAuthResult) -> Self {
         match value {
-            enums::SpfAuthResult::None => SpfResult::None,
-            enums::SpfAuthResult::Neutral => SpfResult::Neutral,
-            enums::SpfAuthResult::Pass => SpfResult::Pass,
-            enums::SpfAuthResult::Fail => SpfResult::Fail,
-            enums::SpfAuthResult::SoftFail => SpfResult::SoftFail,
-            enums::SpfAuthResult::TempError => SpfResult::TempError,
-            enums::SpfAuthResult::PermError => SpfResult::PermError,
+            enums::SpfAuthResult::None => SpfStatus::None,
+            enums::SpfAuthResult::Neutral => SpfStatus::Neutral,
+            enums::SpfAuthResult::Pass => SpfStatus::Pass,
+            enums::SpfAuthResult::Fail => SpfStatus::Fail,
+            enums::SpfAuthResult::SoftFail => SpfStatus::SoftFail,
+            enums::SpfAuthResult::TempError => SpfStatus::TempError,
+            enums::SpfAuthResult::PermError => SpfStatus::PermError,
         }
     }
 }
 
-impl From<SpfResult> for enums::SpfAuthResult {
-    fn from(value: SpfResult) -> Self {
+impl From<SpfStatus> for enums::SpfAuthResult {
+    fn from(value: SpfStatus) -> Self {
         match value {
-            SpfResult::None => enums::SpfAuthResult::None,
-            SpfResult::Neutral => enums::SpfAuthResult::Neutral,
-            SpfResult::Pass => enums::SpfAuthResult::Pass,
-            SpfResult::Fail => enums::SpfAuthResult::Fail,
-            SpfResult::SoftFail => enums::SpfAuthResult::SoftFail,
-            SpfResult::TempError => enums::SpfAuthResult::TempError,
-            SpfResult::PermError => enums::SpfAuthResult::PermError,
+            SpfStatus::None => enums::SpfAuthResult::None,
+            SpfStatus::Neutral => enums::SpfAuthResult::Neutral,
+            SpfStatus::Pass => enums::SpfAuthResult::Pass,
+            SpfStatus::Fail => enums::SpfAuthResult::Fail,
+            SpfStatus::SoftFail => enums::SpfAuthResult::SoftFail,
+            SpfStatus::TempError => enums::SpfAuthResult::TempError,
+            SpfStatus::PermError => enums::SpfAuthResult::PermError,
         }
     }
 }
 
-impl From<enums::SpfDomainScope> for SPFDomainScope {
+impl From<enums::SpfDomainScope> for SpfScope {
     fn from(value: enums::SpfDomainScope) -> Self {
         match value {
-            enums::SpfDomainScope::Helo => SPFDomainScope::Helo,
-            enums::SpfDomainScope::MailFrom => SPFDomainScope::MailFrom,
-            enums::SpfDomainScope::Unspecified => SPFDomainScope::Unspecified,
+            enums::SpfDomainScope::Helo => SpfScope::Helo,
+            enums::SpfDomainScope::MailFrom => SpfScope::MailFrom,
+            enums::SpfDomainScope::Unspecified => SpfScope::Unspecified,
         }
     }
 }
 
-impl From<SPFDomainScope> for enums::SpfDomainScope {
-    fn from(value: SPFDomainScope) -> Self {
+impl From<SpfScope> for enums::SpfDomainScope {
+    fn from(value: SpfScope) -> Self {
         match value {
-            SPFDomainScope::Helo => enums::SpfDomainScope::Helo,
-            SPFDomainScope::MailFrom => enums::SpfDomainScope::MailFrom,
-            SPFDomainScope::Unspecified => enums::SpfDomainScope::Unspecified,
+            SpfScope::Helo => enums::SpfDomainScope::Helo,
+            SpfScope::MailFrom => enums::SpfDomainScope::MailFrom,
+            SpfScope::Unspecified => enums::SpfDomainScope::Unspecified,
         }
     }
 }
@@ -231,7 +232,7 @@ impl From<SPFDomainScope> for enums::SpfDomainScope {
 impl From<structs::DmarcPolicyOverrideReason> for PolicyOverrideReason {
     fn from(value: structs::DmarcPolicyOverrideReason) -> Self {
         PolicyOverrideReason {
-            type_: value.override_type.into(),
+            kind: value.override_type.into(),
             comment: value.comment,
         }
     }
@@ -240,15 +241,15 @@ impl From<structs::DmarcPolicyOverrideReason> for PolicyOverrideReason {
 impl From<PolicyOverrideReason> for structs::DmarcPolicyOverrideReason {
     fn from(value: PolicyOverrideReason) -> Self {
         structs::DmarcPolicyOverrideReason {
-            override_type: value.type_.into(),
+            override_type: value.kind.into(),
             comment: value.comment,
         }
     }
 }
 
-impl From<structs::DmarcDkimResult> for DKIMAuthResult {
+impl From<structs::DmarcDkimResult> for DkimAuthResult {
     fn from(value: structs::DmarcDkimResult) -> Self {
-        DKIMAuthResult {
+        DkimAuthResult {
             domain: value.domain,
             selector: value.selector,
             result: value.result.into(),
@@ -257,8 +258,8 @@ impl From<structs::DmarcDkimResult> for DKIMAuthResult {
     }
 }
 
-impl From<DKIMAuthResult> for structs::DmarcDkimResult {
-    fn from(value: DKIMAuthResult) -> Self {
+impl From<DkimAuthResult> for structs::DmarcDkimResult {
+    fn from(value: DkimAuthResult) -> Self {
         structs::DmarcDkimResult {
             domain: value.domain,
             selector: value.selector,
@@ -268,9 +269,9 @@ impl From<DKIMAuthResult> for structs::DmarcDkimResult {
     }
 }
 
-impl From<structs::DmarcSpfResult> for SPFAuthResult {
+impl From<structs::DmarcSpfResult> for SpfAuthResult {
     fn from(value: structs::DmarcSpfResult) -> Self {
-        SPFAuthResult {
+        SpfAuthResult {
             domain: value.domain,
             scope: value.scope.into(),
             result: value.result.into(),
@@ -279,8 +280,8 @@ impl From<structs::DmarcSpfResult> for SPFAuthResult {
     }
 }
 
-impl From<SPFAuthResult> for structs::DmarcSpfResult {
-    fn from(value: SPFAuthResult) -> Self {
+impl From<SpfAuthResult> for structs::DmarcSpfResult {
+    fn from(value: SpfAuthResult) -> Self {
         structs::DmarcSpfResult {
             domain: value.domain,
             scope: value.scope.into(),
@@ -325,12 +326,12 @@ impl From<structs::DmarcReportRecord> for Record {
                         .collect(),
                 },
             },
-            identifiers: Identifier {
+            identifiers: Identifiers {
                 envelope_to: value.envelope_to,
                 envelope_from: value.envelope_from,
                 header_from: value.header_from,
             },
-            auth_results: AuthResult {
+            auth_results: AuthResults {
                 dkim: value.dkim_results.into_iter().map(Into::into).collect(),
                 spf: value.spf_results.into_iter().map(Into::into).collect(),
             },
@@ -365,20 +366,20 @@ impl From<Record> for structs::DmarcReportRecord {
     }
 }
 
-impl From<structs::DmarcReport> for Report {
+impl From<structs::DmarcReport> for AggregateReport {
     fn from(value: structs::DmarcReport) -> Self {
-        Report {
-            version: value.version.into_inner() as f32,
+        AggregateReport {
+            version: (value.version.into_inner() == 1.0).then_some(ReportVersion::V1),
             report_metadata: ReportMetadata {
                 org_name: value.org_name,
                 email: value.email,
                 extra_contact_info: value.extra_contact_info,
                 report_id: value.report_id,
-                date_range: mail_auth::report::DateRange {
+                date_range: mail_auth::report::dmarc::DateRange {
                     begin: value.date_range_begin.timestamp() as u64,
                     end: value.date_range_end.timestamp() as u64,
                 },
-                error: value.errors.into_inner(),
+                errors: value.errors.into_inner(),
                 generator: value.generator,
             },
             policy_published: PolicyPublished {
@@ -395,16 +396,16 @@ impl From<structs::DmarcReport> for Report {
                     value.policy_failure_reporting_options.as_slice(),
                 ),
             },
-            record: value.records.into_iter().map(Into::into).collect(),
+            records: value.records.into_iter().map(Into::into).collect(),
             extensions: value.extensions.into_iter().map(Into::into).collect(),
         }
     }
 }
 
-impl From<Report> for structs::DmarcReport {
-    fn from(value: Report) -> Self {
+impl From<AggregateReport> for structs::DmarcReport {
+    fn from(value: AggregateReport) -> Self {
         structs::DmarcReport {
-            version: (value.version as f64).into(),
+            version: value.version.map_or(0.0, |_| 1.0).into(),
             date_range_begin: UTCDateTime::from_timestamp(
                 value.report_metadata.date_range.begin as i64,
             ),
@@ -412,7 +413,7 @@ impl From<Report> for structs::DmarcReport {
                 value.report_metadata.date_range.end as i64,
             ),
             email: value.report_metadata.email,
-            errors: value.report_metadata.error.into(),
+            errors: value.report_metadata.errors.into(),
             extensions: List::from_iter(value.extensions.into_iter().map(Into::into)),
             extra_contact_info: value.report_metadata.extra_contact_info,
             generator: value.report_metadata.generator,
@@ -432,8 +433,8 @@ impl From<Report> for structs::DmarcReport {
             policy_version: value
                 .policy_published
                 .version_published
-                .map(|v| v.to_string()),
-            records: List::from_iter(value.record.into_iter().map(Into::into)),
+                .map(|v| v.as_str().to_string()),
+            records: List::from_iter(value.records.into_iter().map(Into::into)),
             report_id: value.report_metadata.report_id,
         }
     }
@@ -543,9 +544,9 @@ impl From<IdentityAlignment> for enums::ArfIdentityAlignment {
     }
 }
 
-impl From<structs::ArfFeedbackReport> for Feedback<'static> {
+impl From<structs::ArfFeedbackReport> for FeedbackReport<'static> {
     fn from(value: structs::ArfFeedbackReport) -> Self {
-        Feedback {
+        FeedbackReport {
             feedback_type: value.feedback_type.into(),
             arrival_date: value.arrival_date.map(|d| d.timestamp()),
             authentication_results: value
@@ -558,13 +559,13 @@ impl From<structs::ArfFeedbackReport> for Feedback<'static> {
             original_envelope_id: value.original_envelope_id.map(Cow::Owned),
             original_mail_from: value.original_mail_from.map(Cow::Owned),
             original_rcpt_to: value.original_rcpt_to.map(Cow::Owned),
-            reported_domain: value
+            reported_domains: value
                 .reported_domains
                 .into_inner()
                 .into_iter()
                 .map(Cow::Owned)
                 .collect(),
-            reported_uri: value
+            reported_uris: value
                 .reported_uris
                 .into_inner()
                 .into_iter()
@@ -574,7 +575,10 @@ impl From<structs::ArfFeedbackReport> for Feedback<'static> {
             source_ip: value.source_ip.map(|ip| ip.into_inner()),
             user_agent: value.user_agent.map(Cow::Owned),
             version: value.version as u32,
-            source_port: value.source_port.unwrap_or(0) as u32,
+            source_port: value
+                .source_port
+                .and_then(|port| u16::try_from(port).ok())
+                .unwrap_or(0),
             auth_failure: value.auth_failure.into(),
             delivery_result: value.delivery_result.into(),
             dkim_adsp_dns: value.dkim_adsp_dns.map(Cow::Owned),
@@ -592,8 +596,8 @@ impl From<structs::ArfFeedbackReport> for Feedback<'static> {
     }
 }
 
-impl From<Feedback<'_>> for structs::ArfFeedbackReport {
-    fn from(value: Feedback<'_>) -> Self {
+impl From<FeedbackReport<'_>> for structs::ArfFeedbackReport {
+    fn from(value: FeedbackReport<'_>) -> Self {
         let port = value.source_port;
         structs::ArfFeedbackReport {
             arrival_date: value.arrival_date.map(UTCDateTime::from_timestamp),
@@ -621,24 +625,20 @@ impl From<Feedback<'_>> for structs::ArfFeedbackReport {
             original_mail_from: value.original_mail_from.map(|s| s.into_owned()),
             original_rcpt_to: value.original_rcpt_to.map(|s| s.into_owned()),
             reported_domains: value
-                .reported_domain
+                .reported_domains
                 .into_iter()
                 .map(|s| s.into_owned())
                 .collect::<Vec<_>>()
                 .into(),
             reported_uris: value
-                .reported_uri
+                .reported_uris
                 .into_iter()
                 .map(|s| s.into_owned())
                 .collect::<Vec<_>>()
                 .into(),
             reporting_mta: value.reporting_mta.map(|s| s.into_owned()),
             source_ip: value.source_ip.map(IpAddr),
-            source_port: if port == 0 || port > 65535 {
-                None
-            } else {
-                Some(port as u64)
-            },
+            source_port: (port != 0).then_some(port as u64),
             spf_dns: value.spf_dns.map(|s| s.into_owned()),
             user_agent: value.user_agent.map(|s| s.into_owned()),
             version: value.version as u64,
@@ -668,40 +668,40 @@ impl From<PolicyType> for enums::TlsPolicyType {
     }
 }
 
-impl From<enums::TlsResultType> for ResultType {
+impl From<enums::TlsResultType> for FailureType {
     fn from(value: enums::TlsResultType) -> Self {
         match value {
-            enums::TlsResultType::StartTlsNotSupported => ResultType::StartTlsNotSupported,
-            enums::TlsResultType::CertificateHostMismatch => ResultType::CertificateHostMismatch,
-            enums::TlsResultType::CertificateExpired => ResultType::CertificateExpired,
-            enums::TlsResultType::CertificateNotTrusted => ResultType::CertificateNotTrusted,
-            enums::TlsResultType::ValidationFailure => ResultType::ValidationFailure,
-            enums::TlsResultType::TlsaInvalid => ResultType::TlsaInvalid,
-            enums::TlsResultType::DnssecInvalid => ResultType::DnssecInvalid,
-            enums::TlsResultType::DaneRequired => ResultType::DaneRequired,
-            enums::TlsResultType::StsPolicyFetchError => ResultType::StsPolicyFetchError,
-            enums::TlsResultType::StsPolicyInvalid => ResultType::StsPolicyInvalid,
-            enums::TlsResultType::StsWebpkiInvalid => ResultType::StsWebpkiInvalid,
-            enums::TlsResultType::Other => ResultType::Other,
+            enums::TlsResultType::StartTlsNotSupported => FailureType::StartTlsNotSupported,
+            enums::TlsResultType::CertificateHostMismatch => FailureType::CertificateHostMismatch,
+            enums::TlsResultType::CertificateExpired => FailureType::CertificateExpired,
+            enums::TlsResultType::CertificateNotTrusted => FailureType::CertificateNotTrusted,
+            enums::TlsResultType::ValidationFailure => FailureType::ValidationFailure,
+            enums::TlsResultType::TlsaInvalid => FailureType::TlsaInvalid,
+            enums::TlsResultType::DnssecInvalid => FailureType::DnssecInvalid,
+            enums::TlsResultType::DaneRequired => FailureType::DaneRequired,
+            enums::TlsResultType::StsPolicyFetchError => FailureType::StsPolicyFetchError,
+            enums::TlsResultType::StsPolicyInvalid => FailureType::StsPolicyInvalid,
+            enums::TlsResultType::StsWebpkiInvalid => FailureType::StsWebpkiInvalid,
+            enums::TlsResultType::Other => FailureType::Other,
         }
     }
 }
 
-impl From<ResultType> for enums::TlsResultType {
-    fn from(value: ResultType) -> Self {
+impl From<FailureType> for enums::TlsResultType {
+    fn from(value: FailureType) -> Self {
         match value {
-            ResultType::StartTlsNotSupported => enums::TlsResultType::StartTlsNotSupported,
-            ResultType::CertificateHostMismatch => enums::TlsResultType::CertificateHostMismatch,
-            ResultType::CertificateExpired => enums::TlsResultType::CertificateExpired,
-            ResultType::CertificateNotTrusted => enums::TlsResultType::CertificateNotTrusted,
-            ResultType::ValidationFailure => enums::TlsResultType::ValidationFailure,
-            ResultType::TlsaInvalid => enums::TlsResultType::TlsaInvalid,
-            ResultType::DnssecInvalid => enums::TlsResultType::DnssecInvalid,
-            ResultType::DaneRequired => enums::TlsResultType::DaneRequired,
-            ResultType::StsPolicyFetchError => enums::TlsResultType::StsPolicyFetchError,
-            ResultType::StsPolicyInvalid => enums::TlsResultType::StsPolicyInvalid,
-            ResultType::StsWebpkiInvalid => enums::TlsResultType::StsWebpkiInvalid,
-            ResultType::Other => enums::TlsResultType::Other,
+            FailureType::StartTlsNotSupported => enums::TlsResultType::StartTlsNotSupported,
+            FailureType::CertificateHostMismatch => enums::TlsResultType::CertificateHostMismatch,
+            FailureType::CertificateExpired => enums::TlsResultType::CertificateExpired,
+            FailureType::CertificateNotTrusted => enums::TlsResultType::CertificateNotTrusted,
+            FailureType::ValidationFailure => enums::TlsResultType::ValidationFailure,
+            FailureType::TlsaInvalid => enums::TlsResultType::TlsaInvalid,
+            FailureType::DnssecInvalid => enums::TlsResultType::DnssecInvalid,
+            FailureType::DaneRequired => enums::TlsResultType::DaneRequired,
+            FailureType::StsPolicyFetchError => enums::TlsResultType::StsPolicyFetchError,
+            FailureType::StsPolicyInvalid => enums::TlsResultType::StsPolicyInvalid,
+            FailureType::StsWebpkiInvalid => enums::TlsResultType::StsWebpkiInvalid,
+            FailureType::Other => enums::TlsResultType::Other,
         }
     }
 }
@@ -736,9 +736,9 @@ impl From<FailureDetails> for structs::TlsFailureDetails {
     }
 }
 
-impl From<structs::TlsReportPolicy> for Policy {
+impl From<structs::TlsReportPolicy> for PolicyResult {
     fn from(value: structs::TlsReportPolicy) -> Self {
-        Policy {
+        PolicyResult {
             policy: PolicyDetails {
                 policy_type: value.policy_type.into(),
                 policy_string: value.policy_strings.into_inner(),
@@ -746,23 +746,23 @@ impl From<structs::TlsReportPolicy> for Policy {
                 mx_host: value.mx_hosts.into_inner(),
             },
             summary: Summary {
-                total_success: value.total_successful_sessions as u32,
-                total_failure: value.total_failed_sessions as u32,
+                successful_sessions: value.total_successful_sessions as u32,
+                failed_sessions: value.total_failed_sessions as u32,
             },
             failure_details: value.failure_details.into_iter().map(Into::into).collect(),
         }
     }
 }
 
-impl From<Policy> for structs::TlsReportPolicy {
-    fn from(value: Policy) -> Self {
+impl From<PolicyResult> for structs::TlsReportPolicy {
+    fn from(value: PolicyResult) -> Self {
         structs::TlsReportPolicy {
             policy_type: value.policy.policy_type.into(),
             policy_strings: value.policy.policy_string.into(),
             policy_domain: value.policy.policy_domain,
             mx_hosts: value.policy.mx_host.into(),
-            total_successful_sessions: value.summary.total_success as u64,
-            total_failed_sessions: value.summary.total_failure as u64,
+            total_successful_sessions: value.summary.successful_sessions as u64,
+            total_failed_sessions: value.summary.failed_sessions as u64,
             failure_details: List::from_iter(value.failure_details.into_iter().map(Into::into)),
         }
     }
@@ -973,14 +973,9 @@ impl From<&mail_auth::DmarcResult> for structs::DmarcTroubleshootAuthResult {
     }
 }
 
-impl From<&mail_auth::dmarc::Policy> for enums::DmarcDisposition {
-    fn from(value: &mail_auth::dmarc::Policy) -> Self {
-        match value {
-            mail_auth::dmarc::Policy::None => enums::DmarcDisposition::None,
-            mail_auth::dmarc::Policy::Quarantine => enums::DmarcDisposition::Quarantine,
-            mail_auth::dmarc::Policy::Reject => enums::DmarcDisposition::Reject,
-            mail_auth::dmarc::Policy::Unspecified => enums::DmarcDisposition::Unspecified,
-        }
+impl From<&Policy> for enums::DmarcDisposition {
+    fn from(value: &Policy) -> Self {
+        (*value).into()
     }
 }
 

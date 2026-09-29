@@ -21,7 +21,7 @@ use jmap_proto::{
     request::MaybeInvalid,
     types::state::State,
 };
-use mail_parser::{HeaderName, MessageParser};
+use mail_parser::MessageParser;
 use std::future::Future;
 use types::{
     acl::Acl,
@@ -164,12 +164,9 @@ impl EmailImport for Server {
 
             // Import message
             let parsed = MessageParser::new().parse(&raw_message);
-            let is_valid_message = parsed.as_ref().is_some_and(|message| {
-                message
-                    .headers()
-                    .iter()
-                    .any(|header| !matches!(header.name, HeaderName::Other(_)))
-            });
+            let is_valid_message = parsed
+                .as_ref()
+                .is_some_and(|message| message.headers().has_known());
             if !is_valid_message {
                 response.not_created.append(
                     id,

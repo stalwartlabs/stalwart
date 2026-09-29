@@ -6,10 +6,10 @@
 
 use crate::config::smtp::auth::{pem_or_base64_decode, rsa_key_parse};
 use dns_update::{DnsRecord, NamedDnsRecord};
-use jiff::{Timestamp, fmt::strtime, tz::TimeZone};
-use mail_auth::common::crypto::Ed25519Key;
-use mail_auth::dkim::generate::DkimKeyPair;
 use encodify::{base64::STANDARD, pem};
+use jiff::{Timestamp, fmt::strtime, tz::TimeZone};
+use mail_auth::crypto::Ed25519Key;
+use mail_auth::dkim::generate::DkimKeyPair;
 use pkcs8::Document;
 use registry::schema::enums::DkimSignatureType;
 use registry::schema::structs::DkimSignature;

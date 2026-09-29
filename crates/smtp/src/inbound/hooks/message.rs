@@ -233,7 +233,7 @@ impl<T: SessionStream> Session<T> {
             }),
             message: message.map(|message| Message {
                 headers: message
-                    .raw_parsed_headers()
+                    .headers()
                     .iter()
                     .map(|(k, v)| {
                         (

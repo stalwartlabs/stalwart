@@ -360,8 +360,8 @@ impl TestServer {
                 .dkim1
                 .iter()
                 .map(|s| match s {
-                    Dkim1Signer::RsaSha256(s) => s.template.s.as_str(),
-                    Dkim1Signer::Ed25519Sha256(s) => s.template.s.as_str(),
+                    Dkim1Signer::RsaSha256(s) => s.template().s.as_str(),
+                    Dkim1Signer::Ed25519Sha256(s) => s.template().s.as_str(),
                 })
                 .collect::<AHashSet<_>>(),
             selectors.iter().copied().collect::<AHashSet<_>>()

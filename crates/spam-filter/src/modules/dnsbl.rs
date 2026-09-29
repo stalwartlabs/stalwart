@@ -12,7 +12,7 @@ use common::{
     expr::functions::ResolveVariable,
 };
 use compact_str::ToCompactString;
-use mail_auth::{Error, common::resolver::ToFqdn};
+use mail_auth::{Error, dns::ToFqdn};
 use std::{
     net::Ipv4Addr,
     sync::Arc,

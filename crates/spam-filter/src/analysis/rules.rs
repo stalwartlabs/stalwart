@@ -118,13 +118,7 @@ impl SpamFilterAnalyzeRules for Server {
 
         if !self.core.spam.rules.header.is_empty() {
             for header in ctx.input.message.headers() {
-                let raw = String::from_utf8_lossy(
-                    ctx.input
-                        .message
-                        .raw_message()
-                        .get(header.offset_start as usize..header.offset_end as usize)
-                        .unwrap_or_default(),
-                );
+                let raw = String::from_utf8_lossy(header.raw_value());
                 let header_resolver = EmailHeader {
                     header,
                     raw: raw.as_ref(),
@@ -153,9 +147,9 @@ impl SpamFilterAnalyzeRules for Server {
                     TextPart::None => continue,
                 };
                 let idx = idx as u32;
-                let location = if ctx.input.message.text_body.contains(&idx) {
+                let location = if ctx.input.is_text_body(idx) {
                     Location::BodyText
-                } else if ctx.input.message.html_body.contains(&idx) {
+                } else if ctx.input.is_html_body(idx) {
                     Location::BodyHtml
                 } else {
                     Location::Attachment

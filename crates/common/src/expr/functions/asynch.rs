@@ -218,7 +218,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
-                        .rrset
+                        .records
                         .iter()
                         .flat_map(|mx| {
                             mx.exchanges.iter().map(|host| {
@@ -257,7 +257,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
-                        .rrset
+                        .records
                         .iter()
                         .map(|host| Variable::from(host.to_compact_string()))
                         .collect::<Vec<_>>()
@@ -273,7 +273,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
-                        .rrset
+                        .records
                         .iter()
                         .map(|ip| Variable::from(ip.to_compact_string()))
                         .collect::<Vec<_>>()
@@ -289,7 +289,7 @@ impl Server {
                 .map_err(|err| trc::Error::from(err).caused_by(trc::location!()))
                 .map(|result| {
                     result
-                        .rrset
+                        .records
                         .iter()
                         .map(|ip| Variable::from(ip.to_compact_string()))
                         .collect::<Vec<_>>()

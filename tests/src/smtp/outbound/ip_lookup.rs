@@ -8,7 +8,7 @@ use crate::{
     smtp::session::TestSession,
     utils::{dns::DnsCache, server::TestServerBuilder},
 };
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::{
     schema::{
         enums::MtaIpStrategy,
@@ -80,7 +80,7 @@ async fn ip_lookup_strategy() {
         // Add mock DNS entries
         local.server.mx_add(
             "foobar.org",
-            vec![MX {
+            vec![Mx {
                 exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
                 preference: 10,
             }],

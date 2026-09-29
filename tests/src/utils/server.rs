@@ -32,7 +32,7 @@ use common::{
     },
     psl,
 };
-use email::message::metadata::MessageMetadata;
+use email::message::metadata::MetadataStructure;
 use groupware::cache::GroupwareCache;
 use http::HttpSessionManager;
 use imap::core::ImapSessionManager;
@@ -64,7 +64,7 @@ use std::{collections::VecDeque, path::PathBuf, str::FromStr, sync::Arc};
 use store::{
     RegistryStore, Store, ValueKey,
     registry::{RegistryQuery, bootstrap::Bootstrap, write::RegistryWrite},
-    write::{Archive, ArchiveBytes, now},
+    write::now,
 };
 use tokio::sync::{mpsc, watch};
 use trc::EventType;
@@ -550,10 +550,10 @@ impl TestServer {
     }
 
     pub async fn fetch_email(&self, account_id: u32, document_id: u32) -> Vec<u8> {
-        let metadata_ = self
+        let structure = self
             .server
             .store()
-            .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
+            .get_value::<MetadataStructure>(ValueKey::immutable(
                 account_id,
                 Collection::Email,
                 document_id,
@@ -565,12 +565,7 @@ impl TestServer {
         self.server
             .blob_store()
             .get_blob(
-                metadata_
-                    .unarchive::<MessageMetadata>()
-                    .unwrap()
-                    .blob_hash
-                    .0
-                    .as_slice(),
+                structure.unarchive().unwrap().blob_hash().as_slice(),
                 0..usize::MAX,
             )
             .await

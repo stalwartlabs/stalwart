@@ -407,7 +407,9 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                         if let Some(subscription) = push_servers.get_mut(&id) {
                             subscription.num_attempts = 0;
                             subscription.in_flight = false;
-                            retry_ids.remove(&id);
+                            if subscription.notifications.is_empty() {
+                                retry_ids.remove(&id);
+                            }
                         }
                     }
                     Event::DeliveryFailure { id, notifications } => {

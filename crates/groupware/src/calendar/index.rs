@@ -533,7 +533,9 @@ impl CalendarEvent {
 
 impl ArchivedCalendarEvent {
     pub fn event_range_end(&self) -> i64 {
-        self.start.to_native() + self.duration.to_native() as i64
+        self.start
+            .to_native()
+            .saturating_add(self.duration.to_native() as i64)
     }
 
     pub fn meta_size_hint(&self) -> usize {

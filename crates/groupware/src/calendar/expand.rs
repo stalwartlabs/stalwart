@@ -382,8 +382,8 @@ trait ExpansionSource {
                     BitpackIterator::from_bytes_and_offset(instances, bytes_read, offset_or_count);
                 for start_offset in unpacker {
                     let own_recurrence_id = own_recurrence_id.take();
-                    let start_date_naive = start_offset as i64 + base_offset;
-                    let end_date_naive = start_date_naive + duration;
+                    let start_date_naive = base_offset.saturating_add(start_offset as i64);
+                    let end_date_naive = start_date_naive.saturating_add(duration);
                     let series_recurrence_id = this_and_future_tz.and_then(|recurrence_tz| {
                         shifts.recurrence_id(
                             comp_id,
@@ -420,8 +420,8 @@ trait ExpansionSource {
                     }
                 }
             } else {
-                let start_date_naive = offset_or_count as i64 + base_offset;
-                let end_date_naive = start_date_naive + duration;
+                let start_date_naive = base_offset.saturating_add(offset_or_count as i64);
+                let end_date_naive = start_date_naive.saturating_add(duration);
                 let series_recurrence_id = this_and_future_tz.and_then(|recurrence_tz| {
                     shifts.recurrence_id(
                         comp_id,
@@ -556,7 +556,7 @@ impl CalendarEventData {
             }
 
             let mut push_instance = |own_recurrence_id: Option<RecurrenceId>, start_offset: u32| {
-                let start_date_naive = start_offset as i64 + base_offset;
+                let start_date_naive = base_offset.saturating_add(start_offset as i64);
                 let series_recurrence_id = this_and_future_tz.and_then(|recurrence_tz| {
                     shifts.recurrence_id(
                         comp_id,
@@ -576,7 +576,7 @@ impl CalendarEventData {
                     return;
                 }
 
-                let end_date_naive = start_date_naive + duration;
+                let end_date_naive = start_date_naive.saturating_add(duration);
                 if let (Some(start), Some(end)) = (
                     flags.resolve_start(start_tz, start_date_naive),
                     flags.resolve_end(end_tz, end_date_naive),
@@ -645,7 +645,7 @@ impl CalendarEventData {
                 Tz::from_id(range.start_tz)?,
                 RangeFlags::from_bits(range.flags).resolve_end(
                     effective_tz(Tz::from_id(range.end_tz)?),
-                    start_date_naive + range.duration as i64,
+                    start_date_naive.saturating_add(range.duration as i64),
                 )?,
             ),
             None => {

@@ -7,6 +7,7 @@
 use super::{download::BlobDownload, embedded::EmbeddedBlobs};
 use common::{Server, auth::AccessToken};
 use email::message::messagedata::MessageData;
+use encodify::base64::STANDARD;
 use jmap_proto::{
     method::{
         get::{GetRequest, GetResponse},
@@ -16,7 +17,6 @@ use jmap_proto::{
     request::{IntoValid, MaybeInvalid},
 };
 use jmap_tools::{Map, Value};
-use encodify::base64::STANDARD;
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
 use std::future::Future;

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use mail_parser::decoders::charsets::map::charset_decoder;
+use mail_parser::decoders::charsets::charset_decoder;
 
 use crate::{
     Command,

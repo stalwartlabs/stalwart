@@ -32,8 +32,8 @@ use common::ipc::{PolicyType, QueueEvent, QueueEventStatus, TlsEvent};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_auth::RecordSet;
 use mail_auth::{
-    mta_sts::TlsRpt,
-    report::tlsrpt::{FailureDetails, ResultType},
+    mta_sts::TlsRptRecord,
+    report::tlsrpt::{FailureDetails, FailureType},
 };
 use smtp_proto::MAIL_REQUIRETLS;
 use std::sync::Arc;
@@ -346,7 +346,7 @@ impl QueuedMessage {
                             .smtp
                             .resolvers
                             .dns
-                            .txt_lookup::<TlsRpt>(
+                            .txt_lookup::<TlsRptRecord>(
                                 format!("_smtp._tls.{domain}."),
                                 Some(&server.inner.cache.dns_txt),
                             )
@@ -433,11 +433,11 @@ impl QueuedMessage {
                                         server.schedule_report(TlsEvent {
                                             policy: PolicyType::Sts(None),
                                             domain: domain.to_string(),
-                                            failure: FailureDetails::new(ResultType::Other)
-                                                .with_failure_reason_code(
-                                                    "MTA-STS is required and no policy was found.",
-                                                )
-                                                .into(),
+                                            failure: FailureDetails {
+                                                failure_reason_code: Some("MTA-STS is required and no policy was found.".into()),
+                                                ..FailureDetails::new(FailureType::Other)
+                                            }
+                                            .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
                                             span_id: message.span_id,
@@ -453,9 +453,11 @@ impl QueuedMessage {
                                         .schedule_report(TlsEvent {
                                             policy: PolicyType::Sts(None),
                                             domain: domain.to_string(),
-                                            failure: FailureDetails::new(&err)
-                                                .with_failure_reason_code(err.to_string())
-                                                .into(),
+                                            failure: FailureDetails {
+                                                failure_reason_code: Some(err.to_string()),
+                                                ..FailureDetails::new(&err)
+                                            }
+                                            .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
                                             span_id: message.span_id,
@@ -541,7 +543,7 @@ impl QueuedMessage {
                         );
 
                         RecordSet {
-                            rrset: Arc::new([]),
+                            records: Arc::new([]),
                             dnssec_status: DnssecStatus::Indeterminate,
                         }
                     }
@@ -609,10 +611,14 @@ impl QueuedMessage {
                                 .schedule_report(TlsEvent {
                                     policy: mta_sts_policy.into(),
                                     domain: domain.to_string(),
-                                    failure: FailureDetails::new(ResultType::ValidationFailure)
-                                        .with_receiving_mx_hostname(envelope.mx)
-                                        .with_failure_reason_code("MX not authorized by policy.")
-                                        .into(),
+                                    failure: FailureDetails {
+                                        receiving_mx_hostname: Some(envelope.mx.into()),
+                                        failure_reason_code: Some(
+                                            "MX not authorized by policy.".into(),
+                                        ),
+                                        ..FailureDetails::new(FailureType::ValidationFailure)
+                                    }
+                                    .into(),
                                     tls_record: tls_report.record.clone(),
                                     interval: tls_report.interval,
                                     span_id: message.span_id,
@@ -762,13 +768,17 @@ impl QueuedMessage {
                                                 .schedule_report(TlsEvent {
                                                     policy: tlsa.into(),
                                                     domain: domain.to_string(),
-                                                    failure: FailureDetails::new(
-                                                        ResultType::TlsaInvalid,
-                                                    )
-                                                    .with_receiving_mx_hostname(envelope.mx)
-                                                    .with_failure_reason_code(
-                                                        "Invalid TLSA record.",
-                                                    )
+                                                    failure: FailureDetails {
+                                                        receiving_mx_hostname: Some(
+                                                            envelope.mx.into(),
+                                                        ),
+                                                        failure_reason_code: Some(
+                                                            "Invalid TLSA record.".into(),
+                                                        ),
+                                                        ..FailureDetails::new(
+                                                            FailureType::TlsaInvalid,
+                                                        )
+                                                    }
                                                     .into(),
                                                     tls_record: tls_report.record.clone(),
                                                     interval: tls_report.interval,
@@ -809,13 +819,15 @@ impl QueuedMessage {
                                             .schedule_report(TlsEvent {
                                                 policy: PolicyType::Tlsa(None),
                                                 domain: domain.to_string(),
-                                                failure: FailureDetails::new(
-                                                    ResultType::DnssecInvalid,
-                                                )
-                                                .with_receiving_mx_hostname(envelope.mx)
-                                                .with_failure_reason_code(
-                                                    "Bogus TLSA records were found.",
-                                                )
+                                                failure: FailureDetails {
+                                                    receiving_mx_hostname: Some(envelope.mx.into()),
+                                                    failure_reason_code: Some(
+                                                        "Bogus TLSA records were found.".into(),
+                                                    ),
+                                                    ..FailureDetails::new(
+                                                        FailureType::DnssecInvalid,
+                                                    )
+                                                }
                                                 .into(),
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,
@@ -850,13 +862,17 @@ impl QueuedMessage {
                                                 .schedule_report(TlsEvent {
                                                     policy: PolicyType::Tlsa(None),
                                                     domain: domain.to_string(),
-                                                    failure: FailureDetails::new(
-                                                        ResultType::DaneRequired,
-                                                    )
-                                                    .with_receiving_mx_hostname(envelope.mx)
-                                                    .with_failure_reason_code(
-                                                        "No TLSA DNSSEC records found.",
-                                                    )
+                                                    failure: FailureDetails {
+                                                        receiving_mx_hostname: Some(
+                                                            envelope.mx.into(),
+                                                        ),
+                                                        failure_reason_code: Some(
+                                                            "No TLSA DNSSEC records found.".into(),
+                                                        ),
+                                                        ..FailureDetails::new(
+                                                            FailureType::DaneRequired,
+                                                        )
+                                                    }
                                                     .into(),
                                                     tls_record: tls_report.record.clone(),
                                                     interval: tls_report.interval,
@@ -901,13 +917,18 @@ impl QueuedMessage {
                                                     .schedule_report(TlsEvent {
                                                         policy: PolicyType::Tlsa(None),
                                                         domain: domain.to_string(),
-                                                        failure: FailureDetails::new(
-                                                            ResultType::DaneRequired,
-                                                        )
-                                                        .with_receiving_mx_hostname(envelope.mx)
-                                                        .with_failure_reason_code(
-                                                            "No TLSA records found for MX.",
-                                                        )
+                                                        failure: FailureDetails {
+                                                            receiving_mx_hostname: Some(
+                                                                envelope.mx.into(),
+                                                            ),
+                                                            failure_reason_code: Some(
+                                                                "No TLSA records found for MX."
+                                                                    .into(),
+                                                            ),
+                                                            ..FailureDetails::new(
+                                                                FailureType::DaneRequired,
+                                                            )
+                                                        }
                                                         .into(),
                                                         tls_record: tls_report.record.clone(),
                                                         interval: tls_report.interval,
@@ -961,12 +982,14 @@ impl QueuedMessage {
                                     .schedule_report(TlsEvent {
                                         policy: PolicyType::Tlsa(None),
                                         domain: domain.to_string(),
-                                        failure: FailureDetails::new(ResultType::DnssecInvalid)
-                                            .with_receiving_mx_hostname(envelope.mx)
-                                            .with_failure_reason_code(format!(
+                                        failure: FailureDetails {
+                                            receiving_mx_hostname: Some(envelope.mx.into()),
+                                            failure_reason_code: Some(format!(
                                                 "Bogus {dnssec_entity} records were found."
-                                            ))
-                                            .into(),
+                                            )),
+                                            ..FailureDetails::new(FailureType::DnssecInvalid)
+                                        }
+                                        .into(),
                                         tls_record: tls_report.record.clone(),
                                         interval: tls_report.interval,
                                         span_id: message.span_id,
@@ -999,12 +1022,15 @@ impl QueuedMessage {
                                         .schedule_report(TlsEvent {
                                             policy: PolicyType::Tlsa(None),
                                             domain: domain.to_string(),
-                                            failure: FailureDetails::new(ResultType::DaneRequired)
-                                                .with_receiving_mx_hostname(envelope.mx)
-                                                .with_failure_reason_code(
-                                                    "MX host is not in a DNSSEC signed zone.",
-                                                )
-                                                .into(),
+                                            failure: FailureDetails {
+                                                receiving_mx_hostname: Some(envelope.mx.into()),
+                                                failure_reason_code: Some(
+                                                    "MX host is not in a DNSSEC signed zone."
+                                                        .into(),
+                                                ),
+                                                ..FailureDetails::new(FailureType::DaneRequired)
+                                            }
+                                            .into(),
                                             tls_record: tls_report.record.clone(),
                                             interval: tls_report.interval,
                                             span_id: message.span_id,
@@ -1243,14 +1269,19 @@ impl QueuedMessage {
                                                 .schedule_report(TlsEvent {
                                                     policy: dane_policy.into(),
                                                     domain: domain.to_string(),
-                                                    failure: FailureDetails::new(
-                                                        ResultType::ValidationFailure,
-                                                    )
-                                                    .with_receiving_mx_hostname(envelope.mx)
-                                                    .with_receiving_ip(remote_ip)
-                                                    .with_failure_reason_code(
-                                                        "No matching certificates found.",
-                                                    )
+                                                    failure: FailureDetails {
+                                                        receiving_mx_hostname: Some(
+                                                            envelope.mx.into(),
+                                                        ),
+                                                        receiving_ip: Some(remote_ip),
+                                                        failure_reason_code: Some(
+                                                            "No matching certificates found."
+                                                                .into(),
+                                                        ),
+                                                        ..FailureDetails::new(
+                                                            FailureType::ValidationFailure,
+                                                        )
+                                                    }
                                                     .into(),
                                                     tls_record: tls_report.record.clone(),
                                                     interval: tls_report.interval,
@@ -1318,12 +1349,14 @@ impl QueuedMessage {
                                             .schedule_report(TlsEvent {
                                                 policy: (&mta_sts_policy, &dane_policy).into(),
                                                 domain: domain.to_string(),
-                                                failure: FailureDetails::new(
-                                                    ResultType::StartTlsNotSupported,
-                                                )
-                                                .with_receiving_mx_hostname(envelope.mx)
-                                                .with_receiving_ip(remote_ip)
-                                                .with_failure_reason_code(reason)
+                                                failure: FailureDetails {
+                                                    receiving_mx_hostname: Some(envelope.mx.into()),
+                                                    receiving_ip: Some(remote_ip),
+                                                    failure_reason_code: Some(reason),
+                                                    ..FailureDetails::new(
+                                                        FailureType::StartTlsNotSupported,
+                                                    )
+                                                }
                                                 .into(),
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,
@@ -1368,12 +1401,14 @@ impl QueuedMessage {
                                             .schedule_report(TlsEvent {
                                                 policy: (&mta_sts_policy, &dane_policy).into(),
                                                 domain: domain.to_string(),
-                                                failure: FailureDetails::new(
-                                                    ResultType::CertificateNotTrusted,
-                                                )
-                                                .with_receiving_mx_hostname(envelope.mx)
-                                                .with_receiving_ip(remote_ip)
-                                                .with_failure_reason_code(error.to_string())
+                                                failure: FailureDetails {
+                                                    receiving_mx_hostname: Some(envelope.mx.into()),
+                                                    receiving_ip: Some(remote_ip),
+                                                    failure_reason_code: Some(error.to_string()),
+                                                    ..FailureDetails::new(
+                                                        FailureType::CertificateNotTrusted,
+                                                    )
+                                                }
                                                 .into(),
                                                 tls_record: tls_report.record.clone(),
                                                 interval: tls_report.interval,

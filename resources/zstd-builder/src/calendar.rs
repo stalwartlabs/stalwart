@@ -91,9 +91,7 @@ fn sample(rng: &mut Rng, ical: ICalendar) -> Vec<u8> {
 }
 
 fn event(rng: &mut Rng, ical: ICalendar) -> CalendarEventContent {
-    let mut next_email_alarm = None;
-    let mut data =
-        CalendarEventData::new(ical, Tz::Floating, MAX_EXPANSIONS, &mut next_email_alarm);
+    let mut data = CalendarEventData::new(ical, Tz::Floating, MAX_EXPANSIONS);
     stabilise(&mut data);
 
     CalendarEventContent {
@@ -101,9 +99,8 @@ fn event(rng: &mut Rng, ical: ICalendar) -> CalendarEventContent {
         preferences: if rng.chance(15) {
             vec![EventPreferences {
                 account_id: rng.below(4096) as u32,
-                flags: 0,
-                properties: Vec::new(),
-                alerts: Vec::new(),
+                updated: 0,
+                instances: Vec::new(),
             }]
         } else {
             Vec::new()

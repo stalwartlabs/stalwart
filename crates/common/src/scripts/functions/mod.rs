@@ -9,6 +9,7 @@ mod email;
 mod header;
 pub mod image;
 pub mod misc;
+pub mod sniff;
 pub mod text;
 pub mod unicode;
 pub mod url;

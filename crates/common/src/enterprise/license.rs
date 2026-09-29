@@ -22,8 +22,8 @@
 use crate::manager::fetch_resource;
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
 use compact_str::ToCompactString;
-use hyper::{HeaderMap, header::AUTHORIZATION};
 use encodify::base64::STANDARD;
+use hyper::{HeaderMap, header::AUTHORIZATION};
 use std::{
     fmt::{Display, Formatter},
     time::Duration,

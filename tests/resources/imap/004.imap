@@ -5,7 +5,7 @@ BODY (
       ) NIL NIL "7bit" 45 1
    )(
       (
-         "message" NIL NIL NIL NIL NIL 100 (
+         "message" "rfc822" NIL NIL NIL "7bit" 100 (
             "Fri, 26 Mar 1993 11:13:32 +0200" "my opinion" (
                (
                   NIL NIL "unknown" "localhost"
@@ -23,9 +23,9 @@ BODY (
             "text" "plain" (
                "charset" "us-ascii"
             ) NIL NIL "7bit" 22 1
-         ) 0
+         ) 5
       )(
-         "message" NIL NIL NIL NIL NIL 125 (
+         "message" "rfc822" NIL NIL NIL "7bit" 125 (
             "Fri, 26 Mar 1993 10:07:13 -0500" "my different opinion" (
                (
                   NIL NIL "unknown" "localhost"
@@ -43,7 +43,7 @@ BODY (
             "text" "plain" (
                "charset" "us-ascii"
             ) NIL NIL "7bit" 31 1
-         ) 0
+         ) 5
       ) "digest"
    ) "mixed"
 )
@@ -52,10 +52,10 @@ BODYSTRUCTURE (
    (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 45 1 "f7f7e917e54763330bc648984459b38e" NIL NIL NIL
+      ) NIL NIL "7bit" 45 1 NIL NIL NIL NIL
    )(
       (
-         "message" NIL NIL NIL NIL NIL 100 (
+         "message" "rfc822" NIL NIL NIL "7bit" 100 (
             "Fri, 26 Mar 1993 11:13:32 +0200" "my opinion" (
                (
                   NIL NIL "unknown" "localhost"
@@ -72,10 +72,10 @@ BODYSTRUCTURE (
          ) (
             "text" "plain" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 22 1 "1ec4e1f0175dc661a12854b33879ce9b" NIL NIL NIL
-         ) 0 "ef1527984c599523c90fb184a8fdfd61" NIL NIL NIL
+            ) NIL NIL "7bit" 22 1 NIL NIL NIL NIL
+         ) 5 NIL NIL NIL NIL
       )(
-         "message" NIL NIL NIL NIL NIL 125 (
+         "message" "rfc822" NIL NIL NIL "7bit" 125 (
             "Fri, 26 Mar 1993 10:07:13 -0500" "my different opinion" (
                (
                   NIL NIL "unknown" "localhost"
@@ -92,8 +92,8 @@ BODYSTRUCTURE (
          ) (
             "text" "plain" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 31 1 "7a0001277b1197e7029ad48b54919b62" NIL NIL NIL
-         ) 0 "9609bccef55fba1208046885cdcc9db8" NIL NIL NIL
+            ) NIL NIL "7bit" 31 1 NIL NIL NIL NIL
+         ) 5 NIL NIL NIL NIL
       ) "digest" (
          "boundary" "---- next message ----"
       ) NIL NIL NIL
@@ -106,10 +106,10 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 45 1 "f7f7e917e54763330bc648984459b38e" NIL NIL NIL
+      ) NIL NIL "7bit" 45 1 NIL NIL NIL NIL
    )(
       (
-         "message" NIL NIL NIL NIL NIL 100 (
+         "message" "rfc822" NIL NIL NIL "7bit" 100 (
             "Fri, 26 Mar 1993 11:13:32 +0200" "my opinion" (
                (
                   NIL NIL "unknown" "localhost"
@@ -126,10 +126,10 @@ BODYSTRUCTURE UTF8=ACCEPT (
          ) (
             "text" "plain" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 22 1 "1ec4e1f0175dc661a12854b33879ce9b" NIL NIL NIL
-         ) 0 "ef1527984c599523c90fb184a8fdfd61" NIL NIL NIL
+            ) NIL NIL "7bit" 22 1 NIL NIL NIL NIL
+         ) 5 NIL NIL NIL NIL
       )(
-         "message" NIL NIL NIL NIL NIL 125 (
+         "message" "rfc822" NIL NIL NIL "7bit" 125 (
             "Fri, 26 Mar 1993 10:07:13 -0500" "my different opinion" (
                (
                   NIL NIL "unknown" "localhost"
@@ -146,8 +146,8 @@ BODYSTRUCTURE UTF8=ACCEPT (
          ) (
             "text" "plain" (
                "charset" "us-ascii"
-            ) NIL NIL "7bit" 31 1 "7a0001277b1197e7029ad48b54919b62" NIL NIL NIL
-         ) 0 "9609bccef55fba1208046885cdcc9db8" NIL NIL NIL
+            ) NIL NIL "7bit" 31 1 NIL NIL NIL NIL
+         ) 5 NIL NIL NIL NIL
       ) "digest" (
          "boundary" "---- next message ----"
       ) NIL NIL NIL
@@ -424,6 +424,10 @@ BINARY[2.1.1] {22}
 
 BINARY.SIZE[2.1.1] 22
 ----------------------------------
+BODY[2.1.1.MIME] {2}
+
+
+----------------------------------
 BODY[2.2] {125}
 From: someone-else-again
 Date: Fri, 26 Mar 1993 10:07:13 -0500
@@ -462,6 +466,10 @@ BINARY[2.2.1] {31}
 ... another body goes here ...
 
 BINARY.SIZE[2.2.1] 31
+----------------------------------
+BODY[2.2.1.MIME] {2}
+
+
 ----------------------------------
 BODY[HEADER.FIELDS (FROM TO)] {45}
 From: Moderator-Address

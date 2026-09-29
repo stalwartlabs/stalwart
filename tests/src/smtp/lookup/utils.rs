@@ -11,7 +11,7 @@ use common::config::smtp::{
     report::AggregateFrequency,
     resolver::{Mode, MxPattern, Policy},
 };
-use mail_auth::{DnssecStatus, IpLookupStrategy, MX, RecordSet};
+use mail_auth::{DnssecStatus, IpLookupStrategy, Mx, RecordSet};
 use mail_parser::DateTime;
 use registry::{
     schema::{
@@ -225,22 +225,22 @@ async fn strategies() {
 
 #[test]
 fn to_remote_hosts() {
-    let mx: RecordSet<MX> = RecordSet {
-        rrset: Arc::from(vec![
-            MX {
+    let mx: RecordSet<Mx> = RecordSet {
+        records: Arc::from(vec![
+            Mx {
                 exchanges: vec!["mx1".into(), "mx2".into()].into_boxed_slice(),
                 preference: 10,
             },
-            MX {
+            Mx {
                 exchanges: vec!["mx3".into(), "mx4".into(), "mx5".into(), "mx6".into()]
                     .into_boxed_slice(),
                 preference: 20,
             },
-            MX {
+            Mx {
                 exchanges: vec!["mx7".into(), "mx8".into()].into_boxed_slice(),
                 preference: 10,
             },
-            MX {
+            Mx {
                 exchanges: vec!["mx9".into(), "mxA".into()].into_boxed_slice(),
                 preference: 10,
             },
@@ -259,8 +259,8 @@ fn to_remote_hosts() {
             assert!((*host.as_bytes().last().unwrap() - b'0') <= 8);
         }
     }
-    let mx: RecordSet<MX> = RecordSet {
-        rrset: Arc::from(vec![MX {
+    let mx: RecordSet<Mx> = RecordSet {
+        records: Arc::from(vec![Mx {
             exchanges: vec![".".into()].into_boxed_slice(),
             preference: 0,
         }]),

@@ -6,7 +6,10 @@
 
 use crate::{
     mailbox::{JUNK_ID, TRASH_ID},
-    message::messagedata::{MessageData, PendingMessageData},
+    message::{
+        messagedata::{MessageData, PendingMessageData},
+        metadata::ExtraHeaders,
+    },
 };
 use common::storage::index::{
     CurrentObject, IndexItem, IndexValue, IndexableObject, SerializableObject,
@@ -145,13 +148,11 @@ impl SerializableObject for PendingMessageData {
 }
 
 pub(super) trait IndexMessage {
-    #[allow(clippy::too_many_arguments)]
-    fn index_message<'x>(
+    fn index_message(
         &mut self,
         tenant_id: Option<u32>,
-        message: mail_parser::Message<'x>,
-        extra_headers: Vec<u8>,
-        extra_headers_parsed: Vec<mail_parser::Header<'x>>,
+        message: &mail_parser::Message<'_>,
+        extra_headers: &ExtraHeaders,
         blob_hash: BlobHash,
         data: PendingMessageData,
     ) -> trc::Result<&mut Self>;

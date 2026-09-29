@@ -6,15 +6,15 @@
 
 use crate::utils::{cleanup::store_destroy, server::TestServerBuilder};
 use ahash::AHashMap;
-use email::message::metadata::MessageMetadata;
+use email::message::metadata::{MessageMetadata, MetadataRow};
 use registry::{
     schema::{enums::CompressionAlgo, structs::Jmap},
     types::duration::Duration,
 };
 use services::task_manager::tasks::destroy_account::destroy_account_blobs;
 use store::{
-    BlobStore, Serialize, SerializeInfallible,
-    write::{Archiver, BatchBuilder, BlobLink, BlobOp, ValueClass, now},
+    BlobStore, SerializeInfallible,
+    write::{BatchBuilder, BlobLink, BlobOp, ValueClass, now},
 };
 use types::{blob::BlobClass, blob_hash::BlobHash, collection::Collection, field::EmailField};
 
@@ -196,14 +196,13 @@ pub async fn blob_tests() {
                 )
                 .set(
                     ValueClass::Immutable(EmailField::Metadata.into()),
-                    Archiver::new(MessageMetadata {
-                        contents: Default::default(),
-                        blob_hash: hash.clone(),
-                        blob_body_offset: Default::default(),
-                        preview: Default::default(),
-                        raw_headers: Default::default(),
-                    })
-                    .serialize()
+                    MetadataRow::encode(
+                        MessageMetadata {
+                            blob_hash: hash.clone(),
+                            ..Default::default()
+                        },
+                        &[],
+                    )
                     .unwrap(),
                 );
         };

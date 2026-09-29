@@ -157,15 +157,20 @@ impl CalendarEventData {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             base_offset: ranges.base_offset,
-            base_time_utc: (ranges.min_time_utc - ranges.base_offset).clamp(0, MAX_TIME_SPAN)
-                as u32,
-            duration: (ranges.max_time_utc - ranges.min_time_utc).clamp(0, MAX_TIME_SPAN) as u32,
+            base_time_utc: ranges
+                .min_time_utc
+                .saturating_sub(ranges.base_offset)
+                .clamp(0, MAX_TIME_SPAN) as u32,
+            duration: ranges
+                .max_time_utc
+                .saturating_sub(ranges.min_time_utc)
+                .clamp(0, MAX_TIME_SPAN) as u32,
         }
     }
 
     pub fn event_range(&self) -> Option<(i64, u32)> {
         if self.base_offset != 0 {
-            Some((self.base_offset + self.base_time_utc as i64, self.duration))
+            Some((self.event_range_start(), self.duration))
         } else {
             None
         }
@@ -203,33 +208,32 @@ impl TimeRanges {
 impl ArchivedCalendarEventData {
     pub fn event_range(&self) -> Option<(i64, u32)> {
         if self.base_offset != 0 {
-            Some((
-                self.base_offset.to_native() + self.base_time_utc.to_native() as i64,
-                self.duration.to_native(),
-            ))
+            Some((self.event_range_start(), self.duration.to_native()))
         } else {
             None
         }
     }
 
     pub fn event_range_start(&self) -> i64 {
-        self.base_offset.to_native() + self.base_time_utc.to_native() as i64
+        self.base_offset
+            .to_native()
+            .saturating_add(self.base_time_utc.to_native() as i64)
     }
 
     pub fn event_range_end(&self) -> i64 {
-        self.base_offset.to_native()
-            + self.base_time_utc.to_native() as i64
-            + self.duration.to_native() as i64
+        self.event_range_start()
+            .saturating_add(self.duration.to_native() as i64)
     }
 }
 
 impl CalendarEventData {
     pub fn event_range_start(&self) -> i64 {
-        self.base_offset + self.base_time_utc as i64
+        self.base_offset.saturating_add(self.base_time_utc as i64)
     }
 
     pub fn event_range_end(&self) -> i64 {
-        self.base_offset + self.base_time_utc as i64 + self.duration as i64
+        self.event_range_start()
+            .saturating_add(self.duration as i64)
     }
 }
 

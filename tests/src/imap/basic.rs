@@ -6,8 +6,8 @@
 
 use super::{AssertResult, ImapConnection, Type};
 use directory::Credentials;
-use imap_proto::ResponseType;
 use encodify::base64::LENIENT;
+use imap_proto::ResponseType;
 
 pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection) {
     println!("Running basic tests...");

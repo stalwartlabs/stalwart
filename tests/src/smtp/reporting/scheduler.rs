@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::server::TestServerBuilder;
+use crate::{smtp::reporting::TestRecord, utils::server::TestServerBuilder};
 use common::{
     config::smtp::report::AggregateFrequency,
     ipc::{DmarcEvent, PolicyType, TlsEvent},
 };
 use mail_auth::{
-    common::parse::TxtRecordParser,
-    dmarc::Dmarc,
-    mta_sts::TlsRpt,
-    report::{ActionDisposition, DmarcResult, Record},
+    dmarc::DmarcRecord,
+    dns::TxtRecordParser,
+    mta_sts::TlsRptRecord,
+    report::dmarc::{Disposition, DmarcStatus, Record},
 };
 use registry::schema::structs::{
     DmarcInternalReport, DmarcReportSettings, Expression, TlsInternalReport, TlsReportSettings,
@@ -67,19 +67,23 @@ async fn report_scheduler() {
     test.expect_reload_settings().await;
 
     // Schedule two events with a same policy and another one with a different policy
-    let dmarc_record =
-        Arc::new(Dmarc::parse(b"v=DMARC1; p=quarantine; rua=mailto:dmarc@foobar.org").unwrap());
+    let dmarc_record = Arc::new(
+        DmarcRecord::parse(b"v=DMARC1; p=quarantine; rua=mailto:dmarc@foobar.org").unwrap(),
+    );
     test.server
         .schedule_dmarc(Box::new(DmarcEvent {
             domain: "foobar.org".to_string(),
-            report_record: Record::new()
-                .with_source_ip("192.168.1.2".parse().unwrap())
-                .with_action_disposition(ActionDisposition::Pass)
-                .with_dmarc_dkim_result(DmarcResult::Pass)
-                .with_dmarc_spf_result(DmarcResult::Fail)
-                .with_envelope_from("hello@example.org")
-                .with_envelope_to("other@example.org")
-                .with_header_from("bye@example.org"),
+            report_record: Record::evaluated(
+                "192.168.1.2",
+                Disposition::Pass,
+                DmarcStatus::Pass,
+                DmarcStatus::Fail,
+            )
+            .with_identifiers(
+                "hello@example.org",
+                "other@example.org",
+                "bye@example.org",
+            ),
             dmarc_record: dmarc_record.clone(),
             interval: AggregateFrequency::Weekly,
             span_id: 0,
@@ -91,14 +95,17 @@ async fn report_scheduler() {
         test.server
             .schedule_dmarc(Box::new(DmarcEvent {
                 domain: "foobar.org".to_string(),
-                report_record: Record::new()
-                    .with_source_ip("192.168.1.2".parse().unwrap())
-                    .with_action_disposition(ActionDisposition::Pass)
-                    .with_dmarc_dkim_result(DmarcResult::Pass)
-                    .with_dmarc_spf_result(DmarcResult::Fail)
-                    .with_envelope_from("hello@example.org")
-                    .with_envelope_to("other@example.org")
-                    .with_header_from("bye@example.org"),
+                report_record: Record::evaluated(
+                    "192.168.1.2",
+                    Disposition::Pass,
+                    DmarcStatus::Pass,
+                    DmarcStatus::Fail,
+                )
+                .with_identifiers(
+                    "hello@example.org",
+                    "other@example.org",
+                    "bye@example.org",
+                ),
                 dmarc_record: dmarc_record.clone(),
                 interval: AggregateFrequency::Weekly,
                 span_id: 0,
@@ -106,15 +113,16 @@ async fn report_scheduler() {
             .await;
     }
     let dmarc_record =
-        Arc::new(Dmarc::parse(b"v=DMARC1; p=reject; rua=mailto:dmarc@foobar.org").unwrap());
+        Arc::new(DmarcRecord::parse(b"v=DMARC1; p=reject; rua=mailto:dmarc@foobar.org").unwrap());
     test.server
         .schedule_dmarc(Box::new(DmarcEvent {
             domain: "foobar.org".to_string(),
-            report_record: Record::new()
-                .with_source_ip("a:b:c::e:f".parse().unwrap())
-                .with_action_disposition(ActionDisposition::Reject)
-                .with_dmarc_dkim_result(DmarcResult::Fail)
-                .with_dmarc_spf_result(DmarcResult::Pass),
+            report_record: Record::evaluated(
+                "a:b:c::e:f",
+                Disposition::Reject,
+                DmarcStatus::Fail,
+                DmarcStatus::Pass,
+            ),
             dmarc_record: dmarc_record.clone(),
             interval: AggregateFrequency::Weekly,
             span_id: 0,
@@ -122,7 +130,8 @@ async fn report_scheduler() {
         .await;
 
     // Schedule TLS event
-    let tls_record = Arc::new(TlsRpt::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.org").unwrap());
+    let tls_record =
+        Arc::new(TlsRptRecord::parse(b"v=TLSRPTv1;rua=mailto:reports@foobar.org").unwrap());
     test.server
         .schedule_tls(Box::new(TlsEvent {
             domain: "foobar.org".to_string(),

@@ -279,27 +279,6 @@
   ],
   "attachments": [
     {
-      "partId": "4",
-      "blobId": "blob_2",
-      "size": 37,
-      "headers": [
-        {
-          "name": "Content-ID",
-          "value": " <cid:1234-5678-9012-3456>"
-        },
-        {
-          "name": "Content-Type",
-          "value": " image/png"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": " base64"
-        }
-      ],
-      "type": "image/png",
-      "cid": "cid:1234-5678-9012-3456"
-    },
-    {
       "partId": "5",
       "blobId": "blob_3",
       "size": 127,

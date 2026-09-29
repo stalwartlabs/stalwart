@@ -13,10 +13,10 @@ use crate::{
 };
 use common::{config::smtp::resolver::Policy, ipc::PolicyType};
 use mail_auth::{
-    DnssecStatus, MX,
-    common::parse::TxtRecordParser,
-    mta_sts::{MtaSts, ReportUri, TlsRpt},
-    report::tlsrpt::ResultType,
+    DnssecStatus, Mx,
+    dns::TxtRecordParser,
+    mta_sts::{MtaStsRecord, ReportUri, TlsRptRecord},
+    report::tlsrpt::FailureType,
 };
 use registry::{
     schema::{
@@ -102,7 +102,7 @@ async fn mta_sts_verify() {
     // Add mock DNS entries
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -116,7 +116,7 @@ async fn mta_sts_verify() {
     );
     local.server.txt_add(
         "_smtp._tls.foobar.org",
-        TlsRpt::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
+        TlsRptRecord::parse(b"v=TLSRPTv1; rua=mailto:reports@foobar.org").unwrap(),
         Instant::now() + Duration::from_secs(10),
     );
 
@@ -147,7 +147,7 @@ async fn mta_sts_verify() {
     assert_eq!(report.policy, PolicyType::Sts(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::Other
+        FailureType::Other
     );
     assert_eq!(
         report.tls_record.rua,
@@ -157,7 +157,7 @@ async fn mta_sts_verify() {
     // MTA-STS policy fetch failure
     local.server.txt_add(
         "_mta-sts.foobar.org",
-        MtaSts::parse(b"v=STSv1; id=policy_will_fail;").unwrap(),
+        MtaStsRecord::parse(b"v=STSv1; id=policy_will_fail;").unwrap(),
         Instant::now() + Duration::from_secs(10),
     );
     session
@@ -181,7 +181,7 @@ async fn mta_sts_verify() {
     assert_eq!(report.policy, PolicyType::Sts(None));
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::StsPolicyInvalid
+        FailureType::StsPolicyInvalid
     );
 
     // MTA-STS policy does not authorize mx.foobar.org
@@ -222,14 +222,14 @@ async fn mta_sts_verify() {
     );
     assert_eq!(
         report.failure.as_ref().unwrap().result_type,
-        ResultType::ValidationFailure
+        FailureType::ValidationFailure
     );
     remote.assert_no_events();
 
     // MTA-STS successful validation
     local.server.txt_add(
         "_mta-sts.foobar.org",
-        MtaSts::parse(b"v=STSv1; id=policy_will_work;").unwrap(),
+        MtaStsRecord::parse(b"v=STSv1; id=policy_will_work;").unwrap(),
         Instant::now() + Duration::from_secs(10),
     );
     let policy = concat!(
@@ -313,7 +313,7 @@ async fn mta_sts_testing_mode_does_not_enforce_tls() {
 
     local.server.mx_add(
         "foobar.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],
@@ -327,7 +327,7 @@ async fn mta_sts_testing_mode_does_not_enforce_tls() {
     );
     local.server.txt_add(
         "_mta-sts.foobar.org",
-        MtaSts::parse(b"v=STSv1; id=policy_in_testing;").unwrap(),
+        MtaStsRecord::parse(b"v=STSv1; id=policy_in_testing;").unwrap(),
         Instant::now() + Duration::from_secs(10),
     );
 

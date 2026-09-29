@@ -13,7 +13,7 @@ use common::{
 };
 use email::{
     identity::Identity,
-    message::metadata::{ArchivedMetadataHeaderName, ArchivedMetadataHeaderValue, MessageMetadata},
+    message::metadata::{HeaderId, HeaderSelection, MetadataRow},
     submission::{Address, Delivered, DeliveryStatus, EmailSubmission, UndoStatus},
 };
 use jmap_proto::{
@@ -628,83 +628,53 @@ impl EmailSubmissionSet for Server {
         };
 
         // Obtain message metadata
-        let metadata_ = if let Some(metadata) = self
+        let Some(row) = self
             .store()
-            .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
+            .get_value::<MetadataRow>(ValueKey::immutable(
                 account_id,
                 Collection::Email,
                 submission.email_id,
                 EmailField::Metadata,
             ))
             .await?
-        {
-            metadata
-        } else {
+        else {
             return Ok(Err(SetError::invalid_properties()
                 .with_property(EmailSubmissionProperty::EmailId)
                 .with_description("Email not found.")));
         };
-        let metadata = metadata_
-            .unarchive::<MessageMetadata>()
-            .caused_by(trc::location!())?;
+        let metadata = row.unarchive().caused_by(trc::location!())?;
 
         // Add recipients to envelope if missing
-        let mut bcc_header = None;
         if rcpt_to.is_empty() {
-            for header in metadata.contents[0].parts[0].headers.iter() {
-                if matches!(
-                    header.name,
-                    ArchivedMetadataHeaderName::To
-                        | ArchivedMetadataHeaderName::Cc
-                        | ArchivedMetadataHeaderName::Bcc
-                ) {
-                    if matches!(header.name, ArchivedMetadataHeaderName::Bcc) {
-                        bcc_header = Some(header);
-                    }
-                    match &header.value {
-                        ArchivedMetadataHeaderValue::AddressList(addr) => {
-                            for address in addr.iter() {
-                                if let Some(address) = address
-                                    .address
-                                    .as_ref()
-                                    .map(|v| v.as_ref())
-                                    .and_then(sanitize_email)
-                                    && !rcpt_to.iter().any(|rcpt| rcpt.address == address)
-                                {
-                                    submission.envelope.rcpt_to.push(Address {
-                                        email: address.to_string(),
-                                        parameters: None,
-                                    });
-                                    rcpt_to.push(RcptTo {
-                                        address: Cow::Owned(address),
-                                        ..Default::default()
-                                    });
-                                }
-                            }
-                        }
-                        ArchivedMetadataHeaderValue::AddressGroup(groups) => {
-                            for group in groups.iter() {
-                                for address in group.addresses.iter() {
-                                    if let Some(address) = address
-                                        .address
-                                        .as_ref()
-                                        .map(|v| v.as_ref())
-                                        .and_then(sanitize_email)
-                                        && !rcpt_to.iter().any(|rcpt| rcpt.address == address)
-                                    {
-                                        submission.envelope.rcpt_to.push(Address {
-                                            email: address.to_string(),
-                                            parameters: None,
-                                        });
-                                        rcpt_to.push(RcptTo {
-                                            address: Cow::Owned(address),
-                                            ..Default::default()
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
+            let headers = row.raw_headers().caused_by(trc::location!())?;
+            let root_headers = metadata.root().root_part().selected_headers(
+                &headers,
+                HeaderSelection::Ids(&[HeaderId::TO, HeaderId::CC, HeaderId::BCC]),
+            );
+            for header in root_headers.list().iter() {
+                if !matches!(header.id(), HeaderId::TO | HeaderId::CC | HeaderId::BCC) {
+                    continue;
+                }
+                let Some(raw) = header.raw_value(&headers) else {
+                    continue;
+                };
+                let parsed = mail_parser::HeaderForm::Addresses.parse(raw);
+                let Some(list) = parsed.value().as_address() else {
+                    continue;
+                };
+                for address in list
+                    .mailboxes()
+                    .filter_map(|mailbox| mailbox.address().and_then(sanitize_email))
+                {
+                    if !rcpt_to.iter().any(|rcpt| rcpt.address == address) {
+                        submission.envelope.rcpt_to.push(Address {
+                            email: address.to_string(),
+                            parameters: None,
+                        });
+                        rcpt_to.push(RcptTo {
+                            address: Cow::Owned(address),
+                            ..Default::default()
+                        });
                     }
                 }
             }
@@ -713,11 +683,6 @@ impl EmailSubmissionSet for Server {
                 return Ok(Err(SetError::new(SetErrorType::NoRecipients)
                     .with_description("No recipients found in email.")));
             }
-        } else {
-            bcc_header = metadata.contents[0].parts[0]
-                .headers
-                .iter()
-                .find(|header| matches!(header.name, ArchivedMetadataHeaderName::Bcc));
         }
 
         // Update sendAt
@@ -730,34 +695,29 @@ impl EmailSubmissionSet for Server {
         };
 
         // Obtain raw message
-        let mut message = if let Some(message) = self
+        let Some(blob) = self
             .blob_store()
-            .get_blob(metadata.blob_hash.0.as_slice(), 0..usize::MAX)
+            .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
             .await?
-        {
-            if message.len() > self.core.email.mail_max_size {
-                return Ok(Err(SetError::new(SetErrorType::InvalidEmail)
-                    .with_description(format!(
-                        "Message exceeds maximum size of {} bytes.",
-                        self.core.email.mail_max_size
-                    ))));
-            }
-
-            message
-        } else {
+        else {
             return Ok(Err(SetError::invalid_properties()
                 .with_property(EmailSubmissionProperty::EmailId)
                 .with_description("Blob for email not found.")));
         };
+        if blob.len() > self.core.email.mail_max_size {
+            return Ok(Err(SetError::new(SetErrorType::InvalidEmail)
+                .with_description(format!(
+                    "Message exceeds maximum size of {} bytes.",
+                    self.core.email.mail_max_size
+                ))));
+        }
 
         // Remove BCC header if present
-        if let Some(bcc_header) = bcc_header {
-            let mut new_message = Vec::with_capacity(message.len());
-            let range = bcc_header.name_value_range();
-            new_message.extend_from_slice(&message[..range.start]);
-            new_message.extend_from_slice(&message[range.end..]);
-            message = new_message;
-        }
+        let stripped = match metadata.strip_root_fields(&blob, HeaderId::BCC) {
+            Cow::Owned(stripped) => Some(stripped),
+            Cow::Borrowed(_) => None,
+        };
+        let message = stripped.unwrap_or(blob);
 
         // Begin local SMTP session
         let mut session = Session::<NullIo>::local(

@@ -14,13 +14,13 @@ BODYSTRUCTURE (
    (
       "text" "plain" (
          "charset" "utf-8"
-      ) NIL NIL "quoted-printable" 87 2 "ba404f7e85d80b41eddae75d5087186d" (
+      ) NIL NIL "quoted-printable" 87 2 NIL (
          "inline" NIL
       ) NIL NIL
    )(
       "text" "html" (
          "charset" "utf-8"
-      ) NIL NIL "quoted-printable" 93 2 "bb2724458c0a6183195d922d711523c0" (
+      ) NIL NIL "quoted-printable" 93 2 NIL (
          "inline" NIL
       ) NIL NIL
    ) "alternative" (
@@ -32,13 +32,13 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "plain" (
          "charset" "utf-8"
-      ) NIL NIL "quoted-printable" 87 2 "ba404f7e85d80b41eddae75d5087186d" (
+      ) NIL NIL "quoted-printable" 87 2 NIL (
          "inline" NIL
       ) NIL NIL
    )(
       "text" "html" (
          "charset" "utf-8"
-      ) NIL NIL "quoted-printable" 93 2 "bb2724458c0a6183195d922d711523c0" (
+      ) NIL NIL "quoted-printable" 93 2 NIL (
          "inline" NIL
       ) NIL NIL
    ) "alternative" (

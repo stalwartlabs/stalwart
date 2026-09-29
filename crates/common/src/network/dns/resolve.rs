@@ -18,7 +18,7 @@ impl Server {
             .mx_lookup(entry, Some(&self.inner.cache.dns_mx))
             .await
         {
-            Ok(result) => Ok(result.rrset.iter().any(|mx| !mx.exchanges.is_empty())),
+            Ok(result) => Ok(result.records.iter().any(|mx| !mx.exchanges.is_empty())),
             Err(Error::Dns(mail_auth::DnsError::RecordNotFound(_))) => Ok(false),
             Err(err) => Err(err.into()),
         }
@@ -55,7 +55,7 @@ impl Server {
                 .ptr_lookup(addr, Some(&self.inner.cache.dns_ptr))
                 .await
             {
-                Ok(result) => Ok(!result.rrset.is_empty()),
+                Ok(result) => Ok(!result.records.is_empty()),
                 Err(Error::Dns(mail_auth::DnsError::RecordNotFound(_))) => Ok(false),
                 Err(err) => Err(err.into()),
             }
@@ -73,7 +73,7 @@ impl Server {
             .ipv4_lookup(entry, Some(&self.inner.cache.dns_ipv4))
             .await
         {
-            Ok(result) => Ok(!result.rrset.is_empty()),
+            Ok(result) => Ok(!result.records.is_empty()),
             Err(Error::Dns(mail_auth::DnsError::RecordNotFound(_))) => Ok(false),
             Err(err) => Err(err.into()),
         }
@@ -88,7 +88,7 @@ impl Server {
             .ipv6_lookup(entry, Some(&self.inner.cache.dns_ipv6))
             .await
         {
-            Ok(result) => Ok(!result.rrset.is_empty()),
+            Ok(result) => Ok(!result.records.is_empty()),
             Err(Error::Dns(mail_auth::DnsError::RecordNotFound(_))) => Ok(false),
             Err(err) => Err(err.into()),
         }

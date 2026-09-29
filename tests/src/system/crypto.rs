@@ -13,7 +13,7 @@ use common::{
     storage::encryption::{EncryptionMethod, parse_public_key},
 };
 use email::message::crypto::EncryptMessage;
-use mail_parser::{MessageParser, MimeHeaders};
+use mail_parser::MessageParser;
 use registry::schema::{
     prelude::{ObjectType, Property},
     structs::{EncryptionAtRest, EncryptionSettings, PublicKey},

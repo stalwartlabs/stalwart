@@ -21,7 +21,7 @@ use common::{
 use http_proto::{JsonResponse, ToHttpResponse};
 use hyper::Method;
 use mail_auth::{
-    ArcOutput, DkimOutput, DkimResult, DmarcResult, DnssecStatus, IprevOutput, IprevResult, MX,
+    ArcOutput, DkimOutput, DkimResult, DmarcResult, DnssecStatus, IprevOutput, IprevResult, Mx,
     SpfOutput, SpfResult, dkim::Signature, dmarc::Policy,
 };
 use mail_parser::MessageParser;
@@ -40,7 +40,7 @@ use serde_json::json;
 use smtp::core::SessionAddress;
 use smtp_proto::{MAIL_BODY_8BITMIME, MAIL_SMTPUTF8};
 use spam_filter::{
-    SpamFilterInput,
+    MessageTexts, SpamFilterInput,
     analysis::{
         classifier::SpamFilterAnalyzeClassify, date::SpamFilterAnalyzeDate,
         dmarc::SpamFilterAnalyzeDmarc, domain::SpamFilterAnalyzeDomain,
@@ -210,7 +210,7 @@ async fn antispam() {
     ] {
         test.server.mx_add(
             mx,
-            vec![MX {
+            vec![Mx {
                 exchanges: vec!["127.0.0.1".into()].into_boxed_slice(),
                 preference: 10,
             }],
@@ -403,19 +403,13 @@ async fn antispam() {
                         }
                         "dkim.result" => {
                             dkim_result = match DkimResult::from_str(value) {
-                                DkimResult::Pass => DkimOutput::pass(),
-                                DkimResult::Neutral(error) => DkimOutput::neutral(error),
-                                DkimResult::Fail(error) => DkimOutput::fail(error),
-                                DkimResult::PermError(error) => DkimOutput::perm_err(error),
-                                DkimResult::TempError(error) => DkimOutput::temp_err(error),
                                 DkimResult::None => unreachable!(),
+                                result => DkimOutput::from(result),
                             }
                             .into();
                         }
                         "arc.result" => {
-                            arc_result = ArcOutput::default()
-                                .with_result(DkimResult::from_str(value))
-                                .into();
+                            arc_result = ArcOutput::from(DkimResult::from_str(value)).into();
                         }
                         "dkim.domains" => {
                             dkim_signatures = value
@@ -547,8 +541,10 @@ async fn antispam() {
             }
 
             // Initialize filter
+            let texts = MessageTexts::new(&parsed_message);
             let mut spam_input = session.build_spam_input(
                 &parsed_message,
+                &texts,
                 &dkim_domains,
                 None,
                 arc_result.as_ref(),
@@ -700,8 +696,9 @@ async fn classifier_features(server: &Server, contents: String) {
 
         // Build features
         let message = MessageParser::new().parse(input).unwrap_or_default();
-        let mut ctx =
-            server.spam_filter_init(SpamFilterInput::from_message(&message, 0).train_mode());
+        let texts = MessageTexts::new(&message);
+        let mut ctx = server
+            .spam_filter_init(SpamFilterInput::from_message(&message, &texts, 0).train_mode());
         server.spam_filter_analyze_domain(&mut ctx).await;
         server.spam_filter_analyze_url(&mut ctx).await;
         let mut tokens = server

@@ -4,7 +4,7 @@
   },
   "keywords": {
     "$draft": true,
-    "$hasnoattachment": true,
+    "$hasattachment": true,
     "$seen": true
   },
   "receivedAt": "2018-07-10T01:03:11Z",
@@ -279,6 +279,40 @@
   ],
   "htmlBody": [
     {
+      "partId": "1",
+      "blobId": "blob_0",
+      "size": 81,
+      "headers": [
+        {
+          "name": "Content-Language",
+          "value": " en"
+        },
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"us-ascii\""
+        },
+        {
+          "name": "X-Header",
+          "value": " just a value"
+        },
+        {
+          "name": "X-Text",
+          "value": " more text"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii",
+      "language": [
+        "en"
+      ]
+    }
+  ],
+  "attachments": [
+    {
       "partId": "2",
       "blobId": "blob_1",
       "size": 218,
@@ -302,7 +336,6 @@
       "location": "https://example.com/html-body.html"
     }
   ],
-  "attachments": [],
-  "hasAttachment": false,
+  "hasAttachment": true,
   "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
 }

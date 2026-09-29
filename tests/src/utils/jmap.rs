@@ -5,9 +5,9 @@
  */
 
 use crate::utils::account::Account;
+use encodify::base64::STANDARD;
 use hyper::header;
 use jmap_proto::error::set::SetErrorType;
-use encodify::base64::STANDARD;
 use registry::types::error::ValidationError;
 use registry::types::id::ObjectId;
 use serde_json::{Value, json};

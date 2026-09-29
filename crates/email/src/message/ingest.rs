@@ -10,9 +10,13 @@ use crate::{
     mailbox::{INBOX_ID, JUNK_ID, SENT_ID, TRASH_ID},
     message::{
         crypto::EncryptionFlags,
-        index::{IndexMessage, extractors::VisitText},
+        index::IndexMessage,
         messagedata::{MessageData, PendingMessageData},
-        metadata::MessageMetadata,
+        metadata::{
+            AddressHeader, ExtraHeaders, HeaderId, Mailbox, MetadataRow, MetadataStructure,
+            Occurrence,
+        },
+        thread::ThreadFields,
     },
 };
 use common::{MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken};
@@ -21,10 +25,7 @@ use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
 };
-use mail_parser::{
-    DateTime, Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
-    parsers::fields::thread::thread_name,
-};
+use mail_parser::{DateTime, HeaderForm, Message, MessageParser, thread_name};
 use registry::{
     schema::{
         enums::StorageQuota,
@@ -34,7 +35,7 @@ use registry::{
     types::{EnumImpl, ObjectImpl, datetime::UTCDateTime, id::ObjectId, map::Map},
 };
 use std::future::Future;
-use std::{borrow::Cow, cmp::Ordering, fmt::Write, time::Instant};
+use std::{borrow::Cow, cmp::Ordering, time::Instant};
 use store::{
     IterateParams, SerializeInfallible, U32_LEN, U128_LEN, ValueKey,
     ahash::AHashMap,
@@ -43,10 +44,7 @@ use store::{
         QueueDocumentId, SearchIndex, SizedSetValue, ValueClass, key::DeserializeBigEndian, now,
     },
 };
-use store::{
-    write::{Archive, ArchiveBytes, RegistryClass},
-    xxhash_rust::xxh3::xxh3_128,
-};
+use store::{write::RegistryClass, xxhash_rust::xxh3::xxh3_128};
 use tinyvec::TinyVec;
 use trc::{AddContext, MessageIngestEvent, SpamEvent};
 use types::{
@@ -189,52 +187,16 @@ impl EmailIngest for Server {
         })?;
 
         // Obtain message references and thread name
-        let mut message_id = None;
-        let mut sent_at = None;
-        let mut message_ids = Vec::new();
-        let thread_result = {
-            let mut subject = "";
-            for header in message.root_part().headers().iter().rev() {
-                match &header.name {
-                    HeaderName::MessageId => header.value.visit_text(|id| {
-                        if !id.is_empty() {
-                            if message_id.is_none() {
-                                message_id = id.to_string().into();
-                            }
-                            message_ids.push(xxh3_128(id.as_bytes()));
-                        }
-                    }),
-                    HeaderName::InReplyTo
-                    | HeaderName::References
-                    | HeaderName::ResentMessageId => {
-                        header.value.visit_text(|id| {
-                            if !id.is_empty() {
-                                message_ids.push(xxh3_128(id.as_bytes()));
-                            }
-                        });
-                    }
-                    HeaderName::Subject if subject.is_empty() => {
-                        subject = thread_name(match &header.value {
-                            HeaderValue::Text(text) => text.as_ref(),
-                            HeaderValue::TextList(list) if !list.is_empty() => {
-                                list.first().unwrap().as_ref()
-                            }
-                            _ => "",
-                        });
-                    }
-                    HeaderName::Date => {
-                        sent_at = header.value.as_datetime().map(|dt| dt.to_timestamp());
-                    }
-                    _ => (),
-                }
-            }
-
-            message_ids.sort_unstable();
-            message_ids.dedup();
-
-            self.find_thread_id(account_id, subject, &message_ids)
-                .await?
-        };
+        let fields = ThreadFields::scan(&message);
+        let thread_result = self
+            .find_thread_id(account_id, fields.subject, &fields.message_ids)
+            .await?;
+        let ThreadFields {
+            message_id,
+            sent_at,
+            message_ids,
+            ..
+        } = fields;
 
         // Skip duplicate messages for SMTP ingestion
         if !thread_result.duplicate_ids.is_empty() && params.source.is_smtp() {
@@ -270,8 +232,7 @@ impl EmailIngest for Server {
 
         // Spam classification and training
         let mut train_spam = None;
-        let mut extra_headers = String::new();
-        let mut extra_headers_parsed = Vec::new();
+        let mut extra_headers = ExtraHeaders::default();
         let mut itip_messages = Vec::new();
         let is_spam = match params.source {
             IngestSource::Smtp {
@@ -281,14 +242,7 @@ impl EmailIngest for Server {
             } => {
                 // Add delivered to header
                 if self.core.smtp.session.data.add_delivered_to {
-                    extra_headers = format!("Delivered-To: {deliver_to}\r\n");
-                    extra_headers_parsed.push(Header {
-                        name: HeaderName::DeliveredTo,
-                        value: HeaderValue::Text(deliver_to.into()),
-                        offset_field: 0,
-                        offset_start: 13,
-                        offset_end: extra_headers.len() as u32,
-                    });
+                    extra_headers.push(HeaderId::DELIVERED_TO, deliver_to);
                 }
 
                 // Spam training on confirmed false positives
@@ -362,30 +316,15 @@ impl EmailIngest for Server {
                     }
 
                     // Add Spam-Status header
-                    const HEADER: &str = "X-Spam-Status";
-                    let offset_field = extra_headers.len();
-                    let offset_start = offset_field + HEADER.len() + 1;
                     let result = if is_spam { "Yes" } else { "No" };
                     if let Some(reason) = overridden {
-                        let _ = write!(
-                            &mut extra_headers,
-                            "{HEADER}: {result}, reason={reason}\r\n",
+                        extra_headers.push(
+                            HeaderId::X_SPAM_STATUS,
+                            &format!("{result}, reason={reason}"),
                         );
                     } else {
-                        let _ = write!(&mut extra_headers, "{HEADER}: {result}\r\n",);
+                        extra_headers.push(HeaderId::X_SPAM_STATUS, result);
                     }
-
-                    extra_headers_parsed.push(Header {
-                        name: HeaderName::Other(HEADER.into()),
-                        value: HeaderValue::Text(
-                            extra_headers[offset_start + 1..extra_headers.len() - 2]
-                                .to_string()
-                                .into(),
-                        ),
-                        offset_field: offset_field as u32,
-                        offset_start: offset_start as u32,
-                        offset_end: extra_headers.len() as u32,
-                    });
 
                     if is_spam && params.mailbox_ids == [INBOX_ID] {
                         params.mailbox_ids[0] = JUNK_ID;
@@ -406,14 +345,14 @@ impl EmailIngest for Server {
                         .await
                         .caused_by(trc::location!())?;
                     let mut sender = None;
-                    for part in &message.parts {
+                    for part in message.root().parts() {
                         if part.content_type().is_some_and(|ct| {
                             ct.ctype().eq_ignore_ascii_case("text")
                                 && ct
                                     .subtype()
                                     .is_some_and(|st| st.eq_ignore_ascii_case("calendar"))
                                 && ct.has_attribute("method")
-                        }) && let Some(itip_message) = part.text_contents()
+                        }) && let Some(itip_message) = part.text()
                         {
                             if itip_message.len() < self.core.groupware.itip_inbound_max_ical_size {
                                 if let Some(sender) = sender.get_or_insert_with(|| {
@@ -428,7 +367,7 @@ impl EmailIngest for Server {
                                             &account_info,
                                             sender,
                                             deliver_to,
-                                            itip_message,
+                                            &itip_message,
                                         )
                                         .await
                                     {
@@ -507,18 +446,12 @@ impl EmailIngest for Server {
                     params.received_at = message
                         .root_part()
                         .headers()
-                        .iter()
-                        .filter_map(|header| {
-                            if let (HeaderName::Received, HeaderValue::Received(received)) =
-                                (&header.name, &header.value)
-                            {
-                                received
-                                    .date
-                                    .filter(|dt| dt.is_valid())
-                                    .map(|dt| dt.to_timestamp() as u64)
-                            } else {
-                                None
-                            }
+                        .all_received()
+                        .filter_map(|received| {
+                            received
+                                .date()
+                                .filter(|dt| dt.is_valid())
+                                .map(|dt| dt.to_timestamp() as u64)
                         })
                         .max();
                 }
@@ -560,22 +493,6 @@ impl EmailIngest for Server {
                     // Disable spam training if requested
                     if !account.flags.can_train_spam_filter() {
                         train_spam = None;
-                    }
-
-                    // Remove contents from parsed message
-                    for part in &mut message.parts {
-                        match &mut part.body {
-                            PartType::Text(txt) | PartType::Html(txt) => {
-                                *txt = Cow::from("");
-                            }
-                            PartType::Binary(bin) | PartType::InlineBinary(bin) => {
-                                *bin = Cow::from(&[][..]);
-                            }
-                            PartType::Message(_) => {
-                                part.body = PartType::Binary(Cow::from(&[][..]));
-                            }
-                            PartType::Multipart(_) => (),
-                        }
                     }
 
                     true
@@ -649,11 +566,9 @@ impl EmailIngest for Server {
                 keywords,
                 keywords_extra,
                 thread_id: thread_result.thread_id.unwrap_or_default(),
-                size: (message.raw_message.len() + extra_headers.len()) as u32,
+                size: (message.raw().len() + extra_headers.len()) as u32,
                 received_at,
-                sent_at: sent_at
-                    .map(|sent_at| (sent_at - received_at as i64) as i32)
-                    .unwrap_or_default(),
+                sent_at: MessageData::sent_at_offset(sent_at, received_at),
                 change_id: 0,
             },
             uid_slots,
@@ -688,14 +603,7 @@ impl EmailIngest for Server {
         batch
             .with_collection(Collection::Email)
             .create_document(document_slot)
-            .index_message(
-                tenant_id,
-                message,
-                extra_headers.into_bytes(),
-                extra_headers_parsed,
-                blob_hash.clone(),
-                data,
-            )
+            .index_message(tenant_id, &message, &extra_headers, blob_hash.clone(), data)
             .caused_by(trc::location!())?
             .set(
                 ValueClass::IndexProperty(IndexPropertyClass::Hash {
@@ -898,29 +806,59 @@ impl EmailIngest for Server {
         is_spam: bool,
         span_id: u64,
     ) -> trc::Result<()> {
+        let key = ValueKey::immutable(
+            account_id,
+            Collection::Email,
+            document_id,
+            EmailField::Metadata,
+        );
         if self.core.spam.classifier.is_some()
-            && let Some(archive) = self
+            && let Some(structure) = self
                 .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::immutable(
-                    account_id,
-                    Collection::Email,
-                    document_id,
-                    EmailField::Metadata,
-                ))
+                .get_value::<MetadataStructure>(key.clone())
                 .await
                 .caused_by(trc::location!())?
         {
-            let metadata = archive
-                .to_unarchived::<MessageMetadata>()
-                .caused_by(trc::location!())?;
-            let part = metadata.inner.root_part();
+            let metadata = structure.unarchive().caused_by(trc::location!())?;
+            let envelope = metadata.root().envelope();
+            let from = if metadata.completeness().is_truncated() {
+                match self
+                    .store()
+                    .get_value::<MetadataRow>(key)
+                    .await
+                    .caused_by(trc::location!())?
+                {
+                    Some(row) => {
+                        let headers = row.raw_headers().caused_by(trc::location!())?;
+                        let parsed = row.unarchive().caused_by(trc::location!())?.root_field_in(
+                            &headers,
+                            HeaderId::FROM,
+                            HeaderForm::Addresses,
+                        );
+                        parsed
+                            .as_ref()
+                            .and_then(Mailbox::first_of)
+                            .and_then(|mailbox| mailbox.address)
+                            .unwrap_or_default()
+                            .to_string()
+                    }
+                    None => String::new(),
+                }
+            } else {
+                envelope
+                    .addresses(AddressHeader::From, Occurrence::Last)
+                    .first()
+                    .and_then(|mailbox| mailbox.address)
+                    .unwrap_or_default()
+                    .to_string()
+            };
 
             self.add_spam_sample(
                 account_id,
                 batch,
-                (&metadata.inner.blob_hash).into(),
-                part.from().unwrap_or_default().to_string(),
-                thread_name(part.subject().unwrap_or_default()).to_string(),
+                metadata.blob_hash(),
+                from,
+                thread_name(envelope.subject().unwrap_or_default()).to_string(),
                 is_spam,
                 true,
                 span_id,

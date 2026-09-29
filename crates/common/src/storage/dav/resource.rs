@@ -292,7 +292,7 @@ impl GroupwareResource {
         match &self.data {
             GroupwareResourceMetadata::CalendarEvent {
                 start, duration, ..
-            } => Some((*start, *start + *duration as i64)),
+            } => Some((*start, start.saturating_add(*duration as i64))),
             _ => None,
         }
     }

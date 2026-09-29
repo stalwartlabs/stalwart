@@ -10,7 +10,7 @@ use encodify::{base32::STALWART, base64::STANDARD, utf7::IMAP};
 use std::fmt::Display;
 use types::id::Id;
 use types::keyword::Keyword;
-use utils::chained_bytes::SliceRange;
+use utils::chained_bytes::ChainedBytes;
 
 pub mod acl;
 pub mod append;
@@ -171,12 +171,18 @@ const fn byte_class_table(needles: &[u8]) -> [bool; 256] {
     table
 }
 
-static NEEDS_ESCAPE: [bool; 256] = byte_class_table(b"\\\"");
-static NEEDS_LITERAL: [bool; 256] = byte_class_table(b"\\\"\r\n");
+static NEEDS_ESCAPE: [bool; 256] = byte_class_table(b"\\\"\0");
+static NEEDS_LITERAL: [bool; 256] = byte_class_table(b"\\\"\r\n\0");
 
 #[inline(always)]
 fn find_escape(text: &[u8]) -> Option<usize> {
     text.iter().position(|&ch| NEEDS_ESCAPE[ch as usize])
+}
+
+#[cold]
+#[inline(never)]
+fn without_nul(text: &str) -> String {
+    text.replace('\0', "")
 }
 
 pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
@@ -185,9 +191,9 @@ pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
     while let Some(pos) = find_escape(rest) {
         let (head, tail) = rest.split_at(pos);
         buf.extend_from_slice(head);
-        buf.push(b'\\');
         let mut tail = tail.iter();
-        if let Some(&ch) = tail.next() {
+        if let Some(&ch) = tail.next().filter(|&&ch| ch != 0) {
+            buf.push(b'\\');
             buf.push(ch);
         }
         rest = tail.as_slice();
@@ -209,13 +215,15 @@ pub(crate) fn quoted_mailbox_name(buf: &mut Vec<u8>, name: &str, is_utf8: bool) 
 }
 
 pub fn quoted_or_literal_string(buf: &mut Vec<u8>, text: &str) {
-    let text = text.as_bytes();
-    if text.iter().any(|&ch| NEEDS_LITERAL[ch as usize]) {
-        literal_string(buf, text)
+    let bytes = text.as_bytes();
+    if !bytes.iter().any(|&ch| NEEDS_LITERAL[ch as usize]) {
+        buf.push(b'"');
+        buf.extend_from_slice(bytes);
+        buf.push(b'"');
+    } else if bytes.contains(&0) {
+        quoted_or_literal_string(buf, &without_nul(text));
     } else {
-        buf.push(b'"');
-        buf.extend_from_slice(text);
-        buf.push(b'"');
+        push_literal(buf, bytes);
     }
 }
 pub fn quoted_or_literal_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
@@ -228,6 +236,7 @@ pub fn quoted_or_literal_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
 
 const CLASS_LITERAL: u8 = 1;
 const CLASS_NON_ASCII: u8 = 2;
+const CLASS_NUL: u8 = 4;
 
 const fn text_class_table() -> [u8; 256] {
     let mut table = [0u8; 256];
@@ -235,6 +244,7 @@ const fn text_class_table() -> [u8; 256] {
     table[b'"' as usize] = CLASS_LITERAL;
     table[b'\r' as usize] = CLASS_LITERAL;
     table[b'\n' as usize] = CLASS_LITERAL;
+    table[0] = CLASS_NUL;
     let mut ch = 0x80;
     while ch < 256 {
         table[ch] |= CLASS_NON_ASCII;
@@ -256,18 +266,20 @@ pub fn quoted_or_literal_encoded_string(buf: &mut Vec<u8>, text: &str, is_utf8: 
         quoted_or_literal_string(buf, text);
         return;
     }
-    let text = text.as_bytes();
-    let class = text
+    let bytes = text.as_bytes();
+    let class = bytes
         .iter()
         .fold(0u8, |class, &ch| class | TEXT_CLASS[ch as usize]);
-    if class & CLASS_NON_ASCII != 0 {
-        push_base64_encoded(buf, text);
-    } else if class & CLASS_LITERAL != 0 {
-        literal_string(buf, text);
+    if class == 0 {
+        buf.push(b'"');
+        buf.extend_from_slice(bytes);
+        buf.push(b'"');
+    } else if class & CLASS_NUL != 0 {
+        quoted_or_literal_encoded_string(buf, &without_nul(text), is_utf8);
+    } else if class & CLASS_NON_ASCII != 0 {
+        push_base64_encoded(buf, bytes);
     } else {
-        buf.push(b'"');
-        buf.extend_from_slice(text);
-        buf.push(b'"');
+        push_literal(buf, bytes);
     }
 }
 
@@ -283,6 +295,28 @@ pub fn quoted_or_literal_encoded_string_or_nil(
     }
 }
 
+pub fn quoted_or_literal_raw_string(buf: &mut Vec<u8>, text: &str, is_utf8: bool) {
+    if is_utf8 {
+        quoted_or_literal_string(buf, text);
+    } else if !text.bytes().any(|ch| TEXT_CLASS[ch as usize] != 0) {
+        buf.push(b'"');
+        buf.extend_from_slice(text.as_bytes());
+        buf.push(b'"');
+    } else if text.as_bytes().contains(&0) {
+        quoted_or_literal_raw_string(buf, &without_nul(text), is_utf8);
+    } else {
+        push_literal(buf, text.as_bytes());
+    }
+}
+
+pub fn quoted_or_literal_raw_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>, is_utf8: bool) {
+    if let Some(text) = text {
+        quoted_or_literal_raw_string(buf, text, is_utf8);
+    } else {
+        buf.extend_from_slice(b"NIL");
+    }
+}
+
 pub fn quoted_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
     if let Some(text) = text {
         quoted_string(buf, text);
@@ -292,23 +326,43 @@ pub fn quoted_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
 }
 
 pub fn literal_string(buf: &mut Vec<u8>, text: &[u8]) {
-    buf.push(b'{');
-    push_int(buf, text.len());
-    buf.extend_from_slice(b"}\r\n");
-    buf.extend_from_slice(text);
+    if text.contains(&0) {
+        let text = text
+            .iter()
+            .copied()
+            .filter(|&ch| ch != 0)
+            .collect::<Vec<_>>();
+        push_literal(buf, &text);
+    } else {
+        push_literal(buf, text);
+    }
 }
 
-pub fn literal_string_slice(buf: &mut Vec<u8>, text: &SliceRange<'_>) {
+pub fn literal8_string(buf: &mut Vec<u8>, bytes: &[u8]) {
+    buf.push(b'~');
+    push_literal(buf, bytes);
+}
+
+fn push_literal(buf: &mut Vec<u8>, bytes: &[u8]) {
     buf.push(b'{');
-    push_int(buf, text.len());
+    push_int(buf, bytes.len());
     buf.extend_from_slice(b"}\r\n");
-    match text {
-        SliceRange::Single(bytes) => buf.extend_from_slice(bytes),
-        SliceRange::Split(first, last) => {
-            buf.extend_from_slice(first);
-            buf.extend_from_slice(last);
-        }
-        SliceRange::None => (),
+    buf.extend_from_slice(bytes);
+}
+
+const LITERAL_FRAMING_LEN: usize = 24;
+
+pub trait WriteLiteral {
+    fn write_literal(&self, buf: &mut Vec<u8>);
+}
+
+impl WriteLiteral for ChainedBytes<'_> {
+    fn write_literal(&self, buf: &mut Vec<u8>) {
+        buf.reserve(self.len() + LITERAL_FRAMING_LEN);
+        buf.push(b'{');
+        push_int(buf, self.len());
+        buf.extend_from_slice(b"}\r\n");
+        self.extend_into(buf);
     }
 }
 
@@ -430,14 +484,6 @@ pub fn quoted_rfc2822(buf: &mut Vec<u8>, timestamp: &mail_parser::DateTime) {
     push_padded_u8(buf, timestamp.tz_hour);
     push_padded_u8(buf, timestamp.tz_minute);
     buf.push(b'"');
-}
-
-pub fn quoted_rfc2822_or_nil(buf: &mut Vec<u8>, timestamp: &Option<mail_parser::DateTime>) {
-    if let Some(timestamp) = timestamp {
-        quoted_rfc2822(buf, timestamp);
-    } else {
-        buf.extend_from_slice(b"NIL");
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -935,11 +981,13 @@ mod tests {
     use crate::parser::parse_sequence_set;
     use crate::protocol::ObjectId;
     use crate::{Command, StatusResponse};
-    use jiff::Timestamp;
     use encodify::{base64::STANDARD, utf7::IMAP};
+    use jiff::Timestamp;
     use mail_parser::DateTime;
     use types::id::Id;
-    use utils::chained_bytes::SliceRange;
+    use utils::chained_bytes::ChainedBytes;
+
+    use super::WriteLiteral;
 
     #[test]
     fn quoted_timestamp_matches_strftime() {
@@ -1270,6 +1318,13 @@ mod tests {
         "\u{1f604}",
         "mixed \u{fc} and \"quotes\"",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "\0",
+        "a\0b",
+        "\0\0\0",
+        "caf\u{e9}\0",
+        "\0\"quoted\\\0",
+        "line\0\r\nbreak",
+        "\0\u{1f604}",
     ];
 
     #[test]
@@ -1277,34 +1332,43 @@ mod tests {
         for repeat in [1usize, 5, 40] {
             for sample in STRING_SAMPLES {
                 let text = sample.repeat(repeat);
-                let bytes = text.as_bytes();
+                let wire = text.replace('\0', "");
+                let bytes = wire.as_bytes();
                 let needs_literal = bytes
                     .iter()
                     .any(|ch| matches!(ch, b'\\' | b'"' | b'\r' | b'\n'));
+                let mut written = Vec::new();
 
                 let mut buf = b"prefix ".to_vec();
                 super::quoted_string(&mut buf, &text);
                 let mut expected = b"prefix ".to_vec();
-                expected.extend(naive_quoted(&text));
+                expected.extend(naive_quoted(&wire));
                 assert_eq!(buf, expected, "quoted_string {text:?}");
+                written.push(buf);
 
                 let mut buf = Vec::new();
                 super::quoted_or_literal_string(&mut buf, &text);
                 let expected = if needs_literal {
                     naive_literal(bytes)
                 } else {
-                    naive_quoted(&text)
+                    naive_quoted(&wire)
                 };
                 assert_eq!(buf, expected, "quoted_or_literal_string {text:?}");
+                written.push(buf);
+
+                let mut buf = Vec::new();
+                super::literal_string(&mut buf, text.as_bytes());
+                assert_eq!(buf, naive_literal(bytes), "literal_string {text:?}");
+                written.push(buf);
 
                 for is_utf8 in [false, true] {
                     let mut buf = Vec::new();
                     super::quoted_or_literal_encoded_string(&mut buf, &text, is_utf8);
-                    let expected = if is_utf8 || text.is_ascii() {
+                    let expected = if is_utf8 || wire.is_ascii() {
                         if needs_literal {
                             naive_literal(bytes)
                         } else {
-                            naive_quoted(&text)
+                            naive_quoted(&wire)
                         }
                     } else {
                         format!("\"=?utf-8?B?{}?=\"", STANDARD.encode(bytes)).into_bytes()
@@ -1313,9 +1377,40 @@ mod tests {
                         buf, expected,
                         "quoted_or_literal_encoded_string {text:?} is_utf8={is_utf8}"
                     );
+                    written.push(buf);
+
+                    let mut buf = Vec::new();
+                    super::quoted_or_literal_raw_string(&mut buf, &text, is_utf8);
+                    let expected = if needs_literal || (!is_utf8 && !wire.is_ascii()) {
+                        naive_literal(bytes)
+                    } else {
+                        naive_quoted(&wire)
+                    };
+                    assert_eq!(
+                        buf, expected,
+                        "quoted_or_literal_raw_string {text:?} is_utf8={is_utf8}"
+                    );
+                    written.push(buf);
+
+                    let mut buf = Vec::new();
+                    super::quoted_or_literal_encoded_string_or_nil(&mut buf, Some(&text), is_utf8);
+                    written.push(buf);
+                    let mut buf = Vec::new();
+                    super::quoted_or_literal_raw_string_or_nil(&mut buf, Some(&text), is_utf8);
+                    written.push(buf);
+                }
+                for buf in written {
+                    assert!(!buf.contains(&0), "{text:?}: {buf:?}");
                 }
             }
         }
+    }
+
+    #[test]
+    fn literal8_keeps_nul_octets() {
+        let mut buf = Vec::new();
+        super::literal8_string(&mut buf, b"a\0b");
+        assert_eq!(buf, b"~{3}\r\na\0b");
     }
 
     #[test]
@@ -1430,23 +1525,24 @@ mod tests {
     }
 
     #[test]
-    fn literal_string_slice_matches_concatenation() {
+    fn write_literal_matches_concatenation() {
         let payload: Vec<u8> = (0..300u32).map(|i| (i % 251) as u8).collect();
         for split in [0usize, 1, 7, 150, 299, 300] {
             let (first, last) = payload.split_at(split);
-            for range in [
-                SliceRange::Single(first),
-                SliceRange::Split(first, last),
-                SliceRange::None,
+            for (bytes, expected_payload) in [
+                (ChainedBytes::new(first), first),
+                (ChainedBytes::chain(first, last), payload.as_slice()),
+                (ChainedBytes::default(), &[][..]),
             ] {
-                let mut buf = Vec::new();
-                super::literal_string_slice(&mut buf, &range);
-                let expected_payload: Vec<u8> = match range {
-                    SliceRange::Single(bytes) => bytes.to_vec(),
-                    SliceRange::Split(first, last) => [first, last].concat(),
-                    SliceRange::None => Vec::new(),
-                };
-                assert_eq!(buf, naive_literal(&expected_payload));
+                let mut buf = b"* ".to_vec();
+                bytes.write_literal(&mut buf);
+                let mut expected = b"* ".to_vec();
+                super::push_literal(&mut expected, expected_payload);
+                assert_eq!(buf, expected);
+                assert_eq!(
+                    buf.get(2..),
+                    Some(naive_literal(expected_payload).as_slice())
+                );
             }
         }
     }

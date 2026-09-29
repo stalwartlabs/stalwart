@@ -9,20 +9,16 @@ BODY (
       ) NIL NIL "7bit" 111 3
    )(
       (
-         "text" "basic" (
-            "charset" "us-ascii"
-         ) NIL NIL "base64" 85 2
+         "audio" "basic" NIL NIL NIL "base64" 85
       )(
-         "text" "jpeg" (
-            "charset" "us-ascii"
-         ) NIL NIL "base64" 44 1
+         "image" "jpeg" NIL NIL NIL "base64" 44
       ) "parallel"
    )(
       "text" "enriched" (
          "charset" "us-ascii"
       ) NIL NIL "7bit" 140 5
    )(
-      "message" "rfc822" NIL NIL NIL NIL 223 (
+      "message" "rfc822" NIL NIL NIL "7bit" 223 (
          NIL "(subject in US-ASCII)" (
             (
                NIL NIL "unknown" "localhost"
@@ -40,7 +36,7 @@ BODY (
          "text" "plain" (
             "charset" "ISO-8859-1"
          ) NIL NIL "Quoted-printable" 48 1
-      ) 0
+      ) 7
    ) "mixed"
 )
 
@@ -48,29 +44,25 @@ BODYSTRUCTURE (
    (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 262 7 "1ba9f4410aca245ffe18870d1767eaf1" NIL NIL NIL
+      ) NIL NIL "7bit" 262 7 NIL NIL NIL NIL
    )(
       "text" "plain" (
          "charset" "US-ASCII"
-      ) NIL NIL "7bit" 111 3 "457a84e4830817334703ecead7a71bdf" NIL NIL NIL
+      ) NIL NIL "7bit" 111 3 NIL NIL NIL NIL
    )(
       (
-         "text" "basic" (
-            "charset" "us-ascii"
-         ) NIL NIL "base64" 85 2 "c6e3404e683fdeb88e96dfed0abbddad" NIL NIL NIL
+         "audio" "basic" NIL NIL NIL "base64" 85 NIL NIL NIL NIL
       )(
-         "text" "jpeg" (
-            "charset" "us-ascii"
-         ) NIL NIL "base64" 44 1 "88217c7613d6252c87ba0cd279f1e93c" NIL NIL NIL
+         "image" "jpeg" NIL NIL NIL "base64" 44 NIL NIL NIL NIL
       ) "parallel" (
          "boundary" "unique-boundary-2"
       ) NIL NIL NIL
    )(
       "text" "enriched" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 140 5 "4a5cd280a875e791bd6d767dcf60c43d" NIL NIL NIL
+      ) NIL NIL "7bit" 140 5 NIL NIL NIL NIL
    )(
-      "message" "rfc822" NIL NIL NIL NIL 223 (
+      "message" "rfc822" NIL NIL NIL "7bit" 223 (
          NIL "(subject in US-ASCII)" (
             (
                NIL NIL "unknown" "localhost"
@@ -87,8 +79,8 @@ BODYSTRUCTURE (
       ) (
          "text" "plain" (
             "charset" "ISO-8859-1"
-         ) NIL NIL "Quoted-printable" 48 1 "632b0aae19d3c55d420c0dc8cebaf049" NIL NIL NIL
-      ) 0 "40ceb8762dcb7270c37f1395e91aa893" NIL NIL NIL
+         ) NIL NIL "Quoted-printable" 48 1 NIL NIL NIL NIL
+      ) 7 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "unique-boundary-1"
    ) NIL NIL NIL
@@ -98,29 +90,25 @@ BODYSTRUCTURE UTF8=ACCEPT (
    (
       "text" "plain" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 262 7 "1ba9f4410aca245ffe18870d1767eaf1" NIL NIL NIL
+      ) NIL NIL "7bit" 262 7 NIL NIL NIL NIL
    )(
       "text" "plain" (
          "charset" "US-ASCII"
-      ) NIL NIL "7bit" 111 3 "457a84e4830817334703ecead7a71bdf" NIL NIL NIL
+      ) NIL NIL "7bit" 111 3 NIL NIL NIL NIL
    )(
       (
-         "text" "basic" (
-            "charset" "us-ascii"
-         ) NIL NIL "base64" 85 2 "c6e3404e683fdeb88e96dfed0abbddad" NIL NIL NIL
+         "audio" "basic" NIL NIL NIL "base64" 85 NIL NIL NIL NIL
       )(
-         "text" "jpeg" (
-            "charset" "us-ascii"
-         ) NIL NIL "base64" 44 1 "88217c7613d6252c87ba0cd279f1e93c" NIL NIL NIL
+         "image" "jpeg" NIL NIL NIL "base64" 44 NIL NIL NIL NIL
       ) "parallel" (
          "boundary" "unique-boundary-2"
       ) NIL NIL NIL
    )(
       "text" "enriched" (
          "charset" "us-ascii"
-      ) NIL NIL "7bit" 140 5 "4a5cd280a875e791bd6d767dcf60c43d" NIL NIL NIL
+      ) NIL NIL "7bit" 140 5 NIL NIL NIL NIL
    )(
-      "message" "rfc822" NIL NIL NIL NIL 223 (
+      "message" "rfc822" NIL NIL NIL "7bit" 223 (
          NIL "(subject in US-ASCII)" (
             (
                NIL NIL "unknown" "localhost"
@@ -137,8 +125,8 @@ BODYSTRUCTURE UTF8=ACCEPT (
       ) (
          "text" "plain" (
             "charset" "ISO-8859-1"
-         ) NIL NIL "Quoted-printable" 48 1 "632b0aae19d3c55d420c0dc8cebaf049" NIL NIL NIL
-      ) 0 "40ceb8762dcb7270c37f1395e91aa893" NIL NIL NIL
+         ) NIL NIL "Quoted-printable" 48 1 NIL NIL NIL NIL
+      ) 7 NIL NIL NIL NIL
    ) "mixed" (
       "boundary" "unique-boundary-1"
    ) NIL NIL NIL
@@ -546,9 +534,9 @@ BODY[3.1] {85}
 ... base64-encoded 8000 Hz single-channel
     mu-law-format audio data goes here ...
 
-* NO [UNKNOWN-CTE] Failed to decode part 3.1 of message 0.
-
-BINARY.SIZE[3.1] 85
+BINARY[3.1] {16}
+[binary content]
+BINARY.SIZE[3.1] 45
 ----------------------------------
 BODY[3.1.HEADER] {61}
 Content-Type: audio/basic
@@ -571,16 +559,16 @@ BODY[3.1.1] {85}
 ... base64-encoded 8000 Hz single-channel
     mu-law-format audio data goes here ...
 
-* NO [UNKNOWN-CTE] Failed to decode part 3.1.1 of message 0.
-
-BINARY.SIZE[3.1.1] 85
+BINARY[3.1.1] {16}
+[binary content]
+BINARY.SIZE[3.1.1] 45
 ----------------------------------
 BODY[3.2] {44}
 ... base64-encoded image data goes here ...
 
-* NO [UNKNOWN-CTE] Failed to decode part 3.2 of message 0.
-
-BINARY.SIZE[3.2] 44
+BINARY[3.2] {16}
+[binary content]
+BINARY.SIZE[3.2] 22
 ----------------------------------
 BODY[3.2.HEADER] {60}
 Content-Type: image/jpeg
@@ -601,9 +589,9 @@ Content-Transfer-Encoding: base64
 BODY[3.2.1] {44}
 ... base64-encoded image data goes here ...
 
-* NO [UNKNOWN-CTE] Failed to decode part 3.2.1 of message 0.
-
-BINARY.SIZE[3.2.1] 44
+BINARY[3.2.1] {16}
+[binary content]
+BINARY.SIZE[3.2.1] 22
 ----------------------------------
 BODY[4] {140}
 This is <bold><italic>enriched.</italic></bold>
@@ -700,6 +688,12 @@ BINARY[5.1] {48}
 ... Additional text in ISO-8859-1 goes here ...
 
 BINARY.SIZE[5.1] 48
+----------------------------------
+BODY[5.1.MIME] {91}
+Content-Type: Text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: Quoted-printable
+
+
 ----------------------------------
 BODY[HEADER.FIELDS (FROM TO)] {79}
 From: Nathaniel Borenstein <nsb@nsb.fv.com>

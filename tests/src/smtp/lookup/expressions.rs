@@ -6,7 +6,7 @@
 
 use crate::utils::{dns::DnsCache, server::TestServerBuilder};
 use common::expr::{tokenizer::TokenMap, *};
-use mail_auth::{DnssecStatus, MX};
+use mail_auth::{DnssecStatus, Mx};
 use registry::schema::{
     enums::ExpressionVariable,
     prelude::{ObjectType, Property},
@@ -75,7 +75,7 @@ async fn expressions() {
 
     test.server.mx_add(
         "test.org",
-        vec![MX {
+        vec![Mx {
             exchanges: vec!["mx.foobar.org".into()].into_boxed_slice(),
             preference: 10,
         }],

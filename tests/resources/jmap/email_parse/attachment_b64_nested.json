@@ -1,0 +1,154 @@
+{
+  "mailboxIds": null,
+  "size": 1146,
+  "messageId": [
+    "level-one@example.com"
+  ],
+  "from": [
+    {
+      "name": "Level One",
+      "email": "one@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "Recipient",
+      "email": "rcpt@example.com"
+    }
+  ],
+  "subject": "Level one",
+  "sentAt": "2021-12-14T10:49:00Z",
+  "bodyStructure": {
+    "headers": [
+      {
+        "name": "From",
+        "value": " Level One <one@example.com>"
+      },
+      {
+        "name": "To",
+        "value": " Recipient <rcpt@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": " Level one"
+      },
+      {
+        "name": "Message-ID",
+        "value": " <level-one@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": " Tue, 14 Dec 2021 11:49:00 +0100"
+      },
+      {
+        "name": "MIME-Version",
+        "value": " 1.0"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed; boundary=\"one\""
+      }
+    ],
+    "type": "multipart/mixed",
+    "subParts": [
+      {
+        "partId": "1",
+        "blobId": "blob_0",
+        "size": 33,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " text/plain; charset=utf-8"
+          }
+        ],
+        "type": "text/plain",
+        "charset": "utf-8"
+      },
+      {
+        "partId": "2",
+        "blobId": "blob_1",
+        "size": 501,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": " message/rfc822"
+          },
+          {
+            "name": "Content-Disposition",
+            "value": " attachment; filename=\"level_two.eml\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " base64"
+          }
+        ],
+        "name": "level_two.eml",
+        "type": "message/rfc822",
+        "disposition": "attachment"
+      }
+    ]
+  },
+  "bodyValues": {
+    "1": {
+      "value": "Text of the first nested message.",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "textBody": [
+    {
+      "partId": "1",
+      "blobId": "blob_0",
+      "size": 33,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8"
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "1",
+      "blobId": "blob_0",
+      "size": 33,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8"
+    }
+  ],
+  "attachments": [
+    {
+      "partId": "2",
+      "blobId": "blob_1",
+      "size": 501,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " message/rfc822"
+        },
+        {
+          "name": "Content-Disposition",
+          "value": " attachment; filename=\"level_two.eml\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
+        }
+      ],
+      "name": "level_two.eml",
+      "type": "message/rfc822",
+      "disposition": "attachment"
+    }
+  ],
+  "hasAttachment": true,
+  "preview": "Text of the first nested message."
+}
