@@ -8,14 +8,19 @@ use jmap_proto::{
     error::set::{SetError, SetErrorType},
     object::email::EmailProperty,
 };
+use mail_parser::Message;
 use std::fmt::Display;
 use types::keyword::Keyword;
+
+const HEADER_TERMINATOR_LEN: usize = b"\r\n".len();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmailLimits {
     pub mailboxes_per_email: usize,
     pub keywords_per_email: usize,
     pub keyword_length: usize,
+    pub header_count: usize,
+    pub header_size: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +28,8 @@ pub enum EmailLimitError {
     TooManyMailboxes { max: usize },
     TooManyKeywords { max: usize },
     KeywordTooLong { max: usize },
+    TooManyHeaders { max: usize },
+    HeaderTooLarge { max: usize },
 }
 
 impl EmailLimits {
@@ -112,6 +119,27 @@ impl EmailLimits {
             .id()
             .map_or_else(|name| name.len() <= self.keyword_length, |_| true)
     }
+
+    pub fn header_fields_size(&self) -> usize {
+        self.header_size.saturating_sub(HEADER_TERMINATOR_LEN)
+    }
+
+    pub fn validate_header_section(&self, message: &Message<'_>) -> Result<(), EmailLimitError> {
+        let root = message.root_part();
+        if root.headers().len() > self.header_count {
+            Err(EmailLimitError::TooManyHeaders {
+                max: self.header_count,
+            })
+        } else if root.offset_body().saturating_sub(root.offset_header()) as usize
+            > self.header_size
+        {
+            Err(EmailLimitError::HeaderTooLarge {
+                max: self.header_size,
+            })
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl From<EmailLimitError> for SetError<EmailProperty> {
@@ -126,6 +154,9 @@ impl From<EmailLimitError> for SetError<EmailProperty> {
             }
             EmailLimitError::KeywordTooLong { .. } => {
                 SetError::invalid_properties().with_property(EmailProperty::Keywords)
+            }
+            EmailLimitError::TooManyHeaders { .. } | EmailLimitError::HeaderTooLarge { .. } => {
+                SetError::too_large()
             }
         }
         .with_description(err.to_string())
@@ -144,6 +175,12 @@ impl Display for EmailLimitError {
             EmailLimitError::KeywordTooLong { max } => {
                 write!(f, "Keywords cannot be longer than {max} bytes.")
             }
+            EmailLimitError::TooManyHeaders { max } => {
+                write!(f, "An email header cannot have more than {max} fields.")
+            }
+            EmailLimitError::HeaderTooLarge { max } => {
+                write!(f, "An email header cannot exceed {max} bytes.")
+            }
         }
     }
 }
@@ -151,15 +188,58 @@ impl Display for EmailLimitError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mail_parser::MessageParser;
 
     const LIMITS: EmailLimits = EmailLimits {
         mailboxes_per_email: 2,
         keywords_per_email: 3,
         keyword_length: 5,
+        header_count: 3,
+        header_size: 38,
     };
+    const HEADER_FIELD: &str = "Subject: x\r\n";
+    const NESTED_ROOT_HEADER: &str = concat!(
+        "Subject: nested\r\n",
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
+        "\r\n"
+    );
 
     fn keywords(names: &[&str]) -> Vec<Keyword> {
         names.iter().map(|name| Keyword::parse(name)).collect()
+    }
+
+    fn header_fields(count: usize) -> String {
+        format!("{}\r\nbody\r\n", HEADER_FIELD.repeat(count))
+    }
+
+    fn validate_raw(limits: &EmailLimits, raw: &str) -> Result<(), EmailLimitError> {
+        let message = MessageParser::new()
+            .parse(raw.as_bytes())
+            .expect("test message parses");
+        limits.validate_header_section(&message)
+    }
+
+    fn nested_message() -> String {
+        let nested_fields = HEADER_FIELD.repeat(50);
+        format!(
+            concat!(
+                "{root}",
+                "--b\r\n",
+                "{nested_fields}",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "part\r\n",
+                "--b\r\n",
+                "Content-Type: message/rfc822\r\n",
+                "\r\n",
+                "{nested_fields}",
+                "\r\n",
+                "attached\r\n",
+                "--b--\r\n"
+            ),
+            root = NESTED_ROOT_HEADER,
+            nested_fields = nested_fields,
+        )
     }
 
     #[test]
@@ -219,6 +299,73 @@ mod tests {
     }
 
     #[test]
+    fn header_section_at_limit() {
+        assert_eq!(validate_raw(&LIMITS, &header_fields(3)), Ok(()));
+    }
+
+    #[test]
+    fn header_fields_size_excludes_terminator() {
+        assert_eq!(LIMITS.header_fields_size(), 36);
+    }
+
+    #[test]
+    fn header_count_over_limit() {
+        let limits = EmailLimits {
+            header_size: usize::MAX,
+            ..LIMITS
+        };
+        assert_eq!(
+            validate_raw(&limits, &header_fields(4)),
+            Err(EmailLimitError::TooManyHeaders { max: 3 })
+        );
+    }
+
+    #[test]
+    fn header_size_over_limit() {
+        let limits = EmailLimits {
+            header_size: LIMITS.header_size - 1,
+            ..LIMITS
+        };
+        assert_eq!(
+            validate_raw(&limits, &header_fields(3)),
+            Err(EmailLimitError::HeaderTooLarge { max: 37 })
+        );
+    }
+
+    #[test]
+    fn nested_headers_not_counted() {
+        let raw = nested_message();
+        let limits = EmailLimits {
+            header_count: 2,
+            header_size: NESTED_ROOT_HEADER.len(),
+            ..LIMITS
+        };
+        assert_eq!(validate_raw(&limits, &raw), Ok(()));
+        assert_eq!(
+            validate_raw(
+                &EmailLimits {
+                    header_count: 1,
+                    ..limits
+                },
+                &raw
+            ),
+            Err(EmailLimitError::TooManyHeaders { max: 1 })
+        );
+        assert_eq!(
+            validate_raw(
+                &EmailLimits {
+                    header_size: NESTED_ROOT_HEADER.len() - 1,
+                    ..limits
+                },
+                &raw
+            ),
+            Err(EmailLimitError::HeaderTooLarge {
+                max: NESTED_ROOT_HEADER.len() - 1
+            })
+        );
+    }
+
+    #[test]
     fn set_error_mapping() {
         let err: SetError<EmailProperty> = EmailLimitError::TooManyMailboxes { max: 2 }.into();
         assert_eq!(err.error_type(), &SetErrorType::TooManyMailboxes);
@@ -229,6 +376,18 @@ mod tests {
         assert_eq!(
             err.description(),
             Some("Keywords cannot be longer than 5 bytes.")
+        );
+        let err: SetError<EmailProperty> = EmailLimitError::TooManyHeaders { max: 100 }.into();
+        assert_eq!(err.error_type(), &SetErrorType::TooLarge);
+        assert_eq!(
+            err.description(),
+            Some("An email header cannot have more than 100 fields.")
+        );
+        let err: SetError<EmailProperty> = EmailLimitError::HeaderTooLarge { max: 1024 }.into();
+        assert_eq!(err.error_type(), &SetErrorType::TooLarge);
+        assert_eq!(
+            err.description(),
+            Some("An email header cannot exceed 1024 bytes.")
         );
     }
 }

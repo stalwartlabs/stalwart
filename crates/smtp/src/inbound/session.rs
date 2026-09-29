@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{auth::SaslToken, data::MessageOrigin};
+use crate::core::{Session, State};
 use common::{
     config::{server::ServerProtocol, smtp::session::Mechanism},
     expr::{self, functions::ResolveVariable, *},
     network::SessionStream,
 };
-
 use compact_str::{CompactString, ToCompactString, format_compact};
 use registry::schema::enums::ExpressionVariable;
 use smtp_proto::{
@@ -21,10 +22,6 @@ use smtp_proto::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use trc::{NetworkEvent, SecurityEvent, SmtpEvent};
-
-use crate::core::{Session, State};
-
-use super::auth::SaslToken;
 
 impl<T: SessionStream> Session<T> {
     pub async fn ingest(&mut self, bytes: &[u8]) -> Result<bool, ()> {
@@ -364,7 +361,7 @@ impl<T: SessionStream> Session<T> {
                 State::Data(receiver) => {
                     if self.data.message.len() + bytes.len() < self.params.max_message_size {
                         if receiver.ingest(&mut iter, &mut self.data.message) {
-                            let message = self.queue_message().await;
+                            let message = self.queue_message(MessageOrigin::Client).await;
                             let num_responses = if self.instance.protocol == ServerProtocol::Smtp {
                                 1
                             } else {
@@ -400,7 +397,7 @@ impl<T: SessionStream> Session<T> {
                 State::Bdat(receiver) => {
                     if receiver.ingest(&mut iter, &mut self.data.message) {
                         if receiver.is_last {
-                            let message = self.queue_message().await;
+                            let message = self.queue_message(MessageOrigin::Client).await;
                             if !message.is_empty() {
                                 let num_responses =
                                     if self.instance.protocol == ServerProtocol::Smtp {

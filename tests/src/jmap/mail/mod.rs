@@ -10,6 +10,7 @@ pub mod cache;
 pub mod changes;
 pub mod copy;
 pub mod get;
+pub mod header_limits;
 pub mod mailbox;
 pub mod parse;
 pub mod query;

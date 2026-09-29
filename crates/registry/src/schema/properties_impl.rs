@@ -943,6 +943,7 @@ impl EnumImpl for Property {
             b"maxFlagLength" => Property::MaxFlagLength,
             b"maxFlagsPerEmail" => Property::MaxFlagsPerEmail,
             b"maxFolders" => Property::MaxFolders,
+            b"maxHeaderCount" => Property::MaxHeaderCount,
             b"maxHeaderSize" => Property::MaxHeaderSize,
             b"maxICalendarSize" => Property::MaxICalendarSize,
             b"maxIdentities" => Property::MaxIdentities,
@@ -1927,6 +1928,7 @@ impl EnumImpl for Property {
             Property::MaxFlagLength => "maxFlagLength",
             Property::MaxFlagsPerEmail => "maxFlagsPerEmail",
             Property::MaxFolders => "maxFolders",
+            Property::MaxHeaderCount => "maxHeaderCount",
             Property::MaxHeaderSize => "maxHeaderSize",
             Property::MaxICalendarSize => "maxICalendarSize",
             Property::MaxIdentities => "maxIdentities",
@@ -2914,6 +2916,7 @@ impl EnumImpl for Property {
             953 => Some(Property::MaxFlagLength),
             952 => Some(Property::MaxFlagsPerEmail),
             379 => Some(Property::MaxFolders),
+            978 => Some(Property::MaxHeaderCount),
             715 => Some(Property::MaxHeaderSize),
             159 => Some(Property::MaxICalendarSize),
             363 => Some(Property::MaxIdentities),
@@ -3369,7 +3372,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 978;
+    const COUNT: usize = 979;
 }
 
 impl serde::Serialize for Property {

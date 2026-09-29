@@ -48,7 +48,10 @@ use registry::{
     },
     types::EnumImpl,
 };
-use smtp::core::{Session, SessionData};
+use smtp::{
+    core::{Session, SessionData},
+    inbound::data::MessageOrigin,
+};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{sync::Arc, time::Duration};
 use store::{
@@ -308,7 +311,7 @@ async fn send_email_alarm(
 
         // DATA
         session.data.message = message;
-        let response = session.queue_message().await;
+        let response = session.queue_message(MessageOrigin::Internal).await;
         if let smtp::core::State::Accepted(queue_id) = session.state {
             Ok(queue_id)
         } else {

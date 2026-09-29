@@ -11,16 +11,21 @@ use crate::{
     },
     utils::server::TestServerBuilder,
 };
+use mail_parser::MessageParser;
 use registry::{
     schema::{
         enums::MtaQueueQuotaKey,
-        prelude::ObjectType,
+        prelude::{ObjectType, Property},
         structs::{
-            Expression, ExpressionMatch, MtaQueueQuota, MtaStageData, SenderAuth, SpamSettings,
+            Email, Expression, ExpressionMatch, MtaQueueQuota, MtaStageData, SenderAuth,
+            SpamSettings,
         },
     },
     types::{list::List, map::Map},
 };
+
+const MAX_HEADER_SIZE: u64 = 1024;
+const MAX_HEADER_COUNT: u64 = 100;
 
 #[tokio::test]
 async fn data() {
@@ -195,6 +200,16 @@ async fn data() {
             size: Some(450),
         })
         .await;
+    admin
+        .registry_update_setting(
+            Email {
+                max_header_size: MAX_HEADER_SIZE,
+                max_header_count: MAX_HEADER_COUNT,
+                ..Default::default()
+            },
+            &[Property::MaxHeaderSize, Property::MaxHeaderCount],
+        )
+        .await;
     admin.reload_settings().await;
     test.reload_core();
     test.expect_reload_settings().await;
@@ -326,6 +341,53 @@ async fn data() {
         .assert_contains("Subject: ")
         .assert_contains("Received: ");
 
+    let header_count = MAX_HEADER_COUNT as usize;
+    let header_size = MAX_HEADER_SIZE as usize;
+    session
+        .send_message(
+            "bill@doe.org",
+            &["mike@test.com"],
+            &message_with_header(header_count, header_size),
+            "250",
+        )
+        .await;
+    let queued = test.expect_message().await.read_message(&test).await;
+    let queued = MessageParser::new()
+        .parse(queued.as_bytes())
+        .expect("queued message parses");
+    let root = queued.root_part();
+    assert!(root.headers().len() > header_count);
+    assert!(root.raw_headers().len() > header_size);
+    session
+        .send_message(
+            "bill@doe.org",
+            &["mike@test.com"],
+            &message_with_header(header_count + 1, header_size - 100),
+            "552 5.3.4",
+        )
+        .await;
+    session
+        .send_message(
+            "bill@doe.org",
+            &["mike@test.com"],
+            &message_with_header(header_count / 2, header_size + 1),
+            "552 5.3.4",
+        )
+        .await;
+    session.mail_from("bill@doe.org", "250").await;
+    session.rcpt_to("mike@test.com", "250").await;
+    let message = message_with_header(header_count / 2, header_size + 1);
+    let mut chunk = format!("BDAT {} LAST\r\n", message.len()).into_bytes();
+    chunk.extend_from_slice(message.as_bytes());
+    session
+        .ingest(&chunk)
+        .await
+        .expect("session accepts the BDAT chunk");
+    session
+        .response()
+        .assert_code("552 5.3.4")
+        .assert_contains("header too large");
+
     // Only one message is allowed in the queue from john@doe.org
     session.data.remote_ip_str = "10.0.0.2".into();
     session.eval_session_params().await;
@@ -388,4 +450,21 @@ async fn data() {
         .registry_destroy_all(ObjectType::MtaInboundThrottle)
         .await;
     test.assert_is_empty().await;
+}
+
+fn message_with_header(fields: usize, size: usize) -> String {
+    const SUBJECT: &str = "Subject: header limits\r\n";
+    const FILLER: &str = "X: y\r\n";
+    const PAD_NAME: &str = "X-Pad: ";
+    const HEADER_END: &str = "\r\n\r\n";
+
+    let mut message = String::with_capacity(size + 8);
+    message.push_str(SUBJECT);
+    message.push_str(&FILLER.repeat(fields - 2));
+    message.push_str(PAD_NAME);
+    let padding = size - message.len() - HEADER_END.len();
+    message.extend(std::iter::repeat_n('p', padding));
+    message.push_str(HEADER_END);
+    message.push_str("body");
+    message
 }

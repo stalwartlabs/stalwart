@@ -175,6 +175,12 @@ impl EmailImport for Server {
                 );
                 continue;
             }
+            if let Some(message) = &parsed
+                && let Err(err) = self.core.email.limits.validate_header_section(message)
+            {
+                response.not_created.append(id, err.into());
+                continue;
+            }
             let received_at = email
                 .received_at
                 .map(|date| date.timestamp().clamp(0, MAX_RECEIVED_AT as i64) as u64);

@@ -32,6 +32,7 @@ use jmap_tools::{Key, Map, Value};
 use registry::schema::enums::StorageQuota;
 use smtp::{
     core::{Session, SessionData},
+    inbound::data::MessageOrigin,
     queue::spool::SmtpSpool,
 };
 use smtp_proto::{MailFrom, RcptTo, request::parser::Rfc5321Parser};
@@ -760,7 +761,7 @@ impl EmailSubmissionSet for Server {
             // DATA
             if has_success {
                 session.data.message = message;
-                let response = session.queue_message().await;
+                let response = session.queue_message(MessageOrigin::Internal).await;
                 if let smtp::core::State::Accepted(queue_id) = session.state {
                     Ok((responses, Some(queue_id)))
                 } else {

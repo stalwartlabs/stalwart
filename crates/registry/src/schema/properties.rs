@@ -785,6 +785,7 @@ pub enum Property {
     MaxFlagLength = 953,
     MaxFlagsPerEmail = 952,
     MaxFolders = 379,
+    MaxHeaderCount = 978,
     MaxHeaderSize = 715,
     MaxICalendarSize = 159,
     MaxIdentities = 363,

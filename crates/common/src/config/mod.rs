@@ -82,6 +82,7 @@ impl Core {
         // SPDX-SnippetEnd
 
         let metadata = MetadataConfig::parse(bp).await;
+        let email = EmailConfig::parse(bp).await;
 
         Self {
             // SPDX-SnippetBegin
@@ -90,7 +91,7 @@ impl Core {
             #[cfg(feature = "enterprise")]
             enterprise,
             // SPDX-SnippetEnd
-            sieve: Scripting::parse(bp).await,
+            sieve: Scripting::parse(bp, &email.limits).await,
             network: Network::parse(bp).await,
             smtp: Box::pin(SmtpConfig::parse(bp)).await,
             jmap: JmapConfig::parse(bp, &metadata).await,
@@ -98,7 +99,7 @@ impl Core {
             oauth: OAuthConfig::parse(bp).await,
             metrics: Metrics::parse(bp).await,
             spam: SpamFilterConfig::parse(bp).await,
-            email: EmailConfig::parse(bp).await,
+            email,
             groupware: GroupwareConfig::parse(bp).await,
             metadata,
             storage,

@@ -7,9 +7,12 @@
 use super::{AssertResult, ImapConnection, Type, resources_dir};
 use crate::utils::server::TestServer;
 use imap_proto::ResponseType;
+use registry::schema::{prelude::Property, structs::Email};
 use std::{fs, io};
 
 const APPEND_INTERNALDATE: &str = "01-Jan-2024 00:00:00 +0000";
+const MAX_HEADER_SIZE: u64 = 1024;
+const MAX_HEADER_COUNT: u64 = 100;
 
 pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, test: &TestServer) {
     println!("Running APPEND tests...");
@@ -19,6 +22,8 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, t
     imap.assert_read(Type::Tagged, ResponseType::No)
         .await
         .assert_response_code("TRYCREATE");
+
+    header_limits(test).await;
 
     // Import test messages
     let mut entries = fs::read_dir(resources_dir())
@@ -65,6 +70,68 @@ pub async fn test(imap: &mut ImapConnection, _imap_check: &mut ImapConnection, t
     }
 
     test.wait_for_tasks().await;
+}
+
+async fn header_limits(test: &TestServer) {
+    let admin = test.account("admin@example.com");
+    admin
+        .registry_update_setting(
+            Email {
+                max_header_size: MAX_HEADER_SIZE,
+                max_header_count: MAX_HEADER_COUNT,
+                ..Default::default()
+            },
+            &[Property::MaxHeaderSize, Property::MaxHeaderCount],
+        )
+        .await;
+    admin.reload_settings().await;
+
+    let account = test.account("jdoe@example.com");
+    let mut imap = ImapConnection::connect(b"_h ").await;
+    imap.assert_read(Type::Untagged, ResponseType::Ok).await;
+    imap.authenticate(account.name(), account.secret()).await;
+
+    let within = "Subject: within\r\n\r\nbody\r\n";
+    let too_many_fields = format!(
+        "Subject: count\r\n{}\r\nbody\r\n",
+        "X: y\r\n".repeat(MAX_HEADER_COUNT as usize)
+    );
+    let too_large = format!(
+        "Subject: {}\r\n\r\nbody\r\n",
+        "s".repeat(MAX_HEADER_SIZE as usize)
+    );
+    for (message, details) in [
+        (too_many_fields.as_str(), "more than 100 fields"),
+        (too_large.as_str(), "cannot exceed 1024 bytes"),
+    ] {
+        imap.send(&format!("APPEND INBOX {{{}+}}\r\n{message}", message.len()))
+            .await;
+        imap.assert_read(Type::Tagged, ResponseType::No)
+            .await
+            .assert_response_code("LIMIT")
+            .assert_contains(details);
+    }
+    imap.send(&format!(
+        "APPEND INBOX {{{}+}}\r\n{too_large} {{{}+}}\r\n{within}",
+        too_large.len(),
+        within.len()
+    ))
+    .await;
+    imap.assert_read(Type::Tagged, ResponseType::No)
+        .await
+        .assert_response_code("LIMIT");
+    imap.send("STATUS INBOX (MESSAGES)").await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .assert_contains("MESSAGES 0");
+
+    admin
+        .registry_update_setting(
+            Email::default(),
+            &[Property::MaxHeaderSize, Property::MaxHeaderCount],
+        )
+        .await;
+    admin.reload_settings().await;
 }
 
 pub async fn assert_append_message(

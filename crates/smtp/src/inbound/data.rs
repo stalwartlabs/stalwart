@@ -52,8 +52,14 @@ use std::{
 use trc::{SmtpEvent, SpamEvent};
 use utils::DomainPart;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageOrigin {
+    Client,
+    Internal,
+}
+
 impl<T: SessionStream> Session<T> {
-    pub async fn queue_message(&mut self) -> Cow<'static, [u8]> {
+    pub async fn queue_message(&mut self, origin: MessageOrigin) -> Cow<'static, [u8]> {
         // Parse message
         let raw_message = std::mem::take(&mut self.data.message);
         let parsed_message = match MessageParser::new()
@@ -70,6 +76,23 @@ impl<T: SessionStream> Session<T> {
                 return (&b"550 5.7.7 Failed to parse message.\r\n"[..]).into();
             }
         };
+
+        if origin == MessageOrigin::Client
+            && let Err(err) = self
+                .server
+                .core
+                .email
+                .limits
+                .validate_header_section(&parsed_message)
+        {
+            trc::event!(
+                Smtp(SmtpEvent::MessageTooLarge),
+                SpanId = self.data.session_id,
+                Details = err.to_string(),
+            );
+
+            return (&b"552 5.3.4 Message header too large.\r\n"[..]).into();
+        }
 
         // Authenticate message
         let mut auth_message = AuthenticatedMessage::from_parsed(

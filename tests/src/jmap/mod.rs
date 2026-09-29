@@ -208,6 +208,7 @@ pub async fn jmap_tests() {
         mail::vacation_response::test(&test).await;
         mail::submission::test(&test).await;
         mail::cache::test(&test).await;
+        mail::header_limits::test(&test).await;
     }
 
     if enabled("core") {

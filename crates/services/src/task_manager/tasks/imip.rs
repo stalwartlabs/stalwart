@@ -27,7 +27,10 @@ use mail_builder::{
 };
 use mail_parser::decoders::html::html_to_text;
 use registry::{schema::structs::TaskCalendarItipMessage, types::EnumImpl};
-use smtp::core::{Session, SessionData};
+use smtp::{
+    core::{Session, SessionData},
+    inbound::data::MessageOrigin,
+};
 use smtp_proto::{MailFrom, RcptTo};
 use std::{sync::Arc, time::Duration};
 use store::{ahash::AHashMap, write::now};
@@ -273,7 +276,7 @@ async fn send_imip(
 
                 // DATA
                 session.data.message = message;
-                let response = session.queue_message().await;
+                let response = session.queue_message(MessageOrigin::Internal).await;
                 if let smtp::core::State::Accepted(queue_id) = session.state {
                     trc::event!(
                         Calendar(trc::CalendarEvent::ItipMessageSent),

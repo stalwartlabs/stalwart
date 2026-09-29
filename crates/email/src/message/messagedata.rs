@@ -584,6 +584,8 @@ mod tests {
         mailboxes_per_email: 2,
         keywords_per_email: 2,
         keyword_length: 4,
+        header_count: usize::MAX,
+        header_size: usize::MAX,
     };
 
     fn message(mailboxes: &[u32], keywords: &[&str]) -> MessageData {

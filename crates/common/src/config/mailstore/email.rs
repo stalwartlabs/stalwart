@@ -290,6 +290,8 @@ impl EmailConfig {
                 mailboxes_per_email: email.max_mailboxes_per_email as usize,
                 keywords_per_email: email.max_flags_per_email as usize,
                 keyword_length: email.max_flag_length as usize,
+                header_count: email.max_header_count as usize,
+                header_size: email.max_header_size as usize,
             },
             mail_attachments_max_size: email.max_attachment_size as usize,
             mail_max_size: email.max_message_size as usize,

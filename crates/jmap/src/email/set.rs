@@ -784,11 +784,19 @@ impl EmailSet for Server {
             let mut raw_message = Vec::with_capacity((4 * size_attachments / 3) + 1024);
             builder.write_to(&mut raw_message).unwrap_or_default();
 
+            let message = MessageParser::new().parse(&raw_message);
+            if let Some(message) = &message
+                && let Err(err) = self.core.email.limits.validate_header_section(message)
+            {
+                response.not_created.append(id, err.into());
+                continue 'create;
+            }
+
             // Ingest message
             match self
                 .email_ingest(IngestEmail {
                     raw_message: &raw_message,
-                    message: MessageParser::new().parse(&raw_message),
+                    message,
                     blob_hash: None,
                     access_token: import_access_token.as_ref().unwrap_or(access_token),
                     mailbox_ids: mailboxes,

@@ -20880,6 +20880,14 @@ impl ObjectImpl for Email {
         if *value > 1024 {
             errors.push(ValidationError::max_value(Property::MaxFlagLength, 1024));
         }
+        let value = &self.max_header_size;
+        if *value < 1024 {
+            errors.push(ValidationError::min_value(Property::MaxHeaderSize, 1024));
+        }
+        let value = &self.max_header_count;
+        if *value < 100 {
+            errors.push(ValidationError::min_value(Property::MaxHeaderCount, 100));
+        }
         errors.len() == neb
     }
 
@@ -20905,6 +20913,8 @@ impl Pickle for Email {
         self.max_mailboxes_per_email.pickle(out);
         self.max_flags_per_email.pickle(out);
         self.max_flag_length.pickle(out);
+        self.max_header_size.pickle(out);
+        self.max_header_count.pickle(out);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
@@ -20932,6 +20942,12 @@ impl Pickle for Email {
         if stream.version() >= 1 {
             this.max_flag_length = Pickle::unpickle(stream)?;
         }
+        if stream.version() >= 1 {
+            this.max_header_size = Pickle::unpickle(stream)?;
+        }
+        if stream.version() >= 1 {
+            this.max_header_count = Pickle::unpickle(stream)?;
+        }
         Some(this)
     }
 }
@@ -20956,13 +20972,15 @@ impl Default for Email {
             max_mailboxes_per_email: 100u64,
             max_flags_per_email: 100u64,
             max_flag_length: 128u64,
+            max_header_size: 524288u64,
+            max_header_count: 5000u64,
         }
     }
 }
 
 impl IntoValue for Email {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(19);
+        let mut map = jmap_tools::Map::with_capacity(21);
         map.insert_unchecked(
             Property::MaxAttachmentSize,
             self.max_attachment_size.into_value(),
@@ -21004,6 +21022,8 @@ impl IntoValue for Email {
             self.max_flags_per_email.into_value(),
         );
         map.insert_unchecked(Property::MaxFlagLength, self.max_flag_length.into_value());
+        map.insert_unchecked(Property::MaxHeaderSize, self.max_header_size.into_value());
+        map.insert_unchecked(Property::MaxHeaderCount, self.max_header_count.into_value());
         JmapValue::Object(map)
     }
 }
@@ -21038,6 +21058,8 @@ impl RegistryJsonPropertyPatch for Email {
             }
             Some(Property::MaxFlagsPerEmail) => self.max_flags_per_email.patch(pointer, value),
             Some(Property::MaxFlagLength) => self.max_flag_length.patch(pointer, value),
+            Some(Property::MaxHeaderSize) => self.max_header_size.patch(pointer, value),
+            Some(Property::MaxHeaderCount) => self.max_header_count.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

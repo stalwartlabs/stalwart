@@ -5,6 +5,7 @@
  */
 
 use super::{AssertResult, ImapConnection, Type};
+use email::message::metadata::MAX_VALUE_LEN;
 use imap_proto::ResponseType;
 
 pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
@@ -184,7 +185,7 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
         .assert_contains("_p BAD")
         .assert_contains("* 1 FETCH (UID 1");
 
-    let subject = "s".repeat(20_000);
+    let subject = "s".repeat(MAX_VALUE_LEN + 1);
     let to = (0..1_100)
         .map(|index| format!("r{index}@example.com"))
         .collect::<Vec<_>>()

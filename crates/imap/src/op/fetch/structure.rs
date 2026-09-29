@@ -907,7 +907,9 @@ impl MediaToken for str {
 pub(super) mod tests {
     use super::{Binary, HeaderEnvelope, HeaderSelection, ImapEnvelope, ImapMetadata};
     use crate::op::fetch::source::DecodedSources;
-    use email::message::metadata::{ExtraHeaders, MessageMetadata, MetadataRow, MetadataStructure};
+    use email::message::metadata::{
+        ExtraHeaders, MAX_VALUE_LEN, MessageMetadata, MetadataRow, MetadataStructure,
+    };
     use imap_proto::protocol::fetch::Section;
     use mail_parser::MessageParser;
     use store::Deserialize;
@@ -2403,7 +2405,7 @@ pub(super) mod tests {
 
     #[test]
     fn envelope_falls_back_to_section_b_when_caps_were_hit() {
-        let subject = "s".repeat(20_000);
+        let subject = "s".repeat(MAX_VALUE_LEN + 1);
         let to = (0..1_100)
             .map(|index| format!("r{index}@example.com"))
             .collect::<Vec<_>>()

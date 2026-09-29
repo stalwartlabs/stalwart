@@ -2882,6 +2882,10 @@ pub struct Email {
     pub max_flags_per_email: u64,
     #[serde(rename = "maxFlagLength")]
     pub max_flag_length: u64,
+    #[serde(rename = "maxHeaderSize")]
+    pub max_header_size: u64,
+    #[serde(rename = "maxHeaderCount")]
+    pub max_header_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

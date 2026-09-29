@@ -6,6 +6,7 @@
 
 use crate::{
     VERSION_PUBLIC,
+    config::mailstore::limits::EmailLimits,
     expr::if_block::{BootstrapExprExt, IfBlock},
     scripts::{
         functions::{register_functions_trusted, register_functions_untrusted},
@@ -44,7 +45,7 @@ pub struct Scripting {
 }
 
 impl Scripting {
-    pub async fn parse(bp: &mut Bootstrap) -> Self {
+    pub async fn parse(bp: &mut Bootstrap, limits: &EmailLimits) -> Self {
         // Parse untrusted compiler
         let untrusted = bp.setting_infallible::<SieveUserInterpreter>().await;
         let untrusted_sign = bp.compile_expr(
@@ -75,6 +76,8 @@ impl Scripting {
             .with_max_received_headers(usize::MAX) // This is set to usize::MAX here, but the actual limit is enforced during ingestion.
             .with_max_header_size(untrusted.max_header_size as usize)
             .with_max_out_messages(untrusted.max_out_messages as usize)
+            .with_max_header_count(limits.header_count)
+            .with_max_header_block_size(limits.header_fields_size())
             .with_default_vacation_expiry(untrusted.default_expiry_vacation.into_inner().as_secs())
             .with_default_duplicate_expiry(
                 untrusted.default_expiry_duplicate.into_inner().as_secs(),

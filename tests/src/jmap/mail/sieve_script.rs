@@ -15,7 +15,11 @@ use jmap_client::{
     email, mailbox,
     sieve::query::{Comparator, Filter},
 };
-use registry::schema::{prelude::ObjectType, structs::SieveUserScript};
+use registry::schema::{
+    prelude::{ObjectType, Property},
+    structs::{Email, SieveUserScript},
+};
+use serde_json::{Value, json};
 use sieve::Sieve;
 use std::{
     fs,
@@ -27,6 +31,11 @@ use store::{
     write::{Archive, ArchiveBytes, Archiver, BatchBuilder},
 };
 use types::{collection::Collection, field::SieveField};
+
+const BUDGET_HEADER_SIZE: u64 = 4096;
+const BUDGET_HEADER_COUNT: u64 = 100;
+const BUDGET_SCRIPT: &str = "require \"editheader\";\naddheader \"X-Sieve-Added\" \"added\";\n";
+const BUDGET_HEADER: &str = "header:X-Sieve-Added:asText";
 
 pub async fn test(test: &TestServer) {
     println!("Running Sieve tests...");
@@ -636,6 +645,8 @@ pub async fn test(test: &TestServer) {
     );
     assert_eq!(script.name, "test_recompile");
 
+    header_budget(test).await;
+
     // Remove test data
     client.sieve_script_deactivate().await.unwrap();
     let mut request = client.build();
@@ -648,6 +659,81 @@ pub async fn test(test: &TestServer) {
         .registry_destroy_all(ObjectType::SieveUserScript)
         .await;
     test.assert_is_empty().await;
+}
+
+async fn header_budget(test: &TestServer) {
+    let admin = test.account("admin@example.com");
+    admin
+        .registry_update_setting(
+            Email {
+                max_header_size: BUDGET_HEADER_SIZE,
+                max_header_count: BUDGET_HEADER_COUNT,
+                ..Default::default()
+            },
+            &[Property::MaxHeaderSize, Property::MaxHeaderCount],
+        )
+        .await;
+    admin.reload_settings().await;
+
+    let account = test.account("jdoe@example.com");
+    account
+        .jmap_client()
+        .await
+        .sieve_script_create(
+            "test_header_budget",
+            BUDGET_SCRIPT.as_bytes().to_vec(),
+            true,
+        )
+        .await
+        .expect("header budget script is created");
+
+    let header_start = "From: bill@remote.org\r\nTo: jdoe@example.com\r\n";
+    let count_at_limit = format!(
+        "{header_start}Subject: budget count\r\n{}\r\nbody\r\n",
+        "X: y\r\n".repeat(BUDGET_HEADER_COUNT as usize - 3)
+    );
+    let size_prefix = format!("{header_start}Subject: budget size\r\nX-Pad: ");
+    let size_at_limit = format!(
+        "{size_prefix}{}\r\n\r\nbody\r\n",
+        "p".repeat(BUDGET_HEADER_SIZE as usize - size_prefix.len() - 4)
+    );
+    let control = format!("{header_start}Subject: budget control\r\n\r\nbody\r\n");
+    let mut lmtp = SmtpConnection::connect().await;
+    for message in [&count_at_limit, &size_at_limit, &control] {
+        lmtp.ingest("bill@remote.org", &["jdoe@example.com"], message)
+            .await;
+    }
+
+    let response = account
+        .jmap_method_call(
+            "Email/get",
+            json!({
+                "accountId": account.id_string(),
+                "properties": ["subject", BUDGET_HEADER],
+            }),
+        )
+        .await;
+    let added_header = |subject: &str| {
+        response
+            .list()
+            .iter()
+            .find(|email| email["subject"] == subject)
+            .unwrap_or_else(|| panic!("message {subject:?} was not delivered"))
+            .get(BUDGET_HEADER)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    assert_eq!(added_header("budget count"), None);
+    assert_eq!(added_header("budget size"), None);
+    assert_eq!(added_header("budget control").as_deref(), Some("added"));
+
+    admin
+        .registry_update_setting(
+            Email::default(),
+            &[Property::MaxHeaderSize, Property::MaxHeaderCount],
+        )
+        .await;
+    admin.reload_settings().await;
 }
 
 fn get_script(name: &str) -> Vec<u8> {

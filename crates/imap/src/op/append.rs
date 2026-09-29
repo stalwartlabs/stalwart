@@ -168,6 +168,12 @@ impl<T: SessionStream> SessionData<T> {
         let mut last_change_id = None;
         let limits = &self.server.core.email.limits;
         for message in arguments.messages {
+            let parsed = MessageParser::new().parse(&message.message);
+            if let Some(parsed) = &parsed
+                && let Err(err) = limits.validate_header_section(parsed)
+            {
+                return Err(err.into_imap_error().id(arguments.tag));
+            }
             let keywords = message
                 .flags
                 .into_iter()
@@ -185,7 +191,7 @@ impl<T: SessionStream> SessionData<T> {
                 .server
                 .email_ingest(IngestEmail {
                     raw_message: &message.message,
-                    message: MessageParser::new().parse(&message.message),
+                    message: parsed,
                     blob_hash: None,
                     access_token: &access_token,
                     mailbox_ids: vec![mailbox_id],
