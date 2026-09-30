@@ -8,7 +8,7 @@ use crate::{
     core::Session,
     reporting::{ReportAddress, send::MtaReportSend},
 };
-use common::network::SessionStream;
+use common::{expr::Bump, network::SessionStream};
 use compact_str::CompactString;
 use mail_auth::{
     AuthenticatedMessage, AuthenticationResults, DkimOutput,
@@ -61,19 +61,20 @@ impl<T: SessionStream> Session<T> {
         }
 
         let config = &self.server.core.smtp.report.dkim;
+        let mut arena = Bump::new();
         let from_addr = self
             .server
-            .eval_if(&config.address, self, self.data.session_id)
+            .eval_if(&config.address, self, &mut arena, self.data.session_id)
             .await
             .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_string());
         let from_name = self
             .server
-            .eval_if(&config.name, self, self.data.session_id)
+            .eval_if(&config.name, self, &mut arena, self.data.session_id)
             .await
             .unwrap_or_else(|| "Mail Delivery Subsystem".to_string());
         let subject = self
             .server
-            .eval_if(&config.subject, self, self.data.session_id)
+            .eval_if(&config.subject, self, &mut arena, self.data.session_id)
             .await
             .unwrap_or_else(|| "DKIM Report".to_string());
         let mut report = Vec::with_capacity(128);

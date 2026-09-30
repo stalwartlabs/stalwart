@@ -16,7 +16,7 @@ pub mod masked;
 
 use crate::{
     Core, LogoCache, Server, USER_AGENT, config::groupware::CalendarTemplateVariable,
-    expr::Expression, manager::application::Resource,
+    expr::if_block::IfBlock, manager::application::Resource,
 };
 use ahash::{AHashMap, AHashSet};
 use license::LicenseKey;
@@ -63,7 +63,7 @@ pub struct SpamFilterLlmConfig {
 #[derive(Clone, Debug)]
 pub struct MetricAlert {
     pub id: ObjectId,
-    pub condition: Expression,
+    pub condition: IfBlock,
     pub method: Vec<AlertMethod>,
 }
 

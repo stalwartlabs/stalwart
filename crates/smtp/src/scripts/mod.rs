@@ -8,7 +8,10 @@ use std::borrow::Cow;
 
 use ahash::AHashMap;
 use common::{
-    Server, auth::AccessToken, expr::functions::ResolveVariable, scripts::ScriptModification,
+    Server,
+    auth::AccessToken,
+    expr::{Bump, functions::ResolveVariable},
+    scripts::ScriptModification,
 };
 
 use mail_parser::Message;
@@ -73,17 +76,18 @@ impl<'x> ScriptParameters<'x> {
         vars: &impl ResolveVariable,
         session_id: u64,
     ) -> Self {
+        let mut arena = Bump::new();
         for (variable, expr) in [
             (&mut self.from_addr, &server.core.sieve.from_addr),
             (&mut self.from_name, &server.core.sieve.from_name),
             (&mut self.return_path, &server.core.sieve.return_path),
         ] {
-            if let Some(value) = server.eval_if(expr, vars, session_id).await {
+            if let Some(value) = server.eval_if(expr, vars, &mut arena, session_id).await {
                 *variable = value;
             }
         }
         self.sign_domain = server
-            .eval_if(&server.core.sieve.sign, vars, session_id)
+            .eval_if(&server.core.sieve.sign, vars, &mut arena, session_id)
             .await;
         self
     }

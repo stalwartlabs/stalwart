@@ -16,7 +16,7 @@ use common::config::smtp::auth::DkimSigners;
 use common::config::smtp::queue::{ArchivedQueueExpiry, QueueName};
 use common::ipc::{BroadcastEvent, QueueEvent};
 use common::network::RcptResolution;
-use common::{KV_LOCK_QUEUE_MESSAGE, Server};
+use common::{KV_LOCK_QUEUE_MESSAGE, Server, expr::Bump};
 use compact_str::{CompactString, ToCompactString};
 use mail_auth::AuthenticatedMessage;
 use registry::schema::prelude::{ObjectType, Property};
@@ -650,11 +650,13 @@ impl MessageWrapper {
 
     pub async fn add_expanded_recipient(&mut self, rcpt: impl AsRef<str>, server: &Server) {
         self.message.recipients.push(Recipient::new(rcpt.as_ref()));
+        let mut arena = Bump::new();
         let queue = server.get_queue_or_default(
             &server
                 .eval_if::<String, _>(
                     &server.core.smtp.queue.queue,
                     &QueueEnvelope::new(&self.message, self.message.recipients.last().unwrap()),
+                    &mut arena,
                     self.span_id,
                 )
                 .await

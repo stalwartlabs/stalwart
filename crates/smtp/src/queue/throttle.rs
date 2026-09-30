@@ -6,7 +6,9 @@
 
 use crate::core::throttle::NewKey;
 use common::{
-    KV_RATE_LIMIT_SMTP, Server, config::smtp::QueueRateLimiter, expr::functions::ResolveVariable,
+    KV_RATE_LIMIT_SMTP, Server,
+    config::smtp::QueueRateLimiter,
+    expr::{Bump, functions::ResolveVariable},
 };
 use compact_str::ToCompactString;
 use std::future::Future;
@@ -28,9 +30,10 @@ impl IsAllowed for Server {
         envelope: &impl ResolveVariable,
         session_id: u64,
     ) -> Result<(), u64> {
+        let mut arena = Bump::new();
         if throttle.expr.is_empty()
             || self
-                .eval_if(&throttle.expr, envelope, session_id)
+                .eval_if(&throttle.expr, envelope, &mut arena, session_id)
                 .await
                 .unwrap_or(false)
         {

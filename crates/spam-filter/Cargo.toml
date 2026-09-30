@@ -28,6 +28,7 @@ rkyv.workspace = true
 serde = { version = "1.0", features = ["derive"]}
 unicode-general-category = "1.1.0"
 unicode-normalization = "0.1.25"
+sync_wrapper = "1.0.2"
 
 [features]
 test_mode = []

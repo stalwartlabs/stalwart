@@ -5,11 +5,13 @@
  */
 
 use crate::expr::{
-    Variable,
+    Bump, Variable,
     functions::ResolveVariable,
+    guard::ScopeRules,
     if_block::{BootstrapExprExt, IfBlock},
 };
 use ahash::AHashSet;
+use compact_str::{CompactString, ToCompactString};
 use mail_auth::dns::ToReverseName;
 use nlp::classifier::model::{CcfhClassifier, FhClassifier};
 use registry::schema::{
@@ -22,7 +24,9 @@ use registry::schema::{
 };
 use sieve::SpamStatus;
 use std::{
+    mem::size_of,
     net::{IpAddr, SocketAddr},
+    sync::OnceLock,
     time::Duration,
 };
 use store::registry::{RegistryObject, bootstrap::Bootstrap};
@@ -166,15 +170,15 @@ pub struct PyzorConfig {
     pub ratio: f64,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone)]
 pub struct SpamFilterRules {
-    pub url: Vec<IfBlock>,
-    pub domain: Vec<IfBlock>,
-    pub email: Vec<IfBlock>,
-    pub ip: Vec<IfBlock>,
-    pub header: Vec<IfBlock>,
-    pub body: Vec<IfBlock>,
-    pub any: Vec<IfBlock>,
+    pub url: ScopeRules,
+    pub domain: ScopeRules,
+    pub email: ScopeRules,
+    pub ip: ScopeRules,
+    pub header: ScopeRules,
+    pub body: ScopeRules,
+    pub any: ScopeRules,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -266,21 +270,36 @@ impl SpamFilterRules {
         }
         rules.sort_by_key(|a| a.priority);
 
-        let mut result = SpamFilterRules::default();
+        let mut url = Vec::new();
+        let mut domain = Vec::new();
+        let mut email = Vec::new();
+        let mut ip = Vec::new();
+        let mut header = Vec::new();
+        let mut body = Vec::new();
+        let mut any = Vec::new();
 
         for rule in rules {
             match rule.scope {
-                Element::Url => result.url.push(rule.rule),
-                Element::Domain => result.domain.push(rule.rule),
-                Element::Email => result.email.push(rule.rule),
-                Element::Ip => result.ip.push(rule.rule),
-                Element::Header => result.header.push(rule.rule),
-                Element::Body => result.body.push(rule.rule),
-                Element::Any => result.any.push(rule.rule),
+                Element::Url => url.push(rule.rule),
+                Element::Domain => domain.push(rule.rule),
+                Element::Email => email.push(rule.rule),
+                Element::Ip => ip.push(rule.rule),
+                Element::Header => header.push(rule.rule),
+                Element::Body => body.push(rule.rule),
+                Element::Any => any.push(rule.rule),
             }
         }
 
-        result
+        let location = Some(ExpressionVariable::Location);
+        SpamFilterRules {
+            url: ScopeRules::new(url, location),
+            domain: ScopeRules::new(domain, location),
+            email: ScopeRules::new(email, location),
+            ip: ScopeRules::new(ip, location),
+            header: ScopeRules::new(header, Some(ExpressionVariable::NameLower)),
+            body: ScopeRules::new(body, location),
+            any: ScopeRules::new(any, None),
+        }
     }
 }
 
@@ -607,55 +626,70 @@ impl Element {
     }
 }
 
+const IPV6_TEXT_MAX_LEN: usize = 39;
+const IPV6_REVERSE_LEN: usize = 63;
+
 pub struct IpResolver {
     ip: IpAddr,
-    ip_string: String,
-    reverse: String,
-    octets: Variable<'static>,
+    text: OnceLock<CompactString>,
+    reverse: OnceLock<CompactString>,
 }
 
 impl ResolveVariable for IpResolver {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> Variable<'_> {
+    fn resolve_variable<'a>(
+        &'a self,
+        variable: ExpressionVariable,
+        arena: &'a Bump,
+    ) -> Variable<'a> {
         match variable {
-            ExpressionVariable::Ip | ExpressionVariable::Value => self.ip_string.as_str().into(),
-            ExpressionVariable::IpReverse => self.reverse.as_str().into(),
-            ExpressionVariable::Octets => self.octets.clone(),
+            ExpressionVariable::Ip | ExpressionVariable::Value => self.text().into(),
+            ExpressionVariable::IpReverse => self.reverse().into(),
+            ExpressionVariable::Octets => {
+                let octets = |octets: &[u8]| {
+                    arena.alloc_slice_fill_iter(
+                        octets
+                            .iter()
+                            .map(|octet| Variable::Integer(i64::from(*octet))),
+                    )
+                };
+                Variable::Array(match self.ip {
+                    IpAddr::V4(ip) => octets(&ip.octets()),
+                    IpAddr::V6(ip) => octets(&ip.octets()),
+                })
+            }
             ExpressionVariable::IsV4 => Variable::Integer(self.ip.is_ipv4() as _),
             ExpressionVariable::IsV6 => Variable::Integer(self.ip.is_ipv6() as _),
             _ => Variable::Integer(0),
         }
-    }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
     }
 }
 
 impl IpResolver {
     pub fn new(ip: IpAddr) -> Self {
         Self {
-            ip_string: ip.to_string(),
-            reverse: ip.to_reverse_name(),
-            octets: Variable::Array(match ip {
-                IpAddr::V4(ipv4_addr) => ipv4_addr
-                    .octets()
-                    .iter()
-                    .map(|o| Variable::Integer(*o as _))
-                    .collect(),
-                IpAddr::V6(ipv6_addr) => ipv6_addr
-                    .octets()
-                    .iter()
-                    .map(|o| Variable::Integer(*o as _))
-                    .collect(),
-            }),
             ip,
+            text: OnceLock::new(),
+            reverse: OnceLock::new(),
         }
+    }
+
+    pub fn text(&self) -> &str {
+        self.text.get_or_init(|| self.ip.to_compact_string())
+    }
+
+    pub fn reverse(&self) -> &str {
+        self.reverse
+            .get_or_init(|| self.ip.to_reverse_name().into())
     }
 }
 
 impl CacheItemWeight for IpResolver {
     fn weight(&self) -> u64 {
-        (std::mem::size_of::<IpResolver>() + self.ip_string.len() + self.reverse.len()) as u64
+        let heap = match self.ip {
+            IpAddr::V4(_) => 0,
+            IpAddr::V6(_) => IPV6_TEXT_MAX_LEN + IPV6_REVERSE_LEN,
+        };
+        (size_of::<IpResolver>() + heap) as u64
     }
 }
 
@@ -731,6 +765,71 @@ mod tests {
 
         let below_spam_threshold = config(5.0, 3.0, 0.0);
         assert_eq!(below_spam_threshold.spam_percentage(7.5), 75);
+    }
+
+    #[test]
+    fn ip_resolver_text_forms() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.255",
+            "0.0.0.0",
+            "255.255.255.255",
+            "::1",
+            "2001:db8::8a2e:370:7334",
+            "::ffff:192.0.2.1",
+            "fe80::1:2:3:4",
+            "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        ] {
+            let arena = Bump::new();
+            let ip: IpAddr = ip.parse().expect("valid address");
+            let resolver = IpResolver::new(ip);
+            assert_eq!(resolver.text(), ip.to_string());
+            assert_eq!(resolver.reverse(), ip.to_reverse_name());
+            assert!(resolver.text().len() <= IPV6_TEXT_MAX_LEN);
+            assert!(resolver.reverse().len() <= IPV6_REVERSE_LEN);
+            assert!(matches!(
+                resolver.resolve_variable(ExpressionVariable::IpReverse, &arena),
+                Variable::String(reverse) if reverse == ip.to_reverse_name()
+            ));
+            assert!(matches!(
+                resolver.resolve_variable(ExpressionVariable::Ip, &arena),
+                Variable::String(text) if text == ip.to_string()
+            ));
+            assert_eq!(arena.allocated_bytes(), 0);
+            let octets = match ip {
+                IpAddr::V4(ip) => ip.octets().to_vec(),
+                IpAddr::V6(ip) => ip.octets().to_vec(),
+            };
+            let Variable::Array(resolved) =
+                resolver.resolve_variable(ExpressionVariable::Octets, &arena)
+            else {
+                panic!("octets resolve to an array");
+            };
+            assert_eq!(
+                resolved
+                    .iter()
+                    .map(|octet| octet.to_integer())
+                    .collect::<Vec<_>>(),
+                octets
+                    .iter()
+                    .map(|octet| Some(i64::from(*octet)))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn ip_resolver_is_compact() {
+        assert!(size_of::<IpResolver>() <= 96);
+        let v4 = IpResolver::new(IpAddr::from([192, 0, 2, 1]));
+        assert_eq!(v4.text(), "192.0.2.1");
+        assert_eq!(v4.reverse(), "1.2.0.192");
+        assert_eq!(v4.weight(), size_of::<IpResolver>() as u64);
+        let v6 = IpResolver::new(IpAddr::from([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]));
+        assert_eq!(
+            v6.weight(),
+            (size_of::<IpResolver>() + IPV6_TEXT_MAX_LEN + IPV6_REVERSE_LEN) as u64
+        );
     }
 
     #[test]

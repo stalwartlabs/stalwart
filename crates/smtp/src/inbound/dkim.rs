@@ -8,7 +8,7 @@ use crate::queue::{MessageWrapper, Metadata, spool::QueueParams};
 use common::{
     Server,
     config::smtp::auth::{Dkim1Signer, DkimSigners},
-    expr::{functions::ResolveVariable, if_block::IfBlock},
+    expr::{Bump, functions::ResolveVariable, if_block::IfBlock},
 };
 use mail_auth::{
     AuthenticatedMessage,
@@ -161,8 +161,9 @@ impl DkimSign for Server {
         resolver: &impl ResolveVariable,
         session_id: u64,
     ) -> Option<Arc<DkimSigners>> {
+        let mut arena = Bump::new();
         let sign_with_domain = self
-            .eval_if::<String, _>(if_block, resolver, session_id)
+            .eval_if::<String, _>(if_block, resolver, &mut arena, session_id)
             .await?;
         match self.dkim_signers(&sign_with_domain).await {
             Ok(signers) => signers,

@@ -4,356 +4,399 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::{CompactString, ToCompactString, format_compact};
-use sha1::Sha1;
+use super::{FnCtx, args};
+use crate::expr::{Variable, kernels};
+use bumpalo::{Bump, collections::Vec as BumpVec};
+use memchr::{memchr_iter, memmem};
+use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
-use utils::HexEncode;
 
-use crate::expr::{StringCow, Variable};
+const EMPTY_SEPARATOR: &str = "";
 
-pub(crate) fn fn_trim(mut v: Vec<Variable>) -> Variable {
-    v.remove(0).transform(|s| match s {
-        StringCow::Borrowed(s) => Variable::from(s.trim()),
-        StringCow::Owned(s) => Variable::from(s.trim().to_compact_string()),
-    })
+fn contains<'a>(haystack: Variable<'a>, needle: Variable<'a>, arena: &'a Bump) -> bool {
+    match haystack {
+        Variable::String(s) => s.contains(needle.to_str(arena)),
+        Variable::Array(items) => items.contains(&needle),
+        value => value.to_str(arena).contains(needle.to_str(arena)),
+    }
 }
 
-pub(crate) fn fn_trim_end(mut v: Vec<Variable>) -> Variable {
-    v.remove(0).transform(|s| match s {
-        StringCow::Borrowed(s) => Variable::from(s.trim_end()),
-        StringCow::Owned(s) => Variable::from(s.trim_end().to_compact_string()),
-    })
+pub(crate) fn contains_ignore_case<'a>(
+    haystack: Variable<'a>,
+    needle: &str,
+    arena: &'a Bump,
+    in_string: impl FnOnce(&'a str) -> bool,
+) -> bool {
+    match haystack {
+        Variable::String(s) => in_string(s),
+        Variable::Array(items) => items
+            .iter()
+            .any(|item| matches!(item, Variable::String(s) if s.eq_ignore_ascii_case(needle))),
+        value => value.to_str(arena).contains(needle),
+    }
 }
 
-pub(crate) fn fn_trim_start(mut v: Vec<Variable>) -> Variable {
-    v.remove(0).transform(|s| match s {
-        StringCow::Borrowed(s) => Variable::from(s.trim_start()),
-        StringCow::Owned(s) => Variable::from(s.trim_start().to_compact_string()),
-    })
+fn collect_strs<'a>(arena: &'a Bump, items: impl Iterator<Item = &'a str>) -> Variable<'a> {
+    let mut out = BumpVec::new_in(arena);
+    out.extend(items.map(Variable::String));
+    Variable::Array(out.into_bump_slice())
 }
 
-pub(crate) fn fn_len(v: Vec<Variable>) -> Variable {
-    match &v[0] {
+fn split_capacity(value: &str, separator: &str) -> usize {
+    match separator.as_bytes() {
+        [] => value.len() + 2,
+        [byte] => memchr_iter(*byte, value.as_bytes()).count() + 1,
+        needle => memmem::find_iter(value.as_bytes(), needle).count() + 1,
+    }
+}
+
+fn single_byte(separator: &str) -> Option<char> {
+    match separator.as_bytes() {
+        [byte] => Some(char::from(*byte)),
+        _ => None,
+    }
+}
+
+fn pair<'a>(arena: &'a Bump, (a, b): (&'a str, &'a str)) -> Variable<'a> {
+    Variable::Array(arena.alloc_slice_copy(&[Variable::String(a), Variable::String(b)]))
+}
+
+pub(crate) fn fn_trim<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    value.transform(ctx.arena(), |s| Variable::String(s.trim()))
+}
+
+pub(crate) fn fn_trim_end<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    value.transform(ctx.arena(), |s| Variable::String(s.trim_end()))
+}
+
+pub(crate) fn fn_trim_start<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    value.transform(ctx.arena(), |s| Variable::String(s.trim_start()))
+}
+
+pub(crate) fn fn_len<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    match value {
         Variable::String(s) => s.len(),
         Variable::Array(a) => a.len(),
-        v => v.to_string().len(),
+        value => value.to_str(ctx.arena()).len(),
     }
     .into()
 }
 
-pub(crate) fn fn_to_lowercase(mut v: Vec<Variable>) -> Variable {
-    v.remove(0)
-        .transform(|s| Variable::from(CompactString::from_str_to_lowercase(s.as_str())))
+pub(crate) fn fn_to_lowercase<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    let arena = ctx.arena();
+    value.transform(arena, |s| Variable::String(kernels::to_lowercase(s, arena)))
 }
 
-pub(crate) fn fn_to_uppercase(mut v: Vec<Variable>) -> Variable {
-    v.remove(0)
-        .transform(|s| Variable::from(CompactString::from_str_to_uppercase(s.as_str())))
+pub(crate) fn fn_to_uppercase<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    let arena = ctx.arena();
+    value.transform(arena, |s| Variable::String(kernels::to_uppercase(s, arena)))
 }
 
-pub(crate) fn fn_is_uppercase(mut v: Vec<Variable>) -> Variable {
-    v.remove(0).transform(|s| {
-        s.as_str()
-            .chars()
-            .filter(|c| c.is_alphabetic())
-            .all(|c| c.is_uppercase())
-            .into()
+pub(crate) fn fn_is_uppercase<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    value.transform(ctx.arena(), |s| kernels::is_uppercase(s).into())
+}
+
+pub(crate) fn fn_is_lowercase<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    value.transform(ctx.arena(), |s| kernels::is_lowercase(s).into())
+}
+
+pub(crate) fn fn_has_digits<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    value.transform(ctx.arena(), |s| kernels::has_digits(s).into())
+}
+
+pub(crate) fn fn_split_words<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    let arena = ctx.arena();
+    collect_strs(arena, kernels::split_words(value.to_str(arena)))
+}
+
+pub(crate) fn fn_count_spaces<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    kernels::count_whitespace(value.to_str(ctx.arena())).into()
+}
+
+pub(crate) fn fn_count_uppercase<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    kernels::count_uppercase(value.to_str(ctx.arena())).into()
+}
+
+pub(crate) fn fn_count_lowercase<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    kernels::count_lowercase(value.to_str(ctx.arena())).into()
+}
+
+pub(crate) fn fn_count_chars<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
+    kernels::count_chars(value.to_str(ctx.arena())).into()
+}
+
+pub(crate) fn fn_eq_ignore_case<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [a, b] = args(v);
+    let arena = ctx.arena();
+    a.to_str(arena).eq_ignore_ascii_case(b.to_str(arena)).into()
+}
+
+pub(crate) fn fn_contains<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [haystack, needle] = args(v);
+    contains(haystack, needle, ctx.arena()).into()
+}
+
+pub(crate) fn fn_contains_ignore_case<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [haystack, needle] = args(v);
+    let arena = ctx.arena();
+    let needle = needle.to_str(arena);
+    contains_ignore_case(haystack, needle, arena, |s| {
+        kernels::contains_ignore_case(s, needle)
     })
-}
-
-pub(crate) fn fn_is_lowercase(mut v: Vec<Variable>) -> Variable {
-    v.remove(0).transform(|s| {
-        s.as_str()
-            .chars()
-            .filter(|c| c.is_alphabetic())
-            .all(|c| c.is_lowercase())
-            .into()
-    })
-}
-
-pub(crate) fn fn_has_digits(mut v: Vec<Variable>) -> Variable {
-    v.remove(0)
-        .transform(|s| s.as_str().chars().any(|c| c.is_ascii_digit()).into())
-}
-
-pub(crate) fn fn_split_words(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .split_whitespace()
-        .filter(|word| word.chars().all(|c| c.is_alphanumeric()))
-        .map(|word| Variable::from(CompactString::new(word)))
-        .collect::<Vec<_>>()
-        .into()
-}
-
-pub(crate) fn fn_count_spaces(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .chars()
-        .filter(|c| c.is_whitespace())
-        .count()
-        .into()
-}
-
-pub(crate) fn fn_count_uppercase(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .chars()
-        .filter(|c| c.is_alphabetic() && c.is_uppercase())
-        .count()
-        .into()
-}
-
-pub(crate) fn fn_count_lowercase(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .chars()
-        .filter(|c| c.is_alphabetic() && c.is_lowercase())
-        .count()
-        .into()
-}
-
-pub(crate) fn fn_count_chars(v: Vec<Variable>) -> Variable {
-    v[0].to_string().as_str().chars().count().into()
-}
-
-pub(crate) fn fn_eq_ignore_case(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .eq_ignore_ascii_case(v[1].to_string().as_str())
-        .into()
-}
-
-pub(crate) fn fn_contains(v: Vec<Variable>) -> Variable {
-    match &v[0] {
-        Variable::String(s) => s.as_str().contains(v[1].to_string().as_str()),
-        Variable::Array(arr) => arr.contains(&v[1]),
-        val => val.to_string().as_str().contains(v[1].to_string().as_str()),
-    }
     .into()
 }
 
-pub(crate) fn fn_contains_ignore_case(v: Vec<Variable>) -> Variable {
-    let needle = v[1].to_string();
-    match &v[0] {
-        Variable::String(s) => s
-            .as_str()
-            .to_lowercase()
-            .contains(&needle.as_str().to_lowercase()),
-        Variable::Array(arr) => arr.iter().any(|v| match v {
-            Variable::String(s) => s.as_str().eq_ignore_ascii_case(needle.as_str()),
-            _ => false,
-        }),
-        val => val.to_string().as_str().contains(needle.as_str()),
-    }
-    .into()
+pub(crate) fn fn_starts_with<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [a, b] = args(v);
+    let arena = ctx.arena();
+    a.to_str(arena).starts_with(b.to_str(arena)).into()
 }
 
-pub(crate) fn fn_starts_with(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .starts_with(v[1].to_string().as_str())
-        .into()
+pub(crate) fn fn_ends_with<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [a, b] = args(v);
+    let arena = ctx.arena();
+    a.to_str(arena).ends_with(b.to_str(arena)).into()
 }
 
-pub(crate) fn fn_ends_with(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .ends_with(v[1].to_string().as_str())
-        .into()
-}
-
-pub(crate) fn fn_lines(mut v: Vec<Variable>) -> Variable {
-    match v.remove(0) {
-        Variable::String(s) => s
-            .as_str()
-            .lines()
-            .map(|s| Variable::from(CompactString::new(s)))
-            .collect::<Vec<_>>()
-            .into(),
-        val => val,
-    }
-}
-
-pub(crate) fn fn_substring(v: Vec<Variable>) -> Variable {
-    v[0].to_string()
-        .as_str()
-        .chars()
-        .skip(v[1].to_usize().unwrap_or_default())
-        .take(v[2].to_usize().unwrap_or_default())
-        .collect::<CompactString>()
-        .into()
-}
-
-pub(crate) fn fn_strip_prefix(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap();
-    let prefix = v.next().unwrap().into_string();
-
-    value.transform(|s| match s {
-        StringCow::Borrowed(s) => s
-            .strip_prefix(prefix.as_str())
-            .map(Variable::from)
-            .unwrap_or_default(),
-        StringCow::Owned(s) => s
-            .strip_prefix(prefix.as_str())
-            .map(|s| Variable::from(CompactString::new(s)))
-            .unwrap_or_default(),
-    })
-}
-
-pub(crate) fn fn_strip_suffix(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap();
-    let suffix = v.next().unwrap().into_string();
-
-    value.transform(|s| match s {
-        StringCow::Borrowed(s) => s
-            .strip_suffix(suffix.as_str())
-            .map(Variable::from)
-            .unwrap_or_default(),
-        StringCow::Owned(s) => s
-            .strip_suffix(suffix.as_str())
-            .map(|s| Variable::from(CompactString::new(s)))
-            .unwrap_or_default(),
-    })
-}
-
-pub(crate) fn fn_split(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap().into_string();
-    let arg = v.next().unwrap().into_string();
-
+pub(crate) fn fn_lines<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
     match value {
-        StringCow::Borrowed(s) => s
-            .split(arg.as_str())
-            .map(Variable::from)
-            .collect::<Vec<_>>()
-            .into(),
-        StringCow::Owned(s) => s
-            .split(arg.as_str())
-            .map(|s| Variable::from(CompactString::new(s)))
-            .collect::<Vec<_>>()
-            .into(),
+        Variable::String(s) => collect_strs(ctx.arena(), s.lines()),
+        value => value,
     }
 }
 
-pub(crate) fn fn_rsplit(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap().into_string();
-    let arg = v.next().unwrap().into_string();
+pub(crate) fn fn_substring<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, start, count] = args(v);
+    Variable::String(kernels::substring(
+        value.to_str(ctx.arena()),
+        start.to_usize().unwrap_or_default(),
+        count.to_usize().unwrap_or_default(),
+    ))
+}
 
-    match value {
-        StringCow::Borrowed(s) => s
-            .rsplit(arg.as_str())
-            .map(Variable::from)
-            .collect::<Vec<_>>()
-            .into(),
-        StringCow::Owned(s) => s
-            .rsplit(arg.as_str())
-            .map(|s| Variable::from(CompactString::new(s)))
-            .collect::<Vec<_>>()
-            .into(),
+pub(crate) fn fn_strip_prefix<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, prefix] = args(v);
+    let arena = ctx.arena();
+    let prefix = prefix.to_str(arena);
+    value.transform(arena, |s| {
+        s.strip_prefix(prefix)
+            .map(Variable::String)
+            .unwrap_or_default()
+    })
+}
+
+pub(crate) fn fn_strip_suffix<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, suffix] = args(v);
+    let arena = ctx.arena();
+    let suffix = suffix.to_str(arena);
+    value.transform(arena, |s| {
+        s.strip_suffix(suffix)
+            .map(Variable::String)
+            .unwrap_or_default()
+    })
+}
+
+pub(crate) fn fn_split<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, separator] = args(v);
+    let arena = ctx.arena();
+    let value = value.to_str(arena);
+    let separator = separator.to_str(arena);
+    let mut out = BumpVec::with_capacity_in(split_capacity(value, separator), arena);
+    match single_byte(separator) {
+        Some(separator) => out.extend(value.split(separator).map(Variable::String)),
+        None => out.extend(value.split(separator).map(Variable::String)),
+    }
+    Variable::Array(out.into_bump_slice())
+}
+
+pub(crate) fn fn_rsplit<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, separator] = args(v);
+    let arena = ctx.arena();
+    let value = value.to_str(arena);
+    let separator = separator.to_str(arena);
+    let mut out = BumpVec::with_capacity_in(split_capacity(value, separator), arena);
+    match single_byte(separator) {
+        Some(separator) => out.extend(value.rsplit(separator).map(Variable::String)),
+        None => out.extend(value.rsplit(separator).map(Variable::String)),
+    }
+    Variable::Array(out.into_bump_slice())
+}
+
+pub(crate) fn fn_split_n<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, separator, count] = args(v);
+    let arena = ctx.arena();
+    let mut rest = value.to_str(arena);
+    let separator = separator.to_str(arena);
+    let count = count.to_integer().unwrap_or_default() as usize;
+    if separator.is_empty() {
+        return collect_strs(arena, rest.splitn(count.saturating_add(1), EMPTY_SEPARATOR));
+    }
+
+    let mut out = BumpVec::new_in(arena);
+    for _ in 0..count {
+        match rest.split_once(separator) {
+            Some((head, tail)) => {
+                out.push(Variable::String(head));
+                rest = tail;
+            }
+            None => break,
+        }
+    }
+    out.push(Variable::String(rest));
+    Variable::Array(out.into_bump_slice())
+}
+
+pub(crate) fn fn_split_once<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, separator] = args(v);
+    let arena = ctx.arena();
+    value
+        .to_str(arena)
+        .split_once(separator.to_str(arena))
+        .map(|parts| pair(arena, parts))
+        .unwrap_or_default()
+}
+
+pub(crate) fn fn_rsplit_once<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, separator] = args(v);
+    let arena = ctx.arena();
+    value
+        .to_str(arena)
+        .rsplit_once(separator.to_str(arena))
+        .map(|parts| pair(arena, parts))
+        .unwrap_or_default()
+}
+
+pub(crate) fn fn_hash<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, algorithm] = args(v);
+    let arena = ctx.arena();
+    let value = value.to_str(arena).as_bytes();
+
+    let hex = |digest: &[u8]| Variable::String(kernels::hex_encode(digest, arena));
+    match algorithm.to_str(arena) {
+        "md5" => hex(&md5::compute(value).0),
+        "sha1" => hex(&Sha1::digest(value)),
+        "sha256" => hex(&Sha256::digest(value)),
+        "sha512" => hex(&Sha512::digest(value)),
+        _ => Variable::default(),
     }
 }
 
-pub(crate) fn fn_split_n(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap().into_string();
-    let arg = v.next().unwrap().into_string();
-    let num = v.next().unwrap().to_integer().unwrap_or_default() as usize;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::functions::SyncFn;
 
-    fn split_n<'x, 'y>(s: &'x str, arg: &'y str, num: usize, mut f: impl FnMut(&'x str)) {
-        let mut s = s;
-        for _ in 0..num {
-            if let Some((a, b)) = s.split_once(arg) {
-                f(a);
-                s = b;
-            } else {
-                break;
+    fn split_n<'a>(
+        arena: &'a Bump,
+        value: &'a str,
+        separator: &'a str,
+        count: i64,
+    ) -> Vec<&'a str> {
+        let ctx = FnCtx::new(arena);
+        match fn_split_n(
+            &ctx,
+            &[
+                Variable::String(value),
+                Variable::String(separator),
+                Variable::Integer(count),
+            ],
+        ) {
+            Variable::Array(items) => items.iter().map(|item| item.to_str(arena)).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn split_n_empty_separator_follows_std_splitn() {
+        let arena = Bump::new();
+        for value in ["", "ab", "ünï"] {
+            for count in [-1, 0, 1, 2, 3, 100, i64::MAX] {
+                let expected = value
+                    .splitn((count as usize).saturating_add(1), "")
+                    .collect::<Vec<_>>();
+                assert_eq!(split_n(&arena, value, "", count), expected);
             }
         }
-        f(s);
+        assert_eq!(split_n(&arena, "ab", "", -1), ["", "a", "b", ""]);
+        assert_eq!(split_n(&arena, "ab", "", 1), ["", "ab"]);
+        assert_eq!(split_n(&arena, "a,b,c", ",", -1), ["a", "b", "c"]);
+        assert_eq!(split_n(&arena, "a,b,c", ",", 1), ["a", "b,c"]);
     }
 
-    let mut result = Vec::new();
-    match value {
-        StringCow::Borrowed(s) => split_n(s, arg.as_str(), num, |s| result.push(Variable::from(s))),
-        StringCow::Owned(s) => split_n(&s, arg.as_str(), num, |s| {
-            result.push(Variable::from(CompactString::new(s)))
-        }),
-    }
-
-    result.into()
-}
-
-pub(crate) fn fn_split_once(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap().into_string();
-    let arg = v.next().unwrap().into_string();
-
-    match value {
-        StringCow::Borrowed(s) => s
-            .split_once(arg.as_str())
-            .map(|(a, b)| Variable::Array(vec![Variable::from(a), Variable::from(b)]))
-            .unwrap_or_default(),
-        StringCow::Owned(s) => s
-            .split_once(arg.as_str())
-            .map(|(a, b)| {
-                Variable::Array(vec![
-                    Variable::from(CompactString::new(a)),
-                    Variable::from(CompactString::new(b)),
-                ])
-            })
-            .unwrap_or_default(),
-    }
-}
-
-pub(crate) fn fn_rsplit_once(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap().into_string();
-    let arg = v.next().unwrap().into_string();
-
-    match value {
-        StringCow::Borrowed(s) => s
-            .rsplit_once(arg.as_str())
-            .map(|(a, b)| Variable::Array(vec![Variable::from(a), Variable::from(b)]))
-            .unwrap_or_default(),
-        StringCow::Owned(s) => s
-            .rsplit_once(arg.as_str())
-            .map(|(a, b)| {
-                Variable::Array(vec![
-                    Variable::from(CompactString::new(a)),
-                    Variable::from(CompactString::new(b)),
-                ])
-            })
-            .unwrap_or_default(),
-    }
-}
-
-pub(crate) fn fn_hash(v: Vec<Variable>) -> Variable {
-    use sha1::Digest;
-    let mut v = v.into_iter();
-    let value = v.next().unwrap().into_string();
-    let algo = v.next().unwrap().into_string();
-
-    match algo.as_str() {
-        "md5" => format_compact!("{:x}", md5::compute(value.as_bytes())).into(),
-        "sha1" => {
-            let mut hasher = Sha1::new();
-            hasher.update(value.as_bytes());
-            hasher.finalize().hex_encode().to_compact_string().into()
+    #[test]
+    fn split_matches_std() {
+        let arena = Bump::new();
+        let ctx = FnCtx::new(&arena);
+        for value in [
+            "",
+            "a",
+            "a b  c",
+            " lead trail ",
+            "ünï cödé",
+            "a::b::::c",
+            "aaaa",
+        ] {
+            for separator in ["", " ", ":", "::", "aa", "ö", "missing"] {
+                let args = [Variable::String(value), Variable::String(separator)];
+                for (function, expected) in [
+                    (
+                        fn_split as SyncFn,
+                        value.split(separator).collect::<Vec<_>>(),
+                    ),
+                    (fn_rsplit, value.rsplit(separator).collect::<Vec<_>>()),
+                ] {
+                    let Variable::Array(items) = function(&ctx, &args) else {
+                        panic!("split returns an array");
+                    };
+                    let items = items
+                        .iter()
+                        .map(|item| item.to_str(&arena))
+                        .collect::<Vec<_>>();
+                    assert_eq!(items, expected, "{value:?} {separator:?}");
+                }
+            }
         }
-        "sha256" => {
-            let mut hasher = Sha256::new();
-            hasher.update(value.as_bytes());
-            hasher.finalize().hex_encode().to_compact_string().into()
+    }
+
+    #[test]
+    fn case_conversion_borrows_when_unchanged() {
+        let arena = Bump::new();
+        for text in ["plain ascii", "ünïcödé", "σς"] {
+            assert!(std::ptr::eq(kernels::to_lowercase(text, &arena), text));
         }
-        "sha512" => {
-            let mut hasher = Sha512::new();
-            hasher.update(value.as_bytes());
-            hasher.finalize().hex_encode().to_compact_string().into()
+        for text in ["PLAIN ASCII", "ÜNÏCÖDÉ"] {
+            assert!(std::ptr::eq(kernels::to_uppercase(text, &arena), text));
         }
-        _ => Variable::default(),
+        assert_eq!(arena.allocated_bytes(), 0);
+    }
+
+    #[test]
+    fn case_conversion_follows_std() {
+        let arena = Bump::new();
+        for text in [
+            "ΟΔΟΣ ΣΊΣΥΦΟΣ",
+            "\u{212A}elvin İ",
+            "straße ﬁ",
+            "ABCDEFGHIJKLMNOPΣ",
+            "Plain Ascii Text With Σ",
+        ] {
+            assert_eq!(kernels::to_lowercase(text, &arena), text.to_lowercase());
+            assert_eq!(kernels::to_uppercase(text, &arena), text.to_uppercase());
+        }
     }
 }

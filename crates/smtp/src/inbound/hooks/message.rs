@@ -20,6 +20,7 @@ use ahash::AHashMap;
 use common::{
     DAEMON_NAME,
     config::smtp::session::{MTAHook, Stage},
+    expr::Bump,
     network::SessionStream,
 };
 use compact_str::ToCompactString;
@@ -40,11 +41,12 @@ impl<T: SessionStream> Session<T> {
         }
 
         let mut modifications = Vec::new();
+        let mut arena = Bump::new();
         for mta_hook in mta_hooks {
             if !mta_hook.run_on_stage.contains(&stage)
                 || !self
                     .server
-                    .eval_if(&mta_hook.enable, self, self.data.session_id)
+                    .eval_if(&mta_hook.enable, self, &mut arena, self.data.session_id)
                     .await
                     .unwrap_or(false)
             {

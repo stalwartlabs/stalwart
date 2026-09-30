@@ -7,10 +7,10 @@
 use super::{
     ExpressionItem,
     parser::ExpressionParser,
+    program::{Program, ProgramBuilder},
     tokenizer::{TokenMap, Tokenizer},
 };
-use crate::expr::{Constant, Expression};
-use compact_str::CompactString;
+use crate::expr::Expression;
 use registry::{
     schema::{
         prelude::{ExpressionContext, Property},
@@ -26,37 +26,27 @@ pub struct IfThen {
     pub then: Expression,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct IfBlock {
     pub id: ObjectId,
     pub property: Property,
     pub if_then: Box<[IfThen]>,
     pub default: Expression,
+    pub(crate) program: Program,
 }
 
-impl IfBlock {
-    pub fn new_default(id: ObjectId, expr_ctx: ExpressionContext<'_>) -> Self {
-        let token_map = TokenMap::default();
-
-        if let Some(default) = expr_ctx.default {
-            Self {
-                id,
-                property: expr_ctx.property,
-                if_then: default
-                    .match_
-                    .into_iter()
-                    .map(|match_| IfThen {
-                        expr: Expression::parse(&token_map, &match_.if_),
-                        then: Expression::parse(&token_map, &match_.then),
-                    })
-                    .collect(),
-                default: Expression::parse(&token_map, &default.else_),
-            }
-        } else {
-            Self::empty(id, expr_ctx.property)
-        }
+impl PartialEq for IfBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.property == other.property
+            && self.if_then == other.if_then
+            && self.default == other.default
     }
+}
 
+impl Eq for IfBlock {}
+
+impl IfBlock {
     pub fn empty(id: ObjectId, property: Property) -> Self {
         Self {
             id,
@@ -65,19 +55,74 @@ impl IfBlock {
             default: Expression {
                 items: Default::default(),
             },
+            program: Program::default(),
         }
+    }
+
+    pub fn new(
+        id: ObjectId,
+        property: Property,
+        if_then: Box<[IfThen]>,
+        default: Expression,
+    ) -> Self {
+        let mut block = Self {
+            id,
+            property,
+            if_then,
+            default,
+            program: Program::default(),
+        };
+        if !block.is_empty() {
+            block.program = block.lower();
+        }
+        block
+    }
+
+    fn lower(&self) -> Program {
+        let (ops, widest) = self
+            .if_then
+            .iter()
+            .flat_map(|if_then| [&if_then.expr, &if_then.then])
+            .chain([&self.default])
+            .fold((2 * self.if_then.len() + 1, 0), |(ops, widest), expr| {
+                (ops + expr.items.len(), widest.max(expr.items.len()))
+            });
+        let mut builder = ProgramBuilder::with_capacity(ops, widest);
+        for if_then in &self.if_then {
+            builder.push_expression(&if_then.expr.items);
+            let test = builder.push_test();
+            builder.push_expression(&if_then.then.items);
+            builder.push_return();
+            builder.patch_test(test);
+        }
+        builder.push_expression(&self.default.items);
+        builder.push_return();
+        builder.build()
     }
 
     pub fn is_empty(&self) -> bool {
         self.default.is_empty() && self.if_then.is_empty()
     }
+
+    pub fn all_items(&self) -> impl Iterator<Item = &ExpressionItem> {
+        self.if_then
+            .iter()
+            .flat_map(|if_then| if_then.expr.items().iter().chain(if_then.then.items()))
+            .chain(self.default.items())
+    }
 }
 
 impl Expression {
-    pub fn parse(token_map: &TokenMap, expr: &str) -> Self {
-        ExpressionParser::new(Tokenizer::new(expr, token_map))
-            .parse()
-            .unwrap()
+    pub fn parse(token_map: &TokenMap, expr: &str) -> Result<Self, String> {
+        ExpressionParser::default().parse(Tokenizer::new(expr, token_map))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn items(&self) -> &[ExpressionItem] {
+        &self.items
     }
 }
 
@@ -151,7 +196,8 @@ impl BootstrapExprExt for Bootstrap {
             .with_variables(expr_ctx.allowed_variables)
             .with_constants(expr_ctx.allowed_constants);
 
-        let default = match ExpressionParser::new(Tokenizer::new(&expr.else_, &token_map)).parse() {
+        let mut parser = ExpressionParser::default();
+        let default = match parser.parse(Tokenizer::new(&expr.else_, &token_map)) {
             Ok(expr) => expr,
             Err(err) => {
                 self.invalid_property(
@@ -164,29 +210,27 @@ impl BootstrapExprExt for Bootstrap {
         };
 
         for (num, match_) in expr.match_.iter().enumerate() {
-            match ExpressionParser::new(Tokenizer::new(&match_.if_, &token_map)).parse() {
-                Ok(if_expr) => {
-                    match ExpressionParser::new(Tokenizer::new(&match_.then, &token_map)).parse() {
-                        Ok(then_expr) => {
-                            if_then.push(IfThen {
-                                expr: if_expr,
-                                then: then_expr,
-                            });
-                        }
-                        Err(err) => {
-                            self.invalid_property(
-                                id,
-                                expr_ctx.property,
-                                format!(
-                                    "Error parsing 'then' expression in condition #{}: {}",
-                                    num + 1,
-                                    err
-                                ),
-                            );
-                            return None;
-                        }
+            match parser.parse(Tokenizer::new(&match_.if_, &token_map)) {
+                Ok(if_expr) => match parser.parse(Tokenizer::new(&match_.then, &token_map)) {
+                    Ok(then_expr) => {
+                        if_then.push(IfThen {
+                            expr: if_expr,
+                            then: then_expr,
+                        });
                     }
-                }
+                    Err(err) => {
+                        self.invalid_property(
+                            id,
+                            expr_ctx.property,
+                            format!(
+                                "Error parsing 'then' expression in condition #{}: {}",
+                                num + 1,
+                                err
+                            ),
+                        );
+                        return None;
+                    }
+                },
                 Err(err) => {
                     self.invalid_property(
                         id,
@@ -202,49 +246,33 @@ impl BootstrapExprExt for Bootstrap {
             }
         }
 
-        Some(IfBlock {
+        Some(IfBlock::new(
             id,
-            property: expr_ctx.property,
-            if_then: if_then.into_boxed_slice(),
+            expr_ctx.property,
+            if_then.into_boxed_slice(),
             default,
-        })
+        ))
     }
 }
 
+#[cfg(test)]
 impl IfBlock {
-    pub fn into_default(self, id: ObjectId, property: Property) -> IfBlock {
-        IfBlock {
-            id,
-            property,
-            if_then: Default::default(),
-            default: self.default,
-        }
-    }
+    pub(crate) fn compile_test(if_then: &[(&str, &str)], default: &str) -> Self {
+        use registry::schema::prelude::ObjectType;
 
-    pub fn all_items(&self) -> impl Iterator<Item = &ExpressionItem> {
-        self.if_then
-            .iter()
-            .flat_map(|if_then| if_then.expr.items().iter().chain(if_then.then.items()))
-            .chain(self.default.items())
-    }
-
-    pub fn default_string(&self) -> Option<&str> {
-        for expr_item in &self.default.items {
-            if let ExpressionItem::Constant(Constant::String(value)) = expr_item {
-                return Some(value.as_str());
-            }
-        }
-
-        None
-    }
-
-    pub fn into_default_string(self) -> Option<CompactString> {
-        for expr_item in self.default.items {
-            if let ExpressionItem::Constant(Constant::String(value)) = expr_item {
-                return Some(value);
-            }
-        }
-
-        None
+        let token_map = TokenMap::default();
+        let parse = |expr: &str| Expression::parse(&token_map, expr).expect("expression parses");
+        IfBlock::new(
+            ObjectType::SpamRule.singleton(),
+            Property::Condition,
+            if_then
+                .iter()
+                .map(|(expr, then)| IfThen {
+                    expr: parse(expr),
+                    then: parse(then),
+                })
+                .collect(),
+            parse(default),
+        )
     }
 }

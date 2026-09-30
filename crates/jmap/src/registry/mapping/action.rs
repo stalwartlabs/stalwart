@@ -408,7 +408,7 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
             _ => (0.0, SpamClassifyTagDisposition::Reject),
         };
         request.tags.append(
-            tag,
+            tag.into_string(),
             SpamClassifyTag {
                 disposition,
                 score: (score as f64).into(),

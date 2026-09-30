@@ -6,10 +6,13 @@
 
 use crate::utils::server::TestServerBuilder;
 use ::smtp::outbound::NextHop;
-use common::config::smtp::{
-    queue::{MxConfig, QueueExpiry, QueueName},
-    report::AggregateFrequency,
-    resolver::{Mode, MxPattern, Policy},
+use common::{
+    config::smtp::{
+        queue::{MxConfig, QueueExpiry, QueueName},
+        report::AggregateFrequency,
+        resolver::{Mode, MxPattern, Policy},
+    },
+    expr::Bump,
 };
 use mail_auth::{DnssecStatus, IpLookupStrategy, Mx, RecordSet};
 use mail_parser::DateTime;
@@ -215,6 +218,7 @@ async fn strategies() {
             .eval_if::<String, _>(
                 &test.server.core.smtp.queue.queue,
                 &QueueEnvelope::new(&message, &message.recipients[0]),
+                &mut Bump::new(),
                 0,
             )
             .await

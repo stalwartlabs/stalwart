@@ -649,7 +649,7 @@ impl<'x> TryFrom<Variable<'x>> for IpLookupStrategy {
                 _ => Err(()),
             },
             Variable::String(value) => {
-                match value.as_str() {
+                match value {
                     "ipv4_only" => Ok(IpLookupStrategy::Ipv4Only),
                     "ipv6_only" => Ok(IpLookupStrategy::Ipv6Only),
                     //"ipv4_and_ipv6" => IpLookupStrategy::Ipv4AndIpv6,

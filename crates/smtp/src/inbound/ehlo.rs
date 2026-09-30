@@ -86,12 +86,7 @@ impl<T: SessionStream> Session<T> {
 
             // Sieve filtering
             if let Some((script, script_id)) = self
-                .server
-                .eval_if::<String, _>(
-                    &self.server.core.smtp.session.ehlo.script,
-                    self,
-                    self.data.session_id,
-                )
+                .eval_if::<String>(&self.server.core.smtp.session.ehlo.script)
                 .await
                 .and_then(|name| {
                     self.server
@@ -147,70 +142,39 @@ impl<T: SessionStream> Session<T> {
         let dc = &self.server.core.smtp.session.data;
 
         // Pipelining
-        if self
-            .server
-            .eval_if(&ec.pipelining, self, self.data.session_id)
-            .await
-            .unwrap_or(true)
-        {
+        if self.eval_if(&ec.pipelining).await.unwrap_or(true) {
             response.capabilities |= EXT_PIPELINING;
         }
 
         // Chunking
-        if self
-            .server
-            .eval_if(&ec.chunking, self, self.data.session_id)
-            .await
-            .unwrap_or(true)
-        {
+        if self.eval_if(&ec.chunking).await.unwrap_or(true) {
             response.capabilities |= EXT_CHUNKING;
         }
 
         // Address Expansion
-        if self
-            .server
-            .eval_if(&ec.expn, self, self.data.session_id)
-            .await
-            .unwrap_or(false)
-        {
+        if self.eval_if(&ec.expn).await.unwrap_or(false) {
             response.capabilities |= EXT_EXPN;
         }
 
         // Recipient Verification
-        if self
-            .server
-            .eval_if(&ec.vrfy, self, self.data.session_id)
-            .await
-            .unwrap_or(false)
-        {
+        if self.eval_if(&ec.vrfy).await.unwrap_or(false) {
             response.capabilities |= EXT_VRFY;
         }
 
         // Require TLS
-        if self
-            .server
-            .eval_if(&ec.requiretls, self, self.data.session_id)
-            .await
-            .unwrap_or(true)
-        {
+        if self.eval_if(&ec.requiretls).await.unwrap_or(true) {
             response.capabilities |= EXT_REQUIRE_TLS;
         }
 
         // DSN
-        if self
-            .server
-            .eval_if(&ec.dsn, self, self.data.session_id)
-            .await
-            .unwrap_or(false)
-        {
+        if self.eval_if(&ec.dsn).await.unwrap_or(false) {
             response.capabilities |= EXT_DSN;
         }
 
         // Authentication
         if !self.is_authenticated() {
             response.auth_mechanisms = self
-                .server
-                .eval_if::<Mechanism, _>(&ac.mechanisms, self, self.data.session_id)
+                .eval_if::<Mechanism>(&ac.mechanisms)
                 .await
                 .unwrap_or_default()
                 .into();
@@ -220,11 +184,7 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Future release
-        if let Some(value) = self
-            .server
-            .eval_if::<Duration, _>(&ec.future_release, self, self.data.session_id)
-            .await
-        {
+        if let Some(value) = self.eval_if::<Duration>(&ec.future_release).await {
             response.capabilities |= EXT_FUTURE_RELEASE;
             response.future_release_interval = value.as_secs();
             response.future_release_datetime = SystemTime::now()
@@ -235,29 +195,20 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Deliver By
-        if let Some(value) = self
-            .server
-            .eval_if::<Duration, _>(&ec.deliver_by, self, self.data.session_id)
-            .await
-        {
+        if let Some(value) = self.eval_if::<Duration>(&ec.deliver_by).await {
             response.capabilities |= EXT_DELIVER_BY;
             response.deliver_by = value.as_secs();
         }
 
         // Priority
-        if let Some(value) = self
-            .server
-            .eval_if::<MtPriority, _>(&ec.mt_priority, self, self.data.session_id)
-            .await
-        {
+        if let Some(value) = self.eval_if::<MtPriority>(&ec.mt_priority).await {
             response.capabilities |= EXT_MT_PRIORITY;
             response.mt_priority = value;
         }
 
         // Size
         response.size = self
-            .server
-            .eval_if(&dc.max_message_size, self, self.data.session_id)
+            .eval_if(&dc.max_message_size)
             .await
             .unwrap_or(25 * 1024 * 1024);
         if response.size > 0 {
@@ -265,11 +216,7 @@ impl<T: SessionStream> Session<T> {
         }
 
         // No soliciting
-        if let Some(value) = self
-            .server
-            .eval_if::<String, _>(&ec.no_soliciting, self, self.data.session_id)
-            .await
-        {
+        if let Some(value) = self.eval_if::<String>(&ec.no_soliciting).await {
             response.capabilities |= EXT_NO_SOLICITING;
             response.no_soliciting = if !value.is_empty() {
                 value.to_string().into()

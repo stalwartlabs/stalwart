@@ -17,7 +17,7 @@ use crate::{
             },
         },
     },
-    expr::{Variable, functions::ResolveVariable},
+    expr::{Bump, Variable, functions::ResolveVariable},
     manager::SPAM_CLASSIFIER_KEY,
     network::RcptResolution,
 };
@@ -61,10 +61,12 @@ impl Server {
         if domain.flags & DOMAIN_FLAG_SUB_ADDRESSING != 0 {
             if let Some(sub_addressing) = &domain.sub_addressing_custom {
                 // Custom sub-addressing resolution
+                let mut arena = Bump::new();
                 if let Some(result) = self
                     .eval_if::<String, _>(
                         sub_addressing,
                         &AddressResolver(local_part.as_ref()),
+                        &mut arena,
                         session_id,
                     )
                     .await
@@ -523,11 +525,7 @@ impl Server {
 pub struct AddressResolver<'x>(pub &'x str);
 
 impl ResolveVariable for AddressResolver<'_> {
-    fn resolve_variable(&'_ self, _: ExpressionVariable) -> crate::expr::Variable<'_> {
+    fn resolve_variable<'a>(&'a self, _: ExpressionVariable, _: &'a Bump) -> Variable<'a> {
         Variable::from(self.0)
-    }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
     }
 }

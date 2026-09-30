@@ -6,9 +6,9 @@
 
 use super::{BinaryOperator, Expression, ExpressionItem, Token, tokenizer::Tokenizer};
 
-pub struct ExpressionParser<'x> {
-    pub(crate) tokenizer: Tokenizer<'x>,
-    pub(crate) output: Vec<ExpressionItem>,
+#[derive(Default)]
+pub struct ExpressionParser {
+    output: Vec<ExpressionItem>,
     operator_stack: Vec<(Token, Option<usize>)>,
     arg_count: Vec<i32>,
 }
@@ -16,20 +16,14 @@ pub struct ExpressionParser<'x> {
 pub(crate) const ID_ARRAY_ACCESS: u32 = u32::MAX;
 pub(crate) const ID_ARRAY_BUILD: u32 = u32::MAX - 1;
 
-impl<'x> ExpressionParser<'x> {
-    pub fn new(tokenizer: Tokenizer<'x>) -> Self {
-        Self {
-            tokenizer,
-            output: Vec::new(),
-            operator_stack: Vec::new(),
-            arg_count: Vec::new(),
-        }
-    }
-
-    pub fn parse(mut self) -> Result<Expression, String> {
+impl ExpressionParser {
+    pub fn parse(&mut self, mut tokenizer: Tokenizer<'_>) -> Result<Expression, String> {
+        self.output.clear();
+        self.operator_stack.clear();
+        self.arg_count.clear();
         let mut last_is_var_or_fnc = false;
 
-        while let Some(token) = self.tokenizer.next()? {
+        while let Some(token) = tokenizer.next()? {
             let mut is_var_or_fnc = false;
             match token {
                 Token::Variable(v) => {
@@ -77,7 +71,7 @@ impl<'x> ExpressionParser<'x> {
 
                     match self.operator_stack.last() {
                         Some((Token::Function { id, num_args, name }, _)) => {
-                            let got_args = self.arg_count.pop().unwrap();
+                            let got_args = self.arg_count.pop().unwrap_or_default();
                             if got_args != *num_args as i32 {
                                 return Err(if *id != u32::MAX {
                                     format!(
@@ -101,19 +95,20 @@ impl<'x> ExpressionParser<'x> {
                             self.operator_stack.pop();
                             self.output.push(expr);
                         }
-                        Some((Token::Regex(regex), _)) => {
-                            if self.arg_count.pop().unwrap() != 1 {
+                        Some((Token::Regex(_), _)) => {
+                            if self.arg_count.pop().unwrap_or_default() != 1 {
                                 return Err("Expression function \"matches\" expected 2 arguments"
                                     .to_string());
                             }
-                            self.output.push(ExpressionItem::Regex(regex.clone()));
-                            self.operator_stack.pop();
+                            if let Some((Token::Regex(regex), _)) = self.operator_stack.pop() {
+                                self.output.push(ExpressionItem::Regex(regex));
+                            }
                         }
                         Some((Token::System(setting), _)) => {
-                            if self.arg_count.pop().unwrap() != 0 {
+                            if self.arg_count.pop().unwrap_or_default() != 0 {
                                 return Err("Expression function expected 1 argument".to_string());
                             }
-                            self.output.push(ExpressionItem::System(setting.clone()));
+                            self.output.push(ExpressionItem::System(*setting));
                             self.operator_stack.pop();
                         }
                         _ => {}
@@ -180,7 +175,7 @@ impl<'x> ExpressionParser<'x> {
                     self.operator_stack.push((
                         Token::Function {
                             id,
-                            name: "array".into(),
+                            name: "array",
                             num_args,
                         },
                         None,
@@ -223,7 +218,7 @@ impl<'x> ExpressionParser<'x> {
 
         if self.operator_stack.is_empty() {
             Ok(Expression {
-                items: self.output.into_boxed_slice(),
+                items: self.output.drain(..).collect(),
             })
         } else {
             Err("Invalid expression".to_string())

@@ -24,6 +24,7 @@ use common::{
             session::Stage,
         },
     },
+    expr::Bump,
     network::SessionStream,
     scripts::ScriptModification,
 };
@@ -108,11 +109,7 @@ impl<T: SessionStream> Session<T> {
         let ac = &self.server.core.smtp.mail_auth;
         let rc = &self.server.core.smtp.report;
         if auth_message.received_headers_count()
-            > self
-                .server
-                .eval_if(&dc.max_received_headers, self, self.data.session_id)
-                .await
-                .unwrap_or(50)
+            > self.eval_if(&dc.max_received_headers).await.unwrap_or(50)
         {
             trc::event!(
                 Smtp(SmtpEvent::LoopDetected),
@@ -126,13 +123,11 @@ impl<T: SessionStream> Session<T> {
 
         // Verify DKIM
         let dkim = self
-            .server
-            .eval_if(&ac.dkim.verify, self, self.data.session_id)
+            .eval_if(&ac.dkim.verify)
             .await
             .unwrap_or(VerifyStrategy::Relaxed);
         let dmarc = self
-            .server
-            .eval_if(&ac.dmarc.verify, self, self.data.session_id)
+            .eval_if(&ac.dmarc.verify)
             .await
             .unwrap_or(VerifyStrategy::Relaxed);
         let dkim_output = if dkim.verify() || dmarc.verify() {
@@ -163,11 +158,7 @@ impl<T: SessionStream> Session<T> {
             let rejected = strict && !pass;
 
             // Send reports for failed signatures
-            if let Some(rate) = self
-                .server
-                .eval_if::<Rate, _>(&rc.dkim.send, self, self.data.session_id)
-                .await
-            {
+            if let Some(rate) = self.eval_if::<Rate>(&rc.dkim.send).await {
                 for output in &dkim_output {
                     if let Some(rcpt) = output.report_address() {
                         Box::pin(self.send_dkim_report(
@@ -213,8 +204,7 @@ impl<T: SessionStream> Session<T> {
 
         // Verify ARC
         let arc = self
-            .server
-            .eval_if(&ac.arc.verify, self, self.data.session_id)
+            .eval_if(&ac.arc.verify)
             .await
             .unwrap_or(VerifyStrategy::Relaxed);
         let arc_output = if arc.verify() {
@@ -482,32 +472,18 @@ impl<T: SessionStream> Session<T> {
         // Add Received header
         let message_id = self.server.inner.data.queue_id_gen.generate();
         let mut headers = Vec::with_capacity(64);
-        if self
-            .server
-            .eval_if(&dc.add_received, self, self.data.session_id)
-            .await
-            .unwrap_or(true)
-        {
+        if self.eval_if(&dc.add_received).await.unwrap_or(true) {
             self.write_received(&mut headers, message_id)
         }
 
         // Add authentication results header
-        if self
-            .server
-            .eval_if(&dc.add_auth_results, self, self.data.session_id)
-            .await
-            .unwrap_or(true)
-        {
+        if self.eval_if(&dc.add_auth_results).await.unwrap_or(true) {
             auth_results.write_header(&mut headers);
         }
 
         // Add Received-SPF header
         if let Some(spf_output) = &self.data.spf_mail_from
-            && self
-                .server
-                .eval_if(&dc.add_received_spf, self, self.data.session_id)
-                .await
-                .unwrap_or(true)
+            && self.eval_if(&dc.add_received_spf).await.unwrap_or(true)
         {
             ReceivedSpf::new(
                 spf_output,
@@ -524,13 +500,7 @@ impl<T: SessionStream> Session<T> {
         // Run SPAM filter
         let mut train_spam = None;
         let mut spam_result = None;
-        if self.server.core.spam.enabled
-            && self
-                .server
-                .eval_if(&dc.spam_filter, self, self.data.session_id)
-                .await
-                .unwrap_or(true)
-        {
+        if self.server.core.spam.enabled && self.eval_if(&dc.spam_filter).await.unwrap_or(true) {
             match Box::pin(self.spam_classify(
                 &parsed_message,
                 &dkim_output,
@@ -629,11 +599,8 @@ impl<T: SessionStream> Session<T> {
         };
 
         // Sieve filtering
-        if let Some((script, script_id)) = self
-            .server
-            .eval_if::<String, _>(&dc.script, self, self.data.session_id)
-            .await
-            .and_then(|name| {
+        if let Some((script, script_id)) =
+            self.eval_if::<String>(&dc.script).await.and_then(|name| {
                 self.server
                     .get_trusted_sieve_script(&name, self.data.session_id)
                     .map(|s| (s, name))
@@ -757,36 +724,19 @@ impl<T: SessionStream> Session<T> {
             .await;
 
         // Add Return-Path
-        if self
-            .server
-            .eval_if(&dc.add_return_path, self, self.data.session_id)
-            .await
-            .unwrap_or(true)
-        {
+        if self.eval_if(&dc.add_return_path).await.unwrap_or(true) {
             headers.extend_from_slice(b"Return-Path: <");
             headers.extend_from_slice(message.message.return_path.as_bytes());
             headers.extend_from_slice(b">\r\n");
         }
 
         // Add any missing headers
-        if !has_date_header
-            && self
-                .server
-                .eval_if(&dc.add_date, self, self.data.session_id)
-                .await
-                .unwrap_or(true)
-        {
+        if !has_date_header && self.eval_if(&dc.add_date).await.unwrap_or(true) {
             headers.extend_from_slice(b"Date: ");
             headers.extend_from_slice(Date::now().to_rfc822().as_bytes());
             headers.extend_from_slice(b"\r\n");
         }
-        if !has_message_id_header
-            && self
-                .server
-                .eval_if(&dc.add_message_id, self, self.data.session_id)
-                .await
-                .unwrap_or(true)
-        {
+        if !has_message_id_header && self.eval_if(&dc.add_message_id).await.unwrap_or(true) {
             headers.extend_from_slice(b"Message-ID: ");
             generate_message_id_header(&mut headers, &self.hostname);
             headers.extend_from_slice(b"\r\n");
@@ -861,6 +811,7 @@ impl<T: SessionStream> Session<T> {
 
         // Add recipients
         let future_release = self.data.future_release;
+        let mut arena = Bump::new();
         rcpt_to.sort_unstable();
         for rcpt in rcpt_to {
             message.recipients.push(
@@ -897,6 +848,7 @@ impl<T: SessionStream> Session<T> {
                     .eval_if::<String, _>(
                         &self.server.core.smtp.queue.queue,
                         &envelope,
+                        &mut arena,
                         self.data.session_id,
                     )
                     .await
@@ -986,12 +938,7 @@ impl<T: SessionStream> Session<T> {
             Some(b"503 5.5.1 RCPT is required first.\r\n")
         } else if self.data.messages_sent
             < self
-                .server
-                .eval_if(
-                    &self.server.core.smtp.session.data.max_messages,
-                    self,
-                    self.data.session_id,
-                )
+                .eval_if(&self.server.core.smtp.session.data.max_messages)
                 .await
                 .unwrap_or(10)
         {

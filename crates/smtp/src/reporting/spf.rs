@@ -8,7 +8,7 @@ use crate::{
     core::Session,
     reporting::{ReportAddress, send::MtaReportSend},
 };
-use common::network::SessionStream;
+use common::{expr::Bump, network::SessionStream};
 use compact_str::CompactString;
 use mail_auth::{
     AuthenticationResults, SpfOutput,
@@ -50,19 +50,20 @@ impl<T: SessionStream> Session<T> {
 
         // Generate report
         let config = &self.server.core.smtp.report.spf;
+        let mut arena = Bump::new();
         let from_addr = self
             .server
-            .eval_if(&config.address, self, self.data.session_id)
+            .eval_if(&config.address, self, &mut arena, self.data.session_id)
             .await
             .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_string());
         let from_name = self
             .server
-            .eval_if(&config.name, self, self.data.session_id)
+            .eval_if(&config.name, self, &mut arena, self.data.session_id)
             .await
             .unwrap_or_else(|| "Mailer Daemon".to_string());
         let subject = self
             .server
-            .eval_if(&config.subject, self, self.data.session_id)
+            .eval_if(&config.subject, self, &mut arena, self.data.session_id)
             .await
             .unwrap_or_else(|| "SPF Report".to_string());
         let spf_params = if let Some(mail_from) = &self.data.mail_from {

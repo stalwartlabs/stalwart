@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use capture::CaptureRegex;
 use compact_str::CompactString;
-use regex::Regex;
 use registry::schema::{
     enums::{ExpressionConstant, ExpressionVariable},
     structs::Rate,
 };
 use std::{
-    borrow::Cow,
-    fmt::{Display, Formatter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
     time::Duration,
@@ -22,11 +20,18 @@ use utils::cache::CacheItemWeight;
 
 use crate::expr::if_block::IfBlock;
 
+pub use bumpalo::{self, Bump};
+
+pub mod capture;
 pub mod eval;
 pub mod functions;
+pub mod guard;
 pub mod if_block;
+pub mod kernels;
 pub mod parser;
+pub(crate) mod program;
 pub mod tokenizer;
+pub mod variable;
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 #[repr(transparent)]
@@ -43,31 +48,27 @@ pub enum ExpressionItem {
     Constant(Constant),
     BinaryOperator(BinaryOperator),
     UnaryOperator(UnaryOperator),
-    Regex(Regex),
+    Regex(CaptureRegex),
     JmpIf { val: bool, pos: u32 },
     Function { id: u32, num_args: u32 },
     ArrayAccess,
     ArrayBuild(u32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Variable<'x> {
-    String(StringCow<'x>),
+    String(&'x str),
     Integer(i64),
     Float(f64),
-    Array(Vec<Variable<'x>>),
+    Array(&'x [Variable<'x>]),
     Constant(ExpressionConstant),
 }
 
-#[derive(Debug, Clone)]
-pub enum StringCow<'x> {
-    Owned(CompactString),
-    Borrowed(&'x str),
-}
+const _: () = assert!(std::mem::size_of::<Variable<'static>>() == 24);
 
 impl Default for Variable<'_> {
     fn default() -> Self {
-        Variable::String(StringCow::Borrowed(""))
+        Variable::String("")
     }
 }
 
@@ -154,13 +155,13 @@ pub enum Token {
     Global(CompactString),
     Capture(u32),
     Function {
-        name: Cow<'static, str>,
+        name: &'static str,
         id: u32,
         num_args: u32,
     },
     Constant(Constant),
     System(SystemVariable),
-    Regex(Regex),
+    Regex(CaptureRegex),
     BinaryOperator(BinaryOperator),
     UnaryOperator(UnaryOperator),
     OpenParen,
@@ -170,7 +171,7 @@ pub enum Token {
     Comma,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum SystemVariable {
     Hostname,
     Domain,
@@ -230,18 +231,12 @@ impl From<f64> for Variable<'_> {
 
 impl<'x> From<&'x str> for Variable<'x> {
     fn from(value: &'x str) -> Self {
-        Variable::String(StringCow::Borrowed(value))
+        Variable::String(value)
     }
 }
 
-impl From<CompactString> for Variable<'_> {
-    fn from(value: CompactString) -> Self {
-        Variable::String(StringCow::Owned(value))
-    }
-}
-
-impl<'x> From<Vec<Variable<'x>>> for Variable<'x> {
-    fn from(value: Vec<Variable<'x>>) -> Self {
+impl<'x> From<&'x [Variable<'x>]> for Variable<'x> {
+    fn from(value: &'x [Variable<'x>]) -> Self {
         Variable::Array(value)
     }
 }
@@ -345,84 +340,11 @@ impl<'x> TryFrom<Variable<'x>> for Duration {
             Variable::Integer(value) if value > 0 => Ok(Duration::from_millis(value as u64)),
             Variable::Float(value) if value > 0.0 => Ok(Duration::from_millis(value as u64)),
             Variable::String(value) if !value.is_empty() => {
-                registry::types::duration::Duration::from_str(value.as_str())
+                registry::types::duration::Duration::from_str(value)
                     .map(|v| v.into_inner())
                     .map_err(|_| ())
             }
             _ => Err(()),
-        }
-    }
-}
-
-impl StringCow<'_> {
-    pub fn as_str(&self) -> &str {
-        match self {
-            StringCow::Owned(s) => s.as_str(),
-            StringCow::Borrowed(s) => s,
-        }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            StringCow::Owned(s) => s.as_bytes(),
-            StringCow::Borrowed(s) => s.as_bytes(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match self {
-            StringCow::Owned(s) => s.is_empty(),
-            StringCow::Borrowed(s) => s.is_empty(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            StringCow::Owned(s) => s.len(),
-            StringCow::Borrowed(s) => s.len(),
-        }
-    }
-
-    pub fn into_owned(self) -> CompactString {
-        match self {
-            StringCow::Owned(s) => s,
-            StringCow::Borrowed(s) => s.into(),
-        }
-    }
-}
-
-impl<'x> From<Cow<'x, str>> for StringCow<'x> {
-    fn from(value: Cow<'x, str>) -> Self {
-        match value {
-            Cow::Borrowed(s) => StringCow::Borrowed(s),
-            Cow::Owned(s) => StringCow::Owned(s.into()),
-        }
-    }
-}
-
-impl From<CompactString> for StringCow<'_> {
-    fn from(value: CompactString) -> Self {
-        StringCow::Owned(value)
-    }
-}
-
-impl AsRef<str> for StringCow<'_> {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-impl AsRef<[u8]> for StringCow<'_> {
-    fn as_ref(&self) -> &[u8] {
-        self.as_str().as_bytes()
-    }
-}
-
-impl Display for StringCow<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StringCow::Owned(s) => write!(f, "{}", s),
-            StringCow::Borrowed(s) => write!(f, "{}", s),
         }
     }
 }
@@ -438,9 +360,9 @@ impl<'x> TryFrom<Variable<'x>> for Rate {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::Array(items) if items.len() == 2 => {
-                let requests = items[0].to_integer().ok_or(())?;
-                let period = items[1].to_integer().ok_or(())?;
+            Variable::Array([requests, period]) => {
+                let requests = requests.to_integer().ok_or(())?;
+                let period = period.to_integer().ok_or(())?;
 
                 if requests > 0 && period > 0 {
                     Ok(Rate {
@@ -461,7 +383,7 @@ impl<'x> TryFrom<Variable<'x>> for Ipv4Addr {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::String(value) => value.as_str().parse().map_err(|_| ()),
+            Variable::String(value) => value.parse().map_err(|_| ()),
             _ => Err(()),
         }
     }
@@ -472,7 +394,7 @@ impl<'x> TryFrom<Variable<'x>> for Ipv6Addr {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::String(value) => value.as_str().parse().map_err(|_| ()),
+            Variable::String(value) => value.parse().map_err(|_| ()),
             _ => Err(()),
         }
     }
@@ -483,24 +405,24 @@ impl<'x> TryFrom<Variable<'x>> for IpAddr {
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
         match value {
-            Variable::String(value) => value.as_str().parse().map_err(|_| ()),
+            Variable::String(value) => value.parse().map_err(|_| ()),
             _ => Err(()),
         }
     }
 }
 
-impl<'x, T: TryFrom<Variable<'x>>> TryFrom<Variable<'x>> for Vec<T>
-where
-    Result<Vec<T>, ()>: FromIterator<Result<T, <T as TryFrom<Variable<'x>>>::Error>>,
-{
+impl<'x, T: TryFrom<Variable<'x>>> TryFrom<Variable<'x>> for Vec<T> {
     type Error = ();
 
     fn try_from(value: Variable<'x>) -> Result<Self, Self::Error> {
-        value
-            .into_array()
-            .into_iter()
-            .map(|v| T::try_from(v))
-            .collect()
+        match value {
+            Variable::Array(items) => items
+                .iter()
+                .map(|item| T::try_from(*item).map_err(|_| ()))
+                .collect(),
+            value if !value.is_empty() => T::try_from(value).map(|item| vec![item]).map_err(|_| ()),
+            _ => Ok(Vec::new()),
+        }
     }
 }
 
@@ -519,5 +441,6 @@ impl CacheItemWeight for IfBlock {
                 .map(|if_then| if_then.expr.weight() + if_then.then.weight())
                 .sum::<u64>()
             + self.default.weight()
+            + self.program.weight()
     }
 }

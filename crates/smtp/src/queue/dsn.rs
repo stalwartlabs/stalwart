@@ -12,7 +12,7 @@ use super::{
 use crate::inbound::dkim::DkimSign;
 use crate::queue::spool::{DSN_RETRY, QueueParams};
 use crate::queue::{MessageWrapper, UnexpectedResponse};
-use common::Server;
+use common::{Server, expr::Bump};
 use compact_str::{CompactString, ToCompactString};
 use email::message::delivery::ORCPT_ADDR_TYPE;
 use mail_builder::MessageBuilder;
@@ -270,18 +270,20 @@ impl MessageWrapper {
         }
 
         // Obtain hostname and sender addresses
+        let mut arena = Bump::new();
         let from_name = server
-            .eval_if(&config.dsn.name, &self.message, self.span_id)
+            .eval_if(&config.dsn.name, &self.message, &mut arena, self.span_id)
             .await
             .unwrap_or_else(|| String::from("Mail Delivery Subsystem"));
         let from_addr = server
-            .eval_if(&config.dsn.address, &self.message, self.span_id)
+            .eval_if(&config.dsn.address, &self.message, &mut arena, self.span_id)
             .await
             .unwrap_or_else(|| String::from("MAILER-DAEMON@localhost"));
         let reporting_mta = server
             .eval_if(
                 &server.core.smtp.report.submitter,
                 &self.message,
+                &mut arena,
                 self.span_id,
             )
             .await
@@ -377,6 +379,7 @@ impl MessageWrapper {
     pub async fn update_next_dsn(&mut self, server: &Server, status: DsnStatus) {
         let now = now();
         let mut notify_changes = Vec::new();
+        let mut arena = Bump::new();
         for (rcpt_idx, rcpt) in self.message.recipients.iter().enumerate() {
             if matches!(
                 &rcpt.status,
@@ -391,7 +394,12 @@ impl MessageWrapper {
                 let envelope = QueueEnvelope::new(&self.message, rcpt);
 
                 let queue_id = server
-                    .eval_if::<String, _>(&server.core.smtp.queue.queue, &envelope, self.span_id)
+                    .eval_if::<String, _>(
+                        &server.core.smtp.queue.queue,
+                        &envelope,
+                        &mut arena,
+                        self.span_id,
+                    )
                     .await
                     .unwrap_or_else(|| "default".to_string());
                 let queue = server.get_queue_or_default(&queue_id, self.span_id);

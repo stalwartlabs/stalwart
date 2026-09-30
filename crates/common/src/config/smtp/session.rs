@@ -486,7 +486,7 @@ impl<'x> TryFrom<Variable<'x>> for Mechanism {
                 let mut mechanism = 0;
 
                 for item in items {
-                    match item {
+                    match *item {
                         Variable::Constant(value) => mechanism |= Mechanism::try_from(value)?.0,
                         _ => return Err(()),
                     }
@@ -537,7 +537,6 @@ impl<'x> TryFrom<Variable<'x>> for MtPriority {
                 _ => Err(()),
             },
             Variable::String(value) => {
-                let value = value.as_str();
                 if value.eq_ignore_ascii_case("MIXER") {
                     Ok(MtPriority::Mixer)
                 } else if value.eq_ignore_ascii_case("STANAG4406") {

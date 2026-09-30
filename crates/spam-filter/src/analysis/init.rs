@@ -10,11 +10,13 @@ use crate::{
     SpamFilterOutput, SpamFilterResult, TextPart,
     modules::html::{html_text_body, html_to_tokens},
 };
-use common::Server;
+use common::{Server, expr::Bump};
 use mail_auth::DmarcResult;
 use mail_parser::{HeaderName, Mailbox, PartKind, thread_name};
 use nlp::tokenizers::types::{TokenType, TypesTokenizer};
 use std::borrow::Cow;
+use store::ahash::AHashSet;
+use sync_wrapper::SyncWrapper;
 
 pub trait SpamFilterInit {
     fn spam_filter_init<'x>(&self, input: SpamFilterInput<'x>) -> SpamFilterContext<'x>;
@@ -23,6 +25,7 @@ pub trait SpamFilterInit {
 const POSTMASTER_ADDRESSES: [&str; 3] = ["postmaster", "mailer-daemon", "root"];
 const BYTES_PER_TOKEN: usize = 3;
 const MAX_RESERVED_TOKENS: usize = 1 << 16;
+const TAG_CAPACITY: usize = 64;
 
 impl SpamFilterInit for Server {
     fn spam_filter_init<'x>(&self, input: SpamFilterInput<'x>) -> SpamFilterContext<'x> {
@@ -169,7 +172,11 @@ impl<'x> SpamFilterContext<'x> {
                 domains: Default::default(),
             },
             input,
-            result: SpamFilterResult::default(),
+            result: SpamFilterResult {
+                tags: AHashSet::with_capacity(TAG_CAPACITY),
+                ..Default::default()
+            },
+            arena: SyncWrapper::new(Bump::new()),
         }
     }
 }

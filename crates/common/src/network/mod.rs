@@ -5,13 +5,9 @@
  */
 
 use self::limiter::{ConcurrencyLimiter, InFlight};
-use crate::{
-    Server,
-    config::server::ServerProtocol,
-    expr::{functions::ResolveVariable, *},
-};
+use crate::{Server, config::server::ServerProtocol};
 use compact_str::ToCompactString;
-use registry::{schema::enums::ExpressionVariable, types::ipmask::IpAddrOrMask};
+use registry::types::ipmask::IpAddrOrMask;
 use rustls::ServerConfig;
 use std::fmt::Debug;
 use std::{
@@ -261,25 +257,6 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
     ) -> impl std::future::Future<Output = ()> + Send;
 
     fn shutdown(&self) -> impl std::future::Future<Output = ()> + Send;
-}
-
-impl<T: SessionStream> ResolveVariable for SessionData<T> {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> crate::expr::Variable<'_> {
-        match variable {
-            ExpressionVariable::RemoteIp => self.remote_ip.to_compact_string().into(),
-            ExpressionVariable::RemotePort => self.remote_port.into(),
-            ExpressionVariable::LocalIp => self.local_ip.to_compact_string().into(),
-            ExpressionVariable::LocalPort => self.local_port.into(),
-            ExpressionVariable::Listener => self.instance.id.as_str().into(),
-            ExpressionVariable::Protocol => self.protocol.as_str().into(),
-            ExpressionVariable::IsTls => self.stream.is_tls().into(),
-            _ => crate::expr::Variable::default(),
-        }
-    }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
-    }
 }
 
 impl Debug for TcpAcceptor {

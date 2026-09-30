@@ -23,7 +23,6 @@ dns-update = { version = "0.5" }
 calcard = { version = "0.4", features = ["rkyv"] }
 ahash = { version = "0.8.12", features = ["serde"] }
 parking_lot = "0.12.5"
-regex = "1.13.1"
 proxy-header = { version = "0.1.2", features = ["tokio"] }
 arc-swap = "1.9.2"
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
@@ -82,6 +81,12 @@ zxcvbn = "3.1.1"
 pkcs8 = { version = "0.10.2", features = ["alloc", "std"] }
 quick-xml = "0.41"
 percent-encoding = "2.3.2"
+bumpalo = { version = "3.20.3", features = ["collections"] }
+regex-automata = { version = "0.4.18", default-features = false, features = ["std", "syntax", "meta", "nfa-pikevm", "nfa-backtrack", "hybrid", "dfa-onepass", "perf-inline", "perf-literal", "unicode"] }
+memchr = "2.8.3"
+simdutf8 = "0.1.5"
+itoa = "1.0.18"
+zmij = "1.0.23"
 
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.6"
@@ -99,6 +104,7 @@ redis = ["store/redis"]
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
+regex = "1.13.1"
 
 [lints]
 workspace = true

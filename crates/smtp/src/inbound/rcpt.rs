@@ -94,8 +94,7 @@ impl<T: SessionStream> Session<T> {
         // Address rewriting and Sieve filtering
         let rcpt_config = &self.server.core.smtp.session.rcpt;
         let rcpt_script = self
-            .server
-            .eval_if::<String, _>(&rcpt_config.script, self, self.data.session_id)
+            .eval_if::<String>(&rcpt_config.script)
             .await
             .and_then(|name| {
                 self.server
@@ -149,11 +148,7 @@ impl<T: SessionStream> Session<T> {
             }
 
             // Address rewriting
-            if let Some(new_address) = self
-                .server
-                .eval_if::<String, _>(&rcpt_config.rewrite, self, self.data.session_id)
-                .await
-            {
+            if let Some(new_address) = self.eval_if::<String>(&rcpt_config.rewrite).await {
                 let rcpt = self.data.rcpt_to.last_mut().unwrap();
 
                 trc::event!(
@@ -228,12 +223,7 @@ impl<T: SessionStream> Session<T> {
                     .await;
             }
             Ok(RcptResolution::UnknownDomain) => {
-                if !self
-                    .server
-                    .eval_if(&rcpt_config.relay, self, self.data.session_id)
-                    .await
-                    .unwrap_or(false)
-                {
+                if !self.eval_if(&rcpt_config.relay).await.unwrap_or(false) {
                     trc::event!(
                         Smtp(SmtpEvent::RelayNotAllowed),
                         SpanId = self.data.session_id,

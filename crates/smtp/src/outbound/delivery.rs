@@ -25,10 +25,10 @@ use crate::queue::{
 use crate::reporting::send::MtaReportSend;
 use crate::{queue::ErrorDetails, reporting::tls::TlsRptOptions};
 use ahash::AHashMap;
-use common::Server;
 use common::config::smtp::queue::RoutingStrategy;
 use common::config::{server::ServerProtocol, smtp::report::AggregateFrequency};
 use common::ipc::{PolicyType, QueueEvent, QueueEventStatus, TlsEvent};
+use common::{Server, expr::Bump};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use mail_auth::RecordSet;
 use mail_auth::{
@@ -223,6 +223,7 @@ impl QueuedMessage {
         // Group recipients by route
         let queue_config = &server.core.smtp.queue;
         let now_ = now();
+        let mut arena = Bump::new();
         let mut routes: AHashMap<(&str, &RoutingStrategy, Option<&[u8]>), Vec<usize>> =
             AHashMap::new();
         let mut has_rcpt_headers = false;
@@ -246,7 +247,12 @@ impl QueuedMessage {
                 let envelope = QueueEnvelope::new(&message.message, rcpt);
                 let route = server.get_route_or_default(
                     &server
-                        .eval_if::<String, _>(&queue_config.route, &envelope, message.span_id)
+                        .eval_if::<String, _>(
+                            &queue_config.route,
+                            &envelope,
+                            &mut arena,
+                            message.span_id,
+                        )
                         .await
                         .unwrap_or_else(|| "default".to_string()),
                     message.span_id,
@@ -323,7 +329,7 @@ impl QueuedMessage {
             // Prepare TLS strategy
             let mut tls_strategy = server.get_tls_or_default(
                 &server
-                    .eval_if::<String, _>(&queue_config.tls, &envelope, message.span_id)
+                    .eval_if::<String, _>(&queue_config.tls, &envelope, &mut arena, message.span_id)
                     .await
                     .unwrap_or_else(|| "default".to_string()),
                 message.span_id,
@@ -338,6 +344,7 @@ impl QueuedMessage {
                     .eval_if(
                         &server.core.smtp.report.tls.send,
                         &envelope,
+                        &mut arena,
                         message.span_id,
                     )
                     .await
@@ -686,7 +693,12 @@ impl QueuedMessage {
                 // Update TLS strategy
                 tls_strategy = server.get_tls_or_default(
                     &server
-                        .eval_if::<String, _>(&queue_config.tls, &envelope, message.span_id)
+                        .eval_if::<String, _>(
+                            &queue_config.tls,
+                            &envelope,
+                            &mut arena,
+                            message.span_id,
+                        )
                         .await
                         .unwrap_or_else(|| "default".to_string()),
                     message.span_id,
@@ -1118,6 +1130,7 @@ impl QueuedMessage {
                             .eval_if::<String, _>(
                                 &queue_config.connection,
                                 &envelope,
+                                &mut arena,
                                 message.span_id,
                             )
                             .await
@@ -1685,10 +1698,16 @@ impl MessageWrapper {
         self.message.recipients[rcpt_idx].status = status;
 
         if needs_retry {
+            let mut arena = Bump::new();
             let envelope = QueueEnvelope::new(&self.message, &self.message.recipients[rcpt_idx]);
             let queue = server.get_queue_or_default(
                 &server
-                    .eval_if::<String, _>(&server.core.smtp.queue.queue, &envelope, self.span_id)
+                    .eval_if::<String, _>(
+                        &server.core.smtp.queue.queue,
+                        &envelope,
+                        &mut arena,
+                        self.span_id,
+                    )
                     .await
                     .unwrap_or_else(|| "default".to_string()),
                 self.span_id,

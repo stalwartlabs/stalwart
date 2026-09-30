@@ -7,7 +7,11 @@
 use super::{Metadata, QueueEnvelope, Status};
 use crate::{core::throttle::NewKey, queue::MessageWrapper};
 use ahash::AHashSet;
-use common::{Server, config::smtp::queue::QueueQuota, expr::functions::ResolveVariable};
+use common::{
+    Server,
+    config::smtp::queue::QueueQuota,
+    expr::{Bump, functions::ResolveVariable},
+};
 use compact_str::ToCompactString;
 use std::future::Future;
 use store::{
@@ -128,9 +132,10 @@ impl HasQueueQuota for Server {
         refs: &mut Vec<Metadata>,
         session_id: u64,
     ) -> bool {
+        let mut arena = Bump::new();
         if !quota.expr.is_empty()
             && self
-                .eval_if(&quota.expr, envelope, session_id)
+                .eval_if(&quota.expr, envelope, &mut arena, session_id)
                 .await
                 .unwrap_or(false)
         {

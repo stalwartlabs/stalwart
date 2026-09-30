@@ -76,15 +76,14 @@ impl<T: SessionStream> Session<T> {
         let config = &self.server.core.smtp.session.connect;
 
         // Sieve filtering
-        if let Some((script, script_id)) = self
-            .server
-            .eval_if::<String, _>(&config.script, self, self.data.session_id)
-            .await
-            .and_then(|name| {
-                self.server
-                    .get_trusted_sieve_script(&name, self.data.session_id)
-                    .map(|s| (s, name))
-            })
+        if let Some((script, script_id)) =
+            self.eval_if::<String>(&config.script)
+                .await
+                .and_then(|name| {
+                    self.server
+                        .get_trusted_sieve_script(&name, self.data.session_id)
+                        .map(|s| (s, name))
+                })
             && let ScriptResult::Reject(message) = self
                 .run_script(script_id, script, self.build_script_parameters("connect"))
                 .await
@@ -107,8 +106,7 @@ impl<T: SessionStream> Session<T> {
 
         // Obtain hostname
         self.hostname = self
-            .server
-            .eval_if::<String, _>(&config.hostname, self, self.data.session_id)
+            .eval_if::<String>(&config.hostname)
             .await
             .unwrap_or_default();
         if self.hostname.is_empty() {
@@ -121,8 +119,7 @@ impl<T: SessionStream> Session<T> {
 
         // Obtain greeting
         let greeting = self
-            .server
-            .eval_if::<String, _>(&config.greeting, self, self.data.session_id)
+            .eval_if::<String>(&config.greeting)
             .await
             .filter(|g| !g.is_empty())
             .map(|g| format!("220 {}\r\n", g))

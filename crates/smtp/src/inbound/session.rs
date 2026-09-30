@@ -8,7 +8,7 @@ use super::{auth::SaslToken, data::MessageOrigin};
 use crate::core::{Session, State};
 use common::{
     config::{server::ServerProtocol, smtp::session::Mechanism},
-    expr::{self, functions::ResolveVariable, *},
+    expr::{Bump, Variable, bumpalo, functions::ResolveVariable},
     network::SessionStream,
 };
 use compact_str::{CompactString, ToCompactString, format_compact};
@@ -22,6 +22,12 @@ use smtp_proto::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use trc::{NetworkEvent, SecurityEvent, SmtpEvent};
+
+const MIN_PRIORITY: i16 = -9;
+const PRIORITIES: [&str; 19] = [
+    "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2", "-1", "0", "1", "2", "3", "4", "5", "6", "7",
+    "8", "9",
+];
 
 impl<T: SessionStream> Session<T> {
     pub async fn ingest(&mut self, bytes: &[u8]) -> Result<bool, ()> {
@@ -100,11 +106,8 @@ impl<T: SessionStream> Session<T> {
                                 initial_response,
                             } => {
                                 let auth: u64 = self
-                                    .server
-                                    .eval_if::<Mechanism, _>(
+                                    .eval_if::<Mechanism>(
                                         &self.server.core.smtp.session.auth.mechanisms,
-                                        self,
-                                        self.data.session_id,
                                     )
                                     .await
                                     .unwrap_or_default()
@@ -562,7 +565,11 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
 }
 
 impl<T: SessionStream> ResolveVariable for Session<T> {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'_> {
+    fn resolve_variable<'a>(
+        &'a self,
+        variable: ExpressionVariable,
+        arena: &'a Bump,
+    ) -> Variable<'a> {
         match variable {
             ExpressionVariable::Rcpt => self
                 .data
@@ -578,13 +585,14 @@ impl<T: SessionStream> ResolveVariable for Session<T> {
                 .map(|r| r.domain.as_str())
                 .unwrap_or_default()
                 .into(),
-            ExpressionVariable::Recipients => self
-                .data
-                .rcpt_to
-                .iter()
-                .map(|r| Variable::from(r.address_lcase.as_str()))
-                .collect::<Vec<_>>()
-                .into(),
+            ExpressionVariable::Recipients => Variable::Array(
+                arena.alloc_slice_fill_iter(
+                    self.data
+                        .rcpt_to
+                        .iter()
+                        .map(|r| Variable::String(r.address_lcase.as_str())),
+                ),
+            ),
             ExpressionVariable::Sender => self
                 .data
                 .mail_from
@@ -609,7 +617,11 @@ impl<T: SessionStream> ResolveVariable for Session<T> {
             ExpressionVariable::LocalIp => self.data.local_ip_str.as_str().into(),
             ExpressionVariable::LocalPort => self.data.local_port.into(),
             ExpressionVariable::IsTls => self.stream.is_tls().into(),
-            ExpressionVariable::Priority => self.data.priority.to_compact_string().into(),
+            ExpressionVariable::Priority => {
+                Variable::String(priority_name(self.data.priority).unwrap_or_else(|| {
+                    bumpalo::format!(in arena, "{}", self.data.priority).into_bump_str()
+                }))
+            }
             ExpressionVariable::Protocol => self.instance.protocol.as_str().into(),
             ExpressionVariable::Asn => self
                 .data
@@ -627,11 +639,28 @@ impl<T: SessionStream> ResolveVariable for Session<T> {
                 .map(|c| c.as_str())
                 .unwrap_or_default()
                 .into(),
-            _ => expr::Variable::default(),
+            _ => Variable::default(),
         }
     }
+}
 
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
+fn priority_name(priority: i16) -> Option<&'static str> {
+    PRIORITIES
+        .get(usize::try_from(priority.checked_sub(MIN_PRIORITY)?).ok()?)
+        .copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::priority_name;
+
+    #[test]
+    fn priority_names_match_display() {
+        for priority in i16::MIN..=i16::MAX {
+            match priority_name(priority) {
+                Some(name) => assert_eq!(name, priority.to_string()),
+                None => assert!(!(-9..=9).contains(&priority), "{priority}"),
+            }
+        }
     }
 }

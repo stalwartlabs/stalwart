@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use compact_str::CompactString;
+use super::{FnCtx, args};
+use crate::expr::Variable;
 
-use crate::expr::{StringCow, Variable};
-
-pub(crate) fn fn_is_email(v: Vec<Variable>) -> Variable {
+pub(crate) fn fn_is_email<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value] = args(v);
     let mut last_ch = 0;
     let mut in_quote = false;
     let mut at_count = 0;
     let mut dot_count = 0;
     let mut lp_len = 0;
-    let mut value = 0;
+    let mut value_len = 0;
 
-    for &ch in v[0].to_string().as_bytes() {
+    for &ch in value.to_str(ctx.arena()).as_bytes() {
         match ch {
             b'0'..=b'9'
             | b'a'..=b'z'
@@ -41,11 +41,11 @@ pub(crate) fn fn_is_email(v: Vec<Variable>) -> Variable {
             | b'}'
             | b'~'
             | 0x7f..=u8::MAX => {
-                value += 1;
+                value_len += 1;
             }
             b'.' if !in_quote => {
-                if last_ch != b'.' && last_ch != b'@' && value != 0 {
-                    value += 1;
+                if last_ch != b'.' && last_ch != b'@' && value_len != 0 {
+                    value_len += 1;
                     if at_count == 1 {
                         dot_count += 1;
                     }
@@ -55,11 +55,11 @@ pub(crate) fn fn_is_email(v: Vec<Variable>) -> Variable {
             }
             b'@' if !in_quote => {
                 at_count += 1;
-                lp_len = value;
-                value = 0;
+                lp_len = value_len;
+                value_len = 0;
             }
             b'>' | b':' | b',' | b' ' if in_quote => {
-                value += 1;
+                value_len += 1;
             }
             b'\"' if !in_quote || last_ch != b'\\' => {
                 in_quote = !in_quote;
@@ -75,30 +75,21 @@ pub(crate) fn fn_is_email(v: Vec<Variable>) -> Variable {
         last_ch = ch;
     }
 
-    (at_count == 1 && dot_count > 0 && lp_len > 0 && value > 0).into()
+    (at_count == 1 && dot_count > 0 && lp_len > 0 && value_len > 0).into()
 }
 
-pub(crate) fn fn_email_part(v: Vec<Variable>) -> Variable {
-    let mut v = v.into_iter();
-    let value = v.next().unwrap();
-    let part = v.next().unwrap().into_string();
+pub(crate) fn fn_email_part<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
+    let [value, part] = args(v);
+    let arena = ctx.arena();
+    let part = part.to_str(arena);
 
-    value.transform(|s| match s {
-        StringCow::Borrowed(s) => s
-            .rsplit_once('@')
-            .map(|(u, d)| match part.as_str() {
-                "local" => Variable::from(u.trim()),
-                "domain" => Variable::from(d.trim()),
+    value.transform(arena, |s| {
+        s.rsplit_once('@')
+            .map(|(local, domain)| match part {
+                "local" => Variable::String(local.trim()),
+                "domain" => Variable::String(domain.trim()),
                 _ => Variable::default(),
             })
-            .unwrap_or_default(),
-        StringCow::Owned(s) => s
-            .rsplit_once('@')
-            .map(|(u, d)| match part.as_str() {
-                "local" => Variable::from(CompactString::new(u.trim())),
-                "domain" => Variable::from(CompactString::new(d.trim())),
-                _ => Variable::default(),
-            })
-            .unwrap_or_default(),
+            .unwrap_or_default()
     })
 }

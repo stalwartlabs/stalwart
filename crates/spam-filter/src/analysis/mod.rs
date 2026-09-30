@@ -8,6 +8,7 @@ use crate::{
     Recipient, SpamFilterContext, SpamFilterInput, SpamFilterOutput, SpamFilterResult, TextPart,
 };
 use common::{Server, config::mailstore::spamfilter::Location};
+use compact_str::CompactString;
 use mail_parser::{Header, HeaderForm};
 use std::{
     borrow::Cow,
@@ -62,13 +63,11 @@ impl SpamFilterOutput<'_> {
             .chain(self.recipients_cc.iter())
             .chain(self.recipients_bcc.iter())
     }
-}
 
-impl SpamFilterContext<'_> {
-    pub fn text_body(&self) -> Option<&str> {
-        self.input
+    pub fn text_body(&self, input: &SpamFilterInput<'_>) -> Option<&str> {
+        input
             .first_body_part()
-            .and_then(|idx| self.output.text_parts.get(idx as usize))
+            .and_then(|idx| self.text_parts.get(idx as usize))
             .and_then(|part| match part {
                 TextPart::Plain { text_body, .. } => Some(*text_body),
                 TextPart::Html { text_body, .. } => Some(text_body.as_str()),
@@ -77,8 +76,14 @@ impl SpamFilterContext<'_> {
     }
 }
 
+impl SpamFilterContext<'_> {
+    pub fn text_body(&self) -> Option<&str> {
+        self.output.text_body(&self.input)
+    }
+}
+
 impl SpamFilterResult {
-    pub fn add_tag(&mut self, tag: impl Into<String>) {
+    pub fn add_tag(&mut self, tag: impl Into<CompactString>) {
         self.tags.insert(tag.into());
     }
 

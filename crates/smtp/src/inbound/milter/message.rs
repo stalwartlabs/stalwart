@@ -13,6 +13,7 @@ use crate::{
 use common::{
     DAEMON_NAME,
     config::smtp::session::{Milter, Stage},
+    expr::Bump,
     network::SessionStream,
 };
 use compact_str::ToCompactString;
@@ -41,11 +42,12 @@ impl<T: SessionStream> Session<T> {
         }
 
         let mut modifications = Vec::new();
+        let mut arena = Bump::new();
         for milter in milters {
             if !milter.run_on_stage.contains(&stage)
                 || !self
                     .server
-                    .eval_if(&milter.enable, self, self.data.session_id)
+                    .eval_if(&milter.enable, self, &mut arena, self.data.session_id)
                     .await
                     .unwrap_or(false)
             {

@@ -16,7 +16,7 @@ use crate::{
         RECOVERY_ADMIN_ID, RoleCache, TenantCache, permissions::BuildPermissions,
     },
     config::smtp::auth::DkimSigners,
-    expr::if_block::BootstrapExprExt,
+    expr::{Bump, if_block::BootstrapExprExt},
     network::mta::AddressResolver,
     storage::{
         ObjectQuota, TenantQuota,
@@ -607,10 +607,12 @@ impl Server {
                     if domain.flags & DOMAIN_FLAG_SUB_ADDRESSING != 0 {
                         if let Some(sub_addressing) = &domain.sub_addressing_custom {
                             // Custom sub-addressing resolution
+                            let mut arena = Bump::new();
                             if let Some(result) = self
                                 .eval_if::<String, _>(
                                     sub_addressing,
                                     &AddressResolver(local_part.as_ref()),
+                                    &mut arena,
                                     0,
                                 )
                                 .await

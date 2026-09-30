@@ -11,6 +11,8 @@ pub mod modules;
 
 use analysis::ElementLocation;
 use analysis::url::UrlParts;
+use common::expr::Bump;
+use compact_str::CompactString;
 use mail_auth::{
     ArcOutput, DkimOutput, DmarcResult, IprevOutput, SpfOutput, dkim2::Dkim2Output, dmarc::Policy,
 };
@@ -22,6 +24,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 use store::ahash::AHashSet;
+use sync_wrapper::SyncWrapper;
 
 pub type ContextToken<'x> = TokenType<Cow<'x, str>, Box<Email>, Box<UrlParts<'x>>, IpParts>;
 
@@ -112,7 +115,7 @@ pub enum TextPart<'x> {
 
 #[derive(Debug, Default)]
 pub struct SpamFilterResult {
-    pub tags: AHashSet<String>,
+    pub tags: AHashSet<CompactString>,
     pub classifier_confidence: Vec<Option<f32>>,
     pub score: f32,
     pub rbl_ip_checks: usize,
@@ -126,6 +129,7 @@ pub struct SpamFilterContext<'x> {
     pub input: SpamFilterInput<'x>,
     pub output: SpamFilterOutput<'x>,
     pub result: SpamFilterResult,
+    pub arena: SyncWrapper<Bump>,
 }
 
 #[derive(Debug, Clone)]

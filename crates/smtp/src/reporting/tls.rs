@@ -15,6 +15,7 @@ use common::{
         report::AggregateFrequency,
         resolver::{Mode, MxPattern, TlsaMatching},
     },
+    expr::Bump,
     ipc::{TlsEvent, ToHash},
 };
 use compact_str::{CompactString, ToCompactString};
@@ -186,20 +187,32 @@ impl TlsReporting for Server {
             .collect::<Vec<_>>();
         if !mail_rua.is_empty() {
             let config = &self.core.smtp.report.tls;
+            let mut arena = Bump::new();
             let from_addr = self
-                .eval_if(&config.address, &RecipientDomain::new(domain_name), span_id)
+                .eval_if(
+                    &config.address,
+                    &RecipientDomain::new(domain_name),
+                    &mut arena,
+                    span_id,
+                )
                 .await
                 .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_string());
             let submitter = self
                 .eval_if(
                     &self.core.smtp.report.submitter,
                     &RecipientDomain::new(domain_name),
+                    &mut arena,
                     span_id,
                 )
                 .await
                 .unwrap_or_else(|| "localhost".to_string());
             let from_name = self
-                .eval_if(&config.name, &RecipientDomain::new(domain_name), span_id)
+                .eval_if(
+                    &config.name,
+                    &RecipientDomain::new(domain_name),
+                    &mut arena,
+                    span_id,
+                )
                 .await
                 .unwrap_or_else(|| "Mail Delivery Subsystem".to_string());
             let mut message = Vec::with_capacity(2048);
@@ -249,6 +262,7 @@ impl TlsReporting for Server {
             key: event.domain.as_bytes().to_vec(),
         });
         let mut rety_count = 0;
+        let mut arena = Bump::new();
         let policy_hash = event.policy.to_hash();
 
         loop {
@@ -306,6 +320,7 @@ impl TlsReporting for Server {
                 .eval_if(
                     &config.max_size,
                     &RecipientDomain::new(&event.domain),
+                    &mut arena,
                     event.span_id,
                 )
                 .await
@@ -379,6 +394,7 @@ impl TlsReporting for Server {
                             .eval_if::<String, _>(
                                 &config.org_name,
                                 &RecipientDomain::new(&event.domain),
+                                &mut arena,
                                 event.span_id,
                             )
                             .await
@@ -387,6 +403,7 @@ impl TlsReporting for Server {
                             .eval_if::<String, _>(
                                 &config.contact_info,
                                 &RecipientDomain::new(&event.domain),
+                                &mut arena,
                                 event.span_id,
                             )
                             .await

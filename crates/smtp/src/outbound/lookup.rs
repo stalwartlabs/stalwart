@@ -10,7 +10,7 @@ use crate::queue::{Error, ErrorDetails, HostResponse, Status};
 use common::{
     Server,
     config::smtp::queue::{ConnectionStrategy, HostOrIp, IpAndHost, MxConfig},
-    expr::functions::ResolveVariable,
+    expr::{Bump, functions::ResolveVariable},
 };
 use mail_auth::{DnssecStatus, IpLookupStrategy, Mx, RecordSet};
 use rand::{RngExt, seq::SliceRandom};
@@ -196,14 +196,15 @@ impl DnsLookup for Server {
                 dnssec_status,
             })
         } else {
+            let arena = Bump::new();
             Err(Status::TemporaryFailure(Box::new(ErrorDetails {
                 entity: remote_host.hostname().into(),
                 details: Error::DnsError(
                     format!(
                         "No IP addresses found for {:?}.",
                         envelope
-                            .resolve_variable(ExpressionVariable::Mx)
-                            .to_string()
+                            .resolve_variable(ExpressionVariable::Mx, &arena)
+                            .to_str(&arena)
                     )
                     .into_boxed_str(),
                 ),

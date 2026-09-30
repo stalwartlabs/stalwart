@@ -9,7 +9,8 @@ use common::{
     Inner, Server,
     auth::AccountInfo,
     config::smtp::auth::VerifyStrategy,
-    network::{ServerInstance, asn::AsnGeoLookupResult},
+    expr::{Bump, Variable, if_block::IfBlock},
+    network::{ServerInstance, SessionStream, asn::AsnGeoLookupResult},
 };
 use email::message::delivery::ORCPT_ADDR_TYPE;
 use mail_auth::{IprevOutput, SpfOutput};
@@ -204,6 +205,18 @@ impl Ord for SessionAddress {
 impl PartialOrd for SessionAddress {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl<T: SessionStream> Session<T> {
+    pub async fn eval_if<R>(&self, if_block: &IfBlock) -> Option<R>
+    where
+        R: for<'b> TryFrom<Variable<'b>>,
+    {
+        let mut arena = Bump::new();
+        self.server
+            .eval_if(if_block, self, &mut arena, self.data.session_id)
+            .await
     }
 }
 

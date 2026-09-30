@@ -6,7 +6,9 @@
 
 use super::Session;
 use common::{
-    KV_RATE_LIMIT_SMTP, ThrottleKey, config::smtp::*, expr::functions::ResolveVariable,
+    KV_RATE_LIMIT_SMTP, ThrottleKey,
+    config::smtp::*,
+    expr::{Bump, functions::ResolveVariable},
     network::SessionStream,
 };
 use compact_str::ToCompactString;
@@ -20,40 +22,36 @@ pub trait NewKey: Sized {
 
 impl NewKey for QueueQuota {
     fn new_key(&self, e: &impl ResolveVariable, _: &str) -> ThrottleKey {
+        let arena = Bump::new();
         let mut hasher = blake3::Hasher::new();
 
         if (self.keys & THROTTLE_RCPT) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::Rcpt)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::Rcpt, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_RCPT_DOMAIN) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::RcptDomain)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::RcptDomain, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_SENDER) != 0 {
-            let sender = e.resolve_variable(ExpressionVariable::Sender).into_string();
-            hasher.update(
-                if !sender.is_empty() {
-                    sender.as_ref()
-                } else {
-                    "<>"
-                }
-                .as_bytes(),
-            );
+            let sender = e
+                .resolve_variable(ExpressionVariable::Sender, &arena)
+                .to_str(&arena);
+            hasher.update(if !sender.is_empty() { sender } else { "<>" }.as_bytes());
         }
         if (self.keys & THROTTLE_SENDER_DOMAIN) != 0 {
             let sender_domain = e
-                .resolve_variable(ExpressionVariable::SenderDomain)
-                .into_string();
+                .resolve_variable(ExpressionVariable::SenderDomain, &arena)
+                .to_str(&arena);
             hasher.update(
                 if !sender_domain.is_empty() {
-                    sender_domain.as_ref()
+                    sender_domain
                 } else {
                     "<>"
                 }
@@ -77,40 +75,36 @@ impl NewKey for QueueQuota {
 
 impl NewKey for QueueRateLimiter {
     fn new_key(&self, e: &impl ResolveVariable, context: &str) -> ThrottleKey {
+        let arena = Bump::new();
         let mut hasher = blake3::Hasher::new();
 
         if (self.keys & THROTTLE_RCPT) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::Rcpt)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::Rcpt, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_RCPT_DOMAIN) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::RcptDomain)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::RcptDomain, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_SENDER) != 0 {
-            let sender = e.resolve_variable(ExpressionVariable::Sender).into_string();
-            hasher.update(
-                if !sender.is_empty() {
-                    sender.as_ref()
-                } else {
-                    "<>"
-                }
-                .as_bytes(),
-            );
+            let sender = e
+                .resolve_variable(ExpressionVariable::Sender, &arena)
+                .to_str(&arena);
+            hasher.update(if !sender.is_empty() { sender } else { "<>" }.as_bytes());
         }
         if (self.keys & THROTTLE_SENDER_DOMAIN) != 0 {
             let sender_domain = e
-                .resolve_variable(ExpressionVariable::SenderDomain)
-                .into_string();
+                .resolve_variable(ExpressionVariable::SenderDomain, &arena)
+                .to_str(&arena);
             hasher.update(
                 if !sender_domain.is_empty() {
-                    sender_domain.as_ref()
+                    sender_domain
                 } else {
                     "<>"
                 }
@@ -119,43 +113,43 @@ impl NewKey for QueueRateLimiter {
         }
         if (self.keys & THROTTLE_HELO_DOMAIN) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::HeloDomain)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::HeloDomain, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_AUTH_AS) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::AuthenticatedAs)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::AuthenticatedAs, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_LISTENER) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::Listener)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::Listener, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_MX) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::Mx)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::Mx, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_REMOTE_IP) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::RemoteIp)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::RemoteIp, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
         if (self.keys & THROTTLE_LOCAL_IP) != 0 {
             hasher.update(
-                e.resolve_variable(ExpressionVariable::LocalIp)
-                    .to_string()
+                e.resolve_variable(ExpressionVariable::LocalIp, &arena)
+                    .to_str(&arena)
                     .as_bytes(),
             );
         }
@@ -180,13 +174,7 @@ impl<T: SessionStream> Session<T> {
         };
 
         for t in throttles {
-            if t.expr.is_empty()
-                || self
-                    .server
-                    .eval_if(&t.expr, self, self.data.session_id)
-                    .await
-                    .unwrap_or(false)
-            {
+            if t.expr.is_empty() || self.eval_if(&t.expr).await.unwrap_or(false) {
                 if (t.keys & THROTTLE_RCPT_DOMAIN) != 0 {
                     let d = self
                         .data

@@ -12,7 +12,10 @@ use super::{
     AlertContent, AlertContentToken, AlertMethod, Enterprise, MetricAlert, SpamFilterLlmConfig,
     license::LicenseKey, llm::AiApiConfig,
 };
-use crate::{enterprise::llm::ApiType, expr::if_block::BootstrapExprExt};
+use crate::{
+    enterprise::llm::ApiType,
+    expr::if_block::{BootstrapExprExt, IfBlock},
+};
 use ahash::AHashMap;
 use registry::schema::{
     enums::AiModelType,
@@ -220,7 +223,13 @@ impl Enterprise {
             if !alert.enable {
                 continue;
             }
-            let condition = bp.compile_expr(id, &alert.ctx_condition()).default;
+            let condition = bp.compile_expr(id, &alert.ctx_condition());
+            let condition = IfBlock::new(
+                condition.id,
+                condition.property,
+                Box::default(),
+                condition.default,
+            );
             let mut method = Vec::with_capacity(1);
             if let structs::AlertEmail::Enabled(alert) = alert.email_alert {
                 method.push(AlertMethod::Email {

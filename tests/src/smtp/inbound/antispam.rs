@@ -18,6 +18,7 @@ use common::{
         ChatCompletionChoice, ChatCompletionRequest, ChatCompletionResponse, Message,
     },
 };
+use compact_str::CompactString;
 use http_proto::{JsonResponse, ToHttpResponse};
 use hyper::Method;
 use mail_auth::{
@@ -356,7 +357,7 @@ async fn antispam() {
             let mut dkim_signatures = vec![];
             let mut dmarc_result = None;
             let mut dmarc_policy = None;
-            let mut expected_tags: AHashSet<String> = AHashSet::new();
+            let mut expected_tags: AHashSet<CompactString> = AHashSet::new();
             let mut expect_headers = String::new();
             let mut body_params = 0;
             let mut is_tls = false;
@@ -446,8 +447,11 @@ async fn antispam() {
                             dmarc_policy = Policy::from_str(value).into();
                         }
                         "expect" => {
-                            expected_tags
-                                .extend(value.split_ascii_whitespace().map(|v| v.to_uppercase()));
+                            expected_tags.extend(
+                                value
+                                    .split_ascii_whitespace()
+                                    .map(|v| CompactString::from(v.to_uppercase())),
+                            );
                         }
                         "expect_header" => {
                             let value = value.trim();
@@ -645,7 +649,7 @@ async fn antispam() {
                             r.headers
                                 .split_ascii_whitespace()
                                 .filter(|t| t.starts_with("PROB_"))
-                                .map(|t| t.to_string()),
+                                .map(CompactString::from),
                         ),
                         _ => unreachable!(),
                     }

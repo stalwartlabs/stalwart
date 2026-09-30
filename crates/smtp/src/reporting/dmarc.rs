@@ -13,6 +13,7 @@ use crate::{
 use common::{
     Server,
     config::smtp::report::AggregateFrequency,
+    expr::Bump,
     ipc::{DmarcEvent, ToHash},
     network::SessionStream,
 };
@@ -61,6 +62,7 @@ impl<T: SessionStream> Session<T> {
             return;
         };
         let config = &self.server.core.smtp.report.dmarc;
+        let mut arena = Bump::new();
 
         if self
             .server
@@ -75,7 +77,7 @@ impl<T: SessionStream> Session<T> {
         if !matches!(dmarc_record.psd, dmarc::Psd::Yes)
             && let (Some(failure_rate), Some(report_options)) = (
                 self.server
-                    .eval_if::<Rate, _>(&config.send, self, self.data.session_id)
+                    .eval_if::<Rate, _>(&config.send, self, &mut arena, self.data.session_id)
                     .await,
                 dmarc_output.failure_report(),
             )
@@ -139,7 +141,7 @@ impl<T: SessionStream> Session<T> {
             if !rcpts.is_empty() {
                 let from_addr = self
                     .server
-                    .eval_if(&config.address, self, self.data.session_id)
+                    .eval_if(&config.address, self, &mut arena, self.data.session_id)
                     .await
                     .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_compact_string());
                 let mut auth_failure = FeedbackReport {
@@ -232,12 +234,12 @@ impl<T: SessionStream> Session<T> {
                 };
                 let from_name = self
                     .server
-                    .eval_if(&config.name, self, self.data.session_id)
+                    .eval_if(&config.name, self, &mut arena, self.data.session_id)
                     .await
                     .unwrap_or_else(|| "Mail Delivery Subsystem".to_compact_string());
                 let subject = self
                     .server
-                    .eval_if(&config.subject, self, self.data.session_id)
+                    .eval_if(&config.subject, self, &mut arena, self.data.session_id)
                     .await
                     .unwrap_or_else(|| "DMARC Report".to_compact_string());
                 let write_report = |to| {
@@ -328,6 +330,7 @@ impl<T: SessionStream> Session<T> {
             .eval_if(
                 &self.server.core.smtp.report.dmarc_aggregate.send,
                 self,
+                &mut arena,
                 self.data.session_id,
             )
             .await
@@ -484,10 +487,12 @@ impl DmarcReporting for Server {
 
         // Serialize report
         let config = &self.core.smtp.report.dmarc_aggregate;
+        let mut arena = Bump::new();
         let from_addr = self
             .eval_if(
                 &config.address,
                 &RecipientDomain::new(report.domain.as_str()),
+                &mut arena,
                 span_id,
             )
             .await
@@ -496,6 +501,7 @@ impl DmarcReporting for Server {
             .eval_if(
                 &self.core.smtp.report.submitter,
                 &RecipientDomain::new(report.domain.as_str()),
+                &mut arena,
                 span_id,
             )
             .await
@@ -504,6 +510,7 @@ impl DmarcReporting for Server {
             .eval_if(
                 &config.name,
                 &RecipientDomain::new(report.domain.as_str()),
+                &mut arena,
                 span_id,
             )
             .await
@@ -553,6 +560,7 @@ impl DmarcReporting for Server {
                 .finalize(),
         });
         let mut rety_count = 0;
+        let mut arena = Bump::new();
 
         loop {
             // Find the report by domain name
@@ -609,6 +617,7 @@ impl DmarcReporting for Server {
                 .eval_if(
                     &config.max_size,
                     &RecipientDomain::new(&event.domain),
+                    &mut arena,
                     event.span_id,
                 )
                 .await
@@ -686,6 +695,7 @@ impl DmarcReporting for Server {
                             .eval_if(
                                 &config.address,
                                 &RecipientDomain::new(event.domain.as_str()),
+                                &mut arena,
                                 event.span_id,
                             )
                             .await
@@ -694,6 +704,7 @@ impl DmarcReporting for Server {
                             .eval_if::<String, _>(
                                 &config.contact_info,
                                 &RecipientDomain::new(event.domain.as_str()),
+                                &mut arena,
                                 event.span_id,
                             )
                             .await,
@@ -701,6 +712,7 @@ impl DmarcReporting for Server {
                             .eval_if::<String, _>(
                                 &config.org_name,
                                 &RecipientDomain::new(event.domain.as_str()),
+                                &mut arena,
                                 event.span_id,
                             )
                             .await

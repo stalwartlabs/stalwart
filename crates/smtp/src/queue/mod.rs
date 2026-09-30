@@ -6,9 +6,8 @@
 
 use common::{
     config::smtp::queue::{QueueExpiry, QueueName},
-    expr::{self, functions::ResolveVariable, *},
+    expr::{Bump, Variable, bumpalo, functions::ResolveVariable},
 };
-use compact_str::ToCompactString;
 use registry::schema::enums::ExpressionVariable;
 use smtp_proto::Response;
 use std::{
@@ -319,20 +318,32 @@ impl<'x> QueueEnvelope<'x> {
     }
 }
 
-impl<'x> ResolveVariable for QueueEnvelope<'x> {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'x> {
+fn display<'a>(arena: &'a Bump, value: impl Display) -> Variable<'a> {
+    Variable::String(bumpalo::format!(in arena, "{}", value).into_bump_str())
+}
+
+fn addresses<'a>(arena: &'a Bump, recipients: &'a [Recipient]) -> Variable<'a> {
+    Variable::Array(
+        arena.alloc_slice_fill_iter(
+            recipients
+                .iter()
+                .map(|r| Variable::String(r.address.as_ref())),
+        ),
+    )
+}
+
+impl ResolveVariable for QueueEnvelope<'_> {
+    fn resolve_variable<'a>(
+        &'a self,
+        variable: ExpressionVariable,
+        arena: &'a Bump,
+    ) -> Variable<'a> {
         match variable {
             ExpressionVariable::Sender => self.message.return_path.as_ref().into(),
             ExpressionVariable::SenderDomain => self.message.return_path.domain_part().into(),
             ExpressionVariable::RcptDomain => self.domain.into(),
             ExpressionVariable::Rcpt => self.rcpt.address.as_ref().into(),
-            ExpressionVariable::Recipients => self
-                .message
-                .recipients
-                .iter()
-                .map(|r| Variable::from(r.address.as_ref()))
-                .collect::<Vec<_>>()
-                .into(),
+            ExpressionVariable::Recipients => addresses(arena, &self.message.recipients),
             ExpressionVariable::RetryNum => self.rcpt.retry.inner.into(),
             ExpressionVariable::NotifyNum => self.rcpt.notify.inner.into(),
             ExpressionVariable::ExpiresIn => match &self.rcpt.expires {
@@ -342,7 +353,7 @@ impl<'x> ResolveVariable for QueueEnvelope<'x> {
                 }
             }
             .into(),
-            ExpressionVariable::LastStatus => self.rcpt.status.to_compact_string().into(),
+            ExpressionVariable::LastStatus => display(arena, &self.rcpt.status),
             ExpressionVariable::LastError => match &self.rcpt.status {
                 Status::Scheduled | Status::Completed(_) => "none",
                 Status::TemporaryFailure(err) | Status::PermanentFailure(err) => {
@@ -380,55 +391,42 @@ impl<'x> ResolveVariable for QueueEnvelope<'x> {
             .into(),
             ExpressionVariable::Mx => self.mx.into(),
             ExpressionVariable::Priority => self.message.priority.into(),
-            ExpressionVariable::RemoteIp => self.remote_ip.to_compact_string().into(),
-            ExpressionVariable::LocalIp => self.local_ip.to_compact_string().into(),
-            ExpressionVariable::ReceivedFromIp => {
-                self.message.received_from_ip.to_compact_string().into()
-            }
+            ExpressionVariable::RemoteIp => display(arena, self.remote_ip),
+            ExpressionVariable::LocalIp => display(arena, self.local_ip),
+            ExpressionVariable::ReceivedFromIp => display(arena, self.message.received_from_ip),
             ExpressionVariable::ReceivedViaPort => self.message.received_via_port.into(),
             ExpressionVariable::Size => self.message.size.into(),
             _ => "".into(),
         }
     }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
-    }
 }
 
 impl ResolveVariable for Message {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'_> {
+    fn resolve_variable<'a>(
+        &'a self,
+        variable: ExpressionVariable,
+        arena: &'a Bump,
+    ) -> Variable<'a> {
         match variable {
             ExpressionVariable::Sender => self.return_path.as_ref().into(),
             ExpressionVariable::SenderDomain => self.return_path.domain_part().into(),
-            ExpressionVariable::Recipients => self
-                .recipients
-                .iter()
-                .map(|r| Variable::from(r.address.as_ref()))
-                .collect::<Vec<_>>()
-                .into(),
+            ExpressionVariable::Recipients => addresses(arena, &self.recipients),
             ExpressionVariable::Priority => self.priority.into(),
             _ => "".into(),
         }
     }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
-    }
 }
 
 impl ResolveVariable for MessageWrapper {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'_> {
+    fn resolve_variable<'a>(
+        &'a self,
+        variable: ExpressionVariable,
+        arena: &'a Bump,
+    ) -> Variable<'a> {
         match variable {
             ExpressionVariable::Sender => self.message.return_path.as_ref().into(),
             ExpressionVariable::SenderDomain => self.message.return_path.domain_part().into(),
-            ExpressionVariable::Recipients => self
-                .message
-                .recipients
-                .iter()
-                .map(|r| Variable::from(r.address.as_ref()))
-                .collect::<Vec<_>>()
-                .into(),
+            ExpressionVariable::Recipients => addresses(arena, &self.message.recipients),
             ExpressionVariable::Priority => self.message.priority.into(),
             ExpressionVariable::QueueName => self.queue_name.as_str().into(),
             ExpressionVariable::QueueAge => now().saturating_sub(self.message.created).into(),
@@ -448,17 +446,11 @@ impl ResolveVariable for MessageWrapper {
                 "unknown"
             }
             .into(),
-            ExpressionVariable::ReceivedFromIp => {
-                self.message.received_from_ip.to_compact_string().into()
-            }
+            ExpressionVariable::ReceivedFromIp => display(arena, self.message.received_from_ip),
             ExpressionVariable::ReceivedViaPort => self.message.received_via_port.into(),
             ExpressionVariable::Size => self.message.size.into(),
             _ => "".into(),
         }
-    }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
     }
 }
 
@@ -470,16 +462,12 @@ impl<'x> RecipientDomain<'x> {
     }
 }
 
-impl<'x> ResolveVariable for RecipientDomain<'x> {
-    fn resolve_variable(&self, variable: ExpressionVariable) -> expr::Variable<'x> {
+impl ResolveVariable for RecipientDomain<'_> {
+    fn resolve_variable<'a>(&'a self, variable: ExpressionVariable, _: &'a Bump) -> Variable<'a> {
         match variable {
             ExpressionVariable::RcptDomain => self.0.into(),
             _ => "".into(),
         }
-    }
-
-    fn resolve_global(&self, _: &str) -> Variable<'_> {
-        Variable::Integer(0)
     }
 }
 

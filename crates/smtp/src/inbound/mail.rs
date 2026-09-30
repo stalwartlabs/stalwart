@@ -130,12 +130,7 @@ impl<T: SessionStream> Session<T> {
 
         // Check whether the address is allowed
         if !self
-            .server
-            .eval_if::<bool, _>(
-                &self.server.core.smtp.session.mail.is_allowed,
-                self,
-                self.data.session_id,
-            )
+            .eval_if::<bool>(&self.server.core.smtp.session.mail.is_allowed)
             .await
             .unwrap_or(true)
         {
@@ -152,12 +147,7 @@ impl<T: SessionStream> Session<T> {
 
         // Sieve filtering
         if let Some((script, script_id)) = self
-            .server
-            .eval_if::<String, _>(
-                &self.server.core.smtp.session.mail.script,
-                self,
-                self.data.session_id,
-            )
+            .eval_if::<String>(&self.server.core.smtp.session.mail.script)
             .await
             .and_then(|name| {
                 self.server
@@ -198,12 +188,7 @@ impl<T: SessionStream> Session<T> {
 
         // Address rewriting
         if let Some(new_address) = self
-            .server
-            .eval_if::<String, _>(
-                &self.server.core.smtp.session.mail.rewrite,
-                self,
-                self.data.session_id,
-            )
+            .eval_if::<String>(&self.server.core.smtp.session.mail.rewrite)
             .await
         {
             let mail_from = self.data.mail_from.as_mut().unwrap();
@@ -230,12 +215,7 @@ impl<T: SessionStream> Session<T> {
         match self.authenticated_as() {
             Some(authenticated_as)
                 if self
-                    .server
-                    .eval_if(
-                        &self.server.core.smtp.session.auth.must_match_sender,
-                        self,
-                        self.data.session_id,
-                    )
+                    .eval_if(&self.server.core.smtp.session.auth.must_match_sender)
                     .await
                     .unwrap_or(true) =>
             {
@@ -272,11 +252,7 @@ impl<T: SessionStream> Session<T> {
         let config = &self.server.core.smtp.session.extensions;
         let config_data = &self.server.core.smtp.session.data;
         if (from.flags & MAIL_REQUIRETLS) != 0
-            && !self
-                .server
-                .eval_if(&config.requiretls, self, self.data.session_id)
-                .await
-                .unwrap_or(false)
+            && !self.eval_if(&config.requiretls).await.unwrap_or(false)
         {
             trc::event!(
                 Smtp(SmtpEvent::RequireTlsDisabled),
@@ -288,11 +264,7 @@ impl<T: SessionStream> Session<T> {
                 .await;
         }
         if (from.flags & (MAIL_BY_NOTIFY | MAIL_BY_RETURN)) != 0 {
-            if let Some(duration) = self
-                .server
-                .eval_if::<Duration, _>(&config.deliver_by, self, self.data.session_id)
-                .await
-            {
+            if let Some(duration) = self.eval_if::<Duration>(&config.deliver_by).await {
                 if from.by.checked_abs().unwrap_or(0) as u64 <= duration.as_secs()
                     && (from.by.is_positive() || (from.flags & MAIL_BY_NOTIFY) != 0)
                 {
@@ -329,8 +301,7 @@ impl<T: SessionStream> Session<T> {
         }
         if from.mt_priority != 0 {
             if self
-                .server
-                .eval_if::<MtPriority, _>(&config.mt_priority, self, self.data.session_id)
+                .eval_if::<MtPriority>(&config.mt_priority)
                 .await
                 .is_some()
             {
@@ -358,8 +329,7 @@ impl<T: SessionStream> Session<T> {
         }
         if from.size > 0 {
             let max_message_size = self
-                .server
-                .eval_if::<usize, _>(&config_data.max_message_size, self, self.data.session_id)
+                .eval_if::<usize>(&config_data.max_message_size)
                 .await
                 .unwrap_or(25 * 1024 * 1024);
 
@@ -390,11 +360,7 @@ impl<T: SessionStream> Session<T> {
                     .write(b"501 5.5.4 Only one of HOLDFOR or HOLDUNTIL may be specified.\r\n")
                     .await;
             }
-            if let Some(max_hold) = self
-                .server
-                .eval_if::<Duration, _>(&config.future_release, self, self.data.session_id)
-                .await
-            {
+            if let Some(max_hold) = self.eval_if::<Duration>(&config.future_release).await {
                 let max_hold = max_hold.as_secs();
                 let now = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
@@ -446,13 +412,7 @@ impl<T: SessionStream> Session<T> {
                     .await;
             }
         }
-        if has_dsn
-            && !self
-                .server
-                .eval_if(&config.dsn, self, self.data.session_id)
-                .await
-                .unwrap_or(false)
-        {
+        if has_dsn && !self.eval_if(&config.dsn).await.unwrap_or(false) {
             trc::event!(Smtp(SmtpEvent::DsnDisabled), SpanId = self.data.session_id,);
             self.data.mail_from = None;
             return self
@@ -573,12 +533,7 @@ impl<T: SessionStream> Session<T> {
         // Send report
         if let (Some(recipient), Some(rate)) = (
             spf_output.report_address(),
-            self.server
-                .eval_if::<Rate, _>(
-                    &self.server.core.smtp.report.spf.send,
-                    self,
-                    self.data.session_id,
-                )
+            self.eval_if::<Rate>(&self.server.core.smtp.report.spf.send)
                 .await,
         ) {
             // Do not send SPF auth failures to local domains, as they are likely relay attempts (which are blocked later on)
