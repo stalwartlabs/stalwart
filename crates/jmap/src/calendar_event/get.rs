@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::blob::embedded::{EmbeddedBlobIds, import_error};
 use crate::{
+    api::metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
+    blob::embedded::{EmbeddedBlobIds, import_error},
     calendar_event::{CalendarSyntheticId, EventMap, EventValue, is_origin},
     changes::state::JmapCacheState,
 };
@@ -40,7 +41,7 @@ use groupware::{
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::calendar_event,
-    request::IntoValid,
+    request::{IntoValid, capability::CapabilityIds},
 };
 use jmap_tools::{Key, Map, Value};
 use std::{ops::Range, str::FromStr};
@@ -64,6 +65,7 @@ pub trait CalendarEventGet: Sync + Send {
         &self,
         request: GetRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<GetResponse<calendar_event::CalendarEvent>>> + Send;
 }
 
@@ -72,9 +74,12 @@ impl CalendarEventGet for Server {
         &self,
         mut request: GetRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<GetResponse<calendar_event::CalendarEvent>> {
         let return_all_properties = request.properties.is_none();
-        let properties = request.unwrap_properties(&[]);
+        let (properties, selection) = select_properties(&mut request, &[], using)?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
+        let metadata_get = metadata.get(selection);
         let account_id = request.account_id.document_id();
         let default_tz = request.arguments.resolved_time_zone()?;
         let cache = self
@@ -112,9 +117,34 @@ impl CalendarEventGet for Server {
         };
         ids.sort_unstable_by_key(|(id, index)| (id.document_id(), u64::from(*id), *index));
         ids.dedup_by_key(|(id, _)| *id);
+        let mut metadata_values = match &metadata_get {
+            Some(get) => {
+                let mut documents = MetadataDocuments::default();
+                for (id, _) in &ids {
+                    let document_id = id.document_id();
+                    if let Some(resource) = calendar_event_ids
+                        .contains(document_id)
+                        .then(|| cache.item_by_id(document_id))
+                        .flatten()
+                        .filter(|resource| {
+                            EventPrivacy::from_flags(resource.event_flags().unwrap_or_default())
+                                .private_view(is_account_member)
+                                == Some(false)
+                        })
+                    {
+                        documents.insert(document_id, resource.metadata_kinds());
+                    }
+                }
+                Some(metadata.load(self, account_id, get, &documents).await?)
+            }
+            None => None,
+        };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: cache.get_state(false).into(),
+            state: metadata
+                .state(self, account_id, cache.get_state(false))
+                .await?
+                .into(),
             list: Vec::with_capacity(ids.len()),
             not_found: vec![],
         };
@@ -176,6 +206,7 @@ impl CalendarEventGet for Server {
                 None
             };
             let flags = resource.event_flags().unwrap_or_default();
+            let projected_from = results.found.len();
             projector
                 .project(
                     self,
@@ -196,6 +227,11 @@ impl CalendarEventGet for Server {
                     &mut results,
                 )
                 .await?;
+            if let Some(values) = &mut metadata_values {
+                for (_, result) in results.found.iter_mut().skip(projected_from) {
+                    values.insert_into(document_id, result);
+                }
+            }
         }
 
         for id in results.not_found {
@@ -472,7 +508,6 @@ impl<'x> EventProjector<'x> {
                 .caused_by(trc::location!())?
                 .into_iter()
                 .collect(),
-            dead_properties: Default::default(),
         };
         let Some(is_private_view) = privacy
             .max(content.data.event.privacy())

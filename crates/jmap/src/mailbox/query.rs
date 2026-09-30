@@ -4,12 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        metadata::{MetadataType, ObjectMetadata},
+        query::QueryResponseBuilder,
+    },
+    changes::state::{JmapCacheState, MetadataStateManager},
+};
 use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::mailbox::{Mailbox, MailboxComparator, MailboxFilter},
+    request::capability::CapabilityIds,
 };
 use std::{collections::BTreeMap, future::Future};
 use store::{
@@ -18,13 +25,14 @@ use store::{
     search::{SearchComparator, SearchFilter, SearchQuery},
     write::SearchIndex,
 };
-use types::{acl::Acl, collection::Collection, special_use::SpecialUse};
+use types::{acl::Acl, collection::Collection, metadata::MetadataKinds, special_use::SpecialUse};
 
 pub trait MailboxQuery: Sync + Send {
     fn mailbox_query(
         &self,
         request: QueryRequest<Mailbox>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
@@ -33,6 +41,7 @@ impl MailboxQuery for Server {
         &self,
         mut request: QueryRequest<Mailbox>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Mailbox);
@@ -40,6 +49,46 @@ impl MailboxQuery for Server {
         let filter_as_tree = request.arguments.filter_as_tree.unwrap_or(false);
         let mut filters = Vec::with_capacity(request.filter.len());
         let mailboxes = self.get_cached_messages(account_id).await?;
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Mailbox);
+        let viewer = object_metadata.viewer();
+        let readable: RoaringBitmap = if access_token.is_shared(account_id) {
+            mailboxes.shared_mailboxes(access_token, Acl::Read)
+        } else {
+            mailboxes
+                .mailboxes
+                .items
+                .iter()
+                .map(|m| m.document_id)
+                .collect()
+        };
+        let metadata =
+            object_metadata.query(request.filter.iter().filter_map(|filter| match filter {
+                Filter::Property(MailboxFilter::Metadata(filter)) => Some(filter),
+                _ => None,
+            }))?;
+        let mut metadata_matches = if metadata.is_empty() {
+            Vec::new()
+        } else {
+            let candidates = mailboxes
+                .mailboxes
+                .items
+                .iter()
+                .filter(|mailbox| {
+                    mailbox.metadata_kinds.contains(MetadataKinds::JMAP)
+                        && readable.contains(mailbox.document_id)
+                })
+                .map(|mailbox| mailbox.document_id)
+                .collect::<RoaringBitmap>();
+            let private = if metadata.has_private() {
+                object_metadata.private_candidates(self, account_id).await?
+            } else {
+                None
+            };
+            metadata
+                .evaluate(self, account_id, &candidates, private)
+                .await?
+        }
+        .into_iter();
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -127,7 +176,9 @@ impl MailboxQuery for Server {
                                     .collect::<RoaringBitmap>(),
                             ));
                         }
-                        MailboxFilter::Metadata(_) => todo!(),
+                        MailboxFilter::Metadata(_) => filters.push(SearchFilter::is_in_set(
+                            metadata_matches.next().unwrap_or_default(),
+                        )),
                         MailboxFilter::_T(other) => {
                             return Err(trc::JmapEvent::UnsupportedFilter
                                 .into_err()
@@ -230,16 +281,7 @@ impl MailboxQuery for Server {
         let mut results = SearchQuery::new(SearchIndex::InMemory)
             .with_filters(filters)
             .with_comparators(comparators)
-            .with_mask(if access_token.is_shared(account_id) {
-                mailboxes.shared_mailboxes(access_token, Acl::Read)
-            } else {
-                mailboxes
-                    .mailboxes
-                    .items
-                    .iter()
-                    .map(|m| m.document_id)
-                    .collect()
-            })
+            .with_mask(readable)
             .filter();
 
         // Filter as tree
@@ -269,7 +311,13 @@ impl MailboxQuery for Server {
         let mut response = QueryResponseBuilder::new(
             results.results().len() as usize,
             self.core.jmap.query_max_results,
-            mailboxes.get_state(true),
+            self.metadata_state(
+                viewer,
+                account_id,
+                Collection::Mailbox,
+                mailboxes.get_state(true),
+            )
+            .await?,
             &request,
         );
 

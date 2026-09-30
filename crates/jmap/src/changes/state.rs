@@ -4,11 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use common::{GroupwareResources, MessageStoreCache, Server};
+use common::{GroupwareResources, MessageStoreCache, Server, storage::metadata::MetadataViewer};
 use jmap_proto::types::state::State;
 use std::future::Future;
 use trc::AddContext;
-use types::{ChangeId, collection::SyncCollection};
+use types::{
+    ChangeId,
+    collection::{Collection, SyncCollection},
+};
 
 pub trait StateManager: Sync + Send {
     fn get_state(
@@ -21,6 +24,25 @@ pub trait StateManager: Sync + Send {
         &self,
         account_id: u32,
         collection: SyncCollection,
+        if_in_state: &Option<State>,
+    ) -> impl Future<Output = trc::Result<State>> + Send;
+}
+
+pub trait MetadataStateManager: Sync + Send {
+    fn metadata_state(
+        &self,
+        viewer: Option<MetadataViewer>,
+        account_id: u32,
+        collection: Collection,
+        shared: State,
+    ) -> impl Future<Output = trc::Result<State>> + Send;
+
+    fn assert_metadata_state(
+        &self,
+        viewer: Option<MetadataViewer>,
+        account_id: u32,
+        collection: Collection,
+        shared: State,
         if_in_state: &Option<State>,
     ) -> impl Future<Output = trc::Result<State>> + Send;
 }
@@ -64,6 +86,52 @@ impl StateManager for Server {
         }
 
         Ok(old_state)
+    }
+}
+
+impl MetadataStateManager for Server {
+    async fn metadata_state(
+        &self,
+        viewer: Option<MetadataViewer>,
+        account_id: u32,
+        collection: Collection,
+        shared: State,
+    ) -> trc::Result<State> {
+        match viewer {
+            Some(viewer) => self
+                .metadata_viewer_state(viewer, account_id, collection)
+                .await
+                .caused_by(trc::location!())
+                .map(|state| max_state(shared, state.change_id)),
+            None => Ok(shared),
+        }
+    }
+
+    async fn assert_metadata_state(
+        &self,
+        viewer: Option<MetadataViewer>,
+        account_id: u32,
+        collection: Collection,
+        shared: State,
+        if_in_state: &Option<State>,
+    ) -> trc::Result<State> {
+        let old_state = self
+            .metadata_state(viewer, account_id, collection, shared)
+            .await?;
+        if let Some(if_in_state) = if_in_state
+            && &old_state != if_in_state
+        {
+            return Err(trc::JmapEvent::StateMismatch.into_err());
+        }
+        Ok(old_state)
+    }
+}
+
+pub(crate) fn max_state(state: State, change_id: ChangeId) -> State {
+    match state {
+        State::Initial if change_id != 0 => State::Exact(change_id),
+        State::Exact(current) => State::Exact(current.max(change_id)),
+        state => state,
     }
 }
 

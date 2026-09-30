@@ -5,14 +5,17 @@
  */
 
 use crate::{
-    object::{AnyId, JmapObject, JmapObjectId, metadata::MetadataFilter},
+    object::{
+        AnyId, JmapObject, JmapObjectId,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+    },
     request::{MaybeInvalid, deserialize::DeserializeArguments},
 };
 use calcard::{
     common::timezone::Tz,
     jscalendar::{JSCalendarDateTime, JSCalendarProperty, JSCalendarValue},
 };
-use jmap_tools::{JsonPointerItem, Key};
+use jmap_tools::{JsonPointer, JsonPointerItem, Key};
 use mail_parser::DateTime;
 use std::borrow::Cow;
 use types::{blob::BlobId, id::Id};
@@ -361,6 +364,30 @@ impl<'de> serde::Deserialize<'de> for LocalTime {
                 "Invalid datetime: {}",
                 value
             )))
+        }
+    }
+}
+
+impl MetadataProperty for JSCalendarProperty<Id> {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            JSCalendarProperty::Metadata => Some(MetadataRoot::Shared),
+            JSCalendarProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            JSCalendarProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => JSCalendarProperty::Metadata,
+            MetadataRoot::Private => JSCalendarProperty::PrivateMetadata,
         }
     }
 }

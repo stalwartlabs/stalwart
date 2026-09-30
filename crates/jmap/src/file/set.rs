@@ -12,12 +12,16 @@ use super::{
 use crate::{
     api::{
         acl::JmapRights,
+        metadata::{
+            MetadataAccess, MetadataPatches, MetadataPreload, MetadataType, NewMetadata,
+            ObjectMetadata, PreparedMetadata, is_empty_update, reject_uncommitted,
+        },
         parent_ref::{CreateResolver, ParentRef},
     },
     changes::state::JmapCacheState,
 };
-use common::{Server, auth::AccessToken};
-use groupware::{cache::GroupwareCache, file::FileNode};
+use common::{Server, auth::AccessToken, storage::dav::FilePresence};
+use groupware::{PresenceUpdate, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
@@ -27,7 +31,7 @@ use jmap_proto::{
         file_node::{self, FileNodeProperty, FileNodeValue},
     },
     references::resolve::ResolveCreatedReference,
-    request::MaybeInvalid,
+    request::{MaybeInvalid, capability::CapabilityIds},
     types::state::State,
 };
 use jmap_tools::{Key, Map, Value};
@@ -42,6 +46,7 @@ use types::{
     collection::{Collection, SyncCollection},
     id::Id,
     media_type::media_type_essence,
+    metadata::MetadataKinds,
 };
 use utils::map::bitmap::Bitmap;
 
@@ -51,6 +56,7 @@ pub trait FileNodeSet: Sync + Send {
         request: SetRequest<'_, file_node::FileNode>,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<SetResponse<file_node::FileNode>>> + Send;
 }
 
@@ -62,6 +68,7 @@ pub(super) struct PreparedCreate {
     node: FileNode,
     parent: ParentRef,
     omitted: Omitted,
+    metadata: Option<PreparedMetadata>,
 }
 
 struct PreparedUpdate {
@@ -73,6 +80,7 @@ struct PreparedUpdate {
     effects: PatchEffects,
     report_size: bool,
     echo: Omitted,
+    metadata: Option<PreparedMetadata>,
 }
 
 enum Planned {
@@ -108,6 +116,7 @@ impl FileNodeSet for Server {
         mut request: SetRequest<'_, file_node::FileNode>,
         access_token: &AccessToken,
         _session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<SetResponse<file_node::FileNode>> {
         let account_id = request.account_id.document_id();
         let cache = self
@@ -117,8 +126,18 @@ impl FileNodeSet for Server {
                 SyncCollection::FileNode,
             )
             .await?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(cache.assert_state(false, &request.if_in_state)?);
+            .with_state(
+                metadata
+                    .assert_state(
+                        self,
+                        account_id,
+                        cache.get_state(false),
+                        &request.if_in_state,
+                    )
+                    .await?,
+            );
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let options = WriteOptions {
             on_exists: request.arguments.on_exists,
@@ -131,7 +150,8 @@ impl FileNodeSet for Server {
                 .compare_case_insensitively
                 .unwrap_or(false),
         };
-        let mut writer = FileNodeWriter::new(self, access_token, account_id, &cache, options);
+        let mut writer =
+            FileNodeWriter::new(self, access_token, account_id, &cache, options, metadata);
         if request.has_creates() {
             writer = writer.with_quota().await?;
         }
@@ -170,6 +190,7 @@ impl FileNodeSet for Server {
                 FileNode::default(),
                 object,
                 &resolver,
+                None,
             )
             .await?
             {
@@ -181,7 +202,28 @@ impl FileNodeSet for Server {
             }
         }
 
-        for (id, object) in request.unwrap_update() {
+        let mut updates =
+            Vec::with_capacity(request.update.as_ref().map_or(0, |update| update.len()));
+        let mut preload = MetadataPreload::default();
+        for (id, mut object) in request.unwrap_update() {
+            let patches = writer
+                .metadata
+                .extract(MetadataPatches::for_update(), &mut object);
+            if let (MaybeInvalid::Value(id), Ok(Some(patches))) = (&id, &patches) {
+                let document_id = id.document_id();
+                preload.insert(
+                    document_id,
+                    patches,
+                    cache
+                        .resources
+                        .find_any(document_id)
+                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
+                );
+            }
+            updates.push((id, object, patches));
+        }
+        writer.metadata.preload(self, account_id, preload).await?;
+        for (id, object, patches) in updates {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -189,8 +231,15 @@ impl FileNodeSet for Server {
                     continue;
                 }
             };
+            let patches = match patches {
+                Ok(patches) => patches,
+                Err(err) => {
+                    response.not_updated.append(id, err);
+                    continue;
+                }
+            };
             let resolver = CreateResolver::new(&pending_creates);
-            match prepare_update(&writer, id, object, &resolver).await? {
+            match prepare_update(&writer, id, object, patches, &resolver).await? {
                 Ok(update) => planned.push(Planned::Update(update)),
                 Err(err) => response.not_updated.append(id, err),
             }
@@ -258,10 +307,22 @@ impl FileNodeSet for Server {
         writer.finish();
 
         if !writer.batch.is_empty() {
-            let assigned_ids = self
-                .commit_batch(writer.batch)
-                .await
-                .caused_by(trc::location!())?;
+            let assigned_ids = match self.commit_batch(writer.batch).await {
+                Ok(assigned_ids) => assigned_ids,
+                Err(err) if err.is_assertion_failure() => {
+                    reject_uncommitted(
+                        &mut response,
+                        created.into_iter().map(|create| create.create_id),
+                        "Another process modified this file node, please try again.",
+                    );
+                    for (key, err, _) in awaiting_existing {
+                        key.append(&mut response, err);
+                    }
+                    return Ok(response);
+                }
+                Err(err) => return Err(err.caused_by(trc::location!())),
+            };
+            writer.metadata.committed(self, &assigned_ids).await;
 
             for (key, err, slot) in awaiting_existing {
                 key.append(
@@ -342,11 +403,13 @@ pub(super) async fn create_node<R: ResolveCreatedReference<FileNodeProperty, Fil
     node: FileNode,
     object: Value<'_, FileNodeProperty, FileNodeValue>,
     resolver: &R,
+    copy_source: Option<u32>,
 ) -> trc::Result<Result<CreatedNode, (String, Rejection)>> {
-    let mut create = match prepare_create(writer, create_id, node, object, resolver).await? {
-        Ok(create) => create,
-        Err((create_id, err)) => return Ok(Err((create_id, err.into()))),
-    };
+    let mut create =
+        match prepare_create(writer, create_id, node, object, resolver, copy_source).await? {
+            Ok(create) => create,
+            Err((create_id, err)) => return Ok(Err((create_id, err.into()))),
+        };
     match place_create(writer, &mut create, None) {
         Claim::Accepted { renamed } => commit_create(writer, create, renamed).map(Ok),
         Claim::Rejected(rejection) => {
@@ -364,9 +427,20 @@ async fn prepare_create<R: ResolveCreatedReference<FileNodeProperty, FileNodeVal
     writer: &mut FileNodeWriter<'_>,
     create_id: String,
     mut node: FileNode,
-    object: Value<'_, FileNodeProperty, FileNodeValue>,
+    mut object: Value<'_, FileNodeProperty, FileNodeValue>,
     resolver: &R,
+    copy_source: Option<u32>,
 ) -> trc::Result<Result<PreparedCreate, (String, SetError<FileNodeProperty>)>> {
+    let new_metadata = match writer
+        .metadata
+        .extract(MetadataPatches::for_create(), &mut object)
+    {
+        Ok(patches) => match copy_source {
+            Some(source_id) => Some(NewMetadata::Copy { patches, source_id }),
+            None => patches.map(NewMetadata::Create),
+        },
+        Err(err) => return Ok(Err((create_id, err))),
+    };
     let patch = match NodePatch::parse(None, object, &node, true, resolver) {
         Ok(patch) => patch,
         Err(err) => return Ok(Err((create_id, err))),
@@ -426,6 +500,21 @@ async fn prepare_create<R: ResolveCreatedReference<FileNodeProperty, FileNodeVal
     {
         return Ok(Err((create_id, err)));
     }
+    let metadata_access = match (&new_metadata, writer.inherited_rights(parent)) {
+        (Some(_), Some(rights)) => MetadataAccess {
+            may_write_shared: rights.contains(Acl::Modify),
+            may_read: rights.contains(Acl::Read) || rights.contains(Acl::ReadItems),
+        },
+        _ => MetadataAccess::FULL,
+    };
+    let metadata = match writer
+        .metadata
+        .prepare_new(writer.server, new_metadata, metadata_access)
+        .await?
+    {
+        Ok(metadata) => metadata,
+        Err(err) => return Ok(Err((create_id, err))),
+    };
 
     let slot = writer
         .batch
@@ -437,6 +526,7 @@ async fn prepare_create<R: ResolveCreatedReference<FileNodeProperty, FileNodeVal
         node,
         parent,
         omitted,
+        metadata,
     }))
 }
 
@@ -474,6 +564,7 @@ fn commit_create(
         mut node,
         parent,
         omitted,
+        metadata,
     } = create;
     writer.register_created(slot, parent, node.is_directory());
     node.stamp_insert(
@@ -482,7 +573,16 @@ fn commit_create(
         omitted.accessed && node.accessed == 0,
     );
     node.parent_id = parent.as_stored();
+    node.set_presence(
+        metadata
+            .as_ref()
+            .and_then(PreparedMetadata::file_presence)
+            .unwrap_or(FilePresence::NONE),
+    );
     let values = created_values(&node, &omitted, writer.inherited_rights(parent), renamed);
+    if let Some(metadata) = metadata {
+        writer.metadata.write(metadata, slot, &mut writer.batch)?;
+    }
     node.insert_stamped(
         writer.access_token.account_tenant_ids(),
         writer.account_id,
@@ -502,8 +602,13 @@ async fn prepare_update(
     writer: &FileNodeWriter<'_>,
     id: Id,
     object: Value<'_, FileNodeProperty, FileNodeValue>,
+    metadata_patches: Option<MetadataPatches>,
     resolver: &CreateResolver<'_>,
 ) -> trc::Result<Result<PreparedUpdate, SetError<FileNodeProperty>>> {
+    let is_metadata_only = metadata_patches.is_some()
+        && object
+            .as_object()
+            .is_some_and(|object| is_empty_update::<file_node::FileNode>(object, id));
     let document_id = id.document_id();
     if writer.is_destroyed(document_id) {
         return Ok(Err(SetError::will_destroy()));
@@ -562,7 +667,9 @@ async fn prepare_update(
         Ok(effects) => effects,
         Err(err) => return Ok(Err(err)),
     };
-    if let Err(err) = writer.validate_update_rights(document_id, old_parent, parent, &effects) {
+    if !is_metadata_only
+        && let Err(err) = writer.validate_update_rights(document_id, old_parent, parent, &effects)
+    {
         return Ok(Err(err));
     }
     if effects.acls
@@ -576,6 +683,23 @@ async fn prepare_update(
     {
         return Ok(Err(err));
     }
+    let metadata = match metadata_patches {
+        Some(patches) => {
+            let access = MetadataAccess {
+                may_write_shared: writer.has_right(document_id, Acl::Modify),
+                may_read: writer.is_readable(document_id),
+            };
+            match writer
+                .metadata
+                .prepare(writer.server, patches, access, Some(document_id))
+                .await?
+            {
+                Ok(metadata) => Some(metadata),
+                Err(err) => return Ok(Err(err)),
+            }
+        }
+        None => None,
+    };
 
     Ok(Ok(PreparedUpdate {
         id,
@@ -586,6 +710,7 @@ async fn prepare_update(
         effects,
         report_size,
         echo,
+        metadata,
     }))
 }
 
@@ -636,10 +761,26 @@ fn commit_update(
     update: PreparedUpdate,
     renamed: bool,
 ) -> trc::Result<Option<Value<'static, FileNodeProperty, FileNodeValue>>> {
+    let document_id = update.id.document_id();
+    let metadata = update.metadata;
     if !update.effects.changes_node() && !update.effects.subscription {
+        if let Some(metadata) = metadata {
+            if let Some(presence) = metadata.file_presence() {
+                PresenceUpdate(
+                    update
+                        .archive
+                        .to_unarchived::<FileNode>()
+                        .caused_by(trc::location!())?,
+                )
+                .write(presence, writer.account_id, document_id, &mut writer.batch)
+                .caused_by(trc::location!())?;
+            }
+            writer
+                .metadata
+                .write(metadata, document_id, &mut writer.batch)?;
+        }
         return Ok(None);
     }
-    let document_id = update.id.document_id();
     let current = update
         .archive
         .to_unarchived::<FileNode>()
@@ -647,6 +788,9 @@ fn commit_update(
     let mut node = update.node;
     node.parent_id = update.parent.as_stored();
     node.stamp_update(false);
+    if let Some(presence) = metadata.as_ref().and_then(PreparedMetadata::file_presence) {
+        node.set_presence(presence);
+    }
     writer.register_update(
         document_id,
         update.parent,
@@ -696,6 +840,11 @@ fn commit_update(
         }
     }
 
+    if let Some(metadata) = metadata {
+        writer
+            .metadata
+            .write(metadata, document_id, &mut writer.batch)?;
+    }
     node.update_stamped(
         writer.access_token.account_tenant_ids(),
         current,

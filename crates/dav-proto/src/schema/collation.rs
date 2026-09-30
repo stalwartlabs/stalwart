@@ -71,10 +71,24 @@ impl Collation {
                 if text.is_ascii() {
                     Collation::AsciiCasemap.prepare(text)
                 } else {
-                    Cow::Owned(text.chars().map(char::simple_titlecase).nfkd().collect())
+                    let mut folded = String::with_capacity(text.len());
+                    unicode_casemap(text, &mut folded);
+                    Cow::Owned(folded)
                 }
             }
         }
+    }
+}
+
+pub fn unicode_casemap(text: &str, out: &mut String) {
+    if text.is_ascii() {
+        let start = out.len();
+        out.push_str(text);
+        if let Some(appended) = out.get_mut(start..) {
+            appended.make_ascii_uppercase();
+        }
+    } else {
+        out.extend(text.chars().map(char::simple_titlecase).nfkd());
     }
 }
 
@@ -180,6 +194,29 @@ mod tests {
 
     fn text_match(value: &str, match_type: MatchType, collation: Collation) -> TextMatch {
         TextMatch::new(value.to_string(), match_type, collation, false)
+    }
+
+    #[test]
+    fn unicode_casemap_appends_the_prepared_form() {
+        for text in [
+            "",
+            "abc",
+            "Doe",
+            "Straße",
+            "ǆemal",
+            "\u{fb01}le",
+            "ᾀ",
+            "ＡＢＣ",
+            "\u{212a}",
+        ] {
+            let mut folded = String::from("prefix:");
+            unicode_casemap(text, &mut folded);
+            assert_eq!(
+                folded,
+                format!("prefix:{}", Collation::UnicodeCasemap.prepare(text)),
+                "{text:?}"
+            );
+        }
     }
 
     #[test]

@@ -9,13 +9,17 @@ use store::{
     Serialize, U32_LEN, U64_LEN,
     write::{
         Archive, ArchiveBytes, ArchiveCompression, Archiver, AssignedIds, BatchBuilder, Patch,
-        PatchSource, SerializeWithIds, SetValue, SizedSetValue, Slot,
+        PatchSource, SerializeWithIds, SetValue, SizedSetValue, Slot, metadata::MetadataClass,
     },
 };
-use types::field::Field;
+use types::{field::Field, metadata::MetadataKinds};
 
 pub trait IndexableObject: Sync + Send {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>>;
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        MetadataKinds::NONE
+    }
 }
 
 pub trait IndexableAndSerializableObject:
@@ -92,6 +96,9 @@ impl<T: IndexableObject> CurrentObject for Archive<T> {
     #[inline(always)]
     fn clear(&self, batch: &mut BatchBuilder) {
         batch.clear(Field::ARCHIVE);
+        if !self.inner.metadata_kinds().is_empty() {
+            batch.clear(MetadataClass::Shared);
+        }
     }
 }
 

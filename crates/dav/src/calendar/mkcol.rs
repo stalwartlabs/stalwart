@@ -9,6 +9,7 @@ use crate::{
     DavError, DavMethod, PropStatBuilder,
     common::{
         ExtractETag,
+        dead::{DeadPatch, DeadTarget, DisplayName},
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -27,7 +28,10 @@ use hyper::StatusCode;
 use registry::schema::enums::StorageQuota;
 use store::write::BatchBuilder;
 use trc::AddContext;
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    metadata::MetadataKinds,
+};
 
 pub(crate) trait CalendarMkColRequestHandler: Sync + Send {
     fn handle_calendar_mkcol_request(
@@ -108,18 +112,37 @@ impl CalendarMkColRequestHandler for Server {
         // Apply MKCOL properties
         let personal_id = access_token.personal_id(account_id, Collection::Calendar);
         calendar.preferences_mut(personal_id).flags |= CALENDAR_SUBSCRIBED;
+        let mut batch = BatchBuilder::new();
+        let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
         let mut return_prop_stat = None;
         let mut is_mkcalendar = false;
-        if let Some(mkcol) = request {
+        let mut dead_write = None;
+        if let Some(mut mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
             is_mkcalendar = mkcol.is_mkcalendar;
-            if !self.apply_calendar_properties(
+            let dead = DeadPatch::take_values(&mut mkcol.props, DisplayName::Live);
+            self.apply_calendar_properties(
                 personal_id,
                 &mut calendar,
                 false,
                 mkcol.props,
                 &mut prop_stat,
-            ) {
+            );
+            dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::container(
+                        account_id,
+                        Collection::Calendar,
+                        document_id,
+                        MetadataKinds::NONE,
+                    ),
+                    &mut prop_stat,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            if prop_stat.has_errors() {
+                prop_stat.fail_dependencies();
                 return Ok(HttpResponse::new(StatusCode::FORBIDDEN).with_xml_body(
                     MkColResponse::new(prop_stat.build())
                         .with_namespace(Namespace::CalDav)
@@ -134,8 +157,12 @@ impl CalendarMkColRequestHandler for Server {
 
         // Prepare write batch
         calendar.sync_owner_preferences(account_id, personal_id);
-        let mut batch = BatchBuilder::new();
-        let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
+        if let Some(dead_write) = &dead_write {
+            calendar.set_metadata_kinds(dead_write.kinds);
+        }
+        if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
+            write.build(&mut batch).caused_by(trc::location!())?;
+        }
         calendar
             .insert(
                 access_token.account_tenant_ids(),

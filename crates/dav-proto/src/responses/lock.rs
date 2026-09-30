@@ -6,15 +6,21 @@
 
 use crate::{
     Depth, Timeout,
-    responses::DeadPropertyFormat,
     schema::{
+        Namespace,
         property::{ActiveLock, LockDiscovery, LockEntry, LockScope, LockType, SupportedLock},
         request::LockInfo,
         response::{Href, List},
     },
 };
-use std::fmt::Display;
-use types::dead_property::DeadProperty;
+use std::fmt::{self, Display};
+use types::metadata::{DavValueView, EncodedDavValue, XmlName};
+
+const OWNER: XmlName<'static> = XmlName::borrowed(Some("DAV:"), "owner");
+
+fn write_owner(owner: DavValueView<'_>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    owner.write_property_prefixed(&OWNER, Namespace::Dav.prefix(), f)
+}
 
 impl Display for SupportedLock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -37,9 +43,7 @@ impl Display for ActiveLock {
         )?;
 
         if let Some(owner) = &self.owner {
-            f.write_str("<D:owner>")?;
-            owner.fmt(f)?;
-            f.write_str("</D:owner>")?;
+            write_owner(owner.view(), f)?;
         }
 
         write!(f, "{}", self.timeout)?;
@@ -82,9 +86,7 @@ impl Display for LockInfo {
         write!(f, "<D:lockinfo>{}{}", self.lock_scope, self.lock_type)?;
 
         if let Some(owner) = &self.owner {
-            f.write_str("<D:owner>")?;
-            owner.fmt(f)?;
-            f.write_str("</D:owner>")?;
+            write_owner(owner.to_encoded().map_err(|_| fmt::Error)?.view(), f)?;
         }
 
         write!(f, "</D:lockinfo>",)
@@ -142,12 +144,12 @@ impl ActiveLock {
         self
     }
 
-    pub fn with_owner_opt(mut self, owner: Option<DeadProperty>) -> Self {
+    pub fn with_owner_opt(mut self, owner: Option<EncodedDavValue>) -> Self {
         self.owner = owner;
         self
     }
 
-    pub fn with_owner(mut self, owner: DeadProperty) -> Self {
+    pub fn with_owner(mut self, owner: EncodedDavValue) -> Self {
         self.owner = Some(owner);
         self
     }

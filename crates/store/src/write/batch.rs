@@ -449,6 +449,63 @@ impl BatchBuilder {
         self
     }
 
+    pub fn log_container_metadata(&mut self, collection: SyncCollection) -> &mut Self {
+        if let (Some(account_id), Some(document_id)) =
+            (self.current_account_id, self.current_document_id)
+        {
+            self.changes
+                .get_mut_or_insert(account_id)
+                .log_container_metadata(collection, document_id);
+        }
+        self
+    }
+
+    pub fn log_item_metadata(
+        &mut self,
+        collection: SyncCollection,
+        prefix: Option<PendingId>,
+    ) -> &mut Self {
+        if let (Some(account_id), Some(document_id)) =
+            (self.current_account_id, self.current_document_id)
+        {
+            self.changes
+                .get_mut_or_insert(account_id)
+                .log_item_metadata(collection, prefix, document_id);
+        }
+        self
+    }
+
+    pub fn log_private_container_metadata(
+        &mut self,
+        collection: SyncCollection,
+        viewer: u32,
+    ) -> &mut Self {
+        if let (Some(account_id), Some(document_id)) =
+            (self.current_account_id, self.current_document_id)
+        {
+            self.changes
+                .get_mut_or_insert(account_id)
+                .log_private_container_metadata(collection, viewer, document_id);
+        }
+        self
+    }
+
+    pub fn log_private_item_metadata(
+        &mut self,
+        collection: SyncCollection,
+        viewer: u32,
+        prefix: Option<PendingId>,
+    ) -> &mut Self {
+        if let (Some(account_id), Some(document_id)) =
+            (self.current_account_id, self.current_document_id)
+        {
+            self.changes
+                .get_mut_or_insert(account_id)
+                .log_private_item_metadata(collection, viewer, prefix, document_id);
+        }
+        self
+    }
+
     pub fn log_vanished_item(
         &mut self,
         collection: VanishedCollection,
@@ -496,7 +553,10 @@ impl BatchBuilder {
     fn serialize_changes(&mut self) {
         if !self.changes.is_empty() {
             for (account_id, changelog) in std::mem::take(&mut self.changes) {
-                if changelog.changes.is_empty() && changelog.vanished.is_empty() {
+                if changelog.changes.is_empty()
+                    && changelog.vanished.is_empty()
+                    && changelog.private.is_empty()
+                {
                     continue;
                 }
                 self.with_account_id(account_id);
@@ -530,6 +590,22 @@ impl BatchBuilder {
                     self.ops.push(Operation::Log {
                         collection: LogCollection::Vanished(collection),
                         set: LogSet::Bytes(vanished.serialize(collection.is_named(), &mut scratch)),
+                    });
+                }
+
+                for (log, changes) in changelog.private.into_iter() {
+                    self.register_change_group(account_id, log.collection.change_group());
+                    let set = if changes.has_pending() {
+                        LogSet::Pending(Box::new(changes))
+                    } else {
+                        LogSet::Bytes(changes.serialize(log.collection.is_prefixed(), &mut scratch))
+                    };
+                    self.ops.push(Operation::Log {
+                        collection: LogCollection::Private {
+                            collection: log.collection,
+                            viewer: log.viewer,
+                        },
+                        set,
                     });
                 }
             }

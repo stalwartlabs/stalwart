@@ -8,7 +8,7 @@ use super::{
     AddressBook, ArchivedAddressBook, ArchivedContactCard, ArchivedContactCardContent, ContactCard,
     ContactCardContent,
 };
-use crate::DestroyArchive;
+use crate::{DestroyArchive, metadata::MetadataCleanup};
 use calcard::vcard::VCardVersion;
 use common::{
     Server,
@@ -179,6 +179,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
         account_id: u32,
         document_id: u32,
         children_ids: Vec<u32>,
+        cleanup: &MetadataCleanup,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
@@ -199,31 +200,75 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
                         .to_unarchived::<ContactCard>()
                         .caused_by(trc::location!())?,
                 )
-                .delete(
+                .remove(
                     server,
                     changed_by,
                     account_id,
                     document_id,
                     addressbook_id,
                     None,
+                    cleanup,
                     batch,
                 )
                 .await?;
             }
         }
 
-        self.delete(changed_by, account_id, document_id, delete_path, batch)
+        self.delete(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            delete_path,
+            batch,
+        )
+        .await
     }
 
-    pub fn delete(
+    pub async fn delete(
         self,
+        server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
+        self.delete_with_cleanup(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            delete_path,
+            &MetadataCleanup::immediate(Collection::AddressBook),
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn delete_with_cleanup(
+        self,
+        server: &Server,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        delete_path: Option<String>,
+        cleanup: &MetadataCleanup,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
         let book = self.0;
+        cleanup
+            .remove(
+                server,
+                changed_by,
+                account_id,
+                document_id,
+                book.inner.metadata_kinds(),
+                batch,
+            )
+            .await?;
+
         // Delete addressbook
         batch
             .with_account_id(account_id)
@@ -258,6 +303,56 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
+        self.remove(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            addressbook_id,
+            delete_path,
+            &MetadataCleanup::immediate(Collection::ContactCard),
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn delete_with_cleanup(
+        self,
+        server: &Server,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        addressbook_id: u32,
+        delete_path: Option<String>,
+        cleanup: &MetadataCleanup,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        self.remove(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            addressbook_id,
+            delete_path,
+            cleanup,
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn remove(
+        self,
+        server: &Server,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        addressbook_id: u32,
+        delete_path: Option<String>,
+        cleanup: &MetadataCleanup,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
         let card = self.0;
         if let Some(delete_idx) = card
             .inner
@@ -283,7 +378,19 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
             } else {
                 // Delete card
                 let content_ = card_content(server, account_id, document_id).await?;
+                cleanup
+                    .remove(
+                        server,
+                        changed_by,
+                        account_id,
+                        document_id,
+                        card.inner.metadata_kinds(),
+                        batch,
+                    )
+                    .await?;
                 batch
+                    .with_account_id(account_id)
+                    .with_collection(Collection::ContactCard)
                     .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<_, ()>::new()
@@ -311,7 +418,37 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
         document_id: u32,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
+        self.remove_all(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            &MetadataCleanup::immediate(Collection::ContactCard),
+            batch,
+        )
+        .await
+    }
+
+    pub async fn remove_all(
+        self,
+        server: &Server,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        cleanup: &MetadataCleanup,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
         let content_ = card_content(server, account_id, document_id).await?;
+        cleanup
+            .remove(
+                server,
+                changed_by,
+                account_id,
+                document_id,
+                self.0.inner.metadata_kinds(),
+                batch,
+            )
+            .await?;
 
         batch
             .with_account_id(account_id)

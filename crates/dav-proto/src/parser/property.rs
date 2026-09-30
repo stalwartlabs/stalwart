@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{DavParser, RawElement, Token, XmlValueParser, tokenizer::Tokenizer};
+use super::{RawElement, Token, XmlValueParser, tokenizer::Tokenizer};
 use crate::schema::{
     Attribute, AttributeValue, Element, NamedElement, Namespace,
     property::{
@@ -21,7 +21,7 @@ use calcard::{
     vcard::{VCardParameterName, VCardProperty, VCardVersion},
 };
 use mail_parser::DateTime;
-use types::{TimeRange, dead_property::DeadProperty};
+use types::TimeRange;
 
 impl Tokenizer<'_> {
     pub(crate) fn collect_properties(
@@ -61,17 +61,18 @@ impl Tokenizer<'_> {
                         version,
                     }));
                 }
-                Token::ElementStart { name, .. } => {
-                    if let Some(property) = DavProperty::from_element(name) {
-                        elements.push(property);
-                    }
+                Token::ElementStart { name, raw } => {
+                    elements.push(match DavProperty::from_element(name) {
+                        Some(property) => property,
+                        None => DavProperty::Dead(raw.dead_name()?),
+                    });
                     self.expect_element_end()?;
                 }
                 Token::ElementEnd => {
                     break;
                 }
-                Token::UnknownElement(name) => {
-                    elements.push(DavProperty::DeadProperty((&name).into()));
+                Token::UnknownElement(raw) => {
+                    elements.push(DavProperty::Dead(raw.dead_name()?));
                     self.expect_element_end()?;
                 }
                 token => return Err(token.into_unexpected()),
@@ -290,14 +291,15 @@ impl Tokenizer<'_> {
     }
 }
 
-impl Tokenizer<'_> {
+impl<'x> Tokenizer<'x> {
     pub(crate) fn collect_property_values(
         &mut self,
         elements: &mut Vec<DavPropertyValue>,
+        lang: Option<&str>,
     ) -> crate::parser::Result<()> {
         loop {
             match self.token()? {
-                Token::ElementStart { name, .. } => {
+                Token::ElementStart { name, raw } => {
                     if let Some(property) = DavProperty::from_element(name) {
                         let value = match property {
                             DavProperty::WebDav(WebDavProperty::ResourceType) => {
@@ -368,24 +370,31 @@ impl Tokenizer<'_> {
 
                         elements.push(DavPropertyValue { property, value });
                     } else {
-                        // Ignore unknown elements
-                        self.seek_element_end()?;
+                        elements.push(self.collect_dead_property(&raw, lang)?);
                     }
                 }
                 Token::ElementEnd | Token::Eof => {
                     break;
                 }
                 Token::UnknownElement(raw) => {
-                    elements.push(DavPropertyValue {
-                        property: DavProperty::DeadProperty((&raw).into()),
-                        value: DavValue::DeadProperty(DeadProperty::parse(self)?),
-                    });
+                    elements.push(self.collect_dead_property(&raw, lang)?);
                 }
                 token => return Err(token.into_unexpected()),
             }
         }
 
         Ok(())
+    }
+
+    fn collect_dead_property(
+        &mut self,
+        raw: &RawElement<'x>,
+        lang: Option<&str>,
+    ) -> crate::parser::Result<DavPropertyValue> {
+        Ok(DavPropertyValue {
+            property: DavProperty::Dead(raw.dead_name()?),
+            value: DavValue::Dead(Box::new(self.collect_xml_value(raw, lang)?)),
+        })
     }
 }
 

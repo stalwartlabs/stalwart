@@ -8,23 +8,28 @@ use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::{
-        mailbox::{Mailbox, MailboxProperty, MailboxValue},
-        metadata::MetadataSelection,
-    },
+    object::mailbox::{Mailbox, MailboxProperty, MailboxValue},
+    request::capability::CapabilityIds,
 };
 use jmap_tools::{Map, Value};
 use std::future::Future;
 use store::ahash::AHashSet;
-use types::{acl::Acl, collection::Collection, keyword::Keyword, special_use::SpecialUse};
+use types::{acl::Acl, collection::Collection, id::Id, keyword::Keyword, special_use::SpecialUse};
 
-use crate::{api::acl::JmapRights, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        acl::JmapRights,
+        metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
+    },
+    changes::state::{JmapCacheState, MetadataStateManager},
+};
 
 pub trait MailboxGet: Sync + Send {
     fn mailbox_get(
         &self,
         request: GetRequest<Mailbox>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<GetResponse<Mailbox>>> + Send;
 }
 
@@ -33,24 +38,29 @@ impl MailboxGet for Server {
         &self,
         mut request: GetRequest<Mailbox>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<GetResponse<Mailbox>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let mut properties = request.unwrap_properties(&[
-            MailboxProperty::Id,
-            MailboxProperty::Name,
-            MailboxProperty::ParentId,
-            MailboxProperty::Role,
-            MailboxProperty::SortOrder,
-            MailboxProperty::IsSubscribed,
-            MailboxProperty::TotalEmails,
-            MailboxProperty::UnreadEmails,
-            MailboxProperty::TotalThreads,
-            MailboxProperty::UnreadThreads,
-            MailboxProperty::MyRights,
-        ]);
-        if !MetadataSelection::extract(&mut properties)?.is_none() {
-            todo!()
-        }
+        let (properties, selection) = select_properties(
+            &mut request,
+            &[
+                MailboxProperty::Id,
+                MailboxProperty::Name,
+                MailboxProperty::ParentId,
+                MailboxProperty::Role,
+                MailboxProperty::SortOrder,
+                MailboxProperty::IsSubscribed,
+                MailboxProperty::TotalEmails,
+                MailboxProperty::UnreadEmails,
+                MailboxProperty::TotalThreads,
+                MailboxProperty::UnreadThreads,
+                MailboxProperty::MyRights,
+            ],
+            using,
+        )?;
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Mailbox);
+        let viewer = object_metadata.viewer();
+        let metadata = object_metadata.get(selection);
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Mailbox);
         let cache = self.get_cached_messages(account_id).await?;
@@ -74,9 +84,39 @@ impl MailboxGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: Some(cache.get_state(true)),
+            state: Some(
+                self.metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Mailbox,
+                    cache.get_state(true),
+                )
+                .await?,
+            ),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
+        };
+        let mut metadata_values = match &metadata {
+            Some(metadata) => {
+                let mut documents = MetadataDocuments::default();
+                for document_id in ids.iter().map(Id::document_id) {
+                    if let Some(mailbox) = cache.mailbox_by_id(&document_id).filter(|_| {
+                        shared_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(document_id))
+                    }) {
+                        documents.insert(document_id, mailbox.metadata_kinds);
+                    }
+                }
+                Some(
+                    object_metadata
+                        .load::<MailboxProperty, MailboxValue>(
+                            self, account_id, metadata, &documents,
+                        )
+                        .await?,
+                )
+            }
+            None => None,
         };
 
         for id in ids {
@@ -162,7 +202,9 @@ impl MailboxGet for Server {
                 mailbox.insert_unchecked(property.clone(), value);
             }
 
-            // Add result to response
+            if let Some(metadata_values) = &mut metadata_values {
+                metadata_values.insert_into(document_id, &mut mailbox);
+            }
             response.list.push(mailbox.into());
         }
         Ok(response)

@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::changes::state::JmapCacheState;
+use crate::{
+    api::metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
+    changes::state::{JmapCacheState, MetadataStateManager},
+};
 use common::{Server, auth::AccessToken};
 use compact_str::format_compact;
 use email::{
@@ -16,11 +19,8 @@ use email::{
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::{
-        email::{Email, EmailProperty, EmailValue},
-        metadata::MetadataSelection,
-    },
-    request::IntoValid,
+    object::email::{Email, EmailProperty, EmailValue},
+    request::{IntoValid, capability::CapabilityIds},
     types::date::UTCDate,
 };
 use jmap_tools::{Map, Value};
@@ -41,6 +41,7 @@ pub trait EmailGet: Sync + Send {
         &self,
         request: GetRequest<Email>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<GetResponse<Email>>> + Send;
 }
 
@@ -49,37 +50,42 @@ impl EmailGet for Server {
         &self,
         mut request: GetRequest<Email>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<GetResponse<Email>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let mut properties = request.unwrap_properties(&[
-            EmailProperty::Id,
-            EmailProperty::BlobId,
-            EmailProperty::ThreadId,
-            EmailProperty::MailboxIds,
-            EmailProperty::Keywords,
-            EmailProperty::Size,
-            EmailProperty::ReceivedAt,
-            EmailProperty::MessageId,
-            EmailProperty::InReplyTo,
-            EmailProperty::References,
-            EmailProperty::Sender,
-            EmailProperty::From,
-            EmailProperty::To,
-            EmailProperty::Cc,
-            EmailProperty::Bcc,
-            EmailProperty::ReplyTo,
-            EmailProperty::Subject,
-            EmailProperty::SentAt,
-            EmailProperty::HasAttachment,
-            EmailProperty::Preview,
-            EmailProperty::BodyValues,
-            EmailProperty::TextBody,
-            EmailProperty::HtmlBody,
-            EmailProperty::Attachments,
-        ]);
-        if !MetadataSelection::extract(&mut properties)?.is_none() {
-            todo!()
-        }
+        let (properties, selection) = select_properties(
+            &mut request,
+            &[
+                EmailProperty::Id,
+                EmailProperty::BlobId,
+                EmailProperty::ThreadId,
+                EmailProperty::MailboxIds,
+                EmailProperty::Keywords,
+                EmailProperty::Size,
+                EmailProperty::ReceivedAt,
+                EmailProperty::MessageId,
+                EmailProperty::InReplyTo,
+                EmailProperty::References,
+                EmailProperty::Sender,
+                EmailProperty::From,
+                EmailProperty::To,
+                EmailProperty::Cc,
+                EmailProperty::Bcc,
+                EmailProperty::ReplyTo,
+                EmailProperty::Subject,
+                EmailProperty::SentAt,
+                EmailProperty::HasAttachment,
+                EmailProperty::Preview,
+                EmailProperty::BodyValues,
+                EmailProperty::TextBody,
+                EmailProperty::HtmlBody,
+                EmailProperty::Attachments,
+            ],
+            using,
+        )?;
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
+        let viewer = object_metadata.viewer();
+        let metadata = object_metadata.get(selection);
         let body_properties = request
             .arguments
             .body_properties
@@ -157,9 +163,37 @@ impl EmailGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: cache.get_state(false).into(),
+            state: self
+                .metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Email,
+                    cache.get_state(false),
+                )
+                .await?
+                .into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
+        };
+        let mut metadata_values = match &metadata {
+            Some(metadata) => {
+                let mut documents = MetadataDocuments::default();
+                for document_id in ids
+                    .iter()
+                    .map(Id::document_id)
+                    .filter(|document_id| message_ids.contains(*document_id))
+                {
+                    if let Some(email) = cache.email_by_id(&document_id) {
+                        documents.insert(document_id, cache.metadata_kinds(email));
+                    }
+                }
+                Some(
+                    object_metadata
+                        .load::<EmailProperty, EmailValue>(self, account_id, metadata, &documents)
+                        .await?,
+                )
+            }
+            None => None,
         };
 
         for id in ids {
@@ -332,6 +366,9 @@ impl EmailGet for Server {
                         }
                     }
                 }
+            }
+            if let Some(metadata_values) = &mut metadata_values {
+                metadata_values.insert_into(id.document_id(), &mut email);
             }
             response.list.push(Value::Object(email).into_owned());
         }

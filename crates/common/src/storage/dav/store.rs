@@ -178,19 +178,25 @@ impl ResourceChunkBuilder {
                 acls,
                 preferences,
                 etag,
+                metadata,
             } => GroupwareResourceMetadata::Calendar {
                 name: self.push_str(src.chunk.str_at(*name)),
                 acls: self.push_acls(src.chunk.acls_at(*acls)),
                 preferences: self.push_prefs(src.chunk.prefs_at(*preferences)),
                 etag: *etag,
+                metadata: *metadata,
             },
-            GroupwareResourceMetadata::AddressBook { name, acls, etag } => {
-                GroupwareResourceMetadata::AddressBook {
-                    name: self.push_str(src.chunk.str_at(*name)),
-                    acls: self.push_acls(src.chunk.acls_at(*acls)),
-                    etag: *etag,
-                }
-            }
+            GroupwareResourceMetadata::AddressBook {
+                name,
+                acls,
+                etag,
+                metadata,
+            } => GroupwareResourceMetadata::AddressBook {
+                name: self.push_str(src.chunk.str_at(*name)),
+                acls: self.push_acls(src.chunk.acls_at(*acls)),
+                etag: *etag,
+                metadata: *metadata,
+            },
             GroupwareResourceMetadata::CalendarEvent {
                 names,
                 start,
@@ -219,6 +225,7 @@ impl ResourceChunkBuilder {
                 modified_at,
                 uid,
                 etag,
+                flags,
             } => {
                 let names = self.push_cached_names(src.chunk, *names);
                 GroupwareResourceMetadata::ContactCard {
@@ -227,6 +234,7 @@ impl ResourceChunkBuilder {
                     modified_at: *modified_at,
                     uid: self.push_uid(src.chunk.str_at(*uid), names),
                     etag: *etag,
+                    flags: *flags,
                 }
             }
             GroupwareResourceMetadata::CalendarEventNotification {
@@ -561,7 +569,7 @@ mod tests {
         FileFlags, GroupwareResourceMetadata,
         storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE},
     };
-    use types::media_type::MediaTypeId;
+    use types::{media_type::MediaTypeId, metadata::MetadataKinds};
 
     fn calendar(builder: &mut ResourceChunkBuilder, document_id: u32, name: &str) {
         let name = builder.push_str(name);
@@ -574,6 +582,7 @@ mod tests {
                 acls,
                 preferences,
                 etag: document_id,
+                metadata: MetadataKinds::NONE,
             },
         });
     }

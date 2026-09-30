@@ -146,7 +146,14 @@ pub(super) async fn get(
                         Change::DeleteContainer(_) | Change::DeleteItem(_) => {
                             maybe_has_vanished = true;
                         }
-                        Change::UpdateContainerProperty(_) => (),
+                        Change::UpdateItemMetadata(id) => {
+                            item_changes.insert(id as u32);
+                        }
+                        Change::UpdateContainerPartial(id, partial) => {
+                            if partial.has_metadata() {
+                                container_changes.insert(id as u32);
+                            }
+                        }
                     }
                 }
 
@@ -193,7 +200,10 @@ pub(super) async fn get(
                             maybe_has_vanished = true;
                             None
                         }
-                        _ => None,
+                        Change::UpdateItemMetadata(id) => Some(*id as u32),
+                        Change::UpdateContainerPartial(id, partial) => {
+                            partial.has_metadata().then_some(*id as u32)
+                        }
                     },
                 ));
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:"><D:set><D:prop xml:lang="en"><x:author xmlns:x='http://example.com/ns'>
+  <x:name>Jane Doe</x:name>
+  <!-- Jane's contact info -->
+  <x:uri type='email'
+         added='2005-11-26'>mailto:jane.doe@example.com</x:uri>
+  <x:notes xmlns:h='http://www.w3.org/1999/xhtml'>
+    Jane has been working way <h:em>too</h:em> long on the
+    long-awaited revision of <![CDATA[<RFC2518>]]>.
+  </x:notes>
+</x:author><C:source xmlns:C="http://calendarserver.org/ns"><D:href>https://example.com/holidays.ics</D:href></C:source><I:calendar-color xmlns:I="http://apple.com/ns/ical/" symbolic-color="red">#FF0000</I:calendar-color></D:prop></D:set>
+<D:remove><D:prop><x:gone xmlns:x="urn:x"/><C:source xmlns:C="http://calendarserver.org/ns/"/></D:prop></D:remove></D:propertyupdate>

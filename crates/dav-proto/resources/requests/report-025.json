@@ -3,20 +3,20 @@
   "properties": [
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "calendar-proxy-read-for",
-          "attrs": "name=\"calendar-proxy-read-for\" namespace=\"\nhttp://calendarserver.org/ns/\""
+          "namespace": "http://calendarserver.org/ns/",
+          "name": "calendar-proxy-read-for"
         }
       },
       "depth": 0
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "email-address-set",
-          "attrs": "name=\"email-address-set\"\nnamespace=\"http://calendarserver.org/ns/\""
+          "namespace": "http://calendarserver.org/ns/",
+          "name": "email-address-set"
         }
       },
       "depth": 1
@@ -32,30 +32,29 @@
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Principal",
         "data": {
-          "name": "calendar-user-address-set",
-          "attrs": "name=\"calendar-user-address-set\"\nnamespace=\"urn:ietf:params:xml:ns:caldav\""
+          "type": "CalendarUserAddressSet"
         }
       },
       "depth": 1
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "calendar-proxy-write-for",
-          "attrs": "name=\"calendar-proxy-write-for\"\nnamespace=\"http://calendarserver.org/ns/\""
+          "namespace": "http://calendarserver.org/ns/",
+          "name": "calendar-proxy-write-for"
         }
       },
       "depth": 0
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "email-address-set",
-          "attrs": "name=\"email-address-set\" namespace=\"http://calendarserver.org/ns/\""
+          "namespace": "http://calendarserver.org/ns/",
+          "name": "email-address-set"
         }
       },
       "depth": 1
@@ -71,10 +70,9 @@
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Principal",
         "data": {
-          "name": "calendar-user-address-set",
-          "attrs": "name=\"calendar-user-address-set\"\nnamespace=\"urn:ietf:params:xml:ns:caldav\""
+          "type": "CalendarUserAddressSet"
         }
       },
       "depth": 1

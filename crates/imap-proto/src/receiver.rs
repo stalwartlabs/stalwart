@@ -202,6 +202,7 @@ impl<T: CommandParser> Receiver<T> {
             }
             let token = if !in_quote
                 && self.request.command.tokenize_nil()
+                && !self.request.tokens.is_empty()
                 && self.buf.as_ref().eq_ignore_ascii_case(b"NIL")
             {
                 Token::NilAtom

@@ -14,7 +14,10 @@ use store::{
     *,
 };
 use trc::AddContext;
-use types::blob_hash::{BLOB_HASH_LEN, BlobHash};
+use types::{
+    blob_hash::{BLOB_HASH_LEN, BlobHash},
+    collection::Collection,
+};
 
 pub async fn store_destroy(store: &Store) {
     store_destroy_sql_indexes(store).await;
@@ -286,6 +289,13 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
                             }));
                             return Ok(true);
                         }
+                        Subspace::Property if is_metadata_bookkeeping(key) => {
+                            delete_batch.clear(ValueClass::Any(AnyClass {
+                                subspace,
+                                key: key.to_vec(),
+                            }));
+                            return Ok(true);
+                        }
                         Subspace::Indexes => {
                             println!(
                                 concat!(
@@ -396,6 +406,17 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
     if failed {
         panic!("Store is not empty.");
     }
+}
+
+const METADATA_VIEWER_CLASS: u8 = 2;
+const METADATA_OWNER_CLASS: u8 = 3;
+
+fn is_metadata_bookkeeping(key: &[u8]) -> bool {
+    matches!(
+        key.get(U32_LEN..U32_LEN + 2),
+        Some(&[collection, METADATA_VIEWER_CLASS | METADATA_OWNER_CLASS])
+            if collection == u8::from(Collection::Metadata)
+    )
 }
 
 fn is_allowed_registry_type(object_type: ObjectType) -> bool {

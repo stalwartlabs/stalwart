@@ -53,6 +53,7 @@ pub struct SieveScript {
     pub size: u32,
     pub vacation_response: Option<VacationResponse>,
     pub script: Vec<u8>,
+    pub metadata_flags: u8,
 }
 
 #[derive(
@@ -75,6 +76,7 @@ impl SieveScript {
             vacation_response: None,
             size: 0,
             script: Vec::new(),
+            metadata_flags: 0,
         }
     }
 

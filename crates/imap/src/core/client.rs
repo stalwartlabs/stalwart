@@ -265,11 +265,11 @@ impl<T: SessionStream> Session<T> {
                     .await
                     .map(|_| SessionResult::Continue),
                 Command::GetMetadata => self
-                    .handle_get_metadata(request)
+                    .handle_get_metadata(request, self.acquire_read_permit().await)
                     .await
                     .map(|_| SessionResult::Continue),
                 Command::SetMetadata => self
-                    .handle_set_metadata(request)
+                    .handle_set_metadata(request, self.acquire_write_permit().await)
                     .await
                     .map(|_| SessionResult::Continue),
             };

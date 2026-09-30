@@ -7,9 +7,11 @@
 #![warn(clippy::large_futures)]
 
 pub mod cache;
+pub mod cleanup;
 pub mod identity;
 pub mod mailbox;
 pub mod message;
+pub mod presence;
 pub mod push;
 pub mod sieve;
 pub mod submission;

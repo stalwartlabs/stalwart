@@ -23,6 +23,7 @@ pub mod contacts;
 pub mod core;
 pub mod files;
 pub mod mail;
+pub mod metadata;
 pub mod principal;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -271,6 +272,10 @@ pub async fn jmap_tests() {
     if enabled("principal") {
         principal::get::test(&test).await;
         principal::availability::test(&test).await;
+    }
+
+    if enabled("metadata") {
+        metadata::test(&test).await;
     }
 
     if enabled("compliance") {

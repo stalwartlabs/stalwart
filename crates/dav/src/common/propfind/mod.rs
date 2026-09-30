@@ -5,6 +5,7 @@
  */
 
 mod data;
+mod dead;
 mod get;
 mod item;
 mod load;
@@ -42,6 +43,7 @@ use dav_proto::{
         response::{BaseCondition, MultiStatus, PropStat, Response},
     },
 };
+use dead::{DeadDemand, DeadPresence, dead_property_names};
 use get::{get, multiget};
 use groupware::{
     DavCalendarResource, DavResourceName,
@@ -52,7 +54,7 @@ use hyper::StatusCode;
 use item::PropFindItemBuilder;
 use load::{ArchiveLoader, PROPFIND_BATCH_SIZE};
 use registry::schema::{enums::Permission, prelude::ObjectType};
-use store::{registry::RegistryQuery, roaring::RoaringBitmap};
+use store::{registry::RegistryQuery, roaring::RoaringBitmap, write::metadata::MetadataBuf};
 use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
 
@@ -84,6 +86,7 @@ pub(crate) struct PropFindItem {
     pub parent_id: Option<u32>,
     pub is_container: bool,
     pub is_discover_only: bool,
+    pub dead: DeadPresence,
 }
 
 pub(crate) struct PropFindState {
@@ -103,6 +106,7 @@ pub(crate) struct PropFindContext<'x> {
     pub sync_collection: SyncCollection,
     pub is_scheduling: bool,
     pub skip_not_found: bool,
+    pub is_allprop: bool,
 }
 
 impl PropFindRequestHandler for Server {
@@ -341,6 +345,7 @@ impl PropFindRequestHandler for Server {
         response.set_namespace(collection_container.namespace());
 
         let mut skip_not_found = query.expand;
+        let mut is_allprop = false;
         let (properties, property_names) = match &query.propfind {
             PropFind::PropName => {
                 let (container_props, children_props) = match collection_container {
@@ -362,10 +367,31 @@ impl PropFindRequestHandler for Server {
                 }
 
                 if query_filter.is_none() {
-                    for item in paths {
-                        response.add_response(
-                            item.into_property_names(container_props, children_props),
-                        );
+                    let demand = DeadDemand::new(&[], false, true, collection_container);
+                    let mut paths = paths.into_iter();
+                    loop {
+                        let batch = paths.by_ref().take(PROPFIND_BATCH_SIZE).collect::<Vec<_>>();
+                        if batch.is_empty() {
+                            break;
+                        }
+                        let containers = demand
+                            .load(self, access_token, &batch, |item| {
+                                collection_of(item, collection_container, collection_children)
+                            })
+                            .await
+                            .caused_by(trc::location!())?;
+                        for item in batch {
+                            let collection =
+                                collection_of(&item, collection_container, collection_children);
+                            let container =
+                                containers.get(item.account_id, collection, item.document_id);
+                            response.add_response(item.into_property_names(
+                                container_props,
+                                children_props,
+                                container,
+                                collection,
+                            ));
+                        }
                     }
 
                     return Ok(HttpResponse::new(StatusCode::MULTI_STATUS)
@@ -376,6 +402,7 @@ impl PropFindRequestHandler for Server {
             }
             PropFind::AllProp(items) => {
                 skip_not_found = true;
+                is_allprop = true;
                 let mut result = Vec::with_capacity(items.len() + DavProperty::ALL_PROPS.len());
                 result.extend(DavProperty::ALL_PROPS);
                 result.extend(items.iter().filter(|field| !field.is_all_prop()).cloned());
@@ -402,8 +429,15 @@ impl PropFindRequestHandler for Server {
             sync_collection,
             is_scheduling: collection_container == Collection::CalendarEventNotification,
             skip_not_found,
+            is_allprop,
         };
         let loader = ArchiveLoader::new(&ctx, query_filter.is_some());
+        let dead_demand = DeadDemand::new(
+            &properties,
+            is_allprop,
+            property_names.is_some(),
+            collection_container,
+        );
         let needs_event_view = loader.needs_event_view();
 
         let mut is_truncated = query_filter.is_none() && paths.len() > limit;
@@ -431,6 +465,12 @@ impl PropFindRequestHandler for Server {
             }
             let archives = loader
                 .load(self, access_token, &batch)
+                .await
+                .caused_by(trc::location!())?;
+            let containers = dead_demand
+                .load(self, access_token, &batch, |item| {
+                    loader.collection_of(item)
+                })
                 .await
                 .caused_by(trc::location!())?;
 
@@ -534,12 +574,18 @@ impl PropFindRequestHandler for Server {
                 }
                 remaining -= 1;
 
+                let container = containers
+                    .get(account_id, collection, item.document_id)
+                    .filter(|_| !item.dead.is_hidden_from(access_token, account_id));
                 if let Some((container_props, children_props)) = property_names {
-                    state
-                        .response
-                        .add_response(item.into_property_names(container_props, children_props));
+                    state.response.add_response(item.into_property_names(
+                        container_props,
+                        children_props,
+                        container,
+                        collection,
+                    ));
                 } else if !self
-                    .add_propfind_item(&ctx, &mut state, item, &archive, calendar_filter)
+                    .add_propfind_item(&ctx, &mut state, item, &archive, container, calendar_filter)
                     .await?
                 {
                     instances_exceeded = true;
@@ -611,6 +657,7 @@ impl PropFindItem {
             parent_id: resource.parent_id(),
             is_container: resource.is_container(),
             is_discover_only: false,
+            dead: DeadPresence::from_resource(&resource),
         }
     }
 
@@ -627,19 +674,33 @@ impl PropFindItem {
         self,
         container_props: &[DavProperty],
         children_props: &[DavProperty],
+        container: Option<&MetadataBuf>,
+        collection: Collection,
     ) -> Response {
         let props = if self.is_container {
             container_props
         } else {
             children_props
         };
+        let mut names = Vec::with_capacity(props.len());
+        names.extend(props.iter().cloned().map(DavPropertyValue::empty));
+        if let Some(container) = container.filter(|_| !self.is_discover_only) {
+            names.extend(dead_property_names(container, collection));
+        }
 
-        Response::new_propstat(
-            self.name,
-            vec![PropStat::new_list(
-                props.iter().cloned().map(DavPropertyValue::empty).collect(),
-            )],
-        )
+        Response::new_propstat(self.name, vec![PropStat::new_list(names)])
+    }
+}
+
+fn collection_of(
+    item: &PropFindItem,
+    collection_container: Collection,
+    collection_children: Collection,
+) -> Collection {
+    if item.is_container {
+        collection_container
+    } else {
+        collection_children
     }
 }
 

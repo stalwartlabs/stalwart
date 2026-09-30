@@ -7,6 +7,7 @@
 use super::*;
 use crate::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
+    cleanup::FlaggedContainers,
     message::{
         delete::EmailDeletion,
         messagedata::{EmailMessageData, MessageData},
@@ -34,6 +35,7 @@ pub trait MailboxDestroy: Sync + Send {
         document_id: u32,
         access_token: &AccessToken,
         remove_emails: bool,
+        containers: Option<&FlaggedContainers>,
     ) -> impl Future<Output = trc::Result<Result<Option<u64>, MailboxDestroyError>>> + Send;
 }
 
@@ -53,6 +55,7 @@ impl MailboxDestroy for Server {
         document_id: u32,
         access_token: &AccessToken,
         remove_emails: bool,
+        containers: Option<&FlaggedContainers>,
     ) -> trc::Result<Result<Option<u64>, MailboxDestroyError>> {
         // Internal folders cannot be deleted
         #[cfg(not(feature = "test_mode"))]
@@ -79,14 +82,24 @@ impl MailboxDestroy for Server {
 
         batch.with_account_id(account_id);
 
-        let message_ids =
-            RoaringBitmap::from_iter(cache.in_mailbox(document_id).map(|m| m.document_id()));
+        let mut message_ids = RoaringBitmap::new();
+        let mut flagged_ids = RoaringBitmap::new();
+        for message in cache.in_mailbox(document_id) {
+            message_ids.insert(message.document_id());
+            if message.mailboxes().len() == 1 && !cache.metadata_kinds(message).is_empty() {
+                flagged_ids.insert(message.document_id());
+            }
+        }
 
         if !message_ids.is_empty() {
             if remove_emails {
                 // If the message is in multiple mailboxes, untag it from the current mailbox,
                 // otherwise delete it.
 
+                let message_containers =
+                    FlaggedContainers::load(self, account_id, Collection::Email, &flagged_ids)
+                        .await
+                        .caused_by(trc::location!())?;
                 let mut deleted_ids = RoaringBitmap::new();
                 let mut thread_ids = RoaringBitmap::new();
                 self.message_datas(account_id, &message_ids, |message_id, prev_message_data| {
@@ -109,8 +122,11 @@ impl MailboxDestroy for Server {
                         }
                         deleted_ids.insert(message_id);
                         thread_ids.insert(prev_message_data.thread_id);
+                        batch.with_collection(Collection::Email);
+                        if !prev_message_data.metadata_kinds().is_empty() {
+                            message_containers.remove(&mut batch, message_id);
+                        }
                         batch
-                            .with_collection(Collection::Email)
                             .with_document(message_id)
                             .custom(
                                 ObjectIndexBuilder::<_, ()>::new()
@@ -188,14 +204,29 @@ impl MailboxDestroy for Server {
             }
             batch
                 .with_account_id(account_id)
-                .with_collection(Collection::Mailbox)
+                .with_collection(Collection::Mailbox);
+            if !mailbox.inner.metadata_kinds().is_empty() {
+                match containers {
+                    Some(containers) => containers.remove(&mut batch, document_id),
+                    None => FlaggedContainers::load(
+                        self,
+                        account_id,
+                        Collection::Mailbox,
+                        &RoaringBitmap::from_iter([document_id]),
+                    )
+                    .await
+                    .caused_by(trc::location!())?
+                    .remove(&mut batch, document_id),
+                }
+            }
+            batch
                 .with_document(document_id)
                 .clear(MailboxField::UidCounter)
                 .custom(ObjectIndexBuilder::<_, ()>::new().with_current(mailbox))
                 .caused_by(trc::location!())?;
         } else {
             return Ok(Err(MailboxDestroyError::NotFound));
-        };
+        }
 
         if !batch.is_empty() {
             match self

@@ -5,9 +5,10 @@
  */
 
 use crate::cache::{MessageCacheFetch, email::MessageCacheAccess};
+use crate::cleanup::FlaggedContainers;
 use crate::message::messagedata::EmailMessageData;
 use crate::submission::EmailSubmission;
-use common::{Server, storage::index::ObjectIndexBuilder};
+use common::{MessageStoreCache, Server, storage::index::ObjectIndexBuilder};
 use groupware::calendar::storage::ItipAutoExpunge;
 use std::future::Future;
 use store::write::key::DeserializeBigEndian;
@@ -61,6 +62,21 @@ impl EmailDeletion for Server {
         batch: &mut BatchBuilder,
         document_ids: RoaringBitmap,
     ) -> trc::Result<RoaringBitmap> {
+        let cache = self
+            .get_cached_messages(account_id)
+            .await
+            .caused_by(trc::location!())?;
+        let flagged_ids = document_ids
+            .iter()
+            .filter(|document_id| {
+                cache
+                    .email_by_id(document_id)
+                    .is_some_and(|message| !cache.metadata_kinds(message).is_empty())
+            })
+            .collect::<RoaringBitmap>();
+        let containers = FlaggedContainers::load(self, account_id, Collection::Email, &flagged_ids)
+            .await
+            .caused_by(trc::location!())?;
         let mut deleted_ids = RoaringBitmap::new();
         let mut thread_ids = RoaringBitmap::new();
         batch
@@ -75,6 +91,9 @@ impl EmailDeletion for Server {
                 );
             }
             thread_ids.insert(metadata.thread_id);
+            if !metadata.metadata_kinds().is_empty() {
+                containers.remove(batch, document_id);
+            }
             batch
                 .with_document(document_id)
                 .custom(
@@ -92,8 +111,7 @@ impl EmailDeletion for Server {
         })
         .await?;
 
-        self.log_emptied_threads(account_id, batch, thread_ids, &deleted_ids)
-            .await?;
+        log_threads_emptied(&cache, batch, account_id, thread_ids, &deleted_ids);
 
         let not_destroyed = if document_ids.len() == deleted_ids.len() {
             RoaringBitmap::new()
@@ -117,18 +135,7 @@ impl EmailDeletion for Server {
                 .get_cached_messages(account_id)
                 .await
                 .caused_by(trc::location!())?;
-            for thread_id in &thread_ids {
-                if cache
-                    .in_thread(thread_id)
-                    .all(|message| deleted_ids.contains(message.document_id()))
-                {
-                    batch
-                        .with_account_id(account_id)
-                        .with_collection(Collection::Thread)
-                        .with_document(thread_id)
-                        .log_container_delete(SyncCollection::Thread);
-                }
-            }
+            log_threads_emptied(&cache, batch, account_id, thread_ids, deleted_ids);
         }
 
         Ok(())
@@ -164,6 +171,10 @@ impl EmailDeletion for Server {
         )
         .await
         .caused_by(trc::location!())?;
+
+        self.purge_private_metadata(account_id, self.core.email.changes_max_history)
+            .await
+            .caused_by(trc::location!())?;
 
         Ok(())
     }
@@ -317,5 +328,26 @@ impl EmailDeletion for Server {
         self.commit_batch(batch).await?;
 
         Ok(())
+    }
+}
+
+fn log_threads_emptied(
+    cache: &MessageStoreCache,
+    batch: &mut BatchBuilder,
+    account_id: u32,
+    thread_ids: RoaringBitmap,
+    deleted_ids: &RoaringBitmap,
+) {
+    for thread_id in &thread_ids {
+        if cache
+            .in_thread(thread_id)
+            .all(|message| deleted_ids.contains(message.document_id()))
+        {
+            batch
+                .with_account_id(account_id)
+                .with_collection(Collection::Thread)
+                .with_document(thread_id)
+                .log_container_delete(SyncCollection::Thread);
+        }
     }
 }

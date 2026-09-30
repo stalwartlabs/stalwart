@@ -13,8 +13,8 @@ use std::time::Duration;
 use store::{
     IterateParams, Key, LogKey, Subspace, U64_LEN,
     write::{
-        AnyClass, AssignedIds, BatchBuilder, ChangedCollection, QueueNotify, ValueClass,
-        key::DeserializeBigEndian,
+        AnyClass, AssignedIds, BatchBuilder, ChangedCollection, LogCollection, QueueNotify,
+        ValueClass, key::DeserializeBigEndian,
     },
 };
 use trc::AddContext;
@@ -135,90 +135,29 @@ impl Server {
                 SyncCollection::Calendar,
                 SyncCollection::CalendarEventNotification,
             ] {
-                let collection = sync_collection.into();
-                let from_key = LogKey {
-                    account_id,
-                    collection,
-                    change_id: 0,
-                };
-                let to_key = LogKey {
-                    account_id,
-                    collection,
-                    change_id: u64::MAX,
+                let Some(first_change_id) = self
+                    .truncate_change_log(account_id, sync_collection.into(), max_entries)
+                    .await?
+                else {
+                    continue;
                 };
 
-                let mut first_change_id = 0;
-                let mut num_changes = 0;
-
-                self.store()
-                    .iterate(
-                        IterateParams::new(from_key, to_key)
-                            .descending()
-                            .no_values(),
-                        |key, _| {
-                            first_change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
-                            num_changes += 1;
-
-                            Ok(num_changes <= max_entries)
-                        },
-                    )
-                    .await
-                    .caused_by(trc::location!())?;
-
-                if num_changes > max_entries {
+                if let Some(vanished_collection) =
+                    sync_collection.vanished_collection().map(u8::from)
+                {
                     self.store()
                         .delete_range(
                             LogKey {
                                 account_id,
-                                collection,
+                                collection: vanished_collection,
                                 change_id: 0,
                             },
                             LogKey {
                                 account_id,
-                                collection,
+                                collection: vanished_collection,
                                 change_id: first_change_id,
                             },
                         )
-                        .await
-                        .caused_by(trc::location!())?;
-
-                    // Delete vanished items
-                    if let Some(vanished_collection) =
-                        sync_collection.vanished_collection().map(u8::from)
-                    {
-                        self.store()
-                            .delete_range(
-                                LogKey {
-                                    account_id,
-                                    collection: vanished_collection,
-                                    change_id: 0,
-                                },
-                                LogKey {
-                                    account_id,
-                                    collection: vanished_collection,
-                                    change_id: first_change_id,
-                                },
-                            )
-                            .await
-                            .caused_by(trc::location!())?;
-                    }
-
-                    // Write truncation entry for cache
-                    let mut batch = BatchBuilder::new();
-                    batch.with_account_id(account_id).set(
-                        ValueClass::Any(AnyClass {
-                            subspace: Subspace::Logs,
-                            key: LogKey {
-                                account_id,
-                                collection,
-                                change_id: first_change_id,
-                            }
-                            .serialize(0),
-                        }),
-                        Vec::new(),
-                    );
-                    self.store()
-                        .write_batch(&mut batch)
                         .await
                         .caused_by(trc::location!())?;
                 }
@@ -244,6 +183,59 @@ impl Server {
                 .caused_by(trc::location!())?;
         }
         Ok(())
+    }
+
+    pub async fn truncate_change_log(
+        &self,
+        account_id: u32,
+        collection: LogCollection,
+        max_entries: usize,
+    ) -> trc::Result<Option<u64>> {
+        let mut first_change_id = 0;
+        let mut num_changes = 0;
+
+        self.store()
+            .iterate(
+                IterateParams::new(
+                    collection.log_key(account_id, 0),
+                    collection.log_key(account_id, u64::MAX),
+                )
+                .descending()
+                .no_values(),
+                |key, _| {
+                    first_change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
+                    num_changes += 1;
+
+                    Ok(num_changes <= max_entries)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        if num_changes <= max_entries {
+            return Ok(None);
+        }
+
+        let first_key = collection.log_key(account_id, first_change_id);
+        self.store()
+            .delete_range(collection.log_key(account_id, 0), first_key)
+            .await
+            .caused_by(trc::location!())?;
+
+        let mut batch = BatchBuilder::new();
+        batch.with_account_id(account_id).set(
+            ValueClass::Any(AnyClass {
+                subspace: Subspace::Logs,
+                key: first_key.serialize(0),
+            }),
+            Vec::new(),
+        );
+        self.store()
+            .write_batch(&mut batch)
+            .await
+            .caused_by(trc::location!())?;
+
+        Ok(Some(first_change_id))
     }
 
     #[inline(always)]

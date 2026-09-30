@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        metadata::{
+            MetadataType, ObjectMetadata, ResourceScope, filter_containers, flagged_documents,
+        },
+        query::QueryResponseBuilder,
+    },
+    changes::state::JmapCacheState,
+};
 use common::{Server, auth::AccessToken};
 use groupware::cache::GroupwareCache;
 use jmap_proto::{
@@ -13,8 +21,7 @@ use jmap_proto::{
         addressbook::{AddressBook, AddressBookFilter},
         contact::{ContactCard, ContactCardComparator, ContactCardFilter},
     },
-    request::MaybeInvalid,
-    types::state::State,
+    request::{MaybeInvalid, capability::CapabilityIds},
 };
 use store::{
     roaring::RoaringBitmap,
@@ -29,12 +36,14 @@ pub trait ContactCardQuery: Sync + Send {
         &self,
         request: QueryRequest<ContactCard>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 
     fn address_book_query(
         &self,
         request: QueryRequest<AddressBook>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
@@ -43,9 +52,16 @@ impl ContactCardQuery for Server {
         &self,
         mut request: QueryRequest<ContactCard>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
+        let metadata_query =
+            metadata.query(request.filter.iter().filter_map(|filter| match filter {
+                Filter::Property(ContactCardFilter::Metadata(filter)) => Some(filter),
+                _ => None,
+            }))?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -53,6 +69,18 @@ impl ContactCardQuery for Server {
                 SyncCollection::AddressBook,
             )
             .await?;
+        let is_shared = access_token.is_shared(account_id);
+        let mask = if is_shared {
+            cache.shared_items(access_token, [Acl::ReadItems], true)
+        } else {
+            cache.document_ids(false).collect()
+        };
+        let mut metadata_leaves = metadata
+            .evaluate(self, account_id, &metadata_query, || {
+                flagged_documents(&cache, ResourceScope::Items, is_shared.then_some(&mask))
+            })
+            .await?
+            .into_iter();
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -192,7 +220,11 @@ impl ContactCardQuery for Server {
                             }),
                         )));
                     }
-                    ContactCardFilter::Metadata(_) => todo!(),
+                    ContactCardFilter::Metadata(_) => {
+                        filters.push(SearchFilter::is_in_set(
+                            metadata_leaves.next().unwrap_or_default(),
+                        ));
+                    }
                     unsupported => {
                         return Err(trc::JmapEvent::UnsupportedFilter
                             .into_err()
@@ -273,18 +305,16 @@ impl ContactCardQuery for Server {
                     .with_filters(filters)
                     .with_comparators(comparators)
                     .with_account_id(account_id)
-                    .with_mask(if access_token.is_shared(account_id) {
-                        cache.shared_items(access_token, [Acl::ReadItems], true)
-                    } else {
-                        cache.document_ids(false).collect()
-                    }),
+                    .with_mask(mask),
             )
             .await?;
 
         let mut response = QueryResponseBuilder::new(
             results.len(),
             self.core.jmap.query_max_results,
-            cache.get_state(false),
+            metadata
+                .state(self, account_id, cache.get_state(false))
+                .await?,
             &request,
         );
 
@@ -301,10 +331,15 @@ impl ContactCardQuery for Server {
         &self,
         request: QueryRequest<AddressBook>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::AddressBook);
+        let mut metadata_filters = Vec::new();
         for filter in &request.filter {
             match filter {
-                Filter::Property(AddressBookFilter::Metadata(_)) => todo!(),
+                Filter::Property(AddressBookFilter::Metadata(filter)) => {
+                    metadata_filters.push(filter);
+                }
                 Filter::Property(AddressBookFilter::_T(other)) => {
                     return Err(trc::JmapEvent::UnsupportedFilter
                         .into_err()
@@ -313,6 +348,7 @@ impl ContactCardQuery for Server {
                 Filter::And | Filter::Or | Filter::Not | Filter::Close => {}
             }
         }
+        let metadata_query = metadata.query(metadata_filters)?;
 
         let account_id = request.account_id.document_id();
         let cache = self
@@ -323,12 +359,29 @@ impl ContactCardQuery for Server {
             )
             .await?;
 
-        let results = cache.document_ids(true).collect::<Vec<_>>();
+        let is_member = access_token.is_member(account_id);
+        let readable = if is_member {
+            cache.document_ids(true).collect::<RoaringBitmap>()
+        } else {
+            cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
+        };
+        let leaves = metadata
+            .evaluate(self, account_id, &metadata_query, || {
+                flagged_documents(
+                    &cache,
+                    ResourceScope::Containers,
+                    (!is_member).then_some(&readable),
+                )
+            })
+            .await?;
+        let results = filter_containers(&request.filter, leaves, readable);
 
         let mut response = QueryResponseBuilder::new(
             results.len() as usize,
             self.core.jmap.query_max_results,
-            State::Initial,
+            metadata
+                .state(self, account_id, cache.get_state(true))
+                .await?,
             &request,
         );
 

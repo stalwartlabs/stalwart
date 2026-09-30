@@ -14,10 +14,7 @@ use calcard::{
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
     vcard::{VCardParameterName, VCardProperty},
 };
-use types::{
-    TimeRange,
-    dead_property::{ArchivedDeadProperty, ArchivedDeadPropertyTag, DeadElementTag, DeadProperty},
-};
+use types::{TimeRange, metadata::XmlValue};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
@@ -56,7 +53,7 @@ pub struct MkCol {
 pub struct LockInfo {
     pub lock_scope: LockScope,
     pub lock_type: LockType,
-    pub owner: Option<DeadProperty>,
+    pub owner: Option<XmlValue<'static>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,49 +285,6 @@ impl FreeBusyQuery {
     pub fn new(start: i64, end: i64) -> Self {
         FreeBusyQuery {
             range: Some(TimeRange { start, end }),
-        }
-    }
-}
-
-pub trait DavDeadProperty {
-    fn to_dav_values(&self, output: &mut Vec<DavPropertyValue>);
-}
-
-impl DavDeadProperty for ArchivedDeadProperty {
-    fn to_dav_values(&self, output: &mut Vec<DavPropertyValue>) {
-        let mut depth: u32 = 0;
-        let mut tags = Vec::new();
-        let mut tag_start = None;
-
-        for tag in self.0.iter() {
-            match tag {
-                ArchivedDeadPropertyTag::ElementStart(start) => {
-                    if depth == 0 {
-                        tag_start = Some(DeadElementTag::from(start.as_ref()));
-                    } else {
-                        tags.push(tag.into());
-                    }
-
-                    depth += 1;
-                }
-                ArchivedDeadPropertyTag::ElementEnd => {
-                    depth = depth.saturating_sub(1);
-
-                    if depth > 0 {
-                        tags.push(tag.into());
-                    } else if let Some(tag_start) = tag_start.take() {
-                        output.push(DavPropertyValue::new(
-                            DavProperty::DeadProperty(tag_start),
-                            DavValue::DeadProperty(DeadProperty(std::mem::take(&mut tags))),
-                        ));
-                    }
-                }
-                ArchivedDeadPropertyTag::Text(_) => {
-                    if tag_start.is_some() {
-                        tags.push(tag.into());
-                    }
-                }
-            }
         }
     }
 }

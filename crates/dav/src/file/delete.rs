@@ -14,11 +14,14 @@ use crate::{
 };
 use common::{Server, auth::AccessToken};
 use dav_proto::RequestHeaders;
-use groupware::{DestroyArchive, cache::GroupwareCache};
+use groupware::{DestroyArchive, cache::GroupwareCache, metadata::MetadataCleanup};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use trc::AddContext;
-use types::{acl::Acl, collection::SyncCollection};
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 
 pub(crate) trait FileDeleteRequestHandler: Sync + Send {
     fn handle_file_delete_request(
@@ -82,6 +85,11 @@ impl FileDeleteRequestHandler for Server {
                 )
             })
             .unwrap();
+        let flagged = ids
+            .iter()
+            .map(|a| (a.document_id(), a.resource.metadata_kinds()))
+            .filter(|(_, kinds)| !kinds.is_empty())
+            .collect::<Vec<_>>();
         let mut sorted_ids = Vec::with_capacity(ids.len());
         sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
 
@@ -111,11 +119,21 @@ impl FileDeleteRequestHandler for Server {
         )
         .await?;
 
+        let cleanup = MetadataCleanup::preload(
+            self,
+            access_token.account_tenant_ids(),
+            account_id,
+            Collection::FileNode,
+            flagged,
+        )
+        .await
+        .caused_by(trc::location!())?;
         DestroyArchive(sorted_ids)
             .delete(
                 self,
                 access_token.account_tenant_ids(),
                 account_id,
+                &cleanup,
                 full_delete_path.into(),
             )
             .await?;

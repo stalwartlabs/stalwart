@@ -35,40 +35,24 @@ impl Request<Command> {
                     return Err(bad(self.tag, "Expected '(' after 'USE'."));
                 }
                 match tokens.next() {
-                    Some(Token::Argument(value)) => {
-                        let r = hashify::map_ignore_case!(value.as_slice(), Option<Attribute>,
-                            "\\Archive" => Some(Attribute::Archive),
-                            "\\Drafts" => Some(Attribute::Drafts),
-                            "\\Junk" => Some(Attribute::Junk),
-                            "\\Sent" => Some(Attribute::Sent),
-                            "\\Trash" => Some(Attribute::Trash),
-                            "\\Important" => Some(Attribute::Important),
-                            "\\Memos" => Some(Attribute::Memos),
-                            "\\Scheduled" => Some(Attribute::Scheduled),
-                            "\\Snoozed" => Some(Attribute::Snoozed),
-                            "\\All" => None,
-                        )
-                        .copied();
-
-                        match r {
-                            Some(Some(tag)) => Some(tag),
-                            Some(None) => {
-                                return Err(bad(
-                                    self.tag,
-                                    "A mailbox with the \"\\All\" attribute already exists.",
-                                ));
-                            }
-                            None => {
-                                return Err(bad(
-                                    self.tag,
-                                    format_compact!(
-                                        "Special use attribute {:?} is not supported.",
-                                        String::from_utf8_lossy(&value)
-                                    ),
-                                ));
-                            }
+                    Some(Token::Argument(value)) => match Attribute::parse_special_use(&value) {
+                        Some(Attribute::All) => {
+                            return Err(bad(
+                                self.tag,
+                                "A mailbox with the \"\\All\" attribute already exists.",
+                            ));
                         }
-                    }
+                        Some(tag) => Some(tag),
+                        None => {
+                            return Err(bad(
+                                self.tag,
+                                format_compact!(
+                                    "Special use attribute {:?} is not supported.",
+                                    String::from_utf8_lossy(&value)
+                                ),
+                            ));
+                        }
+                    },
                     _ => {
                         return Err(bad(self.tag, "Invalid SPECIAL-USE attribute."));
                     }
@@ -85,6 +69,24 @@ impl Request<Command> {
         } else {
             Err(self.into_error("Missing arguments."))
         }
+    }
+}
+
+impl Attribute {
+    pub fn parse_special_use(value: &[u8]) -> Option<Self> {
+        hashify::map_ignore_case!(value, Attribute,
+            "\\Archive" => Attribute::Archive,
+            "\\Drafts" => Attribute::Drafts,
+            "\\Junk" => Attribute::Junk,
+            "\\Sent" => Attribute::Sent,
+            "\\Trash" => Attribute::Trash,
+            "\\Important" => Attribute::Important,
+            "\\Memos" => Attribute::Memos,
+            "\\Scheduled" => Attribute::Scheduled,
+            "\\Snoozed" => Attribute::Snoozed,
+            "\\All" => Attribute::All,
+        )
+        .copied()
     }
 }
 

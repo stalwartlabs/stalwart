@@ -5,8 +5,12 @@
  */
 
 use self::assert::AssertValue;
-use crate::{IndexKey, Key, LogKey, Subspace, U32_LEN, U64_LEN, backend::MAX_TOKEN_LENGTH};
+use crate::{
+    ChangeLogKey, IndexKey, Key, LogKey, PrivateLogKey, Subspace, U32_LEN, U64_LEN,
+    backend::MAX_TOKEN_LENGTH,
+};
 use log::ChangeLogBuilder;
+use metadata::MetadataClass;
 use nlp::tokenizers::word::WordTokenizer;
 use registry::{schema::structs::Task, types::ObjectImpl};
 use std::{borrow::Cow, collections::HashSet, hash::Hash, time::SystemTime};
@@ -34,6 +38,7 @@ pub mod compress;
 pub mod key;
 pub mod lazybitmap;
 pub mod log;
+pub mod metadata;
 pub mod serialize;
 
 pub use compress::{ArchiveCompression, Compression, Dictionary};
@@ -345,13 +350,21 @@ pub enum LogSet {
 pub enum LogCollection {
     Sync(SyncCollection),
     Vanished(VanishedCollection),
+    Private {
+        collection: SyncCollection,
+        viewer: u32,
+    },
 }
+
+pub const PRIVATE_LOG: u8 = 0x80;
 
 impl LogCollection {
     #[inline(always)]
     pub fn change_group(&self) -> ChangeGroup {
         match self {
-            LogCollection::Sync(collection) => collection.change_group(),
+            LogCollection::Sync(collection) | LogCollection::Private { collection, .. } => {
+                collection.change_group()
+            }
             LogCollection::Vanished(collection) => collection.change_group(),
         }
     }
@@ -359,8 +372,27 @@ impl LogCollection {
     #[inline(always)]
     pub fn is_prefixed(&self) -> bool {
         match self {
-            LogCollection::Sync(collection) => collection.is_prefixed(),
+            LogCollection::Sync(collection) | LogCollection::Private { collection, .. } => {
+                collection.is_prefixed()
+            }
             LogCollection::Vanished(_) => false,
+        }
+    }
+
+    #[inline(always)]
+    pub fn log_key(&self, account_id: u32, change_id: u64) -> ChangeLogKey {
+        match *self {
+            LogCollection::Private { collection, viewer } => ChangeLogKey::Private(PrivateLogKey {
+                account_id,
+                collection,
+                viewer,
+                change_id,
+            }),
+            collection => ChangeLogKey::Shared(LogKey {
+                account_id,
+                collection: u8::from(collection),
+                change_id,
+            }),
         }
     }
 }
@@ -540,12 +572,9 @@ impl BatchCursor {
             "no change id was allocated for this account"
         );
         buf.clear();
-        LogKey {
-            account_id: self.account_id,
-            collection: u8::from(collection),
-            change_id,
-        }
-        .serialize_into(buf, flags);
+        collection
+            .log_key(self.account_id, change_id)
+            .serialize_into(buf, flags);
     }
 }
 
@@ -629,6 +658,7 @@ pub enum ValueClass {
     Quota,
     TenantQuota(u32),
     NodeId(u16),
+    Metadata(MetadataClass),
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -1355,6 +1385,7 @@ impl From<LogCollection> for u8 {
         match value {
             LogCollection::Sync(col) => col as u8,
             LogCollection::Vanished(col) => col as u8,
+            LogCollection::Private { collection, .. } => PRIVATE_LOG | collection as u8,
         }
     }
 }

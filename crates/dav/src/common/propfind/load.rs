@@ -8,12 +8,7 @@ use super::{PropFindContext, PropFindItem};
 use crate::common::ArchivedResource;
 use common::{Server, auth::AccessToken};
 use dav_proto::schema::property::{CalDavProperty, CardDavProperty, DavProperty, WebDavProperty};
-use groupware::{
-    calendar::{
-        CalendarEvent, EVENT_HAS_ALARMS, EVENT_HAS_DEAD_PROPERTIES, EVENT_PRIVATE, EVENT_SECRET,
-    },
-    contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard},
-};
+use groupware::calendar::{CalendarEvent, EVENT_HAS_ALARMS, EVENT_PRIVATE, EVENT_SECRET};
 use store::{
     ahash::AHashMap,
     roaring::RoaringBitmap,
@@ -34,7 +29,6 @@ pub(super) struct ArchiveLoader {
     collection_children: Collection,
     is_scheduling: bool,
     needs_content: bool,
-    needs_dead_properties: bool,
     needs_content_length: bool,
     content_field: Option<Field>,
 }
@@ -45,8 +39,6 @@ pub(super) struct BatchArchives {
 }
 
 struct ContentDemand {
-    dead_properties: bool,
-    event_content_length: bool,
     is_owner: bool,
 }
 
@@ -65,10 +57,6 @@ impl ArchiveLoader {
                             | DavProperty::CalDav(CalDavProperty::CalendarData(_))
                     )
                 }),
-            needs_dead_properties: ctx.skip_not_found
-                || properties
-                    .iter()
-                    .any(|property| matches!(property, DavProperty::DeadProperty(_))),
             needs_content_length: ctx.collection_children == Collection::CalendarEvent
                 && properties.iter().any(|property| {
                     matches!(
@@ -116,15 +104,12 @@ impl ArchiveLoader {
             }
         }
 
-        let track_carriers = self.content_field.is_some()
-            && (self.needs_dead_properties || self.needs_content_length)
-            && !self.needs_content;
+        let track_carriers =
+            self.content_field.is_some() && self.needs_content_length && !self.needs_content;
         let mut metadata = AHashMap::with_capacity(batch.len());
         let mut carriers: AHashMap<(u32, Collection), RoaringBitmap> = AHashMap::new();
         for (&(account_id, collection), documents) in &groups {
             let content_demand = ContentDemand {
-                dead_properties: self.needs_dead_properties,
-                event_content_length: self.needs_content_length,
                 is_owner: access_token.is_member(account_id),
             };
             let mut group_carriers = RoaringBitmap::new();
@@ -157,7 +142,7 @@ impl ArchiveLoader {
 
         let mut contents = AHashMap::new();
         if let Some(content_field) = self.content_field
-            && (self.needs_content || self.needs_dead_properties || self.needs_content_length)
+            && (self.needs_content || self.needs_content_length)
         {
             for (&(account_id, collection), documents) in &groups {
                 if collection != self.collection_children {
@@ -227,16 +212,11 @@ impl ContentDemand {
     ) -> trc::Result<bool> {
         match collection {
             Collection::CalendarEvent => {
-                let flags = archive.unarchive::<CalendarEvent>()?.flags.to_native();
                 Ok(
-                    (self.dead_properties && flags & EVENT_HAS_DEAD_PROPERTIES != 0)
-                        || (self.event_content_length && flags & self.view_flags() != 0),
+                    archive.unarchive::<CalendarEvent>()?.flags.to_native() & self.view_flags()
+                        != 0,
                 )
             }
-            Collection::ContactCard => Ok(self.dead_properties
-                && archive.unarchive::<ContactCard>()?.flags.to_native()
-                    & CARD_HAS_DEAD_PROPERTIES
-                    != 0),
             _ => Ok(false),
         }
     }

@@ -19,7 +19,7 @@ use compact_str::CompactString;
 use registry::schema::structs;
 use std::sync::Arc;
 use tinyvec::TinyVec;
-use types::collection::SyncCollection;
+use types::{collection::SyncCollection, metadata::MetadataKinds};
 
 const ACCOUNT_ID: u32 = 1234;
 
@@ -278,6 +278,7 @@ fn sample_resources(items: usize) -> GroupwareResources {
                 acls,
                 preferences,
                 etag: document_id,
+                metadata: MetadataKinds::NONE,
             },
         });
         entries.push((

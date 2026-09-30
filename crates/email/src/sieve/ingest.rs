@@ -676,6 +676,7 @@ impl SieveScriptIngest for Server {
                             is_sender_authenticated: envelope_from_authenticated,
                             is_spam: envelope_to.is_spam() && !sieve_message.did_file_into,
                         },
+                        metadata: None,
                         session_id,
                     })
                     .await
@@ -848,6 +849,7 @@ impl SieveScriptIngest for Server {
                 }
             }),
             script: script.to_bytes(),
+            metadata_flags: script_object.metadata_flags,
         };
         let script_name = new_script_object.name.clone();
         let bytecode = new_script_object.script.clone();

@@ -13,7 +13,11 @@ use crate::{
 };
 use ahash::AHashMap;
 use serde::{Deserialize, Deserializer};
-use types::{id::Id, type_state::DataType};
+use types::{
+    id::Id,
+    metadata::{NamespaceScope, RegisteredNamespace},
+    type_state::DataType,
+};
 use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -493,26 +497,48 @@ impl MetadataCapabilities {
         &self,
         account_capabilities: CapabilityIds,
         supports_private: bool,
-    ) -> MetadataCapabilities {
-        MetadataCapabilities {
-            data_types: self
-                .data_types
+    ) -> Option<MetadataCapabilities> {
+        let data_types = self
+            .data_types
+            .iter()
+            .filter(|(data_type, _)| {
+                Capability::for_data_type(**data_type)
+                    .is_some_and(|capability| account_capabilities.contains(capability))
+            })
+            .filter_map(|(data_type, info)| {
+                info.to_account_info(supports_private)
+                    .map(|info| (*data_type, info))
+            })
+            .collect::<VecMap<_, _>>();
+
+        (!data_types.is_empty()).then_some(MetadataCapabilities { data_types })
+    }
+}
+
+impl DataTypeMetadataInfo {
+    fn to_account_info(&self, supports_private: bool) -> Option<DataTypeMetadataInfo> {
+        let supports_private = self.supports_private && supports_private;
+        let namespaces = if supports_private {
+            self.namespaces.clone()
+        } else {
+            self.namespaces
                 .iter()
-                .filter(|(data_type, _)| {
-                    Capability::for_data_type(**data_type)
-                        .is_some_and(|capability| account_capabilities.contains(capability))
+                .copied()
+                .filter(|name| {
+                    RegisteredNamespace::by_name(name)
+                        .is_none_or(|namespace| namespace.scope != NamespaceScope::PrivateMetadata)
                 })
-                .map(|(data_type, info)| {
-                    (
-                        *data_type,
-                        DataTypeMetadataInfo {
-                            supports_private: info.supports_private && supports_private,
-                            ..info.clone()
-                        },
-                    )
-                })
-                .collect(),
-        }
+                .collect()
+        };
+
+        (self.supports_vendor_namespaces || !namespaces.is_empty()).then_some(
+            DataTypeMetadataInfo {
+                namespaces,
+                supports_vendor_namespaces: self.supports_vendor_namespaces,
+                supports_private,
+                max_depth: self.max_depth,
+            },
+        )
     }
 }
 
@@ -650,10 +676,40 @@ mod tests {
             );
         }
 
-        assert_eq!(
-            serde_json::to_value(base.to_account_capabilities(CapabilityIds::default(), true))
-                .unwrap(),
-            json!({"dataTypes": {}})
+        assert!(
+            base.to_account_capabilities(CapabilityIds::default(), true)
+                .is_none()
         );
+        let sieve_only = [Capability::Sieve, Capability::Metadata]
+            .into_iter()
+            .collect::<CapabilityIds>();
+        assert_eq!(
+            base.to_account_capabilities(sieve_only, true)
+                .map(|capabilities| capabilities.data_types.len()),
+            Some(1)
+        );
+
+        let no_vendor = MetadataCapabilities {
+            data_types: base
+                .data_types
+                .iter()
+                .map(|(data_type, info)| {
+                    (
+                        *data_type,
+                        DataTypeMetadataInfo {
+                            supports_vendor_namespaces: false,
+                            ..info.clone()
+                        },
+                    )
+                })
+                .collect(),
+        };
+        for supports_private in [true, false] {
+            assert!(
+                no_vendor
+                    .to_account_capabilities(account, supports_private)
+                    .is_none()
+            );
+        }
     }
 }

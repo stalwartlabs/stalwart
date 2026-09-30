@@ -69,7 +69,7 @@ impl Inner {
             PushNotification::EmailPush(email_push) => {
                 self.mark_cache_stale(email_push.account_id, SyncCollection::Email);
             }
-            PushNotification::CalendarAlert(_) => {}
+            PushNotification::ViewerStateChange(_) | PushNotification::CalendarAlert(_) => {}
         }
     }
 }
@@ -391,6 +391,7 @@ impl Server {
         self.inner.cache.contacts.clear();
         self.inner.cache.events.clear();
         self.inner.cache.scheduling.clear();
+        self.inner.cache.metadata_viewers.clear();
         self.inner.cache.dkim_signers.clear();
         self.inner.cache.accounts.clear();
         self.inner.cache.roles.clear();
@@ -500,6 +501,9 @@ impl Server {
                 }
                 CacheInvalidation::DomainNegative => {
                     cache.domain_names_negative.clear();
+                }
+                CacheInvalidation::PrivateMetadata(id) => {
+                    cache.metadata_viewers.invalidate(*id);
                 }
             }
         }

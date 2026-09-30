@@ -13,16 +13,19 @@ use quick_xml::events::BytesStart;
 use tokenizer::Tokenizer;
 
 use crate::schema::{Element, NamedElement, Namespace};
+use types::metadata::XmlError;
 
 pub mod header;
 pub mod property;
 pub mod tokenizer;
+pub mod value;
 
 #[derive(Debug, Clone)]
 pub enum Error {
     Xml(Box<quick_xml::Error>),
     UnexpectedToken(Box<UnexpectedToken>),
     Filter(FilterError),
+    Value(XmlError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,6 +233,7 @@ impl Display for Error {
                 write!(f, "Unsupported collation: {collation}")
             }
             Error::Filter(FilterError::TooComplex(_)) => write!(f, "Filter is too complex"),
+            Error::Value(err) => write!(f, "Invalid property value: {err}"),
         }
     }
 }

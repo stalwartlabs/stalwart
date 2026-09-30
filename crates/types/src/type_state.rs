@@ -69,6 +69,8 @@ pub struct StateChange {
     pub types: Bitmap<DataType>,
 }
 
+const _: () = assert!(size_of::<StateChange>() <= 24);
+
 impl StateChange {
     pub fn new(account_id: u32) -> Self {
         Self {

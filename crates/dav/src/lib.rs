@@ -219,6 +219,33 @@ impl PropStatBuilder {
         self
     }
 
+    pub fn has_errors(&self) -> bool {
+        self.propstats
+            .keys()
+            .any(|(status, _, _)| !status.is_success())
+    }
+
+    pub fn fail_dependencies(&mut self) {
+        let succeeded = self
+            .propstats
+            .keys()
+            .filter(|(status, _, _)| status.is_success())
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut failed = Vec::new();
+        for key in succeeded {
+            if let Some(props) = self.propstats.remove(&key) {
+                failed.extend(props);
+            }
+        }
+        if !failed.is_empty() {
+            self.propstats
+                .entry((StatusCode::FAILED_DEPENDENCY, None, None))
+                .or_default()
+                .extend(failed);
+        }
+    }
+
     pub fn build(self) -> Vec<PropStat> {
         self.propstats
             .into_iter()
@@ -229,5 +256,50 @@ impl PropStatBuilder {
                 response_description: description.map(ResponseDescription),
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PropStatBuilder;
+    use dav_proto::schema::{
+        property::{DavProperty, WebDavProperty},
+        response::BaseCondition,
+    };
+    use hyper::StatusCode;
+
+    fn statuses(items: PropStatBuilder) -> Vec<(StatusCode, usize)> {
+        let mut statuses = items
+            .build()
+            .into_iter()
+            .map(|propstat| (propstat.status.0, propstat.prop.0.0.len()))
+            .collect::<Vec<_>>();
+        statuses.sort_unstable_by_key(|(status, _)| status.as_u16());
+        statuses
+    }
+
+    #[test]
+    fn failed_properties_turn_the_others_into_failed_dependencies() {
+        let mut items = PropStatBuilder::default();
+        items.insert_ok(DavProperty::WebDav(WebDavProperty::DisplayName));
+        items.insert_with_status(
+            DavProperty::WebDav(WebDavProperty::GetContentType),
+            StatusCode::NO_CONTENT,
+        );
+        assert!(!items.has_errors());
+        items.insert_precondition_failed(
+            DavProperty::WebDav(WebDavProperty::CreationDate),
+            StatusCode::INSUFFICIENT_STORAGE,
+            BaseCondition::QuotaNotExceeded,
+        );
+        assert!(items.has_errors());
+        items.fail_dependencies();
+        assert_eq!(
+            statuses(items),
+            vec![
+                (StatusCode::FAILED_DEPENDENCY, 2),
+                (StatusCode::INSUFFICIENT_STORAGE, 1)
+            ]
+        );
     }
 }

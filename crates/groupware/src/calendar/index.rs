@@ -14,8 +14,8 @@ use crate::{
         ArchivedCalendarEventContent, ArchivedCalendarEventNotification,
         ArchivedCalendarEventNotificationContent, ArchivedChangedBy, CalendarEventContent,
         CalendarEventNotification, CalendarEventNotificationContent, ChangedBy, EVENT_HAS_ALARMS,
-        EVENT_HAS_DEAD_PROPERTIES, EVENT_HAS_UNBOUNDED_TODO, EVENT_USES_DEFAULT_ALERTS,
-        EventPreferences, PREF_HAS_ALERTS, privacy::ICalendarPrivacy,
+        EVENT_HAS_UNBOUNDED_TODO, EVENT_USES_DEFAULT_ALERTS, EventPreferences, PREF_HAS_ALERTS,
+        privacy::ICalendarPrivacy,
     },
     strip_mailto_scheme,
 };
@@ -25,9 +25,12 @@ use calcard::icalendar::{
     ArchivedICalendarProperty, ArchivedICalendarValue, ICalendar, ICalendarComponentType,
     ICalendarParameterValue, ICalendarProperty, ICalendarValue,
 };
-use common::storage::index::{
-    ArchivedSplitObject, IndexValue, IndexableAndSerializableObject, IndexableObject,
-    SEARCH_HASH_UNCHANGED, SerializableObject, SplitObject, serialize_object,
+use common::storage::{
+    dav::PresenceBits,
+    index::{
+        ArchivedSplitObject, IndexValue, IndexableAndSerializableObject, IndexableObject,
+        SEARCH_HASH_UNCHANGED, SerializableObject, SplitObject, serialize_object,
+    },
 };
 use nlp::language::{
     Language,
@@ -43,7 +46,10 @@ use types::{
     acl::AclGrant,
     collection::SyncCollection,
     field::{CalendarEventField, CalendarNotificationField, Field},
+    metadata::MetadataKinds,
 };
+
+const EVENT_HASHED_FLAGS: u16 = !PresenceBits::CALENDAR_EVENT.mask();
 
 impl IndexableObject for Calendar {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -81,6 +87,10 @@ impl IndexableObject for &ArchivedCalendar {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedCalendar::metadata_kinds(self)
     }
 }
 
@@ -120,6 +130,10 @@ impl IndexableObject for CalendarEvent {
 impl IndexableObject for &ArchivedCalendarEvent {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         self.meta_index_values().into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedCalendarEvent::metadata_kinds(self)
     }
 }
 
@@ -162,7 +176,7 @@ impl SplitObject for CalendarEvent {
             .i64(self.created)
             .i64(self.modified)
             .u32(self.size)
-            .u16(self.flags)
+            .u16(self.flags & EVENT_HASHED_FLAGS)
             .opt_u32(self.schedule_tag)
             .finish()
     }
@@ -186,11 +200,6 @@ impl SplitObject for CalendarEvent {
         self.start = start;
         self.duration = duration;
         self.size = SizeWriter::ical(&content.data.event) as u32;
-        if content.dead_properties.is_empty() {
-            self.flags &= !EVENT_HAS_DEAD_PROPERTIES;
-        } else {
-            self.flags |= EVENT_HAS_DEAD_PROPERTIES;
-        }
         if content.data.has_unbounded_todo() {
             self.flags |= EVENT_HAS_UNBOUNDED_TODO;
         } else {
@@ -258,13 +267,17 @@ impl ArchivedSplitObject for ArchivedCalendarEvent {
             .i64(self.created.to_native())
             .i64(self.modified.to_native())
             .u32(self.size.to_native())
-            .u16(self.flags.to_native())
+            .u16(self.flags.to_native() & EVENT_HASHED_FLAGS)
             .opt_u32(self.schedule_tag.as_ref().map(|tag| tag.to_native()))
             .finish()
     }
 
     fn etag(&self) -> u32 {
         self.etag.to_native()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedCalendarEvent::metadata_kinds(self)
     }
 
     fn meta_index_values(&self) -> Vec<IndexValue<'_>> {
@@ -506,8 +519,7 @@ impl ICalendarObjectUid for ArchivedICalendar {
 
 impl Calendar {
     pub fn size(&self) -> usize {
-        self.dead_properties.size()
-            + self.preferences.iter().map(|p| p.size()).sum::<usize>()
+        self.preferences.iter().map(|p| p.size()).sum::<usize>()
             + self.name.len()
             + std::mem::size_of::<Calendar>()
     }
@@ -515,8 +527,7 @@ impl Calendar {
 
 impl ArchivedCalendar {
     pub fn size(&self) -> usize {
-        self.dead_properties.size()
-            + self.preferences.iter().map(|p| p.size()).sum::<usize>()
+        self.preferences.iter().map(|p| p.size()).sum::<usize>()
             + self.name.len()
             + std::mem::size_of::<Calendar>()
     }
@@ -806,10 +817,20 @@ impl ArchiveCompression for CalendarEventNotificationContent {
 mod tests {
     use super::*;
     use crate::calendar::{
-        CalendarEventData, EVENT_HAS_UNBOUNDED_TODO, EventUserData, PREF_USE_DEFAULT_ALERTS,
-        alerts::DefaultAlerts,
+        CalendarEventData, EVENT_DRAFT, EVENT_HAS_UNBOUNDED_TODO, EVENT_HIDE_ATTENDEES,
+        EVENT_INVITE_OTHERS, EVENT_INVITE_SELF, EVENT_META_DAV, EVENT_META_JMAP, EVENT_PRIVATE,
+        EVENT_SECRET, EventUserData, PREF_USE_DEFAULT_ALERTS, alerts::DefaultAlerts,
     };
     use calcard::common::timezone::Tz;
+    use common::{DavName, storage::index::GroupwareWrite};
+    use rkyv::rancor::Error;
+
+    const KINDS: [MetadataKinds; 4] = [
+        MetadataKinds::NONE,
+        MetadataKinds::JMAP,
+        MetadataKinds::DAV,
+        MetadataKinds::JMAP.union(MetadataKinds::DAV),
+    ];
 
     const EVENT_WITH_ALARM: &str = concat!(
         "BEGIN:VCALENDAR\r\n",
@@ -834,7 +855,6 @@ mod tests {
                 &DefaultAlerts::disabled(),
             ),
             preferences,
-            ..Default::default()
         }
     }
 
@@ -936,6 +956,97 @@ mod tests {
                 flags & (EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS),
                 EVENT_HAS_ALARMS | EVENT_USES_DEFAULT_ALERTS
             );
+        }
+    }
+
+    fn archive(event: &CalendarEvent) -> rkyv::util::AlignedVec {
+        rkyv::to_bytes::<Error>(event).expect("the event archives")
+    }
+
+    fn access(bytes: &[u8]) -> &ArchivedCalendarEvent {
+        rkyv::access::<ArchivedCalendarEvent, Error>(bytes).expect("the archive validates")
+    }
+
+    #[test]
+    fn event_flags_do_not_overlap() {
+        let flags = [
+            EVENT_INVITE_SELF,
+            EVENT_INVITE_OTHERS,
+            EVENT_HIDE_ATTENDEES,
+            EVENT_DRAFT,
+            EVENT_META_DAV,
+            EVENT_HAS_ALARMS,
+            EVENT_PRIVATE,
+            EVENT_SECRET,
+            EVENT_USES_DEFAULT_ALERTS,
+            EVENT_HAS_UNBOUNDED_TODO,
+            EVENT_META_JMAP,
+        ];
+        let union = flags.iter().fold(0u16, |union, flag| {
+            assert_eq!(flag.count_ones(), 1);
+            assert_eq!(union & flag, 0, "flag {flag:#x} is used twice");
+            union | flag
+        });
+        assert_eq!(union.count_ones() as usize, flags.len());
+    }
+
+    #[test]
+    fn presence_never_moves_the_event_etag() {
+        let event = CalendarEvent {
+            names: vec![DavName::new("event.ics".to_string(), 1)],
+            uid: "presence".to_string(),
+            size: 10,
+            etag: 1234,
+            flags: EVENT_HAS_ALARMS | EVENT_PRIVATE,
+            ..Default::default()
+        };
+        let hash = event.meta_hash();
+        let original = archive(&event);
+        let original = access(&original);
+        assert_eq!(original.meta_hash(), hash);
+
+        for kinds in KINDS {
+            let mut changed = event.clone();
+            changed.set_metadata_kinds(kinds);
+            assert_eq!(changed.metadata_kinds(), kinds);
+            assert_eq!(changed.flags & EVENT_HASHED_FLAGS, event.flags);
+            assert_eq!(changed.meta_hash(), hash);
+
+            let bytes = archive(&changed);
+            let archived = access(&bytes);
+            assert_eq!(archived.meta_hash(), hash);
+            assert_eq!(ArchivedSplitObject::metadata_kinds(archived), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&archived), kinds);
+
+            let write = GroupwareWrite::meta_only(changed, original);
+            assert_eq!(write.meta().etag, event.etag);
+        }
+
+        let mut drafted = event.clone();
+        drafted.flags |= EVENT_DRAFT;
+        assert_ne!(drafted.meta_hash(), hash);
+    }
+
+    #[test]
+    fn content_refresh_keeps_the_jmap_presence() {
+        let mut event = CalendarEvent::default();
+        event.set_metadata_kinds(MetadataKinds::JMAP);
+        event.refresh_from_content(&content(EVENT_WITH_ALARM, vec![]), ());
+        assert_eq!(event.metadata_kinds(), MetadataKinds::JMAP);
+        assert_eq!(event.flags & EVENT_HAS_ALARMS, EVENT_HAS_ALARMS);
+    }
+
+    #[test]
+    fn calendar_presence_is_reported_to_the_index_builder() {
+        for kinds in KINDS {
+            let mut calendar = Calendar::default();
+            calendar.set_metadata_kinds(kinds.union(MetadataKinds::IMAP));
+            assert_eq!(calendar.metadata_kinds(), kinds);
+            let bytes = rkyv::to_bytes::<Error>(&calendar).expect("the calendar archives");
+            let archived =
+                rkyv::access::<ArchivedCalendar, Error>(&bytes).expect("the archive validates");
+            assert_eq!(archived.metadata_kinds(), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&archived), kinds);
         }
     }
 }

@@ -15,10 +15,10 @@
     {
       "properties": [
         {
-          "type": "DeadProperty",
+          "type": "Dead",
           "data": {
-            "name": "title",
-            "attrs": "xmlns=\"http://www.example.com/ns/\""
+            "namespace": "http://www.example.com/ns/",
+            "name": "title"
           }
         }
       ],
@@ -33,31 +33,31 @@
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "department",
-        "attrs": "xmlns=\"http://www.example.com/ns/\""
+        "namespace": "http://www.example.com/ns/",
+        "name": "department"
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "phone",
-        "attrs": "xmlns=\"http://www.example.com/ns/\""
+        "namespace": "http://www.example.com/ns/",
+        "name": "phone"
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "office",
-        "attrs": "xmlns=\"http://www.example.com/ns/\""
+        "namespace": "http://www.example.com/ns/",
+        "name": "office"
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "salary",
-        "attrs": "xmlns=\"http://www.example.com/ns/\""
+        "namespace": "http://www.example.com/ns/",
+        "name": "salary"
       }
     }
   ],

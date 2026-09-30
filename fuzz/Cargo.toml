@@ -14,6 +14,9 @@ nlp = { path = "../crates/nlp" }
 spam-filter = { path = "../crates/spam-filter" }
 common = { path = "../crates/common" }
 utils = { path = "../crates/utils" }
+types = { path = "../crates/types" }
+dav-proto = { path = "../crates/dav-proto" }
+jmap-tools = "0.1"
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 encodify = "1.0"
 
@@ -27,6 +30,7 @@ mail-auth = { path = "../../mail-auth" }
 mail-builder = { path = "../../mail-builder" }
 encodify = { path = "../../encodify" }
 mail-parser = { path = "../../mail-parser" }
+sieve-rs = { path = "../../sieve" }
 
 [[bin]]
 name = "imap_receiver"
@@ -73,6 +77,20 @@ bench = false
 [[bin]]
 name = "spam_context"
 path = "fuzz_targets/spam_context.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "metadata_container"
+path = "fuzz_targets/metadata_container.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dav_xml_value"
+path = "fuzz_targets/dav_xml_value.rs"
 test = false
 doc = false
 bench = false

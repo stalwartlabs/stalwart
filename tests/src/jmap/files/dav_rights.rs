@@ -183,7 +183,7 @@ pub async fn test(test: &TestServer) {
     let lock_token = john_client
         .lock_create(&spelled, "owner", true, "0", "Second-300")
         .await
-        .with_status(StatusCode::CREATED)
+        .with_status(StatusCode::OK)
         .lock_token()
         .to_string();
     john_client
@@ -222,7 +222,7 @@ pub async fn test(test: &TestServer) {
             john_client
                 .lock_create(&path, "owner", true, "0", "Second-300")
                 .await
-                .with_status(StatusCode::CREATED)
+                .with_status(StatusCode::OK)
                 .lock_token()
                 .to_string(),
         ));
@@ -262,7 +262,7 @@ pub async fn test(test: &TestServer) {
     let dir_token = john_client
         .lock_create(&locks, "owner", true, "infinity", "Second-300")
         .await
-        .with_status(StatusCode::CREATED)
+        .with_status(StatusCode::OK)
         .lock_token()
         .to_string();
     let child = format!("{locks}/new.txt");

@@ -20,6 +20,7 @@ use crate::{
     },
     manager::application::WebApplications,
     network::security::BlockedIps,
+    storage::metadata::MetadataViewerCache,
 };
 use ahash::{AHashMap, AHashSet};
 use arc_swap::ArcSwap;
@@ -132,6 +133,7 @@ impl Caches {
             contacts: Cache::new_single_shard(cache.contacts, dav_estimate).with_name("contacts"),
             scheduling: Cache::new_single_shard(cache.scheduling, dav_estimate)
                 .with_name("scheduling"),
+            metadata_viewers: MetadataViewerCache::new(cache.access_tokens / 4),
             emails: Cache::new(cache.email_addresses, 255u64).with_name("emailAddresses"),
             emails_negative: CacheWithTtl::new(
                 cache.email_addresses_negative,

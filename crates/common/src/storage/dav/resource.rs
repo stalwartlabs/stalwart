@@ -10,9 +10,9 @@ use crate::{
     TinyCalendarPreferences,
 };
 use store::rand::{RngExt, distr::Alphanumeric};
-use types::acl::AclGrant;
+use types::{acl::AclGrant, metadata::MetadataKinds};
 
-use super::{CONTAINER_FLAG, FILE_KIND_FILE, SCHEDULE_INBOX_ID};
+use super::{CONTAINER_FLAG, FILE_KIND_FILE, PresenceBits, SCHEDULE_INBOX_ID};
 
 impl<'x> GroupwareResourceRef<'x> {
     #[inline(always)]
@@ -68,6 +68,11 @@ impl<'x> GroupwareResourceRef<'x> {
     #[inline(always)]
     pub fn etag(&self) -> u32 {
         self.resource.etag()
+    }
+
+    #[inline(always)]
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        self.resource.metadata_kinds()
     }
 
     #[inline(always)]
@@ -359,6 +364,22 @@ impl GroupwareResource {
             | GroupwareResourceMetadata::CalendarEventNotification { etag, .. }
             | GroupwareResourceMetadata::AddressBook { etag, .. }
             | GroupwareResourceMetadata::ContactCard { etag, .. } => *etag,
+        }
+    }
+
+    #[inline(always)]
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        match &self.data {
+            GroupwareResourceMetadata::File { flags, .. } => flags.metadata_kinds(),
+            GroupwareResourceMetadata::Calendar { metadata, .. }
+            | GroupwareResourceMetadata::AddressBook { metadata, .. } => *metadata,
+            GroupwareResourceMetadata::CalendarEvent { flags, .. } => {
+                PresenceBits::CALENDAR_EVENT.kinds(*flags)
+            }
+            GroupwareResourceMetadata::ContactCard { flags, .. } => {
+                PresenceBits::CONTACT_CARD.kinds(*flags)
+            }
+            GroupwareResourceMetadata::CalendarEventNotification { .. } => MetadataKinds::NONE,
         }
     }
 

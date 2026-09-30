@@ -19,7 +19,6 @@ use crate::schema::{
     response::{Href, List, Location, ResponseDescription, Status, SyncToken},
 };
 use std::fmt::{Display, Write};
-use types::dead_property::{DeadProperty, DeadPropertyTag};
 
 trait XmlEscape {
     fn write_escaped_to(&self, out: &mut impl Write) -> std::fmt::Result;
@@ -168,38 +167,6 @@ impl Display for SupportedCollation {
     }
 }
 
-pub trait DeadPropertyFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
-}
-
-impl DeadPropertyFormat for DeadProperty {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut last_tag = "";
-
-        for item in &self.0 {
-            match item {
-                DeadPropertyTag::ElementStart(tag) => {
-                    let name = &tag.name;
-                    if let Some(attrs) = &tag.attrs {
-                        write!(f, "<{name} {attrs}>")?;
-                    } else {
-                        write!(f, "<{name}>")?;
-                    }
-                    last_tag = name;
-                }
-                DeadPropertyTag::ElementEnd => {
-                    write!(f, "</{}>", last_tag)?;
-                }
-                DeadPropertyTag::Text(text) => {
-                    text.write_escaped_to(f)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fmt::Display;
@@ -207,7 +174,8 @@ mod tests {
     use calcard::{icalendar::ICalendar, vcard::VCard};
     use hyper::StatusCode;
     use mail_parser::DateTime;
-    use types::dead_property::{DeadElementTag, DeadProperty, DeadPropertyTag};
+    use std::borrow::Cow;
+    use types::metadata::{EncodedDavValue, XmlElement, XmlName, XmlNode, XmlValue};
 
     use crate::{
         Depth,
@@ -233,6 +201,15 @@ mod tests {
         pub fn new(vec: impl IntoIterator<Item = T>) -> Self {
             List(vec.into_iter().collect())
         }
+    }
+
+    fn owner(children: Vec<XmlNode<'static>>) -> EncodedDavValue {
+        XmlValue {
+            children,
+            ..Default::default()
+        }
+        .to_encoded()
+        .expect("encodable owner")
     }
 
     impl From<ICalendar> for DavValue {
@@ -340,14 +317,14 @@ mod tests {
                         "http://example.com/workspace/webdav/proposal.doc",
                         LockScope::Exclusive,
                     )
-                    .with_owner(DeadProperty(vec![
-                        DeadPropertyTag::ElementStart(Box::new(DeadElementTag {
-                            name: "D:href".to_string(),
-                            attrs: None,
-                        })),
-                        DeadPropertyTag::Text("http://example.org/~ejw/contact.html".to_string()),
-                        DeadPropertyTag::ElementEnd,
-                    ]))
+                    .with_owner(owner(vec![XmlNode::Element(XmlElement {
+                        name: XmlName::borrowed(Some("DAV:"), "href"),
+                        prefix: Some(Cow::Borrowed("D")),
+                        attributes: vec![],
+                        children: vec![XmlNode::Text(Cow::Borrowed(
+                            "http://example.org/~ejw/contact.html",
+                        ))],
+                    })]))
                     .with_timeout(604800)
                     .with_lock_token("urn:uuid:e71d4fae-5dec-22d6-fea5-00a0c91e6be4"),
                 ],
@@ -360,9 +337,7 @@ mod tests {
                     WebDavProperty::LockDiscovery,
                     vec![
                         ActiveLock::new("http://www.example.com/container/", LockScope::Shared)
-                            .with_owner(DeadProperty(vec![DeadPropertyTag::Text(
-                                "Jane Smith".to_string(),
-                            )]))
+                            .with_owner(owner(vec![XmlNode::Text(Cow::Borrowed("Jane Smith"))]))
                             .with_depth(Depth::Zero)
                             .with_lock_token("urn:uuid:f81de2ad-7f3d-a1b2-4f3c-00a0c91a9d76"),
                     ],

@@ -11,7 +11,10 @@ use crate::{
 
 impl DavParser for PropFind {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
-        if !stream.expect_named_element_or_eof(NamedElement::dav(Element::Propfind))? {
+        if stream
+            .expect_named_element_or_eof(NamedElement::dav(Element::Propfind))?
+            .is_none()
+        {
             return Ok(PropFind::AllProp(vec![]));
         }
 

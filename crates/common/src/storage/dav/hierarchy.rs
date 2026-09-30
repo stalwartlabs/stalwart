@@ -255,6 +255,7 @@ mod tests {
     use super::*;
     use crate::{DavName, GroupwareResource, UpdateLock, storage::dav::ResourceChunkBuilder};
     use std::sync::Arc;
+    use types::metadata::MetadataKinds;
 
     fn calendar(builder: &mut ResourceChunkBuilder, document_id: u32, name: &str) {
         let name = builder.push_str(name);
@@ -267,6 +268,7 @@ mod tests {
                 acls,
                 preferences,
                 etag: 0,
+                metadata: MetadataKinds::NONE,
             },
         });
     }

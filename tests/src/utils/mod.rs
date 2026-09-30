@@ -7,6 +7,7 @@
 pub mod account;
 pub mod cleanup;
 pub mod containers;
+pub mod dav_xml;
 pub mod dns;
 pub mod http;
 pub mod http_server;

@@ -49,8 +49,17 @@ pub enum PushEvent {
 #[derive(Debug, Clone)]
 pub enum PushNotification {
     StateChange(StateChange),
+    ViewerStateChange(ViewerStateChange),
     CalendarAlert(CalendarAlert),
     EmailPush(EmailPush),
+}
+
+const _: () = assert!(size_of::<PushNotification>() <= 80);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ViewerStateChange {
+    pub viewer_id: u32,
+    pub change: StateChange,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +138,7 @@ pub enum CacheInvalidation {
         local_part_hash: u32,
     },
     DomainNegative,
+    PrivateMetadata(u32),
 }
 
 #[derive(Debug)]
@@ -289,9 +299,10 @@ impl From<(&Option<Arc<Policy>>, &Option<Arc<Tlsa>>)> for PolicyType {
 }
 
 impl PushNotification {
-    pub fn account_id(&self) -> u32 {
+    pub fn recipient(&self) -> u32 {
         match self {
             PushNotification::StateChange(state_change) => state_change.account_id,
+            PushNotification::ViewerStateChange(viewer_change) => viewer_change.viewer_id,
             PushNotification::CalendarAlert(calendar_alert) => calendar_alert.account_id,
             PushNotification::EmailPush(email_push) => email_push.account_id,
         }
@@ -300,17 +311,15 @@ impl PushNotification {
     pub fn filter_types(&self, types: &Bitmap<DataType>) -> Option<PushNotification> {
         match self {
             PushNotification::StateChange(state_change) => {
-                let mut filtered_types = state_change.types;
-                filtered_types.intersection(types);
-                if !filtered_types.is_empty() {
-                    Some(PushNotification::StateChange(StateChange {
-                        account_id: state_change.account_id,
-                        change_id: state_change.change_id,
-                        types: filtered_types,
-                    }))
-                } else {
-                    None
-                }
+                filter_state_change(state_change, types).map(PushNotification::StateChange)
+            }
+            PushNotification::ViewerStateChange(viewer_change) => {
+                filter_state_change(&viewer_change.change, types).map(|change| {
+                    PushNotification::ViewerStateChange(ViewerStateChange {
+                        viewer_id: viewer_change.viewer_id,
+                        change,
+                    })
+                })
             }
             PushNotification::CalendarAlert(_) => {
                 if types.contains(DataType::CalendarAlert) {
@@ -336,6 +345,18 @@ impl PushNotification {
             }
         }
     }
+}
+
+fn filter_state_change(
+    state_change: &StateChange,
+    types: &Bitmap<DataType>,
+) -> Option<StateChange> {
+    let mut filtered_types = state_change.types;
+    filtered_types.intersection(types);
+    (!filtered_types.is_empty()).then_some(StateChange {
+        types: filtered_types,
+        ..*state_change
+    })
 }
 
 impl EmailPush {

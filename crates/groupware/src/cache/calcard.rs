@@ -339,6 +339,7 @@ pub(super) fn push_calendar(
             acls,
             preferences,
             etag,
+            metadata: calendar.metadata_kinds(),
         },
     });
 }
@@ -362,7 +363,12 @@ pub(super) fn push_addressbook(
     );
     builder.records.push(GroupwareResource {
         document_id,
-        data: GroupwareResourceMetadata::AddressBook { name, acls, etag },
+        data: GroupwareResourceMetadata::AddressBook {
+            name,
+            acls,
+            etag,
+            metadata: book.metadata_kinds(),
+        },
     });
 }
 
@@ -431,6 +437,7 @@ pub(super) fn push_card(
                 .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
             uid,
             etag: card.etag.to_native(),
+            flags: card.flags.to_native(),
         },
     });
 }
@@ -483,4 +490,95 @@ pub(super) fn push_scheduling_container(builder: &mut ResourceChunkBuilder, docu
             flags: 0,
         },
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::{GroupwareResourceRef, storage::dav::PresenceBits};
+    use rkyv::rancor::Error;
+    use types::metadata::MetadataKinds;
+
+    #[test]
+    fn archived_presence_reaches_the_cache() {
+        let mut calendar = Calendar {
+            name: "work".to_string(),
+            ..Default::default()
+        };
+        calendar.set_metadata_kinds(MetadataKinds::JMAP);
+        let mut book = AddressBook {
+            name: "contacts".to_string(),
+            ..Default::default()
+        };
+        book.set_metadata_kinds(MetadataKinds::DAV);
+        let mut card = ContactCard {
+            names: vec![DavName::new("card.vcf".to_string(), 1)],
+            uid: "card".to_string(),
+            etag: 77,
+            ..Default::default()
+        };
+        card.set_metadata_kinds(MetadataKinds::JMAP.union(MetadataKinds::DAV));
+        let mut event = CalendarEvent {
+            names: vec![DavName::new("event.ics".to_string(), 0)],
+            uid: "event".to_string(),
+            ..Default::default()
+        };
+        event.set_metadata_kinds(MetadataKinds::JMAP);
+
+        let calendar = rkyv::to_bytes::<Error>(&calendar).expect("archives");
+        let book = rkyv::to_bytes::<Error>(&book).expect("archives");
+        let card = rkyv::to_bytes::<Error>(&card).expect("archives");
+        let event = rkyv::to_bytes::<Error>(&event).expect("archives");
+
+        let mut builder = ResourceChunkBuilder::with_capacity(4);
+        push_calendar(
+            &mut builder,
+            rkyv::access::<ArchivedCalendar, Error>(&calendar).expect("validates"),
+            0,
+            11,
+        );
+        push_addressbook(
+            &mut builder,
+            rkyv::access::<ArchivedAddressBook, Error>(&book).expect("validates"),
+            1,
+            12,
+        );
+        push_card(
+            &mut builder,
+            rkyv::access::<ArchivedContactCard, Error>(&card).expect("validates"),
+            2,
+        );
+        push_event(
+            &mut builder,
+            rkyv::access::<ArchivedCalendarEvent, Error>(&event).expect("validates"),
+            3,
+        );
+        let chunk = builder.finish();
+
+        let cached = chunk
+            .records
+            .iter()
+            .map(|resource| {
+                let resource = GroupwareResourceRef {
+                    chunk: &chunk,
+                    resource,
+                };
+                (resource.metadata_kinds(), resource.etag())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            cached,
+            [
+                (MetadataKinds::JMAP, 11),
+                (MetadataKinds::DAV, 12),
+                (MetadataKinds::JMAP.union(MetadataKinds::DAV), 77),
+                (MetadataKinds::JMAP, 0),
+            ]
+        );
+        assert!(matches!(
+            chunk.records.get(2).map(|resource| &resource.data),
+            Some(GroupwareResourceMetadata::ContactCard { flags, .. })
+                if *flags == PresenceBits::CONTACT_CARD.mask()
+        ));
+    }
 }

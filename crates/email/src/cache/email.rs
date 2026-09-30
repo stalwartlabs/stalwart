@@ -5,7 +5,7 @@
  */
 
 use crate::message::messagedata::{
-    EmailMessageData, KeywordsIter, MessageData, SERVER_SET_KEYWORDS,
+    EmailMessageData, KEYWORD_BITS, KeywordsIter, MessageData, SERVER_SET_KEYWORDS,
 };
 use common::{
     CustomKeywords, MessageCache, MessageStoreCache, MessagesCache, Server, auth::AccessToken,
@@ -18,7 +18,7 @@ use store::{
     roaring::RoaringBitmap,
 };
 use trc::AddContext;
-use types::{acl::Acl, keyword::Keyword};
+use types::{acl::Acl, keyword::Keyword, metadata::MetadataKinds};
 use utils::map::bitmap::Bitmap;
 
 pub(crate) const HAS_CUSTOM_KEYWORDS: u32 = 1 << 31;
@@ -311,6 +311,10 @@ pub trait MessageCacheAccess {
 
     fn keyword_count(&self, message: MessageRef<'_>) -> usize;
 
+    fn metadata_kinds(&self, message: MessageRef<'_>) -> MetadataKinds;
+
+    fn with_metadata(&self) -> impl Iterator<Item = MessageRef<'_>>;
+
     fn received(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = MessageRef<'_>>;
 
     fn sent(&self, date: i64, comp: SearchOperator) -> impl Iterator<Item = MessageRef<'_>>;
@@ -468,7 +472,7 @@ impl MessageCacheAccess for MessageStoreCache {
     }
 
     fn expand_keywords(&self, message: MessageRef<'_>) -> impl Iterator<Item = Keyword> {
-        KeywordsIter(message.keywords() & !HAS_CUSTOM_KEYWORDS).chain(
+        KeywordsIter(message.keywords() & KEYWORD_BITS).chain(
             self.custom_keywords(message)
                 .iter()
                 .map(|name| Keyword::Other(name.clone())),
@@ -476,8 +480,18 @@ impl MessageCacheAccess for MessageStoreCache {
     }
 
     fn keyword_count(&self, message: MessageRef<'_>) -> usize {
-        (message.keywords() & !(HAS_CUSTOM_KEYWORDS | SERVER_SET_KEYWORDS)).count_ones() as usize
+        (message.keywords() & KEYWORD_BITS & !SERVER_SET_KEYWORDS).count_ones() as usize
             + self.custom_keywords(message).len()
+    }
+
+    fn metadata_kinds(&self, message: MessageRef<'_>) -> MetadataKinds {
+        MessageData::metadata_kinds_of(message.keywords())
+    }
+
+    fn with_metadata(&self) -> impl Iterator<Item = MessageRef<'_>> {
+        self.emails
+            .iter()
+            .filter(|message| MessageData::has_metadata(message.keywords()))
     }
 
     fn has_keyword(&self, message: MessageRef<'_>, keyword: &Keyword) -> bool {
@@ -494,8 +508,10 @@ impl MessageCacheAccess for MessageStoreCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{CACHE_CHUNK, MessageUid, MessagesCache};
+    use crate::message::messagedata::HAS_JMAP_METADATA;
+    use common::{CACHE_CHUNK, MailboxesCache, MessageUid, MessagesCache, UpdateLock};
     use std::sync::Arc;
+    use types::keyword::{FLAGGED, SEEN};
 
     const BASE: u64 = 1_700_000_000;
 
@@ -593,6 +609,128 @@ mod tests {
                 .collect(),
         );
         assert_equals_a_rebuild(&merged, &expected);
+    }
+
+    fn store_cache(items: Vec<MessageCache>, keywords: Vec<CustomKeywords>) -> MessageStoreCache {
+        MessageStoreCache {
+            emails: Arc::new(MessagesCache::new(1, items, keywords)),
+            mailboxes: Arc::new(MailboxesCache {
+                change_id: 1,
+                index: Default::default(),
+                items: Default::default(),
+                size: 0,
+            }),
+            update_lock: Arc::new(UpdateLock::new()),
+            last_change_id: 1,
+            size: 0,
+            verification: Default::default(),
+        }
+    }
+
+    #[test]
+    fn the_metadata_bit_survives_the_cache_and_is_not_a_keyword() {
+        let seen_flagged = (1 << SEEN) | (1 << FLAGGED);
+        let record = |document_id: u32, keywords: u32| {
+            MessageCache::new(
+                document_id,
+                [MessageUid {
+                    mailbox_id: 0,
+                    uid: document_id + 1,
+                }]
+                .into_iter()
+                .collect(),
+                keywords,
+                document_id,
+                100 + u64::from(document_id),
+                10,
+                BASE + u64::from(document_id),
+                0,
+            )
+        };
+        let cache = store_cache(
+            vec![
+                record(0, seen_flagged),
+                record(1, seen_flagged | HAS_JMAP_METADATA),
+                record(2, seen_flagged | HAS_JMAP_METADATA | HAS_CUSTOM_KEYWORDS),
+            ],
+            vec![CustomKeywords {
+                names: vec![CompactString::from("custom")].into_boxed_slice(),
+                document_id: 2,
+            }],
+        );
+
+        let plain = cache.email_by_id(&0).expect("cached");
+        let flagged = cache.email_by_id(&1).expect("cached");
+        let custom = cache.email_by_id(&2).expect("cached");
+        assert_eq!(cache.metadata_kinds(plain), MetadataKinds::NONE);
+        assert_eq!(cache.metadata_kinds(flagged), MetadataKinds::JMAP);
+        assert_eq!(cache.metadata_kinds(custom), MetadataKinds::JMAP);
+        assert_eq!(
+            cache
+                .with_metadata()
+                .map(|message| message.document_id())
+                .collect::<RoaringBitmap>(),
+            RoaringBitmap::from_iter([1u32, 2])
+        );
+
+        assert_eq!(cache.keyword_count(flagged), cache.keyword_count(plain));
+        assert_eq!(cache.keyword_count(custom), cache.keyword_count(plain) + 1);
+        assert_eq!(
+            cache.expand_keywords(flagged).collect::<Vec<_>>(),
+            cache.expand_keywords(plain).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            cache.expand_keywords(custom).last(),
+            Some(Keyword::Other("custom".into()))
+        );
+        assert_eq!(cache.expand_keywords(custom).count(), 3);
+
+        let data = cache.message_data(2).expect("cached");
+        assert_eq!(data.keywords, seen_flagged | HAS_JMAP_METADATA);
+        assert_eq!(data.metadata_kinds(), MetadataKinds::JMAP);
+        assert_eq!(data.keywords_extra, vec![CompactString::from("custom")]);
+        assert_eq!(data.change_id, 102);
+        assert_eq!(
+            cache.message_data(0).expect("cached").metadata_kinds(),
+            MetadataKinds::NONE
+        );
+    }
+
+    #[test]
+    fn a_presence_refetch_carries_the_new_change_id() {
+        let (items, keywords) = sample(CACHE_CHUNK as u32 + 10);
+        let cache = MessagesCache::new(1, items.clone(), keywords);
+        let target = items
+            .iter()
+            .find(|item| item.keywords() & HAS_CUSTOM_KEYWORDS == 0)
+            .expect("a message without custom keywords")
+            .document_id();
+        let item = cache.by_id(target).expect("cached");
+        let new_change_id = item.change_id() + 1000;
+        let record = MessageCache::new(
+            item.document_id(),
+            item.mailboxes().iter().copied().collect(),
+            item.keywords() | HAS_JMAP_METADATA,
+            item.thread_id(),
+            new_change_id,
+            item.size(),
+            item.received_at(),
+            item.sent_at(),
+        );
+
+        let merged = merge_email_cache(
+            &cache,
+            &AHashMap::from_iter([(target, true)]),
+            AHashMap::from_iter([(target, record)]),
+            Vec::new(),
+        );
+        let updated = merged.by_id(target).expect("still cached");
+        assert_eq!(updated.change_id(), new_change_id);
+        assert_eq!(
+            MessageData::metadata_kinds_of(updated.keywords()),
+            MetadataKinds::JMAP
+        );
+        assert_eq!(merged.len(), cache.len());
     }
 
     #[test]

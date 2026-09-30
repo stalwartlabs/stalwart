@@ -7,13 +7,20 @@
 use ahash::{AHashMap, AHashSet};
 use dav_proto::{
     Depth,
-    schema::property::{CalDavProperty, DavProperty, WebDavProperty},
+    schema::{
+        Namespace,
+        property::{CalDavProperty, DavProperty, WebDavProperty},
+    },
     xml_pretty_print,
 };
 use encodify::base64::STANDARD;
 use groupware::DavResourceName;
 use hyper::{HeaderMap, Method, StatusCode, header::AUTHORIZATION};
-use quick_xml::{NsReader, Reader, XmlVersion, events::Event, name::ResolveResult};
+use quick_xml::{
+    NsReader, XmlVersion,
+    events::{BytesStart, Event},
+    name::ResolveResult,
+};
 use std::{borrow::Cow, time::Duration};
 use store::rand::{RngExt, distr::Alphanumeric, rng};
 
@@ -354,7 +361,8 @@ impl DummyWebDavClient {
     ) -> DavResponse {
         let mut request = concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            "<D:mkcol xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" xmlns:B=\"urn:ietf:params:xml:ns:carddav\">",
+            "<D:mkcol xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" ",
+            "xmlns:B=\"urn:ietf:params:xml:ns:carddav\" xmlns:C=\"http://calendarserver.org/ns/\">",
             "<D:set><D:prop>"
         )
         .to_string();
@@ -373,7 +381,7 @@ impl DummyWebDavClient {
         }
 
         for (key, value) in properties {
-            request.push_str(&format!("<{key}>{value}</{key}>"));
+            write_property(&mut request, &key, Some(value));
         }
         request.push_str("</D:prop></D:set></D:mkcol>");
 
@@ -389,7 +397,7 @@ impl DummyWebDavClient {
         path: &str,
         properties: impl IntoIterator<Item = (T, &str)>,
     ) where
-        T: AsRef<str> + Clone,
+        T: DavPropName + Clone,
     {
         let mut expect_set = Vec::new();
         let mut expect_remove = Vec::new();
@@ -414,11 +422,11 @@ impl DummyWebDavClient {
             .into_propfind_response(None);
         let patch_prop = response.properties(path);
         for (key, _) in &expect_set {
-            patch_prop.get(key.as_ref()).with_status(StatusCode::OK);
+            patch_prop.get(key.lookup_key()).with_status(StatusCode::OK);
         }
         for key in &expect_remove {
             patch_prop
-                .get(key.as_ref())
+                .get(key.lookup_key())
                 .with_status(StatusCode::NO_CONTENT);
         }
 
@@ -434,20 +442,21 @@ impl DummyWebDavClient {
         let prop = response.properties(path);
 
         for (key, value) in expect_set {
-            prop.get(key.as_ref())
+            prop.get(key.lookup_key())
                 .with_values([value])
                 .with_status(StatusCode::OK);
         }
 
         for key in expect_remove {
-            prop.get(key.as_ref()).with_status(StatusCode::NOT_FOUND);
+            prop.get(key.lookup_key())
+                .with_status(StatusCode::NOT_FOUND);
         }
     }
 
     pub async fn propfind<I, T>(&self, path: &str, properties: I) -> DavMultiStatus
     where
         I: IntoIterator<Item = T>,
-        T: AsRef<str>,
+        T: DavPropName,
     {
         self.propfind_with_headers(path, properties, []).await
     }
@@ -460,7 +469,7 @@ impl DummyWebDavClient {
     ) -> DavMultiStatus
     where
         I: IntoIterator<Item = T>,
-        T: AsRef<str>,
+        T: DavPropName,
     {
         let mut request = concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
@@ -471,7 +480,7 @@ impl DummyWebDavClient {
         .to_string();
 
         for property in properties {
-            request.push_str(&format!("<{}/>", property.as_ref()));
+            write_property(&mut request, &property, None);
         }
 
         request.push_str("</D:prop></D:propfind>");
@@ -490,7 +499,7 @@ impl DummyWebDavClient {
         headers: impl IntoIterator<Item = (&'static str, &str)>,
     ) -> DavResponse
     where
-        T: AsRef<str>,
+        T: DavPropName,
     {
         let mut request = concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
@@ -501,14 +510,13 @@ impl DummyWebDavClient {
         .to_string();
 
         for property in clear {
-            request.push_str(&format!("<{}/>", property.as_ref()));
+            write_property(&mut request, &property, None);
         }
 
         request.push_str("</D:prop></D:remove><D:set><D:prop>");
 
         for (key, value) in set {
-            let key = key.as_ref();
-            request.push_str(&format!("<{key}>{value}</{key}>"));
+            write_property(&mut request, &key, Some(value));
         }
 
         request.push_str("</D:prop></D:set></D:propertyupdate>");
@@ -555,13 +563,14 @@ impl DummyWebDavClient {
     ) -> DavResponse {
         let mut request = concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            "<D:sync-collection xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" xmlns:B=\"urn:ietf:params:xml:ns:carddav\">",
+            "<D:sync-collection xmlns:D=\"DAV:\" xmlns:A=\"urn:ietf:params:xml:ns:caldav\" ",
+            "xmlns:B=\"urn:ietf:params:xml:ns:carddav\" xmlns:C=\"http://calendarserver.org/ns/\">",
             "<D:prop>"
         )
         .to_string();
 
         for property in properties {
-            request.push_str(&format!("<{property}/>"));
+            write_property(&mut request, &property, None);
         }
 
         request.push_str("</D:prop><D:sync-token>");
@@ -1164,7 +1173,7 @@ fn undeclared_xml_prefix(xml: &str) -> Option<String> {
 }
 
 fn flatten_xml(xml: &str) -> Vec<(String, String)> {
-    let mut reader = Reader::from_str(xml);
+    let mut reader = NsReader::from_str(xml);
 
     let mut path: Vec<String> = Vec::new();
     let mut result: Vec<(String, String)> = Vec::new();
@@ -1172,36 +1181,21 @@ fn flatten_xml(xml: &str) -> Vec<(String, String)> {
     let mut text_content: Option<String> = None;
 
     loop {
-        match reader.read_event_into(&mut buf).unwrap() {
+        let (namespace, event) = reader.read_resolved_event_into(&mut buf).unwrap();
+        match event {
             Event::Start(ref e) => {
-                let name = str::from_utf8(e.name().as_ref()).unwrap().to_string();
-                path.push(name);
+                path.push(qualified_name(&namespace, e.local_name().as_ref()));
                 let base_path = path.join(".");
-                for attr in e.attributes() {
-                    let attr = attr.unwrap();
-                    let key = str::from_utf8(attr.key.as_ref()).unwrap().to_string();
-                    let value = attr.normalized_value(XmlVersion::Implicit1_0).unwrap();
-                    let value_str = value.trim().to_string();
-
-                    result.push((format!("{}.[{}]", base_path, key), value_str));
-                }
+                push_attributes(&reader, e, &base_path, &mut result);
                 text_content = None;
             }
             Event::Empty(ref e) => {
-                let name = str::from_utf8(e.name().as_ref()).unwrap().to_string();
-                let base_path = format!("{}.{}", path.join("."), name);
-                let mut has_attrs = false;
-
-                for attr in e.attributes() {
-                    let attr = attr.unwrap();
-                    let key = str::from_utf8(attr.key.as_ref()).unwrap().to_string();
-                    let value = attr.normalized_value(XmlVersion::Implicit1_0).unwrap();
-                    let value_str = value.trim().to_string();
-                    has_attrs = true;
-                    result.push((format!("{}.[{}]", base_path, key), value_str));
-                }
-
-                if !has_attrs {
+                let base_path = format!(
+                    "{}.{}",
+                    path.join("."),
+                    qualified_name(&namespace, e.local_name().as_ref())
+                );
+                if !push_attributes(&reader, e, &base_path, &mut result) {
                     result.push((base_path, "".to_string()));
                 }
             }
@@ -1260,6 +1254,181 @@ fn flatten_xml(xml: &str) -> Vec<(String, String)> {
     }
 
     result
+}
+
+fn qualified_name(namespace: &ResolveResult<'_>, local_name: &[u8]) -> String {
+    let local_name = str::from_utf8(local_name).unwrap();
+    match namespace {
+        ResolveResult::Bound(namespace) if namespace.as_ref() == XML_NAMESPACE.as_bytes() => {
+            format!("xml:{local_name}")
+        }
+        ResolveResult::Bound(namespace) => match Namespace::try_parse(namespace.as_ref()) {
+            Some(namespace) => format!("{}:{local_name}", namespace.prefix()),
+            None => local_name.to_string(),
+        },
+        ResolveResult::Unbound | ResolveResult::Unknown(_) => local_name.to_string(),
+    }
+}
+
+fn push_attributes(
+    reader: &NsReader<&[u8]>,
+    element: &BytesStart<'_>,
+    base_path: &str,
+    result: &mut Vec<(String, String)>,
+) -> bool {
+    let mut has_attributes = false;
+    for attribute in element.attributes() {
+        let attribute = attribute.unwrap();
+        if attribute.key.as_namespace_binding().is_some() {
+            continue;
+        }
+        let (namespace, local_name) = reader.resolver().resolve_attribute(attribute.key);
+        let name = qualified_name(&namespace, local_name.as_ref());
+        let value = attribute.normalized_value(XmlVersion::Implicit1_0).unwrap();
+        result.push((format!("{base_path}.[{name}]"), value.trim().to_string()));
+        has_attributes = true;
+    }
+    has_attributes
+}
+
+const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
+
+pub trait DavPropName {
+    fn open_tag(&self) -> Cow<'_, str>;
+
+    fn close_tag(&self) -> Cow<'_, str>;
+
+    fn lookup_key(&self) -> Cow<'_, str>;
+}
+
+impl DavPropName for DavProperty {
+    fn open_tag(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.as_ref())
+    }
+
+    fn close_tag(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.as_ref())
+    }
+
+    fn lookup_key(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.as_ref())
+    }
+}
+
+impl DavPropName for str {
+    fn open_tag(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self)
+    }
+
+    fn close_tag(&self) -> Cow<'_, str> {
+        Cow::Borrowed(
+            self.split_once(char::is_whitespace)
+                .map_or(self, |(name, _)| name),
+        )
+    }
+
+    fn lookup_key(&self) -> Cow<'_, str> {
+        self.close_tag()
+    }
+}
+
+impl DavPropName for String {
+    fn open_tag(&self) -> Cow<'_, str> {
+        self.as_str().open_tag()
+    }
+
+    fn close_tag(&self) -> Cow<'_, str> {
+        self.as_str().close_tag()
+    }
+
+    fn lookup_key(&self) -> Cow<'_, str> {
+        self.as_str().lookup_key()
+    }
+}
+
+impl<T: DavPropName + ?Sized> DavPropName for &T {
+    fn open_tag(&self) -> Cow<'_, str> {
+        (**self).open_tag()
+    }
+
+    fn close_tag(&self) -> Cow<'_, str> {
+        (**self).close_tag()
+    }
+
+    fn lookup_key(&self) -> Cow<'_, str> {
+        (**self).lookup_key()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeadPropertyName {
+    pub namespace: &'static str,
+    pub name: &'static str,
+    pub attributes: &'static str,
+}
+
+impl DeadPropertyName {
+    pub const fn new(namespace: &'static str, name: &'static str) -> Self {
+        DeadPropertyName {
+            namespace,
+            name,
+            attributes: "",
+        }
+    }
+
+    pub const fn with_attributes(mut self, attributes: &'static str) -> Self {
+        self.attributes = attributes;
+        self
+    }
+}
+
+impl DavPropName for DeadPropertyName {
+    fn open_tag(&self) -> Cow<'_, str> {
+        let mut tag = String::with_capacity(
+            self.name.len() + self.namespace.len() + self.attributes.len() + 16,
+        );
+        if self.namespace.is_empty() {
+            tag.push_str(self.name);
+        } else {
+            tag.push_str("X:");
+            tag.push_str(self.name);
+            tag.push_str(" xmlns:X=\"");
+            tag.push_str(self.namespace);
+            tag.push('"');
+        }
+        if !self.attributes.is_empty() {
+            tag.push(' ');
+            tag.push_str(self.attributes);
+        }
+        Cow::Owned(tag)
+    }
+
+    fn close_tag(&self) -> Cow<'_, str> {
+        if self.namespace.is_empty() {
+            Cow::Borrowed(self.name)
+        } else {
+            Cow::Owned(format!("X:{}", self.name))
+        }
+    }
+
+    fn lookup_key(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.name)
+    }
+}
+
+fn write_property(request: &mut String, property: &impl DavPropName, value: Option<&str>) {
+    request.push('<');
+    request.push_str(&property.open_tag());
+    match value {
+        Some(value) => {
+            request.push('>');
+            request.push_str(value);
+            request.push_str("</");
+            request.push_str(&property.close_tag());
+            request.push('>');
+        }
+        None => request.push_str("/>"),
+    }
 }
 
 pub trait GenerateTestDavResource {

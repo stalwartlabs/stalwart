@@ -7,7 +7,7 @@
 use crate::{
     object::{
         AnyId, DeserializeArguments, JmapObject, JmapObjectId, MaybeReference,
-        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
     request::reference::MaybeIdReference,
@@ -49,9 +49,13 @@ impl Property for SieveProperty {
         depth: PointerDepth,
     ) -> Option<Self> {
         match key {
-            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
-            _ => SieveProperty::parse(value, key.is_none().then_some(depth)),
+            Some(_) => SieveProperty::parse_nested_name(value),
+            None => SieveProperty::parse(value, Some(depth)),
         }
+    }
+
+    fn is_opaque(&self) -> bool {
+        self.metadata_root().is_some()
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -134,17 +138,16 @@ impl SieveProperty {
         matches!(self, SieveProperty::Pointer(_))
     }
 
+    property_names!(
+        SieveProperty,
+        "id" => SieveProperty::Id,
+        "name" => SieveProperty::Name,
+        "blobId" => SieveProperty::BlobId,
+        "isActive" => SieveProperty::IsActive,
+    );
+
     fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
-        hashify::fnc_map!(value.as_bytes(),
-            b"id" => Some(SieveProperty::Id),
-            b"name" => Some(SieveProperty::Name),
-            b"blobId" => Some(SieveProperty::BlobId),
-            b"isActive" => Some(SieveProperty::IsActive),
-            b"metadata" => Some(SieveProperty::Metadata),
-            b"privateMetadata" => Some(SieveProperty::PrivateMetadata),
-            _ => None,
-        )
-        .or_else(|| {
+        SieveProperty::parse_name(value).or_else(|| {
             patch_depth
                 .filter(|_| value.contains('/'))
                 .and_then(|depth| JsonPointer::parse_nested(value, depth))
@@ -166,6 +169,13 @@ impl MetadataProperty for SieveProperty {
         match self {
             SieveProperty::Pointer(pointer) => Some(pointer),
             _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => SieveProperty::Metadata,
+            MetadataRoot::Private => SieveProperty::PrivateMetadata,
         }
     }
 }

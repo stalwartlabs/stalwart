@@ -7,22 +7,33 @@
 use crate::{
     api::{
         acl::{JmapAcl, JmapRights},
+        metadata::{
+            ContainerTarget, MetadataAccess, MetadataPatches, MetadataType, ObjectMetadata,
+            is_empty_update,
+        },
         parent_ref::{CreateResolver, ParentRef},
     },
-    changes::state::JmapCacheState,
+    changes::state::{JmapCacheState, MetadataStateManager},
 };
 use common::{
-    Server, auth::AccessToken, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder,
+    Server,
+    auth::AccessToken,
+    sharing::EffectiveAcl,
+    storage::{
+        index::ObjectIndexBuilder,
+        metadata::{MetadataLog, PrivateMetadataCommit},
+    },
 };
-#[allow(unused_imports)]
-use email::mailbox::{INBOX_ID, JUNK_ID, TRASH_ID};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
+    cleanup::FlaggedContainers,
     mailbox::{
         Mailbox,
         destroy::{MailboxDestroy, MailboxDestroyError},
         merge_subscription,
+        role::RoleChange,
     },
+    presence::update_mailbox_presence,
 };
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
@@ -30,10 +41,9 @@ use jmap_proto::{
     object::{
         AnyId,
         mailbox::{self, MailboxProperty, MailboxValue},
-        metadata::MetadataProperty,
     },
     references::resolve::ResolveCreatedReference,
-    request::MaybeInvalid,
+    request::{MaybeInvalid, capability::CapabilityIds},
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
@@ -68,6 +78,7 @@ pub trait MailboxSet: Sync + Send {
         &self,
         request: SetRequest<'_, mailbox::Mailbox>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<SetResponse<mailbox::Mailbox>>> + Send;
 
     #[allow(clippy::type_complexity)]
@@ -99,13 +110,39 @@ impl MailboxSet for Server {
         &self,
         mut request: SetRequest<'_, mailbox::Mailbox>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<SetResponse<mailbox::Mailbox>> {
         // Prepare response
         let account_id = request.account_id.document_id();
         let on_destroy_remove_emails = request.arguments.on_destroy_remove_emails.unwrap_or(false);
         let cache = self.get_cached_messages(account_id).await?;
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Mailbox);
+        let viewer = object_metadata.viewer();
+        let shared_state = cache.get_state(true);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(cache.assert_state(true, &request.if_in_state)?);
+            .with_state(
+                self.assert_metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Mailbox,
+                    shared_state.clone(),
+                    &request.if_in_state,
+                )
+                .await?,
+            );
+        let metadata_support = object_metadata.support();
+        let containers = object_metadata
+            .preload_updates(self, account_id, request.update.as_ref(), |document_id| {
+                cache
+                    .mailbox_by_id(&document_id)
+                    .map(|mailbox| mailbox.metadata_kinds)
+            })
+            .await?;
+        let mut commit = PrivateMetadataCommit::default();
+        let mut private_batch = BatchBuilder::new();
+        let mut private_commit = PrivateMetadataCommit::default();
+        let mut will_update_private = Vec::new();
+        let mut has_private_changes = false;
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let mut ctx = SetContext {
             account_id,
@@ -121,7 +158,15 @@ impl MailboxSet for Server {
         // Process creates
         let mut batch = BatchBuilder::new();
         let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
-        'create: for (id, object) in request.unwrap_create() {
+        'create: for (id, mut object) in request.unwrap_create() {
+            let metadata_patches =
+                match object_metadata.extract(MetadataPatches::for_create(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        ctx.response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                };
             let Some(object) = object.into_object() else {
                 continue;
             };
@@ -150,7 +195,54 @@ impl MailboxSet for Server {
                 )
                 .await?
             {
-                Ok((builder, parent)) => {
+                Ok((mut builder, parent)) => {
+                    let metadata_writes = if let Some(metadata_patches) = metadata_patches {
+                        let Some(support) = metadata_support else {
+                            ctx.response
+                                .not_created
+                                .append(id, metadata_patches.unsupported());
+                            continue 'create;
+                        };
+                        let access = MetadataAccess {
+                            may_write_shared: true,
+                            may_read: true,
+                        };
+                        let update = match metadata_patches.apply(support, access, None, None) {
+                            Ok(update) => update,
+                            Err(err) => {
+                                ctx.response.not_created.append(id, err);
+                                continue 'create;
+                            }
+                        };
+                        match update
+                            .prepare(
+                                self,
+                                ContainerTarget {
+                                    owner: &account_info,
+                                    viewer_id: access_token.account_id(),
+                                    collection: Collection::Mailbox,
+                                    log: MetadataLog::None,
+                                },
+                            )
+                            .await?
+                        {
+                            Ok(prepared) => {
+                                if let Some((kinds, mailbox)) =
+                                    prepared.shared_kinds().zip(builder.changes_mut())
+                                {
+                                    mailbox.set_metadata_kinds(kinds);
+                                }
+                                Some(prepared)
+                            }
+                            Err(err) => {
+                                ctx.response.not_created.append(id, err);
+                                continue 'create;
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
                     batch
                         .with_account_id(account_id)
                         .with_collection(Collection::Mailbox);
@@ -165,8 +257,13 @@ impl MailboxSet for Server {
                     batch
                         .create_document(slot)
                         .custom(builder.with_pending_id_opt(parent.slot()))
-                        .caused_by(trc::location!())?
-                        .commit_point();
+                        .caused_by(trc::location!())?;
+                    if let Some(prepared) = metadata_writes {
+                        prepared
+                            .build(slot, &mut batch, &mut commit)
+                            .caused_by(trc::location!())?;
+                    }
+                    batch.commit_point();
 
                     pending_creates.insert(id, slot);
                 }
@@ -182,6 +279,8 @@ impl MailboxSet for Server {
             change_id = assigned_ids
                 .last_change_id(account_id, SyncCollection::Email)
                 .into();
+            self.private_metadata_committed(std::mem::take(&mut commit), &assigned_ids)
+                .await;
 
             for (id, slot) in pending_creates {
                 let document_id = assigned_ids.slot(slot);
@@ -193,7 +292,7 @@ impl MailboxSet for Server {
         // Process updates
         let mut will_update = Vec::with_capacity(request.update.as_ref().map_or(0, |u| u.len()));
         let mut batch = BatchBuilder::new();
-        'update: for (id, object) in request.unwrap_update() {
+        'update: for (id, mut object) in request.unwrap_update() {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -210,13 +309,21 @@ impl MailboxSet for Server {
                     .append(id, SetError::will_destroy());
                 continue 'update;
             }
+            let metadata_patches =
+                match object_metadata.extract(MetadataPatches::for_update(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        ctx.response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                };
             let Some(object) = object.into_object() else {
                 continue 'update;
             };
 
             // Obtain mailbox
             let document_id = id.document_id();
-            if let Some(mailbox) = self
+            if let Some(mailbox_archive) = self
                 .store()
                 .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
@@ -226,7 +333,7 @@ impl MailboxSet for Server {
                 .await?
             {
                 // Validate ACL
-                let mailbox = mailbox
+                let mailbox = mailbox_archive
                     .into_deserialized::<email::mailbox::Mailbox>()
                     .caused_by(trc::location!())?;
                 let subscription_only = object.keys().all(|key| {
@@ -235,8 +342,10 @@ impl MailboxSet for Server {
                         Key::Property(MailboxProperty::IsSubscribed | MailboxProperty::Id)
                     )
                 });
-                if ctx.is_shared {
-                    let acl = mailbox.inner.acls.effective_acl(access_token);
+                let acl = ctx
+                    .is_shared
+                    .then(|| mailbox.inner.acls.effective_acl(access_token));
+                if let Some(acl) = acl {
                     if subscription_only {
                         if !acl.contains(Acl::Read) {
                             ctx.response.not_updated.append(
@@ -267,11 +376,98 @@ impl MailboxSet for Server {
                     }
                 }
 
+                let metadata_writes = if let Some(metadata_patches) = metadata_patches {
+                    let Some(support) = metadata_support else {
+                        ctx.response
+                            .not_updated
+                            .append(id, metadata_patches.unsupported());
+                        continue 'update;
+                    };
+                    let access = MetadataAccess {
+                        may_write_shared: acl.is_none_or(|acl| acl.contains(Acl::Modify)),
+                        may_read: acl.is_none_or(|acl| acl.contains(Acl::Read)),
+                    };
+                    let update = match metadata_patches.apply(
+                        support,
+                        access,
+                        containers.shared.get(document_id),
+                        containers.private.get(document_id),
+                    ) {
+                        Ok(update) => update,
+                        Err(err) => {
+                            ctx.response.not_updated.append(id, err);
+                            continue 'update;
+                        }
+                    };
+                    if update.is_empty() {
+                        None
+                    } else {
+                        match update
+                            .prepare(
+                                self,
+                                ContainerTarget {
+                                    owner: &account_info,
+                                    viewer_id: access_token.account_id(),
+                                    collection: Collection::Mailbox,
+                                    log: MetadataLog::Container,
+                                },
+                            )
+                            .await?
+                        {
+                            Ok(prepared) => Some(prepared),
+                            Err(err) => {
+                                ctx.response.not_updated.append(id, err);
+                                continue 'update;
+                            }
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                if is_empty_update::<mailbox::Mailbox>(&object, id) {
+                    match metadata_writes {
+                        Some(prepared) => {
+                            let is_private_only = prepared.is_private_only();
+                            let (target, target_commit) = if is_private_only {
+                                (&mut private_batch, &mut private_commit)
+                            } else {
+                                (&mut batch, &mut commit)
+                            };
+                            if let Some(presence) = prepared
+                                .build(document_id, target, target_commit)
+                                .caused_by(trc::location!())?
+                            {
+                                update_mailbox_presence(
+                                    target,
+                                    account_id,
+                                    document_id,
+                                    &mailbox_archive
+                                        .to_unarchived::<email::mailbox::Mailbox>()
+                                        .caused_by(trc::location!())?,
+                                    presence,
+                                )
+                                .caused_by(trc::location!())?;
+                            }
+                            target.commit_point();
+                            if is_private_only {
+                                will_update_private.push(id);
+                            } else {
+                                will_update.push(id);
+                            }
+                        }
+                        None => {
+                            ctx.response.updated.append(id, None);
+                        }
+                    }
+                    continue 'update;
+                }
+
                 match self
                     .mailbox_set_item(object, (document_id, mailbox).into(), &ctx, None)
                     .await?
                 {
-                    Ok((builder, parent)) => {
+                    Ok((mut builder, parent)) => {
                         batch
                             .with_account_id(account_id)
                             .with_collection(Collection::Mailbox);
@@ -279,18 +475,47 @@ impl MailboxSet for Server {
                         if subscription_only {
                             let subscriber = access_token.account_id();
                             let subscribe = builder.changes().unwrap().is_subscribed(subscriber);
+                            let subscription_changed =
+                                builder.current().unwrap().inner.is_subscribed(subscriber)
+                                    != subscribe;
 
-                            if builder.current().unwrap().inner.is_subscribed(subscriber)
-                                == subscribe
-                            {
+                            if !subscription_changed && metadata_writes.is_none() {
                                 ctx.response.updated.append(id, None);
                                 continue 'update;
                             }
 
-                            batch.with_document(document_id);
-                            merge_subscription(&mut batch, subscriber, subscribe);
+                            if let Some(prepared) = metadata_writes
+                                && let Some(presence) = prepared
+                                    .build(document_id, &mut batch, &mut commit)
+                                    .caused_by(trc::location!())?
+                            {
+                                update_mailbox_presence(
+                                    &mut batch,
+                                    account_id,
+                                    document_id,
+                                    &mailbox_archive
+                                        .to_unarchived::<email::mailbox::Mailbox>()
+                                        .caused_by(trc::location!())?,
+                                    presence,
+                                )
+                                .caused_by(trc::location!())?;
+                            }
+                            if subscription_changed {
+                                batch
+                                    .with_account_id(account_id)
+                                    .with_collection(Collection::Mailbox)
+                                    .with_document(document_id);
+                                merge_subscription(&mut batch, subscriber, subscribe);
+                            }
                             batch.commit_point();
                         } else {
+                            if let Some(kinds) = metadata_writes
+                                .as_ref()
+                                .and_then(|prepared| prepared.shared_kinds())
+                                && let Some(mailbox) = builder.changes_mut()
+                            {
+                                mailbox.set_metadata_kinds(kinds);
+                            }
                             if let Some(parent_document_id) = parent.document_id() {
                                 batch
                                     .with_document(parent_document_id)
@@ -300,8 +525,13 @@ impl MailboxSet for Server {
                             batch
                                 .with_document(document_id)
                                 .custom(builder)
-                                .caused_by(trc::location!())?
-                                .commit_point();
+                                .caused_by(trc::location!())?;
+                            if let Some(prepared) = metadata_writes {
+                                prepared
+                                    .build(document_id, &mut batch, &mut commit)
+                                    .caused_by(trc::location!())?;
+                            }
+                            batch.commit_point();
                         }
                         will_update.push(id);
                     }
@@ -316,13 +546,11 @@ impl MailboxSet for Server {
         }
 
         if !batch.is_empty() {
-            match self
-                .commit_batch(batch)
-                .await
-                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email))
-            {
-                Ok(change_id_) => {
-                    change_id = Some(change_id_);
+            match self.commit_batch(batch).await {
+                Ok(assigned_ids) => {
+                    change_id =
+                        Some(assigned_ids.last_change_id(account_id, SyncCollection::Email));
+                    self.private_metadata_committed(commit, &assigned_ids).await;
                     for id in will_update {
                         ctx.response.updated.append(id, None);
                     }
@@ -342,8 +570,49 @@ impl MailboxSet for Server {
                 }
             }
         }
+        if !private_batch.is_empty() {
+            match self.commit_batch(private_batch).await {
+                Ok(assigned_ids) => {
+                    has_private_changes = true;
+                    self.private_metadata_committed(private_commit, &assigned_ids)
+                        .await;
+                    for id in will_update_private {
+                        ctx.response.updated.append(id, None);
+                    }
+                }
+                Err(err) if err.is_assertion_failure() => {
+                    for id in will_update_private {
+                        ctx.response.not_updated.append(
+                            id,
+                            SetError::forbidden().with_description(
+                                "Another process modified this mailbox, please try again.",
+                            ),
+                        );
+                    }
+                }
+                Err(err) => {
+                    return Err(err.caused_by(trc::location!()));
+                }
+            }
+        }
 
         // Process deletions
+        let destroy_containers = FlaggedContainers::load(
+            self,
+            account_id,
+            Collection::Mailbox,
+            &ctx.will_destroy
+                .iter()
+                .map(|id| id.document_id())
+                .filter(|document_id| {
+                    cache
+                        .mailbox_by_id(document_id)
+                        .is_some_and(|mailbox| !mailbox.metadata_kinds.is_empty())
+                })
+                .collect(),
+        )
+        .await
+        .caused_by(trc::location!())?;
         for id in ctx.will_destroy {
             match self
                 .mailbox_destroy(
@@ -351,6 +620,7 @@ impl MailboxSet for Server {
                     id.document_id(),
                     ctx.access_token,
                     on_destroy_remove_emails,
+                    Some(&destroy_containers),
                 )
                 .await?
             {
@@ -391,8 +661,16 @@ impl MailboxSet for Server {
         }
 
         // Write changes
-        if let Some(change_id) = change_id {
-            ctx.response.new_state = State::Exact(change_id).into();
+        if change_id.is_some() || has_private_changes {
+            ctx.response.new_state = self
+                .metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Mailbox,
+                    change_id.map_or(shared_state, State::Exact),
+                )
+                .await?
+                .into();
         }
 
         Ok(ctx.response)
@@ -540,7 +818,6 @@ impl MailboxSet for Server {
                             .with_description("The id property is immutable.".to_string())));
                     }
                 }
-                (Key::Property(property), _) if property.metadata_root().is_some() => todo!(),
                 _ => {
                     return Ok(Err(SetError::invalid_properties()
                         .with_property(property.into_owned())
@@ -625,32 +902,18 @@ impl MailboxSet for Server {
 
         let cached_mailboxes = self.get_cached_messages(ctx.account_id).await?;
 
-        // Verify that the mailbox role is unique.
-        if update
-            .as_ref()
-            .is_none_or(|(_, m)| m.inner.role != changes.role)
-        {
-            if !matches!(changes.role, SpecialUse::None)
-                && cached_mailboxes.mailbox_by_role(&changes.role).is_some()
-            {
-                return Ok(Err(SetError::invalid_properties()
-                    .with_property(MailboxProperty::Role)
-                    .with_description(format!(
-                        "A mailbox with role '{}' already exists.",
-                        changes.role.as_str().unwrap_or_default()
-                    ))));
-            }
-
-            // Role of internal folders cannot be modified
-            if update.as_ref().is_some_and(|(document_id, _)| {
-                *document_id == INBOX_ID || *document_id == TRASH_ID || *document_id == JUNK_ID
-            }) {
-                return Ok(Err(SetError::invalid_properties()
-                    .with_property(MailboxProperty::Role)
-                    .with_description(
-                        "You are not allowed to change the role of Inbox, Junk or Trash folders.",
-                    )));
-            }
+        let role_change = match &update {
+            Some((document_id, current)) => RoleChange::Update {
+                document_id: *document_id,
+                current: current.inner.role,
+                role: changes.role,
+            },
+            None => RoleChange::Create { role: changes.role },
+        };
+        if let Err(err) = role_change.validate(&cached_mailboxes) {
+            return Ok(Err(SetError::invalid_properties()
+                .with_property(MailboxProperty::Role)
+                .with_description(err.to_string())));
         }
 
         // Verify that the mailbox name is unique.

@@ -9,6 +9,7 @@ use crate::{
     DavError, DavMethod,
     common::{
         ExtractETag,
+        dead::{ContainerRequest, ContainerWrites, read_container, stored_container},
         lock::{LockRequestHandler, ResourceState},
         uri::{DavUriResource, UriResource},
     },
@@ -17,23 +18,31 @@ use crate::{
 use common::{
     DavResourcePath, GroupwareResources, Server,
     auth::AccessToken,
-    storage::{dav::MAX_FILE_NODE_DEPTH, index::ObjectIndexBuilder},
+    storage::{
+        dav::{FilePresence, MAX_FILE_NODE_DEPTH},
+        index::ObjectIndexBuilder,
+        metadata::StoredContainer,
+    },
 };
 use dav_proto::{Depth, RequestHeaders};
-use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
+use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode, metadata::MetadataCleanup};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use registry::schema::enums::StorageQuota;
 use std::sync::Arc;
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes},
+    write::{Archive, ArchiveBytes, metadata::MetadataBuf},
 };
-use store::{ahash::AHashMap, write::BatchBuilder};
+use store::{
+    ahash::AHashMap,
+    write::{BatchBuilder, Slot},
+};
 use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
+    metadata::MetadataKinds,
 };
 
 pub(crate) trait FileCopyMoveRequestHandler: Sync + Send {
@@ -338,10 +347,26 @@ impl FileCopyMoveRequestHandler for Server {
                 .collect::<Vec<_>>();
             if !ids.is_empty() {
                 ids.sort_unstable_by_key(|b| std::cmp::Reverse(b.hierarchy_seq()));
+                let cleanup = MetadataCleanup::preload(
+                    self,
+                    access_token.account_tenant_ids(),
+                    to_account_id,
+                    Collection::FileNode,
+                    ids.iter()
+                        .map(|a| (a.document_id(), a.resource.metadata_kinds())),
+                )
+                .await
+                .caused_by(trc::location!())?;
                 let mut sorted_ids = Vec::with_capacity(ids.len());
                 sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
                 DestroyArchive(sorted_ids)
-                    .delete(self, access_token.account_tenant_ids(), to_account_id, None)
+                    .delete(
+                        self,
+                        access_token.account_tenant_ids(),
+                        to_account_id,
+                        &cleanup,
+                        None,
+                    )
                     .await
                     .caused_by(trc::location!())?;
             }
@@ -555,17 +580,30 @@ async fn copy_container(
     let parent_id = destination.document_id.map(|id| id + 1).unwrap_or(0);
 
     // Obtain files to copy
+    let mut container_request = ContainerRequest::default();
+    let mut select = |r: DavResourcePath<'_>| {
+        if !r.resource.metadata_kinds().is_empty() {
+            container_request.insert(from_account_id, Collection::FileNode, r.document_id());
+        }
+        (r.document_id(), r.hierarchy_seq())
+    };
     let mut copy_files = if infinity_copy {
         from_resources
             .subtree(from_resource_name)
-            .map(|r| (r.document_id(), r.hierarchy_seq()))
+            .map(&mut select)
             .collect::<Vec<_>>()
     } else {
         from_resources
             .subtree_with_depth(from_resource_name, 1)
-            .map(|r| (r.document_id(), r.hierarchy_seq()))
+            .map(&mut select)
             .collect::<Vec<_>>()
     };
+    let containers = container_request
+        .load(server)
+        .await
+        .caused_by(trc::location!())?;
+    let mut copies = ContainerWrites::new(to_account_id, Collection::FileNode);
+    let mut removals = ContainerWrites::new(from_account_id, Collection::FileNode);
 
     // Top-down copy
     let mut batch = BatchBuilder::new();
@@ -600,6 +638,8 @@ async fn copy_container(
             delete_files.push((document_id, node_));
             node
         };
+        let container = containers.get(from_account_id, Collection::FileNode, document_id);
+        node.set_presence(file_presence(container));
         let set_accessed = node.accessed == 0;
         node.stamp_insert(true, true, set_accessed);
         node.acls.clear();
@@ -613,6 +653,12 @@ async fn copy_container(
 
         // Prepare write batch
         let new_slot = new_slots.get(slot_offset);
+        if let Some(container) = container {
+            copies
+                .copy(server, container, new_slot, None, &mut batch)
+                .await
+                .caused_by(trc::location!())?;
+        }
         let builder = ObjectIndexBuilder::<(), _>::new()
             .with_changes(node)
             .with_changed_by(access_token.account_tenant_ids());
@@ -625,10 +671,25 @@ async fn copy_container(
             .commit_point();
         id_map.insert(document_id + 1, new_slot);
     }
+    copies.finish(server).await.caused_by(trc::location!())?;
 
     // Delete nodes
     if !delete_files.is_empty() {
         for (document_id, node) in delete_files.into_iter().rev() {
+            if let Some(container) =
+                containers.get(from_account_id, Collection::FileNode, document_id)
+            {
+                removals
+                    .clear(
+                        server,
+                        document_id,
+                        StoredContainer::from(container),
+                        &mut batch,
+                    )
+                    .await
+                    .caused_by(trc::location!())?;
+            }
+
             // Delete record
             batch
                 .with_account_id(from_account_id)
@@ -713,6 +774,17 @@ async fn overwrite_and_delete_item(
     source_node.parent_id = dest_node.inner.parent_id.into();
 
     let mut batch = BatchBuilder::new();
+    replace_container(
+        server,
+        from_account_id,
+        from_document_id,
+        &mut source_node,
+        to_account_id,
+        to_document_id,
+        dest_node.inner.metadata_kinds(),
+        &mut batch,
+    )
+    .await?;
     let etag = source_node
         .update(
             access_token.account_tenant_ids(),
@@ -726,12 +798,14 @@ async fn overwrite_and_delete_item(
         .etag();
     DestroyArchive(source_node_)
         .delete(
+            server,
             access_token.account_tenant_ids(),
             from_account_id,
             from_document_id,
             &mut batch,
             from_resource_path,
         )
+        .await
         .caused_by(trc::location!())?;
     server
         .commit_batch(batch)
@@ -788,6 +862,17 @@ async fn overwrite_item(
     source_node.acls.clear();
     source_node.parent_id = dest_node.inner.parent_id.into();
     let mut batch = BatchBuilder::new();
+    replace_container(
+        server,
+        from_account_id,
+        from_document_id,
+        &mut source_node,
+        to_account_id,
+        to_document_id,
+        dest_node.inner.metadata_kinds(),
+        &mut batch,
+    )
+    .await?;
     let etag = source_node
         .update(
             access_token.account_tenant_ids(),
@@ -859,6 +944,16 @@ async fn move_item(
         // Destination is in a different account: insert a new node, then delete the old one
         new_node.acls.clear();
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::FileNode);
+        copy_node_container(
+            server,
+            from_account_id,
+            from_document_id,
+            &mut new_node,
+            to_account_id,
+            to_document_id,
+            &mut batch,
+        )
+        .await?;
         let etag = new_node
             .insert(
                 access_token.account_tenant_ids(),
@@ -872,12 +967,14 @@ async fn move_item(
             .etag();
         DestroyArchive(node)
             .delete(
+                server,
                 access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 &mut batch,
                 from_resource_path,
             )
+            .await
             .caused_by(trc::location!())?;
         etag
     };
@@ -920,6 +1017,16 @@ async fn copy_item(
     }
     let mut batch = BatchBuilder::new();
     let to_document_id = batch.reserve_document_id(to_account_id, Collection::FileNode);
+    copy_node_container(
+        server,
+        from_account_id,
+        from_document_id,
+        &mut node,
+        to_account_id,
+        to_document_id,
+        &mut batch,
+    )
+    .await?;
     let etag = node
         .insert(
             access_token.account_tenant_ids(),
@@ -993,6 +1100,88 @@ async fn rename_item(
         .caused_by(trc::location!())?;
 
     Ok(HttpResponse::new(StatusCode::CREATED).with_etag_opt(etag))
+}
+
+fn file_presence(container: Option<&MetadataBuf>) -> FilePresence {
+    container.map_or(FilePresence::NONE, |container| {
+        FilePresence::from_view(&container.view())
+    })
+}
+
+async fn copy_node_container(
+    server: &Server,
+    from_account_id: u32,
+    from_document_id: u32,
+    node: &mut FileNode,
+    to_account_id: u32,
+    to_document_id: Slot,
+    batch: &mut BatchBuilder,
+) -> crate::Result<()> {
+    let source = read_container(
+        server,
+        from_account_id,
+        Collection::FileNode,
+        from_document_id,
+        node.metadata_kinds(),
+    )
+    .await
+    .caused_by(trc::location!())?;
+    node.set_presence(file_presence(source.as_ref()));
+    if let Some(source) = &source {
+        let mut copies = ContainerWrites::new(to_account_id, Collection::FileNode);
+        copies
+            .copy(server, source, to_document_id, None, batch)
+            .await
+            .caused_by(trc::location!())?;
+        copies.finish(server).await.caused_by(trc::location!())?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn replace_container(
+    server: &Server,
+    from_account_id: u32,
+    from_document_id: u32,
+    node: &mut FileNode,
+    to_account_id: u32,
+    to_document_id: u32,
+    to_kinds: MetadataKinds,
+    batch: &mut BatchBuilder,
+) -> crate::Result<()> {
+    let source = read_container(
+        server,
+        from_account_id,
+        Collection::FileNode,
+        from_document_id,
+        node.metadata_kinds(),
+    )
+    .await
+    .caused_by(trc::location!())?;
+    let previous = stored_container(
+        server,
+        to_account_id,
+        Collection::FileNode,
+        to_document_id,
+        to_kinds,
+    )
+    .await
+    .caused_by(trc::location!())?;
+    node.set_presence(file_presence(source.as_ref()));
+
+    let mut writes = ContainerWrites::new(to_account_id, Collection::FileNode);
+    match (&source, previous) {
+        (Some(source), previous) => {
+            writes
+                .copy(server, source, to_document_id, previous, batch)
+                .await
+        }
+        (None, Some(previous)) => writes.clear(server, to_document_id, previous, batch).await,
+        (None, None) => Ok(()),
+    }
+    .caused_by(trc::location!())?;
+    writes.finish(server).await.caused_by(trc::location!())?;
+    Ok(())
 }
 
 impl FromDavResource for Destination {

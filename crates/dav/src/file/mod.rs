@@ -14,6 +14,7 @@ use common::{
     storage::dav::{DavFileNameError, FILE_KIND_SYMLINK, dav_file_name},
 };
 use dav_proto::schema::property::{DavProperty, WebDavProperty};
+use groupware::file::ArchivedFileNode;
 use hyper::StatusCode;
 use store::{roaring::RoaringBitmap, write::BatchBuilder};
 use types::{
@@ -193,6 +194,10 @@ pub(crate) fn file_name_from_uri(uri: &str) -> crate::Result<String> {
             | DavFileNameError::ReservedName => StatusCode::BAD_REQUEST,
         })
     })
+}
+
+pub(crate) fn file_etag(node: &ArchivedFileNode) -> String {
+    format!("\"{}\"", node.etag.to_native())
 }
 
 pub(crate) fn is_symlink(resource: &DavResourcePath<'_>) -> bool {

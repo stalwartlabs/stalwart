@@ -6,9 +6,12 @@
 
 use crate::{
     Depth,
-    parser::{DavParser, Token, XmlValueParser, property::TimeRangeFromRaw, tokenizer::Tokenizer},
+    parser::{
+        DavParser, Error, RawElement, Token, XmlValueParser, property::TimeRangeFromRaw,
+        tokenizer::Tokenizer,
+    },
     schema::{
-        Attribute, Element, NamedElement, Namespace,
+        Element, NamedElement, Namespace,
         property::DavProperty,
         request::{
             AclPrincipalPropSet, AddressbookQuery, CalendarQuery, CardFilter, CompFilter,
@@ -17,7 +20,9 @@ use crate::{
         },
     },
 };
-use types::{TimeRange, dead_property::DeadElementTag};
+use quick_xml::XmlVersion;
+use std::borrow::Cow;
+use types::{TimeRange, metadata::XmlName};
 
 impl DavParser for Report {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
@@ -344,35 +349,14 @@ impl DavParser for ExpandProperty {
             match stream.token()? {
                 Token::ElementStart { name, raw } => match name {
                     NamedElement {
-                        ns,
                         element: Element::Property,
+                        ..
                     } => {
-                        for attribute in raw.attributes::<String>() {
-                            if let Attribute::Name(name) = attribute? {
-                                if let Some(property) = Element::try_parse(name.as_bytes())
-                                    .copied()
-                                    .and_then(|element| {
-                                        DavProperty::from_element(NamedElement { ns, element })
-                                    })
-                                {
-                                    ep.properties.push(ExpandPropertyItem {
-                                        property,
-                                        depth: depth - 1,
-                                    });
-                                } else {
-                                    let attrs = raw.element.attributes_raw().trim_ascii();
-                                    ep.properties.push(ExpandPropertyItem {
-                                        property: DavProperty::DeadProperty(DeadElementTag {
-                                            name,
-                                            attrs: (!attrs.is_empty()).then(|| {
-                                                String::from_utf8_lossy(attrs).into_owned()
-                                            }),
-                                        }),
-                                        depth: depth - 1,
-                                    });
-                                }
-                                break;
-                            }
+                        if let Some(property) = raw.expand_property()? {
+                            ep.properties.push(ExpandPropertyItem {
+                                property,
+                                depth: depth - 1,
+                            });
                         }
                         depth += 1;
                     }
@@ -393,6 +377,44 @@ impl DavParser for ExpandProperty {
         }
 
         Ok(ep)
+    }
+}
+
+impl RawElement<'_> {
+    fn expand_property(&self) -> crate::parser::Result<Option<DavProperty>> {
+        let mut name = None;
+        let mut namespace = None;
+        for attribute in self.element.attributes() {
+            let attribute = attribute?;
+            hashify::fnc_map!(attribute.key.as_ref(),
+                b"name" => {
+                    name = Some(attribute.normalized_value(XmlVersion::Implicit1_0)?);
+                },
+                b"namespace" => {
+                    namespace = Some(attribute.normalized_value(XmlVersion::Implicit1_0)?);
+                },
+                _ => {}
+            );
+        }
+        let Some(name) = name else {
+            return Ok(None);
+        };
+        let name = name.trim_ascii();
+        let namespace = namespace
+            .as_deref()
+            .map_or(Namespace::Dav.namespace(), str::trim_ascii);
+        if let Some(property) = Namespace::try_parse(namespace.as_bytes())
+            .zip(Element::try_parse(name.as_bytes()).copied())
+            .and_then(|(ns, element)| DavProperty::from_element(NamedElement { ns, element }))
+        {
+            return Ok(Some(property));
+        }
+        let name = XmlName {
+            namespace: Some(Cow::Owned(namespace.to_string())),
+            name: Cow::Owned(name.to_string()),
+        };
+        name.validate_property().map_err(Error::Value)?;
+        Ok(Some(DavProperty::Dead(name)))
     }
 }
 

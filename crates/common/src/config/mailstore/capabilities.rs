@@ -29,7 +29,10 @@ use registry::{
     types::EnumImpl,
 };
 use store::registry::bootstrap::Bootstrap;
-use types::type_state::DataType;
+use types::{
+    metadata::{NamespaceScope, REGISTERED_NAMESPACES},
+    type_state::DataType,
+};
 use utils::map::vec_map::VecMap;
 
 impl JmapConfig {
@@ -318,14 +321,22 @@ impl JmapConfig {
             Capabilities::Empty(EmptyCapabilities::default()),
         );
 
-        // Add metadata capabilities
         let mut data_types = metadata
             .data_types
             .map(|data_type| {
                 (
                     data_type,
                     DataTypeMetadataInfo {
-                        namespaces: Vec::new(),
+                        namespaces: REGISTERED_NAMESPACES
+                            .iter()
+                            .filter(|namespace| {
+                                namespace.is_advertised()
+                                    && namespace.data_types.contains(&data_type)
+                                    && (metadata.private_metadata
+                                        || namespace.scope != NamespaceScope::PrivateMetadata)
+                            })
+                            .map(|namespace| namespace.name)
+                            .collect(),
                         supports_vendor_namespaces: metadata.vendor_namespaces,
                         supports_private: metadata.private_metadata,
                         max_depth: metadata.max_depth,

@@ -83,7 +83,6 @@ pub enum Command {
     // RFC 10022
     UidBatches,
 
-    // RFC 5464
     GetMetadata,
     SetMetadata,
 }
@@ -253,7 +252,6 @@ pub enum ResponseCode {
         uid: Option<u32>,
     },
 
-    // METADATA
     Metadata(MetadataCode),
 }
 

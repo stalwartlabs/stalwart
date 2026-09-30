@@ -10,6 +10,7 @@ use super::{
 };
 use crate::{
     api::acl::{JmapAcl, JmapRights},
+    api::metadata::{MetadataWriter, ObjectMetadata},
     api::parent_ref::ParentRef,
     blob::{download::BlobDownload, embedded::EmbeddedBlobs},
 };
@@ -22,7 +23,7 @@ use common::{
     },
     storage::dav::{FILE_KIND_SYMLINK, MAX_FILE_NODE_DEPTH},
 };
-use groupware::{DestroyArchive, file::FileNode};
+use groupware::{DestroyArchive, file::FileNode, metadata::MetadataCleanup};
 use jmap_proto::{
     error::set::SetError,
     object::file_node::{self, FileNodeProperty, OnExists},
@@ -88,6 +89,7 @@ pub(super) struct FileNodeWriter<'x> {
     pub cache: &'x GroupwareResources,
     pub personal_id: u32,
     pub batch: BatchBuilder,
+    pub metadata: MetadataWriter,
     pub implicit_destroys: Vec<DestroyGroup>,
     access: Option<FileNodeAccess>,
     options: WriteOptions,
@@ -134,6 +136,7 @@ impl<'x> FileNodeWriter<'x> {
         account_id: u32,
         cache: &'x GroupwareResources,
         options: WriteOptions,
+        metadata: ObjectMetadata,
     ) -> Self {
         let access = (!access_token.is_member(account_id)).then(|| cache.file_access(access_token));
         FileNodeWriter {
@@ -143,6 +146,7 @@ impl<'x> FileNodeWriter<'x> {
             cache,
             personal_id: access_token.personal_id(account_id, Collection::FileNode),
             batch: BatchBuilder::new(),
+            metadata: MetadataWriter::new(metadata, account_id),
             implicit_destroys: Vec::new(),
             access,
             options,
@@ -197,6 +201,13 @@ impl<'x> FileNodeWriter<'x> {
 
     pub fn rights_of(&self, document_id: u32) -> Option<Bitmap<Acl>> {
         self.access.as_ref().map(|access| access.acl(document_id))
+    }
+
+    #[inline(always)]
+    pub fn is_readable(&self, document_id: u32) -> bool {
+        self.access
+            .as_ref()
+            .is_none_or(|access| access.readable.contains(document_id))
     }
 
     #[inline(always)]
@@ -333,11 +344,27 @@ impl<'x> FileNodeWriter<'x> {
         let mut destroyed = Vec::with_capacity(groups.len());
         let mut failed = Vec::new();
         let mut kept = AHashSet::new();
-        for group in groups
-            .into_iter()
-            .rev()
-            .chain(std::mem::take(&mut self.implicit_destroys))
-        {
+        let implicit_destroys = std::mem::take(&mut self.implicit_destroys);
+        let cache = self.cache;
+        let cleanup = MetadataCleanup::preload(
+            self.server,
+            self.access_token.account_tenant_ids(),
+            self.account_id,
+            Collection::FileNode,
+            groups
+                .iter()
+                .chain(&implicit_destroys)
+                .flat_map(|group| group.ids.iter())
+                .filter_map(|&document_id| {
+                    Some((
+                        document_id,
+                        cache.resources.find_any(document_id)?.metadata_kinds(),
+                    ))
+                }),
+        )
+        .await
+        .caused_by(trc::location!())?;
+        for group in groups.into_iter().rev().chain(implicit_destroys) {
             let root_id = group.id.document_id();
             if group.requires_empty
                 && self.cache.children_ids(root_id).any(|child| {
@@ -365,6 +392,7 @@ impl<'x> FileNodeWriter<'x> {
                     self.server,
                     self.access_token.account_tenant_ids(),
                     self.account_id,
+                    &cleanup,
                     group.path,
                     &mut self.batch,
                 )

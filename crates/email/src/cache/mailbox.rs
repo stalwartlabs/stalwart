@@ -152,6 +152,7 @@ fn insert_item(cache: &mut MailboxesCacheBuilder, document_id: u32, mailbox: &Ar
                 grants: Bitmap::from(&acl.grants),
             })
             .collect(),
+        metadata_kinds: mailbox.metadata_kinds(),
     };
 
     mailbox_insert(cache, item);

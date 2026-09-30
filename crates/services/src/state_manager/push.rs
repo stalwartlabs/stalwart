@@ -355,7 +355,7 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                         }
                     }
                     Event::Push { notification } => {
-                        let account_id = notification.account_id();
+                        let account_id = notification.recipient();
                         if let Some(ids) = account_push_ids.get_mut(&account_id) {
                             let current_time = now();
                             let mut remove_ids = Vec::new();

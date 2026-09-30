@@ -9,6 +9,7 @@ use crate::core::{Resolved, SavedSearch, SelectedMailbox, Session, SessionData};
 use common::{MessageStoreCache, network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
+    cleanup::FlaggedContainers,
     message::{delete::EmailDeletion, messagedata::EmailMessageData},
 };
 use imap_proto::{
@@ -207,7 +208,13 @@ impl<T: SessionStream> SessionData<T> {
             // Delete ids
             let mut batch = BatchBuilder::new();
             let (fully_deleted, thread_ids) = self
-                .email_untag_or_delete(account_id, mailbox.id.mailbox_id, &deleted_ids, &mut batch)
+                .email_untag_or_delete(
+                    account_id,
+                    mailbox.id.mailbox_id,
+                    &deleted_ids,
+                    &cache,
+                    &mut batch,
+                )
                 .await
                 .caused_by(trc::location!())?;
             self.server
@@ -259,8 +266,22 @@ impl<T: SessionStream> SessionData<T> {
         account_id: u32,
         mailbox_id: u32,
         deleted_ids: &RoaringBitmap,
+        cache: &MessageStoreCache,
         batch: &mut BatchBuilder,
     ) -> trc::Result<(RoaringBitmap, RoaringBitmap)> {
+        let flagged_ids = deleted_ids
+            .iter()
+            .filter(|document_id| {
+                cache.email_by_id(document_id).is_some_and(|message| {
+                    matches!(message.mailboxes(), [only] if only.mailbox_id == mailbox_id)
+                        && !cache.metadata_kinds(message).is_empty()
+                })
+            })
+            .collect::<RoaringBitmap>();
+        let containers =
+            FlaggedContainers::load(&self.server, account_id, Collection::Email, &flagged_ids)
+                .await
+                .caused_by(trc::location!())?;
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email);
@@ -278,6 +299,9 @@ impl<T: SessionStream> SessionData<T> {
                         // Delete message
                         fully_deleted.insert(document_id);
                         thread_ids.insert(metadata.thread_id);
+                        if !metadata.metadata_kinds().is_empty() {
+                            containers.remove(batch, document_id);
+                        }
                         batch
                             .custom(
                                 ObjectIndexBuilder::<_, ()>::new()

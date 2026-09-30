@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Error, RawElement, Token, UnexpectedToken, XmlValueParser};
-use crate::schema::{Attribute, AttributeValue, Element, NamedElement, Namespace};
+use super::{Error, RawElement, Token, UnexpectedToken, XmlValueParser, value::known_namespace};
+use crate::schema::{Attribute, AttributeValue, Element, NamedElement};
 use quick_xml::{
     NsReader, XmlVersion,
     events::{Event, attributes::AttrError},
@@ -13,8 +13,8 @@ use quick_xml::{
 };
 
 pub struct Tokenizer<'x> {
-    xml: NsReader<&'x [u8]>,
-    last_is_end: bool,
+    pub(super) xml: NsReader<&'x [u8]>,
+    pub(super) last_is_end: bool,
 }
 
 impl<'x> Tokenizer<'x> {
@@ -27,7 +27,7 @@ impl<'x> Tokenizer<'x> {
         }
     }
 
-    pub fn token(&'_ mut self) -> super::Result<Token<'_>> {
+    pub fn token(&mut self) -> super::Result<Token<'x>> {
         loop {
             if self.last_is_end {
                 self.last_is_end = false;
@@ -81,14 +81,13 @@ impl<'x> Tokenizer<'x> {
             let name = tag.name();
             match resolve_result {
                 ResolveResult::Bound(raw_ns) if !raw_ns.as_ref().is_empty() => {
-                    if let (Some(ns), Some(element)) = (
-                        Namespace::try_parse(raw_ns.as_ref()),
+                    if let (Some((ns, uri)), Some(element)) = (
+                        known_namespace(raw_ns.as_ref()),
                         Element::try_parse(name.local_name().as_ref()).copied(),
                     ) {
                         return Ok(Token::ElementStart {
-                            name: NamedElement { ns, element },
-                            raw: RawElement::new(tag)
-                                .with_namespace_static(ns.namespace().as_bytes()),
+                            name: NamedElement { ns: *ns, element },
+                            raw: RawElement::new(tag).with_namespace_static(uri.as_bytes()),
                         });
                     } else {
                         return Ok(Token::UnknownElement(
@@ -119,8 +118,15 @@ impl<'x> Tokenizer<'x> {
     }
 
     pub fn expect_named_element(&mut self, expected: NamedElement) -> super::Result<()> {
+        self.expect_named_element_raw(expected).map(|_| ())
+    }
+
+    pub fn expect_named_element_raw(
+        &mut self,
+        expected: NamedElement,
+    ) -> super::Result<RawElement<'x>> {
         match self.token()? {
-            Token::ElementStart { name, .. } if name == expected => Ok(()),
+            Token::ElementStart { name, raw } if name == expected => Ok(raw),
             found => Err(Error::UnexpectedToken(Box::new(UnexpectedToken {
                 expected: Token::ElementStart {
                     name: expected,
@@ -132,10 +138,13 @@ impl<'x> Tokenizer<'x> {
         }
     }
 
-    pub fn expect_named_element_or_eof(&mut self, expected: NamedElement) -> super::Result<bool> {
+    pub fn expect_named_element_or_eof(
+        &mut self,
+        expected: NamedElement,
+    ) -> super::Result<Option<RawElement<'x>>> {
         match self.token()? {
-            Token::ElementStart { name, .. } if name == expected => Ok(true),
-            Token::Eof => Ok(false),
+            Token::ElementStart { name, raw } if name == expected => Ok(Some(raw)),
+            Token::Eof => Ok(None),
             found => Err(Error::UnexpectedToken(Box::new(UnexpectedToken {
                 expected: Token::ElementStart {
                     name: expected,
@@ -308,7 +317,7 @@ mod tests {
 
     use std::borrow::Cow;
 
-    use crate::schema::{Collation, MatchType};
+    use crate::schema::{Collation, MatchType, Namespace};
 
     use super::*;
 

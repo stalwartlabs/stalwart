@@ -22,6 +22,7 @@ pub mod dav;
 pub mod document;
 pub mod encryption;
 pub mod index;
+pub mod metadata;
 pub mod quota;
 pub mod search;
 pub mod state;

@@ -117,7 +117,6 @@ impl CalendarEventContent {
                 ..self.data
             },
             preferences: vec![],
-            dead_properties: Default::default(),
         }
     }
 }

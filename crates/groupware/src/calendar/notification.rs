@@ -456,7 +456,7 @@ mod tests {
         TinyCalendarPreferences, UpdateLock, storage::dav::ResourceChunkBuilder,
     };
     use registry::schema::enums::Permission;
-    use types::acl::AclGrant;
+    use types::{acl::AclGrant, metadata::MetadataKinds};
     use utils::map::bitmap::Bitmap;
 
     const OWNER: u32 = 1;
@@ -503,6 +503,7 @@ mod tests {
                     acls,
                     preferences,
                     etag: 0,
+                    metadata: MetadataKinds::NONE,
                 },
             });
         }
@@ -662,6 +663,7 @@ mod tests {
                 acls,
                 preferences,
                 etag: 0,
+                metadata: MetadataKinds::NONE,
             },
         });
         let calendars = resources(ResourceStore::from_sorted(vec![containers], vec![], false));

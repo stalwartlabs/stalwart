@@ -9,11 +9,18 @@ use crate::cache::MessageCacheFetch;
 use crate::message::{
     index::extractors::VisitText,
     ingest::ThreadInfo,
+    ingest_metadata::IngestMetadata,
     messagedata::{MessageData, PendingMessageData},
     metadata::{HeaderId, HeaderSelection, MetadataRow},
     sortkeys::MessageSortKeys,
 };
-use common::{MessageUid, Server, storage::index::ObjectIndexBuilder};
+use common::{
+    MessageUid, Server,
+    storage::{
+        index::ObjectIndexBuilder,
+        metadata::{PrivateMetadataCommit, PrivateMetadataWrite},
+    },
+};
 use mail_parser::HeaderForm;
 use registry::{
     schema::{
@@ -24,7 +31,7 @@ use registry::{
 };
 use store::{
     Deserialize, ValueKey,
-    write::{QueueDocumentId, SearchIndex, serialize::RawValue},
+    write::{PendingId, QueueDocumentId, SearchIndex, serialize::RawValue},
 };
 use store::{
     write::{BatchBuilder, IndexPropertyClass, ValueClass},
@@ -37,6 +44,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::EmailField,
     keyword::Keyword,
+    metadata::{EncodedMetadata, MetadataBuilder, MetadataKinds},
 };
 
 const COPY_FIELDS: [HeaderId; 7] = [
@@ -55,6 +63,39 @@ pub enum CopyMessageError {
     AlreadyExists(u32),
 }
 
+#[derive(Debug, Default)]
+pub enum SharedCopy {
+    #[default]
+    None,
+    Source,
+    Set(EncodedMetadata),
+}
+
+#[derive(Debug, Default)]
+pub struct CopyMetadata {
+    pub shared: SharedCopy,
+    pub private: Option<Box<PrivateMetadataWrite>>,
+}
+
+impl SharedCopy {
+    pub fn from_source(kinds: MetadataKinds) -> Self {
+        if kinds.intersects(MessageData::TRACKED_METADATA) {
+            SharedCopy::Source
+        } else {
+            SharedCopy::None
+        }
+    }
+}
+
+impl CopyMetadata {
+    pub fn from_source(kinds: MetadataKinds) -> Self {
+        CopyMetadata {
+            shared: SharedCopy::from_source(kinds),
+            private: None,
+        }
+    }
+}
+
 pub trait EmailCopy: Sync + Send {
     #[allow(clippy::too_many_arguments)]
     fn copy_message(
@@ -65,6 +106,7 @@ pub trait EmailCopy: Sync + Send {
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
         received_at: u64,
+        containers: CopyMetadata,
         session_id: u64,
     ) -> impl Future<Output = trc::Result<Result<IngestedEmail, CopyMessageError>>> + Send;
 }
@@ -79,6 +121,7 @@ impl EmailCopy for Server {
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
         received_at: u64,
+        containers: CopyMetadata,
         session_id: u64,
     ) -> trc::Result<Result<IngestedEmail, CopyMessageError>> {
         // Obtain the metadata and sort key rows verbatim
@@ -100,12 +143,27 @@ impl EmailCopy for Server {
             return Ok(Err(CopyMessageError::NotFound));
         };
         let row = MetadataRow::deserialize(&metadata_bytes.0).caused_by(trc::location!())?;
+        let CopyMetadata { shared, private } = containers;
         let metadata = row.unarchive().caused_by(trc::location!())?;
+        let container = match shared {
+            SharedCopy::None => None,
+            SharedCopy::Source => self
+                .metadata_container(from_account_id, Collection::Email, from_message_id)
+                .await
+                .caused_by(trc::location!())?
+                .and_then(|container| MetadataBuilder::from_view(&container.view()).encode()),
+            SharedCopy::Set(container) => Some(container),
+        }
+        .filter(|container| container.kinds().intersects(MessageData::TRACKED_METADATA));
 
         // Check quota
         let size = u32::try_from(metadata.size()).unwrap_or(u32::MAX);
+        let quota_size = u64::from(size)
+            + container
+                .as_ref()
+                .map_or(0, |container| container.len() as u64);
         let to_account = self.account(to_account_id).await?;
-        let quota_result = match self.has_available_quota(&to_account, size as u64).await {
+        let quota_result = match self.has_available_quota(&to_account, quota_size).await {
             Ok(_) => match self.object_quota_limit(&to_account, StorageQuota::MaxEmails) {
                 Some(limit) => {
                     let used = self
@@ -213,7 +271,7 @@ impl EmailCopy for Server {
             None
         };
 
-        let data = PendingMessageData {
+        let mut data = PendingMessageData {
             data: MessageData {
                 mailboxes: mailbox_ids,
                 keywords: keywords_flags,
@@ -228,6 +286,9 @@ impl EmailCopy for Server {
             thread_slot,
             change_id: None,
         };
+        if let Some(container) = &container {
+            data.data.set_metadata_kinds(container.kinds());
+        }
         let thread_info = ThreadInfo {
             thread_id: data.thread_id(),
             ref_ids: &message_ids,
@@ -250,6 +311,20 @@ impl EmailCopy for Server {
                 thread_info,
             )
             .queue_document_index(SearchIndex::Email, to_account_id, QueueDocumentId::Current);
+
+        let mut private_commit = PrivateMetadataCommit::default();
+        IngestMetadata {
+            shared: container,
+            private: private.map(|write| *write),
+        }
+        .build(
+            &mut batch,
+            to_account_id,
+            tenant_id,
+            PendingId::Slot(document_slot),
+            &mut private_commit,
+        )
+        .caused_by(trc::location!())?;
 
         // Merge threads if necessary
         if !thread_result.merge_ids.is_empty() {
@@ -279,6 +354,8 @@ impl EmailCopy for Server {
             .await
             .caused_by(trc::location!())?;
         self.inner.mark_caches_stale_from(&assigned_ids);
+        self.private_metadata_committed(private_commit, &assigned_ids)
+            .await;
         let document_id = assigned_ids.slot(document_slot);
 
         // Request indexing

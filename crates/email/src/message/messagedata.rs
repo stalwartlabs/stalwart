@@ -22,11 +22,15 @@ use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
     field::Field,
-    keyword::{HASATTACHMENT, HASNOATTACHMENT, Keyword},
+    keyword::{HASATTACHMENT, HASNOATTACHMENT, Keyword, OTHER},
 };
 use utils::codec::leb128::{Leb128_, Leb128Iterator};
 
 pub const SERVER_SET_KEYWORDS: u32 = (1 << HASATTACHMENT) | (1 << HASNOATTACHMENT);
+pub const KEYWORD_BITS: u32 = (1 << OTHER) - 1;
+pub const HAS_JMAP_METADATA: u32 = 1 << 30;
+
+const _: () = assert!(KEYWORD_BITS & HAS_JMAP_METADATA == 0);
 
 #[derive(Debug, Clone)]
 pub struct MessageData {
@@ -130,7 +134,7 @@ impl MessageData {
     }
 
     pub fn set_keywords(&mut self, keywords: Vec<Keyword>) {
-        self.keywords &= (1 << HASATTACHMENT) | (1 << HASNOATTACHMENT);
+        self.keywords &= SERVER_SET_KEYWORDS | !KEYWORD_BITS;
         self.keywords_extra.clear();
         for keyword in keywords {
             match keyword.into_id() {
@@ -215,7 +219,8 @@ impl MessageData {
     }
 
     pub fn keyword_count(&self) -> usize {
-        (self.keywords & !SERVER_SET_KEYWORDS).count_ones() as usize + self.keywords_extra.len()
+        (self.keywords & KEYWORD_BITS & !SERVER_SET_KEYWORDS).count_ones() as usize
+            + self.keywords_extra.len()
     }
 
     pub fn validate_limits(
@@ -234,13 +239,14 @@ impl MessageData {
     }
 
     pub fn has_keyword_changes(&self, prev_data: &MessageData) -> bool {
-        self.keywords != prev_data.keywords || self.keywords_extra != prev_data.keywords_extra
+        (self.keywords ^ prev_data.keywords) & KEYWORD_BITS != 0
+            || self.keywords_extra != prev_data.keywords_extra
     }
 
     pub fn keyword_diff(&self, prev_data: &MessageData) -> KeywordDiff {
         KeywordDiff::Patch {
-            added: self.keywords & !prev_data.keywords,
-            removed: prev_data.keywords & !self.keywords,
+            added: self.keywords & !prev_data.keywords & KEYWORD_BITS,
+            removed: prev_data.keywords & !self.keywords & KEYWORD_BITS,
             added_extra: self
                 .keywords_extra
                 .iter()
@@ -257,15 +263,16 @@ impl MessageData {
     }
 
     pub fn added_keywords(&self, prev_data: &MessageData) -> impl Iterator<Item = Keyword> {
-        KeywordsIter(self.keywords & !prev_data.keywords)
+        KeywordsIter(self.keywords & !prev_data.keywords & KEYWORD_BITS)
     }
 
     pub fn removed_keywords(&self, prev_data: &MessageData) -> impl Iterator<Item = Keyword> {
-        KeywordsIter(prev_data.keywords & !self.keywords)
+        KeywordsIter(prev_data.keywords & !self.keywords & KEYWORD_BITS)
     }
 
     pub fn keywords(&self) -> impl Iterator<Item = Keyword> {
-        KeywordsIter(self.keywords).chain(self.keywords_extra.iter().cloned().map(Keyword::Other))
+        KeywordsIter(self.keywords & KEYWORD_BITS)
+            .chain(self.keywords_extra.iter().cloned().map(Keyword::Other))
     }
 
     pub fn added_mailboxes(&self, prev_data: &MessageData) -> impl Iterator<Item = &MessageUid> {
@@ -364,7 +371,8 @@ impl KeywordDiff {
             } => {
                 let prev_extra_len = data.keywords_extra.len();
 
-                data.keywords = (data.keywords | added) & !removed;
+                data.keywords =
+                    (data.keywords | (added & KEYWORD_BITS)) & !(removed & KEYWORD_BITS);
                 if !removed_extra.is_empty() {
                     data.keywords_extra.retain(|k| !removed_extra.contains(k));
                 }
@@ -565,13 +573,14 @@ impl Iterator for KeywordsIter {
     type Item = Keyword;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.0 != 0 {
+        while self.0 != 0 {
             let item = 31 - self.0.leading_zeros();
             self.0 ^= 1 << item;
-            Keyword::try_from_id(item as usize).ok()
-        } else {
-            None
+            if let Ok(keyword) = Keyword::try_from_id(item as usize) {
+                return Some(keyword);
+            }
         }
+        None
     }
 }
 
@@ -579,6 +588,7 @@ impl Iterator for KeywordsIter {
 mod tests {
     use super::*;
     use common::config::mailstore::limits::{EmailLimitError, EmailLimits};
+    use types::keyword::{FLAGGED, SEEN, UNSUBSCRIBED};
 
     const LIMITS: EmailLimits = EmailLimits {
         mailboxes_per_email: 2,
@@ -678,6 +688,110 @@ mod tests {
             next.validate_limits(&prev, &LIMITS),
             Err(EmailLimitError::KeywordTooLong { max: 4 })
         );
+    }
+
+    fn keyword_ids(keywords: impl Iterator<Item = Keyword>) -> Vec<Keyword> {
+        let mut keywords = keywords.collect::<Vec<_>>();
+        keywords.sort_unstable_by_key(|keyword| keyword.to_string());
+        keywords
+    }
+
+    #[test]
+    fn keywords_iter_skips_unknown_bits() {
+        let known = (1 << SEEN) | (1 << FLAGGED) | (1 << UNSUBSCRIBED);
+        for extra in [0, HAS_JMAP_METADATA, 1 << 29, 1 << 31, !KEYWORD_BITS] {
+            assert_eq!(
+                keyword_ids(KeywordsIter(known | extra)),
+                keyword_ids([Keyword::Seen, Keyword::Flagged, Keyword::Unsubscribed].into_iter()),
+                "{extra:#x}"
+            );
+        }
+        assert_eq!(KeywordsIter(!KEYWORD_BITS).count(), 0);
+        assert_eq!(KeywordsIter(u32::MAX).count(), OTHER);
+    }
+
+    #[test]
+    fn the_metadata_bit_is_not_a_keyword() {
+        let plain = message(&[0], &["$seen", "$flagged", "custom"]);
+        let mut flagged = plain.clone();
+        flagged.keywords |= HAS_JMAP_METADATA;
+
+        assert_eq!(flagged.keyword_count(), plain.keyword_count());
+        assert_eq!(
+            keyword_ids(flagged.keywords()),
+            keyword_ids(plain.keywords())
+        );
+        assert!(!flagged.has_keyword_changes(&plain));
+        assert!(!plain.has_keyword_changes(&flagged));
+        assert_eq!(flagged.added_keywords(&plain).count(), 0);
+        assert_eq!(flagged.removed_keywords(&plain).count(), 0);
+        assert_eq!(plain.removed_keywords(&flagged).count(), 0);
+        let KeywordDiff::Patch { added, removed, .. } = flagged.keyword_diff(&plain) else {
+            panic!("keyword_diff always patches");
+        };
+        assert_eq!((added, removed), (0, 0));
+        let KeywordDiff::Patch { added, removed, .. } = plain.keyword_diff(&flagged) else {
+            panic!("keyword_diff always patches");
+        };
+        assert_eq!((added, removed), (0, 0));
+        assert_eq!(
+            flagged.validate_limits(&plain, &LIMITS),
+            plain.validate_limits(&plain, &LIMITS)
+        );
+
+        let mut unseen = flagged.clone();
+        assert!(unseen.remove_keyword(&Keyword::Seen));
+        assert!(unseen.has_keyword_changes(&flagged));
+        assert_eq!(
+            keyword_ids(unseen.removed_keywords(&flagged)),
+            vec![Keyword::Seen]
+        );
+    }
+
+    #[test]
+    fn keyword_writes_preserve_the_metadata_bit() {
+        let mut data = message(&[0], &["$seen", "custom"]);
+        data.keywords |= HAS_JMAP_METADATA | (1 << HASATTACHMENT);
+
+        data.set_keywords(vec![Keyword::Draft]);
+        assert_ne!(data.keywords & HAS_JMAP_METADATA, 0);
+        assert_ne!(data.keywords & (1 << HASATTACHMENT), 0);
+        assert!(data.has_keyword(&Keyword::Draft));
+        assert!(!data.has_keyword(&Keyword::Seen));
+        assert!(data.keywords_extra.is_empty());
+
+        let diffs = [
+            KeywordDiff::replace(vec![Keyword::Flagged]),
+            KeywordDiff::added(Keyword::Answered),
+            KeywordDiff::Patch {
+                added: 0,
+                removed: u32::MAX,
+                added_extra: Vec::new(),
+                removed_extra: Vec::new(),
+            },
+            KeywordDiff::Patch {
+                added: u32::MAX,
+                removed: 0,
+                added_extra: Vec::new(),
+                removed_extra: Vec::new(),
+            },
+        ];
+        for diff in diffs {
+            let mut patched = data.clone();
+            diff.apply(&mut patched);
+            assert_ne!(patched.keywords & HAS_JMAP_METADATA, 0, "{diff:?}");
+            assert_eq!(
+                patched.keywords & !KEYWORD_BITS,
+                HAS_JMAP_METADATA,
+                "{diff:?}"
+            );
+        }
+
+        let mut cleared = data.clone();
+        cleared.keywords &= !HAS_JMAP_METADATA;
+        let mut patched = cleared.clone();
+        assert!(!KeywordDiff::replace(vec![Keyword::Draft]).apply(&mut patched));
+        assert_eq!(patched.keywords & HAS_JMAP_METADATA, 0);
     }
 
     #[test]

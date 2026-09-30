@@ -1,20 +1,31 @@
 {
   "lock_scope": "Shared",
   "lock_type": "Write",
-  "owner": [
-    {
-      "type": "ElementStart",
-      "data": {
-        "name": "href",
-        "attrs": "xmlns=\"DAV:\""
+  "owner": {
+    "lang": null,
+    "attributes": [],
+    "children": [
+      {
+        "Text": "\n         "
+      },
+      {
+        "Element": {
+          "name": {
+            "namespace": "DAV:",
+            "name": "href"
+          },
+          "prefix": "D",
+          "attributes": [],
+          "children": [
+            {
+              "Text": "http://example.org/~ejw/contact.html"
+            }
+          ]
+        }
+      },
+      {
+        "Text": "\n       "
       }
-    },
-    {
-      "type": "Text",
-      "data": "http://example.org/~ejw/contact.html"
-    },
-    {
-      "type": "ElementEnd"
-    }
-  ]
+    ]
+  }
 }

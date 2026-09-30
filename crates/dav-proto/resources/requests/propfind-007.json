@@ -20,10 +20,17 @@
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "calendar-color",
-        "attrs": "xmlns=\"http://apple.com/ns/ical/\""
+        "namespace": "http://apple.com/ns/ical/",
+        "name": "calendar-color"
+      }
+    },
+    {
+      "type": "Dead",
+      "data": {
+        "namespace": "http://calendarserver.org/ns/",
+        "name": "source"
       }
     },
     {

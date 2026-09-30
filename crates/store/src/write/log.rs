@@ -20,10 +20,26 @@ pub const CONTAINER_DELETES: usize = 3;
 pub const ITEM_INSERTS: usize = 4;
 pub const ITEM_UPDATES: usize = 5;
 pub const ITEM_DELETES: usize = 6;
-pub const CHANGE_LISTS: usize = 7;
+pub const CONTAINER_METADATA: usize = 7;
+pub const ITEM_METADATA: usize = 8;
+pub const CHANGE_LISTS: usize = 9;
 
-const _: () = assert!(CHANGE_LISTS == ITEM_DELETES + 1);
-const _: () = assert!(CHANGE_LISTS <= u8::BITS as usize);
+pub(crate) const PRESENCE_EXTENDED: u8 = 0x80;
+pub(crate) const BASE_LISTS: usize = CONTAINER_METADATA;
+pub(crate) const CONTAINER_LISTS: u16 = (1 << CONTAINER_INSERTS)
+    | (1 << CONTAINER_UPDATES)
+    | (1 << CONTAINER_PROPERTY_CHANGES)
+    | (1 << CONTAINER_DELETES)
+    | (1 << CONTAINER_METADATA);
+pub(crate) const ITEM_LISTS: u16 =
+    (1 << ITEM_INSERTS) | (1 << ITEM_UPDATES) | (1 << ITEM_DELETES) | (1 << ITEM_METADATA);
+
+const _: () = assert!(CHANGE_LISTS == ITEM_METADATA + 1);
+const _: () = assert!(BASE_LISTS == ITEM_DELETES + 1);
+const _: () = assert!(BASE_LISTS < u8::BITS as usize);
+const _: () = assert!(CHANGE_LISTS - BASE_LISTS < u8::BITS as usize);
+const _: () = assert!(CONTAINER_LISTS & ITEM_LISTS == 0);
+const _: () = assert!((CONTAINER_LISTS | ITEM_LISTS).count_ones() as usize == CHANGE_LISTS);
 
 const CHANGE_SET_THRESHOLD: usize = 256;
 const CHANGE_SET_SCAN_LIMIT: usize = 32;
@@ -174,10 +190,40 @@ pub fn zigzag_decode(value: u64) -> i64 {
     ((value >> 1) as i64) ^ -((value & 1) as i64)
 }
 
+#[inline(always)]
+fn write_ids(buf: &mut Vec<u8>, ids: &[u64]) {
+    let mut prev = 0u64;
+    for id in ids {
+        buf.push_leb128(*id - prev);
+        prev = *id;
+    }
+}
+
+#[inline(always)]
+fn write_prefixed_ids(buf: &mut Vec<u8>, ids: &[u64]) {
+    let mut prev_prefix = 0i64;
+    let mut prev_document_id = 0i64;
+    for id in ids {
+        let prefix = (*id >> 32) as i64;
+        let document_id = (*id & u32::MAX as u64) as i64;
+        buf.push_leb128((prefix - prev_prefix) as u64);
+        buf.push_leb128(zigzag_encode(document_id - prev_document_id));
+        prev_prefix = prefix;
+        prev_document_id = document_id;
+    }
+}
+
 #[derive(Default, Debug)]
 pub(crate) struct ChangeLogBuilder {
     pub changes: VecMap<SyncCollection, Changes>,
     pub vanished: VecMap<VanishedCollection, VanishedItems>,
+    pub private: VecMap<PrivateLog, Changes>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct PrivateLog {
+    pub collection: SyncCollection,
+    pub viewer: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -200,7 +246,24 @@ pub struct Changes {
     pub container_deletes: ChangeSet<u64>,
     pub container_property_changes: ChangeSet<u64>,
 
+    pub metadata: Option<Box<MetadataChanges>>,
+
     pending: IndexSet<PendingChange, RandomState>,
+}
+
+#[derive(Default, Debug)]
+pub struct MetadataChanges {
+    pub containers: ChangeSet<u64>,
+    pub items: ChangeSet<u64>,
+}
+
+impl MetadataChanges {
+    #[cold]
+    fn bytes_hint(&self, item_bytes_hint: usize) -> usize {
+        1 + CHANGE_LISTS - BASE_LISTS
+            + (self.containers.len() * CONTAINER_BYTES_HINT)
+            + (self.items.len() * item_bytes_hint)
+    }
 }
 
 impl Changes {
@@ -246,12 +309,27 @@ impl Changes {
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
+
+    #[inline(always)]
+    fn supersede_container_metadata(&mut self, id: u64) {
+        if let Some(metadata) = &mut self.metadata {
+            metadata.containers.remove(&id);
+        }
+    }
+
+    #[inline(always)]
+    fn supersede_item_metadata(&mut self, id: u64) {
+        if let Some(metadata) = &mut self.metadata {
+            metadata.items.remove(&id);
+        }
+    }
 }
 
 impl ChangeLogBuilder {
     pub fn log_container_insert(&mut self, collection: SyncCollection, document_id: PendingId) {
         let changes = self.changes.get_mut_or_insert(collection);
         let id = changes.build_id(None, document_id);
+        changes.supersede_container_metadata(id);
         if changes.container_deletes.remove(&id) {
             changes.container_updates.insert(id);
         } else {
@@ -267,6 +345,7 @@ impl ChangeLogBuilder {
     ) {
         let changes = self.changes.get_mut_or_insert(collection);
         let id = changes.build_id(prefix, document_id);
+        changes.supersede_item_metadata(id);
         if changes.item_deletes.remove(&id) {
             changes.item_updates.insert(id);
         } else {
@@ -277,6 +356,7 @@ impl ChangeLogBuilder {
     pub fn log_container_update(&mut self, collection: SyncCollection, document_id: PendingId) {
         let changes = self.changes.get_mut_or_insert(collection);
         let id = changes.build_id(None, document_id);
+        changes.supersede_container_metadata(id);
         changes.container_updates.insert(id);
     }
 
@@ -298,6 +378,7 @@ impl ChangeLogBuilder {
     ) {
         let changes = self.changes.get_mut_or_insert(collection);
         let id = changes.build_id(prefix, document_id);
+        changes.supersede_item_metadata(id);
         changes.item_updates.insert(id);
     }
 
@@ -306,6 +387,7 @@ impl ChangeLogBuilder {
         let id = changes.build_id(None, document_id);
         changes.container_updates.remove(&id);
         changes.container_property_changes.remove(&id);
+        changes.supersede_container_metadata(id);
         changes.container_deletes.insert(id);
     }
 
@@ -318,7 +400,48 @@ impl ChangeLogBuilder {
         let changes = self.changes.get_mut_or_insert(collection);
         let id = changes.build_id(prefix, document_id);
         changes.item_updates.remove(&id);
+        changes.supersede_item_metadata(id);
         changes.item_deletes.insert(id);
+    }
+
+    pub fn log_container_metadata(&mut self, collection: SyncCollection, document_id: PendingId) {
+        self.changes
+            .get_mut_or_insert(collection)
+            .container_metadata_change(document_id);
+    }
+
+    pub fn log_item_metadata(
+        &mut self,
+        collection: SyncCollection,
+        prefix: Option<PendingId>,
+        document_id: PendingId,
+    ) {
+        self.changes
+            .get_mut_or_insert(collection)
+            .item_metadata_change(prefix, document_id);
+    }
+
+    pub fn log_private_container_metadata(
+        &mut self,
+        collection: SyncCollection,
+        viewer: u32,
+        document_id: PendingId,
+    ) {
+        self.private
+            .get_mut_or_insert(PrivateLog { collection, viewer })
+            .container_metadata_change(document_id);
+    }
+
+    pub fn log_private_item_metadata(
+        &mut self,
+        collection: SyncCollection,
+        viewer: u32,
+        prefix: Option<PendingId>,
+        document_id: PendingId,
+    ) {
+        self.private
+            .get_mut_or_insert(PrivateLog { collection, viewer })
+            .item_metadata_change(prefix, document_id);
     }
 
     pub fn log_vanished_item(
@@ -334,17 +457,45 @@ impl ChangeLogBuilder {
 }
 
 impl Changes {
+    fn container_metadata_change(&mut self, document_id: PendingId) {
+        let id = self.build_id(None, document_id);
+        if !self.container_inserts.contains(&id)
+            && !self.container_updates.contains(&id)
+            && !self.container_deletes.contains(&id)
+        {
+            self.metadata.get_or_insert_default().containers.insert(id);
+        }
+    }
+
+    fn item_metadata_change(&mut self, prefix: Option<PendingId>, document_id: PendingId) {
+        let id = self.build_id(prefix, document_id);
+        if !self.item_inserts.contains(&id)
+            && !self.item_updates.contains(&id)
+            && !self.item_deletes.contains(&id)
+        {
+            self.metadata.get_or_insert_default().items.insert(id);
+        }
+    }
+
     pub fn has_container_changes(&self) -> bool {
         !self.container_inserts.is_empty()
             || !self.container_updates.is_empty()
             || !self.container_property_changes.is_empty()
             || !self.container_deletes.is_empty()
+            || self
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| !metadata.containers.is_empty())
     }
 
     pub fn has_item_changes(&self) -> bool {
         !self.item_inserts.is_empty()
             || !self.item_updates.is_empty()
             || !self.item_deletes.is_empty()
+            || self
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| !metadata.items.is_empty())
     }
 }
 
@@ -392,18 +543,20 @@ impl Changes {
             + self.container_property_changes.len()
             + self.container_deletes.len();
         let items = self.item_inserts.len() + self.item_updates.len() + self.item_deletes.len();
+        let item_bytes_hint = if is_prefixed {
+            PREFIXED_ITEM_BYTES_HINT
+        } else {
+            ITEM_BYTES_HINT
+        };
+
+        let mut capacity =
+            1 + BASE_LISTS + (containers * CONTAINER_BYTES_HINT) + (items * item_bytes_hint);
+        if let Some(metadata) = &self.metadata {
+            capacity += metadata.bytes_hint(item_bytes_hint);
+        }
 
         buf.clear();
-        buf.reserve(
-            1 + CHANGE_LISTS
-                + (containers * CONTAINER_BYTES_HINT)
-                + (items
-                    * if is_prefixed {
-                        PREFIXED_ITEM_BYTES_HINT
-                    } else {
-                        ITEM_BYTES_HINT
-                    }),
-        );
+        buf.reserve(capacity);
         buf.push(presence);
 
         for (slot, list) in container_lists.iter() {
@@ -422,12 +575,7 @@ impl Changes {
                 continue;
             }
             self.collect(list, scratch, ids);
-
-            let mut prev = 0u64;
-            for id in scratch.iter() {
-                buf.push_leb128(*id - prev);
-                prev = *id;
-            }
+            write_ids(buf, scratch);
         }
 
         for (slot, list) in item_lists.iter() {
@@ -435,24 +583,54 @@ impl Changes {
                 continue;
             }
             self.collect(list, scratch, ids);
-
             if is_prefixed {
-                let mut prev_prefix = 0i64;
-                let mut prev_document_id = 0i64;
-                for id in scratch.iter() {
-                    let prefix = (*id >> 32) as i64;
-                    let document_id = (*id & u32::MAX as u64) as i64;
-                    buf.push_leb128((prefix - prev_prefix) as u64);
-                    buf.push_leb128(zigzag_encode(document_id - prev_document_id));
-                    prev_prefix = prefix;
-                    prev_document_id = document_id;
-                }
+                write_prefixed_ids(buf, scratch);
             } else {
-                let mut prev = 0u64;
-                for id in scratch.iter() {
-                    buf.push_leb128(*id - prev);
-                    prev = *id;
-                }
+                write_ids(buf, scratch);
+            }
+        }
+
+        if let Some(metadata) = &self.metadata {
+            self.serialize_metadata(metadata, is_prefixed, ids, scratch, buf);
+        }
+    }
+
+    #[cold]
+    fn serialize_metadata(
+        &self,
+        metadata: &MetadataChanges,
+        is_prefixed: bool,
+        ids: Option<&AssignedIds>,
+        scratch: &mut Vec<u64>,
+        buf: &mut Vec<u8>,
+    ) {
+        let lists = [
+            (CONTAINER_METADATA, &metadata.containers),
+            (ITEM_METADATA, &metadata.items),
+        ];
+        let mut extended = 0u8;
+        for (slot, list) in lists.iter() {
+            if !list.is_empty() {
+                extended |= 1 << (slot - BASE_LISTS);
+            }
+        }
+        if extended == 0 {
+            return;
+        }
+        if let Some(presence) = buf.first_mut() {
+            *presence |= PRESENCE_EXTENDED;
+        }
+        buf.push(extended);
+
+        for (_, list) in lists.iter().filter(|(_, list)| !list.is_empty()) {
+            buf.push_leb128(list.len());
+        }
+        for (slot, list) in lists.iter().filter(|(_, list)| !list.is_empty()) {
+            self.collect(list, scratch, ids);
+            if is_prefixed && *slot == ITEM_METADATA {
+                write_prefixed_ids(buf, scratch);
+            } else {
+                write_ids(buf, scratch);
             }
         }
     }
@@ -593,7 +771,7 @@ impl VanishedItems {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::log::Change;
+    use crate::query::log::{Change, PartialChange};
 
     struct Lcg(u64);
 
@@ -616,6 +794,14 @@ mod tests {
         assert_eq!(has_item, changes.has_item_changes());
         decoded.finalize();
 
+        let empty = ChangeSet::default();
+        let (container_metadata, item_metadata) = changes
+            .metadata
+            .as_deref()
+            .map_or((&empty, &empty), |metadata| {
+                (&metadata.containers, &metadata.items)
+            });
+
         let mut expected = Vec::new();
         for id in &changes.container_inserts {
             if !changes.container_deletes.contains(id) {
@@ -632,7 +818,29 @@ mod tests {
                 && !changes.container_updates.contains(id)
                 && !changes.container_deletes.contains(id)
             {
-                expected.push(Change::UpdateContainerProperty(*id));
+                let partial = if container_metadata.contains(id) {
+                    PartialChange::PROPERTIES.union(PartialChange::METADATA)
+                } else {
+                    PartialChange::PROPERTIES
+                };
+                expected.push(Change::UpdateContainerPartial(*id, partial));
+            }
+        }
+        for id in container_metadata {
+            if !changes.container_inserts.contains(id)
+                && !changes.container_updates.contains(id)
+                && !changes.container_deletes.contains(id)
+                && !changes.container_property_changes.contains(id)
+            {
+                expected.push(Change::UpdateContainerPartial(*id, PartialChange::METADATA));
+            }
+        }
+        for id in item_metadata {
+            if !changes.item_inserts.contains(id)
+                && !changes.item_updates.contains(id)
+                && !changes.item_deletes.contains(id)
+            {
+                expected.push(Change::UpdateItemMetadata(*id));
             }
         }
         for id in &changes.container_deletes {
@@ -702,30 +910,14 @@ mod tests {
 
         for slot in 0..CHANGE_LISTS {
             let mut changes = Changes::default();
-            match slot {
-                0 => {
-                    changes.container_inserts.insert(7);
-                }
-                1 => {
-                    changes.container_updates.insert(7);
-                }
-                2 => {
-                    changes.container_property_changes.insert(7);
-                }
-                3 => {
-                    changes.container_deletes.insert(7);
-                }
-                4 => {
-                    changes.item_inserts.insert((3u64 << 32) | 9);
-                }
-                5 => {
-                    changes.item_updates.insert((3u64 << 32) | 9);
-                }
-                _ => {
-                    changes.item_deletes.insert((3u64 << 32) | 9);
-                }
-            }
+            let id = if ITEM_LISTS & (1 << slot) != 0 {
+                (3u64 << 32) | 9
+            } else {
+                7
+            };
+            list_mut(&mut changes, slot).insert(id);
             roundtrip(&changes, true);
+            roundtrip(&changes, false);
         }
     }
 
@@ -770,6 +962,31 @@ mod tests {
                     }
                     _ => {
                         changes.container_deletes.insert(lcg.next() % 1000);
+                    }
+                }
+
+                if lcg.next().is_multiple_of(3) {
+                    let container_id = lcg.next() % 1000;
+                    if !changes.container_inserts.contains(&container_id)
+                        && !changes.container_updates.contains(&container_id)
+                        && !changes.container_deletes.contains(&container_id)
+                    {
+                        changes
+                            .metadata
+                            .get_or_insert_default()
+                            .containers
+                            .insert(container_id);
+                    }
+                    let item_id = ((lcg.next() % 500_000) << 32) | (lcg.next() % 500_000);
+                    if !changes.item_inserts.contains(&item_id)
+                        && !changes.item_updates.contains(&item_id)
+                        && !changes.item_deletes.contains(&item_id)
+                    {
+                        changes
+                            .metadata
+                            .get_or_insert_default()
+                            .items
+                            .insert(item_id);
                     }
                 }
             }
@@ -1076,24 +1293,29 @@ mod tests {
         decoded.changes
     }
 
+    fn list_mut(changes: &mut Changes, slot: usize) -> &mut ChangeSet<u64> {
+        match slot {
+            CONTAINER_INSERTS => &mut changes.container_inserts,
+            CONTAINER_UPDATES => &mut changes.container_updates,
+            CONTAINER_PROPERTY_CHANGES => &mut changes.container_property_changes,
+            CONTAINER_DELETES => &mut changes.container_deletes,
+            ITEM_INSERTS => &mut changes.item_inserts,
+            ITEM_UPDATES => &mut changes.item_updates,
+            ITEM_DELETES => &mut changes.item_deletes,
+            CONTAINER_METADATA => &mut changes.metadata.get_or_insert_default().containers,
+            _ => &mut changes.metadata.get_or_insert_default().items,
+        }
+    }
+
     fn container_row(slot: usize, id: u64) -> Changes {
         let mut changes = Changes::default();
-        match slot {
-            CONTAINER_INSERTS => changes.container_inserts.insert(id),
-            CONTAINER_UPDATES => changes.container_updates.insert(id),
-            CONTAINER_PROPERTY_CHANGES => changes.container_property_changes.insert(id),
-            _ => changes.container_deletes.insert(id),
-        };
+        list_mut(&mut changes, slot).insert(id);
         changes
     }
 
     fn item_row(slot: usize, id: u64) -> Changes {
         let mut changes = Changes::default();
-        match slot {
-            ITEM_INSERTS => changes.item_inserts.insert(id),
-            ITEM_UPDATES => changes.item_updates.insert(id),
-            _ => changes.item_deletes.insert(id),
-        };
+        list_mut(&mut changes, slot).insert(id);
         changes
     }
 
@@ -1101,7 +1323,7 @@ mod tests {
     fn changelog_precedence_across_rows() {
         let id = 7u64;
 
-        let cases: [(usize, usize, Option<Change>); 12] = [
+        let cases: [(usize, usize, Option<Change>); 21] = [
             (
                 CONTAINER_INSERTS,
                 CONTAINER_UPDATES,
@@ -1117,6 +1339,57 @@ mod tests {
                 CONTAINER_UPDATES,
                 CONTAINER_PROPERTY_CHANGES,
                 Some(Change::UpdateContainer(7)),
+            ),
+            (
+                CONTAINER_PROPERTY_CHANGES,
+                CONTAINER_METADATA,
+                Some(Change::UpdateContainerPartial(
+                    7,
+                    PartialChange::PROPERTIES.union(PartialChange::METADATA),
+                )),
+            ),
+            (
+                CONTAINER_METADATA,
+                CONTAINER_PROPERTY_CHANGES,
+                Some(Change::UpdateContainerPartial(
+                    7,
+                    PartialChange::PROPERTIES.union(PartialChange::METADATA),
+                )),
+            ),
+            (
+                CONTAINER_METADATA,
+                CONTAINER_METADATA,
+                Some(Change::UpdateContainerPartial(7, PartialChange::METADATA)),
+            ),
+            (
+                CONTAINER_UPDATES,
+                CONTAINER_METADATA,
+                Some(Change::UpdateContainer(7)),
+            ),
+            (
+                CONTAINER_METADATA,
+                CONTAINER_UPDATES,
+                Some(Change::UpdateContainer(7)),
+            ),
+            (
+                CONTAINER_INSERTS,
+                CONTAINER_METADATA,
+                Some(Change::InsertContainer(7)),
+            ),
+            (
+                CONTAINER_METADATA,
+                CONTAINER_INSERTS,
+                Some(Change::InsertContainer(7)),
+            ),
+            (
+                CONTAINER_METADATA,
+                CONTAINER_DELETES,
+                Some(Change::DeleteContainer(7)),
+            ),
+            (
+                CONTAINER_DELETES,
+                CONTAINER_METADATA,
+                Some(Change::DeleteContainer(7)),
             ),
             (
                 CONTAINER_UPDATES,
@@ -1171,7 +1444,18 @@ mod tests {
 
         let id = (3u64 << 32) | 9;
 
-        let cases: [(usize, usize, Option<Change>); 8] = [
+        let cases: [(usize, usize, Option<Change>); 15] = [
+            (ITEM_UPDATES, ITEM_METADATA, Some(Change::UpdateItem(id))),
+            (ITEM_METADATA, ITEM_UPDATES, Some(Change::UpdateItem(id))),
+            (ITEM_INSERTS, ITEM_METADATA, Some(Change::InsertItem(id))),
+            (ITEM_METADATA, ITEM_INSERTS, Some(Change::InsertItem(id))),
+            (ITEM_METADATA, ITEM_DELETES, Some(Change::DeleteItem(id))),
+            (ITEM_DELETES, ITEM_METADATA, Some(Change::DeleteItem(id))),
+            (
+                ITEM_METADATA,
+                ITEM_METADATA,
+                Some(Change::UpdateItemMetadata(id)),
+            ),
             (ITEM_INSERTS, ITEM_UPDATES, Some(Change::InsertItem(id))),
             (ITEM_INSERTS, ITEM_DELETES, None),
             (ITEM_UPDATES, ITEM_DELETES, Some(Change::DeleteItem(id))),
@@ -1221,15 +1505,7 @@ mod tests {
 
             for slot in 0..CHANGE_LISTS {
                 let mut changes = Changes::default();
-                match slot {
-                    CONTAINER_INSERTS => changes.container_inserts.insert(0),
-                    CONTAINER_UPDATES => changes.container_updates.insert(0),
-                    CONTAINER_PROPERTY_CHANGES => changes.container_property_changes.insert(0),
-                    CONTAINER_DELETES => changes.container_deletes.insert(0),
-                    ITEM_INSERTS => changes.item_inserts.insert(0),
-                    ITEM_UPDATES => changes.item_updates.insert(0),
-                    _ => changes.item_deletes.insert(0),
-                };
+                list_mut(&mut changes, slot).insert(0);
                 assert!(
                     !changes.serialize(is_prefixed, &mut scratch).is_empty(),
                     "a row holding only id 0 must not serialize to an empty value"
@@ -1304,15 +1580,7 @@ mod tests {
 
     fn push_entry(changes: &mut Changes, entry: Entry) {
         let id = changes.build_id(entry.prefix, entry.id);
-        match entry.list {
-            CONTAINER_INSERTS => changes.container_inserts.insert(id),
-            CONTAINER_UPDATES => changes.container_updates.insert(id),
-            CONTAINER_PROPERTY_CHANGES => changes.container_property_changes.insert(id),
-            CONTAINER_DELETES => changes.container_deletes.insert(id),
-            ITEM_INSERTS => changes.item_inserts.insert(id),
-            ITEM_UPDATES => changes.item_updates.insert(id),
-            _ => changes.item_deletes.insert(id),
-        };
+        list_mut(changes, entry.list).insert(id);
     }
 
     fn resolve_entry(entry: Entry, ids: &AssignedIds) -> Entry {
@@ -1354,7 +1622,7 @@ mod tests {
 
         for is_prefixed in [true, false] {
             for list in 0..CHANGE_LISTS {
-                let is_item = list >= ITEM_INSERTS;
+                let is_item = ITEM_LISTS & (1 << list) != 0;
 
                 assert_pending_matches_concrete(
                     &[Entry {
@@ -1491,7 +1759,7 @@ mod tests {
                         }
                     };
                     let id = pick(&mut lcg);
-                    let prefix = if list >= ITEM_INSERTS && !lcg.next().is_multiple_of(4) {
+                    let prefix = if ITEM_LISTS & (1 << list) != 0 && !lcg.next().is_multiple_of(4) {
                         Some(pick(&mut lcg))
                     } else {
                         None
@@ -1581,5 +1849,227 @@ mod tests {
         let want = concrete.serialize(true, &mut scratch);
 
         assert_eq!(want, got, "changelog builder diverged on pending ids");
+    }
+
+    fn legacy_serialize(changes: &Changes, is_prefixed: bool) -> Vec<u8> {
+        let lists = [
+            &changes.container_inserts,
+            &changes.container_updates,
+            &changes.container_property_changes,
+            &changes.container_deletes,
+            &changes.item_inserts,
+            &changes.item_updates,
+            &changes.item_deletes,
+        ];
+        let mut presence = 0u8;
+        for (slot, list) in lists.iter().enumerate() {
+            if !list.is_empty() {
+                presence |= 1 << slot;
+            }
+        }
+        let mut buf = vec![presence];
+        for list in lists.iter().filter(|list| !list.is_empty()) {
+            buf.push_leb128(list.len());
+        }
+        let mut scratch = Vec::new();
+        for (slot, list) in lists.iter().enumerate() {
+            if !list.is_empty() {
+                list.collect_sorted(&mut scratch);
+                legacy_write_ids(&mut buf, &scratch, is_prefixed && slot >= ITEM_INSERTS);
+            }
+        }
+        buf
+    }
+
+    fn legacy_write_ids(buf: &mut Vec<u8>, ids: &[u64], is_prefixed: bool) {
+        let mut prev_prefix = 0i64;
+        let mut prev_document_id = 0i64;
+        let mut prev = 0u64;
+        for &id in ids {
+            if is_prefixed {
+                let prefix = (id >> 32) as i64;
+                let document_id = (id & u32::MAX as u64) as i64;
+                buf.push_leb128((prefix - prev_prefix) as u64);
+                buf.push_leb128(zigzag_encode(document_id - prev_document_id));
+                prev_prefix = prefix;
+                prev_document_id = document_id;
+            } else {
+                buf.push_leb128(id - prev);
+                prev = id;
+            }
+        }
+    }
+
+    #[test]
+    fn rows_without_metadata_keep_the_legacy_encoding() {
+        let mut lcg = Lcg(0x001e_6ac7);
+        let mut scratch = Vec::new();
+
+        for _ in 0..500 {
+            let mut changes = Changes::default();
+            for _ in 0..(lcg.next() % 20) {
+                let slot = (lcg.next() % BASE_LISTS as u64) as usize;
+                let id = if slot >= ITEM_INSERTS {
+                    ((lcg.next() % 10_000) << 32) | (lcg.next() % 10_000)
+                } else {
+                    lcg.next() % 1000
+                };
+                list_mut(&mut changes, slot).insert(id);
+            }
+            for is_prefixed in [true, false] {
+                let bytes = changes.serialize(is_prefixed, &mut scratch);
+                assert_eq!(bytes, legacy_serialize(&changes, is_prefixed));
+                assert_eq!(bytes[0] & PRESENCE_EXTENDED, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_rows_use_the_extended_presence() {
+        let mut scratch = Vec::new();
+        let mut changes = Changes::default();
+        changes.item_inserts.insert((1u64 << 32) | 2);
+        let metadata = changes.metadata.get_or_insert_default();
+        metadata.containers.insert(3);
+        metadata.items.insert((9u64 << 32) | 12);
+
+        let bytes = changes.serialize(true, &mut scratch);
+        let base = legacy_serialize(&changes, true);
+        let (first, rest) = bytes.split_first().expect("presence");
+        let (base_first, base_rest) = base.split_first().expect("presence");
+        assert_eq!(*first, PRESENCE_EXTENDED | *base_first);
+        let tail = rest.strip_prefix(base_rest).expect("base lists come first");
+        assert_eq!(
+            tail.first().copied(),
+            Some((1 << (CONTAINER_METADATA - BASE_LISTS)) | (1 << (ITEM_METADATA - BASE_LISTS)))
+        );
+        roundtrip(&changes, true);
+
+        let mut decoded = crate::query::log::Changes::default();
+        assert!(decoded.deserialize(&bytes[..base.len()], true).is_none());
+
+        for invalid in [1u8 << (CHANGE_LISTS - BASE_LISTS), 0x80, 0xFF] {
+            let mut corrupted = bytes.clone();
+            corrupted[base.len()] = invalid;
+            let mut decoded = crate::query::log::Changes::default();
+            assert!(
+                decoded.deserialize(&corrupted, true).is_none(),
+                "extended presence {invalid:#x} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_changes_are_superseded_within_a_row() {
+        let assigned = |id: u32| PendingId::Assigned(id);
+        let mut builder = ChangeLogBuilder::default();
+        let collection = SyncCollection::Calendar;
+
+        builder.log_item_update(collection, None, assigned(1));
+        builder.log_item_metadata(collection, None, assigned(1));
+
+        builder.log_item_metadata(collection, None, assigned(2));
+        builder.log_item_update(collection, None, assigned(2));
+
+        builder.log_item_metadata(collection, None, assigned(3));
+        builder.log_item_delete(collection, None, assigned(3));
+
+        builder.log_item_metadata(collection, None, assigned(4));
+        builder.log_item_insert(collection, None, assigned(4));
+
+        builder.log_item_metadata(collection, None, assigned(5));
+
+        builder.log_container_property_update(collection, assigned(10));
+        builder.log_container_metadata(collection, assigned(10));
+
+        builder.log_container_metadata(collection, assigned(11));
+        builder.log_container_update(collection, assigned(11));
+
+        builder.log_container_metadata(collection, assigned(12));
+        builder.log_container_delete(collection, assigned(12));
+
+        builder.log_container_insert(collection, assigned(13));
+        builder.log_container_metadata(collection, assigned(13));
+
+        let changes = builder
+            .changes
+            .remove(&collection)
+            .expect("changes were logged");
+        let metadata = changes.metadata.as_deref().expect("metadata was logged");
+        let mut item_metadata = Vec::new();
+        metadata.items.collect_sorted(&mut item_metadata);
+        let mut container_metadata = Vec::new();
+        metadata.containers.collect_sorted(&mut container_metadata);
+        assert_eq!(item_metadata, vec![5]);
+        assert_eq!(container_metadata, vec![10]);
+        assert!(changes.container_property_changes.contains(&10));
+        assert!(changes.has_item_changes());
+        assert!(changes.has_container_changes());
+
+        let mut builder = ChangeLogBuilder::default();
+        builder.log_item_metadata(collection, None, assigned(5));
+        let changes = builder
+            .changes
+            .remove(&collection)
+            .expect("changes were logged");
+        assert!(changes.has_item_changes());
+        assert!(!changes.has_container_changes());
+
+        let mut builder = ChangeLogBuilder::default();
+        builder.log_item_metadata(collection, None, assigned(6));
+        builder.log_container_metadata(collection, assigned(14));
+        builder.log_item_delete(collection, None, assigned(6));
+        builder.log_container_delete(collection, assigned(14));
+        let changes = builder
+            .changes
+            .remove(&collection)
+            .expect("changes were logged");
+        let mut scratch = Vec::new();
+        let bytes = changes.serialize(false, &mut scratch);
+        assert_eq!(bytes, legacy_serialize(&changes, false));
+        roundtrip(&changes, false);
+    }
+
+    #[test]
+    fn private_rows_stay_out_of_the_shared_log() {
+        let mut builder = ChangeLogBuilder::default();
+        builder.log_private_item_metadata(
+            SyncCollection::Email,
+            42,
+            Some(PendingId::Assigned(7)),
+            PendingId::Assigned(9),
+        );
+        builder.log_private_container_metadata(SyncCollection::Email, 42, PendingId::Assigned(3));
+        builder.log_private_item_metadata(
+            SyncCollection::Email,
+            43,
+            Some(PendingId::Assigned(7)),
+            PendingId::Assigned(9),
+        );
+
+        assert!(builder.changes.is_empty());
+        let viewer_42 = builder
+            .private
+            .get(&PrivateLog {
+                collection: SyncCollection::Email,
+                viewer: 42,
+            })
+            .expect("viewer 42 has a private row");
+        let metadata = viewer_42
+            .metadata
+            .as_deref()
+            .expect("viewer 42 has metadata");
+        assert!(metadata.items.contains(&((7u64 << 32) | 9)));
+        assert!(metadata.containers.contains(&3));
+        assert!(
+            builder
+                .private
+                .get(&PrivateLog {
+                    collection: SyncCollection::Email,
+                    viewer: 43,
+                })
+                .is_some()
+        );
+        roundtrip(viewer_42, true);
     }
 }

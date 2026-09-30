@@ -80,6 +80,7 @@ pub async fn test(test: &TestServer) {
                     uid_validity: 0,
                     subscribers: vec![],
                     acls: vec![],
+                    metadata_flags: 0,
                 }))
                 .unwrap();
         }

@@ -2,6 +2,13 @@
   "type": "AllProp",
   "data": [
     {
+      "type": "Dead",
+      "data": {
+        "namespace": "DAV:",
+        "name": "supported-live-property-set"
+      }
+    },
+    {
       "type": "WebDav",
       "data": {
         "type": "SupportedReportSet"

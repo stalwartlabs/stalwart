@@ -5,6 +5,10 @@
  */
 
 use crate::api::acl::{JmapAcl, JmapRights};
+use crate::api::metadata::{
+    MetadataAccess, MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, ObjectMetadata,
+    PreparedMetadata, is_empty_update, reject_uncommitted,
+};
 use crate::api::pending_creates::PendingCreates;
 use crate::calendar::{Availability, get::default_alert_value};
 use crate::changes::state::JmapCacheState;
@@ -16,7 +20,7 @@ use common::{
     storage::quota::ObjectQuotaUsage,
 };
 use groupware::{
-    DestroyArchive,
+    DestroyArchive, PresenceUpdate,
     cache::GroupwareCache,
     calendar::{
         ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, CALENDAR_AVAILABILITY_ALL,
@@ -30,16 +34,14 @@ use groupware::{
         schedule::EventAlarmScheduler,
         storage::{DirectChangeNotification, NotificationQuota},
     },
+    metadata::MetadataCleanup,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::{
-        calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
-        metadata::MetadataProperty,
-    },
-    request::{MaybeInvalid, reference::MaybeIdReference},
+    object::calendar::{self, CalendarProperty, CalendarValue, IncludeInAvailability},
+    request::{MaybeInvalid, capability::CapabilityIds, reference::MaybeIdReference},
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Map, Value};
@@ -56,6 +58,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::PrincipalField,
     id::Id,
+    metadata::MetadataKinds,
 };
 
 pub trait CalendarSet: Sync + Send {
@@ -64,6 +67,7 @@ pub trait CalendarSet: Sync + Send {
         request: SetRequest<'_, calendar::Calendar>,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<SetResponse<calendar::Calendar>>> + Send;
 }
 
@@ -73,6 +77,7 @@ impl CalendarSet for Server {
         mut request: SetRequest<'_, calendar::Calendar>,
         access_token: &AccessToken,
         _session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<SetResponse<calendar::Calendar>> {
         let account_id = request.account_id.document_id();
         let cache = self
@@ -82,8 +87,19 @@ impl CalendarSet for Server {
                 SyncCollection::Calendar,
             )
             .await?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Calendar);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(cache.assert_state(true, &request.if_in_state)?);
+            .with_state(
+                metadata
+                    .assert_state(
+                        self,
+                        account_id,
+                        cache.get_state(true),
+                        &request.if_in_state,
+                    )
+                    .await?,
+            );
+        let mut metadata_writer = MetadataWriter::new(metadata, account_id);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
         let personal_id = access_token.personal_id(account_id, Collection::Calendar);
@@ -104,7 +120,7 @@ impl CalendarSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        'create: for (id, object) in request.unwrap_create() {
+        'create: for (id, mut object) in request.unwrap_create() {
             if !quota.has_room(created_slots.len()) {
                 response.not_created.append(
                     id,
@@ -140,6 +156,14 @@ impl CalendarSet for Server {
             };
 
             // Process changes
+            let metadata_patches =
+                match metadata_writer.extract(MetadataPatches::for_create(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                };
             let client_properties = object
                 .as_object()
                 .map(|object| {
@@ -196,10 +220,33 @@ impl CalendarSet for Server {
                 }
             }
 
+            let prepared_metadata = match metadata_patches {
+                Some(patches) => match metadata_writer
+                    .prepare(self, patches, OWNER_ACCESS, None)
+                    .await?
+                {
+                    Ok(prepared) => Some(prepared),
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                },
+                None => None,
+            };
+
             // Insert record
             let server_set = calendar.server_set_values(personal_id, &client_properties);
             request_alerts.accept(None, &calendar, personal_id);
             let document_id = batch.reserve_document_id(account_id, Collection::Calendar);
+            if let Some(kinds) = prepared_metadata
+                .as_ref()
+                .and_then(PreparedMetadata::shared_kinds)
+            {
+                calendar.set_metadata_kinds(kinds);
+            }
+            if let Some(prepared) = prepared_metadata {
+                metadata_writer.write(prepared, document_id, &mut batch)?;
+            }
             calendar
                 .insert(
                     access_token.account_tenant_ids(),
@@ -221,7 +268,25 @@ impl CalendarSet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update() {
+        let mut updates =
+            Vec::with_capacity(request.update.as_ref().map_or(0, |update| update.len()));
+        let mut preload = MetadataPreload::default();
+        for (id, mut object) in request.unwrap_update() {
+            let patches = metadata_writer.extract(MetadataPatches::for_update(), &mut object);
+            if let (MaybeInvalid::Value(id), Ok(Some(patches))) = (&id, &patches) {
+                let document_id = id.document_id();
+                preload.insert(
+                    document_id,
+                    patches,
+                    cache
+                        .container_resource_by_id(document_id)
+                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
+                );
+            }
+            updates.push((id, object, patches));
+        }
+        metadata_writer.preload(self, account_id, preload).await?;
+        'update: for (id, object, metadata_patches) in updates {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -234,6 +299,13 @@ impl CalendarSet for Server {
                 response.not_updated.append(id, SetError::will_destroy());
                 continue 'update;
             }
+            let metadata_patches = match metadata_patches {
+                Ok(patches) => patches,
+                Err(err) => {
+                    response.not_updated.append(id, err);
+                    continue 'update;
+                }
+            };
 
             // Obtain calendar
             let document_id = id.document_id();
@@ -261,6 +333,33 @@ impl CalendarSet for Server {
             let acl = calendar.inner.acls.effective_acl(access_token);
             if is_shared && !acl.contains_any([Acl::Read, Acl::ReadItems].into_iter()) {
                 response.not_updated.append(id, SetError::not_found());
+                continue 'update;
+            }
+            let metadata_access = MetadataAccess {
+                may_write_shared: !is_shared || acl.contains(Acl::Modify),
+                may_read: true,
+            };
+            let mut metadata_patches = metadata_patches;
+            if object
+                .as_object()
+                .is_some_and(|object| is_empty_update::<calendar::Calendar>(object, id))
+                && let Some(patches) = metadata_patches.take()
+            {
+                match metadata_writer
+                    .prepare(self, patches, metadata_access, Some(document_id))
+                    .await?
+                {
+                    Ok(prepared) => {
+                        if let Some(kinds) = prepared.shared_kinds() {
+                            PresenceUpdate(calendar)
+                                .write(kinds, account_id, document_id, &mut batch)
+                                .caused_by(trc::location!())?;
+                        }
+                        metadata_writer.write(prepared, document_id, &mut batch)?;
+                        response.updated.append(id, None);
+                    }
+                    Err(err) => response.not_updated.append(id, err),
+                }
                 continue 'update;
             }
 
@@ -332,6 +431,20 @@ impl CalendarSet for Server {
                 }
             }
 
+            let prepared_metadata = match metadata_patches {
+                Some(patches) => match metadata_writer
+                    .prepare(self, patches, metadata_access, Some(document_id))
+                    .await?
+                {
+                    Ok(prepared) => Some(prepared),
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                },
+                None => None,
+            };
+
             self.reschedule_calendar_alarms(
                 &cache,
                 account_id,
@@ -345,6 +458,15 @@ impl CalendarSet for Server {
             request_alerts.accept(Some(document_id), &new_calendar, personal_id);
 
             // Update record
+            if let Some(kinds) = prepared_metadata
+                .as_ref()
+                .and_then(PreparedMetadata::shared_kinds)
+            {
+                new_calendar.set_metadata_kinds(kinds);
+            }
+            if let Some(prepared) = prepared_metadata {
+                metadata_writer.write(prepared, document_id, &mut batch)?;
+            }
             new_calendar
                 .update(
                     access_token.account_tenant_ids(),
@@ -364,6 +486,23 @@ impl CalendarSet for Server {
             let mut destroy_parents = AHashSet::new();
             let on_destroy_remove_events =
                 request.arguments.on_destroy_remove_events.unwrap_or(false);
+            let calendar_cleanup = MetadataCleanup::preload(
+                self,
+                access_token.account_tenant_ids(),
+                account_id,
+                Collection::Calendar,
+                will_destroy.iter().filter_map(|id| {
+                    let document_id = id.document_id();
+                    Some((
+                        document_id,
+                        cache
+                            .container_resource_by_id(document_id)?
+                            .metadata_kinds(),
+                    ))
+                }),
+            )
+            .await
+            .caused_by(trc::location!())?;
             for id in will_destroy {
                 let document_id = id.document_id();
 
@@ -447,13 +586,16 @@ impl CalendarSet for Server {
                     .container_resource_path_by_id(document_id)
                     .map(|resource| cache.format_resource(resource));
                 DestroyArchive(calendar)
-                    .delete(
+                    .delete_with_cleanup(
+                        self,
                         access_token.account_tenant_ids(),
                         account_id,
                         document_id,
                         delete_path,
+                        &calendar_cleanup,
                         &mut batch,
                     )
+                    .await
                     .caused_by(trc::location!())?;
 
                 destroyed_calendars.push(document_id);
@@ -481,6 +623,17 @@ impl CalendarSet for Server {
                     .caused_by(trc::location!())?;
                 let mut resolver = DefaultAlertsResolver::with_resources(account_id, cache.clone());
                 let mut quota = NotificationQuota::default();
+                let cleanup = MetadataCleanup::preload(
+                    self,
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    Collection::CalendarEvent,
+                    destroy_children.iter().filter_map(|&document_id| {
+                        Some((document_id, cache.item_by_id(document_id)?.metadata_kinds()))
+                    }),
+                )
+                .await
+                .caused_by(trc::location!())?;
                 let notify_children = !access_token.is_member(account_id);
                 for document_id in destroy_children {
                     if let Some(event_) = self
@@ -523,13 +676,14 @@ impl CalendarSet for Server {
                         {
                             // Event only belongs to calendars being deleted, delete it
                             DestroyArchive(event)
-                                .delete_all(
+                                .remove_all(
                                     self,
                                     &account_info,
                                     account_id,
                                     document_id,
                                     None,
                                     false,
+                                    &cleanup,
                                     &mut batch,
                                 )
                                 .await?;
@@ -622,7 +776,19 @@ impl CalendarSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let assigned_ids = match self.commit_batch(batch).await {
+                Ok(assigned_ids) => assigned_ids,
+                Err(err) if err.is_assertion_failure() => {
+                    reject_uncommitted(
+                        &mut response,
+                        created_slots.into_create_ids(),
+                        "Another process modified this calendar, please try again.",
+                    );
+                    return Ok(response);
+                }
+                Err(err) => return Err(err.caused_by(trc::location!())),
+            };
+            metadata_writer.committed(self, &assigned_ids).await;
 
             created_slots.resolve(&mut response, &assigned_ids);
             let default_calendar_id = if created_server_set.is_empty() {
@@ -686,6 +852,11 @@ impl CalendarSet for Server {
         Ok(response)
     }
 }
+
+const OWNER_ACCESS: MetadataAccess = MetadataAccess {
+    may_write_shared: true,
+    may_read: true,
+};
 
 #[derive(Debug, Default)]
 struct CalendarChanges {
@@ -839,7 +1010,6 @@ fn update_calendar(
         }
 
         match (property, value) {
-            (property, _) if property.metadata_root().is_some() => todo!(),
             (CalendarProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
                 calendar.preferences_mut(personal_id).name = value.into_owned();
             }

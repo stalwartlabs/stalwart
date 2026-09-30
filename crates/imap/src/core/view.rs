@@ -490,7 +490,12 @@ impl MailboxView {
         } else {
             let bits = KeywordBits::new();
             let mut inserted = Vec::new();
-            for item_id in changes.changes.iter().filter_map(|change| change.item_id()) {
+            for item_id in changes
+                .changes
+                .iter()
+                .filter(|change| !change.is_metadata_only())
+                .filter_map(|change| change.item_id())
+            {
                 let document_id = (item_id & u32::MAX as u64) as u32;
                 let before_message = self.snapshot.by_id(document_id);
                 let after_message = cache.emails.by_id(document_id);
@@ -778,6 +783,7 @@ mod tests {
             subscribers: Default::default(),
             uid_validity: 1,
             acls: Default::default(),
+            metadata_kinds: Default::default(),
         };
         MessageStoreCache {
             emails: Arc::new(MessagesCache::new(change_id, items, Vec::new())),

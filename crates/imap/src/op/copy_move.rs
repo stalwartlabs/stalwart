@@ -13,7 +13,7 @@ use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{JUNK_ID, TRASH_ID},
     message::{
-        copy::{CopyMessageError, EmailCopy},
+        copy::{CopyMessageError, CopyMetadata, EmailCopy},
         ingest::EmailIngest,
         messagedata::{MessageData, PendingMessageData},
     },
@@ -38,6 +38,7 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
     keyword::Keyword,
+    metadata::MetadataKinds,
     type_state::{DataType, StateChange},
 };
 
@@ -505,6 +506,9 @@ impl<T: SessionStream> SessionData<T> {
                         vec![dest_mailbox_id],
                         keywords,
                         email.map(|email| email.received_at()).unwrap_or_else(now),
+                        CopyMetadata::from_source(
+                            email.map_or(MetadataKinds::NONE, |email| cache.metadata_kinds(email)),
+                        ),
                         self.session_id,
                     )
                     .await
@@ -661,6 +665,7 @@ impl<T: SessionStream> SessionData<T> {
                         src_account_id,
                         src_mailbox.id.mailbox_id,
                         &destroy_ids,
+                        &cache,
                         &mut batch,
                     )
                     .await
@@ -675,7 +680,15 @@ impl<T: SessionStream> SessionData<T> {
                                 &arguments.tag,
                                 trc::location!(),
                             )
-                            .await?
+                            .await?;
+                            self.server
+                                .inner
+                                .mark_cache_stale(src_account_id, SyncCollection::Email);
+                            cache = self
+                                .server
+                                .get_cached_messages(src_account_id)
+                                .await
+                                .imap_ctx(&arguments.tag, trc::location!())?;
                         }
                     }
                 }

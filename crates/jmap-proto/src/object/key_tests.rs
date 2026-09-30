@@ -5,18 +5,22 @@
  */
 
 use crate::{
+    method::set::SetRequest,
     object::{
-        addressbook::{AddressBookProperty, AddressBookValue},
+        JmapObject,
+        addressbook::{AddressBook, AddressBookProperty, AddressBookValue},
         blob::{BlobProperty, BlobValue},
-        calendar::{CalendarProperty, CalendarValue},
+        calendar::{Calendar, CalendarProperty, CalendarValue},
+        calendar_event::CalendarEvent,
         calendar_event_notification::{
             CalendarEventNotificationProperty, CalendarEventNotificationValue,
         },
-        email::{EmailProperty, EmailValue, HeaderForm, HeaderProperty},
+        contact::ContactCard,
+        email::{Email, EmailProperty, EmailValue, HeaderForm, HeaderProperty},
         email_submission::{EmailSubmissionProperty, EmailSubmissionValue},
-        file_node::{FileNodeProperty, FileNodeValue},
+        file_node::{FileNode, FileNodeProperty, FileNodeValue},
         identity::{IdentityProperty, IdentityValue},
-        mailbox::{MailboxProperty, MailboxValue},
+        mailbox::{Mailbox, MailboxProperty, MailboxValue},
         metadata::MetadataProperty,
         participant_identity::{ParticipantIdentityProperty, ParticipantIdentityValue},
         principal::{PrincipalProperty, PrincipalValue},
@@ -24,7 +28,7 @@ use crate::{
         quota::{QuotaProperty, QuotaValue},
         search_snippet::{SearchSnippetProperty, SearchSnippetValue},
         share_notification::{ShareNotificationProperty, ShareNotificationValue},
-        sieve::{SieveProperty, SieveValue},
+        sieve::{Sieve, SieveProperty, SieveValue},
         thread::{ThreadProperty, ThreadValue},
         vacation_response::{VacationResponseProperty, VacationResponseValue},
     },
@@ -728,5 +732,286 @@ fn header_form_rules() {
                 }
             }
         }
+    }
+}
+
+const METADATA_DATE: &str = "2024-01-01T00:00:00+00:00";
+const METADATA_ID: &str = "aaab";
+const METADATA_REFERENCE: &str = "#ref";
+
+fn metadata_namespace() -> String {
+    format!(
+        concat!(
+            r#"{{"receivedAt":"{date}","sentAt":"{date}","created":"{date}","modified":"{date}","#,
+            r#""id":"{id}","parentId":"{reference}","blobId":"{reference}","threadId":"{id}","#,
+            r#""mailboxIds":{{"{reference}":true,"{id}":true}},"keywords":{{"$Seen":true}},"#,
+            r#""shareWith":{{"{id}":{{"mayRead":true}}}},"role":"Inbox","name":"x","#,
+            r#""0":["{date}",{{"id":"{reference}","created":"{date}"}}],"a/blobId":"{reference}"}}"#
+        ),
+        date = METADATA_DATE,
+        id = METADATA_ID,
+        reference = METADATA_REFERENCE,
+    )
+}
+
+fn assert_untyped<P: Property, E: Element<Property = P>>(value: &Value<'_, P, E>) {
+    match value {
+        Value::Element(element) => panic!("typed value {element:?}"),
+        Value::Array(items) => items.iter().for_each(assert_untyped),
+        Value::Object(object) => {
+            for (key, item) in object.iter() {
+                assert!(!matches!(key, Key::Property(_)), "typed key {key:?}");
+                assert_untyped(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn assert_untyped_metadata<P: MetadataProperty, E: Element<Property = P>>(
+    value: &Value<'_, P, E>,
+) -> usize {
+    let mut members = 0;
+    for (key, item) in value.as_object().expect("an object").iter() {
+        let Some(property) = key.as_property().filter(|property| property.is_opaque()) else {
+            continue;
+        };
+        assert!(property.metadata_root().is_some(), "{property:?}");
+        if let Some((_, pointer)) = property.metadata_pointer() {
+            let [_, segments @ ..] = pointer.as_slice() else {
+                panic!("empty pointer {pointer:?}");
+            };
+            assert!(
+                segments
+                    .iter()
+                    .all(|segment| matches!(segment, JsonPointerItem::Key(Key::Owned(_)))),
+                "{pointer:?}"
+            );
+        }
+        assert_untyped(item);
+        members += 1;
+    }
+    members
+}
+
+fn check_opaque_properties<P: MetadataProperty>() {
+    for (name, opaque) in [
+        ("metadata", true),
+        ("privateMetadata", true),
+        ("metadata/x.example/0", true),
+        ("privateMetadata/id", true),
+        ("name", false),
+        ("name/metadata", false),
+    ] {
+        let property = P::try_parse(None, name).expect("property");
+        assert_eq!(property.is_opaque(), opaque, "{name}");
+    }
+}
+
+fn check_metadata_round_trip<T: JmapObject>()
+where
+    T::Property: MetadataProperty,
+{
+    check_opaque_properties::<T::Property>();
+    let namespace = metadata_namespace();
+    let create = format!(
+        concat!(
+            r#"{{"name":"n","metadata":{{"x.example":{namespace},"id":{{"id":"{reference}"}}}},"#,
+            r#""privateMetadata":{{"x.example":{namespace}}}}}"#
+        ),
+        namespace = namespace,
+        reference = METADATA_REFERENCE,
+    );
+    let update = format!(
+        concat!(
+            r#"{{"metadata/x.example":{namespace},"metadata/x.example/receivedAt":"{date}","#,
+            r#""privateMetadata/x.example/id":"{id}","metadata/id/0":"{reference}","#,
+            r#""metadata/x.example/a~1blobId":"{reference}"}}"#
+        ),
+        namespace = namespace,
+        date = METADATA_DATE,
+        id = METADATA_ID,
+        reference = METADATA_REFERENCE,
+    );
+    let request =
+        format!(r#"{{"accountId":"a","create":{{"k":{create}}},"update":{{"b":{update}}}}}"#);
+    let mut request = serde_json::from_str::<SetRequest<'_, T>>(&request).expect("parses");
+    let objects = request
+        .unwrap_create()
+        .into_values()
+        .chain(request.unwrap_update().into_values())
+        .zip([(&create, 2), (&update, 5)]);
+    for (value, (json, members)) in objects {
+        assert_eq!(serde_json::to_string(&value).expect("serializes"), *json);
+        assert_eq!(assert_untyped_metadata(&value), members, "{json}");
+
+        let value = Value::<T::Property, T::Element>::parse_json(json).expect("parses");
+        assert_eq!(serde_json::to_string(&value).expect("serializes"), *json);
+        assert_eq!(assert_untyped_metadata(&value), members, "{json}");
+    }
+}
+
+#[test]
+fn metadata_fixtures_change_when_typed() {
+    for json in [
+        format!(r#"{{"receivedAt":"{METADATA_DATE}"}}"#),
+        format!(r#"{{"mailboxIds":{{"{METADATA_ID}":true}}}}"#),
+        r#"{"keywords":{"$Seen":true}}"#.to_string(),
+        format!(r#"{{"x.example":{}}}"#, metadata_namespace()),
+    ] {
+        let value: Value<'_, EmailProperty, EmailValue> =
+            serde_json::from_str(&json).expect("parses");
+        assert_ne!(serde_json::to_string(&value).expect("serializes"), json);
+    }
+    for json in [
+        r#"{"role":"Inbox"}"#.to_string(),
+        format!(r#"{{"parentId":"{METADATA_ID}"}}"#),
+    ] {
+        let value: Value<'_, MailboxProperty, MailboxValue> =
+            serde_json::from_str(&json).expect("parses");
+        assert_ne!(serde_json::to_string(&value).expect("serializes"), json);
+    }
+    let json = format!(r#"{{"created":"{METADATA_DATE}"}}"#);
+    let value: Value<'_, FileNodeProperty, FileNodeValue> =
+        serde_json::from_str(&json).expect("parses");
+    assert!(matches!(
+        value.as_object_and_get(&Key::Property(FileNodeProperty::Created)),
+        Some(Value::Element(_))
+    ));
+}
+
+#[test]
+fn metadata_values_round_trip_verbatim() {
+    check_metadata_round_trip::<Email>();
+    check_metadata_round_trip::<Mailbox>();
+    check_metadata_round_trip::<Sieve>();
+    check_metadata_round_trip::<Calendar>();
+    check_metadata_round_trip::<AddressBook>();
+    check_metadata_round_trip::<FileNode>();
+    check_metadata_round_trip::<CalendarEvent>();
+    check_metadata_round_trip::<ContactCard>();
+}
+
+const ORDINARY_NAME: &str = "ordinaryName";
+
+const EMAIL_NESTED_METADATA: &str = concat!(
+    r##"{"{root}":{"x.example":{"receivedAt":"2024-01-01T00:00:00+00:00"}},"{root}/x.example/id":"#ref","##,
+    r##""bodyValues":{"{nested}":{"value":"v","isTruncated":false}},"##,
+    r##""from":[{"name":"n","email":"e","{nested}":{"receivedAt":"2024-01-01T00:00:00+00:00","id":"#ref"}}],"##,
+    r##""bodyStructure":{"partId":"1","{nested}":{"blobId":"#ref"}},"##,
+    r##""bodyValues/{nested}/isTruncated":true}"##
+);
+
+const MAILBOX_NESTED_METADATA: &str = concat!(
+    r##"{"{root}":{"x.example":{"parentId":"aaab"}},"{root}/x.example/id":"#ref","##,
+    r##""shareWith":{"aaab":{"mayReadItems":true,"{nested}":{"parentId":"aaab","role":"Inbox"}}},"##,
+    r##""shareWith/aaab/{nested}":{"parentId":"aaab"}}"##
+);
+
+const SIEVE_NESTED_METADATA: &str = concat!(
+    r##"{"{root}":{"x.example":{"blobId":"#ref"}},"{root}/x.example/id":"#ref","##,
+    r##""name":"n","x.example":{"{nested}":{"blobId":"#ref","id":"#ref"}}}"##
+);
+
+const SHARED_NESTED_METADATA: &str = concat!(
+    r##"{"{root}":{"x.example":{"id":"#ref"}},"{root}/x.example/id":"#ref","##,
+    r##""shareWith":{"aaab":{"{nested}":{"id":"#ref","parentId":"#ref"}}},"##,
+    r##""x.example":{"{nested}":{"id":"#ref","created":"2024-01-01T00:00:00+00:00"}}}"##
+);
+
+fn check_nested_metadata_is_ordinary<T: JmapObject>(template: &str)
+where
+    T::Property: MetadataProperty,
+{
+    for root in ["metadata", "privateMetadata"] {
+        let json = template.replace("{root}", root);
+        let nested = json.replace("{nested}", root);
+        let renamed = json.replace("{nested}", ORDINARY_NAME);
+        let ordinary = format!("{ORDINARY_NAME:?}");
+        let name = format!("{root:?}");
+
+        let direct = Value::<T::Property, T::Element>::parse_json(&nested).expect("parses");
+        let via_serde: Value<'_, T::Property, T::Element> =
+            serde_json::from_str(&nested).expect("parses");
+        let expected = format!(
+            "{:?}",
+            Value::<T::Property, T::Element>::parse_json(&renamed).expect("parses")
+        )
+        .replace(&ordinary, &name);
+        assert_eq!(format!("{direct:?}"), expected, "{nested}");
+        assert_eq!(format!("{via_serde:?}"), expected, "{nested}");
+
+        let roots = direct
+            .as_object()
+            .expect("an object")
+            .keys()
+            .filter_map(Key::as_property)
+            .filter(|property| property.is_opaque())
+            .count();
+        assert_eq!(roots, 2, "{nested}");
+    }
+}
+
+#[test]
+fn nested_metadata_keys_are_ordinary_names() {
+    check_nested_metadata_is_ordinary::<Email>(EMAIL_NESTED_METADATA);
+    check_nested_metadata_is_ordinary::<Mailbox>(MAILBOX_NESTED_METADATA);
+    check_nested_metadata_is_ordinary::<Sieve>(SIEVE_NESTED_METADATA);
+    check_nested_metadata_is_ordinary::<Calendar>(SHARED_NESTED_METADATA);
+    check_nested_metadata_is_ordinary::<AddressBook>(SHARED_NESTED_METADATA);
+    check_nested_metadata_is_ordinary::<FileNode>(SHARED_NESTED_METADATA);
+}
+
+#[test]
+fn email_body_value_part_named_metadata_stays_typed() {
+    let request = concat!(
+        r#"{"accountId":"a","create":{"k":{"mailboxIds":{"a":true},"#,
+        r#""bodyValues":{"metadata":{"value":"v","isTruncated":false}},"#,
+        r#""textBody":[{"partId":"metadata","type":"text/plain"}]}}}"#
+    );
+    let mut request = serde_json::from_str::<SetRequest<'_, Email>>(request).expect("parses");
+    let email = request
+        .unwrap_create()
+        .into_values()
+        .next()
+        .expect("one email");
+    let (part, body) = email
+        .as_object_and_get(&Key::Property(EmailProperty::BodyValues))
+        .and_then(Value::as_object)
+        .and_then(|values| values.iter().next())
+        .expect("one body value");
+    assert!(matches!(part, Key::Borrowed("metadata")), "{part:?}");
+    let mut members = body.as_object().expect("a body value").iter();
+    assert!(matches!(
+        members.next(),
+        Some((Key::Property(EmailProperty::Value), Value::Str(_)))
+    ));
+    assert!(matches!(
+        members.next(),
+        Some((
+            Key::Property(EmailProperty::IsTruncated),
+            Value::Bool(false)
+        ))
+    ));
+
+    let nested = EmailProperty::try_parse(None, "bodyValues/metadata/value").expect("pointer");
+    assert!(!nested.is_opaque());
+    assert_eq!(
+        format!("{nested:?}"),
+        r#"Pointer(JsonPointer([Key(Property(BodyValues)), Key(Owned("metadata")), Key(Property(Value))]))"#
+    );
+    let root = EmailProperty::try_parse(None, "metadata/bodyValues/value").expect("pointer");
+    assert!(root.is_opaque());
+    assert_eq!(
+        format!("{root:?}"),
+        r#"Pointer(JsonPointer([Key(Property(Metadata)), Key(Owned("bodyValues")), Key(Owned("value"))]))"#
+    );
+    for name in ["metadata", "privateMetadata"] {
+        assert!(EmailProperty::try_parse(None, name).is_some_and(|root| root.is_opaque()));
+        assert!(EmailProperty::from_str(name).is_ok_and(|root| root.is_opaque()));
+        assert_eq!(
+            EmailProperty::try_parse(Some(&Key::Property(EmailProperty::BodyValues)), name),
+            None
+        );
     }
 }

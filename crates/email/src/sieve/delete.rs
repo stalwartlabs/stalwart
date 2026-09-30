@@ -5,10 +5,12 @@
  */
 
 use super::SieveScript;
+use crate::cleanup::FlaggedContainers;
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use store::write::BatchBuilder;
 use store::{
     ValueKey,
+    roaring::RoaringBitmap,
     write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
@@ -43,16 +45,28 @@ impl SieveScriptDelete for Server {
             .await?
         {
             // Delete record
+            let script = obj_
+                .to_unarchived::<SieveScript>()
+                .caused_by(trc::location!())?;
             batch
                 .with_account_id(account_id)
-                .with_collection(Collection::SieveScript)
+                .with_collection(Collection::SieveScript);
+            if !script.inner.metadata_kinds().is_empty() {
+                FlaggedContainers::load(
+                    self,
+                    account_id,
+                    Collection::SieveScript,
+                    &RoaringBitmap::from_iter([document_id]),
+                )
+                .await
+                .caused_by(trc::location!())?
+                .remove(batch, document_id);
+            }
+            batch
                 .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()
-                        .with_current(
-                            obj_.to_unarchived::<SieveScript>()
-                                .caused_by(trc::location!())?,
-                        )
+                        .with_current(script)
                         .with_changed_by(access_token.account_tenant_ids()),
                 )
                 .caused_by(trc::location!())?

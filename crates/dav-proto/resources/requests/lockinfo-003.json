@@ -1,0 +1,46 @@
+{
+  "lock_scope": "Exclusive",
+  "lock_type": "Write",
+  "owner": {
+    "lang": "en",
+    "attributes": [],
+    "children": [
+      {
+        "Element": {
+          "name": {
+            "namespace": "DAV:",
+            "name": "href"
+          },
+          "prefix": "D",
+          "attributes": [],
+          "children": [
+            {
+              "Text": "http://example.org/~ejw/contact.html"
+            }
+          ]
+        }
+      },
+      {
+        "Text": " (Jane "
+      },
+      {
+        "Element": {
+          "name": {
+            "namespace": "urn:x",
+            "name": "b"
+          },
+          "prefix": null,
+          "attributes": [],
+          "children": [
+            {
+              "Text": "Doe"
+            }
+          ]
+        }
+      },
+      {
+        "Text": ")"
+      }
+    ]
+  }
+}

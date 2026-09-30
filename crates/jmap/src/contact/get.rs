@@ -4,14 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::blob::embedded::{EmbeddedBlobIds, import_error};
-use crate::changes::state::JmapCacheState;
+use crate::{
+    api::metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
+    blob::embedded::{EmbeddedBlobIds, import_error},
+    changes::state::JmapCacheState,
+};
 use calcard::jscontact::{JSContactProperty, JSContactValue, import::ImportOptions};
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::contact,
+    request::capability::CapabilityIds,
 };
 use jmap_tools::{Map, Value};
 use store::{
@@ -33,6 +37,7 @@ pub trait ContactCardGet: Sync + Send {
         &self,
         request: GetRequest<contact::ContactCard>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<GetResponse<contact::ContactCard>>> + Send;
 }
 
@@ -41,11 +46,17 @@ impl ContactCardGet for Server {
         &self,
         mut request: GetRequest<contact::ContactCard>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<GetResponse<contact::ContactCard>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let return_all_properties = request.properties.is_none();
-        let properties =
-            request.unwrap_properties(&[JSContactProperty::Id, JSContactProperty::AddressBookIds]);
+        let (properties, selection) = select_properties(
+            &mut request,
+            &[JSContactProperty::Id, JSContactProperty::AddressBookIds],
+            using,
+        )?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
+        let metadata_get = metadata.get(selection);
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_groupware_resources(
@@ -68,9 +79,31 @@ impl ContactCardGet for Server {
                 .map(Into::into)
                 .collect::<Vec<_>>()
         };
+        let mut metadata_values = match &metadata_get {
+            Some(get) => {
+                let mut documents = MetadataDocuments::default();
+                for document_id in ids
+                    .iter()
+                    .map(|id| id.document_id())
+                    .filter(|document_id| contact_ids.contains(*document_id))
+                {
+                    documents.insert(
+                        document_id,
+                        cache
+                            .item_by_id(document_id)
+                            .map_or_else(Default::default, |resource| resource.metadata_kinds()),
+                    );
+                }
+                Some(metadata.load(self, account_id, get, &documents).await?)
+            }
+            None => None,
+        };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: cache.get_state(false).into(),
+            state: metadata
+                .state(self, account_id, cache.get_state(false))
+                .await?
+                .into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };
@@ -181,6 +214,9 @@ impl ContactCardGet for Server {
                     );
                 }
                 result.insert_unchecked(JSContactProperty::AddressBookIds, Value::Object(obj));
+            }
+            if let Some(values) = &mut metadata_values {
+                values.insert_into(document_id, &mut result);
             }
 
             response.list.push(result.into());

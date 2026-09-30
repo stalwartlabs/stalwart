@@ -5,12 +5,15 @@
  */
 
 use crate::{
-    object::{AnyId, JmapObject, JmapObjectId, metadata::MetadataFilter},
+    object::{
+        AnyId, JmapObject, JmapObjectId,
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+    },
     request::{MaybeInvalid, deserialize::DeserializeArguments},
     types::date::UTCDate,
 };
 use calcard::jscontact::{JSContactProperty, JSContactValue};
-use jmap_tools::{JsonPointerItem, Key};
+use jmap_tools::{JsonPointer, JsonPointerItem, Key};
 use std::borrow::Cow;
 use types::{blob::BlobId, id::Id};
 
@@ -282,6 +285,30 @@ impl Default for ContactCardFilter {
 impl Default for ContactCardComparator {
     fn default() -> Self {
         ContactCardComparator::_T(String::new())
+    }
+}
+
+impl MetadataProperty for JSContactProperty<Id> {
+    fn as_metadata_root(&self) -> Option<MetadataRoot> {
+        match self {
+            JSContactProperty::Metadata => Some(MetadataRoot::Shared),
+            JSContactProperty::PrivateMetadata => Some(MetadataRoot::Private),
+            _ => None,
+        }
+    }
+
+    fn as_pointer(&self) -> Option<&JsonPointer<Self>> {
+        match self {
+            JSContactProperty::Pointer(pointer) => Some(pointer),
+            _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => JSContactProperty::Metadata,
+            MetadataRoot::Private => JSContactProperty::PrivateMetadata,
+        }
     }
 }
 

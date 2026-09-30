@@ -5,23 +5,20 @@
  */
 
 use super::{XmlCdataEscape, XmlEscape};
-use crate::{
-    responses::DeadPropertyFormat,
-    schema::{
-        Namespace, Namespaces,
-        property::{
-            ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue,
-            LockDiscovery, LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType,
-            Rfc1123DateTime, SupportedCollation, SupportedLock, WebDavProperty,
-        },
-        request::DavPropertyValue,
-        response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
+use crate::schema::{
+    Namespace, Namespaces,
+    property::{
+        ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue, LockDiscovery,
+        LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType, Rfc1123DateTime,
+        SupportedCollation, SupportedLock, WebDavProperty,
     },
+    request::DavPropertyValue,
+    response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
 };
 use calcard::icalendar::ICalendarComponentType;
 use mail_parser::{DOW, DateTime, MONTH};
-use std::fmt::Display;
-use types::dead_property::DeadProperty;
+use std::fmt::{self, Display};
+use types::metadata::{EncodedDavValue, XmlValue};
 
 impl Display for PropResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,13 +32,20 @@ impl Display for PropResponse {
 
 impl Display for DavPropertyValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (name, attrs) = self.property.tag_name();
-
-        write!(f, "<{}", name)?;
-
-        if let Some(attrs) = attrs {
-            write!(f, " {attrs}")?;
+        if let DavProperty::Dead(name) = &self.property {
+            return match &self.value {
+                DavValue::DeadEncoded(value) => value.view().write_property(name, f),
+                DavValue::Dead(value) => value
+                    .to_encoded()
+                    .map_err(|_| fmt::Error)?
+                    .view()
+                    .write_property(name, f),
+                _ => name.write_empty(f),
+            };
         }
+
+        let name = self.property.tag_name();
+        write!(f, "<{}", name)?;
 
         if !matches!(self.value, DavValue::Null) {
             write!(f, ">{}</{}>", self.value, name)
@@ -97,7 +101,7 @@ impl Display for DavValue {
             DavValue::Privileges(v) => v.fmt(f),
             DavValue::Acl(v) => v.fmt(f),
             DavValue::AclRestrictions(v) => v.fmt(f),
-            DavValue::DeadProperty(v) => v.fmt(f),
+            DavValue::Opaque => f.write_str("<A:opaque/>"),
             DavValue::SupportedAddressData => {
                 write!(
                     f,
@@ -118,7 +122,11 @@ impl Display for DavValue {
                 )
             }
             DavValue::Response(v) => v.fmt(f),
-            DavValue::VCard(_) | DavValue::ICalendar(_) | DavValue::Null => Ok(()),
+            DavValue::VCard(_)
+            | DavValue::ICalendar(_)
+            | DavValue::Dead(_)
+            | DavValue::DeadEncoded(_)
+            | DavValue::Null => Ok(()),
         }
     }
 }
@@ -144,81 +152,76 @@ impl DavValue {
 }
 
 impl DavProperty {
-    fn tag_name(&self) -> (&str, Option<&str>) {
-        (
-            match self {
-                DavProperty::WebDav(prop) => match prop {
-                    WebDavProperty::CreationDate => "D:creationdate",
-                    WebDavProperty::DisplayName => "D:displayname",
-                    WebDavProperty::GetContentLanguage => "D:getcontentlanguage",
-                    WebDavProperty::GetContentLength => "D:getcontentlength",
-                    WebDavProperty::GetContentType => "D:getcontenttype",
-                    WebDavProperty::GetETag => "D:getetag",
-                    WebDavProperty::GetLastModified => "D:getlastmodified",
-                    WebDavProperty::ResourceType => "D:resourcetype",
-                    WebDavProperty::LockDiscovery => "D:lockdiscovery",
-                    WebDavProperty::SupportedLock => "D:supportedlock",
-                    WebDavProperty::CurrentUserPrincipal => "D:current-user-principal",
-                    WebDavProperty::QuotaAvailableBytes => "D:quota-available-bytes",
-                    WebDavProperty::QuotaUsedBytes => "D:quota-used-bytes",
-                    WebDavProperty::SupportedReportSet => "D:supported-report-set",
-                    WebDavProperty::SyncToken => "D:sync-token",
-                    WebDavProperty::Owner => "D:owner",
-                    WebDavProperty::Group => "D:group",
-                    WebDavProperty::SupportedPrivilegeSet => "D:supported-privilege-set",
-                    WebDavProperty::CurrentUserPrivilegeSet => "D:current-user-privilege-set",
-                    WebDavProperty::Acl => "D:acl",
-                    WebDavProperty::AclRestrictions => "D:acl-restrictions",
-                    WebDavProperty::InheritedAclSet => "D:inherited-acl-set",
-                    WebDavProperty::PrincipalCollectionSet => "D:principal-collection-set",
-                    WebDavProperty::GetCTag => "C:getctag",
-                },
-                DavProperty::CardDav(prop) => match prop {
-                    CardDavProperty::AddressbookDescription => "B:addressbook-description",
-                    CardDavProperty::SupportedAddressData => "B:supported-address-data",
-                    CardDavProperty::SupportedCollationSet => "B:supported-collation-set",
-                    CardDavProperty::MaxResourceSize => "B:max-resource-size",
-                    CardDavProperty::AddressData { .. } => "B:address-data",
-                },
-                DavProperty::CalDav(prop) => match prop {
-                    CalDavProperty::CalendarDescription => "A:calendar-description",
-                    CalDavProperty::CalendarTimezone => "A:calendar-timezone",
-                    CalDavProperty::SupportedCalendarComponentSet => {
-                        "A:supported-calendar-component-set"
-                    }
-                    CalDavProperty::SupportedCalendarData => "A:supported-calendar-data",
-                    CalDavProperty::SupportedCollationSet => "A:supported-collation-set",
-                    CalDavProperty::MaxResourceSize => "A:max-resource-size",
-                    CalDavProperty::MinDateTime => "A:min-date-time",
-                    CalDavProperty::MaxDateTime => "A:max-date-time",
-                    CalDavProperty::MaxInstances => "A:max-instances",
-                    CalDavProperty::MaxAttendeesPerInstance => "A:max-attendees-per-instance",
-                    CalDavProperty::CalendarData(_) => "A:calendar-data",
-                    CalDavProperty::TimezoneServiceSet => "A:timezone-service-set",
-                    CalDavProperty::TimezoneId => "A:calendar-timezone-id",
-                    CalDavProperty::ScheduleDefaultCalendarURL => "A:schedule-default-calendar-URL",
-                    CalDavProperty::ScheduleTag => "A:schedule-tag",
-                    CalDavProperty::ScheduleCalendarTransp => "A:schedule-calendar-transp",
-                },
-                DavProperty::Principal(prop) => match prop {
-                    PrincipalProperty::AlternateURISet => "D:alternate-URI-set",
-                    PrincipalProperty::PrincipalURL => "D:principal-URL",
-                    PrincipalProperty::GroupMemberSet => "D:group-member-set",
-                    PrincipalProperty::GroupMembership => "D:group-membership",
-                    PrincipalProperty::CalendarHomeSet => "A:calendar-home-set",
-                    PrincipalProperty::AddressbookHomeSet => "B:addressbook-home-set",
-                    PrincipalProperty::PrincipalAddress => "B:principal-address",
-                    PrincipalProperty::CalendarUserAddressSet => "A:calendar-user-address-set",
-                    PrincipalProperty::CalendarUserType => "A:calendar-user-type",
-                    PrincipalProperty::ScheduleInboxURL => "A:schedule-inbox-URL",
-                    PrincipalProperty::ScheduleOutboxURL => "A:schedule-outbox-URL",
-                },
-                DavProperty::DeadProperty(dead) => {
-                    return (dead.name.as_str(), dead.attrs.as_deref());
-                }
+    fn tag_name(&self) -> &str {
+        match self {
+            DavProperty::WebDav(prop) => match prop {
+                WebDavProperty::CreationDate => "D:creationdate",
+                WebDavProperty::DisplayName => "D:displayname",
+                WebDavProperty::GetContentLanguage => "D:getcontentlanguage",
+                WebDavProperty::GetContentLength => "D:getcontentlength",
+                WebDavProperty::GetContentType => "D:getcontenttype",
+                WebDavProperty::GetETag => "D:getetag",
+                WebDavProperty::GetLastModified => "D:getlastmodified",
+                WebDavProperty::ResourceType => "D:resourcetype",
+                WebDavProperty::LockDiscovery => "D:lockdiscovery",
+                WebDavProperty::SupportedLock => "D:supportedlock",
+                WebDavProperty::CurrentUserPrincipal => "D:current-user-principal",
+                WebDavProperty::QuotaAvailableBytes => "D:quota-available-bytes",
+                WebDavProperty::QuotaUsedBytes => "D:quota-used-bytes",
+                WebDavProperty::SupportedReportSet => "D:supported-report-set",
+                WebDavProperty::SyncToken => "D:sync-token",
+                WebDavProperty::Owner => "D:owner",
+                WebDavProperty::Group => "D:group",
+                WebDavProperty::SupportedPrivilegeSet => "D:supported-privilege-set",
+                WebDavProperty::CurrentUserPrivilegeSet => "D:current-user-privilege-set",
+                WebDavProperty::Acl => "D:acl",
+                WebDavProperty::AclRestrictions => "D:acl-restrictions",
+                WebDavProperty::InheritedAclSet => "D:inherited-acl-set",
+                WebDavProperty::PrincipalCollectionSet => "D:principal-collection-set",
+                WebDavProperty::GetCTag => "C:getctag",
             },
-            None,
-        )
+            DavProperty::CardDav(prop) => match prop {
+                CardDavProperty::AddressbookDescription => "B:addressbook-description",
+                CardDavProperty::SupportedAddressData => "B:supported-address-data",
+                CardDavProperty::SupportedCollationSet => "B:supported-collation-set",
+                CardDavProperty::MaxResourceSize => "B:max-resource-size",
+                CardDavProperty::AddressData { .. } => "B:address-data",
+            },
+            DavProperty::CalDav(prop) => match prop {
+                CalDavProperty::CalendarDescription => "A:calendar-description",
+                CalDavProperty::CalendarTimezone => "A:calendar-timezone",
+                CalDavProperty::SupportedCalendarComponentSet => {
+                    "A:supported-calendar-component-set"
+                }
+                CalDavProperty::SupportedCalendarData => "A:supported-calendar-data",
+                CalDavProperty::SupportedCollationSet => "A:supported-collation-set",
+                CalDavProperty::MaxResourceSize => "A:max-resource-size",
+                CalDavProperty::MinDateTime => "A:min-date-time",
+                CalDavProperty::MaxDateTime => "A:max-date-time",
+                CalDavProperty::MaxInstances => "A:max-instances",
+                CalDavProperty::MaxAttendeesPerInstance => "A:max-attendees-per-instance",
+                CalDavProperty::CalendarData(_) => "A:calendar-data",
+                CalDavProperty::TimezoneServiceSet => "A:timezone-service-set",
+                CalDavProperty::TimezoneId => "A:calendar-timezone-id",
+                CalDavProperty::ScheduleDefaultCalendarURL => "A:schedule-default-calendar-URL",
+                CalDavProperty::ScheduleTag => "A:schedule-tag",
+                CalDavProperty::ScheduleCalendarTransp => "A:schedule-calendar-transp",
+            },
+            DavProperty::Principal(prop) => match prop {
+                PrincipalProperty::AlternateURISet => "D:alternate-URI-set",
+                PrincipalProperty::PrincipalURL => "D:principal-URL",
+                PrincipalProperty::GroupMemberSet => "D:group-member-set",
+                PrincipalProperty::GroupMembership => "D:group-membership",
+                PrincipalProperty::CalendarHomeSet => "A:calendar-home-set",
+                PrincipalProperty::AddressbookHomeSet => "B:addressbook-home-set",
+                PrincipalProperty::PrincipalAddress => "B:principal-address",
+                PrincipalProperty::CalendarUserAddressSet => "A:calendar-user-address-set",
+                PrincipalProperty::CalendarUserType => "A:calendar-user-type",
+                PrincipalProperty::ScheduleInboxURL => "A:schedule-inbox-URL",
+                PrincipalProperty::ScheduleOutboxURL => "A:schedule-outbox-URL",
+            },
+            DavProperty::Dead(name) => name.name(),
+        }
     }
 
     pub fn namespace(&self) -> Namespace {
@@ -243,7 +246,7 @@ impl DavProperty {
 
 impl AsRef<str> for DavProperty {
     fn as_ref(&self) -> &str {
-        self.tag_name().0
+        self.tag_name()
     }
 }
 
@@ -271,11 +274,9 @@ impl Display for ReportSet {
 
 impl Display for DavProperty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (name, attrs) = self.tag_name();
-        if let Some(attrs) = attrs {
-            write!(f, "<{name} {attrs}/>")
-        } else {
-            write!(f, "<{name}/>")
+        match self {
+            DavProperty::Dead(name) => name.write_empty(f),
+            property => write!(f, "<{}/>", property.tag_name()),
         }
     }
 }
@@ -414,9 +415,15 @@ impl From<AclRestrictions> for DavValue {
     }
 }
 
-impl From<DeadProperty> for DavValue {
-    fn from(v: DeadProperty) -> Self {
-        DavValue::DeadProperty(v)
+impl From<EncodedDavValue> for DavValue {
+    fn from(v: EncodedDavValue) -> Self {
+        DavValue::DeadEncoded(v)
+    }
+}
+
+impl From<XmlValue<'static>> for DavValue {
+    fn from(v: XmlValue<'static>) -> Self {
+        DavValue::Dead(Box::new(v))
     }
 }
 

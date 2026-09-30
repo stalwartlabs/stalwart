@@ -5,7 +5,13 @@
  */
 
 use super::node::node_type_id;
-use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        metadata::{MetadataType, ObjectMetadata, ResourceScope, flagged_documents},
+        query::QueryResponseBuilder,
+    },
+    changes::state::JmapCacheState,
+};
 use common::{
     GroupwareResourceRef, GroupwareResources, Server,
     auth::AccessToken,
@@ -20,7 +26,7 @@ use jmap_proto::{
     object::file_node::{
         FileNode as FileNodeObject, FileNodeComparator, FileNodeFilter, FileNodeNodeType,
     },
-    request::MaybeInvalid,
+    request::{MaybeInvalid, capability::CapabilityIds},
 };
 use std::cmp::Ordering;
 use store::IterateParams;
@@ -47,6 +53,7 @@ pub trait FileNodeQuery: Sync + Send {
         &self,
         request: QueryRequest<FileNodeObject>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
@@ -55,8 +62,15 @@ impl FileNodeQuery for Server {
         &self,
         mut request: QueryRequest<FileNodeObject>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
+        let metadata_query =
+            metadata.query(request.filter.iter().filter_map(|filter| match filter {
+                Filter::Property(FileNodeFilter::Metadata(filter)) => Some(filter),
+                _ => None,
+            }))?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -88,6 +102,13 @@ impl FileNodeQuery for Server {
             Some(hidden) => set | hidden,
             None => set,
         };
+        let mut metadata_leaves = metadata
+            .evaluate(self, account_id, &metadata_query, || {
+                let readable = hidden.as_ref().map(|hidden| &mask - hidden);
+                flagged_documents(&cache, ResourceScope::All, readable.as_ref())
+            })
+            .await?
+            .into_iter();
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -274,7 +295,9 @@ impl FileNodeQuery for Server {
                             ));
                             continue;
                         }
-                        FileNodeFilter::Metadata(_) => todo!(),
+                        FileNodeFilter::Metadata(_) => {
+                            readable_only(metadata_leaves.next().unwrap_or_default())
+                        }
                         unsupported @ (FileNodeFilter::Body(_) | FileNodeFilter::_T(_)) => {
                             return Err(trc::JmapEvent::UnsupportedFilter
                                 .into_err()
@@ -310,7 +333,9 @@ impl FileNodeQuery for Server {
         let mut response = QueryResponseBuilder::new(
             results.len() as usize,
             self.core.jmap.query_max_results,
-            cache.get_state(false),
+            metadata
+                .state(self, account_id, cache.get_state(false))
+                .await?,
             &request,
         );
 

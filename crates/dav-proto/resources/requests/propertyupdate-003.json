@@ -1,0 +1,188 @@
+{
+  "set": [
+    {
+      "property": {
+        "type": "Dead",
+        "data": {
+          "namespace": "http://example.com/ns",
+          "name": "author"
+        }
+      },
+      "value": {
+        "Dead": {
+          "lang": "en",
+          "attributes": [],
+          "children": [
+            {
+              "Text": "\n  "
+            },
+            {
+              "Element": {
+                "name": {
+                  "namespace": "http://example.com/ns",
+                  "name": "name"
+                },
+                "prefix": "x",
+                "attributes": [],
+                "children": [
+                  {
+                    "Text": "Jane Doe"
+                  }
+                ]
+              }
+            },
+            {
+              "Text": "\n  \n  "
+            },
+            {
+              "Element": {
+                "name": {
+                  "namespace": "http://example.com/ns",
+                  "name": "uri"
+                },
+                "prefix": "x",
+                "attributes": [
+                  {
+                    "name": {
+                      "namespace": null,
+                      "name": "type"
+                    },
+                    "value": "email"
+                  },
+                  {
+                    "name": {
+                      "namespace": null,
+                      "name": "added"
+                    },
+                    "value": "2005-11-26"
+                  }
+                ],
+                "children": [
+                  {
+                    "Text": "mailto:jane.doe@example.com"
+                  }
+                ]
+              }
+            },
+            {
+              "Text": "\n  "
+            },
+            {
+              "Element": {
+                "name": {
+                  "namespace": "http://example.com/ns",
+                  "name": "notes"
+                },
+                "prefix": "x",
+                "attributes": [],
+                "children": [
+                  {
+                    "Text": "\n    Jane has been working way "
+                  },
+                  {
+                    "Element": {
+                      "name": {
+                        "namespace": "http://www.w3.org/1999/xhtml",
+                        "name": "em"
+                      },
+                      "prefix": "h",
+                      "attributes": [],
+                      "children": [
+                        {
+                          "Text": "too"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "Text": " long on the\n    long-awaited revision of <RFC2518>.\n  "
+                  }
+                ]
+              }
+            },
+            {
+              "Text": "\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "property": {
+        "type": "Dead",
+        "data": {
+          "namespace": "http://calendarserver.org/ns",
+          "name": "source"
+        }
+      },
+      "value": {
+        "Dead": {
+          "lang": "en",
+          "attributes": [],
+          "children": [
+            {
+              "Element": {
+                "name": {
+                  "namespace": "DAV:",
+                  "name": "href"
+                },
+                "prefix": "D",
+                "attributes": [],
+                "children": [
+                  {
+                    "Text": "https://example.com/holidays.ics"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "property": {
+        "type": "Dead",
+        "data": {
+          "namespace": "http://apple.com/ns/ical/",
+          "name": "calendar-color"
+        }
+      },
+      "value": {
+        "Dead": {
+          "lang": "en",
+          "attributes": [
+            {
+              "name": {
+                "namespace": null,
+                "name": "symbolic-color"
+              },
+              "value": "red"
+            }
+          ],
+          "children": [
+            {
+              "Text": "#FF0000"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "remove": [
+    {
+      "type": "Dead",
+      "data": {
+        "namespace": "urn:x",
+        "name": "gone"
+      }
+    },
+    {
+      "type": "Dead",
+      "data": {
+        "namespace": "http://calendarserver.org/ns/",
+        "name": "source"
+      }
+    }
+  ],
+  "set_first": true
+}

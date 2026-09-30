@@ -328,10 +328,7 @@ impl CardUpdateRequestHandler for Server {
                 }],
                 ..Default::default()
             };
-            let content = ContactCardContent {
-                card: vcard,
-                ..Default::default()
-            };
+            let content = ContactCardContent { card: vcard };
 
             // Prepare write batch
             let mut batch = BatchBuilder::new();

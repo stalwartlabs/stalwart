@@ -7,7 +7,7 @@
 use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
-        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
@@ -102,17 +102,20 @@ impl Property for CalendarProperty {
         value: &str,
         depth: PointerDepth,
     ) -> Option<Self> {
-        let patch_depth = key.is_none().then_some(depth);
         match key {
-            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 CalendarProperty::ShareWith => {
                     Id::from_str(value).ok().map(CalendarProperty::IdValue)
                 }
-                _ => CalendarProperty::parse(value, patch_depth),
+                _ => CalendarProperty::parse_nested_name(value),
             },
-            _ => CalendarProperty::parse(value, patch_depth),
+            Some(_) => CalendarProperty::parse_nested_name(value),
+            None => CalendarProperty::parse(value, Some(depth)),
         }
+    }
+
+    fn is_opaque(&self) -> bool {
+        self.metadata_root().is_some()
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -264,41 +267,40 @@ impl CalendarProperty {
         )
     }
 
+    property_names!(
+        CalendarProperty,
+        "id" => CalendarProperty::Id,
+        "name" => CalendarProperty::Name,
+        "description" => CalendarProperty::Description,
+        "color" => CalendarProperty::Color,
+        "sortOrder" => CalendarProperty::SortOrder,
+        "isSubscribed" => CalendarProperty::IsSubscribed,
+        "isVisible" => CalendarProperty::IsVisible,
+        "isDefault" => CalendarProperty::IsDefault,
+        "includeInAvailability" => CalendarProperty::IncludeInAvailability,
+        "defaultAlertsWithTime" => CalendarProperty::DefaultAlertsWithTime,
+        "defaultAlertsWithoutTime" => CalendarProperty::DefaultAlertsWithoutTime,
+        "timeZone" => CalendarProperty::TimeZone,
+        "shareWith" => CalendarProperty::ShareWith,
+        "myRights" => CalendarProperty::MyRights,
+        "mayReadFreeBusy" => CalendarProperty::Rights(CalendarRight::MayReadFreeBusy),
+        "mayReadItems" => CalendarProperty::Rights(CalendarRight::MayReadItems),
+        "mayWriteAll" => CalendarProperty::Rights(CalendarRight::MayWriteAll),
+        "mayWriteOwn" => CalendarProperty::Rights(CalendarRight::MayWriteOwn),
+        "mayUpdatePrivate" => CalendarProperty::Rights(CalendarRight::MayUpdatePrivate),
+        "mayRSVP" => CalendarProperty::Rights(CalendarRight::MayRSVP),
+        "mayShare" => CalendarProperty::Rights(CalendarRight::MayShare),
+        "mayDelete" => CalendarProperty::Rights(CalendarRight::MayDelete),
+        "@type" => CalendarProperty::Type,
+        "when" => CalendarProperty::When,
+        "trigger" => CalendarProperty::Trigger,
+        "offset" => CalendarProperty::Offset,
+        "relativeTo" => CalendarProperty::RelativeTo,
+        "action" => CalendarProperty::Action,
+    );
+
     fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
-        hashify::fnc_map!(value.as_bytes(),
-            b"id" => Some(CalendarProperty::Id),
-            b"name" => Some(CalendarProperty::Name),
-            b"description" => Some(CalendarProperty::Description),
-            b"color" => Some(CalendarProperty::Color),
-            b"sortOrder" => Some(CalendarProperty::SortOrder),
-            b"isSubscribed" => Some(CalendarProperty::IsSubscribed),
-            b"isVisible" => Some(CalendarProperty::IsVisible),
-            b"isDefault" => Some(CalendarProperty::IsDefault),
-            b"includeInAvailability" => Some(CalendarProperty::IncludeInAvailability),
-            b"defaultAlertsWithTime" => Some(CalendarProperty::DefaultAlertsWithTime),
-            b"defaultAlertsWithoutTime" => Some(CalendarProperty::DefaultAlertsWithoutTime),
-            b"timeZone" => Some(CalendarProperty::TimeZone),
-            b"shareWith" => Some(CalendarProperty::ShareWith),
-            b"myRights" => Some(CalendarProperty::MyRights),
-            b"metadata" => Some(CalendarProperty::Metadata),
-            b"privateMetadata" => Some(CalendarProperty::PrivateMetadata),
-            b"mayReadFreeBusy" => Some(CalendarProperty::Rights(CalendarRight::MayReadFreeBusy)),
-            b"mayReadItems" => Some(CalendarProperty::Rights(CalendarRight::MayReadItems)),
-            b"mayWriteAll" => Some(CalendarProperty::Rights(CalendarRight::MayWriteAll)),
-            b"mayWriteOwn" => Some(CalendarProperty::Rights(CalendarRight::MayWriteOwn)),
-            b"mayUpdatePrivate" => Some(CalendarProperty::Rights(CalendarRight::MayUpdatePrivate)),
-            b"mayRSVP" => Some(CalendarProperty::Rights(CalendarRight::MayRSVP)),
-            b"mayShare" => Some(CalendarProperty::Rights(CalendarRight::MayShare)),
-            b"mayDelete" => Some(CalendarProperty::Rights(CalendarRight::MayDelete)),
-            b"@type" => Some(CalendarProperty::Type),
-            b"when" => Some(CalendarProperty::When),
-            b"trigger" => Some(CalendarProperty::Trigger),
-            b"offset" => Some(CalendarProperty::Offset),
-            b"relativeTo" => Some(CalendarProperty::RelativeTo),
-            b"action" => Some(CalendarProperty::Action),
-            _ => None,
-        )
-        .or_else(|| {
+        CalendarProperty::parse_name(value).or_else(|| {
             patch_depth
                 .filter(|_| value.contains('/'))
                 .and_then(|depth| JsonPointer::parse_nested(value, depth))
@@ -308,7 +310,6 @@ impl CalendarProperty {
 
     fn patch_or_prop(&self) -> &CalendarProperty {
         if let CalendarProperty::Pointer(ptr) = self
-            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
@@ -331,6 +332,13 @@ impl MetadataProperty for CalendarProperty {
         match self {
             CalendarProperty::Pointer(pointer) => Some(pointer),
             _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => CalendarProperty::Metadata,
+            MetadataRoot::Private => CalendarProperty::PrivateMetadata,
         }
     }
 }

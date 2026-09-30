@@ -5,7 +5,9 @@
  */
 
 use crate::{
-    blob::download::BlobDownload, changes::state::JmapCacheState, email::ingested_into_object,
+    blob::download::BlobDownload,
+    changes::state::{JmapCacheState, MetadataStateManager},
+    email::ingested_into_object,
 };
 use common::{MAX_RECEIVED_AT, Server, auth::AccessToken, ipc::PushNotification};
 use email::{
@@ -18,13 +20,14 @@ use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::import::{ImportEmailRequest, ImportEmailResponse},
     object::email::EmailProperty,
-    request::reference::MaybeIdReference,
+    request::{capability::CapabilityIds, reference::MaybeIdReference},
     types::state::State,
 };
 use mail_parser::MessageParser;
 use std::future::Future;
 use types::{
     acl::Acl,
+    collection::Collection,
     id::Id,
     keyword::Keyword,
     type_state::{DataType, StateChange},
@@ -37,6 +40,7 @@ pub trait EmailImport: Sync + Send {
         request: ImportEmailRequest,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<ImportEmailResponse>> + Send;
 }
 
@@ -46,11 +50,21 @@ impl EmailImport for Server {
         request: ImportEmailRequest,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<ImportEmailResponse> {
         // Validate state
         let account_id = request.account_id.document_id();
         let cache = self.get_cached_messages(account_id).await?;
-        let old_state: State = cache.assert_state(false, &request.if_in_state)?;
+        let viewer = self.jmap_metadata_viewer(access_token, using, DataType::Email);
+        let old_state: State = self
+            .assert_metadata_state(
+                viewer,
+                account_id,
+                Collection::Email,
+                cache.get_state(false),
+                &request.if_in_state,
+            )
+            .await?;
         let can_add_mailbox_ids = if access_token.is_shared(account_id) {
             cache.shared_mailboxes(access_token, Acl::AddItems).into()
         } else {
@@ -201,6 +215,7 @@ impl EmailImport for Server {
                     mailbox_ids,
                     keywords: email.keywords,
                     received_at,
+                    metadata: None,
                     session_id: session.session_id,
                 })
                 .await
@@ -247,7 +262,14 @@ impl EmailImport for Server {
             ))
             .await;
 
-            response.new_state = self.get_cached_messages(account_id).await?.get_state(false);
+            response.new_state = self
+                .metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Email,
+                    self.get_cached_messages(account_id).await?.get_state(false),
+                )
+                .await?;
         }
 
         Ok(response)

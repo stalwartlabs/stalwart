@@ -13,7 +13,7 @@ use crate::{
 use calcard::common::timezone::Tz;
 use rkyv::with::InlineAsBox;
 use std::sync::Arc;
-use types::acl::AclGrant;
+use types::{acl::AclGrant, metadata::MetadataKinds};
 use utils::map::bitmap::Bitmap;
 
 const KIND_FILE: u16 = 1;
@@ -147,8 +147,10 @@ impl FlatResource {
                 name,
                 acls,
                 preferences,
+                metadata,
                 ..
             } => {
+                flat.flags = u16::from(metadata.bits());
                 flat.set_ref_a(name)?;
                 flat.set_ref_b(acls)?;
                 flat.v0 = preferences.off;
@@ -190,7 +192,13 @@ impl FlatResource {
                 flat.v2 = *changed_by;
                 flat.v3 = *calendar_ids_len as u32;
             }
-            GroupwareResourceMetadata::AddressBook { name, acls, .. } => {
+            GroupwareResourceMetadata::AddressBook {
+                name,
+                acls,
+                metadata,
+                ..
+            } => {
+                flat.flags = u16::from(metadata.bits());
                 flat.set_ref_a(name)?;
                 flat.set_ref_b(acls)?;
             }
@@ -199,8 +207,10 @@ impl FlatResource {
                 created_at,
                 modified_at,
                 uid,
+                flags,
                 ..
             } => {
+                flat.flags = *flags;
                 flat.set_ref_a(names)?;
                 flat.set_ref_b(uid)?;
                 flat.v0 = times.encode(*created_at);
@@ -239,6 +249,10 @@ impl ArchivedFlatResource {
         }
     }
 
+    fn metadata_kinds(&self) -> Option<MetadataKinds> {
+        MetadataKinds::from_bits(u8::try_from(self.flags.to_native()).ok()?)
+    }
+
     fn unpack(&self, kind: u16, times: &ChunkTimes) -> Option<GroupwareResource> {
         let data = match kind {
             KIND_FILE => GroupwareResourceMetadata::File {
@@ -259,6 +273,7 @@ impl ArchivedFlatResource {
                     len: self.v1.to_native(),
                 },
                 etag: self.etag.to_native(),
+                metadata: self.metadata_kinds()?,
             },
             KIND_CALENDAR_EVENT => GroupwareResourceMetadata::CalendarEvent {
                 names: self.ref_a(),
@@ -286,6 +301,7 @@ impl ArchivedFlatResource {
                 name: self.ref_a(),
                 acls: self.ref_b(),
                 etag: self.etag.to_native(),
+                metadata: self.metadata_kinds()?,
             },
             KIND_CONTACT_CARD => GroupwareResourceMetadata::ContactCard {
                 names: self.ref_a(),
@@ -293,6 +309,7 @@ impl ArchivedFlatResource {
                 modified_at: self.v1.to_native() as i32,
                 uid: self.ref_b(),
                 etag: self.etag.to_native(),
+                flags: self.flags.to_native(),
             },
             _ => return None,
         };
@@ -773,15 +790,29 @@ mod tests {
     use super::*;
     use crate::{
         DAV_CHUNK, DavName,
-        storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_SYMLINK, ResourceChunkBuilder},
+        storage::dav::{
+            FILE_KIND_DIRECTORY, FILE_KIND_SYMLINK, FilePresence, PresenceBits,
+            ResourceChunkBuilder,
+        },
     };
     use types::acl::Acl;
+
+    const KINDS: [MetadataKinds; 4] = [
+        MetadataKinds::NONE,
+        MetadataKinds::JMAP,
+        MetadataKinds::DAV,
+        MetadataKinds::JMAP.union(MetadataKinds::DAV),
+    ];
 
     fn grants(account_id: u32) -> AclGrant {
         AclGrant {
             account_id,
             grants: Bitmap::from_iter([Acl::Read, Acl::Modify]),
         }
+    }
+
+    fn kinds(seed: u32) -> MetadataKinds {
+        KINDS[seed as usize % KINDS.len()]
     }
 
     fn calcard(items: usize) -> GroupwareResources {
@@ -804,6 +835,7 @@ mod tests {
                     acls,
                     preferences,
                     etag: document_id + 700,
+                    metadata: kinds(document_id + 1),
                 },
             });
             entries.push((
@@ -843,7 +875,8 @@ mod tests {
                     modified_at: -(document_id as i32) - 1,
                     etag: document_id + 800,
                     uid,
-                    flags: (document_id % 4) as u16 * 0x40,
+                    flags: PresenceBits::CALENDAR_EVENT
+                        .apply((document_id % 4) as u16 * 0x40, kinds(document_id / 4)),
                 },
             });
             entries.push((
@@ -979,7 +1012,8 @@ mod tests {
                         (document_id % 10) as u8,
                         media_id,
                         extra_len,
-                    ),
+                    )
+                    .with_presence(FilePresence::from_bits((document_id % 8) as u16)),
                     size: 1024 + document_id,
                     parent_id: if document_id == 0 {
                         crate::NO_ID
@@ -1037,6 +1071,9 @@ mod tests {
         for (a, b) in left.resources.iter().zip(right.resources.iter()) {
             assert_eq!(a.document_id(), b.document_id());
             assert_eq!(a.is_container(), b.is_container());
+            assert_eq!(a.etag(), b.etag());
+            assert_eq!(a.metadata_kinds(), b.metadata_kinds());
+            assert_eq!(a.has_dav_display_name(), b.has_dav_display_name());
             assert_eq!(a.acls(), b.acls());
             assert_eq!(a.size(), b.size());
             assert_eq!(a.parent_id(), b.parent_id());
@@ -1130,6 +1167,7 @@ mod tests {
                     acls,
                     preferences,
                     etag: document_id + 700,
+                    metadata: MetadataKinds::NONE,
                 },
             });
             entries.push((
@@ -1214,6 +1252,7 @@ mod tests {
                     name,
                     acls,
                     etag: document_id + 700,
+                    metadata: kinds(document_id + 1),
                 },
             });
             entries.push((
@@ -1251,6 +1290,7 @@ mod tests {
                     modified_at: -(document_id as i32) - 1,
                     uid,
                     etag: document_id + 800,
+                    flags: PresenceBits::CONTACT_CARD.apply(0, kinds(document_id)),
                 },
             });
             entries.push((
@@ -1419,6 +1459,44 @@ mod tests {
         let encoded = resources.to_snapshot().expect("encode");
         let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
         assert_same(&resources, &decoded);
+        assert!(
+            decoded
+                .resources
+                .iter()
+                .any(|resource| resource.has_dav_display_name())
+        );
+    }
+
+    #[test]
+    fn contacts_snapshot_round_trips() {
+        let resources = contacts(300);
+        let encoded = resources.to_snapshot().expect("encode");
+        let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
+        assert_same(&resources, &decoded);
+    }
+
+    #[test]
+    fn presence_survives_the_round_trip() {
+        for resources in [calcard(40), contacts(40), files(40)] {
+            let encoded = resources.to_snapshot().expect("encode");
+            let decoded = GroupwareResources::from_snapshot(&encoded).expect("decode");
+            let kinds = decoded
+                .resources
+                .iter()
+                .map(|resource| resource.metadata_kinds())
+                .collect::<Vec<_>>();
+            assert!(
+                resources
+                    .resources
+                    .iter()
+                    .map(|resource| resource.metadata_kinds())
+                    .eq(kinds.iter().copied())
+            );
+            assert!(
+                KINDS.iter().all(|expected| kinds.contains(expected)),
+                "not every kind was exercised"
+            );
+        }
     }
 
     #[test]
@@ -1470,6 +1548,7 @@ mod tests {
                 acls,
                 preferences,
                 etag: 0,
+                metadata: MetadataKinds::NONE,
             },
         });
 
@@ -1582,6 +1661,21 @@ mod tests {
             )
             .is_none(),
             "an arena length past the end of the chunk was accepted"
+        );
+
+        let (mut chunks, path_chunks) = resources.pack().expect("packs");
+        if let Some(record) = chunks
+            .first_mut()
+            .and_then(|chunk| chunk.records.first_mut())
+        {
+            record.flags = u16::MAX;
+        }
+        assert!(
+            GroupwareResources::from_snapshot(
+                &resources.seal_snapshot(chunks, path_chunks).expect("seals")
+            )
+            .is_none(),
+            "a calendar with unknown metadata kinds was accepted"
         );
 
         let (chunks, mut path_chunks) = resources.pack().unwrap();

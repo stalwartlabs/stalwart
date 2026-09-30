@@ -19,7 +19,7 @@ use jmap_proto::{
         query_changes::{AddedItem, QueryChangesRequest, QueryChangesResponse},
     },
     object::{JmapObject, NullObject},
-    request::{QueryChangesRequestMethod, method::MethodObject},
+    request::{QueryChangesRequestMethod, capability::CapabilityIds, method::MethodObject},
 };
 use std::future::Future;
 
@@ -28,6 +28,7 @@ pub trait QueryChanges: Sync + Send {
         &self,
         request: QueryChangesRequestMethod,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryChangesResponse>> + Send;
 }
 
@@ -36,6 +37,7 @@ impl QueryChanges for Server {
         &self,
         request: QueryChangesRequestMethod,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryChangesResponse> {
         let mut response;
         let mut is_mutable = true;
@@ -53,6 +55,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::Email,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -71,7 +74,9 @@ impl QueryChanges for Server {
                         .as_ref()
                         .is_some_and(|sort| sort.iter().any(|s| !s.is_immutable()));
 
-                results = self.email_query((*request).into(), access_token).await?;
+                results = self
+                    .email_query((*request).into(), access_token, using)
+                    .await?;
             }
             QueryChangesRequestMethod::Mailbox(mut request) => {
                 // Query changes
@@ -81,6 +86,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::Mailbox,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -93,7 +99,9 @@ impl QueryChanges for Server {
                 }
 
                 up_to_id = request.up_to_id;
-                results = self.mailbox_query((*request).into(), access_token).await?;
+                results = self
+                    .mailbox_query((*request).into(), access_token, using)
+                    .await?;
             }
             QueryChangesRequestMethod::EmailSubmission(mut request) => {
                 // Query changes
@@ -107,6 +115,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::EmailSubmission,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -133,6 +142,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::ContactCard,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -146,7 +156,7 @@ impl QueryChanges for Server {
 
                 up_to_id = request.up_to_id;
                 results = self
-                    .contact_card_query((*request).into(), access_token)
+                    .contact_card_query((*request).into(), access_token, using)
                     .await?;
             }
             QueryChangesRequestMethod::FileNode(mut request) => {
@@ -161,6 +171,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::FileNode,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -174,7 +185,7 @@ impl QueryChanges for Server {
 
                 up_to_id = request.up_to_id;
                 results = self
-                    .file_node_query((*request).into(), access_token)
+                    .file_node_query((*request).into(), access_token, using)
                     .await?;
             }
             QueryChangesRequestMethod::CalendarEvent(mut request) => {
@@ -193,6 +204,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::CalendarEvent,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -206,7 +218,7 @@ impl QueryChanges for Server {
 
                 up_to_id = request.up_to_id;
                 results = self
-                    .calendar_event_query((*request).into(), access_token)
+                    .calendar_event_query((*request).into(), access_token, using)
                     .await?;
             }
             QueryChangesRequestMethod::CalendarEventNotification(mut request) => {
@@ -221,6 +233,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::CalendarEventNotification,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -249,6 +262,7 @@ impl QueryChanges for Server {
                         build_changes_request(&request),
                         MethodObject::ShareNotification,
                         access_token,
+                        using,
                     )
                     .await?
                     .response;
@@ -306,7 +320,7 @@ fn build_changes_request<T: JmapObject>(req: &QueryChangesRequest<T>) -> Changes
         account_id: req.account_id,
         since_state: req.since_query_state.clone(),
         max_changes: req.max_changes,
-        ignore_metadata_only_changes: None,
+        ignore_metadata_only_changes: Some(false),
     }
 }
 

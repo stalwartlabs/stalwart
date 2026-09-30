@@ -7,6 +7,7 @@
 pub mod file;
 pub mod hierarchy;
 pub mod paths;
+pub mod presence;
 pub mod resource;
 pub mod store;
 
@@ -14,6 +15,7 @@ pub use file::{
     FILE_DEFAULT_MEDIA_TYPE, FILE_KIND_DIRECTORY, FILE_KIND_FILE, FILE_KIND_SYMLINK,
     MAX_FILE_EXTRA_LEN,
 };
+pub use presence::{DISPLAY_NAME_PROPERTY, FilePresence, PresenceBits};
 pub use store::ResourceChunkBuilder;
 
 use percent_encoding::{

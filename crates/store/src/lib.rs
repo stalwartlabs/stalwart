@@ -28,6 +28,7 @@ use crate::backend::{elastic::ElasticSearchStore, meili::MeiliSearchStore};
 use ahash::AHashMap;
 use backend::{ephemeral::EphemeralStore, fs::FsStore, http::HttpStore, memory::StaticMemoryStore};
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
+use types::collection::SyncCollection;
 use write::ValueClass;
 
 pub trait Deserialize: Sized + Sync + Send {
@@ -102,6 +103,20 @@ pub struct LogKey {
     pub account_id: u32,
     pub collection: u8,
     pub change_id: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PrivateLogKey {
+    pub account_id: u32,
+    pub collection: SyncCollection,
+    pub viewer: u32,
+    pub change_id: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChangeLogKey {
+    Shared(LogKey),
+    Private(PrivateLogKey),
 }
 
 pub const U128_LEN: usize = std::mem::size_of::<u128>();

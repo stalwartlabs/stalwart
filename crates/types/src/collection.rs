@@ -77,8 +77,9 @@ pub enum Collection {
     ContactCard = 11,
     FileNode = 12,
     CalendarEventNotification = 13,
+    Metadata = 14,
     #[default]
-    None = 14,
+    None = 15,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Default)]
@@ -267,6 +268,7 @@ impl From<u8> for Collection {
             11 => Collection::ContactCard,
             12 => Collection::FileNode,
             13 => Collection::CalendarEventNotification,
+            14 => Collection::Metadata,
             _ => Collection::None,
         }
     }
@@ -325,6 +327,7 @@ impl From<u64> for Collection {
             11 => Collection::ContactCard,
             12 => Collection::FileNode,
             13 => Collection::CalendarEventNotification,
+            14 => Collection::Metadata,
             _ => Collection::None,
         }
     }
@@ -431,6 +434,7 @@ impl Collection {
             Collection::ContactCard => "contactCard",
             Collection::FileNode => "fileNode",
             Collection::CalendarEventNotification => "calendarEventNotification",
+            Collection::Metadata => "metadata",
             Collection::None => "",
         }
     }
@@ -451,6 +455,7 @@ impl Collection {
             Collection::ContactCard => "contact-card",
             Collection::FileNode => "file-node",
             Collection::CalendarEventNotification => "calendar-event-notification",
+            Collection::Metadata => "metadata",
             Collection::None => "",
         }
     }
@@ -475,6 +480,7 @@ impl FromStr for Collection {
             "contactCard" => Collection::ContactCard,
             "fileNode" => Collection::FileNode,
             "calendarEventNotification" => Collection::CalendarEventNotification,
+            "metadata" => Collection::Metadata,
         )
         .copied()
         .ok_or(())

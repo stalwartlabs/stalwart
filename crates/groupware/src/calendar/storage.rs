@@ -25,6 +25,7 @@ use crate::{
         privacy::ICalendarPrivacy,
         schedule::{EventAlarmScheduler, EventAlarmUsers, EventAlarms},
     },
+    metadata::MetadataCleanup,
     scheduling::{ItipMessages, event_cancel::itip_cancel, recipient::RecipientPolicy},
 };
 use calcard::icalendar::ICalendar;
@@ -358,6 +359,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
         account_id: u32,
         document_id: u32,
         children_ids: Vec<u32>,
+        cleanup: &MetadataCleanup,
         delete_path: Option<String>,
         send_itip: bool,
         batch: &mut BatchBuilder,
@@ -435,6 +437,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
                         None,
                         send_itip,
                         &mut resolver,
+                        cleanup,
                         batch,
                     )
                     .await?;
@@ -442,23 +445,60 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
         }
 
         self.delete(
+            server,
             account_info.account_tenant_ids(),
             account_id,
             document_id,
             delete_path,
             batch,
         )
+        .await
     }
 
-    pub fn delete(
+    pub async fn delete(
         self,
+        server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
+        self.delete_with_cleanup(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            delete_path,
+            &MetadataCleanup::immediate(Collection::Calendar),
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn delete_with_cleanup(
+        self,
+        server: &Server,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        delete_path: Option<String>,
+        cleanup: &MetadataCleanup,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
         let calendar = self.0;
+        cleanup
+            .remove(
+                server,
+                changed_by,
+                account_id,
+                document_id,
+                calendar.inner.metadata_kinds(),
+                batch,
+            )
+            .await?;
+
         // Delete calendar
         batch
             .with_account_id(account_id)
@@ -503,6 +543,36 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
             delete_path,
             send_itip,
             &mut DefaultAlertsResolver::default(),
+            &MetadataCleanup::immediate(Collection::CalendarEvent),
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn delete_with_cleanup(
+        self,
+        server: &Server,
+        account_info: &AccountInfo,
+        account_id: u32,
+        document_id: u32,
+        calendar_id: u32,
+        content: Option<Archive<ArchiveBytes>>,
+        delete_path: Option<String>,
+        cleanup: &MetadataCleanup,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        self.delete_from_calendar(
+            server,
+            account_info,
+            account_id,
+            document_id,
+            calendar_id,
+            content,
+            delete_path,
+            false,
+            &mut DefaultAlertsResolver::default(),
+            cleanup,
             batch,
         )
         .await
@@ -520,6 +590,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         delete_path: Option<String>,
         send_itip: bool,
         resolver: &mut DefaultAlertsResolver,
+        cleanup: &MetadataCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         if let Some(delete_idx) = self
@@ -559,13 +630,14 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                     .custom(update.into_builder(account_info.account_tenant_ids(), None))
                     .caused_by(trc::location!())?;
             } else {
-                self.delete_all(
+                self.remove_all(
                     server,
                     account_info,
                     account_id,
                     document_id,
                     content,
                     send_itip,
+                    cleanup,
                     batch,
                 )
                 .await?;
@@ -590,6 +662,31 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         document_id: u32,
         content: Option<Archive<ArchiveBytes>>,
         send_itip: bool,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        self.remove_all(
+            server,
+            account_info,
+            account_id,
+            document_id,
+            content,
+            send_itip,
+            &MetadataCleanup::immediate(Collection::CalendarEvent),
+            batch,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn remove_all(
+        self,
+        server: &Server,
+        account_info: &AccountInfo,
+        account_id: u32,
+        document_id: u32,
+        content: Option<Archive<ArchiveBytes>>,
+        send_itip: bool,
+        cleanup: &MetadataCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let event = self.0;
@@ -630,6 +727,16 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                 .await
                 .caused_by(trc::location!())?;
         }
+        cleanup
+            .remove(
+                server,
+                account_info.account_tenant_ids(),
+                account_id,
+                document_id,
+                event.inner.metadata_kinds(),
+                batch,
+            )
+            .await?;
         batch
             .with_account_id(account_id)
             .with_collection(Collection::CalendarEvent)

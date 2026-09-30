@@ -54,67 +54,64 @@ impl GetArguments {
             .ok_or("Missing mailbox name.")?
             .unwrap_mailbox_name(is_utf8)?;
 
-        match tokens.next().ok_or("Missing entry specifier.")? {
-            Token::ParenthesisOpen
-                if tokens
-                    .peek()
-                    .is_some_and(|token| !token.as_bytes().starts_with(b"/")) =>
-            {
-                self.parse_options(tokens)?;
-                let first = tokens.next().ok_or("Missing entry specifier.")?;
-                self.parse_entries(first, tokens)?;
-            }
-            first => self.parse_entries(first, tokens)?,
+        let mut is_list = tokens.next_if(Token::is_parenthesis_open).is_some();
+        if is_list
+            && tokens
+                .peek()
+                .is_some_and(|token| !token.as_bytes().starts_with(b"/"))
+        {
+            self.parse_options(tokens)?;
+            is_list = tokens.next_if(Token::is_parenthesis_open).is_some();
         }
 
-        if tokens.next().is_none() {
-            Ok(())
+        if is_list {
+            self.entries = Entry::parse_list(tokens)?;
+            if tokens.next().is_some() {
+                return Err("Unexpected arguments after entry specifiers.".into());
+            }
         } else {
-            Err("Unexpected arguments after entry specifiers.".into())
+            for token in tokens {
+                self.entries.push(Entry::parse(token.as_bytes())?);
+            }
+            if self.entries.is_empty() {
+                return Err("Missing entry specifier.".into());
+            }
         }
+
+        self.entries.sort_unstable();
+        self.entries.dedup();
+        Ok(())
     }
 
     fn parse_options(&mut self, tokens: &mut Tokens) -> super::Result<()> {
         while let Some(token) = tokens.next() {
             match token {
                 Token::ParenthesisClose => return Ok(()),
-                Token::Argument(option) if option.eq_ignore_ascii_case(b"MAXSIZE") => {
-                    self.max_size = Some(parse_number(
-                        tokens.next().ok_or("Missing MAXSIZE value.")?.as_bytes(),
-                    )?);
+                Token::Argument(option) => {
+                    hashify::fnc_map_ignore_case!(option.as_slice(),
+                        "MAXSIZE" => {
+                            self.max_size = Some(parse_number(
+                                tokens.next().ok_or("Missing MAXSIZE value.")?.as_bytes(),
+                            )?);
+                        },
+                        "DEPTH" => {
+                            self.depth =
+                                Depth::parse(tokens.next().ok_or("Missing DEPTH value.")?.as_bytes())?;
+                        },
+                        _ => {
+                            return Err(format!(
+                                "Unsupported GETMETADATA option {:?}.",
+                                String::from_utf8_lossy(&option)
+                            )
+                            .into());
+                        }
+                    )
                 }
-                Token::Argument(option) if option.eq_ignore_ascii_case(b"DEPTH") => {
-                    self.depth =
-                        Depth::parse(tokens.next().ok_or("Missing DEPTH value.")?.as_bytes())?;
-                }
-                token => {
-                    return Err(
-                        format!("Unsupported GETMETADATA option {:?}.", token.to_string()).into(),
-                    );
-                }
+                _ => return Err("Invalid GETMETADATA option.".into()),
             }
         }
 
         Err("Unterminated GETMETADATA options.".into())
-    }
-
-    fn parse_entries(&mut self, first: Token, tokens: &mut Tokens) -> super::Result<()> {
-        if !first.is_parenthesis_open() {
-            self.entries.push(Entry::parse_specifier(first.as_bytes())?);
-            return Ok(());
-        }
-
-        for token in tokens.by_ref() {
-            match token {
-                Token::ParenthesisClose if !self.entries.is_empty() => return Ok(()),
-                Token::ParenthesisOpen | Token::ParenthesisClose => {
-                    return Err("Invalid entry specifier list.".into());
-                }
-                token => self.entries.push(Entry::parse_specifier(token.as_bytes())?),
-            }
-        }
-
-        Err("Unterminated entry specifier list.".into())
     }
 }
 
@@ -132,19 +129,13 @@ impl SetArguments {
             return Err("Expected a parenthesized list of entries and values.".into());
         }
 
-        while let Some(token) = tokens.next() {
-            let entry = match token {
-                Token::ParenthesisClose if !self.entries.is_empty() => {
-                    return if tokens.next().is_none() {
-                        Ok(())
-                    } else {
-                        Err("Unexpected arguments after entry values.".into())
-                    };
-                }
+        loop {
+            let entry = match tokens.next().ok_or("Unterminated entry value list.")? {
+                Token::ParenthesisClose if !self.entries.is_empty() => break,
                 Token::ParenthesisOpen | Token::ParenthesisClose => {
                     return Err("Invalid entry value list.".into());
                 }
-                token => Entry::parse_name(token.as_bytes())?,
+                token => Entry::parse(token.as_bytes())?,
             };
             let value = match tokens.next().ok_or("Missing entry value.")? {
                 Token::NilAtom => None,
@@ -156,12 +147,19 @@ impl SetArguments {
             self.entries.push(EntryValue { entry, value });
         }
 
-        Err("Unterminated entry value list.".into())
+        if tokens.next().is_some() {
+            return Err("Unexpected arguments after entry values.".into());
+        }
+
+        self.entries.reverse();
+        self.entries.sort_by(|a, b| a.entry.cmp(&b.entry));
+        self.entries.dedup_by(|a, b| a.entry == b.entry);
+        Ok(())
     }
 }
 
 impl Entry<'static> {
-    pub fn parse_specifier(value: &[u8]) -> super::Result<Self> {
+    pub fn parse(value: &[u8]) -> super::Result<Self> {
         if let Some(ch) = value
             .iter()
             .find(|&&ch| !(0x1a..0x80).contains(&ch) || ch == b'*' || ch == b'%')
@@ -170,55 +168,66 @@ impl Entry<'static> {
         }
 
         let name = std::str::from_utf8(value).map_err(|_| "Invalid entry name.")?;
-        let (scope, path) = [Scope::Shared, Scope::Private]
-            .into_iter()
-            .find_map(|scope| {
-                let prefix = scope.as_str();
-                name.split_at_checked(prefix.len())
-                    .filter(|(head, path)| {
-                        head.eq_ignore_ascii_case(prefix)
-                            && (path.is_empty() || path.starts_with('/'))
-                    })
-                    .map(|(_, path)| (scope, path))
+        let (scope, rest) = name
+            .strip_prefix('/')
+            .map(|name| {
+                name.split_once('/')
+                    .map_or((name, None), |(scope, rest)| (scope, Some(rest)))
             })
             .ok_or("Entry names must begin with /shared or /private.")?;
+        let scope = hashify::map_ignore_case!(scope.as_bytes(), Scope,
+            "shared" => Scope::Shared,
+            "private" => Scope::Private,
+        )
+        .copied()
+        .ok_or("Entry names must begin with /shared or /private.")?;
+        let rest = rest.ok_or("Entry names must have at least two components.")?;
 
+        let mut path = String::with_capacity(rest.len() + 1);
+        path.push('/');
+        path.push_str(rest);
         if path.ends_with('/') || path.contains("//") {
             return Err(format!("Invalid entry name {name:?}.").into());
+        }
+        path.make_ascii_lowercase();
+
+        let mut components = path.split('/').skip(1);
+        if let (Some("vendor"), _, None) = (components.next(), components.next(), components.next())
+        {
+            return Err("Vendor entry names must have at least four components.".into());
         }
 
         Ok(Entry {
             scope,
-            path: Cow::Owned(path.to_ascii_lowercase()),
+            path: Cow::Owned(path),
         })
     }
 
-    pub fn parse_name(value: &[u8]) -> super::Result<Self> {
-        let entry = Entry::parse_specifier(value)?;
-        let mut components = entry.path.split('/').skip(1);
-        let error = match (components.next(), components.next(), components.next()) {
-            (None, _, _) => Some("Entry names must have at least two components."),
-            (Some("vendor"), _, None) => {
-                Some("Vendor entry names must have at least four components.")
+    pub(crate) fn parse_list(tokens: &mut impl Iterator<Item = Token>) -> super::Result<Vec<Self>> {
+        let mut entries = Vec::new();
+        for token in tokens {
+            match token {
+                Token::ParenthesisClose if !entries.is_empty() => return Ok(entries),
+                Token::ParenthesisOpen | Token::ParenthesisClose => {
+                    return Err("Invalid entry specifier list.".into());
+                }
+                token => entries.push(Entry::parse(token.as_bytes())?),
             }
-            _ => None,
-        };
-
-        match error {
-            Some(error) => Err(error.into()),
-            None => Ok(entry),
         }
+
+        Err("Unterminated entry specifier list.".into())
     }
 }
 
 impl Depth {
     fn parse(value: &[u8]) -> super::Result<Self> {
-        match value {
-            b"0" => Ok(Depth::Zero),
-            b"1" => Ok(Depth::One),
-            _ if value.eq_ignore_ascii_case(b"infinity") => Ok(Depth::Infinity),
-            _ => Err("DEPTH must be 0, 1 or infinity.".into()),
-        }
+        hashify::map_ignore_case!(value, Depth,
+            "0" => Depth::Zero,
+            "1" => Depth::One,
+            "infinity" => Depth::Infinity,
+        )
+        .copied()
+        .ok_or_else(|| "DEPTH must be 0, 1 or infinity.".into())
     }
 }
 
@@ -273,13 +282,13 @@ mod tests {
                 },
             ),
             (
-                "a GETMETADATA (MAXSIZE 1024 DEPTH infinity) INBOX (/Shared/Vendor/CMU)\r\n",
+                "a GETMETADATA (MAXSIZE 1024 DEPTH infinity) INBOX (/Shared/Vendor/CMU/Cyrus-IMAPd)\r\n",
                 GetArguments {
                     tag: "a".into(),
                     mailbox_name: "INBOX".into(),
                     max_size: Some(1024),
                     depth: Depth::Infinity,
-                    entries: vec![entry(Scope::Shared, "/vendor/cmu")],
+                    entries: vec![entry(Scope::Shared, "/vendor/cmu/cyrus-imapd")],
                 },
             ),
             (
@@ -306,13 +315,46 @@ mod tests {
                 },
             ),
             (
-                "a GETMETADATA (depth 0) \"&AOk-t&AOk-\" (/private /SHARED)\r\n",
+                "a GETMETADATA (depth 0) \"&AOk-t&AOk-\" (/private/x /SHARED/Y)\r\n",
                 GetArguments {
                     tag: "a".into(),
                     mailbox_name: "\u{e9}t\u{e9}".into(),
                     max_size: None,
                     depth: Depth::Zero,
-                    entries: vec![entry(Scope::Private, ""), entry(Scope::Shared, "")],
+                    entries: vec![entry(Scope::Shared, "/y"), entry(Scope::Private, "/x")],
+                },
+            ),
+            (
+                "a GETMETADATA \"INBOX\" /private/comment /shared/comment\r\n",
+                GetArguments {
+                    tag: "a".into(),
+                    mailbox_name: "INBOX".into(),
+                    max_size: None,
+                    depth: Depth::Zero,
+                    entries: vec![
+                        entry(Scope::Shared, "/comment"),
+                        entry(Scope::Private, "/comment"),
+                    ],
+                },
+            ),
+            (
+                "a GETMETADATA INBOX (DEPTH 1 MAXSIZE 5 MAXSIZE 7) /shared/b /SHARED/A /shared/b\r\n",
+                GetArguments {
+                    tag: "a".into(),
+                    mailbox_name: "INBOX".into(),
+                    max_size: Some(7),
+                    depth: Depth::One,
+                    entries: vec![entry(Scope::Shared, "/a"), entry(Scope::Shared, "/b")],
+                },
+            ),
+            (
+                "a GETMETADATA (DEPTH INFINITY) nil (/Private/X /private/x /shared/x)\r\n",
+                GetArguments {
+                    tag: "a".into(),
+                    mailbox_name: "nil".into(),
+                    max_size: None,
+                    depth: Depth::Infinity,
+                    entries: vec![entry(Scope::Shared, "/x"), entry(Scope::Private, "/x")],
                 },
             ),
         ] {
@@ -344,7 +386,19 @@ mod tests {
             "a GETMETADATA (MAXSIZE abc) INBOX /shared/comment\r\n",
             "a GETMETADATA (DEPTH 2) INBOX /shared/comment\r\n",
             "a GETMETADATA (UNKNOWN 1) INBOX /shared/comment\r\n",
-            "a GETMETADATA INBOX /shared/comment /private/comment\r\n",
+            "a GETMETADATA (DEPTH) INBOX /shared/comment\r\n",
+            "a GETMETADATA (MAXSIZE 1 INBOX /shared/comment\r\n",
+            "a GETMETADATA INBOX (/shared/comment) extra\r\n",
+            "a GETMETADATA INBOX /shared/comment (/private/comment)\r\n",
+            "a GETMETADATA INBOX (MAXSIZE 1)\r\n",
+            "a GETMETADATA INBOX /sharedx/comment\r\n",
+            "a GETMETADATA INBOX /public/comment\r\n",
+            "a GETMETADATA INBOX /\r\n",
+            "a GETMETADATA INBOX /shared/\r\n",
+            "a GETMETADATA INBOX /shared\r\n",
+            "a GETMETADATA (DEPTH infinity) INBOX (/private)\r\n",
+            "a GETMETADATA INBOX /shared/vendor/cmu\r\n",
+            "a GETMETADATA INBOX /Private/Vendor\r\n",
         ] {
             assert!(
                 receiver
@@ -390,9 +444,9 @@ mod tests {
                     tag: "a".into(),
                     mailbox_name: "".into(),
                     entries: vec![
-                        value(entry(Scope::Private, "/comment"), Some(b"NIL")),
                         value(entry(Scope::Shared, "/comment"), None),
                         value(entry(Scope::Shared, "/vendor/cmu/color"), Some(b"")),
+                        value(entry(Scope::Private, "/comment"), Some(b"NIL")),
                         value(
                             entry(Scope::Private, "/vendor/kolab/folder-type"),
                             Some(b"a\0b"),
@@ -406,6 +460,28 @@ mod tests {
                     tag: "a".into(),
                     mailbox_name: "NIL".into(),
                     entries: vec![value(entry(Scope::Shared, "/comment"), Some(b""))],
+                },
+            ),
+            (
+                "a SETMETADATA nil (/shared/comment NIL)\r\n",
+                SetArguments {
+                    tag: "a".into(),
+                    mailbox_name: "nil".into(),
+                    entries: vec![value(entry(Scope::Shared, "/comment"), None)],
+                },
+            ),
+            (
+                concat!(
+                    "a SETMETADATA Nil (/shared/comment \"a\" /private/comment x ",
+                    "/SHARED/comment \"b\" /private/comment NIL /shared/Comment c)\r\n"
+                ),
+                SetArguments {
+                    tag: "a".into(),
+                    mailbox_name: "Nil".into(),
+                    entries: vec![
+                        value(entry(Scope::Shared, "/comment"), Some(b"c")),
+                        value(entry(Scope::Private, "/comment"), None),
+                    ],
                 },
             ),
         ] {
@@ -432,6 +508,9 @@ mod tests {
             "a SETMETADATA INBOX (/other/comment value)\r\n",
             "a SETMETADATA INBOX (/shared/comment (value))\r\n",
             "a SETMETADATA INBOX (/shared/comment value) extra\r\n",
+            "a SETMETADATA INBOX (NIL value)\r\n",
+            "a SETMETADATA INBOX (/shared/comment NIL /shared/other\r\n",
+            "a SETMETADATA (/shared/comment value)\r\n",
         ] {
             assert!(
                 receiver

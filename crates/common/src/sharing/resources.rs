@@ -161,7 +161,10 @@ mod tests {
         storage::dav::{CONTAINER_FLAG, ResourceChunkBuilder},
     };
     use std::sync::Arc;
-    use types::acl::{Acl, AclGrant};
+    use types::{
+        acl::{Acl, AclGrant},
+        metadata::MetadataKinds,
+    };
     use utils::map::bitmap::Bitmap;
 
     // Calendars and events have independent id spaces that both start at zero, so an
@@ -193,6 +196,7 @@ mod tests {
                     acls,
                     preferences,
                     etag: 0,
+                    metadata: MetadataKinds::NONE,
                 },
             });
             entries.push((
@@ -291,6 +295,7 @@ mod tests {
                 acls,
                 preferences,
                 etag: 0,
+                metadata: MetadataKinds::NONE,
             },
         });
         let resources = GroupwareResources {

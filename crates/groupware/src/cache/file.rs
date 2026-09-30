@@ -52,7 +52,6 @@ pub(super) async fn build_file_resources(
                     nodes.current(),
                     archive.unarchive::<FileNode>()?,
                     document_id,
-                    archive.version.hash().unwrap_or_default(),
                 );
                 Ok(true)
             },
@@ -149,7 +148,6 @@ pub(super) fn push_file(
     builder: &mut ResourceChunkBuilder,
     node: &ArchivedFileNode,
     document_id: u32,
-    etag: u32,
 ) {
     let parent_id = node.parent_id.to_native();
     let file = node.file();
@@ -176,7 +174,7 @@ pub(super) fn push_file(
             size: file.map_or(NO_ID, |f| f.size.to_native()),
             parent_id: if parent_id > 0 { parent_id - 1 } else { NO_ID },
             acls,
-            etag,
+            etag: node.etag.to_native(),
             modified,
             created_delta: node
                 .created
@@ -189,7 +187,8 @@ pub(super) fn push_file(
                 node.role().map_or(0, FileNodeRole::id),
                 media_type_id,
                 extra_len,
-            ),
+            )
+            .with_presence(node.presence()),
         },
     });
 }
@@ -197,8 +196,13 @@ pub(super) fn push_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE};
-    use types::media_type::MediaTypeId;
+    use crate::file::{FileNodeContent, FileProperties};
+    use common::{
+        GroupwareResourceRef,
+        storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE, FilePresence},
+    };
+    use rkyv::rancor::Error;
+    use types::{media_type::MediaTypeId, metadata::MetadataKinds};
 
     const MISSING_DOCUMENT_ID: u32 = 9;
 
@@ -289,6 +293,39 @@ mod tests {
 
     fn hierarchy_seq(files: &GroupwareResources, path: &str) -> u32 {
         files.paths.get(path).expect(path).1.hierarchy_seq & !CONTAINER_FLAG
+    }
+
+    #[test]
+    fn cached_file_carries_the_node_etag_and_presence() {
+        let mut node = FileNode {
+            name: "notes.txt".to_string(),
+            content: FileNodeContent::File(FileProperties {
+                size: 5,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        node.set_presence(FilePresence::from_kinds(MetadataKinds::JMAP).with_dav_display_name());
+        node.etag = node.compute_etag();
+        let bytes = rkyv::to_bytes::<Error>(&node).expect("the node archives");
+        let archived =
+            rkyv::access::<ArchivedFileNode, Error>(&bytes).expect("the archive validates");
+
+        let mut builder = ResourceChunkBuilder::with_capacity(1);
+        push_file(&mut builder, archived, 3);
+        let chunk = builder.finish();
+        let resource = chunk.records.first().map(|resource| GroupwareResourceRef {
+            chunk: &chunk,
+            resource,
+        });
+        let resource = resource.expect("one cached node");
+        assert_eq!(resource.etag(), node.etag);
+        assert_eq!(
+            resource.metadata_kinds(),
+            MetadataKinds::JMAP.union(MetadataKinds::DAV)
+        );
+        assert!(resource.has_dav_display_name());
+        assert_eq!(resource.file_kind(), Some(FILE_KIND_FILE));
     }
 
     #[test]

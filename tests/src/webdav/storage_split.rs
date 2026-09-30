@@ -5,18 +5,17 @@
  */
 
 use crate::utils::server::TestServer;
-use crate::utils::webdav::DummyWebDavClient;
+use crate::utils::webdav::{DeadPropertyName, DummyWebDavClient};
 use crate::webdav::*;
 use common::auth::AccountTenantIds;
 use dav_proto::schema::property::{DavProperty, WebDavProperty};
-use groupware::calendar::{CalendarEvent, EVENT_HAS_DEAD_PROPERTIES};
-use groupware::contact::{CARD_HAS_DEAD_PROPERTIES, ContactCard};
+use groupware::calendar::CalendarEvent;
+use std::time::Duration;
 use store::{
     SerializeInfallible, ValueKey,
     dispatch::StoreOps,
     write::{Archive, ArchiveBytes, BatchBuilder, Operation, ValueClass},
 };
-use types::dead_property::DeadElementTag;
 use types::{
     collection::Collection,
     field::{CalendarEventField, ContactField, Field, PrincipalField},
@@ -24,14 +23,18 @@ use types::{
 
 const EVENT_PATH: &str = "/dav/cal/john%40example.com/default/split-event.ics";
 const CARD_PATH: &str = "/dav/card/john%40example.com/default/split-card.vcf";
+const FILE_PATH: &str = "/dav/file/john%40example.com/split-file.txt";
+const SPLIT_MARKER: DeadPropertyName =
+    DeadPropertyName::new("http://example.com/ns/", "split-marker");
 
 pub async fn test(test: &TestServer) {
     println!("Running storage split tests...");
 
     records_are_written_and_cleared_together(test).await;
     quota_matches_content_length(test).await;
-    dead_property_bit_tracks_the_set(test).await;
+    dead_property_presence_tracks_the_set(test).await;
     etag_changes_on_payload_and_metadata_writes(test).await;
+    file_etag_ignores_property_writes(test).await;
     metadata_only_write_leaves_content_untouched(test).await;
     metadata_only_write_emits_no_content_or_index_op(test).await;
     allprop_propfind_read_count_does_not_scale(test).await;
@@ -196,23 +199,13 @@ async fn quota_matches_content_length(test: &TestServer) {
         .with_status(StatusCode::NO_CONTENT);
 }
 
-// Test 4: the dead-property bit tracks the dead-property set.
-async fn dead_property_bit_tracks_the_set(test: &TestServer) {
+// Test 4: the dead-property presence flag tracks the dead-property set.
+async fn dead_property_presence_tracks_the_set(test: &TestServer) {
     let client = test.account("john@example.com").webdav_client();
 
-    for (path, ct, body, collection) in [
-        (
-            EVENT_PATH,
-            "text/calendar; charset=utf-8",
-            TEST_ICAL_1,
-            Collection::CalendarEvent,
-        ),
-        (
-            CARD_PATH,
-            "text/vcard; charset=utf-8",
-            TEST_VCARD_1,
-            Collection::ContactCard,
-        ),
+    for (path, ct, body) in [
+        (EVENT_PATH, "text/calendar; charset=utf-8", TEST_ICAL_1),
+        (CARD_PATH, "text/vcard; charset=utf-8", TEST_VCARD_1),
     ] {
         let body = body.replace('\n', "\r\n");
         client
@@ -220,31 +213,18 @@ async fn dead_property_bit_tracks_the_set(test: &TestServer) {
             .await
             .with_status(StatusCode::CREATED);
 
-        let id = document_id(test, collection, path).await;
-        assert!(
-            !has_dead_property_bit(test, collection, id).await,
-            "{path}: dead-property bit set on a fresh object"
-        );
+        let unflagged = allprop_read_count(&client, path, "0").await;
 
         client
-            .patch_and_check(
-                path,
-                [(
-                    DavProperty::DeadProperty(DeadElementTag::new(
-                        "split-marker".to_string(),
-                        Some("xmlns=\"http://example.com/ns/\"".to_string()),
-                    )),
-                    "hello",
-                )],
-            )
+            .patch_and_check(path, [(SPLIT_MARKER, "hello")])
             .await;
 
+        let flagged = allprop_read_count(&client, path, "0").await;
         assert!(
-            has_dead_property_bit(test, collection, id).await,
-            "{path}: dead-property bit not set after PROPPATCH"
+            flagged > unflagged,
+            "{path}: reading dead properties cost no extra read ({unflagged} unflagged, {flagged} flagged)"
         );
 
-        // The dead property must be readable, which requires the CONTENT second pass
         let propfind = client
             .request(
                 "PROPFIND",
@@ -261,22 +241,12 @@ async fn dead_property_bit_tracks_the_set(test: &TestServer) {
             "{path}: dead property not returned by allprop PROPFIND"
         );
 
-        client
-            .patch_and_check(
-                path,
-                [(
-                    DavProperty::DeadProperty(DeadElementTag::new(
-                        "split-marker".to_string(),
-                        Some("xmlns=\"http://example.com/ns/\"".to_string()),
-                    )),
-                    "",
-                )],
-            )
-            .await;
+        client.patch_and_check(path, [(SPLIT_MARKER, "")]).await;
 
-        assert!(
-            !has_dead_property_bit(test, collection, id).await,
-            "{path}: dead-property bit still set after removing the last property"
+        let cleared = allprop_read_count(&client, path, "0").await;
+        assert_eq!(
+            cleared, unflagged,
+            "{path}: removing the last dead property left the presence flag set"
         );
 
         client
@@ -286,21 +256,27 @@ async fn dead_property_bit_tracks_the_set(test: &TestServer) {
     }
 }
 
-async fn has_dead_property_bit(test: &TestServer, collection: Collection, id: u32) -> bool {
-    let (meta, _) = meta_and_content(test, collection, id).await;
-    let meta = meta.expect("META missing");
-
-    match collection {
-        Collection::CalendarEvent => {
-            meta.unarchive::<CalendarEvent>().unwrap().flags.to_native() & EVENT_HAS_DEAD_PROPERTIES
-                != 0
-        }
-        Collection::ContactCard => {
-            meta.unarchive::<ContactCard>().unwrap().flags.to_native() & CARD_HAS_DEAD_PROPERTIES
-                != 0
-        }
-        _ => unreachable!(),
-    }
+async fn etag_and_last_modified(client: &DummyWebDavClient, path: &str) -> (String, String) {
+    let response = client
+        .propfind(
+            path,
+            [
+                DavProperty::WebDav(WebDavProperty::GetETag),
+                DavProperty::WebDav(WebDavProperty::GetLastModified),
+            ],
+        )
+        .await;
+    let properties = response.properties(path);
+    (
+        properties
+            .get(DavProperty::WebDav(WebDavProperty::GetETag))
+            .value()
+            .to_string(),
+        properties
+            .get(DavProperty::WebDav(WebDavProperty::GetLastModified))
+            .value()
+            .to_string(),
+    )
 }
 
 // Test 5: a payload change, a PROPPATCH and a rename each move the ETag.
@@ -358,6 +334,25 @@ async fn etag_changes_on_payload_and_metadata_writes(test: &TestServer) {
         "PROPPATCH did not move the ETag"
     );
 
+    let (etag_before, modified_before) = etag_and_last_modified(&client, EVENT_PATH).await;
+    client
+        .patch_and_check(EVENT_PATH, [(SPLIT_MARKER, "dead property only")])
+        .await;
+    let (etag_after, modified_after) = etag_and_last_modified(&client, EVENT_PATH).await;
+    assert_eq!(
+        etag_before, etag_after,
+        "a dead-property PROPPATCH moved the event ETag"
+    );
+    assert_eq!(
+        modified_before, modified_after,
+        "a dead-property PROPPATCH moved the event getlastmodified"
+    );
+    client
+        .request("GET", EVENT_PATH, "")
+        .await
+        .with_status(StatusCode::OK)
+        .with_header("etag", &etag_after);
+
     // A rename is a metadata-only write and must also move the ETag
     let moved_path = "/dav/cal/john%40example.com/default/split-event-moved.ics";
     client
@@ -377,6 +372,63 @@ async fn etag_changes_on_payload_and_metadata_writes(test: &TestServer) {
 
     client
         .request("DELETE", moved_path, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+}
+
+async fn file_etag_ignores_property_writes(test: &TestServer) {
+    let client = test.account("john@example.com").webdav_client();
+
+    client
+        .request_with_headers(
+            "PUT",
+            FILE_PATH,
+            [("content-type", "text/plain")],
+            "first version",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    let (etag_created, modified_created) = etag_and_last_modified(&client, FILE_PATH).await;
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+
+    client
+        .patch_and_check(FILE_PATH, [(SPLIT_MARKER, "file dead property")])
+        .await;
+    client
+        .patch_and_check(
+            FILE_PATH,
+            [(
+                DavProperty::WebDav(WebDavProperty::DisplayName),
+                "split file display name",
+            )],
+        )
+        .await;
+    let (etag_patched, modified_patched) = etag_and_last_modified(&client, FILE_PATH).await;
+    assert_eq!(etag_created, etag_patched, "PROPPATCH moved the file ETag");
+    assert_eq!(
+        modified_created, modified_patched,
+        "PROPPATCH moved the file getlastmodified"
+    );
+
+    client
+        .request_with_headers(
+            "PUT",
+            FILE_PATH,
+            [("content-type", "text/plain")],
+            "second version",
+        )
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+    let (etag_put, modified_put) = etag_and_last_modified(&client, FILE_PATH).await;
+    assert_ne!(etag_patched, etag_put, "PUT did not move the file ETag");
+    assert_ne!(
+        modified_patched, modified_put,
+        "PUT did not move the file getlastmodified"
+    );
+
+    client
+        .request("DELETE", FILE_PATH, "")
         .await
         .with_status(StatusCode::NO_CONTENT);
 }
@@ -466,23 +518,17 @@ async fn allprop_propfind_read_count_does_not_scale(test: &TestServer) {
     client
         .patch_and_check(
             &format!("{calendar_path}split-read-0.ics"),
-            [(
-                DavProperty::DeadProperty(DeadElementTag::new(
-                    "split-marker".to_string(),
-                    Some("xmlns=\"http://example.com/ns/\"".to_string()),
-                )),
-                "hello",
-            )],
+            [(SPLIT_MARKER, "hello")],
         )
         .await;
 
-    let ops_few = allprop_read_count(&client, calendar_path).await;
+    let ops_few = allprop_read_count(&client, calendar_path, "1").await;
 
     for seq in FEW..MANY {
         put_read_count_event(&client, calendar_path, seq).await;
     }
 
-    let ops_many = allprop_read_count(&client, calendar_path).await;
+    let ops_many = allprop_read_count(&client, calendar_path, "1").await;
 
     assert!(
         ops_many <= ops_few + 8,
@@ -515,7 +561,7 @@ async fn put_read_count_event(client: &DummyWebDavClient, calendar_path: &str, s
         .with_status(StatusCode::CREATED);
 }
 
-async fn allprop_read_count(client: &DummyWebDavClient, calendar_path: &str) -> usize {
+async fn allprop_read_count(client: &DummyWebDavClient, path: &str, depth: &str) -> usize {
     const ALLPROP: &str = concat!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
         "<D:propfind xmlns:D=\"DAV:\"><D:allprop/></D:propfind>"
@@ -525,7 +571,7 @@ async fn allprop_read_count(client: &DummyWebDavClient, calendar_path: &str) -> 
     for _ in 0..3 {
         StoreOps::take();
         client
-            .request_with_headers("PROPFIND", calendar_path, [("depth", "1")], ALLPROP)
+            .request_with_headers("PROPFIND", path, [("depth", depth)], ALLPROP)
             .await
             .with_status(StatusCode::MULTI_STATUS);
         lowest = lowest.min(StoreOps::take().total());

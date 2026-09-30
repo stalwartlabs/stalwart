@@ -7,7 +7,7 @@
 use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
-        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
@@ -74,17 +74,20 @@ impl Property for MailboxProperty {
         value: &str,
         depth: PointerDepth,
     ) -> Option<Self> {
-        let patch_depth = key.is_none().then_some(depth);
         match key {
-            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 MailboxProperty::ShareWith => {
                     Id::from_str(value).ok().map(MailboxProperty::IdValue)
                 }
-                _ => MailboxProperty::parse(value, patch_depth),
+                _ => MailboxProperty::parse_nested_name(value),
             },
-            _ => MailboxProperty::parse(value, patch_depth),
+            Some(_) => MailboxProperty::parse_nested_name(value),
+            None => MailboxProperty::parse(value, Some(depth)),
         }
+    }
+
+    fn is_opaque(&self) -> bool {
+        self.metadata_root().is_some()
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -195,35 +198,34 @@ impl MailboxProperty {
         )
     }
 
+    property_names!(
+        MailboxProperty,
+        "id" => MailboxProperty::Id,
+        "name" => MailboxProperty::Name,
+        "parentId" => MailboxProperty::ParentId,
+        "role" => MailboxProperty::Role,
+        "sortOrder" => MailboxProperty::SortOrder,
+        "totalEmails" => MailboxProperty::TotalEmails,
+        "unreadEmails" => MailboxProperty::UnreadEmails,
+        "totalThreads" => MailboxProperty::TotalThreads,
+        "unreadThreads" => MailboxProperty::UnreadThreads,
+        "shareWith" => MailboxProperty::ShareWith,
+        "myRights" => MailboxProperty::MyRights,
+        "mayReadItems" => MailboxProperty::Rights(MailboxRight::MayReadItems),
+        "mayAddItems" => MailboxProperty::Rights(MailboxRight::MayAddItems),
+        "mayRemoveItems" => MailboxProperty::Rights(MailboxRight::MayRemoveItems),
+        "maySetSeen" => MailboxProperty::Rights(MailboxRight::MaySetSeen),
+        "maySetKeywords" => MailboxProperty::Rights(MailboxRight::MaySetKeywords),
+        "mayCreateChild" => MailboxProperty::Rights(MailboxRight::MayCreateChild),
+        "mayRename" => MailboxProperty::Rights(MailboxRight::MayRename),
+        "maySubmit" => MailboxProperty::Rights(MailboxRight::MaySubmit),
+        "mayDelete" => MailboxProperty::Rights(MailboxRight::MayDelete),
+        "mayShare" => MailboxProperty::Rights(MailboxRight::MayShare),
+        "isSubscribed" => MailboxProperty::IsSubscribed,
+    );
+
     fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
-        hashify::fnc_map!(value.as_bytes(),
-            b"id" => Some(MailboxProperty::Id),
-            b"name" => Some(MailboxProperty::Name),
-            b"parentId" => Some(MailboxProperty::ParentId),
-            b"role" => Some(MailboxProperty::Role),
-            b"sortOrder" => Some(MailboxProperty::SortOrder),
-            b"totalEmails" => Some(MailboxProperty::TotalEmails),
-            b"unreadEmails" => Some(MailboxProperty::UnreadEmails),
-            b"totalThreads" => Some(MailboxProperty::TotalThreads),
-            b"unreadThreads" => Some(MailboxProperty::UnreadThreads),
-            b"shareWith" => Some(MailboxProperty::ShareWith),
-            b"myRights" => Some(MailboxProperty::MyRights),
-            b"mayReadItems" => Some(MailboxProperty::Rights(MailboxRight::MayReadItems)),
-            b"mayAddItems" => Some(MailboxProperty::Rights(MailboxRight::MayAddItems)),
-            b"mayRemoveItems" => Some(MailboxProperty::Rights(MailboxRight::MayRemoveItems)),
-            b"maySetSeen" => Some(MailboxProperty::Rights(MailboxRight::MaySetSeen)),
-            b"maySetKeywords" => Some(MailboxProperty::Rights(MailboxRight::MaySetKeywords)),
-            b"mayCreateChild" => Some(MailboxProperty::Rights(MailboxRight::MayCreateChild)),
-            b"mayRename" => Some(MailboxProperty::Rights(MailboxRight::MayRename)),
-            b"maySubmit" => Some(MailboxProperty::Rights(MailboxRight::MaySubmit)),
-            b"mayDelete" => Some(MailboxProperty::Rights(MailboxRight::MayDelete)),
-            b"mayShare" => Some(MailboxProperty::Rights(MailboxRight::MayShare)),
-            b"isSubscribed" => Some(MailboxProperty::IsSubscribed),
-            b"metadata" => Some(MailboxProperty::Metadata),
-            b"privateMetadata" => Some(MailboxProperty::PrivateMetadata),
-            _ => None,
-        )
-        .or_else(|| {
+        MailboxProperty::parse_name(value).or_else(|| {
             patch_depth
                 .filter(|_| value.contains('/'))
                 .and_then(|depth| JsonPointer::parse_nested(value, depth))
@@ -233,7 +235,6 @@ impl MailboxProperty {
 
     fn patch_or_prop(&self) -> &MailboxProperty {
         if let MailboxProperty::Pointer(ptr) = self
-            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
@@ -256,6 +257,13 @@ impl MetadataProperty for MailboxProperty {
         match self {
             MailboxProperty::Pointer(pointer) => Some(pointer),
             _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => MailboxProperty::Metadata,
+            MetadataRoot::Private => MailboxProperty::PrivateMetadata,
         }
     }
 }

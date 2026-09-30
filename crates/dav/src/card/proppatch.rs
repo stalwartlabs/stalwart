@@ -8,6 +8,7 @@ use crate::{
     DavError, DavMethod, PropStatBuilder,
     common::{
         ETag, ExtractETag,
+        dead::{DeadPatch, DeadTarget, DisplayName},
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -23,8 +24,9 @@ use dav_proto::{
     },
 };
 use groupware::{
+    PresenceUpdate,
     cache::GroupwareCache,
-    contact::{AddressBook, ContactCard, ContactCardContent},
+    contact::{AddressBook, ContactCard},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -37,7 +39,6 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
-    field::ContactField,
 };
 
 pub(crate) trait CardPropPatchRequestHandler: Sync + Send {
@@ -52,19 +53,16 @@ pub(crate) trait CardPropPatchRequestHandler: Sync + Send {
         &self,
         personal_id: u32,
         address_book: &mut AddressBook,
-        is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool;
+    );
 
     fn apply_card_properties(
         &self,
         card: &mut ContactCard,
-        content: Option<&mut ContactCardContent>,
-        is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool;
+    );
 }
 
 impl CardPropPatchRequestHandler for Server {
@@ -149,7 +147,7 @@ impl CardPropPatchRequestHandler for Server {
                 account_id,
                 collection,
                 document_id: document_id.into(),
-                etag: etag.into(),
+                etag: etag.clone().into(),
                 path: resource_.resource.unwrap(),
                 ..Default::default()
             }],
@@ -158,11 +156,12 @@ impl CardPropPatchRequestHandler for Server {
         )
         .await?;
 
-        let is_success;
+        let dead = DeadPatch::take(&mut request, DisplayName::Live);
+        let has_live_changes = !request.set.is_empty() || !request.remove.is_empty();
         let mut batch = BatchBuilder::new();
         let mut items = PropStatBuilder::default();
 
-        let etag = if resource.is_container() {
+        let (is_success, etag) = if resource.is_container() {
             // Deserialize
             let book = archive
                 .to_unarchived::<AddressBook>()
@@ -172,8 +171,8 @@ impl CardPropPatchRequestHandler for Server {
                 .caused_by(trc::location!())?;
             let personal_id = access_token.personal_id(account_id, Collection::AddressBook);
 
-            // Remove properties
-            if !request.set_first && !request.remove.is_empty() {
+            // Apply live properties
+            if !request.set_first {
                 remove_addressbook_properties(
                     personal_id,
                     &mut new_book,
@@ -181,51 +180,54 @@ impl CardPropPatchRequestHandler for Server {
                     &mut items,
                 );
             }
+            self.apply_addressbook_properties(personal_id, &mut new_book, request.set, &mut items);
+            remove_addressbook_properties(personal_id, &mut new_book, request.remove, &mut items);
 
-            // Set properties
-            is_success = self.apply_addressbook_properties(
-                personal_id,
-                &mut new_book,
-                true,
-                request.set,
-                &mut items,
-            );
-
-            // Remove properties
-            if is_success && !request.remove.is_empty() {
-                remove_addressbook_properties(
-                    personal_id,
-                    &mut new_book,
-                    request.remove,
-                    &mut items,
-                );
-            }
-
-            if is_success {
-                new_book
-                    .update(
-                        access_token.account_tenant_ids(),
-                        book,
+            // Apply dead properties
+            let mut dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::container(
                         account_id,
+                        Collection::AddressBook,
                         document_id,
-                        &mut batch,
-                    )
-                    .caused_by(trc::location!())?
-                    .etag()
+                        book.inner.metadata_kinds(),
+                    ),
+                    &mut items,
+                )
+                .await
+                .caused_by(trc::location!())?;
+
+            if items.has_errors() {
+                (false, etag)
             } else {
-                book.etag().into()
+                if let Some(write) = dead_write
+                    .as_mut()
+                    .and_then(|dead_write| dead_write.write.take())
+                {
+                    write.build(&mut batch).caused_by(trc::location!())?;
+                }
+                if has_live_changes {
+                    if let Some(dead_write) = &dead_write {
+                        new_book.set_metadata_kinds(dead_write.kinds);
+                    }
+                    new_book
+                        .update(
+                            access_token.account_tenant_ids(),
+                            book,
+                            account_id,
+                            document_id,
+                            &mut batch,
+                        )
+                        .caused_by(trc::location!())?;
+                } else if let Some(dead_write) = &dead_write {
+                    PresenceUpdate(book)
+                        .write(dead_write.kinds, account_id, document_id, &mut batch)
+                        .caused_by(trc::location!())?;
+                }
+                (true, batch.etag().unwrap_or(etag))
             }
         } else {
-            // A request that names no dead property leaves the payload untouched
-            let touches_content = request
-                .set
-                .iter()
-                .any(|property| matches!(property.property, DavProperty::DeadProperty(_)))
-                || request
-                    .remove
-                    .iter()
-                    .any(|property| matches!(property, DavProperty::DeadProperty(_)));
-
             // Deserialize
             let card = archive
                 .to_unarchived::<ContactCard>()
@@ -234,75 +236,47 @@ impl CardPropPatchRequestHandler for Server {
                 .deserialize::<ContactCard>()
                 .caused_by(trc::location!())?;
 
-            let content_ = if touches_content {
-                self.store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
-                        account_id,
-                        Collection::ContactCard,
-                        document_id,
-                        ContactField::Content,
-                    ))
-                    .await
-                    .caused_by(trc::location!())?
-            } else {
-                None
-            };
-            let content = content_
-                .as_ref()
-                .map(|content| content.to_unarchived::<ContactCardContent>())
-                .transpose()
-                .caused_by(trc::location!())?;
-            let mut new_content = content
-                .as_ref()
-                .map(|content| content.deserialize::<ContactCardContent>())
-                .transpose()
-                .caused_by(trc::location!())?;
-
-            // Remove properties
-            if !request.set_first && !request.remove.is_empty() {
+            // Apply live properties
+            if !request.set_first {
                 remove_card_properties(
                     &mut new_card,
-                    new_content.as_mut(),
                     std::mem::take(&mut request.remove),
                     &mut items,
                 );
             }
+            self.apply_card_properties(&mut new_card, request.set, &mut items);
+            remove_card_properties(&mut new_card, request.remove, &mut items);
 
-            // Set properties
-            is_success = self.apply_card_properties(
-                &mut new_card,
-                new_content.as_mut(),
-                true,
-                request.set,
-                &mut items,
-            );
-
-            // Remove properties
-            if is_success && !request.remove.is_empty() {
-                remove_card_properties(
-                    &mut new_card,
-                    new_content.as_mut(),
-                    request.remove,
+            // Apply dead properties
+            let mut dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::item(
+                        account_id,
+                        Collection::ContactCard,
+                        document_id,
+                        card.inner.metadata_kinds(),
+                    ),
                     &mut items,
-                );
-            }
+                )
+                .await
+                .caused_by(trc::location!())?;
 
-            if is_success {
-                match (new_content, content) {
-                    (Some(new_content), Some(content)) => new_card
-                        .update_full(
-                            new_content,
-                            self.core.groupware.vcard_version,
-                            access_token.account_tenant_ids(),
-                            card,
-                            content.inner,
-                            account_id,
-                            document_id,
-                            None,
-                            &mut batch,
-                        )
-                        .caused_by(trc::location!())?,
-                    _ => new_card
+            if items.has_errors() {
+                (false, etag)
+            } else {
+                let mut new_etag = None;
+                if let Some(write) = dead_write
+                    .as_mut()
+                    .and_then(|dead_write| dead_write.write.take())
+                {
+                    write.build(&mut batch).caused_by(trc::location!())?;
+                }
+                if has_live_changes {
+                    if let Some(dead_write) = &dead_write {
+                        new_card.set_metadata_kinds(dead_write.kinds);
+                    }
+                    new_etag = new_card
                         .update_meta(
                             access_token.account_tenant_ids(),
                             card,
@@ -311,16 +285,23 @@ impl CardPropPatchRequestHandler for Server {
                             None,
                             &mut batch,
                         )
-                        .caused_by(trc::location!())?,
+                        .caused_by(trc::location!())?
+                        .into();
+                } else if let Some(dead_write) = &dead_write {
+                    PresenceUpdate(card)
+                        .write(dead_write.kinds, account_id, document_id, &mut batch)
+                        .caused_by(trc::location!())?;
                 }
-                .into()
-            } else {
-                format!("\"{}\"", card.inner.etag.to_native()).into()
+                (true, new_etag.unwrap_or(etag))
             }
         };
 
         if is_success {
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            if !batch.is_empty() {
+                self.commit_batch(batch).await.caused_by(trc::location!())?;
+            }
+        } else {
+            items.fail_dependencies();
         }
 
         if headers.ret != Return::Minimal || !is_success {
@@ -330,9 +311,9 @@ impl CardPropPatchRequestHandler for Server {
                         .with_namespace(Namespace::CardDav)
                         .to_string(),
                 )
-                .with_etag_opt(etag))
+                .with_etag(etag))
         } else {
-            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag_opt(etag))
+            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag(etag))
         }
     }
 
@@ -340,12 +321,9 @@ impl CardPropPatchRequestHandler for Server {
         &self,
         personal_id: u32,
         address_book: &mut AddressBook,
-        is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool {
-        let mut has_errors = false;
-
+    ) {
         for property in properties {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
@@ -358,7 +336,6 @@ impl CardPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-                        has_errors = true;
                     }
                 }
                 (
@@ -374,8 +351,6 @@ impl CardPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-
-                        has_errors = true;
                     }
                 }
                 (DavProperty::WebDav(WebDavProperty::CreationDate), DavValue::Timestamp(dt)) => {
@@ -394,32 +369,8 @@ impl CardPropPatchRequestHandler for Server {
                             StatusCode::FORBIDDEN,
                             BaseCondition::ValidResourceType,
                         );
-                        has_errors = true;
                     } else {
                         items.insert_ok(property.property);
-                    }
-                }
-                (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
-                    if self.core.groupware.dead_property_size.is_some() =>
-                {
-                    if is_update {
-                        address_book.dead_properties.remove_element(dead);
-                    }
-
-                    if address_book.dead_properties.size() + values.size() + dead.size()
-                        < self.core.groupware.dead_property_size.unwrap()
-                    {
-                        address_book
-                            .dead_properties
-                            .add_element(dead.clone(), values.0);
-                        items.insert_ok(property.property);
-                    } else {
-                        items.insert_error_with_description(
-                            property.property,
-                            StatusCode::INSUFFICIENT_STORAGE,
-                            "Property value is too long",
-                        );
-                        has_errors = true;
                     }
                 }
                 (_, DavValue::Null) => {
@@ -431,25 +382,17 @@ impl CardPropPatchRequestHandler for Server {
                         StatusCode::CONFLICT,
                         "Property cannot be modified",
                     );
-                    has_errors = true;
                 }
             }
         }
-
-        !has_errors
     }
 
     fn apply_card_properties(
         &self,
         card: &mut ContactCard,
-        content: Option<&mut ContactCardContent>,
-        is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool {
-        let mut has_errors = false;
-        let mut content = content;
-
+    ) {
         for property in properties {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
@@ -462,34 +405,11 @@ impl CardPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-                        has_errors = true;
                     }
                 }
                 (DavProperty::WebDav(WebDavProperty::CreationDate), DavValue::Timestamp(dt)) => {
                     card.created = dt;
                     items.insert_ok(property.property);
-                }
-                (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
-                    if self.core.groupware.dead_property_size.is_some() && content.is_some() =>
-                {
-                    let dead_properties = &mut content.as_mut().unwrap().dead_properties;
-                    if is_update {
-                        dead_properties.remove_element(dead);
-                    }
-
-                    if dead_properties.size() + values.size() + dead.size()
-                        < self.core.groupware.dead_property_size.unwrap()
-                    {
-                        dead_properties.add_element(dead.clone(), values.0);
-                        items.insert_ok(property.property);
-                    } else {
-                        items.insert_error_with_description(
-                            property.property,
-                            StatusCode::INSUFFICIENT_STORAGE,
-                            "Property value is too long",
-                        );
-                        has_errors = true;
-                    }
                 }
                 (_, DavValue::Null) => {
                     items.insert_ok(property.property);
@@ -500,34 +420,21 @@ impl CardPropPatchRequestHandler for Server {
                         StatusCode::CONFLICT,
                         "Property cannot be modified",
                     );
-                    has_errors = true;
                 }
             }
         }
-
-        !has_errors
     }
 }
 
 fn remove_card_properties(
     card: &mut ContactCard,
-    content: Option<&mut ContactCardContent>,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
 ) {
-    let mut content = content;
     for property in properties {
         match &property {
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 card.display_name = None;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
-            }
-            DavProperty::DeadProperty(dead) if content.is_some() => {
-                content
-                    .as_mut()
-                    .unwrap()
-                    .dead_properties
-                    .remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             _ => {
@@ -555,10 +462,6 @@ fn remove_addressbook_properties(
             }
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 book.preferences_mut(personal_id).name.clear();
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
-            }
-            DavProperty::DeadProperty(dead) => {
-                book.dead_properties.remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             _ => {

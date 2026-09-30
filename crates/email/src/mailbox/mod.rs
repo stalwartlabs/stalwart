@@ -14,6 +14,7 @@ use types::{acl::AclGrant, collection::SyncCollection, field::Field, special_use
 pub mod destroy;
 pub mod index;
 pub mod manage;
+pub mod role;
 
 pub const INBOX_ID: u32 = 0;
 pub const TRASH_ID: u32 = 1;
@@ -32,6 +33,7 @@ pub struct Mailbox {
     pub uid_validity: u32,
     pub subscribers: Vec<u32>,
     pub acls: Vec<AclGrant>,
+    pub metadata_flags: u8,
 }
 
 impl Mailbox {
@@ -44,6 +46,7 @@ impl Mailbox {
             uid_validity: rand::random::<u32>(),
             subscribers: vec![],
             acls: vec![],
+            metadata_flags: 0,
         }
     }
 

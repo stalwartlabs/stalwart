@@ -17,6 +17,7 @@ pub mod idle;
 pub mod mailbox;
 pub mod managesieve;
 pub mod messagelimit;
+pub mod metadata;
 pub mod objectid;
 pub mod pop;
 pub mod search;
@@ -218,73 +219,85 @@ pub async fn imap_tests() {
     test.insert_account(admin);
 
     let start_time = Instant::now();
+    let groups = std::env::var("IMAP_TESTS").ok();
+    let enabled = |group: &str| {
+        groups
+            .as_deref()
+            .is_none_or(|groups| groups.split(',').any(|g| g.trim() == group))
+    };
 
-    // Body structure tests
-    body_structure::test();
+    if enabled("imap") {
+        // Body structure tests
+        body_structure::test();
 
-    // Connect to IMAP server
-    let mut imap_check = ImapConnection::connect(b"_y ").await;
-    let mut imap = ImapConnection::connect(b"_x ").await;
-    for imap in [&mut imap, &mut imap_check] {
-        imap.assert_read(Type::Untagged, ResponseType::Ok).await;
+        // Connect to IMAP server
+        let mut imap_check = ImapConnection::connect(b"_y ").await;
+        let mut imap = ImapConnection::connect(b"_x ").await;
+        for imap in [&mut imap, &mut imap_check] {
+            imap.assert_read(Type::Untagged, ResponseType::Ok).await;
+        }
+
+        // Unauthenticated tests
+        basic::test(&mut imap, &mut imap_check).await;
+
+        // Login
+        let account = test.account("jdoe@example.com");
+        for imap in [&mut imap, &mut imap_check] {
+            imap.authenticate(account.name(), account.secret()).await;
+        }
+
+        // Test GETJMAPACCESS (RFC 9698)
+        imap.send("GETJMAPACCESS").await;
+        imap.assert_read(Type::Tagged, ResponseType::Ok)
+            .await
+            .assert_contains("* JMAPACCESS \"")
+            .assert_contains("/.well-known/jmap\"");
+
+        // Delete folders
+        for mailbox in ["Drafts", "Junk Mail", "Sent Items"] {
+            imap.send(&format!("DELETE \"{}\"", mailbox)).await;
+            imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+        }
+
+        mailbox::test(&mut imap, &mut imap_check, &test).await;
+        append::test(&mut imap, &mut imap_check, &test).await;
+        search::test(&mut imap, &mut imap_check, &test).await;
+        fetch::test(&mut imap, &mut imap_check).await;
+        objectid::test(&test).await;
+        store::test(&mut imap, &mut imap_check, &test).await;
+        copy_move::test(&mut imap, &mut imap_check).await;
+        thread::test(&mut imap, &mut imap_check, &test).await;
+        idle::test(&mut imap, &mut imap_check, false).await;
+        condstore::test(&mut imap, &mut imap_check).await;
+        acl::test(&mut imap, &mut imap_check, &test).await;
+        uidbatches::test(&mut imap, &mut imap_check).await;
+        messagelimit::test(&mut imap, &mut imap_check).await;
+
+        // UIDONLY cannot be disabled once enabled, so it uses its own connection
+        uidonly::test(&test).await;
+
+        // Logout
+        for imap in [&mut imap, &mut imap_check] {
+            imap.send("UNAUTHENTICATE").await;
+            imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+
+            imap.send("LOGOUT").await;
+            imap.assert_read(Type::Untagged, ResponseType::Bye).await;
+        }
+
+        // Antispam training
+        antispam::test(&test).await;
+
+        // Run ManageSieve tests
+        managesieve::test(&test).await;
+
+        // Run POP3 tests
+        pop::test(&test).await;
     }
 
-    // Unauthenticated tests
-    basic::test(&mut imap, &mut imap_check).await;
-
-    // Login
-    let account = test.account("jdoe@example.com");
-    for imap in [&mut imap, &mut imap_check] {
-        imap.authenticate(account.name(), account.secret()).await;
+    if enabled("metadata") {
+        metadata::test(&test).await;
     }
-
-    // Test GETJMAPACCESS (RFC 9698)
-    imap.send("GETJMAPACCESS").await;
-    imap.assert_read(Type::Tagged, ResponseType::Ok)
-        .await
-        .assert_contains("* JMAPACCESS \"")
-        .assert_contains("/.well-known/jmap\"");
-
-    // Delete folders
-    for mailbox in ["Drafts", "Junk Mail", "Sent Items"] {
-        imap.send(&format!("DELETE \"{}\"", mailbox)).await;
-        imap.assert_read(Type::Tagged, ResponseType::Ok).await;
-    }
-
-    mailbox::test(&mut imap, &mut imap_check, &test).await;
-    append::test(&mut imap, &mut imap_check, &test).await;
-    search::test(&mut imap, &mut imap_check, &test).await;
-    fetch::test(&mut imap, &mut imap_check).await;
-    objectid::test(&test).await;
-    store::test(&mut imap, &mut imap_check, &test).await;
-    copy_move::test(&mut imap, &mut imap_check).await;
-    thread::test(&mut imap, &mut imap_check, &test).await;
-    idle::test(&mut imap, &mut imap_check, false).await;
-    condstore::test(&mut imap, &mut imap_check).await;
-    acl::test(&mut imap, &mut imap_check, &test).await;
-    uidbatches::test(&mut imap, &mut imap_check).await;
-    messagelimit::test(&mut imap, &mut imap_check).await;
-
-    // UIDONLY cannot be disabled once enabled, so it uses its own connection
-    uidonly::test(&test).await;
-
-    // Logout
-    for imap in [&mut imap, &mut imap_check] {
-        imap.send("UNAUTHENTICATE").await;
-        imap.assert_read(Type::Tagged, ResponseType::Ok).await;
-
-        imap.send("LOGOUT").await;
-        imap.assert_read(Type::Untagged, ResponseType::Bye).await;
-    }
-
-    // Antispam training
-    antispam::test(&test).await;
-
-    // Run ManageSieve tests
-    managesieve::test(&test).await;
-
-    // Run POP3 tests
-    pop::test(&test).await;
 
     // Print elapsed time
     let elapsed = start_time.elapsed();

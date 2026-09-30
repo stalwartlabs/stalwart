@@ -5,8 +5,8 @@
  */
 
 use super::{
-    AddressBook, ArchivedAddressBook, ArchivedContactCard, ArchivedContactCardContent,
-    CARD_HAS_DEAD_PROPERTIES, ContactCard, ContactCardContent,
+    AddressBook, ArchivedAddressBook, ArchivedContactCard, ArchivedContactCardContent, ContactCard,
+    ContactCardContent,
 };
 use crate::{MetaHasher, SizeWriter};
 use ahash::AHashSet;
@@ -14,9 +14,12 @@ use calcard::{
     common::IanaString,
     vcard::{ArchivedVCardProperty, ArchivedVCardValue, VCardProperty, VCardValue, VCardVersion},
 };
-use common::storage::index::{
-    ArchivedSplitObject, IndexItem, IndexValue, IndexableAndSerializableObject, IndexableObject,
-    SEARCH_HASH_UNCHANGED, SerializableObject, SplitObject, serialize_object,
+use common::storage::{
+    dav::PresenceBits,
+    index::{
+        ArchivedSplitObject, IndexItem, IndexValue, IndexableAndSerializableObject,
+        IndexableObject, SEARCH_HASH_UNCHANGED, SerializableObject, SplitObject, serialize_object,
+    },
 };
 use nlp::language::{
     Language,
@@ -31,8 +34,11 @@ use types::{
     acl::AclGrant,
     collection::SyncCollection,
     field::{ContactField, Field},
+    metadata::MetadataKinds,
 };
 use utils::sanitize_email;
+
+const CARD_HASHED_FLAGS: u16 = !PresenceBits::CONTACT_CARD.mask();
 
 impl IndexableObject for AddressBook {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -70,6 +76,10 @@ impl IndexableObject for &ArchivedAddressBook {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedAddressBook::metadata_kinds(self)
     }
 }
 
@@ -110,6 +120,10 @@ impl IndexableObject for &ArchivedContactCard {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         self.meta_index_values().into_iter()
     }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedContactCard::metadata_kinds(self)
+    }
 }
 
 impl IndexableAndSerializableObject for ContactCard {
@@ -149,7 +163,7 @@ impl SplitObject for ContactCard {
             .i64(self.created)
             .i64(self.modified)
             .u32(self.size)
-            .u16(self.flags)
+            .u16(self.flags & CARD_HASHED_FLAGS)
             .finish()
     }
 
@@ -164,11 +178,6 @@ impl SplitObject for ContactCard {
     fn refresh_from_content(&mut self, content: &ContactCardContent, ctx: VCardVersion) {
         self.uid = content.card.uid().unwrap_or_default().to_string();
         self.size = SizeWriter::vcard(&content.card, ctx) as u32;
-        if content.dead_properties.is_empty() {
-            self.flags &= !CARD_HAS_DEAD_PROPERTIES;
-        } else {
-            self.flags |= CARD_HAS_DEAD_PROPERTIES;
-        }
     }
 
     fn full_index_values<'x>(&'x self, content: &'x ContactCardContent) -> Vec<IndexValue<'x>> {
@@ -207,12 +216,16 @@ impl ArchivedSplitObject for ArchivedContactCard {
             .i64(self.created.to_native())
             .i64(self.modified.to_native())
             .u32(self.size.to_native())
-            .u16(self.flags.to_native())
+            .u16(self.flags.to_native() & CARD_HASHED_FLAGS)
             .finish()
     }
 
     fn etag(&self) -> u32 {
         self.etag.to_native()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedContactCard::metadata_kinds(self)
     }
 
     fn meta_index_values(&self) -> Vec<IndexValue<'_>> {
@@ -261,12 +274,10 @@ impl ArchivedSplitObject for ArchivedContactCard {
 
 impl AddressBook {
     pub fn size(&self) -> usize {
-        self.dead_properties.size()
-            + self
-                .preferences
-                .iter()
-                .map(|p| p.name.len() + p.description.as_ref().map_or(0, |n| n.len()))
-                .sum::<usize>()
+        self.preferences
+            .iter()
+            .map(|p| p.name.len() + p.description.as_ref().map_or(0, |n| n.len()))
+            .sum::<usize>()
             + self.name.len()
             + std::mem::size_of::<AddressBook>()
     }
@@ -274,12 +285,10 @@ impl AddressBook {
 
 impl ArchivedAddressBook {
     pub fn size(&self) -> usize {
-        self.dead_properties.size()
-            + self
-                .preferences
-                .iter()
-                .map(|p| p.name.len() + p.description.as_ref().map_or(0, |n| n.len()))
-                .sum::<usize>()
+        self.preferences
+            .iter()
+            .map(|p| p.name.len() + p.description.as_ref().map_or(0, |n| n.len()))
+            .sum::<usize>()
             + self.name.len()
             + std::mem::size_of::<AddressBook>()
     }
@@ -492,8 +501,17 @@ impl ArchiveCompression for ContactCardContent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contact::{CARD_META_DAV, CARD_META_JMAP};
     use calcard::vcard::VCard;
+    use common::{DavName, storage::index::GroupwareWrite};
     use rkyv::rancor::Error;
+
+    const KINDS: [MetadataKinds; 4] = [
+        MetadataKinds::NONE,
+        MetadataKinds::JMAP,
+        MetadataKinds::DAV,
+        MetadataKinds::JMAP.union(MetadataKinds::DAV),
+    ];
 
     fn card(address: &str) -> ContactCardContent {
         let vcard = [
@@ -509,7 +527,6 @@ mod tests {
         .concat();
         ContactCardContent {
             card: VCard::parse(vcard).expect("valid vCard"),
-            ..Default::default()
         }
     }
 
@@ -536,5 +553,67 @@ mod tests {
         let (after, _) = search_hashes(&card("ADR:;;1 Main St,Apt 5;Springfield;;;\r\n"));
 
         assert_ne!(before, after);
+    }
+
+    fn access_card(bytes: &[u8]) -> &ArchivedContactCard {
+        rkyv::access::<ArchivedContactCard, Error>(bytes).expect("the archive validates")
+    }
+
+    #[test]
+    fn presence_never_moves_the_card_etag() {
+        assert_eq!(CARD_META_DAV & CARD_META_JMAP, 0);
+        let card = ContactCard {
+            names: vec![DavName::new("card.vcf".to_string(), 1)],
+            uid: "presence".to_string(),
+            size: 10,
+            etag: 4321,
+            ..Default::default()
+        };
+        let hash = card.meta_hash();
+        let original = rkyv::to_bytes::<Error>(&card).expect("the card archives");
+        let original = access_card(&original);
+        assert_eq!(original.meta_hash(), hash);
+
+        for kinds in KINDS {
+            let mut changed = card.clone();
+            changed.set_metadata_kinds(kinds);
+            assert_eq!(changed.metadata_kinds(), kinds);
+            assert_eq!(changed.meta_hash(), hash);
+
+            let bytes = rkyv::to_bytes::<Error>(&changed).expect("the card archives");
+            let archived = access_card(&bytes);
+            assert_eq!(archived.meta_hash(), hash);
+            assert_eq!(ArchivedSplitObject::metadata_kinds(archived), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&archived), kinds);
+
+            let write = GroupwareWrite::meta_only(changed, original);
+            assert_eq!(write.meta().etag, card.etag);
+        }
+
+        let mut renamed = card.clone();
+        renamed.uid = "other".to_string();
+        assert_ne!(renamed.meta_hash(), hash);
+    }
+
+    #[test]
+    fn content_refresh_keeps_the_jmap_presence() {
+        let mut meta = ContactCard::default();
+        meta.set_metadata_kinds(MetadataKinds::JMAP);
+        meta.refresh_from_content(&card(""), VCardVersion::V4_0);
+        assert_eq!(meta.metadata_kinds(), MetadataKinds::JMAP);
+    }
+
+    #[test]
+    fn address_book_presence_is_reported_to_the_index_builder() {
+        for kinds in KINDS {
+            let mut book = AddressBook::default();
+            book.set_metadata_kinds(kinds.union(MetadataKinds::IMAP));
+            assert_eq!(book.metadata_kinds(), kinds);
+            let bytes = rkyv::to_bytes::<Error>(&book).expect("the address book archives");
+            let archived =
+                rkyv::access::<ArchivedAddressBook, Error>(&bytes).expect("the archive validates");
+            assert_eq!(archived.metadata_kinds(), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&archived), kinds);
+        }
     }
 }

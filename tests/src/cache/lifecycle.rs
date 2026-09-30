@@ -51,6 +51,7 @@ async fn ingest(server: &Server, account_id: u32, subject: &str, received_at: u6
             keywords: vec![],
             received_at: Some(received_at),
             source: IngestSource::Restore,
+            metadata: None,
             session_id: 0,
         })
         .await

@@ -11,7 +11,9 @@ use crate::{
 
 impl DavParser for PropertyUpdate {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
-        stream.expect_named_element(NamedElement::dav(Element::Propertyupdate))?;
+        let update_lang = stream
+            .expect_named_element_raw(NamedElement::dav(Element::Propertyupdate))?
+            .xml_lang()?;
         let mut update = PropertyUpdate {
             set: Vec::with_capacity(4),
             remove: Vec::with_capacity(4),
@@ -26,10 +28,17 @@ impl DavParser for PropertyUpdate {
                             ns: Namespace::Dav,
                             element: Element::Set,
                         },
-                    ..
+                    raw,
                 } => {
-                    stream.expect_named_element(NamedElement::dav(Element::Prop))?;
-                    stream.collect_property_values(&mut update.set)?;
+                    let set_lang = raw.xml_lang()?;
+                    let prop_lang = stream
+                        .expect_named_element_raw(NamedElement::dav(Element::Prop))?
+                        .xml_lang()?;
+                    let lang = prop_lang
+                        .as_deref()
+                        .or(set_lang.as_deref())
+                        .or(update_lang.as_deref());
+                    stream.collect_property_values(&mut update.set, lang)?;
                     stream.expect_element_end()?;
                     update.set_first = update.remove.is_empty();
                 }

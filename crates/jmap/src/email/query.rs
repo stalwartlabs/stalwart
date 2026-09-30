@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        metadata::{MetadataType, ObjectMetadata},
+        query::QueryResponseBuilder,
+    },
+    changes::state::{JmapCacheState, MetadataStateManager},
+};
 use common::{Server, auth::AccessToken};
 use compact_str::ToCompactString;
 use email::{
@@ -17,6 +23,7 @@ use email::{
 use jmap_proto::{
     method::query::{Filter, QueryRequest, QueryResponse},
     object::email::{Email, EmailComparator, EmailFilter, EmailQueryFilter},
+    request::capability::CapabilityIds,
 };
 use mail_parser::HeaderName;
 use nlp::language::Language;
@@ -28,13 +35,14 @@ use store::{
     write::SearchIndex,
 };
 use trc::AddContext;
-use types::{acl::Acl, keyword::Keyword};
+use types::{acl::Acl, collection::Collection, keyword::Keyword};
 
 pub trait EmailQuery: Sync + Send {
     fn email_query(
         &self,
         request: QueryRequest<Email>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
@@ -43,6 +51,7 @@ impl EmailQuery for Server {
         &self,
         mut request: QueryRequest<Email>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
@@ -50,10 +59,47 @@ impl EmailQuery for Server {
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
+        let viewer = object_metadata.viewer();
+        let readable: RoaringBitmap = if access_token.is_shared(account_id) {
+            cached_messages.shared_messages(access_token, Acl::ReadItems)
+        } else {
+            cached_messages
+                .emails
+                .iter()
+                .map(|item| item.document_id())
+                .collect()
+        };
+        let metadata =
+            object_metadata.query(request.filter.iter().filter_map(|filter| match filter {
+                Filter::Property(EmailQueryFilter::Metadata(filter)) => Some(filter),
+                _ => None,
+            }))?;
+        let mut metadata_matches = if metadata.is_empty() {
+            Vec::new()
+        } else {
+            let mut candidates = RoaringBitmap::from_iter(
+                cached_messages
+                    .with_metadata()
+                    .map(|item| item.document_id()),
+            );
+            candidates &= &readable;
+            let private = if metadata.has_private() {
+                object_metadata.private_candidates(self, account_id).await?
+            } else {
+                None
+            };
+            metadata
+                .evaluate(self, account_id, &candidates, private)
+                .await?
+        }
+        .into_iter();
 
         for filter in std::mem::take(&mut request.filter) {
             match filter {
-                Filter::Property(EmailQueryFilter::Metadata(_)) => todo!(),
+                Filter::Property(EmailQueryFilter::Metadata(_)) => filters.push(
+                    SearchFilter::is_in_set(metadata_matches.next().unwrap_or_default()),
+                ),
                 Filter::Property(EmailQueryFilter::Email(cond)) => match cond {
                     EmailFilter::Text(text) => {
                         let (text, language) =
@@ -383,15 +429,7 @@ impl EmailQuery for Server {
                 SearchQuery::new(SearchIndex::Email)
                     .with_filters(filters)
                     .with_account_id(account_id)
-                    .with_mask(if access_token.is_shared(account_id) {
-                        cached_messages.shared_messages(access_token, Acl::ReadItems)
-                    } else {
-                        cached_messages
-                            .emails
-                            .iter()
-                            .map(|item| item.document_id())
-                            .collect()
-                    }),
+                    .with_mask(readable),
                 comparators,
             )
             .await?;
@@ -415,7 +453,13 @@ impl EmailQuery for Server {
         let mut response = QueryResponseBuilder::new(
             total_results,
             self.core.jmap.query_max_results,
-            cached_messages.get_state(false),
+            self.metadata_state(
+                viewer,
+                account_id,
+                Collection::Email,
+                cached_messages.get_state(false),
+            )
+            .await?,
             &request,
         );
 

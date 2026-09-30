@@ -5,7 +5,7 @@
  */
 
 use super::{ArchivedFileNode, FileNode};
-use crate::DestroyArchive;
+use crate::{DestroyArchive, metadata::MetadataCleanup};
 use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
 use store::{
     ValueKey,
@@ -131,14 +131,26 @@ impl FileNode {
 }
 
 impl DestroyArchive<Archive<&ArchivedFileNode>> {
-    pub fn delete(
+    pub async fn delete(
         self,
+        server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
         path: String,
     ) -> trc::Result<()> {
+        MetadataCleanup::immediate(Collection::FileNode)
+            .remove(
+                server,
+                changed_by,
+                account_id,
+                document_id,
+                self.0.inner.metadata_kinds(),
+                batch,
+            )
+            .await?;
+
         // Prepare write batch
         batch
             .with_account_id(account_id)
@@ -161,12 +173,20 @@ impl DestroyArchive<Vec<u32>> {
         server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
+        cleanup: &MetadataCleanup,
         delete_path: Option<String>,
     ) -> trc::Result<()> {
         // Process deletions
         let mut batch = BatchBuilder::new();
-        self.delete_batch(server, changed_by, account_id, delete_path, &mut batch)
-            .await?;
+        self.delete_batch(
+            server,
+            changed_by,
+            account_id,
+            cleanup,
+            delete_path,
+            &mut batch,
+        )
+        .await?;
         // Write changes
         if !batch.is_empty() {
             server
@@ -183,6 +203,7 @@ impl DestroyArchive<Vec<u32>> {
         server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
+        cleanup: &MetadataCleanup,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
@@ -191,7 +212,7 @@ impl DestroyArchive<Vec<u32>> {
             .with_account_id(account_id)
             .with_collection(Collection::FileNode);
         for document_id in self.0 {
-            if let Some(node) = server
+            if let Some(node_) = server
                 .store()
                 .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                     account_id,
@@ -200,21 +221,35 @@ impl DestroyArchive<Vec<u32>> {
                 ))
                 .await?
             {
+                let node = node_
+                    .to_unarchived::<FileNode>()
+                    .caused_by(trc::location!())?;
+                cleanup
+                    .remove(
+                        server,
+                        changed_by,
+                        account_id,
+                        document_id,
+                        node.inner.metadata_kinds(),
+                        batch,
+                    )
+                    .await?;
+
                 // Delete record
                 batch
                     .with_document(document_id)
                     .custom(
                         ObjectIndexBuilder::<_, ()>::new()
                             .with_changed_by(changed_by)
-                            .with_current(
-                                node.to_unarchived::<FileNode>()
-                                    .caused_by(trc::location!())?,
-                            ),
+                            .with_current(node),
                     )
                     .caused_by(trc::location!())?
                     .commit_point();
             }
         }
+        batch
+            .with_account_id(account_id)
+            .with_collection(Collection::FileNode);
 
         if !batch.is_empty()
             && let Some(delete_path) = delete_path

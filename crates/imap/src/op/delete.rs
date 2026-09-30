@@ -74,7 +74,7 @@ impl<T: SessionStream> SessionData<T> {
 
         if let Err(err) = self
             .server
-            .mailbox_destroy(account_id, mailbox_id, &access_token, true)
+            .mailbox_destroy(account_id, mailbox_id, &access_token, true, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?
         {

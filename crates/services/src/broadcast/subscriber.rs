@@ -236,6 +236,13 @@ fn log_event(event: &BroadcastEvent) -> trc::Value {
                 state_change.change_id.into(),
                 (*state_change.types.as_ref()).into(),
             ]),
+            PushNotification::ViewerStateChange(viewer_change) => trc::Value::Array(vec![
+                "ViewerStateChange".into(),
+                viewer_change.change.account_id.into(),
+                viewer_change.viewer_id.into(),
+                viewer_change.change.change_id.into(),
+                (*viewer_change.change.types.as_ref()).into(),
+            ]),
             PushNotification::CalendarAlert(calendar_alert) => trc::Value::Array(vec![
                 "CalendarAlert".into(),
                 calendar_alert.account_id.into(),

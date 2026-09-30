@@ -27,6 +27,10 @@ impl PendingCreates {
         self.0.is_empty()
     }
 
+    pub fn into_create_ids(self) -> impl Iterator<Item = String> {
+        self.0.into_iter().map(|(create_id, _)| create_id)
+    }
+
     pub fn resolve<T>(self, response: &mut SetResponse<T>, assigned_ids: &AssignedIds)
     where
         T: JmapObject,

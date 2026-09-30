@@ -7,7 +7,7 @@
 use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
-        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
     request::{MaybeInvalid, deserialize::DeserializeArguments},
@@ -97,17 +97,20 @@ impl Property for FileNodeProperty {
         value: &str,
         depth: PointerDepth,
     ) -> Option<Self> {
-        let patch_depth = key.is_none().then_some(depth);
         match key {
-            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 FileNodeProperty::ShareWith => {
                     Id::from_str(value).ok().map(FileNodeProperty::IdValue)
                 }
-                _ => FileNodeProperty::parse(value, patch_depth),
+                _ => FileNodeProperty::parse_nested_name(value),
             },
-            _ => FileNodeProperty::parse(value, patch_depth),
+            Some(_) => FileNodeProperty::parse_nested_name(value),
+            None => FileNodeProperty::parse(value, Some(depth)),
         }
+    }
+
+    fn is_opaque(&self) -> bool {
+        self.metadata_root().is_some()
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -309,36 +312,35 @@ impl FileNodeProperty {
         )
     }
 
+    property_names!(
+        FileNodeProperty,
+        "id" => FileNodeProperty::Id,
+        "parentId" => FileNodeProperty::ParentId,
+        "blobId" => FileNodeProperty::BlobId,
+        "size" => FileNodeProperty::Size,
+        "name" => FileNodeProperty::Name,
+        "type" => FileNodeProperty::Type,
+        "nodeType" => FileNodeProperty::NodeType,
+        "target" => FileNodeProperty::Target,
+        "created" => FileNodeProperty::Created,
+        "modified" => FileNodeProperty::Modified,
+        "accessed" => FileNodeProperty::Accessed,
+        "changed" => FileNodeProperty::Changed,
+        "executable" => FileNodeProperty::Executable,
+        "role" => FileNodeProperty::Role,
+        "myRights" => FileNodeProperty::MyRights,
+        "shareWith" => FileNodeProperty::ShareWith,
+        "isSubscribed" => FileNodeProperty::IsSubscribed,
+        "mayRead" => FileNodeProperty::Rights(FileNodeRight::MayRead),
+        "mayAddChildren" => FileNodeProperty::Rights(FileNodeRight::MayAddChildren),
+        "mayRename" => FileNodeProperty::Rights(FileNodeRight::MayRename),
+        "mayDelete" => FileNodeProperty::Rights(FileNodeRight::MayDelete),
+        "mayModifyContent" => FileNodeProperty::Rights(FileNodeRight::MayModifyContent),
+        "mayShare" => FileNodeProperty::Rights(FileNodeRight::MayShare),
+    );
+
     fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
-        hashify::fnc_map!(value.as_bytes(),
-            b"id" => Some(FileNodeProperty::Id),
-            b"parentId" => Some(FileNodeProperty::ParentId),
-            b"blobId" => Some(FileNodeProperty::BlobId),
-            b"size" => Some(FileNodeProperty::Size),
-            b"name" => Some(FileNodeProperty::Name),
-            b"type" => Some(FileNodeProperty::Type),
-            b"nodeType" => Some(FileNodeProperty::NodeType),
-            b"target" => Some(FileNodeProperty::Target),
-            b"created" => Some(FileNodeProperty::Created),
-            b"modified" => Some(FileNodeProperty::Modified),
-            b"accessed" => Some(FileNodeProperty::Accessed),
-            b"changed" => Some(FileNodeProperty::Changed),
-            b"executable" => Some(FileNodeProperty::Executable),
-            b"role" => Some(FileNodeProperty::Role),
-            b"myRights" => Some(FileNodeProperty::MyRights),
-            b"shareWith" => Some(FileNodeProperty::ShareWith),
-            b"isSubscribed" => Some(FileNodeProperty::IsSubscribed),
-            b"metadata" => Some(FileNodeProperty::Metadata),
-            b"privateMetadata" => Some(FileNodeProperty::PrivateMetadata),
-            b"mayRead" => Some(FileNodeProperty::Rights(FileNodeRight::MayRead)),
-            b"mayAddChildren" => Some(FileNodeProperty::Rights(FileNodeRight::MayAddChildren)),
-            b"mayRename" => Some(FileNodeProperty::Rights(FileNodeRight::MayRename)),
-            b"mayDelete" => Some(FileNodeProperty::Rights(FileNodeRight::MayDelete)),
-            b"mayModifyContent" => Some(FileNodeProperty::Rights(FileNodeRight::MayModifyContent)),
-            b"mayShare" => Some(FileNodeProperty::Rights(FileNodeRight::MayShare)),
-            _ => None,
-        )
-        .or_else(|| {
+        FileNodeProperty::parse_name(value).or_else(|| {
             patch_depth
                 .filter(|_| value.contains('/'))
                 .and_then(|depth| JsonPointer::parse_nested(value, depth))
@@ -348,7 +350,6 @@ impl FileNodeProperty {
 
     fn patch_or_prop(&self) -> &FileNodeProperty {
         if let FileNodeProperty::Pointer(ptr) = self
-            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
@@ -371,6 +372,13 @@ impl MetadataProperty for FileNodeProperty {
         match self {
             FileNodeProperty::Pointer(pointer) => Some(pointer),
             _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => FileNodeProperty::Metadata,
+            MetadataRoot::Private => FileNodeProperty::PrivateMetadata,
         }
     }
 }

@@ -9,6 +9,7 @@ use crate::{
     calendar::assert_event_privacy_access,
     common::{
         ETag, ExtractETag,
+        dead::{DeadPatch, DeadTarget, DisplayName},
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -25,9 +26,10 @@ use dav_proto::{
     },
 };
 use groupware::{
+    PresenceUpdate,
     cache::GroupwareCache,
     calendar::{
-        Calendar, CalendarEvent, CalendarEventContent, SupportedComponent, Timezone,
+        Calendar, CalendarEvent, SupportedComponent, Timezone,
         alerts::{CalendarAlarmsReschedule, CalendarSettings},
         privacy::EventViewer,
     },
@@ -44,7 +46,6 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
-    field::CalendarEventField,
 };
 use utils::map::bitmap::Bitmap;
 
@@ -63,16 +64,14 @@ pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
         is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool;
+    );
 
     fn apply_event_properties(
         &self,
         event: &mut CalendarEvent,
-        content: Option<&mut CalendarEventContent>,
-        is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool;
+    );
 }
 
 impl CalendarPropPatchRequestHandler for Server {
@@ -167,7 +166,7 @@ impl CalendarPropPatchRequestHandler for Server {
                 account_id,
                 collection,
                 document_id: document_id.into(),
-                etag: etag.into(),
+                etag: etag.clone().into(),
                 path: resource_.resource.unwrap(),
                 ..Default::default()
             }],
@@ -176,11 +175,12 @@ impl CalendarPropPatchRequestHandler for Server {
         )
         .await?;
 
-        let is_success;
+        let dead = DeadPatch::take(&mut request, DisplayName::Live);
+        let has_live_changes = !request.set.is_empty() || !request.remove.is_empty();
         let mut batch = BatchBuilder::new();
         let mut items = PropStatBuilder::default();
 
-        let etag = if resource.is_container() {
+        let (is_success, etag) = if resource.is_container() {
             // Deserialize
             let calendar = archive
                 .to_unarchived::<Calendar>()
@@ -194,8 +194,8 @@ impl CalendarPropPatchRequestHandler for Server {
                 new_calendar.inherit_owner_preferences(account_id, personal_id);
             }
 
-            // Remove properties
-            if !request.set_first && !request.remove.is_empty() {
+            // Apply live properties
+            if !request.set_first {
                 remove_calendar_properties(
                     personal_id,
                     &mut new_calendar,
@@ -203,64 +203,73 @@ impl CalendarPropPatchRequestHandler for Server {
                     &mut items,
                 );
             }
-
-            // Set properties
-            is_success = self.apply_calendar_properties(
+            self.apply_calendar_properties(
                 personal_id,
                 &mut new_calendar,
                 true,
                 request.set,
                 &mut items,
             );
+            remove_calendar_properties(personal_id, &mut new_calendar, request.remove, &mut items);
 
-            // Remove properties
-            if is_success && !request.remove.is_empty() {
-                remove_calendar_properties(
-                    personal_id,
-                    &mut new_calendar,
-                    request.remove,
+            // Apply dead properties
+            let mut dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::container(
+                        account_id,
+                        Collection::Calendar,
+                        document_id,
+                        calendar.inner.metadata_kinds(),
+                    ),
                     &mut items,
-                );
-            }
-
-            if is_success {
-                if is_member {
-                    new_calendar.sync_owner_preferences(account_id, personal_id);
-                }
-                self.reschedule_calendar_alarms(
-                    &resources,
-                    account_id,
-                    document_id,
-                    CalendarSettings::from(calendar.inner),
-                    CalendarSettings::from(&new_calendar),
-                    &mut batch,
                 )
                 .await
                 .caused_by(trc::location!())?;
-                new_calendar
-                    .update(
-                        access_token.account_tenant_ids(),
-                        calendar,
+
+            if items.has_errors() {
+                (false, etag)
+            } else {
+                if has_live_changes {
+                    if is_member {
+                        new_calendar.sync_owner_preferences(account_id, personal_id);
+                    }
+                    if let Some(dead_write) = &dead_write {
+                        new_calendar.set_metadata_kinds(dead_write.kinds);
+                    }
+                    self.reschedule_calendar_alarms(
+                        &resources,
                         account_id,
                         document_id,
+                        CalendarSettings::from(calendar.inner),
+                        CalendarSettings::from(&new_calendar),
                         &mut batch,
                     )
-                    .caused_by(trc::location!())?
-                    .etag()
-            } else {
-                calendar.etag().into()
+                    .await
+                    .caused_by(trc::location!())?;
+                    if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
+                        write.build(&mut batch).caused_by(trc::location!())?;
+                    }
+                    new_calendar
+                        .update(
+                            access_token.account_tenant_ids(),
+                            calendar,
+                            account_id,
+                            document_id,
+                            &mut batch,
+                        )
+                        .caused_by(trc::location!())?;
+                } else if let Some(dead_write) = dead_write.as_mut() {
+                    if let Some(write) = dead_write.write.take() {
+                        write.build(&mut batch).caused_by(trc::location!())?;
+                    }
+                    PresenceUpdate(calendar)
+                        .write(dead_write.kinds, account_id, document_id, &mut batch)
+                        .caused_by(trc::location!())?;
+                }
+                (true, batch.etag().unwrap_or(etag))
             }
         } else {
-            // A request that names no dead property leaves the payload untouched
-            let touches_content = request
-                .set
-                .iter()
-                .any(|property| matches!(property.property, DavProperty::DeadProperty(_)))
-                || request
-                    .remove
-                    .iter()
-                    .any(|property| matches!(property, DavProperty::DeadProperty(_)));
-
             // Deserialize
             let event = archive
                 .to_unarchived::<CalendarEvent>()
@@ -269,74 +278,47 @@ impl CalendarPropPatchRequestHandler for Server {
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;
 
-            let content_ = if touches_content {
-                self.store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
-                        account_id,
-                        Collection::CalendarEvent,
-                        document_id,
-                        CalendarEventField::Content,
-                    ))
-                    .await
-                    .caused_by(trc::location!())?
-            } else {
-                None
-            };
-            let content = content_
-                .as_ref()
-                .map(|content| content.to_unarchived::<CalendarEventContent>())
-                .transpose()
-                .caused_by(trc::location!())?;
-            let mut new_content = content
-                .as_ref()
-                .map(|content| content.deserialize::<CalendarEventContent>())
-                .transpose()
-                .caused_by(trc::location!())?;
-
-            // Remove properties
-            if !request.set_first && !request.remove.is_empty() {
+            // Apply live properties
+            if !request.set_first {
                 remove_event_properties(
                     &mut new_event,
-                    new_content.as_mut(),
                     std::mem::take(&mut request.remove),
                     &mut items,
                 );
             }
+            self.apply_event_properties(&mut new_event, request.set, &mut items);
+            remove_event_properties(&mut new_event, request.remove, &mut items);
 
-            // Set properties
-            is_success = self.apply_event_properties(
-                &mut new_event,
-                new_content.as_mut(),
-                true,
-                request.set,
-                &mut items,
-            );
-
-            // Remove properties
-            if is_success && !request.remove.is_empty() {
-                remove_event_properties(
-                    &mut new_event,
-                    new_content.as_mut(),
-                    request.remove,
+            // Apply dead properties
+            let mut dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::item(
+                        account_id,
+                        Collection::CalendarEvent,
+                        document_id,
+                        event.inner.metadata_kinds(),
+                    ),
                     &mut items,
-                );
-            }
+                )
+                .await
+                .caused_by(trc::location!())?;
 
-            if is_success {
-                match (new_content, content) {
-                    (Some(new_content), Some(content)) => new_event
-                        .update_full(
-                            new_content,
-                            access_token.account_tenant_ids(),
-                            event,
-                            content.inner,
-                            account_id,
-                            document_id,
-                            None,
-                            &mut batch,
-                        )
-                        .caused_by(trc::location!())?,
-                    _ => new_event
+            if items.has_errors() {
+                (false, etag)
+            } else {
+                let mut new_etag = None;
+                if let Some(write) = dead_write
+                    .as_mut()
+                    .and_then(|dead_write| dead_write.write.take())
+                {
+                    write.build(&mut batch).caused_by(trc::location!())?;
+                }
+                if has_live_changes {
+                    if let Some(dead_write) = &dead_write {
+                        new_event.set_metadata_kinds(dead_write.kinds);
+                    }
+                    new_etag = new_event
                         .update_meta(
                             access_token.account_tenant_ids(),
                             event,
@@ -345,16 +327,23 @@ impl CalendarPropPatchRequestHandler for Server {
                             None,
                             &mut batch,
                         )
-                        .caused_by(trc::location!())?,
+                        .caused_by(trc::location!())?
+                        .into();
+                } else if let Some(dead_write) = &dead_write {
+                    PresenceUpdate(event)
+                        .write(dead_write.kinds, account_id, document_id, &mut batch)
+                        .caused_by(trc::location!())?;
                 }
-                .into()
-            } else {
-                format!("\"{}\"", event.inner.etag.to_native()).into()
+                (true, new_etag.unwrap_or(etag))
             }
         };
 
         if is_success {
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            if !batch.is_empty() {
+                self.commit_batch(batch).await.caused_by(trc::location!())?;
+            }
+        } else {
+            items.fail_dependencies();
         }
 
         if headers.ret != Return::Minimal || !is_success {
@@ -364,9 +353,9 @@ impl CalendarPropPatchRequestHandler for Server {
                         .with_namespace(Namespace::CalDav)
                         .to_string(),
                 )
-                .with_etag_opt(etag))
+                .with_etag(etag))
         } else {
-            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag_opt(etag))
+            Ok(HttpResponse::new(StatusCode::NO_CONTENT).with_etag(etag))
         }
     }
 
@@ -377,9 +366,7 @@ impl CalendarPropPatchRequestHandler for Server {
         is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool {
-        let mut has_errors = false;
-
+    ) {
         for property in properties {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
@@ -392,7 +379,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-                        has_errors = true;
                     }
                 }
                 (
@@ -408,8 +394,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-
-                        has_errors = true;
                     }
                 }
                 (
@@ -422,7 +406,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-                        has_errors = true;
                     } else if !ical.is_timezone() {
                         items.insert_precondition_failed_with_description(
                             property.property,
@@ -430,7 +413,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             CalCondition::ValidCalendarData,
                             "Invalid calendar timezone",
                         );
-                        has_errors = true;
                     } else {
                         calendar.preferences_mut(personal_id).time_zone = Timezone::Custom(ical);
                         items.insert_ok(property.property);
@@ -448,7 +430,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             CalCondition::ValidTimezone,
                             "Invalid timezone ID",
                         );
-                        has_errors = true;
                     }
                 }
                 (DavProperty::WebDav(WebDavProperty::CreationDate), DavValue::Timestamp(dt)) => {
@@ -469,7 +450,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             StatusCode::FORBIDDEN,
                             BaseCondition::ValidResourceType,
                         );
-                        has_errors = true;
                     } else {
                         items.insert_ok(property.property);
                     }
@@ -495,7 +475,6 @@ impl CalendarPropPatchRequestHandler for Server {
                                 CalCondition::SupportedCalendarComponent,
                                 "At least one supported component must be specified",
                             );
-                            has_errors = true;
                         }
                     } else {
                         items.insert_precondition_failed_with_description(
@@ -504,29 +483,6 @@ impl CalendarPropPatchRequestHandler for Server {
                             CalCondition::SupportedCalendarComponent,
                             "Property cannot be modified",
                         );
-                        has_errors = true;
-                    }
-                }
-                (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
-                    if self.core.groupware.dead_property_size.is_some() =>
-                {
-                    if is_update {
-                        calendar.dead_properties.remove_element(dead);
-                    }
-
-                    if calendar.dead_properties.size() + values.size() + dead.size()
-                        < self.core.groupware.dead_property_size.unwrap()
-                    {
-                        calendar.dead_properties.add_element(dead.clone(), values.0);
-                        items.insert_ok(property.property);
-                    } else {
-                        items.insert_error_with_description(
-                            property.property,
-                            StatusCode::INSUFFICIENT_STORAGE,
-                            "Property value is too long",
-                        );
-
-                        has_errors = true;
                     }
                 }
                 (_, DavValue::Null) => {
@@ -538,25 +494,17 @@ impl CalendarPropPatchRequestHandler for Server {
                         StatusCode::CONFLICT,
                         "Property cannot be modified",
                     );
-                    has_errors = true;
                 }
             }
         }
-
-        !has_errors
     }
 
     fn apply_event_properties(
         &self,
         event: &mut CalendarEvent,
-        content: Option<&mut CalendarEventContent>,
-        is_update: bool,
         properties: Vec<DavPropertyValue>,
         items: &mut PropStatBuilder,
-    ) -> bool {
-        let mut has_errors = false;
-        let mut content = content;
-
+    ) {
         for property in properties {
             match (&property.property, property.value) {
                 (DavProperty::WebDav(WebDavProperty::DisplayName), DavValue::String(name)) => {
@@ -569,34 +517,11 @@ impl CalendarPropPatchRequestHandler for Server {
                             StatusCode::INSUFFICIENT_STORAGE,
                             "Property value is too long",
                         );
-                        has_errors = true;
                     }
                 }
                 (DavProperty::WebDav(WebDavProperty::CreationDate), DavValue::Timestamp(dt)) => {
                     event.created = dt;
                     items.insert_ok(property.property);
-                }
-                (DavProperty::DeadProperty(dead), DavValue::DeadProperty(values))
-                    if self.core.groupware.dead_property_size.is_some() && content.is_some() =>
-                {
-                    let dead_properties = &mut content.as_mut().unwrap().dead_properties;
-                    if is_update {
-                        dead_properties.remove_element(dead);
-                    }
-
-                    if dead_properties.size() + values.size() + dead.size()
-                        < self.core.groupware.dead_property_size.unwrap()
-                    {
-                        dead_properties.add_element(dead.clone(), values.0);
-                        items.insert_ok(property.property);
-                    } else {
-                        items.insert_error_with_description(
-                            property.property,
-                            StatusCode::INSUFFICIENT_STORAGE,
-                            "Property value is too long",
-                        );
-                        has_errors = true;
-                    }
                 }
                 (_, DavValue::Null) => {
                     items.insert_ok(property.property);
@@ -607,34 +532,21 @@ impl CalendarPropPatchRequestHandler for Server {
                         StatusCode::CONFLICT,
                         "Property cannot be modified",
                     );
-                    has_errors = true;
                 }
             }
         }
-
-        !has_errors
     }
 }
 
 fn remove_event_properties(
     event: &mut CalendarEvent,
-    content: Option<&mut CalendarEventContent>,
     properties: Vec<DavProperty>,
     items: &mut PropStatBuilder,
 ) {
-    let mut content = content;
     for property in properties {
         match &property {
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 event.display_name = None;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
-            }
-            DavProperty::DeadProperty(dead) if content.is_some() => {
-                content
-                    .as_mut()
-                    .unwrap()
-                    .dead_properties
-                    .remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             _ => {
@@ -663,10 +575,6 @@ fn remove_calendar_properties(
             DavProperty::CalDav(CalDavProperty::CalendarTimezone)
             | DavProperty::CalDav(CalDavProperty::TimezoneId) => {
                 calendar.preferences_mut(personal_id).time_zone = Timezone::Default;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
-            }
-            DavProperty::DeadProperty(dead) => {
-                calendar.dead_properties.remove_element(dead);
                 items.insert_with_status(property, StatusCode::NO_CONTENT);
             }
             _ => {

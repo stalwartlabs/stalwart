@@ -5,6 +5,10 @@
  */
 
 use crate::api::acl::{JmapAcl, JmapRights};
+use crate::api::metadata::{
+    MetadataAccess, MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, ObjectMetadata,
+    PreparedMetadata, is_empty_update, reject_uncommitted,
+};
 use crate::api::pending_creates::PendingCreates;
 use crate::changes::state::JmapCacheState;
 use common::{
@@ -14,19 +18,17 @@ use common::{
     storage::quota::ObjectQuotaUsage,
 };
 use groupware::{
-    DestroyArchive,
+    DestroyArchive, PresenceUpdate,
     cache::GroupwareCache,
     contact::{AddressBook, AddressBookPreferences, ContactCard},
+    metadata::MetadataCleanup,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::SetError,
     method::set::{SetRequest, SetResponse},
-    object::{
-        addressbook::{self, AddressBookProperty, AddressBookValue},
-        metadata::MetadataProperty,
-    },
-    request::{MaybeInvalid, reference::MaybeIdReference},
+    object::addressbook::{self, AddressBookProperty, AddressBookValue},
+    request::{MaybeInvalid, capability::CapabilityIds, reference::MaybeIdReference},
     types::state::State,
 };
 use jmap_tools::{JsonPointerItem, Key, Value};
@@ -43,6 +45,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::PrincipalField,
     id::Id,
+    metadata::MetadataKinds,
 };
 
 pub trait AddressBookSet: Sync + Send {
@@ -51,6 +54,7 @@ pub trait AddressBookSet: Sync + Send {
         request: SetRequest<'_, addressbook::AddressBook>,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<SetResponse<addressbook::AddressBook>>> + Send;
 }
 
@@ -60,6 +64,7 @@ impl AddressBookSet for Server {
         mut request: SetRequest<'_, addressbook::AddressBook>,
         access_token: &AccessToken,
         _session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<SetResponse<addressbook::AddressBook>> {
         let account_id = request.account_id.document_id();
         let cache = self
@@ -69,8 +74,19 @@ impl AddressBookSet for Server {
                 SyncCollection::AddressBook,
             )
             .await?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::AddressBook);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(cache.assert_state(true, &request.if_in_state)?);
+            .with_state(
+                metadata
+                    .assert_state(
+                        self,
+                        account_id,
+                        cache.get_state(true),
+                        &request.if_in_state,
+                    )
+                    .await?,
+            );
+        let mut metadata_writer = MetadataWriter::new(metadata, account_id);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_shared = access_token.is_shared(account_id);
         let mut set_default: Option<PendingId> = None;
@@ -88,7 +104,7 @@ impl AddressBookSet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        'create: for (id, object) in request.unwrap_create() {
+        'create: for (id, mut object) in request.unwrap_create() {
             if !quota.has_room(created_slots.len()) {
                 response.not_created.append(
                     id,
@@ -124,6 +140,14 @@ impl AddressBookSet for Server {
             };
 
             // Process changes
+            let metadata_patches =
+                match metadata_writer.extract(MetadataPatches::for_create(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                };
             if let Err(err) =
                 update_address_book(None, object, &mut address_book, access_token, account_id)
             {
@@ -152,8 +176,31 @@ impl AddressBookSet for Server {
                 }
             }
 
+            let prepared_metadata = match metadata_patches {
+                Some(patches) => match metadata_writer
+                    .prepare(self, patches, OWNER_ACCESS, None)
+                    .await?
+                {
+                    Ok(prepared) => Some(prepared),
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                },
+                None => None,
+            };
+
             // Insert record
             let document_id = batch.reserve_document_id(account_id, Collection::AddressBook);
+            if let Some(kinds) = prepared_metadata
+                .as_ref()
+                .and_then(PreparedMetadata::shared_kinds)
+            {
+                address_book.set_metadata_kinds(kinds);
+            }
+            if let Some(prepared) = prepared_metadata {
+                metadata_writer.write(prepared, document_id, &mut batch)?;
+            }
             address_book
                 .insert(
                     access_token.account_tenant_ids(),
@@ -174,7 +221,25 @@ impl AddressBookSet for Server {
         }
 
         // Process updates
-        'update: for (id, object) in request.unwrap_update() {
+        let mut updates =
+            Vec::with_capacity(request.update.as_ref().map_or(0, |update| update.len()));
+        let mut preload = MetadataPreload::default();
+        for (id, mut object) in request.unwrap_update() {
+            let patches = metadata_writer.extract(MetadataPatches::for_update(), &mut object);
+            if let (MaybeInvalid::Value(id), Ok(Some(patches))) = (&id, &patches) {
+                let document_id = id.document_id();
+                preload.insert(
+                    document_id,
+                    patches,
+                    cache
+                        .container_resource_by_id(document_id)
+                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
+                );
+            }
+            updates.push((id, object, patches));
+        }
+        metadata_writer.preload(self, account_id, preload).await?;
+        'update: for (id, object, metadata_patches) in updates {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -187,6 +252,13 @@ impl AddressBookSet for Server {
                 response.not_updated.append(id, SetError::will_destroy());
                 continue 'update;
             }
+            let mut metadata_patches = match metadata_patches {
+                Ok(patches) => patches,
+                Err(err) => {
+                    response.not_updated.append(id, err);
+                    continue 'update;
+                }
+            };
 
             // Obtain address book
             let document_id = id.document_id();
@@ -211,6 +283,32 @@ impl AddressBookSet for Server {
             let acl = is_shared.then(|| address_book.inner.acls.effective_acl(access_token));
             if acl.is_some_and(|acl| !acl.contains_any([Acl::Read, Acl::ReadItems].into_iter())) {
                 response.not_updated.append(id, SetError::not_found());
+                continue 'update;
+            }
+            let metadata_access = MetadataAccess {
+                may_write_shared: acl.is_none_or(|acl| acl.contains(Acl::Modify)),
+                may_read: true,
+            };
+            if object
+                .as_object()
+                .is_some_and(|object| is_empty_update::<addressbook::AddressBook>(object, id))
+                && let Some(patches) = metadata_patches.take()
+            {
+                match metadata_writer
+                    .prepare(self, patches, metadata_access, Some(document_id))
+                    .await?
+                {
+                    Ok(prepared) => {
+                        if let Some(kinds) = prepared.shared_kinds() {
+                            PresenceUpdate(address_book)
+                                .write(kinds, account_id, document_id, &mut batch)
+                                .caused_by(trc::location!())?;
+                        }
+                        metadata_writer.write(prepared, document_id, &mut batch)?;
+                        response.updated.append(id, None);
+                    }
+                    Err(err) => response.not_updated.append(id, err),
+                }
                 continue 'update;
             }
 
@@ -262,7 +360,30 @@ impl AddressBookSet for Server {
                 }
             }
 
+            let prepared_metadata = match metadata_patches {
+                Some(patches) => match metadata_writer
+                    .prepare(self, patches, metadata_access, Some(document_id))
+                    .await?
+                {
+                    Ok(prepared) => Some(prepared),
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                },
+                None => None,
+            };
+
             // Update record
+            if let Some(kinds) = prepared_metadata
+                .as_ref()
+                .and_then(PreparedMetadata::shared_kinds)
+            {
+                new_address_book.set_metadata_kinds(kinds);
+            }
+            if let Some(prepared) = prepared_metadata {
+                metadata_writer.write(prepared, document_id, &mut batch)?;
+            }
             new_address_book
                 .update(
                     access_token.account_tenant_ids(),
@@ -285,6 +406,23 @@ impl AddressBookSet for Server {
                 .arguments
                 .on_destroy_remove_contents
                 .unwrap_or(false);
+            let book_cleanup = MetadataCleanup::preload(
+                self,
+                access_token.account_tenant_ids(),
+                account_id,
+                Collection::AddressBook,
+                will_destroy.iter().filter_map(|id| {
+                    let document_id = id.document_id();
+                    Some((
+                        document_id,
+                        cache
+                            .container_resource_by_id(document_id)?
+                            .metadata_kinds(),
+                    ))
+                }),
+            )
+            .await
+            .caused_by(trc::location!())?;
 
             for id in will_destroy {
                 let document_id = id.document_id();
@@ -344,13 +482,16 @@ impl AddressBookSet for Server {
                     .container_resource_path_by_id(document_id)
                     .map(|resource| cache.format_resource(resource));
                 DestroyArchive(address_book)
-                    .delete(
+                    .delete_with_cleanup(
+                        self,
                         access_token.account_tenant_ids(),
                         account_id,
                         document_id,
                         delete_path,
+                        &book_cleanup,
                         &mut batch,
                     )
+                    .await
                     .caused_by(trc::location!())?;
 
                 destroyed_books.push(document_id);
@@ -360,6 +501,17 @@ impl AddressBookSet for Server {
 
             // Delete children
             if !destroy_children.is_empty() {
+                let cleanup = MetadataCleanup::preload(
+                    self,
+                    access_token.account_tenant_ids(),
+                    account_id,
+                    Collection::ContactCard,
+                    destroy_children.iter().filter_map(|&document_id| {
+                        Some((document_id, cache.item_by_id(document_id)?.metadata_kinds()))
+                    }),
+                )
+                .await
+                .caused_by(trc::location!())?;
                 for document_id in destroy_children {
                     if let Some(card_) = self
                         .store()
@@ -382,11 +534,12 @@ impl AddressBookSet for Server {
                         {
                             // Card only belongs to address books being deleted, delete it
                             DestroyArchive(card)
-                                .delete_all(
+                                .remove_all(
                                     self,
                                     access_token.account_tenant_ids(),
                                     account_id,
                                     document_id,
+                                    &cleanup,
                                     &mut batch,
                                 )
                                 .await?;
@@ -442,7 +595,19 @@ impl AddressBookSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let assigned_ids = match self.commit_batch(batch).await {
+                Ok(assigned_ids) => assigned_ids,
+                Err(err) if err.is_assertion_failure() => {
+                    reject_uncommitted(
+                        &mut response,
+                        created_slots.into_create_ids(),
+                        "Another process modified this address book, please try again.",
+                    );
+                    return Ok(response);
+                }
+                Err(err) => return Err(err.caused_by(trc::location!())),
+            };
+            metadata_writer.committed(self, &assigned_ids).await;
 
             created_slots.resolve(&mut response, &assigned_ids);
 
@@ -455,6 +620,11 @@ impl AddressBookSet for Server {
         Ok(response)
     }
 }
+
+const OWNER_ACCESS: MetadataAccess = MetadataAccess {
+    may_write_shared: true,
+    may_read: true,
+};
 
 fn update_address_book(
     expected_id: Option<Id>,
@@ -474,7 +644,6 @@ fn update_address_book(
         };
 
         match (property, value) {
-            (property, _) if property.metadata_root().is_some() => todo!(),
             (AddressBookProperty::Name, Value::Str(value)) if (1..=255).contains(&value.len()) => {
                 address_book.preferences_mut(personal_id).name = value.into_owned();
             }

@@ -22,6 +22,7 @@ use crate::{
     },
     ipc::TrainTaskController,
     network::security::BlockedIps,
+    storage::metadata::MetadataViewerCache,
 };
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
@@ -55,7 +56,7 @@ use store::InMemoryStore;
 use tinyvec::TinyVec;
 use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_rustls::TlsConnector;
-use types::{acl::AclGrant, special_use::SpecialUse};
+use types::{acl::AclGrant, metadata::MetadataKinds, special_use::SpecialUse};
 use utils::{
     cache::{Cache, CacheWithTtl},
     snowflake::SnowflakeIdGenerator,
@@ -188,6 +189,7 @@ pub struct Caches {
     pub contacts: Cache<u32, Arc<GroupwareResources>>,
     pub events: Cache<u32, Arc<GroupwareResources>>,
     pub scheduling: Cache<u32, Arc<GroupwareResources>>,
+    pub metadata_viewers: MetadataViewerCache,
 
     pub emails: Cache<EmailAddress, EmailCache>,
     pub emails_negative: CacheWithTtl<EmailAddress, ()>,
@@ -299,7 +301,10 @@ pub struct MailboxCache {
     pub subscribers: TinyVec<[u32; 4]>,
     pub uid_validity: u32,
     pub acls: TinyVec<[AclGrant; 2]>,
+    pub metadata_kinds: MetadataKinds,
 }
+
+const _: () = assert!(size_of::<MailboxCache>() <= 152);
 
 #[derive(Debug, Clone)]
 pub struct HttpAuthCache {
@@ -461,6 +466,7 @@ pub enum GroupwareResourceMetadata {
         acls: ArenaRef,
         preferences: ArenaRef,
         etag: u32,
+        metadata: MetadataKinds,
     },
     CalendarEvent {
         names: ArenaRef,
@@ -486,6 +492,7 @@ pub enum GroupwareResourceMetadata {
         name: ArenaRef,
         acls: ArenaRef,
         etag: u32,
+        metadata: MetadataKinds,
     },
     ContactCard {
         names: ArenaRef,
@@ -493,6 +500,7 @@ pub enum GroupwareResourceMetadata {
         modified_at: i32,
         uid: ArenaRef,
         etag: u32,
+        flags: u16,
     },
 }
 

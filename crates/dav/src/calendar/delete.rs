@@ -26,6 +26,7 @@ use groupware::{
         rights::EventAcl,
         storage::{DirectChange, DirectChangeNotification, NotificationQuota},
     },
+    metadata::MetadataCleanup,
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -154,6 +155,20 @@ impl CalendarDeleteRequestHandler for Server {
             .await?;
 
             // Delete calendar and events
+            let cleanup = MetadataCleanup::preload(
+                self,
+                account_info.account_tenant_ids(),
+                account_id,
+                Collection::CalendarEvent,
+                children_ids.iter().filter_map(|&document_id| {
+                    Some((
+                        document_id,
+                        resources.item_by_id(document_id)?.metadata_kinds(),
+                    ))
+                }),
+            )
+            .await
+            .caused_by(trc::location!())?;
             DestroyArchive(calendar)
                 .delete_with_events(
                     self,
@@ -162,6 +177,7 @@ impl CalendarDeleteRequestHandler for Server {
                     account_id,
                     document_id,
                     children_ids,
+                    &cleanup,
                     resources.format_resource(delete_resource).into(),
                     send_itip,
                     &mut batch,

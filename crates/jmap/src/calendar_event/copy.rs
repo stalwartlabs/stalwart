@@ -5,6 +5,9 @@
  */
 
 use crate::{
+    api::metadata::{
+        MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, NewMetadata, ObjectMetadata,
+    },
     calendar_event::{
         CalendarSyntheticId, UidIndex,
         privacy::assert_privacy_access,
@@ -36,6 +39,7 @@ use jmap_proto::{
     object::calendar_event,
     request::{
         Call, MaybeInvalid, RequestMethod, SetRequestMethod,
+        capability::CapabilityIds,
         method::{MethodFunction, MethodName, MethodObject},
         reference::MaybeResultReference,
     },
@@ -53,6 +57,7 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
     field::CalendarEventField,
+    metadata::MetadataKinds,
 };
 use utils::map::vec_map::VecMap;
 
@@ -63,6 +68,7 @@ pub trait JmapCalendarEventCopy: Sync + Send {
         access_token: &AccessToken,
         next_call: &mut Option<Call<RequestMethod<'x>>>,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<CopyResponse<calendar_event::CalendarEvent>>> + Send;
 }
 
@@ -73,6 +79,7 @@ impl JmapCalendarEventCopy for Server {
         access_token: &AccessToken,
         next_call: &mut Option<Call<RequestMethod<'x>>>,
         _session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<CopyResponse<calendar_event::CalendarEvent>> {
         let account_id = request.account_id.document_id();
         let from_account_id = request.from_account_id.document_id();
@@ -90,7 +97,15 @@ impl JmapCalendarEventCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let old_state = cache.assert_state(false, &request.if_in_state)?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
+        let old_state = metadata
+            .assert_state(
+                self,
+                account_id,
+                cache.get_state(false),
+                &request.if_in_state,
+            )
+            .await?;
         let mut response = CopyResponse {
             from_account_id: request.from_account_id,
             account_id: request.account_id,
@@ -108,7 +123,14 @@ impl JmapCalendarEventCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        from_cache.assert_state(false, &request.if_from_in_state)?;
+        metadata
+            .assert_state(
+                self,
+                from_account_id,
+                from_cache.get_state(false),
+                &request.if_from_in_state,
+            )
+            .await?;
         let is_from_owner = access_token.is_member(from_account_id);
         let from_personal_id = access_token.personal_id(from_account_id, Collection::Calendar);
         let from_calendar_event_ids = if is_from_owner {
@@ -138,14 +160,32 @@ impl JmapCalendarEventCopy for Server {
         } else {
             CalendarAddresses::default()
         };
+        let mut metadata_writer = MetadataWriter::new(metadata, account_id);
+        let mut preload = MetadataPreload::default();
         let mut creates = Vec::with_capacity(request.create.len());
         for (create_id, mut create) in request.create {
             let source_id = create.take_source_id(JSCalendarProperty::Id);
-            creates.push((create_id, source_id, create));
+            let patches = metadata_writer.extract(MetadataPatches::for_create(), &mut create);
+            if let (Ok(source_id), Ok(_)) = (&source_id, &patches)
+                && !source_id.is_synthetic()
+                && from_calendar_event_ids.contains(source_id.document_id())
+            {
+                let document_id = source_id.document_id();
+                preload.insert_source(
+                    document_id,
+                    from_cache
+                        .item_by_id(document_id)
+                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
+                );
+            }
+            creates.push((create_id, source_id, create, patches));
         }
+        metadata_writer
+            .preload(self, from_account_id, preload)
+            .await?;
         let uid_index = UidIndex::new(
             &cache,
-            creates.iter().filter_map(|(_, source_id, create)| {
+            creates.iter().filter_map(|(_, source_id, create, _)| {
                 match create.as_object_and_get(&Key::Property(JSCalendarProperty::Uid)) {
                     Some(Value::Str(uid)) => Some(uid.as_ref()),
                     _ => source_id.as_ref().ok().and_then(|source_id| {
@@ -178,15 +218,23 @@ impl JmapCalendarEventCopy for Server {
             will_destroy: Vec::new(),
             default_alerts: DefaultAlertsResolver::with_resources(account_id, cache.clone()),
             notification_quota: NotificationQuota::default(),
+            metadata: metadata_writer,
         };
 
-        'create: for (create_id, source_id, create) in creates {
+        'create: for (create_id, source_id, create, patches) in creates {
             if !quota.has_room(created_slots.len()) {
                 response.not_created.append(create_id, too_many_events());
                 continue;
             }
             let source_id = match source_id {
                 Ok(source_id) => source_id,
+                Err(err) => {
+                    response.not_created.append(create_id, err);
+                    continue;
+                }
+            };
+            let patches = match patches {
+                Ok(patches) => patches,
                 Err(err) => {
                     response.not_created.append(create_id, err);
                     continue;
@@ -284,7 +332,16 @@ impl JmapCalendarEventCopy for Server {
             });
 
             match self
-                .create_calendar_event(&mut context, &mut batch, source, create)
+                .create_calendar_event(
+                    &mut context,
+                    &mut batch,
+                    source,
+                    create,
+                    Some(NewMetadata::Copy {
+                        patches,
+                        source_id: from_calendar_event_id,
+                    }),
+                )
                 .await?
             {
                 Ok((slot, server_set)) => {
@@ -304,7 +361,22 @@ impl JmapCalendarEventCopy for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let assigned_ids = match self.commit_batch(batch).await {
+                Ok(assigned_ids) => assigned_ids,
+                Err(err) if err.is_assertion_failure() => {
+                    for (create_id, _, _) in created_slots {
+                        response.not_created.append(
+                            create_id,
+                            SetError::forbidden().with_description(
+                                "Another process modified this calendar event, please try again.",
+                            ),
+                        );
+                    }
+                    return Ok(response);
+                }
+                Err(err) => return Err(err.caused_by(trc::location!())),
+            };
+            context.metadata.committed(self, &assigned_ids).await;
 
             for (create_id, slot, mut server_set) in created_slots {
                 let document_id = assigned_ids.slot(slot);

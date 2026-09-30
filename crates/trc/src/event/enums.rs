@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 650;
+pub const TOTAL_EVENT_COUNT: usize = 652;
 pub const TOTAL_METRIC_COUNT: usize = 370;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -357,6 +357,8 @@ pub enum ImapEvent {
     Thread = 193,
     UidBatches = 634,
     GetQuota = 57,
+    GetMetadata = 650,
+    SetMetadata = 651,
     Error = 168,
     RawInput = 183,
     RawOutput = 184,

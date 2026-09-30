@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{Command, ResponseCode, ResponseType, StatusResponse};
+use crate::{
+    Command, ResponseCode, ResponseType, StatusResponse, protocol::metadata::MetadataCode,
+};
 use compact_str::CompactString;
 use encodify::{base32::STALWART, base64::STANDARD, utf7::IMAP};
 use std::fmt::Display;
@@ -818,7 +820,21 @@ impl ResponseType {
 
 impl From<ResponseCode> for trc::Value {
     fn from(value: ResponseCode) -> Self {
-        trc::Value::String(CompactString::const_new(value.as_str()))
+        trc::Value::String(match &value {
+            ResponseCode::AppendUid { .. }
+            | ResponseCode::Capability { .. }
+            | ResponseCode::CopyUid { .. }
+            | ResponseCode::Modified { .. }
+            | ResponseCode::HighestModseq { .. }
+            | ResponseCode::ObjectId(_)
+            | ResponseCode::MessageLimit { .. }
+            | ResponseCode::Metadata(MetadataCode::LongEntries(_) | MetadataCode::MaxSize(_)) => {
+                let mut buf = Vec::with_capacity(value.size_hint());
+                value.serialize(&mut buf);
+                CompactString::from_utf8_lossy(&buf)
+            }
+            _ => CompactString::const_new(value.as_str()),
+        })
     }
 }
 

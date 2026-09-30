@@ -10,7 +10,7 @@ use common::storage::index::{
     serialize_object,
 };
 use store::write::{ArchiveCompression, BatchBuilder, Compression, Dictionary, Slot};
-use types::{collection::SyncCollection, field::SieveField};
+use types::{collection::SyncCollection, field::SieveField, metadata::MetadataKinds};
 
 impl IndexableObject for SieveScript {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -29,6 +29,10 @@ impl IndexableObject for SieveScript {
             IndexValue::Quota { used: self.size },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        SieveScript::metadata_kinds(self)
     }
 }
 
@@ -57,6 +61,10 @@ impl IndexableObject for &ArchivedSieveScript {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedSieveScript::metadata_kinds(self)
     }
 }
 

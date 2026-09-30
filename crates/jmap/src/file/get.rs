@@ -8,7 +8,13 @@ use super::{
     node::{default_media_type, node_type_from_id, target_value},
     writer::fetch_archive,
 };
-use crate::{api::acl::JmapRights, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        acl::JmapRights,
+        metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
+    },
+    changes::state::JmapCacheState,
+};
 use common::{GroupwareResourceRef, Server, auth::AccessToken, storage::dav::FILE_KIND_FILE};
 use groupware::{
     cache::GroupwareCache,
@@ -16,10 +22,8 @@ use groupware::{
 };
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
-    object::{
-        file_node::{self, FileNodeProperty, FileNodeValue},
-        metadata::MetadataSelection,
-    },
+    object::file_node::{self, FileNodeProperty, FileNodeValue},
+    request::capability::CapabilityIds,
     types::date::UTCDate,
 };
 use jmap_tools::{Map, Value};
@@ -39,6 +43,7 @@ pub trait FileNodeGet: Sync + Send {
         &self,
         request: GetRequest<file_node::FileNode>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<GetResponse<file_node::FileNode>>> + Send;
 }
 
@@ -47,30 +52,34 @@ impl FileNodeGet for Server {
         &self,
         mut request: GetRequest<file_node::FileNode>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<GetResponse<file_node::FileNode>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
-        let mut properties = request.unwrap_properties(&[
-            FileNodeProperty::Id,
-            FileNodeProperty::ParentId,
-            FileNodeProperty::NodeType,
-            FileNodeProperty::BlobId,
-            FileNodeProperty::Target,
-            FileNodeProperty::Size,
-            FileNodeProperty::Name,
-            FileNodeProperty::Type,
-            FileNodeProperty::Created,
-            FileNodeProperty::Modified,
-            FileNodeProperty::Accessed,
-            FileNodeProperty::Changed,
-            FileNodeProperty::Executable,
-            FileNodeProperty::IsSubscribed,
-            FileNodeProperty::MyRights,
-            FileNodeProperty::ShareWith,
-            FileNodeProperty::Role,
-        ]);
-        if !MetadataSelection::extract(&mut properties)?.is_none() {
-            todo!()
-        }
+        let (properties, selection) = select_properties(
+            &mut request,
+            &[
+                FileNodeProperty::Id,
+                FileNodeProperty::ParentId,
+                FileNodeProperty::NodeType,
+                FileNodeProperty::BlobId,
+                FileNodeProperty::Target,
+                FileNodeProperty::Size,
+                FileNodeProperty::Name,
+                FileNodeProperty::Type,
+                FileNodeProperty::Created,
+                FileNodeProperty::Modified,
+                FileNodeProperty::Accessed,
+                FileNodeProperty::Changed,
+                FileNodeProperty::Executable,
+                FileNodeProperty::IsSubscribed,
+                FileNodeProperty::MyRights,
+                FileNodeProperty::ShareWith,
+                FileNodeProperty::Role,
+            ],
+            using,
+        )?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
+        let metadata_get = metadata.get(selection);
         let account_id = request.account_id.document_id();
         let cache = self
             .fetch_groupware_resources(
@@ -143,9 +152,34 @@ impl FileNodeGet for Server {
             )
         });
         let personal_id = access_token.personal_id(account_id, Collection::FileNode);
+        let is_readable = |document_id: u32| {
+            access
+                .as_ref()
+                .is_none_or(|access| access.readable.contains(document_id))
+        };
+        let mut metadata_values = match &metadata_get {
+            Some(get) => {
+                let mut documents = MetadataDocuments::default();
+                for id in &ids {
+                    let document_id = id.document_id();
+                    if let Some(resource) = cache
+                        .resources
+                        .find_any(document_id)
+                        .filter(|_| is_visible(document_id) && is_readable(document_id))
+                    {
+                        documents.insert(document_id, resource.metadata_kinds());
+                    }
+                }
+                Some(metadata.load(self, account_id, get, &documents).await?)
+            }
+            None => None,
+        };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: cache.get_state(false).into(),
+            state: metadata
+                .state(self, account_id, cache.get_state(false))
+                .await?
+                .into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };
@@ -160,13 +194,12 @@ impl FileNodeGet for Server {
                 response.push_not_found(id);
                 continue;
             };
-            let is_readable = access
-                .as_ref()
-                .is_none_or(|access| access.readable.contains(document_id));
-            if !is_readable {
-                response
-                    .list
-                    .push(discoverable_only(&properties, id, &resource).into());
+            if !is_readable(document_id) {
+                let mut result = discoverable_only(&properties, id, &resource);
+                if let Some(values) = &mut metadata_values {
+                    values.insert_into(document_id, &mut result);
+                }
+                response.list.push(result.into());
                 continue;
             }
             let archive = if needs_archive {
@@ -270,6 +303,9 @@ impl FileNodeGet for Server {
                     }
                 };
                 result.insert_unchecked(property.clone(), value);
+            }
+            if let Some(values) = &mut metadata_values {
+                values.insert_into(document_id, &mut result);
             }
             response.list.push(result.into());
         }

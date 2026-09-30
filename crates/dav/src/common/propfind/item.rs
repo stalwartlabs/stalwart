@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{PropFindContext, PropFindItem, PropFindState, data::SyncTokenUrn};
+use super::{
+    PropFindContext, PropFindItem, PropFindState, data::SyncTokenUrn, dead::dead_properties,
+};
 use crate::{
     calendar::{
         filter::FilterTimeRanges,
@@ -14,30 +16,30 @@ use crate::{
     common::{
         ArchivedResource,
         acl::{DavAclHandler, Privileges, current_user_privilege_set},
+        dead::text_of,
     },
     principal::{CurrentUserPrincipal, propfind::PrincipalPropFind},
 };
 use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
-use common::Server;
-use dav_proto::{
-    requests::NsDeadProperty,
-    schema::{
-        Collation, Namespace,
-        property::{
-            CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue, Privilege,
-            Rfc1123DateTime, SupportedCollation, SupportedLock, WebDavProperty,
-        },
-        request::{DavDeadProperty, DavPropertyValue},
-        response::{AclRestrictions, Href, List, PropStat, Response, SupportedPrivilege},
+use common::{Server, storage::dav::DISPLAY_NAME_PROPERTY};
+use dav_proto::schema::{
+    Collation, Namespace,
+    property::{
+        CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue, Privilege, Rfc1123DateTime,
+        SupportedCollation, SupportedLock, WebDavProperty,
     },
+    request::DavPropertyValue,
+    response::{AclRestrictions, Href, List, PropStat, Response, SupportedPrivilege},
 };
 use groupware::{
     DavCalendarResource, DavResourceName,
     calendar::{ArchivedTimezone, SupportedComponent, privacy::EventPrivacy},
 };
 use hyper::StatusCode;
+use std::borrow::Cow;
+use store::write::metadata::MetadataBuf;
 use trc::AddContext;
-use types::{collection::Collection, dead_property::DeadProperty};
+use types::collection::Collection;
 use utils::map::bitmap::Bitmap;
 
 pub(super) trait PropFindItemBuilder: Sync + Send {
@@ -47,6 +49,7 @@ pub(super) trait PropFindItemBuilder: Sync + Send {
         state: &mut PropFindState,
         item: PropFindItem,
         archive: &ArchivedResource<'_>,
+        container: Option<&MetadataBuf>,
         calendar_filter: Option<CalendarQueryHandler>,
     ) -> impl Future<Output = crate::Result<bool>> + Send;
 }
@@ -58,6 +61,7 @@ impl PropFindItemBuilder for Server {
         state: &mut PropFindState,
         item: PropFindItem,
         archive: &ArchivedResource<'_>,
+        container: Option<&MetadataBuf>,
         mut calendar_filter: Option<CalendarQueryHandler>,
     ) -> crate::Result<bool> {
         let PropFindState {
@@ -75,6 +79,7 @@ impl PropFindItemBuilder for Server {
             sync_collection,
             is_scheduling,
             skip_not_found,
+            is_allprop,
         } = *ctx;
         let account_id = item.account_id;
         let personal_id = access_token.personal_id(account_id, collection_container);
@@ -91,7 +96,7 @@ impl PropFindItemBuilder for Server {
                 if !access_token.is_member(account_id)
                     && !EventPrivacy::from_flags(event.inner.flags.to_native()).is_public()
         );
-        let dead_properties = archive.dead_properties().filter(|_| !is_private_view);
+        let container = container.filter(|_| !is_private_view);
         let mut fields = Vec::with_capacity(properties.len());
         let mut fields_not_found = Vec::new();
         for property in properties {
@@ -124,13 +129,23 @@ impl PropFindItemBuilder for Server {
                         ));
                     }
                     WebDavProperty::DisplayName => {
-                        if let Some(name) = archive
-                            .display_name(personal_id)
-                            .filter(|_| !is_private_view)
-                        {
+                        let name = if let ArchivedResource::FileNode(_) = archive {
+                            container
+                                .and_then(|container| {
+                                    container.view().dav_property(&DISPLAY_NAME_PROPERTY)
+                                })
+                                .and_then(text_of)
+                                .map(Cow::Owned)
+                        } else {
+                            archive
+                                .display_name(personal_id)
+                                .filter(|_| !is_private_view)
+                                .map(Cow::Borrowed)
+                        };
+                        if let Some(name) = name {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::String(name.to_string()),
+                                DavValue::String(name.into_owned()),
                             ));
                         } else if !skip_not_found {
                             fields_not_found.push(DavPropertyValue::empty(property.clone()));
@@ -416,11 +431,12 @@ impl PropFindItemBuilder for Server {
                         ));
                     }
                 },
-                DavProperty::DeadProperty(tag) => {
-                    if let Some(value) = dead_properties.and_then(|props| props.find_tag(&tag.name))
+                DavProperty::Dead(name) => {
+                    if let Some(value) =
+                        container.and_then(|container| container.view().dav_property(name))
                     {
-                        fields.push(DavPropertyValue::new(property.clone(), value));
-                    } else {
+                        fields.push(DavPropertyValue::new(property.clone(), value.to_encoded()));
+                    } else if !skip_not_found {
                         fields_not_found.push(DavPropertyValue::empty(property.clone()));
                     }
                 }
@@ -681,13 +697,7 @@ impl PropFindItemBuilder for Server {
                         ));
                     }
                     (CalDavProperty::ScheduleCalendarTransp, ArchivedResource::Calendar(_)) => {
-                        fields.push(DavPropertyValue::new(
-                            property.clone(),
-                            DavValue::DeadProperty(DeadProperty::single_with_ns(
-                                Namespace::CalDav,
-                                "opaque",
-                            )),
-                        ));
+                        fields.push(DavPropertyValue::new(property.clone(), DavValue::Opaque));
                     }
                     (
                         CalDavProperty::ScheduleDefaultCalendarURL,
@@ -722,13 +732,11 @@ impl PropFindItemBuilder for Server {
             }
         }
 
-        // Add dead properties
-        if skip_not_found
+        if is_allprop
             && !item.is_discover_only
-            && let Some(dead_properties) =
-                dead_properties.filter(|dead_properties| !dead_properties.0.is_empty())
+            && let Some(container) = container
         {
-            dead_properties.to_dav_values(&mut fields);
+            fields.extend(dead_properties(container, collection));
         }
 
         // Add response

@@ -2,31 +2,31 @@
   "type": "Prop",
   "data": [
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "bigbox",
-        "attrs": "xmlns=\"http://ns.example.com/boxschema/\""
+        "namespace": "http://ns.example.com/boxschema/",
+        "name": "bigbox"
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "author",
-        "attrs": "xmlns=\"http://ns.example.com/boxschema/\""
+        "namespace": "http://ns.example.com/boxschema/",
+        "name": "author"
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "DingALing",
-        "attrs": "xmlns=\"http://ns.example.com/boxschema/\""
+        "namespace": "http://ns.example.com/boxschema/",
+        "name": "DingALing"
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "Random",
-        "attrs": "xmlns=\"http://ns.example.com/boxschema/\""
+        "namespace": "http://ns.example.com/boxschema/",
+        "name": "Random"
       }
     }
   ]

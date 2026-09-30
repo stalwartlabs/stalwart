@@ -12,6 +12,7 @@ pub mod delivery;
 pub mod headers;
 pub mod index;
 pub mod ingest;
+pub mod ingest_metadata;
 pub mod jmap;
 pub mod messagedata;
 pub mod metadata;

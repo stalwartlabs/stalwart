@@ -24,12 +24,13 @@ pub mod sequence;
 pub mod storage;
 pub mod user;
 
+use crate::metadata::tracked_kinds;
 use calcard::icalendar::{
     ArchivedICalendar, ICalendar, ICalendarComponent, ICalendarComponentType, ICalendarDuration,
 };
 use color::CssColor;
-use common::{DavName, NO_ID};
-use types::{acl::AclGrant, dead_property::DeadProperty};
+use common::{DavName, NO_ID, storage::dav::PresenceBits};
+use types::{acl::AclGrant, metadata::MetadataKinds};
 use utils::map::bitmap::BitmapItem;
 
 #[derive(
@@ -40,7 +41,7 @@ pub struct Calendar {
     pub preferences: Vec<CalendarPreferences>,
     pub acls: Vec<AclGrant>,
     pub supported_components: u64,
-    pub dead_properties: DeadProperty,
+    pub presence: u8,
     pub created: i64,
     pub modified: i64,
 }
@@ -141,12 +142,13 @@ pub const EVENT_INVITE_SELF: u16 = 1;
 pub const EVENT_INVITE_OTHERS: u16 = 1 << 1;
 pub const EVENT_HIDE_ATTENDEES: u16 = 1 << 2;
 pub const EVENT_DRAFT: u16 = 1 << 3;
-pub const EVENT_HAS_DEAD_PROPERTIES: u16 = 1 << 4;
+pub const EVENT_META_DAV: u16 = PresenceBits::CALENDAR_EVENT.dav();
 pub const EVENT_HAS_ALARMS: u16 = 1 << 5;
 pub const EVENT_PRIVATE: u16 = 1 << 6;
 pub const EVENT_SECRET: u16 = 1 << 7;
 pub const EVENT_USES_DEFAULT_ALERTS: u16 = 1 << 8;
 pub const EVENT_HAS_UNBOUNDED_TODO: u16 = 1 << 9;
+pub const EVENT_META_JMAP: u16 = PresenceBits::CALENDAR_EVENT.jmap();
 
 pub const EVENT_NOTIFICATION_IS_DRAFT: u16 = 1;
 pub const EVENT_NOTIFICATION_IS_CHANGE: u16 = 1 << 1;
@@ -190,7 +192,6 @@ pub struct CalendarEvent {
 pub struct CalendarEventContent {
     pub data: CalendarEventData,
     pub preferences: Vec<EventPreferences>,
-    pub dead_properties: DeadProperty,
 }
 
 #[derive(
@@ -400,6 +401,14 @@ pub enum Timezone {
 }
 
 impl Calendar {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        tracked_kinds(self.presence)
+    }
+
+    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.presence = tracked_kinds(kinds.bits()).bits();
+    }
+
     pub fn personal_preferences(&self, account_id: u32) -> Option<&CalendarPreferences> {
         self.preferences.iter().find(|p| p.account_id == account_id)
     }
@@ -504,6 +513,10 @@ impl CalendarPreferences {
 }
 
 impl ArchivedCalendar {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        tracked_kinds(self.presence)
+    }
+
     pub fn default_alerts(
         &self,
         account_id: u32,
@@ -540,6 +553,14 @@ pub const fn default_preference_flags(is_member: bool) -> u16 {
 }
 
 impl CalendarEvent {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        PresenceBits::CALENDAR_EVENT.kinds(self.flags)
+    }
+
+    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.flags = PresenceBits::CALENDAR_EVENT.apply(self.flags, kinds);
+    }
+
     pub fn calendar_ids(&self) -> impl Iterator<Item = u32> {
         self.names.iter().map(DavName::parent_id)
     }
@@ -587,6 +608,10 @@ impl CalendarEvent {
 }
 
 impl ArchivedCalendarEvent {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        PresenceBits::CALENDAR_EVENT.kinds(self.flags.to_native())
+    }
+
     pub fn calendar_ids(&self) -> impl Iterator<Item = u32> {
         self.names.iter().map(|name| name.parent_id.to_native())
     }

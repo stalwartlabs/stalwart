@@ -6,7 +6,7 @@
 
 use crate::blob::UploadResponse;
 use calcard::jscalendar::JSCalendarDateTime;
-use common::ipc::{CalendarAlert, PushNotification};
+use common::ipc::{CalendarAlert, PushNotification, ViewerStateChange};
 use http_proto::{HttpResponse, JsonResponse, ToHttpResponse};
 use hyper::StatusCode;
 use jmap_proto::{
@@ -21,6 +21,7 @@ use utils::map::vec_map::VecMap;
 pub mod acl;
 pub mod auth;
 pub mod event_source;
+pub mod metadata;
 pub mod parent_ref;
 pub mod pending_creates;
 pub mod query;
@@ -220,7 +221,11 @@ pub(crate) fn notifications_into_push_objects(
     let mut objects = Vec::with_capacity(notifications.len());
     for notification in notifications {
         match notification {
-            PushNotification::StateChange(state_change) => {
+            PushNotification::StateChange(state_change)
+            | PushNotification::ViewerStateChange(ViewerStateChange {
+                change: state_change,
+                ..
+            }) => {
                 for type_state in state_change.types {
                     changed
                         .get_mut_or_insert(state_change.account_id.into())

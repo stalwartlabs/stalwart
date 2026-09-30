@@ -8,11 +8,12 @@ use super::{
     AnyKey, BlobOp, InMemoryClass, QueueClass, TaskQueueClass, TelemetryClass, ValueClass,
 };
 use crate::{
-    IndexKey, IndexKeyPrefix, Key, LogKey, Subspace, U16_LEN, U32_LEN, U64_LEN, ValueKey,
-    WITH_SUBSPACE,
+    ChangeLogKey, IndexKey, IndexKeyPrefix, Key, LogKey, PrivateLogKey, Subspace, U16_LEN, U32_LEN,
+    U64_LEN, ValueKey, WITH_SUBSPACE,
     search::{GLOBAL_BUCKET_SHIFT, SearchField},
     write::{
-        BlobLink, IndexPropertyClass, QueueDocumentId, RegistryClass, SearchIndex, SearchIndexClass,
+        BlobLink, IndexPropertyClass, PRIVATE_LOG, QueueDocumentId, RegistryClass, SearchIndex,
+        SearchIndexClass, metadata::MetadataClass,
     },
 };
 use registry::schema::prelude::ObjectType;
@@ -252,6 +253,50 @@ impl Key for LogKey {
             .write(self.account_id)
             .write(self.collection)
             .write(self.change_id);
+    }
+}
+
+impl Key for PrivateLogKey {
+    fn subspace(&self) -> Subspace {
+        Subspace::Logs
+    }
+
+    fn key_len_hint(&self) -> usize {
+        U32_LEN + 1 + U32_LEN + U64_LEN
+    }
+
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        let serializer = if (flags & WITH_SUBSPACE) != 0 {
+            KeySerializer::borrowed(buf).write(Subspace::Logs.byte())
+        } else {
+            KeySerializer::borrowed(buf)
+        };
+
+        serializer
+            .write(self.account_id)
+            .write(PRIVATE_LOG | u8::from(self.collection))
+            .write(self.viewer)
+            .write(self.change_id);
+    }
+}
+
+impl Key for ChangeLogKey {
+    fn subspace(&self) -> Subspace {
+        Subspace::Logs
+    }
+
+    fn key_len_hint(&self) -> usize {
+        match self {
+            ChangeLogKey::Shared(key) => key.key_len_hint(),
+            ChangeLogKey::Private(key) => key.key_len_hint(),
+        }
+    }
+
+    fn serialize_into(&self, buf: &mut Vec<u8>, flags: u32) {
+        match self {
+            ChangeLogKey::Shared(key) => key.serialize_into(buf, flags),
+            ChangeLogKey::Private(key) => key.serialize_into(buf, flags),
+        }
     }
 }
 
@@ -501,6 +546,28 @@ impl ValueClass {
                     .write(SearchIndexClass::CONTROL_STATUS),
             },
             ValueClass::Any(any) => serializer.write(any.key.as_slice()),
+            ValueClass::Metadata(class) => {
+                let serializer = serializer.write(account_id).write(METADATA_COLLECTION);
+                match class {
+                    MetadataClass::Shared => serializer
+                        .write(MetadataClass::SHARED)
+                        .write(collection)
+                        .write(document_id),
+                    MetadataClass::Private { viewer } => serializer
+                        .write(MetadataClass::PRIVATE)
+                        .write(*viewer)
+                        .write(collection)
+                        .write(document_id),
+                    MetadataClass::Viewer { viewer } => serializer
+                        .write(MetadataClass::VIEWER)
+                        .write(collection)
+                        .write(*viewer),
+                    MetadataClass::Owner { owner } => serializer
+                        .write(MetadataClass::OWNER)
+                        .write(*owner)
+                        .write(collection),
+                }
+            }
         };
 
         debug_assert_eq!(
@@ -557,6 +624,7 @@ impl<T: AsRef<[u8]> + Sync + Send + Clone> Key for AnyKey<T> {
 }
 
 const MAILBOX_COLLECTION: u8 = Collection::Mailbox as u8;
+const METADATA_COLLECTION: u8 = Collection::Metadata as u8;
 const EMAIL_COLLECTION: u8 = Collection::Email as u8;
 const REG_ARCHIVED_ITEM: u16 = ObjectType::ArchivedItem as u16;
 const REG_SPAM_SAMPLE: u16 = ObjectType::SpamTrainingSample as u16;
@@ -636,6 +704,12 @@ impl ValueClass {
                 }
             },
             ValueClass::Any(v) => v.key.len(),
+            ValueClass::Metadata(class) => match class {
+                MetadataClass::Private { .. } => (U32_LEN * 3) + 3,
+                MetadataClass::Shared
+                | MetadataClass::Viewer { .. }
+                | MetadataClass::Owner { .. } => (U32_LEN * 2) + 3,
+            },
         }
     }
 
@@ -716,6 +790,7 @@ impl ValueClass {
                 | SearchIndexClass::QueueStatus { .. } => Subspace::SearchQueue,
             },
             ValueClass::Any(any) => any.subspace,
+            ValueClass::Metadata(_) => Subspace::Property,
         }
     }
 
@@ -727,7 +802,8 @@ impl ValueClass {
             | ValueClass::Registry(RegistryClass::Item { .. })
             | ValueClass::Queue(QueueClass::Message(_))
             | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
-            | ValueClass::Telemetry(TelemetryClass::Span(_)) => true,
+            | ValueClass::Telemetry(TelemetryClass::Span(_))
+            | ValueClass::Metadata(MetadataClass::Shared | MetadataClass::Private { .. }) => true,
             ValueClass::SearchIndex(search) => matches!(
                 search,
                 SearchIndexClass::Document { .. }

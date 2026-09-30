@@ -7,7 +7,7 @@ use compact_str::CompactString;
 
 use super::{
     ImapResponse,
-    metadata::Entry,
+    metadata::{Entry, EntryValue, serialize_entry_values},
     quoted_mailbox_name, quoted_string,
     status::{Status, StatusItem},
 };
@@ -94,6 +94,7 @@ pub struct ListItem {
     pub mailbox_name: CompactString,
     pub attributes: Vec<Attribute>,
     pub tags: Vec<Tag>,
+    pub metadata: Vec<EntryValue<'static>>,
 }
 
 impl Arguments {
@@ -129,7 +130,11 @@ impl Attribute {
     }
 
     pub fn serialize(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(match self {
+        buf.extend_from_slice(self.as_bytes());
+    }
+
+    pub fn as_bytes(&self) -> &'static [u8] {
+        match self {
             Attribute::NoInferiors => b"\\NoInferiors",
             Attribute::NoSelect => b"\\NoSelect",
             Attribute::Marked => b"\\Marked",
@@ -150,7 +155,7 @@ impl Attribute {
             Attribute::Memos => b"\\Memos",
             Attribute::Scheduled => b"\\Scheduled",
             Attribute::Snoozed => b"\\Snoozed",
-        });
+        }
     }
 }
 
@@ -212,6 +217,7 @@ impl ListItem {
             mailbox_name: name.into(),
             attributes: Vec::new(),
             tags: Vec::new(),
+            metadata: Vec::new(),
         }
     }
 
@@ -246,6 +252,10 @@ impl ListItem {
         } else {
             buf.extend_from_slice(b"\r\n");
         }
+
+        if !self.metadata.is_empty() {
+            serialize_entry_values(buf, &self.mailbox_name, &self.metadata, is_rev2 || is_utf8);
+        }
     }
 }
 
@@ -279,6 +289,8 @@ impl ImapResponse for Response {
         const TAG_LEN: usize = 24;
         const STATUS_FRAMING_LEN: usize = 24;
         const STATUS_ITEM_LEN: usize = 24;
+        const METADATA_FRAMING_LEN: usize = 20;
+        const METADATA_ENTRY_LEN: usize = 16;
 
         self.list_items
             .iter()
@@ -287,6 +299,21 @@ impl ImapResponse for Response {
                     + item.mailbox_name.len() * 2
                     + item.attributes.len() * ATTRIBUTE_LEN
                     + item.tags.len() * TAG_LEN
+                    + if item.metadata.is_empty() {
+                        0
+                    } else {
+                        METADATA_FRAMING_LEN
+                            + item.mailbox_name.len() * 2
+                            + item
+                                .metadata
+                                .iter()
+                                .map(|entry| {
+                                    METADATA_ENTRY_LEN
+                                        + entry.entry.path.len()
+                                        + entry.value.as_ref().map_or(0, |value| value.len())
+                                })
+                                .sum::<usize>()
+                    }
             })
             .sum::<usize>()
             + self
@@ -310,6 +337,8 @@ mod tests {
     };
 
     use super::{Attribute, ChildInfo, ListItem, Tag};
+    use crate::protocol::metadata::{Entry, EntryValue, Scope};
+    use std::borrow::Cow;
 
     #[test]
     fn serialize_list_item() {
@@ -319,6 +348,7 @@ mod tests {
                     mailbox_name: "".into(),
                     attributes: vec![],
                     tags: vec![],
+                    metadata: vec![],
                 },
                 "* LIST () \"/\" \"\"\r\n",
                 "* LIST () \"/\" \"\"\r\n",
@@ -328,6 +358,7 @@ mod tests {
                     mailbox_name: "中國書店".into(),
                     attributes: vec![Attribute::NoInferiors, Attribute::Drafts],
                     tags: vec![],
+                    metadata: vec![],
                 },
                 "* LIST (\\NoInferiors \\Drafts) \"/\" \"中國書店\"\r\n",
                 "* LIST (\\NoInferiors \\Drafts) \"/\" \"&Ti1XC2b4Xpc-\"\r\n",
@@ -337,6 +368,7 @@ mod tests {
                     mailbox_name: "☺".into(),
                     attributes: vec![Attribute::Subscribed, Attribute::Remote],
                     tags: vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])],
+                    metadata: vec![],
                 },
                 concat!(
                     "* LIST (\\Subscribed \\Remote) \"/\" \"☺\" ",
@@ -352,6 +384,7 @@ mod tests {
                     mailbox_name: "foo".into(),
                     attributes: vec![Attribute::HasNoChildren],
                     tags: vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])],
+                    metadata: vec![],
                 },
                 "* LIST (\\HasNoChildren) \"/\" \"foo\" (\"CHILDINFO\" (\"SUBSCRIBED\"))\r\n",
                 "* LIST (\\HasNoChildren) \"/\" \"foo\" (\"CHILDINFO\" (\"SUBSCRIBED\"))\r\n",
@@ -379,11 +412,13 @@ mod tests {
                     mailbox_name: "INBOX".into(),
                     attributes: vec![Attribute::Subscribed],
                     tags: vec![],
+                    metadata: vec![],
                 },
                 ListItem {
                     mailbox_name: "foo".into(),
                     attributes: vec![],
                     tags: vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])],
+                    metadata: vec![],
                 },
             ],
             status_items: vec![
@@ -423,5 +458,73 @@ mod tests {
 
         assert_eq!(response_v2, expected_v2);
         assert_eq!(response_v1, expected_v1);
+    }
+
+    #[test]
+    fn serialize_list_metadata() {
+        let entry = |scope, path: &'static str, value: Option<&'static [u8]>| EntryValue {
+            entry: Entry {
+                scope,
+                path: Cow::Borrowed(path),
+            },
+            value: value.map(Cow::Borrowed),
+        };
+        let mut response = super::Response {
+            list_items: vec![
+                ListItem {
+                    mailbox_name: "INBOX".into(),
+                    attributes: vec![],
+                    tags: vec![],
+                    metadata: vec![entry(
+                        Scope::Shared,
+                        "/vendor/cmu/cyrus-imapd/color",
+                        Some(b"#b71c1c"),
+                    )],
+                },
+                ListItem {
+                    mailbox_name: "bar".into(),
+                    attributes: vec![Attribute::NonExistent],
+                    tags: vec![],
+                    metadata: vec![],
+                },
+                ListItem {
+                    mailbox_name: "Caf\u{e9}".into(),
+                    attributes: vec![],
+                    tags: vec![],
+                    metadata: vec![
+                        entry(Scope::Shared, "/vendor/cmu/cyrus-imapd/color", None),
+                        entry(Scope::Private, "/specialuse", Some(b"\\Drafts")),
+                    ],
+                },
+            ],
+            status_items: vec![],
+            is_lsub: false,
+            is_rev2: true,
+            is_utf8: true,
+        };
+
+        assert_eq!(
+            String::from_utf8(response.clone().serialize()).unwrap(),
+            concat!(
+                "* LIST () \"/\" \"INBOX\"\r\n",
+                "* METADATA \"INBOX\" (/shared/vendor/cmu/cyrus-imapd/color \"#b71c1c\")\r\n",
+                "* LIST (\\NonExistent) \"/\" \"bar\"\r\n",
+                "* LIST () \"/\" \"Caf\u{e9}\"\r\n",
+                "* METADATA \"Caf\u{e9}\" (/shared/vendor/cmu/cyrus-imapd/color NIL ",
+                "/private/specialuse \"\\\\Drafts\")\r\n",
+            )
+        );
+
+        response.is_rev2 = false;
+        response.is_utf8 = false;
+        response.list_items.drain(..2);
+        assert_eq!(
+            String::from_utf8(response.serialize()).unwrap(),
+            concat!(
+                "* LIST () \"/\" \"Caf&AOk-\"\r\n",
+                "* METADATA \"Caf&AOk-\" (/shared/vendor/cmu/cyrus-imapd/color NIL ",
+                "/private/specialuse \"\\\\Drafts\")\r\n",
+            )
+        );
     }
 }

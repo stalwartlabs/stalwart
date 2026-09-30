@@ -11,6 +11,7 @@ use crate::{
     message::{
         crypto::EncryptionFlags,
         index::IndexMessage,
+        ingest_metadata::IngestMetadata,
         messagedata::{MessageData, PendingMessageData},
         metadata::{
             AddressHeader, ExtraHeaders, HeaderId, Mailbox, MetadataRow, MetadataStructure,
@@ -19,7 +20,10 @@ use crate::{
         thread::ThreadFields,
     },
 };
-use common::{MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken};
+use common::{
+    MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken,
+    storage::metadata::PrivateMetadataCommit,
+};
 use compact_str::{CompactString, ToCompactString};
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
@@ -77,6 +81,7 @@ pub struct IngestEmail<'x> {
     pub keywords: Vec<Keyword>,
     pub received_at: Option<u64>,
     pub source: IngestSource<'x>,
+    pub metadata: Option<Box<IngestMetadata>>,
     pub session_id: u64,
 }
 
@@ -167,9 +172,23 @@ impl EmailIngest for Server {
                     .ctx(trc::Key::Reason, err.to_string()),
             );
         }
-        self.has_available_quota(&account, raw_message_len)
-            .await
-            .caused_by(trc::location!())?;
+        let mut metadata = params.metadata.take();
+        if let Some(metadata) = metadata.as_deref_mut() {
+            metadata.shared = metadata
+                .shared
+                .take()
+                .filter(|container| container.kinds().intersects(MessageData::TRACKED_METADATA));
+        }
+        self.has_available_quota(
+            &account,
+            raw_message_len
+                + metadata
+                    .as_deref()
+                    .and_then(|metadata| metadata.shared.as_ref())
+                    .map_or(0, |container| container.len() as u64),
+        )
+        .await
+        .caused_by(trc::location!())?;
         if let Some(limit) = self.object_quota_limit(&account, StorageQuota::MaxEmails) {
             let used = self
                 .count_emails(account_id, limit)
@@ -560,7 +579,7 @@ impl EmailIngest for Server {
                 Err(name) => keywords_extra.push(name),
             }
         }
-        let data = PendingMessageData {
+        let mut data = PendingMessageData {
             data: MessageData {
                 mailboxes: mailbox_ids,
                 keywords,
@@ -575,6 +594,12 @@ impl EmailIngest for Server {
             thread_slot,
             change_id: None,
         };
+        if let Some(container) = metadata
+            .as_deref()
+            .and_then(|metadata| metadata.shared.as_ref())
+        {
+            data.data.set_metadata_kinds(container.kinds());
+        }
         let thread_ref = data.thread_id();
 
         // Request spam training
@@ -614,6 +639,19 @@ impl EmailIngest for Server {
             )
             .queue_document_index(SearchIndex::Email, account_id, QueueDocumentId::Current);
 
+        let mut private_commit = PrivateMetadataCommit::default();
+        if let Some(metadata) = metadata {
+            metadata
+                .build(
+                    &mut batch,
+                    account_id,
+                    tenant_id,
+                    PendingId::Slot(document_slot),
+                    &mut private_commit,
+                )
+                .caused_by(trc::location!())?;
+        }
+
         if let Some(blob_hold) = blob_hold {
             batch.clear(blob_hold);
         }
@@ -648,6 +686,8 @@ impl EmailIngest for Server {
             .await
             .caused_by(trc::location!())?;
         self.inner.mark_caches_stale_from(&assigned_ids);
+        self.private_metadata_committed(private_commit, &assigned_ids)
+            .await;
         let change_id = assigned_ids.last_change_id(account_id, SyncCollection::Email);
         let document_id = assigned_ids.slot(document_slot);
         let thread_id = thread_result.thread_id.unwrap_or(document_id);

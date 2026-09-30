@@ -10,7 +10,7 @@ pub mod http;
 pub mod manager;
 pub mod push;
 
-use common::ipc::PushNotification;
+use common::ipc::{PushNotification, ViewerStateChange};
 use email::push::PushSubscription;
 use jmap_proto::types::state::State;
 use std::{
@@ -64,7 +64,11 @@ impl IpcSubscriber {
 impl PushBatch {
     pub fn push(&mut self, notification: PushNotification) {
         match notification {
-            PushNotification::StateChange(state_change) => {
+            PushNotification::StateChange(state_change)
+            | PushNotification::ViewerStateChange(ViewerStateChange {
+                change: state_change,
+                ..
+            }) => {
                 if !state_change.types.is_empty() {
                     let states = self
                         .state_changes
@@ -116,7 +120,7 @@ fn merge_state(states: &mut VecMap<DataType, State>, data_type: DataType, change
 #[cfg(test)]
 mod tests {
     use super::PushBatch;
-    use common::ipc::{EmailPush, PushNotification};
+    use common::ipc::{EmailPush, PushNotification, ViewerStateChange};
     use jmap_proto::types::state::State;
     use types::{
         id::Id,
@@ -129,6 +133,21 @@ mod tests {
             account_id: 1,
             change_id,
             types: Bitmap::from_iter(types),
+        })
+    }
+
+    fn viewer_state_change<const N: usize>(
+        viewer_id: u32,
+        change_id: u64,
+        types: [DataType; N],
+    ) -> PushNotification {
+        PushNotification::ViewerStateChange(ViewerStateChange {
+            viewer_id,
+            change: StateChange {
+                account_id: 1,
+                change_id,
+                types: Bitmap::from_iter(types),
+            },
         })
     }
 
@@ -185,5 +204,25 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(email_ids, [1, 2, 3]);
         assert!(batch.state_changes.is_empty());
+    }
+
+    #[test]
+    fn viewer_state_changes_batch_under_the_owner_account() {
+        let mut batch = PushBatch::default();
+        batch.push(state_change(5, [DataType::Email]));
+        batch.push(viewer_state_change(
+            9,
+            8,
+            [DataType::Email, DataType::Mailbox],
+        ));
+
+        assert_eq!(batch.state_changes.len(), 1);
+        let states = batch
+            .state_changes
+            .get(&Id::from(1u32))
+            .expect("owner account states");
+        assert_eq!(states.get(&DataType::Email), Some(&State::Exact(8)));
+        assert_eq!(states.get(&DataType::Mailbox), Some(&State::Exact(8)));
+        assert!(batch.notifications.is_empty());
     }
 }

@@ -663,7 +663,7 @@ async fn process_changes(
 ) -> trc::Result<()> {
     for change in changes {
         match change {
-            Change::InsertItem(id) | Change::UpdateItem(id) => {
+            Change::InsertItem(id) | Change::UpdateItem(id) | Change::UpdateItemMetadata(id) => {
                 let document_id = id as u32;
                 if let Some(archive) = server
                     .store()
@@ -686,35 +686,61 @@ async fn process_changes(
                 updated_resources.insert((has_no_children, id as u32), None);
             }
             Change::InsertContainer(id) | Change::UpdateContainer(id) => {
-                let document_id = id as u32;
-                if let Some(archive) = server
-                    .store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                        account_id,
-                        collection.collection(true),
-                        document_id,
-                    ))
-                    .await
-                    .caused_by(trc::location!())?
-                {
-                    updated_resources.insert(
-                        (true, document_id),
-                        Some({
-                            let slot = staging.len() as u32;
-                            push_from_archive(staging, archive, document_id, collection, true)?;
-                            slot
-                        }),
-                    );
-                } else {
-                    updated_resources.insert((true, document_id), None);
-                }
+                fetch_container(
+                    server,
+                    account_id,
+                    collection,
+                    id as u32,
+                    staging,
+                    updated_resources,
+                )
+                .await?;
+            }
+            Change::UpdateContainerPartial(id, partial) if partial.has_metadata() => {
+                fetch_container(
+                    server,
+                    account_id,
+                    collection,
+                    id as u32,
+                    staging,
+                    updated_resources,
+                )
+                .await?;
             }
             Change::DeleteContainer(id) => {
                 updated_resources.insert((true, id as u32), None);
             }
-            Change::UpdateContainerProperty(_) => (),
+            Change::UpdateContainerPartial(..) => (),
         }
     }
+    Ok(())
+}
+
+async fn fetch_container(
+    server: &Server,
+    account_id: u32,
+    collection: SyncCollection,
+    document_id: u32,
+    staging: &mut ResourceChunkBuilder,
+    updated_resources: &mut AHashMap<(bool, u32), Option<u32>>,
+) -> trc::Result<()> {
+    let slot = if let Some(archive) = server
+        .store()
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
+            account_id,
+            collection.collection(true),
+            document_id,
+        ))
+        .await
+        .caused_by(trc::location!())?
+    {
+        let slot = staging.len() as u32;
+        push_from_archive(staging, archive, document_id, collection, true)?;
+        Some(slot)
+    } else {
+        None
+    };
+    updated_resources.insert((true, document_id), slot);
     Ok(())
 }
 
@@ -908,7 +934,6 @@ fn push_from_archive(
                 .unarchive::<FileNode>()
                 .caused_by(trc::location!())?,
             document_id,
-            etag,
         ),
         SyncCollection::CalendarEventNotification => push_scheduling(
             builder,
@@ -931,7 +956,7 @@ mod tests {
         ResourceStore,
         storage::dav::{CONTAINER_FLAG, FILE_KIND_DIRECTORY, FILE_KIND_FILE},
     };
-    use types::media_type::MediaTypeId;
+    use types::{media_type::MediaTypeId, metadata::MetadataKinds};
 
     #[derive(Clone)]
     enum Spec {
@@ -1033,6 +1058,7 @@ mod tests {
                             acls,
                             preferences,
                             etag: 0,
+                            metadata: MetadataKinds::NONE,
                         },
                     });
                 }

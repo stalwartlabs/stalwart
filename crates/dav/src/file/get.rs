@@ -7,11 +7,10 @@
 use crate::{
     DavError, DavMethod,
     common::{
-        ETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
-    file::DavFileResource,
+    file::{DavFileResource, file_etag},
 };
 use common::{Server, auth::AccessToken};
 use dav_proto::{RequestHeaders, schema::property::Rfc1123DateTime};
@@ -103,7 +102,7 @@ impl FileGetRequestHandler for Server {
         };
 
         // Validate headers
-        let etag = node_.etag();
+        let etag = file_etag(node);
         self.validate_headers(
             access_token,
             headers,

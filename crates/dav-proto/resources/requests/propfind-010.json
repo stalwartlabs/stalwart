@@ -26,10 +26,10 @@
       }
     },
     {
-      "type": "DeadProperty",
+      "type": "Dead",
       "data": {
-        "name": "me-card",
-        "attrs": "xmlns=\"http://calendarserver.org/ns/\" hello=\"world &amp; test\""
+        "namespace": "http://calendarserver.org/ns/",
+        "name": "me-card"
       }
     }
   ]

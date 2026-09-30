@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ImapContext;
+use super::{ImapContext, metadata::ListMetadataTarget};
 use crate::{
     core::{AccountView, Session, SessionData},
     spawn_op,
@@ -70,6 +70,7 @@ impl<T: SessionStream> Session<T> {
                             mailbox_name: "".into(),
                             attributes: vec![Attribute::NoSelect],
                             tags: vec![],
+                            metadata: vec![],
                         }],
                         status_items: Vec::new(),
                     }),
@@ -131,6 +132,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut include_subscribed = false;
         let mut include_children = false;
         let mut include_status = None;
+        let mut include_metadata = None;
         for selection_option in &selection_options {
             match selection_option {
                 SelectionOption::Subscribed => {
@@ -161,7 +163,9 @@ impl<T: SessionStream> SessionData<T> {
                 ReturnOption::SpecialUse => {
                     include_special_use = true;
                 }
-                ReturnOption::Metadata(_) => todo!(),
+                ReturnOption::Metadata(entries) => {
+                    include_metadata = Some(entries.as_slice());
+                }
             }
         }
         if recursive_match && !filter_subscribed {
@@ -178,6 +182,22 @@ impl<T: SessionStream> SessionData<T> {
                 *item = format_compact!("{}{}", reference_name, item);
             })
         }
+
+        let metadata_access = match include_metadata {
+            Some(entries) => {
+                self.assert_metadata_request(&tag, entries.len())?;
+                let access_token = self
+                    .refresh_access_token()
+                    .await
+                    .imap_ctx(&tag, trc::location!())?;
+                access_token
+                    .enforce_permission(Permission::ImapMetadataGet)
+                    .map_err(|err| err.id(tag.clone()))?;
+                Some(access_token)
+            }
+            None => None,
+        };
+        let mut metadata_targets = Vec::new();
 
         let mut list_items = Vec::with_capacity(10);
         let mut lsub_unmatched = Vec::new();
@@ -198,6 +218,7 @@ impl<T: SessionStream> SessionData<T> {
                                 vec![Attribute::NoSelect]
                             },
                             tags: vec![],
+                            metadata: vec![],
                         });
                     }
                     added_shared_folder = true;
@@ -211,6 +232,7 @@ impl<T: SessionStream> SessionData<T> {
                             vec![Attribute::NoSelect]
                         },
                         tags: vec![],
+                        metadata: vec![],
                     });
                 }
             }
@@ -256,6 +278,18 @@ impl<T: SessionStream> SessionData<T> {
                                 continue;
                             }
                         }
+                        if let Some(access_token) = &metadata_access
+                            && (!filter_subscribed || is_subscribed)
+                            && let Some(target) = ListMetadataTarget::new(
+                                list_items.len(),
+                                account.account_id,
+                                mailbox_id,
+                                mailbox,
+                                access_token,
+                            )
+                        {
+                            metadata_targets.push(target);
+                        }
                         list_items.push(ListItem {
                             mailbox_name: mailbox_name.as_str().into(),
                             attributes,
@@ -264,6 +298,7 @@ impl<T: SessionStream> SessionData<T> {
                             } else {
                                 vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])]
                             },
+                            metadata: vec![],
                         });
                     }
                 } else if is_lsub && account.is_subscribed(mailbox_id, self.account_id) {
@@ -284,9 +319,23 @@ impl<T: SessionStream> SessionData<T> {
                         mailbox_name: parent.into(),
                         attributes: vec![Attribute::NoSelect],
                         tags: vec![],
+                        metadata: vec![],
                     });
                 }
             }
+        }
+
+        if let (Some(requested), Some(access_token)) = (include_metadata, &metadata_access)
+            && !metadata_targets.is_empty()
+        {
+            self.list_metadata(
+                &tag,
+                requested,
+                &metadata_targets,
+                &mut list_items,
+                access_token,
+            )
+            .await?;
         }
 
         // RFC 5258 3.5 requires redundant CHILDINFO responses to be suppressed

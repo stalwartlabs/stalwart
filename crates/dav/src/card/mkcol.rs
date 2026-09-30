@@ -9,6 +9,7 @@ use crate::{
     DavError, DavMethod, PropStatBuilder,
     common::{
         ExtractETag,
+        dead::{DeadPatch, DeadTarget, DisplayName},
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -27,7 +28,10 @@ use hyper::StatusCode;
 use registry::schema::enums::StorageQuota;
 use store::write::BatchBuilder;
 use trc::AddContext;
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    metadata::MetadataKinds,
+};
 
 pub(crate) trait CardMkColRequestHandler: Sync + Send {
     fn handle_card_mkcol_request(
@@ -105,16 +109,34 @@ impl CardMkColRequestHandler for Server {
         };
 
         // Apply MKCOL properties
+        let mut batch = BatchBuilder::new();
+        let document_id = batch.reserve_document_id(account_id, Collection::AddressBook);
         let mut return_prop_stat = None;
-        if let Some(mkcol) = request {
+        let mut dead_write = None;
+        if let Some(mut mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
-            if !self.apply_addressbook_properties(
+            let dead = DeadPatch::take_values(&mut mkcol.props, DisplayName::Live);
+            self.apply_addressbook_properties(
                 access_token.personal_id(account_id, Collection::AddressBook),
                 &mut book,
-                false,
                 mkcol.props,
                 &mut prop_stat,
-            ) {
+            );
+            dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::container(
+                        account_id,
+                        Collection::AddressBook,
+                        document_id,
+                        MetadataKinds::NONE,
+                    ),
+                    &mut prop_stat,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            if prop_stat.has_errors() {
+                prop_stat.fail_dependencies();
                 return Ok(HttpResponse::new(StatusCode::FORBIDDEN).with_xml_body(
                     MkColResponse::new(prop_stat.build())
                         .with_namespace(Namespace::CardDav)
@@ -127,8 +149,12 @@ impl CardMkColRequestHandler for Server {
         }
 
         // Prepare write batch
-        let mut batch = BatchBuilder::new();
-        let document_id = batch.reserve_document_id(account_id, Collection::AddressBook);
+        if let Some(dead_write) = &dead_write {
+            book.set_metadata_kinds(dead_write.kinds);
+        }
+        if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
+            write.build(&mut batch).caused_by(trc::location!())?;
+        }
         book.insert(
             access_token.account_tenant_ids(),
             account_id,

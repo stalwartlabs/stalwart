@@ -6,6 +6,7 @@
 
 use common::ipc::{
     BroadcastEvent, CacheInvalidation, CalendarAlert, EmailPush, PushNotification, RegistryChange,
+    ViewerStateChange,
 };
 use registry::{
     schema::prelude::ObjectType,
@@ -28,6 +29,9 @@ pub(crate) struct BroadcastBatch<T> {
 
 const MAX_BATCH_SIZE: usize = 100;
 pub(crate) const BROADCAST_TOPIC: &str = "stwt.agora";
+
+const STATE_CHANGE: u8 = 0;
+const VIEWER_STATE_CHANGE: u8 = 15;
 
 impl BroadcastBatch<Vec<BroadcastEvent>> {
     pub fn init() -> Self {
@@ -62,10 +66,17 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
             match message {
                 BroadcastEvent::PushNotification(notification) => match notification {
                     PushNotification::StateChange(state_change) => {
-                        serialized.push(0u8);
+                        serialized.push(STATE_CHANGE);
                         let _ = serialized.write_leb128(state_change.change_id);
                         let _ = serialized.write_leb128(*state_change.types.as_ref());
                         let _ = serialized.write_leb128(state_change.account_id);
+                    }
+                    PushNotification::ViewerStateChange(viewer_change) => {
+                        serialized.push(VIEWER_STATE_CHANGE);
+                        let _ = serialized.write_leb128(viewer_change.change.change_id);
+                        let _ = serialized.write_leb128(*viewer_change.change.types.as_ref());
+                        let _ = serialized.write_leb128(viewer_change.change.account_id);
+                        let _ = serialized.write_leb128(viewer_change.viewer_id);
                     }
                     PushNotification::CalendarAlert(calendar_alert) => {
                         serialized.push(1u8);
@@ -132,6 +143,7 @@ impl BroadcastBatch<Vec<BroadcastEvent>> {
                             }
                             CacheInvalidation::DomainNegative => (11u8, 0),
                             CacheInvalidation::MessageCache(id) => (12u8, *id),
+                            CacheInvalidation::PrivateMetadata(id) => (13u8, *id),
                         };
 
                         serialized.push(marker);
@@ -187,14 +199,26 @@ where
 
     pub fn next_event(&mut self) -> Result<Option<BroadcastEvent>, ()> {
         if let Some(id) = self.messages.next() {
-            match id.borrow() {
-                0 => Ok(Some(BroadcastEvent::PushNotification(
-                    PushNotification::StateChange(StateChange {
-                        change_id: self.messages.next_leb128().ok_or(())?,
-                        types: Bitmap::from(self.messages.next_leb128::<u64>().ok_or(())?),
-                        account_id: self.messages.next_leb128().ok_or(())?,
-                    }),
-                ))),
+            match *id.borrow() {
+                tag @ (STATE_CHANGE | VIEWER_STATE_CHANGE) => {
+                    let change_id = self.messages.next_leb128().ok_or(())?;
+                    let types = Bitmap::from(self.messages.next_leb128::<u64>().ok_or(())?);
+                    let account_id = self.messages.next_leb128().ok_or(())?;
+                    let change = StateChange {
+                        account_id,
+                        change_id,
+                        types,
+                    };
+                    let notification = if tag == VIEWER_STATE_CHANGE {
+                        PushNotification::ViewerStateChange(ViewerStateChange {
+                            viewer_id: self.messages.next_leb128().ok_or(())?,
+                            change,
+                        })
+                    } else {
+                        PushNotification::StateChange(change)
+                    };
+                    Ok(Some(BroadcastEvent::PushNotification(notification)))
+                }
 
                 1 => {
                     let account_id = self.messages.next_leb128().ok_or(())?;
@@ -292,6 +316,7 @@ where
                             }
                             11 => CacheInvalidation::DomainNegative,
                             12 => CacheInvalidation::MessageCache(id),
+                            13 => CacheInvalidation::PrivateMetadata(id),
                             _ => return Err(()),
                         });
                     }
@@ -315,5 +340,147 @@ where
 impl<T> BroadcastBatch<T> {
     pub fn new(messages: T) -> Self {
         Self { messages }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BroadcastBatch;
+    use common::ipc::{BroadcastEvent, CacheInvalidation, PushNotification, ViewerStateChange};
+    use types::type_state::{DataType, StateChange};
+    use utils::{codec::leb128::Leb128Writer, map::bitmap::Bitmap};
+
+    fn state_change(account_id: u32) -> StateChange {
+        StateChange {
+            account_id,
+            change_id: 300,
+            types: Bitmap::from_iter([DataType::Email, DataType::Mailbox]),
+        }
+    }
+
+    fn viewer_state_change(viewer_id: u32, account_id: u32) -> PushNotification {
+        PushNotification::ViewerStateChange(ViewerStateChange {
+            viewer_id,
+            change: state_change(account_id),
+        })
+    }
+
+    fn encode(events: impl IntoIterator<Item = BroadcastEvent>) -> Vec<u8> {
+        let mut batch = BroadcastBatch::init();
+        for event in events {
+            batch.insert(event);
+        }
+        batch.serialize(3, None)
+    }
+
+    fn encoded_state_change(tag: u8, change: &StateChange) -> Vec<u8> {
+        let mut expected = Vec::new();
+        let _ = expected.write_leb128(3u16);
+        let _ = expected.write_leb128(0u64);
+        expected.push(tag);
+        let _ = expected.write_leb128(change.change_id);
+        let _ = expected.write_leb128(*change.types.as_ref());
+        let _ = expected.write_leb128(change.account_id);
+        expected
+    }
+
+    fn encoded_viewer_state_change(viewer_id: u32, account_id: u32) -> Vec<u8> {
+        let mut expected = encoded_state_change(15, &state_change(account_id));
+        let _ = expected.write_leb128(viewer_id);
+        expected
+    }
+
+    fn decode(bytes: &[u8]) -> Vec<BroadcastEvent> {
+        let mut batch = BroadcastBatch::new(bytes.iter());
+        assert_eq!(batch.node_id(), Some(3));
+        assert_eq!(batch.read_version(), Some(None));
+        std::iter::from_fn(|| batch.next_event().expect("valid event")).collect()
+    }
+
+    fn assert_change(decoded: &StateChange, account_id: u32) {
+        assert_eq!(decoded.account_id, account_id);
+        assert_eq!(decoded.change_id, 300);
+        assert_eq!(
+            decoded.types,
+            Bitmap::from_iter([DataType::Email, DataType::Mailbox])
+        );
+    }
+
+    #[test]
+    fn state_changes_keep_their_encoding() {
+        let shared = state_change(7);
+        let bytes = encode([BroadcastEvent::PushNotification(
+            PushNotification::StateChange(shared),
+        )]);
+        assert_eq!(bytes, encoded_state_change(0, &shared));
+
+        match decode(&bytes).as_slice() {
+            [BroadcastEvent::PushNotification(PushNotification::StateChange(decoded))] => {
+                assert_change(decoded, 7);
+            }
+            events => panic!("unexpected events {events:?}"),
+        }
+    }
+
+    #[test]
+    fn viewer_state_changes_encode_the_viewer_after_the_state_change() {
+        let bytes = encode([BroadcastEvent::PushNotification(viewer_state_change(9, 7))]);
+        assert_eq!(bytes, encoded_viewer_state_change(9, 7));
+    }
+
+    #[test]
+    fn viewer_state_changes_and_viewer_invalidations_round_trip() {
+        let bytes = encode([
+            BroadcastEvent::CacheInvalidate(vec![
+                CacheInvalidation::PrivateMetadata(9),
+                CacheInvalidation::AccessToken(4),
+            ]),
+            BroadcastEvent::PushNotification(viewer_state_change(9, 7)),
+        ]);
+
+        match decode(&bytes).as_slice() {
+            [
+                BroadcastEvent::CacheInvalidate(invalidations),
+                BroadcastEvent::PushNotification(PushNotification::ViewerStateChange(decoded)),
+            ] => {
+                assert_eq!(
+                    invalidations,
+                    &[
+                        CacheInvalidation::PrivateMetadata(9),
+                        CacheInvalidation::AccessToken(4)
+                    ]
+                );
+                assert_eq!(decoded.viewer_id, 9);
+                assert_change(&decoded.change, 7);
+            }
+            events => panic!("unexpected events {events:?}"),
+        }
+    }
+
+    #[test]
+    fn owner_addressed_viewer_state_changes_keep_their_tag_and_route_to_the_owner() {
+        let bytes = encode([BroadcastEvent::PushNotification(viewer_state_change(7, 7))]);
+        assert_eq!(bytes, encoded_viewer_state_change(7, 7));
+
+        match decode(&bytes).as_slice() {
+            [
+                BroadcastEvent::PushNotification(
+                    notification @ PushNotification::ViewerStateChange(decoded),
+                ),
+            ] => {
+                assert_eq!(decoded.viewer_id, 7);
+                assert_change(&decoded.change, 7);
+                assert_eq!(notification.recipient(), 7);
+                match notification.filter_types(&Bitmap::from_iter([DataType::Mailbox])) {
+                    Some(PushNotification::ViewerStateChange(routed)) => {
+                        assert_eq!(routed.viewer_id, 7);
+                        assert_eq!(routed.change.account_id, 7);
+                        assert_eq!(routed.change.types, Bitmap::from_iter([DataType::Mailbox]));
+                    }
+                    routed => panic!("unexpected routed notification {routed:?}"),
+                }
+            }
+            events => panic!("unexpected events {events:?}"),
+        }
     }
 }

@@ -3,40 +3,40 @@
   "properties": [
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "version-history",
-          "attrs": "name=\"version-history\""
+          "namespace": "DAV:",
+          "name": "version-history"
         }
       },
       "depth": 0
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "version-set",
-          "attrs": "name=\"version-set\""
+          "namespace": "DAV:",
+          "name": "version-set"
         }
       },
       "depth": 1
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "creator-displayname",
-          "attrs": "name=\"creator-displayname\""
+          "namespace": "DAV:",
+          "name": "creator-displayname"
         }
       },
       "depth": 2
     },
     {
       "property": {
-        "type": "DeadProperty",
+        "type": "Dead",
         "data": {
-          "name": "activity-set",
-          "attrs": "name=\"activity-set\""
+          "namespace": "DAV:",
+          "name": "activity-set"
         }
       },
       "depth": 2

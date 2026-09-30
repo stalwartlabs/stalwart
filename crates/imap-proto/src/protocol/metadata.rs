@@ -32,13 +32,13 @@ pub enum Depth {
     Infinity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scope {
     Shared,
     Private,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Entry<'x> {
     pub scope: Scope,
     pub path: Cow<'x, str>,
@@ -92,6 +92,16 @@ impl Entry<'_> {
 }
 
 impl EntryValue<'_> {
+    pub fn into_owned(self) -> EntryValue<'static> {
+        EntryValue {
+            entry: Entry {
+                scope: self.entry.scope,
+                path: Cow::Owned(self.entry.path.into_owned()),
+            },
+            value: self.value.map(|value| Cow::Owned(value.into_owned())),
+        }
+    }
+
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         self.entry.serialize(buf);
         buf.push(b' ');
@@ -108,17 +118,26 @@ impl EntryValue<'_> {
 
 impl Response<'_> {
     pub fn serialize(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        buf.extend_from_slice(b"* METADATA ");
-        quoted_mailbox_name(buf, self.mailbox_name, is_utf8);
-        buf.extend_from_slice(b" (");
-        for (pos, entry) in self.entries.iter().enumerate() {
-            if pos > 0 {
-                buf.push(b' ');
-            }
-            entry.serialize(buf);
-        }
-        buf.extend_from_slice(b")\r\n");
+        serialize_entry_values(buf, self.mailbox_name, &self.entries, is_utf8);
     }
+}
+
+pub(crate) fn serialize_entry_values(
+    buf: &mut Vec<u8>,
+    mailbox_name: &str,
+    entries: &[EntryValue<'_>],
+    is_utf8: bool,
+) {
+    buf.extend_from_slice(b"* METADATA ");
+    quoted_mailbox_name(buf, mailbox_name, is_utf8);
+    buf.extend_from_slice(b" (");
+    for (pos, entry) in entries.iter().enumerate() {
+        if pos > 0 {
+            buf.push(b' ');
+        }
+        entry.serialize(buf);
+    }
+    buf.extend_from_slice(b")\r\n");
 }
 
 impl UnsolicitedResponse<'_> {
@@ -159,7 +178,7 @@ fn is_astring_char(ch: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{Entry, EntryValue, MetadataCode, Response, Scope, UnsolicitedResponse};
-    use crate::{ResponseCode, StatusResponse};
+    use crate::{ResponseCode, StatusResponse, protocol::SerializeResponse};
     use std::borrow::Cow;
 
     fn entry(scope: Scope, path: &str) -> Entry<'_> {
@@ -264,6 +283,52 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "* METADATA \"INBOX\" /shared/comment /private/comment\r\n"
+        );
+    }
+
+    #[test]
+    fn numbered_codes_survive_trc_errors() {
+        for (code, expected) in [
+            (
+                MetadataCode::MaxSize(1024),
+                "a NO [METADATA MAXSIZE 1024] Value too large.\r\n",
+            ),
+            (
+                MetadataCode::LongEntries(2199),
+                "a NO [METADATA LONGENTRIES 2199] Value too large.\r\n",
+            ),
+            (
+                MetadataCode::TooMany,
+                "a NO [METADATA TOOMANY] Value too large.\r\n",
+            ),
+        ] {
+            assert_eq!(
+                String::from_utf8(
+                    trc::ImapEvent::Error
+                        .into_err()
+                        .details("Value too large.")
+                        .code(ResponseCode::Metadata(code))
+                        .id("a")
+                        .serialize()
+                )
+                .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            String::from_utf8(
+                trc::ImapEvent::Error
+                    .into_err()
+                    .details("Done.")
+                    .code(ResponseCode::MessageLimit {
+                        limit: 10,
+                        uid: Some(5),
+                    })
+                    .id("b")
+                    .serialize()
+            )
+            .unwrap(),
+            "b NO [MESSAGELIMIT 10 5] Done.\r\n"
         );
     }
 

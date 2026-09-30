@@ -7,11 +7,11 @@
 use crate::{
     DavError, DavMethod,
     common::{
-        ETag, ExtractETag,
+        ExtractETag,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
-    file::{DavFileResource, file_name_from_uri, is_symlink, validate_file_parent_acl},
+    file::{DavFileResource, file_etag, file_name_from_uri, is_symlink, validate_file_parent_acl},
 };
 use common::{
     Server,
@@ -125,7 +125,7 @@ impl FileUpdateRequestHandler for Server {
                         account_id,
                         collection: resource.collection,
                         document_id: Some(document_id),
-                        etag: node.etag().into(),
+                        etag: file_etag(node.inner).into(),
                         path: resource_name,
                         ..Default::default()
                     }],
@@ -156,7 +156,7 @@ impl FileUpdateRequestHandler for Server {
                                 .map(|v| v.as_str())
                                 .unwrap_or("application/octet-stream"),
                         )
-                        .with_etag(node.etag())
+                        .with_etag(file_etag(node.inner))
                         .with_last_modified(
                             Rfc1123DateTime::new(i64::from(node.inner.modified)).to_string(),
                         )

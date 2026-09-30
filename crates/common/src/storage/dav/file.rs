@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::ResourceChunkBuilder;
+use super::{FilePresence, ResourceChunkBuilder};
 use crate::{ArenaRef, FileFlags, GroupwareResourceMetadata, GroupwareResourceRef, ResourceChunk};
-use types::media_type::MediaTypeId;
+use types::{media_type::MediaTypeId, metadata::MetadataKinds};
 
 const KIND_MASK: u32 = 0b11;
 pub const FILE_KIND_DIRECTORY: u8 = 0;
@@ -19,7 +19,9 @@ const MEDIA_SHIFT: u32 = 7;
 const MEDIA_MASK: u32 = (1 << MediaTypeId::BITS) - 1;
 const EXTRA_SHIFT: u32 = 19;
 const EXTRA_MASK: u32 = 0xFF;
-const RESERVED_SHIFT: u32 = EXTRA_SHIFT + 8;
+const PRESENCE_SHIFT: u32 = EXTRA_SHIFT + 8;
+const PRESENCE_MASK: u32 = FilePresence::MASK as u32;
+const RESERVED_SHIFT: u32 = PRESENCE_SHIFT + PRESENCE_MASK.count_ones();
 
 pub const MAX_FILE_EXTRA_LEN: usize = EXTRA_MASK as usize;
 pub const FILE_DEFAULT_MEDIA_TYPE: &str = "application/octet-stream";
@@ -69,6 +71,28 @@ impl FileFlags {
     #[inline(always)]
     pub fn extra_len(self) -> usize {
         ((self.0 >> EXTRA_SHIFT) & EXTRA_MASK) as usize
+    }
+
+    pub fn with_presence(self, presence: FilePresence) -> Self {
+        FileFlags(
+            (self.0 & !(PRESENCE_MASK << PRESENCE_SHIFT))
+                | (presence.bits() as u32 & PRESENCE_MASK) << PRESENCE_SHIFT,
+        )
+    }
+
+    #[inline(always)]
+    pub fn presence(self) -> FilePresence {
+        FilePresence::from_bits(((self.0 >> PRESENCE_SHIFT) & PRESENCE_MASK) as u16)
+    }
+
+    #[inline(always)]
+    pub fn metadata_kinds(self) -> MetadataKinds {
+        self.presence().kinds()
+    }
+
+    #[inline(always)]
+    pub fn has_dav_display_name(self) -> bool {
+        self.presence().has_dav_display_name()
     }
 
     pub fn is_valid(self) -> bool {
@@ -137,6 +161,12 @@ impl<'x> GroupwareResourceRef<'x> {
     #[inline(always)]
     pub fn file_role(&self) -> u8 {
         self.file_flags().map_or(0, FileFlags::role)
+    }
+
+    #[inline(always)]
+    pub fn has_dav_display_name(&self) -> bool {
+        self.file_flags()
+            .is_some_and(FileFlags::has_dav_display_name)
     }
 
     pub fn media_type(&self) -> Option<&'x str> {
@@ -225,6 +255,44 @@ mod tests {
         assert_eq!(flags.role(), 0);
         assert!(flags.media_type_id().is_none());
         assert_eq!(flags.extra_len(), 0);
+    }
+
+    #[test]
+    fn presence_uses_the_reserved_bits() {
+        let base = FileFlags::new(
+            FILE_KIND_FILE,
+            true,
+            VIDEOS,
+            MediaTypeId::UNCATALOGUED,
+            MAX_FILE_EXTRA_LEN as u16,
+        );
+        assert_eq!(base.presence(), FilePresence::NONE);
+        assert_eq!(PRESENCE_SHIFT, 27);
+        assert_eq!(RESERVED_SHIFT, 30);
+
+        for presence in [
+            FilePresence::from_kinds(MetadataKinds::JMAP),
+            FilePresence::from_kinds(MetadataKinds::DAV),
+            FilePresence::NONE.with_dav_display_name(),
+            FilePresence::from_kinds(MetadataKinds::JMAP.union(MetadataKinds::DAV))
+                .with_dav_display_name(),
+        ] {
+            let flags = base.with_presence(presence);
+            assert!(flags.is_valid());
+            assert_eq!(flags.presence(), presence);
+            assert_eq!(flags.metadata_kinds(), presence.kinds());
+            assert_eq!(
+                flags.has_dav_display_name(),
+                presence.has_dav_display_name()
+            );
+            assert_eq!(flags.kind(), base.kind());
+            assert_eq!(flags.is_executable(), base.is_executable());
+            assert_eq!(flags.role(), base.role());
+            assert_eq!(flags.media_type_id(), base.media_type_id());
+            assert_eq!(flags.extra_len(), base.extra_len());
+            assert_eq!(flags.with_presence(FilePresence::NONE), base);
+            assert!(!FileFlags(flags.0 | 1 << RESERVED_SHIFT).is_valid());
+        }
     }
 
     #[test]

@@ -9,9 +9,10 @@ pub mod index;
 pub mod storage;
 pub mod symlink;
 
-use common::storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE, FILE_KIND_SYMLINK};
+use crate::MetaHasher;
+use common::storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE, FILE_KIND_SYMLINK, FilePresence};
 use std::{fmt::Display, str::FromStr};
-use types::{acl::AclGrant, blob_hash::BlobHash, dead_property::DeadProperty};
+use types::{acl::AclGrant, blob_hash::BlobHash, metadata::MetadataKinds};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -20,15 +21,15 @@ use types::{acl::AclGrant, blob_hash::BlobHash, dead_property::DeadProperty};
 pub struct FileNode {
     pub parent_id: u32,
     pub name: String,
-    pub display_name: Option<String>,
     pub content: FileNodeContent,
     pub role: Option<FileNodeRole>,
+    pub flags: u16,
+    pub etag: u32,
     pub created: i64,
     pub modified: i64,
     pub accessed: i64,
     pub changed: i64,
     pub unsubscribed: Vec<u32>,
-    pub dead_properties: DeadProperty,
     pub acls: Vec<AclGrant>,
 }
 
@@ -127,6 +128,40 @@ impl FileNode {
             self.unsubscribed.push(account_id);
         }
     }
+
+    pub fn presence(&self) -> FilePresence {
+        FilePresence::from_bits(self.flags)
+    }
+
+    pub fn set_presence(&mut self, presence: FilePresence) {
+        self.flags = presence.apply(self.flags);
+    }
+
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        self.presence().kinds()
+    }
+
+    pub fn compute_etag(&self) -> u32 {
+        let mut hasher = MetaHasher::new();
+        hasher
+            .u8(self.kind_id())
+            .u32(self.parent_id)
+            .str(&self.name);
+        match &self.content {
+            FileNodeContent::Directory => {}
+            FileNodeContent::File(file) => {
+                hasher
+                    .bytes(file.blob_hash.as_slice())
+                    .u32(file.size)
+                    .opt_str(file.media_type.as_deref())
+                    .u8(u8::from(file.executable));
+            }
+            FileNodeContent::Symlink(target) => {
+                hasher.str(target);
+            }
+        }
+        hasher.u8(self.role.map_or(0, FileNodeRole::id)).finish()
+    }
 }
 
 impl FileNodeContent {
@@ -181,6 +216,36 @@ impl ArchivedFileNode {
             .unsubscribed
             .iter()
             .any(|id| id.to_native() == account_id)
+    }
+
+    pub fn presence(&self) -> FilePresence {
+        FilePresence::from_bits(self.flags.to_native())
+    }
+
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        self.presence().kinds()
+    }
+
+    pub fn compute_etag(&self) -> u32 {
+        let mut hasher = MetaHasher::new();
+        hasher
+            .u8(self.kind_id())
+            .u32(self.parent_id.to_native())
+            .str(&self.name);
+        match &self.content {
+            ArchivedFileNodeContent::Directory => {}
+            ArchivedFileNodeContent::File(file) => {
+                hasher
+                    .bytes(file.blob_hash.0.as_slice())
+                    .u32(file.size.to_native())
+                    .opt_str(file.media_type.as_deref())
+                    .u8(u8::from(file.executable));
+            }
+            ArchivedFileNodeContent::Symlink(target) => {
+                hasher.str(target);
+            }
+        }
+        hasher.u8(self.role().map_or(0, FileNodeRole::id)).finish()
     }
 }
 

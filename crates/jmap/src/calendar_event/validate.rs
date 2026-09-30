@@ -40,6 +40,8 @@ impl EventProperty for JSCalendarProperty<Id> {
                 | JSCalendarProperty::MayInviteSelf
                 | JSCalendarProperty::MayInviteOthers
                 | JSCalendarProperty::HideAttendees
+                | JSCalendarProperty::Metadata
+                | JSCalendarProperty::PrivateMetadata
         )
     }
 
@@ -362,6 +364,11 @@ mod tests {
             "participants/p1/calendarAddress",
             "recurrenceRule/frequency",
             "calendarIds/abc",
+            "metadata",
+            "privateMetadata",
+            "metadata/x.example",
+            "metadata/x.example/start",
+            "privateMetadata/x.example/k",
         ] {
             let json = format!(
                 r#"{{"@type":"Event","recurrenceOverrides":{{"2030-01-02T09:00:00":{{"{key}":null}}}}}}"#

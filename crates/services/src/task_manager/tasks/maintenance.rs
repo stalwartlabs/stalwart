@@ -497,6 +497,11 @@ async fn recalculate_quota(server: &Server, account_id: u32) -> trc::Result<()> 
             .caused_by(trc::location!())?;
     }
 
+    quota += server
+        .metadata_used_quota(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
     let mut batch = BatchBuilder::new();
     batch
         .with_account_id(account_id)

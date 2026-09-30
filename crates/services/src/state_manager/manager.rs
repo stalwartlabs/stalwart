@@ -97,8 +97,7 @@ pub fn spawn_push_router(inner: Arc<Inner>, mut change_rx: mpsc::Receiver<PushEv
                         );
                     }
 
-                    let account_id = notification.account_id();
-                    if let Some(subscribers) = subscribers.get(&account_id) {
+                    if let Some(subscribers) = subscribers.get(&notification.recipient()) {
                         for subscriber in &subscribers.ipc {
                             if let Some(notification) = notification.filter_types(&subscriber.types)
                             {

@@ -21,7 +21,6 @@ use utils::template::Template;
 pub struct GroupwareConfig {
     // DAV settings
     pub max_request_size: usize,
-    pub dead_property_size: Option<usize>,
     pub live_property_size: usize,
     pub max_lock_timeout: u64,
     pub max_locks_per_user: usize,
@@ -110,7 +109,6 @@ impl GroupwareConfig {
 
         GroupwareConfig {
             max_request_size: dav.request_max_size as usize,
-            dead_property_size: dav.dead_property_max_size.map(|v| v as usize),
             live_property_size: dav.live_property_max_size as usize,
             assisted_discovery: dav.enable_assisted_discovery,
             max_lock_timeout: dav.max_lock_timeout.into_inner().as_secs(),

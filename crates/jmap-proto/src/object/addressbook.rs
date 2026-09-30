@@ -7,7 +7,7 @@
 use crate::{
     object::{
         AnyId, JmapObject, JmapObjectId, JmapRight, JmapSharedObject, MaybeReference,
-        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
     request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
@@ -64,17 +64,20 @@ impl Property for AddressBookProperty {
         value: &str,
         depth: PointerDepth,
     ) -> Option<Self> {
-        let patch_depth = key.is_none().then_some(depth);
         match key {
-            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 AddressBookProperty::ShareWith => {
                     Id::from_str(value).ok().map(AddressBookProperty::IdValue)
                 }
-                _ => AddressBookProperty::parse(value, patch_depth),
+                _ => AddressBookProperty::parse_nested_name(value),
             },
-            _ => AddressBookProperty::parse(value, patch_depth),
+            Some(_) => AddressBookProperty::parse_nested_name(value),
+            None => AddressBookProperty::parse(value, Some(depth)),
         }
+    }
+
+    fn is_opaque(&self) -> bool {
+        self.metadata_root().is_some()
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -174,25 +177,24 @@ impl AddressBookProperty {
         )
     }
 
+    property_names!(
+        AddressBookProperty,
+        "id" => AddressBookProperty::Id,
+        "name" => AddressBookProperty::Name,
+        "description" => AddressBookProperty::Description,
+        "sortOrder" => AddressBookProperty::SortOrder,
+        "isDefault" => AddressBookProperty::IsDefault,
+        "isSubscribed" => AddressBookProperty::IsSubscribed,
+        "shareWith" => AddressBookProperty::ShareWith,
+        "myRights" => AddressBookProperty::MyRights,
+        "mayRead" => AddressBookProperty::Rights(AddressBookRight::MayRead),
+        "mayWrite" => AddressBookProperty::Rights(AddressBookRight::MayWrite),
+        "mayShare" => AddressBookProperty::Rights(AddressBookRight::MayShare),
+        "mayDelete" => AddressBookProperty::Rights(AddressBookRight::MayDelete),
+    );
+
     fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
-        hashify::fnc_map!(value.as_bytes(),
-            b"id" => Some(AddressBookProperty::Id),
-            b"name" => Some(AddressBookProperty::Name),
-            b"description" => Some(AddressBookProperty::Description),
-            b"sortOrder" => Some(AddressBookProperty::SortOrder),
-            b"isDefault" => Some(AddressBookProperty::IsDefault),
-            b"isSubscribed" => Some(AddressBookProperty::IsSubscribed),
-            b"shareWith" => Some(AddressBookProperty::ShareWith),
-            b"myRights" => Some(AddressBookProperty::MyRights),
-            b"metadata" => Some(AddressBookProperty::Metadata),
-            b"privateMetadata" => Some(AddressBookProperty::PrivateMetadata),
-            b"mayRead" => Some(AddressBookProperty::Rights(AddressBookRight::MayRead)),
-            b"mayWrite" => Some(AddressBookProperty::Rights(AddressBookRight::MayWrite)),
-            b"mayShare" => Some(AddressBookProperty::Rights(AddressBookRight::MayShare)),
-            b"mayDelete" => Some(AddressBookProperty::Rights(AddressBookRight::MayDelete)),
-            _ => None
-        )
-        .or_else(|| {
+        AddressBookProperty::parse_name(value).or_else(|| {
             patch_depth
                 .filter(|_| value.contains('/'))
                 .and_then(|depth| JsonPointer::parse_nested(value, depth))
@@ -202,7 +204,6 @@ impl AddressBookProperty {
 
     fn patch_or_prop(&self) -> &AddressBookProperty {
         if let AddressBookProperty::Pointer(ptr) = self
-            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
@@ -225,6 +226,13 @@ impl MetadataProperty for AddressBookProperty {
         match self {
             AddressBookProperty::Pointer(pointer) => Some(pointer),
             _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => AddressBookProperty::Metadata,
+            MetadataRoot::Private => AddressBookProperty::PrivateMetadata,
         }
     }
 }

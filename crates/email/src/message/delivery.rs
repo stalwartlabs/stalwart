@@ -191,6 +191,7 @@ impl MailDelivery for Server {
                                     is_sender_authenticated: message.sender_authenticated,
                                     is_spam: rcpt.is_spam(),
                                 },
+                                metadata: None,
                                 session_id: message.session_id,
                             }))
                             .await

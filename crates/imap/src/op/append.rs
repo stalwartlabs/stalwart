@@ -200,6 +200,7 @@ impl<T: SessionStream> SessionData<T> {
                     source: IngestSource::Imap {
                         train_classifier: true,
                     },
+                    metadata: None,
                     session_id: self.session_id,
                 })
                 .await

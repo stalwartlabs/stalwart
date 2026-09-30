@@ -13,6 +13,7 @@ use crate::{
     },
     receiver::{Request, Token, bad},
 };
+use std::mem::discriminant;
 
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
@@ -155,24 +156,14 @@ impl Request<Command> {
                                             "Invalid return option, expected parenthesis after METADATA.",
                                         ));
                                     }
-                                    while let Some(token) = tokens.next() {
-                                        match token {
-                                            Token::ParenthesisClose if !entries.is_empty() => break,
-                                            Token::ParenthesisOpen | Token::ParenthesisClose => {
-                                                return Err(bad(
-                                                    self.tag,
-                                                    "Invalid metadata return option argument.",
-                                                ));
-                                            }
-                                            token => {
-                                                entries.push(
-                                                    Entry::parse_specifier(token.as_bytes())
-                                                        .map_err(|v| bad(self.tag.clone(), v))?,
-                                                );
-                                            }
-                                        }
-                                    }
+                                    *entries = Entry::parse_list(&mut tokens)
+                                        .map_err(|v| bad(self.tag.clone(), v))?;
+                                    entries.sort_unstable();
+                                    entries.dedup();
                                 }
+                                return_options.retain(|existing| {
+                                    discriminant(existing) != discriminant(&return_option)
+                                });
                                 return_options.push(return_option);
                             }
                             _ => {
@@ -417,6 +408,32 @@ mod tests {
                     ],
                 },
             ),
+            (
+                concat!(
+                    "A04 LIST \"\" % RETURN (STATUS (MESSAGES) CHILDREN STATUS (UNSEEN) ",
+                    "METADATA (/shared/a) METADATA (/Shared/B /shared/b /private/c))\r\n"
+                ),
+                list::Arguments::Extended {
+                    tag: "A04".into(),
+                    reference_name: "".into(),
+                    mailbox_name: vec!["%".into()],
+                    selection_options: vec![],
+                    return_options: vec![
+                        ReturnOption::Children,
+                        ReturnOption::Status(vec![Status::Unseen]),
+                        ReturnOption::Metadata(vec![
+                            Entry {
+                                scope: Scope::Shared,
+                                path: "/b".into(),
+                            },
+                            Entry {
+                                scope: Scope::Private,
+                                path: "/c".into(),
+                            },
+                        ]),
+                    ],
+                },
+            ),
         ] {
             assert_eq!(
                 receiver
@@ -432,6 +449,8 @@ mod tests {
             "A04 LIST \"\" % RETURN (METADATA)\r\n",
             "A05 LIST \"\" % RETURN (METADATA ())\r\n",
             "A06 LIST \"\" % RETURN (METADATA (comment))\r\n",
+            "A08 LIST \"\" % RETURN (METADATA /shared/comment)\r\n",
+            "A09 LIST \"\" % RETURN (METADATA (/shared/a (/shared/b)))\r\n",
         ] {
             assert!(
                 receiver

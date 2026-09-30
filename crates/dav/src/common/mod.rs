@@ -38,11 +38,11 @@ use store::write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder};
 use types::{
     acl::{Acl, ArchivedAclGrant},
     collection::Collection,
-    dead_property::ArchivedDeadProperty,
 };
 use uri::{OwnedUri, Urn};
 
 pub mod acl;
+pub mod dead;
 pub mod lock;
 pub mod propfind;
 pub mod search;
@@ -309,9 +309,7 @@ impl<'x> DavQuery<'x> {
     ) -> Self {
         let mut props = Vec::with_capacity(expand.properties.len());
         for item in expand.properties {
-            if !matches!(item.property, DavProperty::DeadProperty(_))
-                && !props.contains(&item.property)
-            {
+            if !matches!(item.property, DavProperty::Dead(_)) && !props.contains(&item.property) {
                 props.push(item.property);
             }
         }
@@ -482,7 +480,7 @@ impl<'x> ArchivedResource<'x> {
             }
             ArchivedResource::Calendar(archive) => archive.version.hash().unwrap_or_default(),
             ArchivedResource::AddressBook(archive) => archive.version.hash().unwrap_or_default(),
-            ArchivedResource::FileNode(archive) => archive.version.hash().unwrap_or_default(),
+            ArchivedResource::FileNode(archive) => archive.inner.etag.to_native(),
             ArchivedResource::CalendarEventNotificationCollection(_) => 0,
         };
 
@@ -523,22 +521,6 @@ impl<'x> ArchivedResource<'x> {
                 archive.inner.modified.to_native()
             }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
-        }
-    }
-
-    pub fn dead_properties(&self) -> Option<&ArchivedDeadProperty> {
-        match self {
-            ArchivedResource::Calendar(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::CalendarEvent(_, content) => content
-                .as_ref()
-                .map(|content| &content.stored().dead_properties),
-            ArchivedResource::AddressBook(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::ContactCard(_, content) => {
-                content.map(|content| &content.dead_properties)
-            }
-            ArchivedResource::FileNode(archive) => Some(&archive.inner.dead_properties),
-            ArchivedResource::CalendarEventNotification(..)
-            | ArchivedResource::CalendarEventNotificationCollection(_) => None,
         }
     }
 
@@ -585,8 +567,8 @@ impl<'x> ArchivedResource<'x> {
                 Some(archive.inner.preferences(account_id).name.as_str())
             }
             ArchivedResource::ContactCard(archive, _) => archive.inner.display_name.as_deref(),
-            ArchivedResource::FileNode(archive) => archive.inner.display_name.as_deref(),
-            ArchivedResource::CalendarEventNotification(..)
+            ArchivedResource::FileNode(_)
+            | ArchivedResource::CalendarEventNotification(..)
             | ArchivedResource::CalendarEventNotificationCollection(_) => None,
         }
     }

@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{api::query::QueryResponseBuilder, changes::state::JmapCacheState};
+use crate::{
+    api::{
+        metadata::{
+            MetadataType, ObjectMetadata, ResourceScope, filter_containers, flagged_documents,
+        },
+        query::QueryResponseBuilder,
+    },
+    changes::state::JmapCacheState,
+};
 use calcard::{common::timezone::Tz, jscalendar::JSCalendarDateTime};
 use common::{GroupwareResources, Server, auth::AccessToken};
 use groupware::{
@@ -21,7 +29,7 @@ use jmap_proto::{
         calendar::{self, CalendarFilter},
         calendar_event::{self, CalendarEventComparator, CalendarEventFilter},
     },
-    request::MaybeInvalid,
+    request::{MaybeInvalid, capability::CapabilityIds},
 };
 use nlp::language::Language;
 use std::cmp::Ordering;
@@ -44,12 +52,14 @@ pub trait CalendarEventQuery: Sync + Send {
         &self,
         request: QueryRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 
     fn calendar_query(
         &self,
         request: QueryRequest<calendar::Calendar>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<QueryResponse>> + Send;
 }
 
@@ -58,8 +68,15 @@ impl CalendarEventQuery for Server {
         &self,
         mut request: QueryRequest<calendar_event::CalendarEvent>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
+        let metadata_query =
+            metadata.query(request.filter.iter().filter_map(|filter| match filter {
+                Filter::Property(CalendarEventFilter::Metadata(filter)) => Some(filter),
+                _ => None,
+            }))?;
         let mut filters = Vec::with_capacity(request.filter.len());
         let cache = self
             .fetch_groupware_resources(
@@ -132,11 +149,31 @@ impl CalendarEventQuery for Server {
         } else {
             std::array::from_fn(|_| RoaringBitmap::new())
         };
+        let metadata_hidden =
+            (is_shared && !metadata_query.is_empty()).then(|| private_ids.clone());
         let visibility = if hides_text {
             TextVisibility::new(&cache, private_ids, hidden_attendee_ids)
         } else {
             TextVisibility::default()
         };
+        let mask = if is_shared {
+            let mut shared_ids = cache.shared_items(access_token, [Acl::ReadItems], true);
+            shared_ids -= secret_ids;
+            shared_ids
+        } else {
+            cache.document_ids(false).collect()
+        };
+        let mut metadata_leaves = metadata
+            .evaluate(self, account_id, &metadata_query, || {
+                let mut flagged =
+                    flagged_documents(&cache, ResourceScope::Items, is_shared.then_some(&mask));
+                if let Some(hidden) = &metadata_hidden {
+                    flagged -= hidden;
+                }
+                flagged
+            })
+            .await?
+            .into_iter();
         let candidates = if expand_recurrences {
             BoundCandidates::Widened
         } else {
@@ -249,7 +286,13 @@ impl CalendarEventQuery for Server {
                             ));
                         }
                     }
-                    CalendarEventFilter::Metadata(_) => todo!(),
+                    CalendarEventFilter::Metadata(_) => {
+                        let mut matches = metadata_leaves.next().unwrap_or_default();
+                        if let Some(hidden) = &metadata_hidden {
+                            matches -= hidden;
+                        }
+                        filters.push(SearchFilter::is_in_set(matches));
+                    }
                     unsupported => {
                         return Err(trc::JmapEvent::UnsupportedFilter
                             .into_err()
@@ -397,15 +440,11 @@ impl CalendarEventQuery for Server {
                     .with_filters(filters)
                     .with_comparators(comparators)
                     .with_account_id(account_id)
-                    .with_mask(if is_shared {
-                        let mut shared_ids =
-                            cache.shared_items(access_token, [Acl::ReadItems], true);
-                        shared_ids -= secret_ids;
-                        shared_ids
-                    } else {
-                        cache.document_ids(false).collect()
-                    }),
+                    .with_mask(mask),
             )
+            .await?;
+        let query_state = metadata
+            .state(self, account_id, cache.get_state(false))
             .await?;
 
         // Extract comparators
@@ -515,7 +554,7 @@ impl CalendarEventQuery for Server {
             let mut response = QueryResponseBuilder::new(
                 expanded_results.len(),
                 self.core.jmap.query_max_results,
-                cache.get_state(false),
+                query_state,
                 &request,
             );
             response.response.can_calculate_changes = false;
@@ -543,7 +582,7 @@ impl CalendarEventQuery for Server {
             let mut response = QueryResponseBuilder::new(
                 results.len(),
                 self.core.jmap.query_max_results,
-                cache.get_state(false),
+                query_state,
                 &request,
             );
             for document_id in results {
@@ -559,10 +598,15 @@ impl CalendarEventQuery for Server {
         &self,
         request: QueryRequest<calendar::Calendar>,
         access_token: &AccessToken,
+        using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Calendar);
+        let mut metadata_filters = Vec::new();
         for filter in &request.filter {
             match filter {
-                Filter::Property(CalendarFilter::Metadata(_)) => todo!(),
+                Filter::Property(CalendarFilter::Metadata(filter)) => {
+                    metadata_filters.push(filter);
+                }
                 Filter::Property(CalendarFilter::_T(other)) => {
                     return Err(trc::JmapEvent::UnsupportedFilter
                         .into_err()
@@ -571,6 +615,7 @@ impl CalendarEventQuery for Server {
                 Filter::And | Filter::Or | Filter::Not | Filter::Close => {}
             }
         }
+        let metadata_query = metadata.query(metadata_filters)?;
 
         let account_id = request.account_id.document_id();
         let cache = self
@@ -581,16 +626,29 @@ impl CalendarEventQuery for Server {
             )
             .await?;
 
-        let results = if access_token.is_member(account_id) {
+        let is_member = access_token.is_member(account_id);
+        let readable = if is_member {
             cache.document_ids(true).collect::<RoaringBitmap>()
         } else {
             cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
         };
+        let leaves = metadata
+            .evaluate(self, account_id, &metadata_query, || {
+                flagged_documents(
+                    &cache,
+                    ResourceScope::Containers,
+                    (!is_member).then_some(&readable),
+                )
+            })
+            .await?;
+        let results = filter_containers(&request.filter, leaves, readable);
 
         let mut response = QueryResponseBuilder::new(
             results.len() as usize,
             self.core.jmap.query_max_results,
-            cache.get_state(true),
+            metadata
+                .state(self, account_id, cache.get_state(true))
+                .await?,
             &request,
         );
 

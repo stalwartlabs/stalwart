@@ -71,7 +71,7 @@ impl PushRegistration {
 
             for notification in &batch.notifications {
                 match notification {
-                    PushNotification::StateChange(_) => {}
+                    PushNotification::StateChange(_) | PushNotification::ViewerStateChange(_) => {}
                     PushNotification::CalendarAlert(calendar_alert) => {
                         let payload = PushObject::CalendarAlert {
                             account_id: calendar_alert.event_account_id.into(),
@@ -205,7 +205,8 @@ impl PushRegistration {
                     .notifications
                     .into_iter()
                     .filter(|notification| match notification {
-                        PushNotification::StateChange(_) => false,
+                        PushNotification::StateChange(_)
+                        | PushNotification::ViewerStateChange(_) => false,
                         PushNotification::EmailPush(email_push) => {
                             failed_email_pushes.contains(&email_push.account_id)
                         }

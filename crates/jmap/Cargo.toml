@@ -46,6 +46,8 @@ rand = "0.10.2"
 rkyv.workspace = true
 hashify = "0.3"
 compact_str = "0.10.0"
+memchr = "2.8"
+dav-proto = { path = "../dav-proto" }
 
 [features]
 test_mode = []

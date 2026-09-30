@@ -7,9 +7,10 @@
 pub mod index;
 pub mod storage;
 
+use crate::metadata::tracked_kinds;
 use calcard::vcard::VCard;
-use common::DavName;
-use types::{acl::AclGrant, dead_property::DeadProperty};
+use common::{DavName, storage::dav::PresenceBits};
+use types::{acl::AclGrant, metadata::MetadataKinds};
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -19,7 +20,7 @@ pub struct AddressBook {
     pub name: String,
     pub preferences: Vec<AddressBookPreferences>,
     pub subscribers: Vec<u32>,
-    pub dead_properties: DeadProperty,
+    pub presence: u8,
     pub acls: Vec<AclGrant>,
     pub created: i64,
     pub modified: i64,
@@ -36,7 +37,8 @@ pub struct AddressBookPreferences {
     pub sort_order: u32,
 }
 
-pub const CARD_HAS_DEAD_PROPERTIES: u16 = 1;
+pub const CARD_META_DAV: u16 = PresenceBits::CONTACT_CARD.dav();
+pub const CARD_META_JMAP: u16 = PresenceBits::CONTACT_CARD.jmap();
 
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
@@ -57,10 +59,17 @@ pub struct ContactCard {
 )]
 pub struct ContactCardContent {
     pub card: VCard,
-    pub dead_properties: DeadProperty,
 }
 
 impl AddressBook {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        tracked_kinds(self.presence)
+    }
+
+    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.presence = tracked_kinds(kinds.bits()).bits();
+    }
+
     pub fn preferences(&self, account_id: u32) -> &AddressBookPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
@@ -92,6 +101,10 @@ impl AddressBook {
 }
 
 impl ArchivedAddressBook {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        tracked_kinds(self.presence)
+    }
+
     pub fn preferences(&self, account_id: u32) -> &ArchivedAddressBookPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]
@@ -106,6 +119,14 @@ impl ArchivedAddressBook {
 }
 
 impl ContactCard {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        PresenceBits::CONTACT_CARD.kinds(self.flags)
+    }
+
+    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.flags = PresenceBits::CONTACT_CARD.apply(self.flags, kinds);
+    }
+
     pub fn added_addressbook_ids(
         &self,
         prev_data: &ArchivedContactCard,
@@ -135,5 +156,11 @@ impl ContactCard {
             .iter()
             .filter(|m| prev_data.names.iter().any(|pm| pm.parent_id == m.parent_id))
             .map(|m| m.parent_id)
+    }
+}
+
+impl ArchivedContactCard {
+    pub fn metadata_kinds(&self) -> MetadataKinds {
+        PresenceBits::CONTACT_CARD.kinds(self.flags.to_native())
     }
 }

@@ -15,24 +15,25 @@ impl DavParser for MkCol {
             is_mkcalendar: false,
             props: Vec::new(),
         };
-        match stream.token()? {
+        let mkcol_lang = match stream.token()? {
             Token::ElementStart {
                 name:
                     NamedElement {
                         ns: Namespace::Dav,
                         element: Element::Mkcol,
                     },
-                ..
-            } => {}
+                raw,
+            } => raw.xml_lang()?,
             Token::ElementStart {
                 name:
                     NamedElement {
                         ns: Namespace::CalDav,
                         element: Element::Mkcalendar,
                     },
-                ..
+                raw,
             } => {
                 mkcol.is_mkcalendar = true;
+                raw.xml_lang()?
             }
             Token::Eof => {
                 return Ok(mkcol);
@@ -48,10 +49,17 @@ impl DavParser for MkCol {
                             ns: Namespace::Dav,
                             element: Element::Set,
                         },
-                    ..
+                    raw,
                 } => {
-                    stream.expect_named_element(NamedElement::dav(Element::Prop))?;
-                    stream.collect_property_values(&mut mkcol.props)?;
+                    let set_lang = raw.xml_lang()?;
+                    let prop_lang = stream
+                        .expect_named_element_raw(NamedElement::dav(Element::Prop))?
+                        .xml_lang()?;
+                    let lang = prop_lang
+                        .as_deref()
+                        .or(set_lang.as_deref())
+                        .or(mkcol_lang.as_deref());
+                    stream.collect_property_values(&mut mkcol.props, lang)?;
                     stream.expect_element_end()?;
                 }
                 Token::ElementEnd | Token::Eof => {

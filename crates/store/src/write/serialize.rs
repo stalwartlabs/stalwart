@@ -6,7 +6,10 @@
 
 use super::{
     Archive, ArchiveBytes, ArchiveVersion, Archiver,
-    compress::{ArchiveCompression, Compression, compress, compress_watermark, decompress},
+    compress::{
+        ArchiveCompression, Compression, MAX_ARCHIVE_SIZE, compress, compress_watermark,
+        decompress, decompress_into,
+    },
 };
 use crate::{Deserialize, Serialize, SerializeInfallible, U32_LEN, U64_LEN, Value};
 use compact_str::format_compact;
@@ -143,6 +146,64 @@ impl Archive<ArchiveBytes> {
         };
 
         Ok(Archive { version, inner })
+    }
+}
+
+impl Archive<ArchiveBytes> {
+    pub fn serialize_raw(mut contents: Vec<u8>, compress_watermark: usize) -> trc::Result<Vec<u8>> {
+        let flags = MAGIC_MARKER | HASHED;
+        if contents.len() >= compress_watermark {
+            let mut compressed = compress(None, &contents, 1).map_err(|err| {
+                trc::StoreEvent::UnexpectedError
+                    .caused_by(trc::location!())
+                    .reason(err)
+            })?;
+            if compressed.len() < contents.len() {
+                compressed.push(flags | ZSTD_COMPRESSED);
+                return Ok(compressed);
+            }
+        }
+
+        let hash = xxhash_rust::xxh3::xxh3_64(&contents) as u32;
+        contents.reserve_exact(U32_LEN + 1);
+        contents.extend_from_slice(&hash.to_be_bytes());
+        contents.push(flags);
+        Ok(contents)
+    }
+
+    pub fn deserialize_raw<'x>(bytes: &'x [u8], scratch: &'x mut Vec<u8>) -> trc::Result<&'x [u8]> {
+        let (encoding, contents, version) =
+            validate_marker_and_contents(bytes).ok_or_else(|| {
+                trc::StoreEvent::DataCorruption
+                    .into_err()
+                    .details("Archive integrity compromised")
+                    .ctx(trc::Key::Value, bytes)
+                    .caused_by(trc::location!())
+            })?;
+        if version == ArchiveVersion::Unversioned {
+            return Err(trc::StoreEvent::DataCorruption
+                .into_err()
+                .details("Raw archive carries no integrity hash")
+                .ctx(trc::Key::Value, bytes)
+                .caused_by(trc::location!()));
+        }
+
+        match encoding {
+            Encoding::Plain => Ok(contents),
+            Encoding::Zstd => {
+                decompress_into(contents, scratch, MAX_ARCHIVE_SIZE).map_err(|err| {
+                    trc::StoreEvent::DecompressError
+                        .ctx(trc::Key::Value, contents)
+                        .caused_by(trc::location!())
+                        .reason(err)
+                })?;
+                Ok(scratch.as_slice())
+            }
+            Encoding::Lz4 => {
+                *scratch = lz4_deflate(contents)?;
+                Ok(scratch.as_slice())
+            }
+        }
     }
 }
 

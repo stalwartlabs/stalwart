@@ -9,6 +9,7 @@ use crate::{
     DavError, DavMethod, PropStatBuilder,
     common::{
         ExtractETag,
+        dead::{DeadPatch, DeadTarget, DisplayName},
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -32,6 +33,7 @@ use trc::AddContext;
 use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
+    metadata::MetadataKinds,
 };
 
 pub(crate) trait FileMkColRequestHandler: Sync + Send {
@@ -134,10 +136,29 @@ impl FileMkColRequestHandler for Server {
         };
 
         // Apply MKCOL properties
+        let mut batch = BatchBuilder::new();
+        let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
         let mut return_prop_stat = None;
-        if let Some(mkcol) = request {
+        let mut dead_write = None;
+        if let Some(mut mkcol) = request {
             let mut prop_stat = PropStatBuilder::default();
-            if !self.apply_file_properties(&mut node, false, mkcol.props, &mut prop_stat) {
+            let dead = DeadPatch::take_values(&mut mkcol.props, DisplayName::Stored);
+            self.apply_file_properties(&mut node, mkcol.props, &mut prop_stat);
+            dead_write = dead
+                .apply(
+                    self,
+                    DeadTarget::item(
+                        account_id,
+                        Collection::FileNode,
+                        document_id,
+                        MetadataKinds::NONE,
+                    ),
+                    &mut prop_stat,
+                )
+                .await
+                .caused_by(trc::location!())?;
+            if prop_stat.has_errors() {
+                prop_stat.fail_dependencies();
                 return Ok(HttpResponse::new(StatusCode::FORBIDDEN).with_xml_body(
                     MkColResponse::new(prop_stat.build())
                         .with_namespace(Namespace::Dav)
@@ -150,8 +171,12 @@ impl FileMkColRequestHandler for Server {
         }
 
         // Prepare write batch
-        let mut batch = BatchBuilder::new();
-        let document_id = batch.reserve_document_id(account_id, Collection::FileNode);
+        if let Some(dead_write) = &dead_write {
+            node.set_presence(dead_write.file_presence);
+        }
+        if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
+            write.build(&mut batch).caused_by(trc::location!())?;
+        }
         batch
             .with_account_id(account_id)
             .with_collection(Collection::FileNode)

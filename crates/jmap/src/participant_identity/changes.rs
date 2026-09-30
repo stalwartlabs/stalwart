@@ -79,7 +79,7 @@ impl ParticipantIdentityChanges for Server {
                 updated_properties: None,
             },
             object: MethodObject::ParticipantIdentity,
-            only_container_changes: false,
+            updated_properties: None,
         })
     }
 }

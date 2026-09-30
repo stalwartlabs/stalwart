@@ -713,7 +713,6 @@ impl CalendarUpdateRequestHandler for Server {
                     self.core.groupware.max_ical_instances,
                 ),
                 preferences,
-                ..Default::default()
             };
             let next_email_alarms = self
                 .next_event_alarms(

@@ -10,7 +10,7 @@ use common::storage::index::{
     SerializableObject, serialize_object,
 };
 use store::write::{ArchiveCompression, BatchBuilder, Compression, Slot};
-use types::{acl::AclGrant, collection::SyncCollection};
+use types::{acl::AclGrant, collection::SyncCollection, metadata::MetadataKinds};
 
 impl IndexableObject for Mailbox {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
@@ -23,6 +23,10 @@ impl IndexableObject for Mailbox {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        Mailbox::metadata_kinds(self)
     }
 }
 
@@ -42,6 +46,10 @@ impl IndexableObject for &ArchivedMailbox {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ArchivedMailbox::metadata_kinds(self)
     }
 }
 

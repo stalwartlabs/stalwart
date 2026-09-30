@@ -6441,8 +6441,6 @@ pub struct WebDav {
     pub max_lock_timeout: Duration,
     #[serde(rename = "maxLocks")]
     pub max_locks: u64,
-    #[serde(rename = "deadPropertyMaxSize")]
-    pub dead_property_max_size: Option<u64>,
     #[serde(rename = "livePropertyMaxSize")]
     pub live_property_max_size: u64,
     #[serde(rename = "requestMaxSize")]

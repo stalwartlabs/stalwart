@@ -5,13 +5,21 @@
  */
 
 use crate::{
+    api::metadata::{
+        ContainerTarget, MetadataAccess, MetadataPatches, MetadataType, ObjectMetadata,
+    },
     blob::download::BlobDownload,
-    changes::state::JmapCacheState,
+    changes::state::{JmapCacheState, MetadataStateManager},
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
 use common::{
-    MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken, ipc::PushNotification,
-    storage::index::ObjectIndexBuilder,
+    MAX_RECEIVED_AT, MessageUid, Server,
+    auth::{AccessToken, AccountCache},
+    ipc::PushNotification,
+    storage::{
+        index::ObjectIndexBuilder,
+        metadata::{MetadataLog, PrivateMetadataCommit},
+    },
 };
 use email::message::headers::{BuildHeader, ValueToHeader};
 use email::{
@@ -20,19 +28,18 @@ use email::{
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
+        ingest_metadata::IngestMetadata,
         messagedata::{KeywordDiff, PendingMessageData, merge_keywords},
     },
+    presence::update_email_presence,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
-    object::{
-        email::{Email, EmailProperty, EmailValue},
-        metadata::MetadataProperty,
-    },
+    object::email::{Email, EmailProperty, EmailValue},
     references::resolve::ResolveCreatedReference,
-    request::MaybeInvalid,
+    request::{MaybeInvalid, capability::CapabilityIds},
     types::state::State,
 };
 use jmap_tools::{Key, Value};
@@ -46,7 +53,7 @@ use mail_builder::{
 };
 use mail_parser::MessageParser;
 use std::future::Future;
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use store::{
     ahash::AHashMap,
     roaring::RoaringBitmap,
@@ -67,6 +74,7 @@ pub trait EmailSet: Sync + Send {
         request: SetRequest<'_, Email>,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<SetResponse<Email>>> + Send;
 }
 
@@ -76,12 +84,31 @@ impl EmailSet for Server {
         mut request: SetRequest<'_, Email>,
         access_token: &AccessToken,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<SetResponse<Email>> {
         // Prepare response
         let account_id = request.account_id.document_id();
         let cache = self.get_cached_messages(account_id).await?;
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
+        let viewer = object_metadata.viewer();
+        let shared_state = cache.get_state(false);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(cache.assert_state(false, &request.if_in_state)?);
+            .with_state(
+                self.assert_metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Email,
+                    shared_state.clone(),
+                    &request.if_in_state,
+                )
+                .await?,
+            );
+        let metadata_support = object_metadata.support();
+        let mut owner_account: Option<Arc<AccountCache>> = None;
+        let mut readable_mailbox_ids: Option<RoaringBitmap> = None;
+        let mut private_batch = BatchBuilder::new();
+        let mut private_commit = PrivateMetadataCommit::default();
+        let mut will_update_private = Vec::new();
 
         // Obtain mailboxIds
         let (can_add_mailbox_ids, can_delete_mailbox_ids, can_modify_mailbox_ids) =
@@ -123,7 +150,15 @@ impl EmailSet for Server {
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
         // Process creates
-        'create: for (id, object) in request.unwrap_create() {
+        'create: for (id, mut object) in request.unwrap_create() {
+            let metadata_patches =
+                match object_metadata.extract(MetadataPatches::for_create(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                };
             let Value::Object(mut object) = object else {
                 continue;
             };
@@ -680,8 +715,6 @@ impl EmailSet for Server {
                         }
                     }
 
-                    (property, _) if property.metadata_root().is_some() => todo!(),
-
                     (_, Value::Null) => (),
 
                     (property, _) => {
@@ -740,6 +773,66 @@ impl EmailSet for Server {
                 response.not_created.append(id, err.into());
                 continue 'create;
             }
+
+            let ingest_metadata = match metadata_patches {
+                Some(metadata_patches) => {
+                    let Some(support) = metadata_support else {
+                        response
+                            .not_created
+                            .append(id, metadata_patches.unsupported());
+                        continue 'create;
+                    };
+                    let access = MetadataAccess {
+                        may_write_shared: can_modify_mailbox_ids
+                            .as_ref()
+                            .is_none_or(|ids| mailboxes.iter().any(|id| ids.contains(*id))),
+                        may_read: !access_token.is_shared(account_id)
+                            || mailboxes.iter().any(|mailbox_id| {
+                                readable_mailbox_ids
+                                    .get_or_insert_with(|| {
+                                        cache.shared_mailboxes(access_token, Acl::ReadItems)
+                                    })
+                                    .contains(*mailbox_id)
+                            }),
+                    };
+                    let update = match metadata_patches.apply(support, access, None, None) {
+                        Ok(update) => update,
+                        Err(err) => {
+                            response.not_created.append(id, err);
+                            continue 'create;
+                        }
+                    };
+                    if update.is_empty() {
+                        None
+                    } else {
+                        let owner = match &owner_account {
+                            Some(owner) => owner.clone(),
+                            None => owner_account
+                                .insert(self.account(account_id).await.caused_by(trc::location!())?)
+                                .clone(),
+                        };
+                        match update
+                            .prepare_detached(
+                                self,
+                                ContainerTarget {
+                                    owner: &owner,
+                                    viewer_id: access_token.account_id(),
+                                    collection: Collection::Email,
+                                    log: MetadataLog::None,
+                                },
+                            )
+                            .await?
+                        {
+                            Ok(detached) => IngestMetadata::new(detached.shared, detached.private),
+                            Err(err) => {
+                                response.not_created.append(id, err);
+                                continue 'create;
+                            }
+                        }
+                    }
+                }
+                None => None,
+            };
 
             // Make sure the message is not empty
             if builder.headers.is_empty()
@@ -805,6 +898,7 @@ impl EmailSet for Server {
                     source: IngestSource::Jmap {
                         train_classifier: true,
                     },
+                    metadata: ingest_metadata,
                     session_id: session.session_id,
                 })
                 .await
@@ -830,7 +924,16 @@ impl EmailSet for Server {
         let mut batch = BatchBuilder::new();
         let mut changed_mailboxes: AHashMap<u32, Vec<u32>> = AHashMap::new();
         let mut will_update = Vec::with_capacity(request.update.as_ref().map_or(0, |u| u.len()));
-        'update: for (id, object) in request.unwrap_update() {
+        let mut commit = PrivateMetadataCommit::default();
+        let mut shared_updates_committed = false;
+        let containers = object_metadata
+            .preload_updates(self, account_id, request.update.as_ref(), |document_id| {
+                cache
+                    .email_by_id(&document_id)
+                    .map(|email| cache.metadata_kinds(email))
+            })
+            .await?;
+        'update: for (id, mut object) in request.unwrap_update() {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -843,6 +946,14 @@ impl EmailSet for Server {
                 response.not_updated.append(id, SetError::will_destroy());
                 continue 'update;
             }
+            let metadata_patches =
+                match object_metadata.extract(MetadataPatches::for_update(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                };
 
             // Obtain message data
             let document_id = id.document_id();
@@ -886,9 +997,6 @@ impl EmailSet for Server {
                                 .collect(),
                         );
                     }
-                    (Key::Property(property), _) if property.metadata_root().is_some() => {
-                        todo!()
-                    }
                     (Key::Property(EmailProperty::Pointer(pointer)), value) => {
                         match handle_email_patch(&pointer, value) {
                             PatchResult::SetKeyword(keyword) => {
@@ -927,10 +1035,110 @@ impl EmailSet for Server {
                 }
             }
 
+            let current_kinds = data.metadata_kinds();
+            let mut shared_kinds = None;
+            let metadata_writes = if let Some(metadata_patches) = metadata_patches {
+                let Some(support) = metadata_support else {
+                    response
+                        .not_updated
+                        .append(id, metadata_patches.unsupported());
+                    continue 'update;
+                };
+                let access = MetadataAccess {
+                    may_write_shared: can_modify_mailbox_ids.as_ref().is_none_or(|ids| {
+                        data.mailboxes
+                            .iter()
+                            .any(|mailbox| ids.contains(mailbox.mailbox_id))
+                    }),
+                    may_read: !access_token.is_shared(account_id)
+                        || data.mailboxes.iter().any(|mailbox| {
+                            readable_mailbox_ids
+                                .get_or_insert_with(|| {
+                                    cache.shared_mailboxes(access_token, Acl::ReadItems)
+                                })
+                                .contains(mailbox.mailbox_id)
+                        }),
+                };
+                let update = match metadata_patches.apply(
+                    support,
+                    access,
+                    containers.shared.get(document_id),
+                    containers.private.get(document_id),
+                ) {
+                    Ok(update) => update,
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                };
+                if update.is_empty() {
+                    None
+                } else {
+                    let owner = match &owner_account {
+                        Some(owner) => owner.clone(),
+                        None => owner_account
+                            .insert(self.account(account_id).await.caused_by(trc::location!())?)
+                            .clone(),
+                    };
+                    match update
+                        .prepare(
+                            self,
+                            ContainerTarget {
+                                owner: &owner,
+                                viewer_id: access_token.account_id(),
+                                collection: Collection::Email,
+                                log: MetadataLog::Item {
+                                    prefix: Some(PendingId::Assigned(data.thread_id)),
+                                },
+                            },
+                        )
+                        .await?
+                    {
+                        Ok(prepared) => {
+                            shared_kinds = prepared.shared_kinds();
+                            Some(prepared)
+                        }
+                        Err(err) => {
+                            response.not_updated.append(id, err);
+                            continue 'update;
+                        }
+                    }
+                }
+            } else {
+                None
+            };
+
             let has_keyword_changes = new_data.has_keyword_changes(&data);
             let has_mailbox_changes = new_data.has_mailbox_changes(&data);
             if !has_keyword_changes && !has_mailbox_changes {
-                response.updated.append(id, None);
+                match metadata_writes {
+                    Some(prepared) if prepared.is_private_only() => {
+                        prepared
+                            .build(document_id, &mut private_batch, &mut private_commit)
+                            .caused_by(trc::location!())?;
+                        private_batch.commit_point();
+                        will_update_private.push(id);
+                    }
+                    Some(prepared) => {
+                        if let Some(presence) = prepared
+                            .build(document_id, &mut batch, &mut commit)
+                            .caused_by(trc::location!())?
+                        {
+                            update_email_presence(
+                                &mut batch,
+                                account_id,
+                                document_id,
+                                current_kinds,
+                                presence,
+                            );
+                        }
+                        batch.commit_point();
+                        will_update.push(id);
+                    }
+                    None => {
+                        response.updated.append(id, None);
+                    }
+                }
                 continue 'update;
             }
 
@@ -1094,6 +1302,9 @@ impl EmailSet for Server {
                 .with_collection(Collection::Email)
                 .with_document(document_id);
             if has_mailbox_changes {
+                if let Some(kinds) = shared_kinds {
+                    new_data.set_metadata_kinds(kinds);
+                }
                 batch
                     .custom(ObjectIndexBuilder::new().with_current(data).with_changes(
                         PendingMessageData {
@@ -1128,6 +1339,15 @@ impl EmailSet for Server {
                 .caused_by(trc::location!())?;
             }
 
+            if let Some(prepared) = metadata_writes
+                && let Some(presence) = prepared
+                    .build(document_id, &mut batch, &mut commit)
+                    .caused_by(trc::location!())?
+                && !has_mailbox_changes
+            {
+                update_email_presence(&mut batch, account_id, document_id, current_kinds, presence);
+            }
+
             batch.commit_point();
             will_update.push(id);
         }
@@ -1144,13 +1364,13 @@ impl EmailSet for Server {
                 }
             }
 
-            match self
-                .commit_batch(batch)
-                .await
-                .map(|ids| ids.last_change_id(account_id, SyncCollection::Email))
-            {
-                Ok(change_id) => {
-                    last_change_id = change_id.into();
+            match self.commit_batch(batch).await {
+                Ok(assigned_ids) => {
+                    shared_updates_committed = true;
+                    last_change_id = assigned_ids
+                        .last_change_id(account_id, SyncCollection::Email)
+                        .into();
+                    self.private_metadata_committed(commit, &assigned_ids).await;
 
                     // Add to updated list
                     for id in will_update {
@@ -1159,6 +1379,33 @@ impl EmailSet for Server {
                 }
                 Err(err) if err.is_assertion_failure() => {
                     for id in will_update {
+                        response.not_updated.append(
+                            id,
+                            SetError::forbidden().with_description(
+                                "Another process modified this message, please try again.",
+                            ),
+                        );
+                    }
+                }
+                Err(err) => {
+                    return Err(err.caused_by(trc::location!()));
+                }
+            }
+        }
+
+        let mut has_private_changes = false;
+        if !private_batch.is_empty() {
+            match self.commit_batch(private_batch).await {
+                Ok(assigned_ids) => {
+                    has_private_changes = true;
+                    self.private_metadata_committed(private_commit, &assigned_ids)
+                        .await;
+                    for id in will_update_private {
+                        response.updated.append(id, None);
+                    }
+                }
+                Err(err) if err.is_assertion_failure() => {
+                    for id in will_update_private {
                         response.not_updated.append(
                             id,
                             SetError::forbidden().with_description(
@@ -1216,12 +1463,26 @@ impl EmailSet for Server {
                     )
                     .await?;
                 if !batch.is_empty() {
-                    last_change_id = self
-                        .commit_batch(batch)
-                        .await
-                        .map(|ids| ids.last_change_id(account_id, SyncCollection::Email))
-                        .caused_by(trc::location!())?
-                        .into();
+                    match self.commit_batch(batch).await {
+                        Ok(assigned_ids) => {
+                            last_change_id = assigned_ids
+                                .last_change_id(account_id, SyncCollection::Email)
+                                .into();
+                        }
+                        Err(err) if err.is_assertion_failure() => {
+                            for destroy_id in response.destroyed.drain(..) {
+                                response.not_destroyed.append(
+                                    destroy_id,
+                                    SetError::forbidden().with_description(
+                                        "Another process modified this message, please try again.",
+                                    ),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            return Err(err.caused_by(trc::location!()));
+                        }
+                    }
                 }
 
                 // Mark messages that were not found as not destroyed (this should not occur in practice)
@@ -1244,20 +1505,30 @@ impl EmailSet for Server {
         }
 
         // Update state
-        if let Some(change_id) = last_change_id {
-            if response.updated.is_empty() && response.destroyed.is_empty() {
-                // Message ingest does not broadcast state changes
-                self.broadcast_push_notification(PushNotification::StateChange(
-                    StateChange::new(account_id)
-                        .with_change_id(change_id)
-                        .with_change(DataType::Email)
-                        .with_change(DataType::Mailbox)
-                        .with_change(DataType::Thread),
-                ))
-                .await;
-            }
-
-            response.new_state = State::Exact(change_id).into();
+        if let Some(change_id) = last_change_id
+            && !shared_updates_committed
+            && response.destroyed.is_empty()
+        {
+            // Message ingest does not broadcast state changes
+            self.broadcast_push_notification(PushNotification::StateChange(
+                StateChange::new(account_id)
+                    .with_change_id(change_id)
+                    .with_change(DataType::Email)
+                    .with_change(DataType::Mailbox)
+                    .with_change(DataType::Thread),
+            ))
+            .await;
+        }
+        if last_change_id.is_some() || has_private_changes {
+            response.new_state = self
+                .metadata_state(
+                    viewer,
+                    account_id,
+                    Collection::Email,
+                    last_change_id.map_or(shared_state, State::Exact),
+                )
+                .await?
+                .into();
         }
 
         Ok(response)

@@ -10,12 +10,14 @@ use crate::{
         LogCollection,
         key::DeserializeBigEndian,
         log::{
-            CHANGE_LISTS, CONTAINER_DELETES, CONTAINER_INSERTS, CONTAINER_PROPERTY_CHANGES,
-            CONTAINER_UPDATES, ITEM_DELETES, ITEM_INSERTS, ITEM_UPDATES, zigzag_decode,
+            BASE_LISTS, CHANGE_LISTS, CONTAINER_INSERTS, CONTAINER_LISTS, CONTAINER_METADATA,
+            CONTAINER_PROPERTY_CHANGES, CONTAINER_UPDATES, ITEM_INSERTS, ITEM_METADATA,
+            ITEM_UPDATES, PRESENCE_EXTENDED, zigzag_decode,
         },
     },
 };
 use ahash::AHashMap;
+use std::slice::Iter;
 use trc::AddContext;
 use types::collection::{SyncCollection, VanishedCollection};
 use utils::codec::leb128::{Leb128Iterator, Leb128Reader};
@@ -24,11 +26,43 @@ use utils::codec::leb128::{Leb128Iterator, Leb128Reader};
 pub enum Change {
     InsertContainer(u64),
     UpdateContainer(u64),
-    UpdateContainerProperty(u64),
+    UpdateContainerPartial(u64, PartialChange),
     DeleteContainer(u64),
     InsertItem(u64),
     UpdateItem(u64),
+    UpdateItemMetadata(u64),
     DeleteItem(u64),
+}
+
+const _: () = assert!(size_of::<Change>() == 16);
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Default)]
+#[repr(transparent)]
+pub struct PartialChange(u8);
+
+impl PartialChange {
+    pub const PROPERTIES: PartialChange = PartialChange(1);
+    pub const METADATA: PartialChange = PartialChange(1 << 1);
+
+    #[inline(always)]
+    pub const fn has_properties(self) -> bool {
+        self.0 & Self::PROPERTIES.0 != 0
+    }
+
+    #[inline(always)]
+    pub const fn has_metadata(self) -> bool {
+        self.0 & Self::METADATA.0 != 0
+    }
+
+    #[inline(always)]
+    pub const fn is_metadata_only(self) -> bool {
+        self.0 == Self::METADATA.0
+    }
+
+    #[inline(always)]
+    pub const fn union(self, other: PartialChange) -> Self {
+        PartialChange(self.0 | other.0)
+    }
 }
 
 #[derive(Debug)]
@@ -91,9 +125,7 @@ impl Store {
             collection_,
             LogCollection::Sync(SyncCollection::ShareNotification)
         );
-        let is_prefixed =
-            matches!(collection_, LogCollection::Sync(collection) if collection.is_prefixed());
-        let collection = u8::from(collection_);
+        let is_prefixed = collection_.is_prefixed();
 
         let (is_inclusive, from_change_id, to_change_id) = match query {
             Query::All => (true, 0, u64::MAX),
@@ -103,16 +135,8 @@ impl Store {
                 (true, from_change_id, to_change_id)
             }
         };
-        let from_key = LogKey {
-            account_id,
-            collection,
-            change_id: from_change_id,
-        };
-        let to_key = LogKey {
-            account_id,
-            collection,
-            change_id: to_change_id,
-        };
+        let from_key = collection_.log_key(account_id, from_change_id);
+        let to_key = collection_.log_key(account_id, to_change_id);
 
         let mut changelog = Changes::default();
 
@@ -263,17 +287,8 @@ impl Store {
         account_id: u32,
         collection: LogCollection,
     ) -> trc::Result<Option<u64>> {
-        let collection = u8::from(collection);
-        let from_key = LogKey {
-            account_id,
-            collection,
-            change_id: 0,
-        };
-        let to_key = LogKey {
-            account_id,
-            collection,
-            change_id: u64::MAX,
-        };
+        let from_key = collection.log_key(account_id, 0);
+        let to_key = collection.log_key(account_id, u64::MAX);
 
         let mut last_change_id = None;
 
@@ -315,22 +330,35 @@ impl Changes {
         };
 
         if let Some(pos) = index.get(&id).copied() {
-            let (is_insert, is_update, is_delete) = match self.changes[pos] {
+            let current = self.changes[pos];
+            let (is_insert, is_update, is_delete) = match current {
                 Change::InsertContainer(_) | Change::InsertItem(_) => (true, false, false),
-                Change::UpdateContainer(_) => (false, true, false),
+                Change::UpdateContainer(_) | Change::UpdateItem(_) => (false, true, false),
                 Change::DeleteContainer(_) | Change::DeleteItem(_) => (false, false, true),
-                _ => (false, false, false),
+                Change::UpdateContainerPartial(..) | Change::UpdateItemMetadata(_) => {
+                    (false, false, false)
+                }
             };
 
             match change {
                 Change::UpdateContainer(_)
-                | Change::UpdateContainerProperty(_)
+                | Change::UpdateContainerPartial(..)
                 | Change::UpdateItem(_)
+                | Change::UpdateItemMetadata(_)
                     if is_insert || is_delete =>
                 {
                     return;
                 }
-                Change::UpdateContainerProperty(_) if is_update => {
+                Change::UpdateContainerPartial(..) | Change::UpdateItemMetadata(_) if is_update => {
+                    return;
+                }
+                Change::UpdateContainerPartial(_, partial) => {
+                    if let Change::UpdateContainerPartial(_, current) = current {
+                        self.changes[pos] =
+                            Change::UpdateContainerPartial(id, current.union(partial));
+                    } else {
+                        self.changes[pos] = change;
+                    }
                     return;
                 }
                 Change::DeleteContainer(_) | Change::DeleteItem(_) if is_insert => {
@@ -379,59 +407,96 @@ impl Changes {
     }
 
     pub fn deserialize(&mut self, bytes: &[u8], is_prefixed: bool) -> Option<(bool, bool)> {
-        let mut bytes_it = bytes.iter();
-        let presence = *bytes_it.next()?;
+        let (&first, rest) = bytes.split_first()?;
+        let mut bytes_it = rest.iter();
+        let (mut has_container_changes, mut has_item_changes) = self.deserialize_lists(
+            &mut bytes_it,
+            u16::from(first & !PRESENCE_EXTENDED),
+            is_prefixed,
+        )?;
 
+        if first & PRESENCE_EXTENDED != 0 {
+            let extended = *bytes_it.next()?;
+            if u32::from(extended) >> (CHANGE_LISTS - BASE_LISTS) != 0 {
+                return None;
+            }
+            let (containers, items) = self.deserialize_lists(
+                &mut bytes_it,
+                u16::from(extended) << BASE_LISTS,
+                is_prefixed,
+            )?;
+            has_container_changes |= containers;
+            has_item_changes |= items;
+        }
+
+        Some((has_container_changes, has_item_changes))
+    }
+
+    #[inline(always)]
+    fn deserialize_lists(
+        &mut self,
+        bytes_it: &mut Iter<'_, u8>,
+        presence: u16,
+        is_prefixed: bool,
+    ) -> Option<(bool, bool)> {
         let mut counts = [0usize; CHANGE_LISTS];
-        for (idx, count) in counts.iter_mut().enumerate() {
-            if presence & (1 << idx) != 0 {
-                *count = bytes_it.next_leb128()?;
-            }
+        let mut bits = presence;
+        while bits != 0 {
+            let slot = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            *counts.get_mut(slot)? = bytes_it.next_leb128()?;
         }
 
-        let has_container_changes = counts[CONTAINER_INSERTS]
-            + counts[CONTAINER_UPDATES]
-            + counts[CONTAINER_PROPERTY_CHANGES]
-            + counts[CONTAINER_DELETES]
-            > 0;
-        let has_item_changes =
-            counts[ITEM_INSERTS] + counts[ITEM_UPDATES] + counts[ITEM_DELETES] > 0;
+        let mut has_container_changes = false;
+        let mut has_item_changes = false;
+        let mut bits = presence;
+        while bits != 0 {
+            let slot = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let count = *counts.get(slot)?;
 
-        for (idx, count) in counts.iter().enumerate().take(ITEM_INSERTS) {
-            let mut prev = 0u64;
-            for _ in 0..*count {
-                prev += bytes_it.next_leb128::<u64>()?;
-                let change = match idx {
-                    CONTAINER_INSERTS => Change::InsertContainer(prev),
-                    CONTAINER_UPDATES => Change::UpdateContainer(prev),
-                    CONTAINER_PROPERTY_CHANGES => Change::UpdateContainerProperty(prev),
-                    _ => Change::DeleteContainer(prev),
-                };
-                self.push_change(prev, change, true);
-            }
-        }
+            if CONTAINER_LISTS & (1 << slot) != 0 {
+                has_container_changes |= count > 0;
+                let mut prev = 0u64;
+                for _ in 0..count {
+                    prev += bytes_it.next_leb128::<u64>()?;
+                    let change = match slot {
+                        CONTAINER_INSERTS => Change::InsertContainer(prev),
+                        CONTAINER_UPDATES => Change::UpdateContainer(prev),
+                        CONTAINER_PROPERTY_CHANGES => {
+                            Change::UpdateContainerPartial(prev, PartialChange::PROPERTIES)
+                        }
+                        CONTAINER_METADATA => {
+                            Change::UpdateContainerPartial(prev, PartialChange::METADATA)
+                        }
+                        _ => Change::DeleteContainer(prev),
+                    };
+                    self.push_change(prev, change, true);
+                }
+            } else {
+                has_item_changes |= count > 0;
+                let mut prev_prefix = 0i64;
+                let mut prev_document_id = 0i64;
+                let mut prev_id = 0u64;
 
-        for (idx, count) in counts.iter().enumerate().skip(ITEM_INSERTS) {
-            let mut prev_prefix = 0i64;
-            let mut prev_document_id = 0i64;
-            let mut prev_id = 0u64;
+                for _ in 0..count {
+                    let id = if is_prefixed {
+                        prev_prefix += bytes_it.next_leb128::<u64>()? as i64;
+                        prev_document_id += zigzag_decode(bytes_it.next_leb128::<u64>()?);
+                        ((prev_prefix as u64) << 32) | (prev_document_id as u64 & u32::MAX as u64)
+                    } else {
+                        prev_id += bytes_it.next_leb128::<u64>()?;
+                        prev_id
+                    };
 
-            for _ in 0..*count {
-                let id = if is_prefixed {
-                    prev_prefix += bytes_it.next_leb128::<u64>()? as i64;
-                    prev_document_id += zigzag_decode(bytes_it.next_leb128::<u64>()?);
-                    ((prev_prefix as u64) << 32) | (prev_document_id as u64 & u32::MAX as u64)
-                } else {
-                    prev_id += bytes_it.next_leb128::<u64>()?;
-                    prev_id
-                };
-
-                let change = match idx {
-                    ITEM_INSERTS => Change::InsertItem(id),
-                    ITEM_UPDATES => Change::UpdateItem(id),
-                    _ => Change::DeleteItem(id),
-                };
-                self.push_change(id, change, false);
+                    let change = match slot {
+                        ITEM_INSERTS => Change::InsertItem(id),
+                        ITEM_UPDATES => Change::UpdateItem(id),
+                        ITEM_METADATA => Change::UpdateItemMetadata(id),
+                        _ => Change::DeleteItem(id),
+                    };
+                    self.push_change(id, change, false);
+                }
             }
         }
 
@@ -458,40 +523,30 @@ impl Changes {
 impl Change {
     pub fn item_id(&self) -> Option<u64> {
         match self {
-            Change::InsertItem(id) => Some(*id),
-            Change::UpdateItem(id) => Some(*id),
-            Change::DeleteItem(id) => Some(*id),
+            Change::InsertItem(id)
+            | Change::UpdateItem(id)
+            | Change::UpdateItemMetadata(id)
+            | Change::DeleteItem(id) => Some(*id),
             _ => None,
         }
     }
 
     pub fn container_id(&self) -> Option<u64> {
         match self {
-            Change::InsertContainer(id) => Some(*id),
-            Change::UpdateContainer(id) => Some(*id),
-            Change::UpdateContainerProperty(id) => Some(*id),
-            Change::DeleteContainer(id) => Some(*id),
+            Change::InsertContainer(id)
+            | Change::UpdateContainer(id)
+            | Change::UpdateContainerPartial(id, _)
+            | Change::DeleteContainer(id) => Some(*id),
             _ => None,
         }
     }
 
     pub fn try_unwrap_item_id(self) -> Option<u64> {
-        match self {
-            Change::InsertItem(id) => Some(id),
-            Change::UpdateItem(id) => Some(id),
-            Change::DeleteItem(id) => Some(id),
-            _ => None,
-        }
+        self.item_id()
     }
 
     pub fn try_unwrap_container_id(self) -> Option<u64> {
-        match self {
-            Change::InsertContainer(id) => Some(id),
-            Change::UpdateContainer(id) => Some(id),
-            Change::UpdateContainerProperty(id) => Some(id),
-            Change::DeleteContainer(id) => Some(id),
-            _ => None,
-        }
+        self.container_id()
     }
 
     pub fn is_container_change(&self) -> bool {
@@ -499,7 +554,7 @@ impl Change {
             self,
             Change::InsertContainer(_)
                 | Change::UpdateContainer(_)
-                | Change::UpdateContainerProperty(_)
+                | Change::UpdateContainerPartial(..)
                 | Change::DeleteContainer(_)
         )
     }
@@ -507,8 +562,19 @@ impl Change {
     pub fn is_item_change(&self) -> bool {
         matches!(
             self,
-            Change::InsertItem(_) | Change::UpdateItem(_) | Change::DeleteItem(_)
+            Change::InsertItem(_)
+                | Change::UpdateItem(_)
+                | Change::UpdateItemMetadata(_)
+                | Change::DeleteItem(_)
         )
+    }
+
+    pub fn is_metadata_only(&self) -> bool {
+        match self {
+            Change::UpdateItemMetadata(_) => true,
+            Change::UpdateContainerPartial(_, partial) => partial.is_metadata_only(),
+            _ => false,
+        }
     }
 }
 

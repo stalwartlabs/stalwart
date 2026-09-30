@@ -10,7 +10,7 @@ use crate::{
 };
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use compact_str::format_compact;
-use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
+use email::{cache::MessageCacheFetch, mailbox::role::RoleChange};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{ObjectId, create::Arguments, list::Attribute},
@@ -334,24 +334,22 @@ impl<T: SessionStream> SessionData<T> {
             parent_mailbox_id,
             parent_mailbox_name,
             special_use: if let Some(mailbox_role) = mailbox_role {
-                // Make sure role is unique
-                let special_use = attr_to_role(mailbox_role);
-                if self
-                    .server
-                    .get_cached_messages(account_id)
-                    .await
-                    .caused_by(trc::location!())?
-                    .mailbox_by_role(&special_use)
-                    .is_some()
-                {
-                    return Err(trc::ImapEvent::Error
-                        .into_err()
-                        .details(format_compact!(
-                            "A mailbox with role '{}' already exists.",
-                            special_use.as_str().unwrap_or_default()
-                        ))
-                        .code(ResponseCode::UseAttr));
+                RoleChange::Create {
+                    role: attr_to_role(mailbox_role),
                 }
+                .validate(
+                    self.server
+                        .get_cached_messages(account_id)
+                        .await
+                        .caused_by(trc::location!())?
+                        .as_ref(),
+                )
+                .map_err(|err| {
+                    trc::ImapEvent::Error
+                        .into_err()
+                        .details(err.to_string())
+                        .code(ResponseCode::UseAttr)
+                })?;
                 Some(mailbox_role)
             } else {
                 None
@@ -371,8 +369,7 @@ pub struct CreateParams<'x> {
     pub is_rename: bool,
 }
 
-#[inline]
-fn attr_to_role(attr: Attribute) -> SpecialUse {
+pub(crate) fn attr_to_role(attr: Attribute) -> SpecialUse {
     match attr {
         Attribute::Archive => SpecialUse::Archive,
         Attribute::Drafts => SpecialUse::Drafts,

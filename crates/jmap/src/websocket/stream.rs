@@ -5,7 +5,11 @@
  */
 
 use crate::api::{ToRequestError, notifications_into_push_objects, request::RequestHandler};
-use common::{Server, auth::AccessToken, ipc::PushNotification};
+use common::{
+    Server,
+    auth::AccessToken,
+    ipc::{PushNotification, ViewerStateChange},
+};
 use compact_str::ToCompactString;
 use futures_util::{SinkExt, StreamExt};
 use http_proto::HttpSessionData;
@@ -186,16 +190,19 @@ impl WebSocketHandler for Server {
                 push_notification = push_rx.recv() => {
                     if let Some(push_notification) = push_notification {
                         match push_notification {
-                            PushNotification::StateChange(state_change) => {
+                            PushNotification::StateChange(state_change)
+                            | PushNotification::ViewerStateChange(ViewerStateChange {
+                                change: state_change,
+                                ..
+                            }) => {
                                 let mut types = state_change.types;
                                 types.intersection(&change_types);
 
                                 if !types.is_empty() {
                                     notifications.push(PushNotification::StateChange(
                                         StateChange {
-                                            account_id: state_change.account_id,
                                             types,
-                                            change_id: state_change.change_id,
+                                            ..state_change
                                         }
                                     ));
                                 }
@@ -208,9 +215,8 @@ impl WebSocketHandler for Server {
                                 if !types.is_empty() {
                                     notifications.push(PushNotification::StateChange(
                                         StateChange {
-                                            account_id: state_change.account_id,
                                             types,
-                                            change_id: state_change.change_id,
+                                            ..state_change
                                         }
                                     ));
                                 }

@@ -12,7 +12,6 @@ use crate::{
         request::LockInfo,
     },
 };
-use types::dead_property::DeadProperty;
 
 impl DavParser for LockInfo {
     fn parse(stream: &mut Tokenizer<'_>) -> crate::parser::Result<Self> {
@@ -22,7 +21,10 @@ impl DavParser for LockInfo {
             owner: None,
         };
 
-        if stream.expect_named_element_or_eof(NamedElement::dav(Element::Lockinfo))? {
+        if let Some(raw) =
+            stream.expect_named_element_or_eof(NamedElement::dav(Element::Lockinfo))?
+        {
+            let lang = raw.xml_lang()?;
             loop {
                 match stream.token()? {
                     Token::ElementStart {
@@ -51,9 +53,9 @@ impl DavParser for LockInfo {
                                 ns: Namespace::Dav,
                                 element: Element::Owner,
                             },
-                        ..
+                        raw,
                     } => {
-                        lockinfo.owner = Some(DeadProperty::parse(stream)?);
+                        lockinfo.owner = Some(stream.collect_xml_value(&raw, lang.as_deref())?);
                     }
                     Token::ElementEnd | Token::Eof => {
                         break;

@@ -5,7 +5,11 @@
  */
 
 use crate::api::IntoPushObject;
-use common::{LONG_1D_SLUMBER, Server, auth::AccessToken, ipc::PushNotification};
+use common::{
+    LONG_1D_SLUMBER, Server,
+    auth::AccessToken,
+    ipc::{PushNotification, ViewerStateChange},
+};
 use http_body_util::{StreamBody, combinators::BoxBody};
 use http_proto::*;
 use hyper::{
@@ -113,7 +117,11 @@ impl EventSourceHandler for Server {
                     match tokio::time::timeout(timeout, push_rx.recv()).await {
                         Ok(Some(notification)) => {
                             match notification {
-                                PushNotification::StateChange(state_change) => {
+                                PushNotification::StateChange(state_change)
+                                | PushNotification::ViewerStateChange(ViewerStateChange {
+                                    change: state_change,
+                                    ..
+                                }) => {
                                     for type_state in state_change.types {
                                         changed
                                             .get_mut_or_insert(state_change.account_id.into())

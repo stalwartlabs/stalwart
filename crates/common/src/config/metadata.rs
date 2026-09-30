@@ -6,7 +6,7 @@
 
 use registry::schema::{enums::MetadataDataType, structs::Metadata};
 use store::registry::bootstrap::Bootstrap;
-use types::type_state::DataType;
+use types::{metadata::MetadataLimits, type_state::DataType};
 use utils::map::bitmap::Bitmap;
 
 #[derive(Default, Clone)]
@@ -55,6 +55,18 @@ impl MetadataConfig {
             query_max_scan: metadata.query_max_scan as usize,
             imap_server_comment: metadata.imap_server_comment,
             imap_server_admin: metadata.imap_server_admin,
+        }
+    }
+}
+
+impl MetadataConfig {
+    pub fn limits(&self) -> MetadataLimits {
+        MetadataLimits {
+            max_depth: self.max_depth,
+            max_entry_size: self.max_entry_size,
+            max_size: self.max_size,
+            max_private_size: self.max_private_size,
+            max_entries: self.max_entries,
         }
     }
 }

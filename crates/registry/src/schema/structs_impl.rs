@@ -48575,7 +48575,7 @@ impl UserRoles {
 
 impl ObjectImpl for WebDav {
     const FLAGS: u64 = OBJ_SINGLETON;
-    const VERSION: u8 = 0;
+    const VERSION: u8 = 1;
     const OBJECT: ObjectType = ObjectType::WebDav;
 
     fn validate(&self, _: &mut Vec<ValidationError>) -> bool {
@@ -48590,7 +48590,6 @@ impl Pickle for WebDav {
         self.enable_assisted_discovery.pickle(out);
         self.max_lock_timeout.pickle(out);
         self.max_locks.pickle(out);
-        self.dead_property_max_size.pickle(out);
         self.live_property_max_size.pickle(out);
         self.request_max_size.pickle(out);
         self.max_results.pickle(out);
@@ -48601,7 +48600,9 @@ impl Pickle for WebDav {
         this.enable_assisted_discovery = Pickle::unpickle(stream)?;
         this.max_lock_timeout = Pickle::unpickle(stream)?;
         this.max_locks = Pickle::unpickle(stream)?;
-        this.dead_property_max_size = Pickle::unpickle(stream)?;
+        if stream.version() < 1 {
+            let _: Option<u64> = Pickle::unpickle(stream)?;
+        }
         this.live_property_max_size = Pickle::unpickle(stream)?;
         this.request_max_size = Pickle::unpickle(stream)?;
         this.max_results = Pickle::unpickle(stream)?;
@@ -48615,7 +48616,6 @@ impl Default for WebDav {
             enable_assisted_discovery: true,
             max_lock_timeout: Duration::from_millis(3600000),
             max_locks: 10u64,
-            dead_property_max_size: Some(1024u64),
             live_property_max_size: 250u64,
             request_max_size: 26214400,
             max_results: 2000u64,
@@ -48625,17 +48625,13 @@ impl Default for WebDav {
 
 impl IntoValue for WebDav {
     fn into_value(self) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(9);
+        let mut map = jmap_tools::Map::with_capacity(8);
         map.insert_unchecked(
             Property::EnableAssistedDiscovery,
             self.enable_assisted_discovery.into_value(),
         );
         map.insert_unchecked(Property::MaxLockTimeout, self.max_lock_timeout.into_value());
         map.insert_unchecked(Property::MaxLocks, self.max_locks.into_value());
-        map.insert_unchecked(
-            Property::DeadPropertyMaxSize,
-            self.dead_property_max_size.into_value(),
-        );
         map.insert_unchecked(
             Property::LivePropertyMaxSize,
             self.live_property_max_size.into_value(),
@@ -48658,8 +48654,8 @@ impl RegistryJsonPropertyPatch for WebDav {
             }
             Some(Property::MaxLockTimeout) => self.max_lock_timeout.patch(pointer, value),
             Some(Property::MaxLocks) => self.max_locks.patch(pointer, value),
-            Some(Property::DeadPropertyMaxSize) => {
-                self.dead_property_max_size.patch(pointer, value)
+            Some(property @ Property::DeadPropertyMaxSize) => {
+                Ok(MaybeUnpatched::Unpatched { property, value })
             }
             Some(Property::LivePropertyMaxSize) => {
                 self.live_property_max_size.patch(pointer, value)

@@ -11,9 +11,9 @@ use super::{
 use crate::auth::AccountTenantIds;
 use store::{
     Serialize,
-    write::{Archive, ArchiveCompression, Archiver, BatchBuilder, Slot},
+    write::{Archive, ArchiveCompression, Archiver, BatchBuilder, Slot, metadata::MetadataClass},
 };
-use types::field::Field;
+use types::{field::Field, metadata::MetadataKinds};
 
 pub trait SerializableContent:
     ArchiveCompression
@@ -75,6 +75,10 @@ pub trait ArchivedSplitObject: Sync + Send {
     fn meta_index_values(&self) -> Vec<IndexValue<'_>>;
 
     fn full_index_values<'x>(&'x self, content: &'x Self::ArchivedContent) -> Vec<IndexValue<'x>>;
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        MetadataKinds::NONE
+    }
 }
 
 pub enum GroupwareWrite<M: SplitObject>
@@ -250,5 +254,8 @@ impl<M: ArchivedSplitObject> CurrentObject for SplitCurrent<'_, M> {
     fn clear(&self, batch: &mut BatchBuilder) {
         batch.clear(Field::ARCHIVE);
         batch.clear(M::CONTENT_FIELD);
+        if !self.meta().inner.metadata_kinds().is_empty() {
+            batch.clear(MetadataClass::Shared);
+        }
     }
 }

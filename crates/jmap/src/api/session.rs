@@ -81,17 +81,17 @@ impl JmapAccount for Server {
             .iter()
             .copied()
             .filter(move |capability| capability_ids.contains(*capability))
-            .map(move |capability| {
+            .filter_map(move |capability| {
                 let capabilities = match base_capabilities.account.get(&capability) {
                     Some(Capabilities::Metadata(metadata)) => Capabilities::Metadata(
-                        metadata.to_account_capabilities(capability_ids, supports_private),
+                        metadata.to_account_capabilities(capability_ids, supports_private)?,
                     ),
                     Some(capabilities) => {
                         capabilities.to_account_capabilities(current_user_principal_id, is_owner)
                     }
                     None => Capabilities::Empty(EmptyCapabilities::default()),
                 };
-                (capability, capabilities)
+                Some((capability, capabilities))
             })
     }
 }
@@ -112,17 +112,21 @@ impl SessionHandler for Server {
             .caused_by(trc::location!())?;
         session.username = account.name().to_string();
         let account_id = Id::from(access_token.account_id());
-        for capability in access_token.account_capabilities(&self.core.jmap.capabilities) {
-            session.primary_accounts.append(capability, account_id);
-        }
-        session.accounts.append(
-            account_id,
-            self.jmap_account(
-                access_token,
-                access_token.account_id(),
-                account.name().to_string(),
-            ),
+        let primary_account = self.jmap_account(
+            access_token,
+            access_token.account_id(),
+            account.name().to_string(),
         );
+        for capability in access_token.account_capabilities(&self.core.jmap.capabilities) {
+            if capability != Capability::Metadata
+                || primary_account
+                    .account_capabilities
+                    .contains_key(&Capability::Metadata)
+            {
+                session.primary_accounts.append(capability, account_id);
+            }
+        }
+        session.accounts.append(account_id, primary_account);
 
         // Add secondary accounts
         for &account_id in access_token.secondary_ids() {
@@ -142,6 +146,14 @@ impl SessionHandler for Server {
                 Id::from(account_id),
                 self.jmap_account(access_token, account_id, account.name().to_string()),
             );
+        }
+
+        if !session.accounts.values().any(|account| {
+            account
+                .account_capabilities
+                .contains_key(&Capability::Metadata)
+        }) {
+            session.capabilities.remove(&Capability::Metadata);
         }
 
         Ok(session)

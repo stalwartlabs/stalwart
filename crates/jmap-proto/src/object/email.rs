@@ -8,7 +8,7 @@ use crate::{
     method::query::{Comparator, Filter},
     object::{
         AnyId, JmapObject, JmapObjectId, MaybeReference,
-        metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
+        metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
     request::{MaybeInvalid, deserialize::DeserializeArguments},
@@ -77,8 +77,6 @@ pub enum EmailProperty {
     IsTruncated,
     HasAttachment,
     Preview,
-
-    // Object metadata
     Metadata,
     PrivateMetadata,
 
@@ -125,9 +123,7 @@ impl Property for EmailProperty {
         value: &str,
         depth: PointerDepth,
     ) -> Option<Self> {
-        let patch_depth = key.is_none().then_some(depth);
         match key {
-            Some(Key::Property(key)) if key.metadata_root().is_some() => None,
             Some(Key::Property(key)) => match key.patch_or_prop() {
                 EmailProperty::Keywords => EmailProperty::Keyword(Keyword::parse(value)).into(),
                 EmailProperty::MailboxIds => match parse_ref(value) {
@@ -135,10 +131,15 @@ impl Property for EmailProperty {
                     MaybeReference::Reference(v) => Some(EmailProperty::IdReference(v)),
                     MaybeReference::ParseError => None,
                 },
-                _ => EmailProperty::parse(value, patch_depth),
+                _ => EmailProperty::parse_nested(value),
             },
-            _ => EmailProperty::parse(value, patch_depth),
+            Some(_) => EmailProperty::parse_nested(value),
+            None => EmailProperty::parse(value, Some(depth)),
         }
+    }
+
+    fn is_opaque(&self) -> bool {
+        self.metadata_root().is_some()
     }
 
     fn to_cow(&self) -> Cow<'static, str> {
@@ -280,67 +281,71 @@ impl EmailProperty {
         )
     }
 
+    property_names!(
+        EmailProperty,
+        "id" => EmailProperty::Id,
+        "blobId" => EmailProperty::BlobId,
+        "threadId" => EmailProperty::ThreadId,
+        "mailboxIds" => EmailProperty::MailboxIds,
+        "keywords" => EmailProperty::Keywords,
+        "size" => EmailProperty::Size,
+        "receivedAt" => EmailProperty::ReceivedAt,
+        "name" => EmailProperty::Name,
+        "email" => EmailProperty::Email,
+        "addresses" => EmailProperty::Addresses,
+        "value" => EmailProperty::Value,
+        "messageId" => EmailProperty::MessageId,
+        "inReplyTo" => EmailProperty::InReplyTo,
+        "references" => EmailProperty::References,
+        "sender" => EmailProperty::Sender,
+        "from" => EmailProperty::From,
+        "to" => EmailProperty::To,
+        "cc" => EmailProperty::Cc,
+        "bcc" => EmailProperty::Bcc,
+        "replyTo" => EmailProperty::ReplyTo,
+        "subject" => EmailProperty::Subject,
+        "sentAt" => EmailProperty::SentAt,
+        "textBody" => EmailProperty::TextBody,
+        "htmlBody" => EmailProperty::HtmlBody,
+        "attachments" => EmailProperty::Attachments,
+        "partId" => EmailProperty::PartId,
+        "headers" => EmailProperty::Headers,
+        "type" => EmailProperty::Type,
+        "charset" => EmailProperty::Charset,
+        "disposition" => EmailProperty::Disposition,
+        "cid" => EmailProperty::Cid,
+        "language" => EmailProperty::Language,
+        "location" => EmailProperty::Location,
+        "subParts" => EmailProperty::SubParts,
+        "bodyStructure" => EmailProperty::BodyStructure,
+        "bodyValues" => EmailProperty::BodyValues,
+        "isEncodingProblem" => EmailProperty::IsEncodingProblem,
+        "isTruncated" => EmailProperty::IsTruncated,
+        "hasAttachment" => EmailProperty::HasAttachment,
+        "preview" => EmailProperty::Preview,
+    );
+
     fn parse(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
-        hashify::fnc_map!(value.as_bytes(),
-                "id" => Some(EmailProperty::Id),
-                "blobId" => Some(EmailProperty::BlobId),
-                "threadId" => Some(EmailProperty::ThreadId),
-                "mailboxIds" => Some(EmailProperty::MailboxIds),
-                "keywords" => Some(EmailProperty::Keywords),
-                "size" => Some(EmailProperty::Size),
-                "receivedAt" => Some(EmailProperty::ReceivedAt),
-                "name" => Some(EmailProperty::Name),
-                "email" => Some(EmailProperty::Email),
-                "addresses" => Some(EmailProperty::Addresses),
-                "value" => Some(EmailProperty::Value),
-                "messageId" => Some(EmailProperty::MessageId),
-                "inReplyTo" => Some(EmailProperty::InReplyTo),
-                "references" => Some(EmailProperty::References),
-                "sender" => Some(EmailProperty::Sender),
-                "from" => Some(EmailProperty::From),
-                "to" => Some(EmailProperty::To),
-                "cc" => Some(EmailProperty::Cc),
-                "bcc" => Some(EmailProperty::Bcc),
-                "replyTo" => Some(EmailProperty::ReplyTo),
-                "subject" => Some(EmailProperty::Subject),
-                "sentAt" => Some(EmailProperty::SentAt),
-                "textBody" => Some(EmailProperty::TextBody),
-                "htmlBody" => Some(EmailProperty::HtmlBody),
-                "attachments" => Some(EmailProperty::Attachments),
-                "partId" => Some(EmailProperty::PartId),
-                "headers" => Some(EmailProperty::Headers),
-                "type" => Some(EmailProperty::Type),
-                "charset" => Some(EmailProperty::Charset),
-                "disposition" => Some(EmailProperty::Disposition),
-                "cid" => Some(EmailProperty::Cid),
-                "language" => Some(EmailProperty::Language),
-                "location" => Some(EmailProperty::Location),
-                "subParts" => Some(EmailProperty::SubParts),
-                "bodyStructure" => Some(EmailProperty::BodyStructure),
-                "bodyValues" => Some(EmailProperty::BodyValues),
-                "isEncodingProblem" => Some(EmailProperty::IsEncodingProblem),
-                "isTruncated" => Some(EmailProperty::IsTruncated),
-                "hasAttachment" => Some(EmailProperty::HasAttachment),
-                "preview" => Some(EmailProperty::Preview),
-                "metadata" => Some(EmailProperty::Metadata),
-                "privateMetadata" => Some(EmailProperty::PrivateMetadata),
-                _ => None
-        )
-        .or_else(|| {
-            if let Some(header) = value.strip_prefix("header:") {
-                HeaderProperty::parse(header).map(EmailProperty::Header)
-            } else {
-                patch_depth
-                    .filter(|_| value.contains('/'))
-                    .and_then(|depth| JsonPointer::parse_nested(value, depth))
-                    .map(EmailProperty::Pointer)
-            }
-        })
+        EmailProperty::parse_name(value).or_else(|| EmailProperty::parse_other(value, patch_depth))
+    }
+
+    fn parse_nested(value: &str) -> Option<Self> {
+        EmailProperty::parse_nested_name(value).or_else(|| EmailProperty::parse_other(value, None))
+    }
+
+    fn parse_other(value: &str, patch_depth: Option<PointerDepth>) -> Option<Self> {
+        if let Some(header) = value.strip_prefix("header:") {
+            HeaderProperty::parse(header).map(EmailProperty::Header)
+        } else {
+            patch_depth
+                .filter(|_| value.contains('/'))
+                .and_then(|depth| JsonPointer::parse_nested(value, depth))
+                .map(EmailProperty::Pointer)
+        }
     }
 
     fn patch_or_prop(&self) -> &EmailProperty {
         if let EmailProperty::Pointer(ptr) = self
-            && self.metadata_pointer().is_none()
             && let Some(JsonPointerItem::Key(Key::Property(prop))) = ptr.last()
         {
             prop
@@ -523,6 +528,13 @@ impl MetadataProperty for EmailProperty {
         match self {
             EmailProperty::Pointer(pointer) => Some(pointer),
             _ => None,
+        }
+    }
+
+    fn from_metadata_root(root: MetadataRoot) -> Self {
+        match root {
+            MetadataRoot::Shared => EmailProperty::Metadata,
+            MetadataRoot::Private => EmailProperty::PrivateMetadata,
         }
     }
 }

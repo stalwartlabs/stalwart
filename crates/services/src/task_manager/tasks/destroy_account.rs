@@ -162,11 +162,21 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
     // Unlink all accounts's blobs
     destroy_account_blobs(server, account_id).await?;
 
+    server
+        .destroy_viewer_metadata(account_id)
+        .await
+        .caused_by(trc::location!())?;
+    server
+        .destroy_owner_metadata(account_id)
+        .await
+        .caused_by(trc::location!())?;
+
     // Drop the resident caches and the writer's pending state on every node
     server
         .invalidate_caches(
             CacheInvalidationBuilder::from(CacheInvalidation::MessageCache(account_id))
-                .with_invalidation(CacheInvalidation::GroupwareResources(account_id)),
+                .with_invalidation(CacheInvalidation::GroupwareResources(account_id))
+                .with_invalidation(CacheInvalidation::PrivateMetadata(account_id)),
         )
         .await?;
     server.inner.cache.swap.forget(account_id);

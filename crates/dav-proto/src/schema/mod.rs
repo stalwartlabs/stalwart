@@ -51,14 +51,17 @@ impl Namespaces {
 
 impl Namespace {
     pub fn try_parse(value: &[u8]) -> Option<Self> {
-        hashify::map!(value, Namespace,
-            "DAV:" => Namespace::Dav,
-            "urn:ietf:params:xml:ns:caldav" => Namespace::CalDav,
-            "urn:ietf:params:xml:ns:carddav" => Namespace::CardDav,
-            "http://calendarserver.org/ns/" => Namespace::CalendarServer,
-            "http://calendarserver.org/ns" => Namespace::CalendarServer
+        Namespace::try_parse_uri(value).map(|(namespace, _)| *namespace)
+    }
+
+    pub fn try_parse_uri(value: &[u8]) -> Option<&'static (Namespace, &'static str)> {
+        hashify::map!(value, (Namespace, &'static str),
+            "DAV:" => (Namespace::Dav, "DAV:"),
+            "urn:ietf:params:xml:ns:caldav" => (Namespace::CalDav, "urn:ietf:params:xml:ns:caldav"),
+            "urn:ietf:params:xml:ns:carddav" => (Namespace::CardDav, "urn:ietf:params:xml:ns:carddav"),
+            "http://calendarserver.org/ns/" => (Namespace::CalendarServer, "http://calendarserver.org/ns/"),
+            "http://calendarserver.org/ns" => (Namespace::CalendarServer, "http://calendarserver.org/ns")
         )
-        .copied()
     }
 
     pub fn prefix(&self) -> &str {

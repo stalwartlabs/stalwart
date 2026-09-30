@@ -168,6 +168,12 @@ impl ImapConnection {
         self.writer.write_all(b"\r\n").await.unwrap();
     }
 
+    pub async fn send_bytes(&mut self, bytes: &[u8]) {
+        self.writer.write_all(self.tag).await.unwrap();
+        self.writer.write_all(bytes).await.unwrap();
+        self.writer.write_all(b"\r\n").await.unwrap();
+    }
+
     pub async fn send_raw(&mut self, text: &str) {
         //let c = println!("-> {:?}", text);
         self.writer.write_all(text.as_bytes()).await.unwrap();

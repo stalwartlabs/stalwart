@@ -318,7 +318,7 @@ impl ChangeSet {
                         entry.insert(true);
                     }
                 },
-                Change::UpdateItem(id) => {
+                Change::UpdateItem(id) | Change::UpdateItemMetadata(id) => {
                     items.insert(id as u32, true);
                 }
                 Change::DeleteItem(id) => {
@@ -338,8 +338,12 @@ impl ChangeSet {
                 Change::DeleteContainer(id) => {
                     containers.insert(id as u32, false);
                 }
-                Change::UpdateContainerProperty(_) => {
-                    has_container_property_changes = true;
+                Change::UpdateContainerPartial(id, partial) => {
+                    if partial.has_metadata() {
+                        containers.insert(id as u32, true);
+                    } else {
+                        has_container_property_changes = true;
+                    }
                 }
             }
         }
@@ -512,4 +516,50 @@ async fn full_cache_build(
         size,
         verification,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use store::query::log::PartialChange;
+
+    fn classify(changes: Vec<Change>) -> ChangeSet {
+        let mut log = Changes::default();
+        log.changes = changes;
+        ChangeSet::classify(log)
+    }
+
+    #[test]
+    fn only_container_metadata_changes_refetch_the_mailbox() {
+        let properties = classify(vec![Change::UpdateContainerPartial(
+            3,
+            PartialChange::PROPERTIES,
+        )]);
+        assert!(properties.containers.is_empty());
+        assert!(properties.has_container_property_changes);
+
+        let metadata = classify(vec![Change::UpdateContainerPartial(
+            3,
+            PartialChange::METADATA,
+        )]);
+        assert_eq!(metadata.containers.get(&3), Some(&true));
+        assert!(!metadata.has_container_property_changes);
+        assert!(metadata.items.is_empty());
+
+        let both = classify(vec![
+            Change::UpdateContainerPartial(
+                3,
+                PartialChange::PROPERTIES.union(PartialChange::METADATA),
+            ),
+            Change::UpdateContainerPartial(4, PartialChange::PROPERTIES),
+        ]);
+        assert_eq!(both.containers.len(), 1);
+        assert_eq!(both.containers.get(&3), Some(&true));
+        assert!(both.has_container_property_changes);
+
+        let item = classify(vec![Change::UpdateItemMetadata(7)]);
+        assert_eq!(item.items.get(&7), Some(&true));
+        assert!(item.containers.is_empty());
+        assert!(!item.has_container_property_changes);
+    }
 }

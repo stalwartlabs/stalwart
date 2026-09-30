@@ -55,7 +55,7 @@ impl<T: SessionStream> Session<T> {
                 .access_token
                 .has_permission(Permission::ImapMetadataGet)
         {
-            capabilities.push(Capability::Metadata);
+            capabilities.extend([Capability::Metadata, Capability::ListMetadata]);
         }
         capabilities
     }

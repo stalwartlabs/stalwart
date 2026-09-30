@@ -235,6 +235,7 @@ async fn test_multi_thread(test: &TestServer) {
                             is_sender_authenticated: true,
                             is_spam: false,
                         },
+                        metadata: None,
                         session_id: 0,
                     })
                     .await

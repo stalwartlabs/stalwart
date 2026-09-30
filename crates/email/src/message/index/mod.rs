@@ -17,13 +17,15 @@ use common::storage::index::{
 use store::{
     Serialize, U64_LEN,
     write::{
-        BatchBuilder, Patch, PatchSource, PendingId, Slot, SlotRange, assert::AssertValue, now,
+        BatchBuilder, Patch, PatchSource, PendingId, Slot, SlotRange, assert::AssertValue,
+        metadata::MetadataClass, now,
     },
 };
 use types::{
     blob_hash::BlobHash,
     collection::SyncCollection,
     field::{EmailField, Field},
+    metadata::MetadataKinds,
 };
 
 pub mod attachment;
@@ -45,6 +47,9 @@ impl CurrentObject for MessageData {
 
     fn clear(&self, batch: &mut BatchBuilder) {
         batch.clear(Field::ARCHIVE);
+        if !IndexableObject::metadata_kinds(self).is_empty() {
+            batch.clear(MetadataClass::Shared);
+        }
     }
 }
 
@@ -70,6 +75,10 @@ impl SerializableObject for MessageData {
 impl IndexableObject for MessageData {
     fn index_values(&self) -> impl Iterator<Item = IndexValue<'_>> {
         self.index_values_in_thread(PendingId::Assigned(self.thread_id))
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        MessageData::metadata_kinds(self)
     }
 }
 

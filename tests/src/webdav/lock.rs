@@ -32,7 +32,7 @@ pub async fn test(test: &TestServer) {
             .with_status(StatusCode::CREATED);
         let lock_token = response
             .with_value(
-                "D:prop.D:lockdiscovery.D:activelock.D:owner.href",
+                "D:prop.D:lockdiscovery.D:activelock.D:owner.D:href",
                 "super-owner",
             )
             .with_value("D:prop.D:lockdiscovery.D:activelock.D:depth", "infinity")
@@ -55,7 +55,7 @@ pub async fn test(test: &TestServer) {
             .await
             .with_status(StatusCode::OK)
             .with_value(
-                "D:prop.D:lockdiscovery.D:activelock.D:owner.href",
+                "D:prop.D:lockdiscovery.D:activelock.D:owner.D:href",
                 "super-owner",
             )
             .with_any_value(
@@ -117,7 +117,7 @@ pub async fn test(test: &TestServer) {
             props
                 .get(DavProperty::WebDav(WebDavProperty::LockDiscovery))
                 .with_some_values([
-                    "D:activelock.D:owner.href:super-owner",
+                    "D:activelock.D:owner.D:href:super-owner",
                     "D:activelock.D:depth:infinity",
                     format!("D:activelock.D:locktoken.D:href:{lock_token}").as_str(),
                     format!("D:activelock.D:lockroot.D:href:{path}").as_str(),
@@ -162,9 +162,7 @@ pub async fn test(test: &TestServer) {
         client
             .lock_create(
                 &path,
-                (0..=test.server.core.groupware.dead_property_size.unwrap() + 1)
-                    .map(|_| "a")
-                    .collect::<String>()
+                "a".repeat(test.server.core.metadata.max_entry_size + 2)
                     .as_str(),
                 true,
                 "infinity",

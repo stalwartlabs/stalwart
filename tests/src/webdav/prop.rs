@@ -5,14 +5,18 @@
  */
 
 use crate::utils::server::TestServer;
-use crate::utils::webdav::GenerateTestDavResource;
+use crate::utils::webdav::{DeadPropertyName, GenerateTestDavResource};
 use crate::webdav::{TEST_ICAL_2, TEST_VTIMEZONE_1};
 use dav_proto::schema::property::{
     CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty,
 };
 use groupware::DavResourceName;
 use hyper::StatusCode;
-use types::dead_property::DeadElementTag;
+
+const MY_DEAD_ELEMENT: DeadPropertyName =
+    DeadPropertyName::new("http://example.com/ns/", "my-dead-element");
+const MY_CHUNKY_DEAD_ELEMENT: DeadPropertyName =
+    DeadPropertyName::new("http://example.com/ns/", "my-chunky-dead-element");
 
 pub async fn test(test: &TestServer, assisted_discovery: bool) {
     let client = test.account("jane@example.com").webdav_client();
@@ -492,13 +496,17 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                 )
                 .await
                 .with_status(StatusCode::MULTI_STATUS);
-            client
+            let response = client
                 .propfind(path, [DavProperty::WebDav(WebDavProperty::GetETag)])
-                .await
-                .properties(path)
-                .get(DavProperty::WebDav(WebDavProperty::GetETag))
-                .with_status(StatusCode::OK)
-                .without_values([etag.as_str()]);
+                .await;
+            let properties = response.properties(path);
+            let etag_after = properties.get(DavProperty::WebDav(WebDavProperty::GetETag));
+            etag_after.with_status(StatusCode::OK);
+            if resource_type == DavResourceName::File {
+                etag_after.with_values([etag.as_str()]);
+            } else {
+                etag_after.without_values([etag.as_str()]);
+            }
 
             // Test 12: PROPPATCH set on DAV properties
             client
@@ -513,45 +521,35 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                             DavProperty::WebDav(WebDavProperty::CreationDate),
                             "2000-01-01T00:00:00Z",
                         ),
-                        (
-                            DavProperty::DeadProperty(DeadElementTag::new(
-                                "my-dead-element".to_string(),
-                                Some("xmlns=\"http://example.com/ns/\" prop=\"abc\"".to_string()),
-                            )),
-                            "this is a dead but exciting element",
-                        ),
                     ],
                 )
                 .await;
             client
                 .patch_and_check(
                     path,
+                    [(MY_DEAD_ELEMENT, "this is a dead but exciting element")],
+                )
+                .await;
+            client
+                .patch_and_check(
+                    path,
                     [(
-                        DavProperty::DeadProperty(DeadElementTag::new(
-                            "my-dead-element".to_string(),
-                            Some("xmlns=\"http://example.com/ns/\" prop=\"xyz\"".to_string()),
-                        )),
+                        MY_DEAD_ELEMENT,
                         "this is a modified dead but exciting element",
                     )],
                 )
                 .await;
 
             // Test 13: PROPPATCH remove on DAV properties
-            let mut props = vec![
-                (
-                    DavProperty::DeadProperty(DeadElementTag::new(
-                        "my-dead-element".to_string(),
-                        Some("xmlns=\"http://example.com/ns/\"".to_string()),
-                    )),
-                    "",
-                ),
-                (DavProperty::WebDav(WebDavProperty::DisplayName), ""),
-            ];
-            if !is_file {
-                // DisplayName can't be removed from calendar/contact collections
-                props.pop();
+            client.patch_and_check(path, [(MY_DEAD_ELEMENT, "")]).await;
+            if is_file {
+                client
+                    .patch_and_check(
+                        path,
+                        [(DavProperty::WebDav(WebDavProperty::DisplayName), "")],
+                    )
+                    .await;
             }
-            client.patch_and_check(path, props).await;
 
             match resource_type {
                 DavResourceName::File if is_file => {
@@ -627,13 +625,7 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
             }
 
             // Test 17: PROPPATCH should fail on large properties
-            let mut chunky_props = vec![
-                DavProperty::WebDav(WebDavProperty::DisplayName),
-                DavProperty::DeadProperty(DeadElementTag::new(
-                    "my-chunky-dead-element".to_string(),
-                    Some("xmlns=\"http://example.com/ns/\"".to_string()),
-                )),
-            ];
+            let mut chunky_props = vec![DavProperty::WebDav(WebDavProperty::DisplayName)];
             if !is_file {
                 if resource_type == DavResourceName::Cal {
                     chunky_props.push(DavProperty::CalDav(CalDavProperty::CalendarDescription));
@@ -643,27 +635,14 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                     ));
                 }
             }
-            let chunky_live_contents = (0..=(test.server.core.groupware.live_property_size + 1))
-                .map(|_| "a")
-                .collect::<String>();
-            let chunky_dead_contents =
-                (0..=(test.server.core.groupware.dead_property_size.unwrap() + 1))
-                    .map(|_| "a")
-                    .collect::<String>();
+            let chunky_live_contents =
+                "a".repeat(test.server.core.groupware.live_property_size + 2);
             let response = client
                 .proppatch(
                     path,
-                    chunky_props.iter().map(|prop| {
-                        (
-                            prop.clone(),
-                            if matches!(prop, DavProperty::DeadProperty(_)) {
-                                &chunky_dead_contents
-                            } else {
-                                &chunky_live_contents
-                            }
-                            .as_str(),
-                        )
-                    }),
+                    chunky_props
+                        .iter()
+                        .map(|prop| (prop, chunky_live_contents.as_str())),
                     [],
                     [],
                 )
@@ -676,6 +655,20 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                     .with_status(StatusCode::INSUFFICIENT_STORAGE)
                     .with_description("Property value is too long");
             }
+            let chunky_dead_contents = "a".repeat(test.server.core.metadata.max_entry_size + 2);
+            let response = client
+                .proppatch(
+                    path,
+                    [(&MY_CHUNKY_DEAD_ELEMENT, chunky_dead_contents.as_str())],
+                    [],
+                    [],
+                )
+                .await
+                .into_propfind_response(None);
+            response
+                .properties(path)
+                .get(MY_CHUNKY_DEAD_ELEMENT.name)
+                .with_status(StatusCode::INSUFFICIENT_STORAGE);
 
             // Test 18: PROPPATCH should fail on invalid calendar property values
             if !is_file && resource_type == DavResourceName::Cal {

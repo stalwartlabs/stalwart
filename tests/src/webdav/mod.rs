@@ -40,6 +40,7 @@ pub mod compliance;
 pub mod copy_move;
 pub mod dav_search;
 pub mod lock;
+pub mod metadata;
 pub mod mkcol;
 pub mod multiget;
 pub mod principals;
@@ -186,30 +187,43 @@ pub async fn webdav_tests() {
     test.insert_account(admin);
 
     let start_time = Instant::now();
-    if std::env::var("ITIP_TEMPLATES").is_ok() {
-        cal_scheduling::test_build_itip_templates(&test).await;
+    let groups = std::env::var("WEBDAV_TESTS").ok();
+    let enabled = |group: &str| {
+        groups
+            .as_deref()
+            .is_none_or(|groups| groups.split(',').any(|g| g.trim() == group))
+    };
+
+    if enabled("dav") {
+        if std::env::var("ITIP_TEMPLATES").is_ok() {
+            cal_scheduling::test_build_itip_templates(&test).await;
+        }
+        basic::test(&test).await;
+        put_get::test(&test).await;
+        embedded_size_limits(&test).await;
+        supported_calendar_components(&test).await;
+        mkcol::test(&test).await;
+        copy_move::test(&test, assisted_discovery).await;
+        prop::test(&test, assisted_discovery).await;
+        multiget::test(&test).await;
+        sync::test(&test).await;
+        lock::test(&test).await;
+        principals::test(&test, assisted_discovery).await;
+        acl::test(&test).await;
+        cal_privacy::test(&test).await;
+        cal_personal::test(&test).await;
+        card_query::test(&test).await;
+        cal_query::test(&test).await;
+        dav_search::test(&test).await;
+        cal_alarm::test(&test).await;
+        storage_split::test(&test).await;
+        cal_itip::test();
+        cal_scheduling::test(&test).await;
     }
-    basic::test(&test).await;
-    put_get::test(&test).await;
-    embedded_size_limits(&test).await;
-    supported_calendar_components(&test).await;
-    mkcol::test(&test).await;
-    copy_move::test(&test, assisted_discovery).await;
-    prop::test(&test, assisted_discovery).await;
-    multiget::test(&test).await;
-    sync::test(&test).await;
-    lock::test(&test).await;
-    principals::test(&test, assisted_discovery).await;
-    acl::test(&test).await;
-    cal_privacy::test(&test).await;
-    cal_personal::test(&test).await;
-    card_query::test(&test).await;
-    cal_query::test(&test).await;
-    dav_search::test(&test).await;
-    cal_alarm::test(&test).await;
-    storage_split::test(&test).await;
-    cal_itip::test();
-    cal_scheduling::test(&test).await;
+
+    if enabled("metadata") {
+        metadata::test(&test).await;
+    }
 
     // Print elapsed time
     let elapsed = start_time.elapsed();

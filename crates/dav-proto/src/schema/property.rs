@@ -16,7 +16,7 @@ use calcard::{
 };
 use types::{
     TimeRange,
-    dead_property::{DeadElementTag, DeadProperty},
+    metadata::{EncodedDavValue, XmlName, XmlValue},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub enum DavProperty {
     CardDav(CardDavProperty),
     CalDav(CalDavProperty),
     Principal(PrincipalProperty),
-    DeadProperty(DeadElementTag),
+    Dead(XmlName<'static>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,9 +170,12 @@ pub enum DavValue {
     Acl(List<Ace>),
     AclRestrictions(AclRestrictions),
     Response(Box<Response>),
-    DeadProperty(DeadProperty),
+    Dead(Box<XmlValue<'static>>),
+    #[cfg_attr(test, serde(skip))]
+    DeadEncoded(EncodedDavValue),
     SupportedAddressData,
     SupportedCalendarData,
+    Opaque,
     Null,
 }
 
@@ -224,7 +227,8 @@ pub struct ActiveLock {
     pub lock_scope: LockScope,
     pub lock_type: LockType,
     pub depth: Depth,
-    pub owner: Option<DeadProperty>,
+    #[cfg_attr(test, serde(skip))]
+    pub owner: Option<EncodedDavValue>,
     pub timeout: Timeout,
     pub lock_token: Option<Href>,
     pub lock_root: Href,
@@ -394,7 +398,7 @@ impl DavProperty {
                 | DavProperty::WebDav(WebDavProperty::GetContentLanguage)
                 | DavProperty::WebDav(WebDavProperty::GetContentLength)
                 | DavProperty::WebDav(WebDavProperty::GetContentType)
-                | DavProperty::DeadProperty(_)
+                | DavProperty::Dead(_)
         )
     }
 }

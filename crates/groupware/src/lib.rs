@@ -11,13 +11,19 @@ use common::GroupwareResources;
 pub use common::storage::dav::RFC_3986;
 use percent_encoding::percent_decode_str;
 use std::borrow::Cow;
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    metadata::MetadataKinds,
+};
 
 pub mod cache;
 pub mod calendar;
 pub mod contact;
 pub mod file;
+pub mod metadata;
 pub mod scheduling;
+
+pub const METADATA_KINDS: MetadataKinds = MetadataKinds::JMAP.union(MetadataKinds::DAV);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DavResourceName {
@@ -82,6 +88,11 @@ impl MetaHasher {
         }
     }
 
+    pub fn u8(&mut self, value: u8) -> &mut Self {
+        self.0.update(&[value]);
+        self
+    }
+
     pub fn u16(&mut self, value: u16) -> &mut Self {
         self.0.update(&value.to_le_bytes());
         self
@@ -116,6 +127,8 @@ impl MetaHasher {
 }
 
 pub struct DestroyArchive<T>(pub T);
+
+pub struct PresenceUpdate<T>(pub T);
 
 impl DavResourceName {
     pub fn parse(service: &str) -> Option<Self> {

@@ -9,7 +9,10 @@ use super::{
     set::create_node,
     writer::{FileNodeWriter, WriteOptions, fetch_archive},
 };
-use crate::changes::state::JmapCacheState;
+use crate::{
+    api::metadata::{MetadataPreload, MetadataType, ObjectMetadata},
+    changes::state::JmapCacheState,
+};
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpSessionData;
@@ -22,6 +25,7 @@ use jmap_proto::{
     object::file_node::{self, FileNodeProperty, FileNodeValue},
     request::{
         Call, MaybeInvalid, RequestMethod, SetRequestMethod,
+        capability::CapabilityIds,
         method::{MethodFunction, MethodName, MethodObject},
         reference::MaybeResultReference,
     },
@@ -29,7 +33,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Value};
 use trc::AddContext;
-use types::{collection::SyncCollection, id::Id};
+use types::{collection::SyncCollection, id::Id, metadata::MetadataKinds};
 use utils::map::vec_map::VecMap;
 
 pub trait FileNodeCopy: Sync + Send {
@@ -39,6 +43,7 @@ pub trait FileNodeCopy: Sync + Send {
         access_token: &AccessToken,
         next_call: &mut Option<Call<RequestMethod<'x>>>,
         session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<CopyResponse<file_node::FileNode>>> + Send;
 }
 
@@ -49,6 +54,7 @@ impl FileNodeCopy for Server {
         access_token: &AccessToken,
         next_call: &mut Option<Call<RequestMethod<'x>>>,
         _session: &HttpSessionData,
+        using: CapabilityIds,
     ) -> trc::Result<CopyResponse<file_node::FileNode>> {
         let account_id = request.account_id.document_id();
         let from_account_id = request.from_account_id.document_id();
@@ -67,7 +73,15 @@ impl FileNodeCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let old_state = cache.assert_state(false, &request.if_in_state)?;
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
+        let old_state = metadata
+            .assert_state(
+                self,
+                account_id,
+                cache.get_state(false),
+                &request.if_in_state,
+            )
+            .await?;
         let mut response = CopyResponse {
             from_account_id: request.from_account_id,
             account_id: request.account_id,
@@ -100,15 +114,45 @@ impl FileNodeCopy for Server {
                 .unwrap_or(false),
         };
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
-        let mut writer = FileNodeWriter::new(self, access_token, account_id, &cache, options)
-            .with_quota()
-            .await?;
+        let mut writer =
+            FileNodeWriter::new(self, access_token, account_id, &cache, options, metadata)
+                .with_quota()
+                .await?;
         let mut created = Vec::with_capacity(request.create.len());
         let mut awaiting_existing = Vec::new();
         let mut destroy_ids = Vec::new();
+        let is_readable = |document_id: u32| {
+            from_cache.resources.find_any(document_id).is_some()
+                && from_readable
+                    .as_ref()
+                    .is_none_or(|readable| readable.contains(document_id))
+        };
 
+        let mut creates = Vec::with_capacity(request.create.len());
+        let mut preload = MetadataPreload::default();
         for (create_id, mut create) in request.create {
-            let source_id = match create.take_source_id(FileNodeProperty::Id) {
+            let source_id = create.take_source_id(FileNodeProperty::Id);
+            if let Ok(source_id) = &source_id
+                && is_readable(source_id.document_id())
+            {
+                let document_id = source_id.document_id();
+                preload.insert_source(
+                    document_id,
+                    from_cache
+                        .resources
+                        .find_any(document_id)
+                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
+                );
+            }
+            creates.push((create_id, source_id, create));
+        }
+        writer
+            .metadata
+            .preload(self, from_account_id, preload)
+            .await?;
+
+        for (create_id, source_id, create) in creates {
+            let source_id = match source_id {
                 Ok(source_id) => source_id,
                 Err(err) => {
                     response.not_created.append(create_id, err);
@@ -116,11 +160,7 @@ impl FileNodeCopy for Server {
                 }
             };
             let from_document_id = source_id.document_id();
-            let source = if from_cache.resources.find_any(from_document_id).is_some()
-                && from_readable
-                    .as_ref()
-                    .is_none_or(|readable| readable.contains(from_document_id))
-            {
+            let source = if is_readable(from_document_id) {
                 fetch_archive(self, from_account_id, from_document_id).await?
             } else {
                 None
@@ -143,7 +183,16 @@ impl FileNodeCopy for Server {
             node.unsubscribed.clear();
             node.parent_id = 0;
 
-            match create_node(&mut writer, String::new(), node, create, &NoResolver).await? {
+            match create_node(
+                &mut writer,
+                String::new(),
+                node,
+                create,
+                &NoResolver,
+                Some(from_document_id),
+            )
+            .await?
+            {
                 Ok(node) => {
                     created.push((create_id, node));
                     if on_success_delete {
@@ -160,10 +209,25 @@ impl FileNodeCopy for Server {
         let _ = writer.execute_destroys(Vec::new()).await?;
 
         if !writer.batch.is_empty() {
-            let assigned_ids = self
-                .commit_batch(writer.batch)
-                .await
-                .caused_by(trc::location!())?;
+            let assigned_ids = match self.commit_batch(writer.batch).await {
+                Ok(assigned_ids) => assigned_ids,
+                Err(err) if err.is_assertion_failure() => {
+                    for (create_id, _) in created {
+                        response.not_created.append(
+                            create_id,
+                            SetError::forbidden().with_description(
+                                "Another process modified this file node, please try again.",
+                            ),
+                        );
+                    }
+                    for (id, err, _) in awaiting_existing {
+                        response.not_created.append(id, err);
+                    }
+                    return Ok(response);
+                }
+                Err(err) => return Err(err.caused_by(trc::location!())),
+            };
+            writer.metadata.committed(self, &assigned_ids).await;
 
             for (id, err, slot) in awaiting_existing {
                 response

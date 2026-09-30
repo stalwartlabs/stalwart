@@ -25,7 +25,7 @@ use store::write::{Archive, ArchiveBytes, ArchiveCompression, Archiver, Compress
 use store::{Serialize, U32_LEN};
 use trc::AddContext;
 use types::collection::{Collection, SyncCollection};
-use types::dead_property::DeadProperty;
+use types::metadata::{DavValueView, EncodedDavValue, XmlValue};
 use utils::map::vec_map::VecMap;
 
 #[derive(Debug, Default, Clone)]
@@ -59,7 +59,7 @@ pub(crate) struct LockItem {
     expires: u64,
     depth_infinity: bool,
     exclusive: bool,
-    owner_dav: Option<DeadProperty>,
+    owner_dav: Option<Box<[u8]>>,
 }
 
 struct LockCache<'x> {
@@ -121,29 +121,7 @@ impl LockRequestHandler for Server {
         if !access_token.is_member(account_id) {
             return Err(DavError::Code(StatusCode::FORBIDDEN));
         }
-        if resource.collection == Collection::FileNode
-            && self
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    account_id,
-                    SyncCollection::FileNode,
-                )
-                .await
-                .caused_by(trc::location!())?
-                .by_path(resource_path)
-                .is_some_and(|existing| is_symlink(&existing))
-        {
-            return Err(DavError::Code(StatusCode::NOT_FOUND));
-        }
 
-        let resources = vec![ResourceState {
-            account_id,
-            collection: resource.collection,
-            path: resource_path,
-            ..Default::default()
-        }];
-
-        let mut base_path = None;
         let is_lock_request = !matches!(lock_info, LockRequest::Unlock);
         let if_lock_token = headers
             .if_
@@ -157,6 +135,37 @@ impl LockRequestHandler for Server {
                 }
             })
             .unwrap_or_default();
+        let is_file = resource.collection == Collection::FileNode;
+        let is_new_lock = is_lock_request && if_lock_token == 0;
+        let lock_status = if is_file || is_new_lock {
+            match self
+                .fetch_groupware_resources(
+                    access_token.account_id(),
+                    account_id,
+                    SyncCollection::from(resource.collection),
+                )
+                .await
+                .caused_by(trc::location!())?
+                .by_path(resource_path)
+            {
+                Some(existing) if is_file && is_symlink(&existing) => {
+                    return Err(DavError::Code(StatusCode::NOT_FOUND));
+                }
+                None if is_new_lock => StatusCode::CREATED,
+                _ => StatusCode::OK,
+            }
+        } else {
+            StatusCode::OK
+        };
+
+        let resources = vec![ResourceState {
+            account_id,
+            collection: resource.collection,
+            path: resource_path,
+            ..Default::default()
+        }];
+
+        let mut base_path = None;
         let mut lock_data = if let Some(lock_data) = self
             .in_memory_store()
             .key_get::<Archive<ArchiveBytes>>(resource_hash.as_slice())
@@ -207,11 +216,10 @@ impl LockRequestHandler for Server {
                 }
 
                 // Validate lock_info
-                if lock_info.owner.as_ref().is_some_and(|o| {
-                    o.size() > self.core.groupware.dead_property_size.unwrap_or(512)
-                }) {
-                    return Err(DavError::Code(StatusCode::PAYLOAD_TOO_LARGE));
-                }
+                check_owner_size(
+                    lock_info.owner.as_ref(),
+                    self.core.metadata.limits().max_entry_size,
+                )?;
 
                 if self.core.groupware.max_locks_per_user > 0
                     && lock_data
@@ -279,35 +287,36 @@ impl LockRequestHandler for Server {
             lock_item.expires = expires;
             if let LockRequest::Lock(lock_info) = lock_info {
                 // Validate lock_info
-                if lock_info.owner.as_ref().is_some_and(|o| {
-                    o.size() > self.core.groupware.dead_property_size.unwrap_or(512)
-                }) {
-                    return Err(DavError::Code(StatusCode::PAYLOAD_TOO_LARGE));
-                }
+                check_owner_size(
+                    lock_info.owner.as_ref(),
+                    self.core.metadata.limits().max_entry_size,
+                )?;
 
                 lock_item.lock_id = store::rand::random::<u64>() ^ expires;
                 lock_item.owner = access_token.account_id();
                 lock_item.depth_infinity = matches!(headers.depth, Depth::Infinity);
-                lock_item.owner_dav = lock_info.owner;
+                lock_item.owner_dav = lock_info
+                    .owner
+                    .as_ref()
+                    .map(XmlValue::encode)
+                    .transpose()
+                    .map_err(|_| DavError::Code(StatusCode::BAD_REQUEST))?
+                    .map(Vec::into_boxed_slice);
                 lock_item.exclusive = matches!(lock_info.lock_scope, LockScope::Exclusive);
             }
 
             let base_path = base_path.get_or_insert_with(|| headers.base_uri().unwrap_or_default());
             let active_lock = lock_item.to_active_lock(format!("{base_path}/{resource_path}"));
 
-            HttpResponse::new(if if_lock_token == 0 {
-                StatusCode::CREATED
-            } else {
-                StatusCode::OK
-            })
-            .with_lock_token(&active_lock.lock_token.as_ref().unwrap().0)
-            .with_xml_body(
-                PropResponse::new(vec![DavPropertyValue::new(
-                    WebDavProperty::LockDiscovery,
-                    vec![active_lock],
-                )])
-                .to_string(),
-            )
+            HttpResponse::new(lock_status)
+                .with_lock_token(&active_lock.lock_token.as_ref().unwrap().0)
+                .with_xml_body(
+                    PropResponse::new(vec![DavPropertyValue::new(
+                        WebDavProperty::LockDiscovery,
+                        vec![active_lock],
+                    )])
+                    .to_string(),
+                )
         } else {
             let lock_id = headers
                 .lock_token
@@ -818,6 +827,18 @@ impl<'x> LockCaches<'x> {
     }
 }
 
+fn check_owner_size(owner: Option<&XmlValue<'_>>, max_size: usize) -> crate::Result<()> {
+    match owner.map(XmlValue::encoded_len) {
+        Some(Ok(size)) if size > max_size => Err(DavError::Code(StatusCode::PAYLOAD_TOO_LARGE)),
+        Some(Err(_)) => Err(DavError::Code(StatusCode::BAD_REQUEST)),
+        _ => Ok(()),
+    }
+}
+
+fn owner_value(bytes: &[u8]) -> Option<EncodedDavValue> {
+    DavValueView::parse(bytes).map(|owner| owner.to_encoded())
+}
+
 impl LockItem {
     pub fn to_active_lock(&self, href: String) -> ActiveLock {
         ActiveLock::new(
@@ -833,7 +854,7 @@ impl LockItem {
         } else {
             Depth::Zero
         })
-        .with_owner_opt(self.owner_dav.clone())
+        .with_owner_opt(self.owner_dav.as_deref().and_then(owner_value))
         .with_timeout(self.expires.saturating_sub(now()))
         .with_lock_token(self.urn().to_string())
     }
@@ -907,7 +928,7 @@ impl ArchivedLockItem {
         } else {
             Depth::Zero
         })
-        .with_owner_opt(self.owner_dav.as_ref().map(Into::into))
+        .with_owner_opt(self.owner_dav.as_deref().and_then(owner_value))
         .with_timeout(u64::from(self.expires).saturating_sub(now()))
         .with_lock_token(self.urn().to_string())
     }

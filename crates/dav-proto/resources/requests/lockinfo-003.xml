@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<D:lockinfo xmlns:D="DAV:" xml:lang="en"><D:lockscope><D:exclusive/></D:lockscope><D:locktype><D:write/></D:locktype><D:owner><D:href>http://example.org/~ejw/contact.html</D:href> (Jane <b xmlns="urn:x">Doe</b>)</D:owner></D:lockinfo>
