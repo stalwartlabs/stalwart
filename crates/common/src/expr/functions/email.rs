@@ -81,15 +81,21 @@ pub(crate) fn fn_is_email<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'
 pub(crate) fn fn_email_part<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
     let [value, part] = args(v);
     let arena = ctx.arena();
-    let part = part.to_str(arena);
+    let part = hashify::map!(part.to_str(arena).as_bytes(), EmailPart,
+        "local" => EmailPart::Local,
+        "domain" => EmailPart::Domain,
+    )
+    .copied();
 
-    value.transform(arena, |s| {
-        s.rsplit_once('@')
-            .map(|(local, domain)| match part {
-                "local" => Variable::String(local.trim()),
-                "domain" => Variable::String(domain.trim()),
-                _ => Variable::default(),
-            })
-            .unwrap_or_default()
+    value.transform(arena, |s| match (part, s.rsplit_once('@')) {
+        (Some(EmailPart::Local), Some((local, _))) => Variable::String(local.trim()),
+        (Some(EmailPart::Domain), Some((_, domain))) => Variable::String(domain.trim()),
+        _ => Variable::default(),
     })
+}
+
+#[derive(Clone, Copy)]
+enum EmailPart {
+    Local,
+    Domain,
 }

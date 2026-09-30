@@ -287,13 +287,13 @@ pub(crate) fn fn_hash<'a>(ctx: &FnCtx<'a>, v: &[Variable<'a>]) -> Variable<'a> {
     let value = value.to_str(arena).as_bytes();
 
     let hex = |digest: &[u8]| Variable::String(kernels::hex_encode(digest, arena));
-    match algorithm.to_str(arena) {
+    hashify::fnc_map!(algorithm.to_str(arena).as_bytes(),
         "md5" => hex(&md5::compute(value).0),
         "sha1" => hex(&Sha1::digest(value)),
         "sha256" => hex(&Sha256::digest(value)),
         "sha512" => hex(&Sha512::digest(value)),
         _ => Variable::default(),
-    }
+    )
 }
 
 #[cfg(test)]

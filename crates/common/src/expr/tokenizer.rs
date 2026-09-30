@@ -83,9 +83,8 @@ impl<'x> Tokenizer<'x> {
                 }
                 _ => {
                     let (prev_token, ch) = if ch == b'(' && !self.word().is_empty() {
-                        match self.word() {
-                            b"matches" => {
-                                // Parse regular expressions
+                        hashify::fnc_map!(self.word(),
+                            "matches" => {
                                 let stop_ch = self.find_char(b"\"'")?;
                                 let regex_str = self.parse_string(stop_ch)?;
                                 let regex = CaptureRegex::new(&regex_str)?;
@@ -93,8 +92,8 @@ impl<'x> Tokenizer<'x> {
                                 self.clear_word();
                                 self.find_char(b",")?;
                                 (Token::Regex(regex).into(), b'(')
-                            }
-                            b"metric" => {
+                            },
+                            "metric" => {
                                 let stop_ch = self.find_char(b"\"'")?;
                                 let metric_str = self.parse_string(stop_ch)?;
                                 let metric = MetricType::parse(&metric_str).ok_or_else(|| {
@@ -103,31 +102,22 @@ impl<'x> Tokenizer<'x> {
                                 self.has_alpha = false;
                                 self.clear_word();
                                 (Token::System(SystemVariable::Metric(metric)).into(), b'(')
-                            }
-                            b"system" => {
+                            },
+                            "system" => {
                                 let stop_ch = self.find_char(b"\"'")?;
-                                let var = match self.parse_string(stop_ch)?.as_str() {
-                                    "domain" => SystemVariable::Domain,
-                                    "hostname" => SystemVariable::Hostname,
-                                    "node_id" => SystemVariable::NodeId,
-                                    "node_hostname" => SystemVariable::NodeHostname,
-                                    "node_role" => SystemVariable::NodeRole,
-                                    other => {
-                                        return Err(format!(
-                                            "Invalid system variable name {:?}",
-                                            other
-                                        ));
-                                    }
-                                };
+                                let name = self.parse_string(stop_ch)?;
+                                let var = SystemVariable::parse(&name).ok_or_else(|| {
+                                    format!("Invalid system variable name {:?}", name)
+                                })?;
                                 self.has_alpha = false;
                                 self.clear_word();
                                 (Token::System(var).into(), b'(')
-                            }
+                            },
                             _ => {
                                 self.is_start = false;
                                 (self.parse_word()?.into(), ch)
                             }
-                        }
+                        )
                     } else if !self.word().is_empty() {
                         self.is_start = false;
                         (self.parse_word()?.into(), ch)
@@ -360,49 +350,41 @@ impl<'x> Tokenizer<'x> {
                     .map(|i| Token::Constant(Constant::Integer(i)))
                     .map_err(|_| format!("Invalid integer value {}", word,))
             }
-        } else {
-            if !has_number && !has_dot && [4, 5].contains(&word.len()) {
-                if word == "true" {
-                    return Ok(Token::Constant(Constant::Integer(1)));
-                } else if word == "false" {
-                    return Ok(Token::Constant(Constant::Integer(0)));
-                }
-            }
-
-            if let Some(variable) = word.strip_prefix('$').filter(|s| !s.is_empty()) {
-                if variable.chars().all(|c| c.is_ascii_digit()) {
-                    Ok(variable
-                        .parse::<u32>()
-                        .map(Token::Capture)
-                        .unwrap_or_else(|_| Token::Global(variable.into())))
-                } else {
-                    Ok(Token::Global(variable.into()))
-                }
-            } else if let Some(function) = lookup_function(word) {
-                Ok(Token::Function {
-                    name: function.name,
-                    id: function.id,
-                    num_args: function.num_args,
-                })
-            } else if let Some(variable) = ExpressionVariable::parse(word) {
-                if self.token_map.variables.allows(variable.to_id()) {
-                    Ok(Token::Variable(variable))
-                } else {
-                    Err(format!("Variable {:?} not allowed in this context", word))
-                }
-            } else if let Some(constant) = ExpressionConstant::parse(word) {
-                if self.token_map.constants.allows(constant.to_id()) {
-                    Ok(Token::Constant(Constant::Static(constant)))
-                } else {
-                    Err(format!("Constant {:?} not allowed in this context", word))
-                }
-            } else if let Ok(duration) = registry::types::duration::Duration::from_str(word) {
-                Ok(Token::Constant(Constant::Integer(
-                    duration.as_millis() as i64
-                )))
+        } else if let Some(value) = hashify::map!(word.as_bytes(), i64, "true" => 1, "false" => 0) {
+            Ok(Token::Constant(Constant::Integer(*value)))
+        } else if let Some(variable) = word.strip_prefix('$').filter(|s| !s.is_empty()) {
+            if variable.chars().all(|c| c.is_ascii_digit()) {
+                Ok(variable
+                    .parse::<u32>()
+                    .map(Token::Capture)
+                    .unwrap_or_else(|_| Token::Global(variable.into())))
             } else {
-                Err(format!("Invalid variable or constant {word:?}"))
+                Ok(Token::Global(variable.into()))
             }
+        } else if let Some(function) = lookup_function(word) {
+            Ok(Token::Function {
+                name: function.name,
+                id: function.id,
+                num_args: function.num_args,
+            })
+        } else if let Some(variable) = ExpressionVariable::parse(word) {
+            if self.token_map.variables.allows(variable.to_id()) {
+                Ok(Token::Variable(variable))
+            } else {
+                Err(format!("Variable {:?} not allowed in this context", word))
+            }
+        } else if let Some(constant) = ExpressionConstant::parse(word) {
+            if self.token_map.constants.allows(constant.to_id()) {
+                Ok(Token::Constant(Constant::Static(constant)))
+            } else {
+                Err(format!("Constant {:?} not allowed in this context", word))
+            }
+        } else if let Ok(duration) = registry::types::duration::Duration::from_str(word) {
+            Ok(Token::Constant(Constant::Integer(
+                duration.as_millis() as i64
+            )))
+        } else {
+            Err(format!("Invalid variable or constant {word:?}"))
         }
     }
 }

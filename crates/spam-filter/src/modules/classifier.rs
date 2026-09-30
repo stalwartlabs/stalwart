@@ -37,7 +37,9 @@ use std::{
     sync::Arc,
 };
 use store::ahash::{AHashMap, AHashSet};
-use store::rand::seq::SliceRandom;
+#[cfg(feature = "test_mode")]
+use store::rand::SeedableRng;
+use store::rand::{rngs::StdRng, seq::SliceRandom};
 use store::write::{ArchiveCompression, BlobLink, Compression, RegistryClass, now};
 use store::{
     Deserialize, IterateParams, Serialize, ValueKey,
@@ -201,6 +203,10 @@ impl SpamClassifier for Server {
         let mut seen_samples = AHashSet::new();
         let mut spam_count = 0;
         let mut ham_count = 0;
+        #[cfg(feature = "test_mode")]
+        let mut rng = StdRng::seed_from_u64(42);
+        #[cfg(not(feature = "test_mode"))]
+        let mut rng: StdRng = store::rand::make_rng();
         self.store()
             .iterate(
                 IterateParams::new(from_key, to_key).descending(),
@@ -226,6 +232,7 @@ impl SpamClassifier for Server {
                                 &sample,
                                 is_spam,
                                 config.reservoir_capacity,
+                                &mut rng,
                             );
                         } else {
                             trainer.reservoir.update_counts(is_spam);
@@ -308,7 +315,7 @@ impl SpamClassifier for Server {
             samples.extend(
                 trainer
                     .reservoir
-                    .replay_samples((spam_count - ham_count) as usize, false)
+                    .replay_samples((spam_count - ham_count) as usize, false, &mut rng)
                     .map(|sample| TrainingTask {
                         id: 0,
                         sample: sample.clone(),
@@ -322,7 +329,7 @@ impl SpamClassifier for Server {
             samples.extend(
                 trainer
                     .reservoir
-                    .replay_samples((ham_count - spam_count) as usize, true)
+                    .replay_samples((ham_count - spam_count) as usize, true, &mut rng)
                     .map(|sample| TrainingTask {
                         id: 0,
                         sample: sample.clone(),
@@ -334,7 +341,7 @@ impl SpamClassifier for Server {
         }
 
         let num_samples = samples.len();
-        samples.shuffle(&mut store::rand::rng());
+        samples.shuffle(&mut rng);
 
         // Spawn training task
         let epochs = match trainer

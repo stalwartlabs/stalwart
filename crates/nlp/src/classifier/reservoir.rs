@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use rand::{RngExt, seq::IndexedRandom};
+use rand::{Rng, RngExt, seq::IndexedRandom};
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
 pub struct SampleReservoir<T> {
@@ -19,7 +19,13 @@ pub struct SampleReservoirClass<T> {
 }
 
 impl<T: Clone + Eq> SampleReservoir<T> {
-    pub fn update_reservoir(&mut self, item: &T, is_spam: bool, capacity: usize) {
+    pub fn update_reservoir(
+        &mut self,
+        item: &T,
+        is_spam: bool,
+        capacity: usize,
+        rng: &mut impl Rng,
+    ) {
         let class = if is_spam {
             &mut self.spam
         } else {
@@ -32,7 +38,7 @@ impl<T: Clone + Eq> SampleReservoir<T> {
             class.buffer.push(item.clone());
         } else if let Some(buf) = class
             .buffer
-            .get_mut(rand::rng().random_range(0..class.total_seen as usize))
+            .get_mut(rng.random_range(0..class.total_seen as usize))
         {
             *buf = item.clone();
         }
@@ -52,6 +58,7 @@ impl<T: Clone + Eq> SampleReservoir<T> {
         &mut self,
         count_needed: usize,
         is_spam: bool,
+        rng: &mut impl Rng,
     ) -> impl Iterator<Item = &T> {
         (if is_spam {
             &mut self.spam
@@ -59,7 +66,7 @@ impl<T: Clone + Eq> SampleReservoir<T> {
             &mut self.ham
         })
         .buffer
-        .sample(&mut rand::rng(), count_needed)
+        .sample(rng, count_needed)
     }
 
     pub fn remove_sample(&mut self, item: &T, is_spam: bool) {

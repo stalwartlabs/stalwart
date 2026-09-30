@@ -181,6 +181,19 @@ pub enum SystemVariable {
     Metric(MetricType),
 }
 
+impl SystemVariable {
+    pub fn parse(name: &str) -> Option<Self> {
+        hashify::map!(name.as_bytes(), SystemVariable,
+            "domain" => SystemVariable::Domain,
+            "hostname" => SystemVariable::Hostname,
+            "node_id" => SystemVariable::NodeId,
+            "node_hostname" => SystemVariable::NodeHostname,
+            "node_role" => SystemVariable::NodeRole,
+        )
+        .copied()
+    }
+}
+
 impl From<usize> for Variable<'_> {
     fn from(value: usize) -> Self {
         Variable::Integer(value as i64)
