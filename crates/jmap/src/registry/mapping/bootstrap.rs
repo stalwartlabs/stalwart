@@ -78,9 +78,9 @@ pub(crate) async fn bootstrap_set(
     mut set: RegistrySetResponse<'_>,
 ) -> trc::Result<RegistrySetResponse<'_>> {
     if !set.server.registry().is_bootstrap_mode() {
-        set.fail_all_create("This operation is only allowed bootstrap mode");
-        set.fail_all_update("This operation is only allowed bootstrap mode");
-        set.fail_all_destroy("This operation is only allowed bootstrap mode");
+        set.fail_all_create("This operation is only allowed in bootstrap mode");
+        set.fail_all_update("This operation is only allowed in bootstrap mode");
+        set.fail_all_destroy("This operation is only allowed in bootstrap mode");
         return Ok(set);
     }
 
