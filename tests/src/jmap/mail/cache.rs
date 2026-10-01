@@ -5,7 +5,10 @@
  */
 
 use crate::utils::server::TestServer;
-use common::{MessageStoreCache, Server, auth::AccessToken};
+use common::{
+    MessageStoreCache, Server,
+    auth::{AccessToken, AccountTenantIds},
+};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{
@@ -113,7 +116,15 @@ async fn write_keywords(
 async fn delete(server: &Server, account_id: u32, document_ids: RoaringBitmap) {
     let mut batch = BatchBuilder::new();
     server
-        .emails_delete(account_id, None, &mut batch, document_ids)
+        .emails_delete(
+            account_id,
+            AccountTenantIds {
+                account_id,
+                tenant_id: None,
+            },
+            &mut batch,
+            document_ids,
+        )
         .await
         .unwrap();
     if !batch.is_empty() {

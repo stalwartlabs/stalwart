@@ -44,8 +44,8 @@ const VIEWER_STATE_LEN: usize = U64_LEN + U32_LEN;
 impl MetadataClass {
     pub(crate) const SHARED: u8 = 0;
     pub(crate) const PRIVATE: u8 = 1;
-    pub(crate) const VIEWER: u8 = 2;
-    pub(crate) const OWNER: u8 = 3;
+    pub const VIEWER: u8 = 2;
+    pub const OWNER: u8 = 3;
 }
 
 impl From<MetadataClass> for ValueClass {

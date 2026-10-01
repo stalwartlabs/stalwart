@@ -1374,7 +1374,7 @@ impl EmailSet for Server {
                 let not_destroyed = self
                     .emails_delete(
                         account_id,
-                        access_token.tenant_id(),
+                        access_token.account_tenant_ids(),
                         &mut batch,
                         destroy_ids,
                     )

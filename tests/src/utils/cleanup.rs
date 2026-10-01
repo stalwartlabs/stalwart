@@ -10,7 +10,7 @@ use ::registry::{
 };
 use store::{
     ValueKey,
-    write::{key::DeserializeBigEndian, *},
+    write::{key::DeserializeBigEndian, metadata::MetadataClass, *},
     *,
 };
 use trc::AddContext;
@@ -408,13 +408,10 @@ pub async fn store_assert_is_empty(store: &Store, blob_store: BlobStore, include
     }
 }
 
-const METADATA_VIEWER_CLASS: u8 = 2;
-const METADATA_OWNER_CLASS: u8 = 3;
-
 fn is_metadata_bookkeeping(key: &[u8]) -> bool {
     matches!(
         key.get(U32_LEN..U32_LEN + 2),
-        Some(&[collection, METADATA_VIEWER_CLASS | METADATA_OWNER_CLASS])
+        Some(&[collection, MetadataClass::VIEWER | MetadataClass::OWNER])
             if collection == u8::from(Collection::Metadata)
     )
 }

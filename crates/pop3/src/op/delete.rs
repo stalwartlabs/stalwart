@@ -91,7 +91,7 @@ impl<T: SessionStream> Session<T> {
                     .server
                     .emails_delete(
                         mailbox.account_id,
-                        self.state.access_token().tenant_id(),
+                        self.state.access_token().account_tenant_ids(),
                         &mut batch,
                         deleted,
                     )

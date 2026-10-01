@@ -74,7 +74,7 @@ impl ContainerCleanup {
 impl Server {
     pub async fn preload_container_cleanup(
         &self,
-        changed_by: Option<AccountTenantIds>,
+        changed_by: AccountTenantIds,
         account_id: u32,
         collection: Collection,
         flagged: &RoaringBitmap,
@@ -98,7 +98,7 @@ impl Server {
         entries: impl IntoIterator<Item = StoredEntry>,
     ) -> trc::Result<ContainerCleanup> {
         self.container_cleanup(
-            Some(changed_by),
+            changed_by,
             account_id,
             collection,
             entries.into_iter().collect(),
@@ -108,7 +108,7 @@ impl Server {
 
     async fn container_cleanup(
         &self,
-        changed_by: Option<AccountTenantIds>,
+        changed_by: AccountTenantIds,
         account_id: u32,
         collection: Collection,
         entries: StoredEntries,
@@ -137,7 +137,7 @@ impl Server {
         if cleanup.release(batch, account_id, document_id) || kinds.is_empty() {
             return Ok(());
         }
-        let tenant_id = self.owner_tenant(Some(changed_by), account_id).await?;
+        let tenant_id = self.owner_tenant(changed_by, account_id).await?;
         if let Some(entry) = self
             .stored_entry(
                 account_id,
@@ -160,16 +160,16 @@ impl Server {
 
     async fn owner_tenant(
         &self,
-        changed_by: Option<AccountTenantIds>,
+        changed_by: AccountTenantIds,
         account_id: u32,
     ) -> trc::Result<Option<u32>> {
-        match changed_by {
-            Some(changed_by) if changed_by.account_id == account_id => Ok(changed_by.tenant_id),
-            _ => self
-                .account(account_id)
+        if changed_by.account_id == account_id {
+            Ok(changed_by.tenant_id)
+        } else {
+            self.account(account_id)
                 .await
                 .caused_by(trc::location!())
-                .map(|account| account.id_tenant),
+                .map(|account| account.id_tenant)
         }
     }
 

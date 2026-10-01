@@ -349,7 +349,7 @@ impl<'x> FileNodeWriter<'x> {
         let cleanup = self
             .server
             .preload_container_cleanup(
-                Some(self.access_token.account_tenant_ids()),
+                self.access_token.account_tenant_ids(),
                 self.account_id,
                 Collection::FileNode,
                 &groups

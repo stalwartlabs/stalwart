@@ -7,7 +7,9 @@
 use crate::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use crate::message::messagedata::EmailMessageData;
 use crate::submission::EmailSubmission;
-use common::{MessageStoreCache, Server, storage::index::ObjectIndexBuilder};
+use common::{
+    MessageStoreCache, Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder,
+};
 use groupware::calendar::storage::ItipAutoExpunge;
 use std::future::Future;
 use store::write::key::DeserializeBigEndian;
@@ -25,7 +27,7 @@ pub trait EmailDeletion: Sync + Send {
     fn emails_delete(
         &self,
         account_id: u32,
-        tenant_id: Option<u32>,
+        changed_by: AccountTenantIds,
         batch: &mut BatchBuilder,
         document_ids: RoaringBitmap,
     ) -> impl Future<Output = trc::Result<RoaringBitmap>> + Send;
@@ -57,7 +59,7 @@ impl EmailDeletion for Server {
     async fn emails_delete(
         &self,
         account_id: u32,
-        tenant_id: Option<u32>,
+        changed_by: AccountTenantIds,
         batch: &mut BatchBuilder,
         document_ids: RoaringBitmap,
     ) -> trc::Result<RoaringBitmap> {
@@ -74,7 +76,7 @@ impl EmailDeletion for Server {
             })
             .collect::<RoaringBitmap>();
         let containers = self
-            .preload_container_cleanup(None, account_id, Collection::Email, &flagged_ids)
+            .preload_container_cleanup(changed_by, account_id, Collection::Email, &flagged_ids)
             .await
             .caused_by(trc::location!())?;
         let mut deleted_ids = RoaringBitmap::new();
@@ -98,7 +100,7 @@ impl EmailDeletion for Server {
                 .with_document(document_id)
                 .custom(
                     ObjectIndexBuilder::<_, ()>::new()
-                        .with_tenant_id(tenant_id)
+                        .with_tenant_id(changed_by.tenant_id)
                         .with_current(metadata),
                 )
                 .caused_by(trc::location!())?
@@ -225,12 +227,15 @@ impl EmailDeletion for Server {
 
         // Delete messages
         let mut batch = BatchBuilder::new();
-        let tenant_id = self
-            .account(account_id)
-            .await
-            .caused_by(trc::location!())?
-            .tenant_id();
-        self.emails_delete(account_id, tenant_id, &mut batch, destroy_ids)
+        let changed_by = AccountTenantIds {
+            account_id,
+            tenant_id: self
+                .account(account_id)
+                .await
+                .caused_by(trc::location!())?
+                .tenant_id(),
+        };
+        self.emails_delete(account_id, changed_by, &mut batch, destroy_ids)
             .await?;
         self.commit_batch(batch).await?;
 

@@ -354,7 +354,7 @@ impl FileCopyMoveRequestHandler for Server {
                 ids.sort_unstable_by_key(|b| std::cmp::Reverse(b.hierarchy_seq()));
                 let cleanup = self
                     .preload_container_cleanup(
-                        Some(access_token.account_tenant_ids()),
+                        access_token.account_tenant_ids(),
                         to_account_id,
                         Collection::FileNode,
                         &ids.iter()

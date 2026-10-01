@@ -156,7 +156,7 @@ impl CalendarDeleteRequestHandler for Server {
             // Delete calendar and events
             let cleanup = self
                 .preload_container_cleanup(
-                    Some(account_info.account_tenant_ids()),
+                    account_info.account_tenant_ids(),
                     account_id,
                     Collection::CalendarEvent,
                     &children_ids

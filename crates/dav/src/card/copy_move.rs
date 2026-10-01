@@ -1054,7 +1054,7 @@ async fn copy_container(
                 .caused_by(trc::location!())?;
             let cleanup = server
                 .preload_container_cleanup(
-                    Some(access_token.account_tenant_ids()),
+                    access_token.account_tenant_ids(),
                     to_account_id,
                     Collection::ContactCard,
                     &to_children

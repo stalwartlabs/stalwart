@@ -122,7 +122,7 @@ impl FileDeleteRequestHandler for Server {
 
         let cleanup = self
             .preload_container_cleanup(
-                Some(access_token.account_tenant_ids()),
+                access_token.account_tenant_ids(),
                 account_id,
                 Collection::FileNode,
                 &flagged,

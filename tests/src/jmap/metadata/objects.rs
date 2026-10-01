@@ -6,7 +6,7 @@
 
 use super::fixture::{Ctx, MetaType, Parents};
 use crate::utils::{account::Account, server::TestServer, webdav::DummyWebDavClient};
-use common::auth::AccessToken;
+use common::auth::{AccessToken, AccountTenantIds};
 use email::{
     cache::MessageCacheFetch,
     mailbox::destroy::MailboxDestroy,
@@ -269,7 +269,15 @@ async fn email_paths(
         let (batch, reads) = metadata_reads(test, async || {
             let mut batch = BatchBuilder::new();
             server
-                .emails_delete(account_id, None, &mut batch, RoaringBitmap::from_iter(ids))
+                .emails_delete(
+                    account_id,
+                    AccountTenantIds {
+                        account_id,
+                        tenant_id: None,
+                    },
+                    &mut batch,
+                    RoaringBitmap::from_iter(ids),
+                )
                 .await
                 .expect("delete");
             batch

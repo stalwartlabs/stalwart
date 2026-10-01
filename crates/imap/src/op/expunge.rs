@@ -279,7 +279,12 @@ impl<T: SessionStream> SessionData<T> {
             .collect::<RoaringBitmap>();
         let containers = self
             .server
-            .preload_container_cleanup(None, account_id, Collection::Email, &flagged_ids)
+            .preload_container_cleanup(
+                self.access_token.account_tenant_ids(),
+                account_id,
+                Collection::Email,
+                &flagged_ids,
+            )
             .await
             .caused_by(trc::location!())?;
         batch

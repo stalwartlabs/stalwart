@@ -392,7 +392,7 @@ impl AddressBookSet for Server {
                 .unwrap_or(false);
             let book_cleanup = self
                 .preload_container_cleanup(
-                    Some(access_token.account_tenant_ids()),
+                    access_token.account_tenant_ids(),
                     account_id,
                     Collection::AddressBook,
                     &will_destroy
@@ -487,7 +487,7 @@ impl AddressBookSet for Server {
             if !destroy_children.is_empty() {
                 let cleanup = self
                     .preload_container_cleanup(
-                        Some(access_token.account_tenant_ids()),
+                        access_token.account_tenant_ids(),
                         account_id,
                         Collection::ContactCard,
                         &destroy_children

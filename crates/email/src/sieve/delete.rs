@@ -52,7 +52,7 @@ impl SieveScriptDelete for Server {
                 .with_collection(Collection::SieveScript);
             if !script.inner.metadata_kinds().is_empty() {
                 self.preload_container_cleanup(
-                    None,
+                    access_token.account_tenant_ids(),
                     account_id,
                     Collection::SieveScript,
                     &RoaringBitmap::from_iter([document_id]),

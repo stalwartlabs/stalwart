@@ -99,7 +99,12 @@ impl MailboxDestroy for Server {
                 // otherwise delete it.
 
                 let message_containers = self
-                    .preload_container_cleanup(None, account_id, Collection::Email, &flagged_ids)
+                    .preload_container_cleanup(
+                        access_token.account_tenant_ids(),
+                        account_id,
+                        Collection::Email,
+                        &flagged_ids,
+                    )
                     .await
                     .caused_by(trc::location!())?;
                 let mut deleted_ids = RoaringBitmap::new();
@@ -215,7 +220,7 @@ impl MailboxDestroy for Server {
                     }
                     None => self
                         .preload_container_cleanup(
-                            None,
+                            access_token.account_tenant_ids(),
                             account_id,
                             Collection::Mailbox,
                             &RoaringBitmap::from_iter([document_id]),

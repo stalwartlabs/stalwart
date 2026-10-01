@@ -504,7 +504,7 @@ impl MailboxSet for Server {
         // Process deletions
         let destroy_containers = self
             .preload_container_cleanup(
-                None,
+                access_token.account_tenant_ids(),
                 account_id,
                 Collection::Mailbox,
                 &ctx.will_destroy

@@ -472,7 +472,7 @@ impl CalendarSet for Server {
                 request.arguments.on_destroy_remove_events.unwrap_or(false);
             let calendar_cleanup = self
                 .preload_container_cleanup(
-                    Some(access_token.account_tenant_ids()),
+                    access_token.account_tenant_ids(),
                     account_id,
                     Collection::Calendar,
                     &will_destroy
@@ -609,7 +609,7 @@ impl CalendarSet for Server {
                 let mut quota = NotificationQuota::default();
                 let cleanup = self
                     .preload_container_cleanup(
-                        Some(access_token.account_tenant_ids()),
+                        access_token.account_tenant_ids(),
                         account_id,
                         Collection::CalendarEvent,
                         &destroy_children
