@@ -6,22 +6,22 @@
 
 use super::{PropFindItem, data::PropFindData};
 use crate::{
-    DavError,
+    DavError, DavErrorCondition,
     common::{
         DavCollection, DavQuery, SyncType,
-        uri::{DavUriResource, UriResource, Urn, canonical_dav_uri},
+        uri::{DavUriResource, SyncCursor, SyncToken, UriResource, Urn, canonical_dav_uri},
     },
     file::is_symlink,
     principal::propfind::PrincipalPropFind,
 };
 use common::{DavResourcePath, Server, auth::AccessToken};
-use dav_proto::schema::response::{MultiStatus, Response};
+use dav_proto::schema::response::{BaseCondition, MultiStatus, Response};
 use groupware::calendar::EVENT_SECRET;
 use hyper::StatusCode;
 use std::{borrow::Cow, sync::Arc};
 use store::{
     ahash::AHashMap,
-    query::log::{Change, Query},
+    query::log::{Change, Changes, Query},
     roaring::RoaringBitmap,
 };
 use trc::AddContext;
@@ -29,8 +29,6 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
-
-use super::data::SyncTokenUrn;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn get(
@@ -50,8 +48,22 @@ pub(super) async fn get(
     response.set_namespace(collection_container.namespace());
 
     let account_id = resource.account_id;
+    let min_change_id = match query.sync_type {
+        SyncType::Token(
+            SyncToken::State(snapshot)
+            | SyncToken::ChangesPage { snapshot, .. }
+            | SyncToken::InitialPage { snapshot, .. },
+        ) => snapshot,
+        _ => 0,
+    };
     let resources = data
-        .resources(server, access_token, account_id, sync_collection)
+        .resources(
+            server,
+            access_token,
+            account_id,
+            sync_collection,
+            min_change_id,
+        )
         .await
         .caused_by(trc::location!())?;
 
@@ -81,7 +93,7 @@ pub(super) async fn get(
     };
     let visible_containers = display_containers
         .as_ref()
-        .filter(|_| matches!(query.sync_type, SyncType::From { .. }))
+        .filter(|_| query.sync_type.is_incremental())
         .cloned();
     let mut display_children = display_containers
         .as_ref()
@@ -105,224 +117,233 @@ pub(super) async fn get(
         });
 
     // Filter by changelog
-    let is_sync = match query.sync_type {
-        SyncType::From { id, seq } => {
-            let changes = server
-                .store()
-                .changes(account_id, sync_collection.into(), Query::Since(id))
-                .await
-                .caused_by(trc::location!())?;
-            let mut vanished: Vec<String> = Vec::new();
-
-            // Merge changes
-            let mut total_changes = 0;
-            let mut maybe_has_vanished = false;
-            let mut hidden_hrefs: Vec<String> = Vec::new();
-            if container_has_children {
-                let mut container_changes = RoaringBitmap::new();
-                let mut item_changes = RoaringBitmap::new();
-                let mut item_updates = RoaringBitmap::new();
-                let track_hidden_items = display_children.is_some();
-
-                for change in changes.changes {
-                    match change {
-                        Change::InsertItem(id) => {
-                            item_changes.insert(id as u32);
-                        }
-                        Change::UpdateItem(id) => {
-                            maybe_has_vanished = true;
-                            item_changes.insert(id as u32);
-                            if track_hidden_items {
-                                item_updates.insert(id as u32);
-                            }
-                        }
-                        Change::InsertContainer(id) => {
-                            container_changes.insert(id as u32);
-                        }
-                        Change::UpdateContainer(id) => {
-                            maybe_has_vanished = true;
-                            container_changes.insert(id as u32);
-                        }
-                        Change::DeleteContainer(_) | Change::DeleteItem(_) => {
-                            maybe_has_vanished = true;
-                        }
-                        Change::UpdateItemMetadata(id) => {
-                            item_changes.insert(id as u32);
-                        }
-                        Change::UpdateContainerPartial(id, partial) => {
-                            if partial.has_metadata() {
-                                container_changes.insert(id as u32);
-                            }
-                        }
-                    }
-                }
-
-                if let (Some(children), Some(containers)) = (&display_children, &display_containers)
-                {
-                    item_updates -= children;
-                    hidden_hrefs.extend(item_updates.iter().filter_map(|document_id| {
-                        let parent_id = resources
-                            .item_by_id(document_id)?
-                            .child_names()
-                            .iter()
-                            .map(|name| name.parent_id)
-                            .find(|parent_id| containers.contains(*parent_id))?;
-                        resources.format_resource_path_by_parent(document_id, parent_id)
-                    }));
-                }
-
-                for (document_ids, changes) in [
-                    (&mut display_containers, container_changes),
-                    (&mut display_children, item_changes),
-                ] {
-                    if let Some(document_ids) = document_ids {
-                        *document_ids &= changes;
-                        total_changes += document_ids.len() as usize;
-                    } else {
-                        total_changes += changes.len() as usize;
-                        *document_ids = Some(changes);
-                    }
-                }
-            } else {
-                let mut updates = RoaringBitmap::new();
-                let track_hidden_items = is_file && display_containers.is_some();
-                let changes = RoaringBitmap::from_iter(changes.changes.iter().filter_map(
-                    |change| match change {
-                        Change::InsertItem(id) | Change::InsertContainer(id) => Some(*id as u32),
-                        Change::UpdateItem(id) | Change::UpdateContainer(id) => {
-                            maybe_has_vanished = true;
-                            if track_hidden_items {
-                                updates.insert(*id as u32);
-                            }
-                            Some(*id as u32)
-                        }
-                        Change::DeleteContainer(_) | Change::DeleteItem(_) => {
-                            maybe_has_vanished = true;
-                            None
-                        }
-                        Change::UpdateItemMetadata(id) => Some(*id as u32),
-                        Change::UpdateContainerPartial(id, partial) => {
-                            partial.has_metadata().then_some(*id as u32)
-                        }
-                    },
-                ));
-
-                if let Some(discoverable) = &display_containers {
-                    updates -= discoverable;
-                    hidden_hrefs.extend(updates.iter().filter_map(|document_id| {
-                        let resource = resources.any_resource_path_by_id(document_id)?;
-                        match resource.parent_id() {
-                            Some(parent_id) if !discoverable.contains(parent_id) => None,
-                            _ => Some(resources.format_resource(resource)),
-                        }
-                    }));
-                }
-
-                if let Some(document_ids) = &mut display_containers {
-                    *document_ids &= changes;
-                    total_changes += document_ids.len() as usize;
-                } else {
-                    total_changes += changes.len() as usize;
-                    display_containers = Some(changes);
-                }
-            }
-
-            if maybe_has_vanished
-                && let Some(vanished_collection) = sync_collection.vanished_collection()
-            {
-                vanished = server
+    let incremental = match query.sync_type {
+        SyncType::Token(SyncToken::State(id)) => Some((id, resources.highest_change_id.max(id), 0)),
+        SyncType::Token(SyncToken::ChangesPage {
+            from,
+            snapshot,
+            offset,
+        }) => Some((from, snapshot, offset)),
+        _ => None,
+    };
+    let is_sync = match incremental {
+        Some((id, snapshot, offset)) => {
+            let changes = if id < snapshot {
+                let changes = server
                     .store()
-                    .vanished(account_id, vanished_collection.into(), Query::Since(id))
+                    .changes(
+                        account_id,
+                        sync_collection.into(),
+                        Query::Range(id, snapshot),
+                    )
                     .await
                     .caused_by(trc::location!())?;
-            }
-            vanished.append(&mut hidden_hrefs);
-            if !vanished.is_empty() {
-                let scope = resource.resource.map_or_else(
-                    || resources.base_path.clone(),
-                    |path| resources.format_collection(path),
-                );
-                vanished.retain(|href| {
-                    href.starts_with(scope.as_str())
-                        && visible_containers.as_ref().is_none_or(|containers| {
-                            let Some(path) = href.strip_prefix(resources.base_path.as_str()) else {
-                                return false;
-                            };
-                            match path.trim_end_matches('/').rsplit_once('/') {
-                                Some((parent, _)) => {
-                                    resources.by_path(parent).is_some_and(|parent| {
-                                        containers.contains(parent.document_id())
-                                    })
-                                }
-                                None => true,
-                            }
-                        })
-                });
-                total_changes += vanished.len();
-            }
-
-            // Truncate changes
-            if total_changes > limit {
-                let mut offset = limit * seq as usize;
-                let mut total_changes = 0;
-
-                // Add vanished items to response
-                for item in vanished {
-                    if offset > 0 {
-                        offset -= 1;
-                    } else if total_changes < limit {
-                        response.add_response(Response::new_status([item], StatusCode::NOT_FOUND));
-                        total_changes += 1;
-                    } else {
-                        *is_sync_limited = true;
-                    }
+                if changes.needs_full_rebuild(id) {
+                    return Err(DavErrorCondition::new(
+                        StatusCode::FORBIDDEN,
+                        BaseCondition::ValidSyncToken,
+                    )
+                    .into());
                 }
+                changes
+            } else {
+                Changes::default()
+            };
 
-                // Add items to document set
-                for document_ids in [&mut display_containers, &mut display_children]
-                    .into_iter()
-                    .flatten()
-                {
-                    let mut new_document_ids = RoaringBitmap::new();
-                    for id in document_ids.iter() {
-                        if offset > 0 {
-                            offset -= 1;
-                        } else if total_changes < limit {
-                            new_document_ids.insert(id);
-                            total_changes += 1;
-                        } else {
-                            *is_sync_limited = true;
+            let mut maybe_has_vanished = false;
+            let mut container_changes = RoaringBitmap::new();
+            let mut item_changes = RoaringBitmap::new();
+            let mut updates = RoaringBitmap::new();
+            let track_hidden_items =
+                display_containers.is_some() && (container_has_children || is_file);
+            for change in changes.changes {
+                match change {
+                    Change::InsertItem(id) | Change::UpdateItemMetadata(id)
+                        if container_has_children =>
+                    {
+                        item_changes.insert(id as u32);
+                    }
+                    Change::UpdateItem(id) if container_has_children => {
+                        maybe_has_vanished = true;
+                        item_changes.insert(id as u32);
+                        if track_hidden_items {
+                            updates.insert(id as u32);
                         }
                     }
-                    *document_ids = new_document_ids;
-                }
-
-                if *is_sync_limited {
-                    response.set_sync_token(Urn::Sync { id, seq: seq + 1 }.to_string());
-                }
-            } else {
-                // Add vanished items to response
-                for item in vanished {
-                    response.add_response(Response::new_status([item], StatusCode::NOT_FOUND));
+                    Change::InsertItem(id)
+                    | Change::InsertContainer(id)
+                    | Change::UpdateItemMetadata(id) => {
+                        container_changes.insert(id as u32);
+                    }
+                    Change::UpdateItem(id) | Change::UpdateContainer(id) => {
+                        maybe_has_vanished = true;
+                        container_changes.insert(id as u32);
+                        if track_hidden_items && !container_has_children {
+                            updates.insert(id as u32);
+                        }
+                    }
+                    Change::DeleteContainer(_) | Change::DeleteItem(_) => {
+                        maybe_has_vanished = true;
+                    }
+                    Change::UpdateContainerPartial(id, partial) => {
+                        if partial.has_metadata() {
+                            container_changes.insert(id as u32);
+                        }
+                    }
                 }
             }
 
-            if !*is_sync_limited {
-                response.set_sync_token(resources.sync_token());
+            let vanished: Vec<String> = match sync_collection.vanished_collection() {
+                Some(vanished_collection) if maybe_has_vanished => server
+                    .store()
+                    .vanished(
+                        account_id,
+                        vanished_collection.into(),
+                        Query::Range(id, snapshot),
+                    )
+                    .await
+                    .caused_by(trc::location!())?,
+                _ => Vec::new(),
+            };
+
+            let scope = resource.resource.map_or_else(
+                || resources.base_path.clone(),
+                |path| resources.format_collection(path),
+            );
+            let is_visible_href = |href: &str| {
+                href.starts_with(scope.as_str())
+                    && visible_containers.as_ref().is_none_or(|containers| {
+                        let Some(path) = href.strip_prefix(resources.base_path.as_str()) else {
+                            return false;
+                        };
+                        match path.trim_end_matches('/').rsplit_once('/') {
+                            Some((parent, _)) => resources
+                                .by_path(parent)
+                                .is_some_and(|parent| containers.contains(parent.document_id())),
+                            None => true,
+                        }
+                    })
+            };
+            let hidden_href = |document_id: u32| {
+                if !updates.contains(document_id) {
+                    return None;
+                }
+                let containers = display_containers.as_ref()?;
+                if container_has_children {
+                    let parent_id = resources
+                        .item_by_id(document_id)?
+                        .child_names()
+                        .iter()
+                        .map(|name| name.parent_id)
+                        .find(|parent_id| containers.contains(*parent_id))?;
+                    resources.format_resource_path_by_parent(document_id, parent_id)
+                } else {
+                    let resource = resources.any_resource_path_by_id(document_id)?;
+                    match resource.parent_id() {
+                        Some(parent_id) if !containers.contains(parent_id) => None,
+                        _ => Some(resources.format_resource(resource)),
+                    }
+                }
+                .filter(|href| is_visible_href(href))
+            };
+
+            let mut removed = Vec::new();
+            let mut page_containers = RoaringBitmap::new();
+            let mut page_items = RoaringBitmap::new();
+            let mut emitted = 0;
+            let mut next_offset = None;
+            for (entry, position) in vanished
+                .into_iter()
+                .map(SyncEntry::Removed)
+                .chain(container_changes.iter().map(SyncEntry::Container))
+                .chain(item_changes.iter().map(SyncEntry::Item))
+                .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+                .zip(offset..)
+            {
+                let entry = match entry {
+                    SyncEntry::Removed(href) => {
+                        is_visible_href(&href).then_some(SyncEntry::Removed(href))
+                    }
+                    SyncEntry::Container(document_id) => {
+                        if display_containers
+                            .as_ref()
+                            .is_none_or(|containers| containers.contains(document_id))
+                        {
+                            Some(SyncEntry::Container(document_id))
+                        } else if container_has_children {
+                            None
+                        } else {
+                            hidden_href(document_id).map(SyncEntry::Removed)
+                        }
+                    }
+                    SyncEntry::Item(document_id) => {
+                        if display_children
+                            .as_ref()
+                            .is_none_or(|children| children.contains(document_id))
+                        {
+                            Some(SyncEntry::Item(document_id))
+                        } else {
+                            hidden_href(document_id).map(SyncEntry::Removed)
+                        }
+                    }
+                };
+                if let Some(entry) = entry {
+                    if emitted == limit {
+                        next_offset = Some(position);
+                        break;
+                    }
+                    match entry {
+                        SyncEntry::Removed(href) => removed.push(href),
+                        SyncEntry::Container(document_id) => {
+                            page_containers.insert(document_id);
+                        }
+                        SyncEntry::Item(document_id) => {
+                            page_items.insert(document_id);
+                        }
+                    }
+                    emitted += 1;
+                }
             }
+            display_containers = Some(page_containers);
+            display_children = Some(page_items);
+            for href in removed {
+                response.add_response(Response::new_status([href], StatusCode::NOT_FOUND));
+            }
+
+            *is_sync_limited = next_offset.is_some();
+            response.set_sync_token(
+                Urn::Sync(match next_offset {
+                    Some(offset) => SyncToken::ChangesPage {
+                        from: id,
+                        snapshot,
+                        offset,
+                    },
+                    None => SyncToken::State(snapshot),
+                })
+                .to_string(),
+            );
 
             true
         }
-        SyncType::Initial => {
-            response.set_sync_token(resources.sync_token());
-            false
-        }
-        SyncType::None => false,
+        None => false,
+    };
+    let mut initial = match query.sync_type {
+        SyncType::Initial => Some(InitialPaging {
+            snapshot: resources.highest_change_id,
+            after: None,
+            boundary: None,
+        }),
+        SyncType::Token(SyncToken::InitialPage { snapshot, after }) => Some(InitialPaging {
+            snapshot,
+            after: Some(after),
+            boundary: None,
+        }),
+        _ => None,
     };
 
     let mut results = Vec::new();
     if let Some(resource) = resource.resource {
-        results = resources
+        let paths = resources
             .subtree_with_depth(resource, query.depth)
             .filter(|item| {
                 display_containers.as_ref().is_none_or(|containers| {
@@ -339,17 +360,16 @@ pub(super) async fn get(
                     }
                 }) && (!query.depth_no_root || item.path() != resource)
                     && (!is_file || !is_symlink(item))
-            })
-            .map(|item| {
-                let is_discover_only = is_discover_only(file_readable.as_ref(), &item);
-                let href = if is_file && item.path() == resource {
-                    requested_href(query.uri, item.is_container())
-                } else {
-                    resources.format_resource(item)
-                };
-                PropFindItem::new(href, account_id, item).with_discover_only(is_discover_only)
-            })
-            .collect::<Vec<_>>();
+            });
+        results = collect_page(paths, account_id, initial.as_mut(), limit, |item| {
+            let is_discover_only = is_discover_only(file_readable.as_ref(), &item);
+            let href = if is_file && item.path() == resource {
+                requested_href(query.uri, item.is_container())
+            } else {
+                resources.format_resource(item)
+            };
+            PropFindItem::new(href, account_id, item).with_discover_only(is_discover_only)
+        });
     } else {
         if !query.depth_no_root && query.sync_type.is_none_or_initial() {
             server
@@ -364,29 +384,26 @@ pub(super) async fn get(
         }
 
         if query.depth != 0 {
-            results = resources
-                .tree_with_depth(query.depth - 1)
-                .filter(|item| {
-                    display_containers.as_ref().is_none_or(|containers| {
-                        if container_has_children {
-                            if item.is_container() {
-                                containers.contains(item.document_id())
-                            } else {
-                                display_children
-                                    .as_ref()
-                                    .is_some_and(|children| children.contains(item.document_id()))
-                            }
-                        } else {
+            let paths = resources.tree_with_depth(query.depth - 1).filter(|item| {
+                display_containers.as_ref().is_none_or(|containers| {
+                    if container_has_children {
+                        if item.is_container() {
                             containers.contains(item.document_id())
+                        } else {
+                            display_children
+                                .as_ref()
+                                .is_some_and(|children| children.contains(item.document_id()))
                         }
-                    }) && (!is_file || !is_symlink(item))
-                })
-                .map(|item| {
-                    let is_discover_only = is_discover_only(file_readable.as_ref(), &item);
-                    PropFindItem::new(resources.format_resource(item), account_id, item)
-                        .with_discover_only(is_discover_only)
-                })
-                .collect::<Vec<_>>();
+                    } else {
+                        containers.contains(item.document_id())
+                    }
+                }) && (!is_file || !is_symlink(item))
+            });
+            results = collect_page(paths, account_id, initial.as_mut(), limit, |item| {
+                let is_discover_only = is_discover_only(file_readable.as_ref(), &item);
+                PropFindItem::new(resources.format_resource(item), account_id, item)
+                    .with_discover_only(is_discover_only)
+            });
 
             // Assisted discovery:
             // If 'bob' has access to 'jane' and `bill` calendars, a query to '/dav/cal/bob' will return:
@@ -407,7 +424,7 @@ pub(super) async fn get(
                         continue;
                     }
                     let shared_resources = data
-                        .resources(server, access_token, shared_account_id, sync_collection)
+                        .resources(server, access_token, shared_account_id, sync_collection, 0)
                         .await
                         .caused_by(trc::location!())?;
                     let shared_containers =
@@ -449,7 +466,78 @@ pub(super) async fn get(
         }
     }
 
+    if let Some(paging) = initial {
+        results.retain(|item| {
+            let cursor = item.sync_cursor();
+            paging.after.is_none_or(|after| cursor > after)
+                && paging.boundary.is_none_or(|boundary| cursor <= boundary)
+        });
+        let boundary =
+            select_page(&mut results, limit, PropFindItem::sync_cursor).or(paging.boundary);
+        *is_sync_limited = boundary.is_some();
+        response.set_sync_token(
+            Urn::Sync(match boundary {
+                Some(after) => SyncToken::InitialPage {
+                    snapshot: paging.snapshot,
+                    after,
+                },
+                None => SyncToken::State(paging.snapshot),
+            })
+            .to_string(),
+        );
+    }
+
     Ok(results)
+}
+
+enum SyncEntry {
+    Removed(String),
+    Container(u32),
+    Item(u32),
+}
+
+struct InitialPaging {
+    snapshot: u64,
+    after: Option<SyncCursor>,
+    boundary: Option<SyncCursor>,
+}
+
+fn collect_page<'x>(
+    paths: impl Iterator<Item = DavResourcePath<'x>>,
+    account_id: u32,
+    paging: Option<&mut InitialPaging>,
+    limit: usize,
+    to_item: impl FnMut(DavResourcePath<'x>) -> PropFindItem,
+) -> Vec<PropFindItem> {
+    match paging {
+        Some(paging) => {
+            let mut paths = paths
+                .filter(|path| {
+                    paging
+                        .after
+                        .is_none_or(|after| SyncCursor::from_path(account_id, path) > after)
+                })
+                .collect::<Vec<_>>();
+            paging.boundary = select_page(&mut paths, limit, |path| {
+                SyncCursor::from_path(account_id, path)
+            });
+            paths.into_iter().map(to_item).collect()
+        }
+        None => paths.map(to_item).collect(),
+    }
+}
+
+fn select_page<T>(
+    items: &mut Vec<T>,
+    limit: usize,
+    cursor: impl Fn(&T) -> SyncCursor,
+) -> Option<SyncCursor> {
+    if items.len() <= limit {
+        return None;
+    }
+    let boundary = cursor(items.select_nth_unstable_by_key(limit - 1, &cursor).1);
+    items.retain(|item| cursor(item) <= boundary);
+    Some(boundary)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -486,7 +574,7 @@ pub(super) async fn multiget(
 
         let account_id = resource.account_id;
         let resources = data
-            .resources(server, access_token, account_id, sync_collection)
+            .resources(server, access_token, account_id, sync_collection, 0)
             .await
             .caused_by(trc::location!())?;
 
@@ -564,4 +652,51 @@ pub(crate) fn requested_href(uri: &str, is_container: bool) -> String {
 
 fn is_discover_only(readable: Option<&RoaringBitmap>, item: &DavResourcePath<'_>) -> bool {
     readable.is_some_and(|readable| !readable.contains(item.document_id()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SyncCursor, select_page};
+
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self, bound: u32) -> u32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) % u64::from(bound)) as u32
+        }
+    }
+
+    #[test]
+    fn select_page_keeps_lowest_and_ties() {
+        let mut rng = Lcg(11);
+        for _ in 0..500 {
+            let items = (0..rng.next(40))
+                .map(|_| SyncCursor::new(rng.next(2), rng.next(2) == 0, rng.next(8), None))
+                .collect::<Vec<_>>();
+            let limit = rng.next(12) as usize + 1;
+            let mut sorted = items.clone();
+            sorted.sort_unstable();
+            let mut page = items.clone();
+            let boundary = select_page(&mut page, limit, |cursor| *cursor);
+            page.sort_unstable();
+            if items.len() <= limit {
+                assert_eq!(boundary, None);
+                assert_eq!(page, sorted);
+            } else {
+                let expected_boundary = sorted[limit - 1];
+                assert_eq!(boundary, Some(expected_boundary));
+                let expected = sorted
+                    .iter()
+                    .copied()
+                    .filter(|cursor| *cursor <= expected_boundary)
+                    .collect::<Vec<_>>();
+                assert_eq!(page, expected);
+                assert!(page.len() >= limit);
+            }
+        }
+    }
 }

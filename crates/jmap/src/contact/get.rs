@@ -13,7 +13,7 @@ use calcard::jscontact::{JSContactProperty, JSContactValue, import::ImportOption
 use common::{Server, auth::AccessToken};
 use groupware::{cache::GroupwareCache, contact::ContactCardContent};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::contact,
     request::capability::CapabilityIds,
 };
@@ -74,11 +74,10 @@ impl ContactCardGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            contact_ids
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            all_ids(
+                contact_ids.iter().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut metadata_values = match &metadata_get {
             Some(get) => {

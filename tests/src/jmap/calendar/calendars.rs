@@ -9,6 +9,7 @@ use crate::utils::{
     server::TestServer,
 };
 use jmap_proto::{object::calendar::CalendarProperty, request::method::MethodObject};
+use registry::schema::{prelude::Property, structs::Jmap};
 use serde_json::json;
 
 pub async fn test(test: &TestServer) {
@@ -401,10 +402,87 @@ pub async fn test(test: &TestServer) {
     );
 
     sharee_destroy_respects_privacy(test).await;
+    get_all_within_limit(test).await;
 
     // Destroy all mailboxes
     account.destroy_all_calendars().await;
     test.assert_is_empty().await;
+}
+
+async fn get_all_within_limit(test: &TestServer) {
+    let account = test.account("jdoe@example.com");
+    let admin = test.account("admin@example.com");
+    let created = account
+        .jmap_create(
+            MethodObject::Calendar,
+            [json!({"name": "Limit one"}), json!({"name": "Limit two"})],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let extra_ids = [
+        created.created(0).id().to_string(),
+        created.created(1).id().to_string(),
+    ];
+    account
+        .jmap_create(
+            MethodObject::AddressBook,
+            [json!({"name": "Limit"})],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0);
+    let get_all = |method: &'static str| {
+        account.jmap_method_call(
+            method,
+            json!({"accountId": account.id_string(), "ids": null}),
+        )
+    };
+
+    for method in ["Calendar/get", "AddressBook/get"] {
+        let total = get_all(method).await.list().len();
+        assert!(total >= 2, "{method}");
+        for (limit, is_allowed) in [(total, true), (total - 1, false)] {
+            admin
+                .registry_update_setting(
+                    Jmap {
+                        get_max_results: limit as u64,
+                        ..Default::default()
+                    },
+                    &[Property::GetMaxResults],
+                )
+                .await;
+            admin.reload_settings().await;
+            let response = get_all(method).await;
+            if is_allowed {
+                assert_eq!(response.list().len(), total, "{method} {response:?}");
+            } else {
+                assert_eq!(
+                    response.method_response()["type"],
+                    json!("requestTooLarge"),
+                    "{method} {response:?}"
+                );
+            }
+        }
+    }
+
+    admin
+        .registry_update_setting(
+            Jmap {
+                get_max_results: 100_000,
+                ..Default::default()
+            },
+            &[Property::GetMaxResults],
+        )
+        .await;
+    admin.reload_settings().await;
+    account
+        .jmap_destroy(
+            MethodObject::Calendar,
+            extra_ids.iter().map(String::as_str),
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    account.destroy_all_addressbooks().await;
 }
 
 async fn sharee_destroy_respects_privacy(test: &TestServer) {

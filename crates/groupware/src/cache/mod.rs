@@ -100,6 +100,14 @@ pub trait GroupwareCache: Sync + Send {
         collection: SyncCollection,
     ) -> impl Future<Output = trc::Result<Arc<GroupwareResources>>> + Send;
 
+    fn fetch_groupware_resources_at(
+        &self,
+        access_account_id: u32,
+        account_id: u32,
+        collection: SyncCollection,
+        min_change_id: u64,
+    ) -> impl Future<Output = trc::Result<Arc<GroupwareResources>>> + Send;
+
     fn create_default_addressbook(
         &self,
         account_info_access: &AccountCache,
@@ -145,6 +153,17 @@ impl GroupwareCache for Server {
         access_account_id: u32,
         account_id: u32,
         collection: SyncCollection,
+    ) -> trc::Result<Arc<GroupwareResources>> {
+        self.fetch_groupware_resources_at(access_account_id, account_id, collection, 0)
+            .await
+    }
+
+    async fn fetch_groupware_resources_at(
+        &self,
+        access_account_id: u32,
+        account_id: u32,
+        collection: SyncCollection,
+        min_change_id: u64,
     ) -> trc::Result<Arc<GroupwareResources>> {
         let cache_store = match collection {
             SyncCollection::Calendar => &self.inner.cache.events,
@@ -209,7 +228,7 @@ impl GroupwareCache for Server {
         // Serve the snapshot without revalidating while it is within the freshness window
         let start_time = Instant::now();
         let revalidate = &self.inner.cache.revalidate;
-        if cache.is_fresh(revalidate) {
+        if cache.is_fresh(revalidate) && cache.highest_change_id >= min_change_id {
             trc::event!(
                 Cache(CacheEvent::Hit),
                 AccountId = account_id,

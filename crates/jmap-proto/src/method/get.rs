@@ -17,6 +17,17 @@ use jmap_tools::Value;
 use serde::{Deserialize, Deserializer};
 use types::id::Id;
 
+pub fn all_ids<V>(ids: impl Iterator<Item = V>, max_objects_in_get: usize) -> trc::Result<Vec<V>> {
+    let ids = ids
+        .take(max_objects_in_get.saturating_add(1))
+        .collect::<Vec<_>>();
+    if ids.len() <= max_objects_in_get {
+        Ok(ids)
+    } else {
+        Err(trc::JmapEvent::RequestTooLarge.into_err())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GetRequest<T: JmapObject> {
     pub account_id: Id,
@@ -147,5 +158,30 @@ impl<T: JmapObject> GetRequest<T> {
         } else {
             Ok((None, Vec::new()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::all_ids;
+    use trc::{EventType, JmapEvent};
+
+    fn is_request_too_large<T>(result: trc::Result<T>) -> bool {
+        result.is_err_and(|err| err.matches(EventType::Jmap(JmapEvent::RequestTooLarge)))
+    }
+
+    #[test]
+    fn all_ids_within_limit() {
+        assert_eq!(all_ids(0..3, 3).expect("at the limit"), [0, 1, 2]);
+        assert_eq!(all_ids(0..2, 3).expect("below the limit"), [0, 1]);
+        assert_eq!(all_ids(0..0, 0).expect("empty"), Vec::<u32>::new());
+        assert_eq!(all_ids(0..3, usize::MAX).expect("unbounded"), [0, 1, 2]);
+    }
+
+    #[test]
+    fn all_ids_over_limit() {
+        assert!(is_request_too_large(all_ids(0..4, 3)));
+        assert!(is_request_too_large(all_ids(0..1, 0)));
+        assert!(is_request_too_large(all_ids(0.., 500)));
     }
 }

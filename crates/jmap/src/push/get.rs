@@ -8,7 +8,7 @@ use common::{Server, auth::AccessToken, ipc::PushEvent};
 use email::push::{PushSubscriptions, Urgency};
 use jmap_proto::{
     method::{
-        get::{GetRequest, GetResponse},
+        get::{GetRequest, GetResponse, all_ids},
         query::ArchivedFilter,
     },
     object::{
@@ -81,13 +81,14 @@ impl PushSubscriptionFetch for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            subscriptions
-                .inner
-                .subscriptions
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(|s| Id::from(s.id.to_native()))
-                .collect::<Vec<_>>()
+            all_ids(
+                subscriptions
+                    .inner
+                    .subscriptions
+                    .iter()
+                    .map(|s| Id::from(s.id.to_native())),
+                self.core.jmap.get_max_objects,
+            )?
         };
 
         for id in ids {

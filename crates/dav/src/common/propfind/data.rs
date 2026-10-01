@@ -8,7 +8,7 @@ use super::{PropFindItem, PropFindRequestHandler};
 use crate::{
     common::{
         lock::{LockData, build_lock_key},
-        uri::Urn,
+        uri::{SyncToken, Urn},
     },
     principal::propfind::PrincipalPropFind,
 };
@@ -100,6 +100,7 @@ impl PropFindData {
         access_token: &AccessToken,
         account_id: u32,
         sync_collection: SyncCollection,
+        min_change_id: u64,
     ) -> trc::Result<Arc<GroupwareResources>> {
         let data = self.accounts.entry(account_id).or_default();
 
@@ -107,7 +108,12 @@ impl PropFindData {
             Ok(resources.clone())
         } else {
             let resources = server
-                .fetch_groupware_resources(access_token.account_id(), account_id, sync_collection)
+                .fetch_groupware_resources_at(
+                    access_token.account_id(),
+                    account_id,
+                    sync_collection,
+                    min_change_id,
+                )
                 .await
                 .caused_by(trc::location!())?;
             data.resources = Some(resources.clone());
@@ -170,10 +176,6 @@ pub(crate) trait SyncTokenUrn {
 
 impl SyncTokenUrn for GroupwareResources {
     fn sync_token(&self) -> String {
-        Urn::Sync {
-            id: self.highest_change_id,
-            seq: 0,
-        }
-        .to_string()
+        Urn::Sync(SyncToken::State(self.highest_change_id)).to_string()
     }
 }

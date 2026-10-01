@@ -65,6 +65,7 @@ impl ShareNotificationGet for Server {
 
         let mut account_cache: AHashMap<u32, Arc<AccountCache>> = AHashMap::new();
 
+        let has_ids = request.ids.is_some();
         let mut ids = if let Some(ids) = request.ids.take() {
             let ids = ids.unwrap();
             if ids.len() <= self.core.jmap.get_max_objects {
@@ -86,7 +87,6 @@ impl ShareNotificationGet for Server {
         } else {
             AHashSet::new()
         };
-        let has_ids = !ids.is_empty();
 
         if min_id == u64::MAX {
             min_id = SnowflakeIdGenerator::from_duration(
@@ -139,11 +139,14 @@ impl ShareNotificationGet for Server {
                     }
 
                     Ok((!has_ids || !ids.is_empty())
-                        && notifications.len() < self.core.jmap.get_max_objects)
+                        && notifications.len() <= self.core.jmap.get_max_objects)
                 },
             )
             .await
             .caused_by(trc::location!())?;
+        if notifications.len() > self.core.jmap.get_max_objects {
+            return Err(trc::JmapEvent::RequestTooLarge.into_err());
+        }
 
         for (change_id, notification) in notifications {
             let changed_by_account =

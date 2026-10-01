@@ -7,10 +7,11 @@
 use crate::utils::{
     jmap::{ChangeType, IntoJmapSet, JmapUtils},
     server::TestServer,
+    webdav::DummyWebDavClient,
 };
 use ahash::AHashSet;
 use calcard::jscalendar::JSCalendarProperty;
-use common::NO_ID;
+use common::{NO_ID, PROD_ID};
 use dav_proto::Depth;
 use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
@@ -809,18 +810,237 @@ END:VCALENDAR
         ical.lines().any(|line| line.starts_with("CREATED:")),
         "{ical}"
     );
-    let ical = ical
-        .lines()
+    let (lines, timezones) = split_timezones(&ical);
+    assert_eq!(timezone_ids(&timezones), ["US/Eastern"], "{ical}");
+    let ical = lines
+        .into_iter()
         .filter(|line| !line.starts_with("DTSTAMP") && !line.starts_with("CREATED"))
-        .map(String::from)
         .collect::<AHashSet<_>>();
     let expected_ical = TEST_ICAL_1
         .lines()
         .filter(|line| !line.starts_with("DTSTAMP"))
         .map(String::from)
-        .chain(["SEQUENCE:1".to_string()])
+        .chain(["SEQUENCE:1".to_string(), format!("PRODID:{PROD_ID}")])
         .collect::<AHashSet<_>>();
     assert_eq!(ical, expected_ical);
+
+    // Events written over JMAP carry PRODID and the VTIMEZONEs they reference
+    let response = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [
+                json!({
+                    "@type": "Event",
+                    "uid": "tz-server-prodid@example.com",
+                    "title": "Server PRODID",
+                    "start": "2030-03-01T09:00:00",
+                    "duration": "PT1H",
+                    "timeZone": "America/New_York",
+                    "recurrenceRule": {"@type": "RecurrenceRule", "frequency": "weekly"},
+                    "alerts": {
+                        "a1": {
+                            "@type": "Alert",
+                            "trigger": {"@type": "OffsetTrigger", "offset": "-PT15M"}
+                        }
+                    },
+                    "calendarIds": {&calendar1_id: true}
+                }),
+                json!({
+                    "@type": "Event",
+                    "uid": "tz-client-prodid@example.com",
+                    "title": "Client PRODID",
+                    "prodId": "-//Example Corp//Client 1.0//EN",
+                    "start": "2030-03-01T09:00:00",
+                    "duration": "PT1H",
+                    "timeZone": "Asia/Tokyo",
+                    "calendarIds": {&calendar1_id: true}
+                }),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let server_prodid_id = response.created(0).id().to_string();
+    let client_prodid_id = response.created(1).id().to_string();
+
+    let ical = caldav_event(test, &dav_client, account_id, &server_prodid_id).await;
+    let (lines, timezones) = split_timezones(&ical);
+    assert!(lines.contains(&format!("PRODID:{PROD_ID}")), "{ical}");
+    assert!(
+        lines.contains(&"DTSTART;TZID=America/New_York:20300301T090000".to_string()),
+        "{ical}"
+    );
+    assert!(lines.contains(&"ACTION:DISPLAY".to_string()), "{ical}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("DESCRIPTION:") || line.starts_with("DESCRIPTION;")),
+        "{ical}"
+    );
+    assert_eq!(timezone_ids(&timezones), ["America/New_York"], "{ical}");
+    assert!(
+        timezones[0].iter().any(|line| line == "BEGIN:STANDARD")
+            && timezones[0].iter().any(|line| line == "BEGIN:DAYLIGHT"),
+        "{ical}"
+    );
+
+    let ical = caldav_event(test, &dav_client, account_id, &client_prodid_id).await;
+    let (lines, timezones) = split_timezones(&ical);
+    assert!(
+        lines.contains(&"PRODID:-//Example Corp//Client 1.0//EN".to_string()),
+        "{ical}"
+    );
+    assert!(!lines.contains(&format!("PRODID:{PROD_ID}")), "{ical}");
+    assert_eq!(timezone_ids(&timezones), ["Asia/Tokyo"], "{ical}");
+    account
+        .jmap_update(
+            MethodObject::CalendarEvent,
+            [(
+                &client_prodid_id,
+                json!({"prodId": "-//Example Corp//Client 2.0//EN"}),
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .updated(&client_prodid_id);
+    let ical = caldav_event(test, &dav_client, account_id, &client_prodid_id).await;
+    let (lines, _) = split_timezones(&ical);
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("PRODID:"))
+            .collect::<Vec<_>>(),
+        ["PRODID:-//Example Corp//Client 2.0//EN"],
+        "{ical}"
+    );
+
+    // Changing the time zone over JMAP replaces the VTIMEZONE instead of keeping the old one
+    account
+        .jmap_update(
+            MethodObject::CalendarEvent,
+            [(&server_prodid_id, json!({"timeZone": "Europe/Berlin"}))],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .updated(&server_prodid_id);
+    let ical = caldav_event(test, &dav_client, account_id, &server_prodid_id).await;
+    let (lines, timezones) = split_timezones(&ical);
+    assert_eq!(timezone_ids(&timezones), ["Europe/Berlin"], "{ical}");
+    assert!(lines.contains(&format!("PRODID:{PROD_ID}")), "{ical}");
+    assert!(
+        lines.contains(&"DTSTART;TZID=Europe/Berlin:20300301T090000".to_string()),
+        "{ical}"
+    );
+
+    // A JMAP update regenerates IANA VTIMEZONEs supplied over CalDAV and keeps custom ones
+    let calendar_path = path.rsplit_once('/').expect("event path").0;
+    let mut caldav_ids = Vec::new();
+    for (name, ical, tz_id, is_regenerated) in [
+        ("custom-tz.ics", CUSTOM_TZ_ICAL, "Custom Zone", false),
+        ("stale-tz.ics", STALE_TZ_ICAL, "Europe/Berlin", true),
+    ] {
+        let event_path = format!("{calendar_path}/{name}");
+        dav_client
+            .request("PUT", &event_path, ical)
+            .await
+            .with_status(StatusCode::CREATED);
+        let resources = test
+            .server
+            .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
+            .await
+            .expect("calendar resources");
+        let event_id = Id::from(
+            resources
+                .by_path(
+                    event_path
+                        .strip_prefix(resources.base_path.as_str())
+                        .expect("path under base"),
+                )
+                .expect("event put over CalDAV")
+                .document_id(),
+        )
+        .to_string();
+        account
+            .jmap_update(
+                MethodObject::CalendarEvent,
+                [(&event_id, json!({"title": "Updated over JMAP"}))],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .updated(&event_id);
+        let ical = dav_client
+            .request("GET", &event_path, "")
+            .await
+            .with_status(StatusCode::OK)
+            .expect_body()
+            .to_string();
+        let (_, timezones) = split_timezones(&ical);
+        assert_eq!(timezone_ids(&timezones), [tz_id], "{ical}");
+        assert_eq!(
+            timezones[0]
+                .iter()
+                .any(|line| line == "X-CUSTOM-MARKER:original"),
+            !is_regenerated,
+            "{ical}"
+        );
+        caldav_ids.push(event_id);
+    }
+
+    // The number of distinct time zones an event may reference is capped
+    let zone_properties = |count: usize| {
+        (0..count)
+            .map(|num| {
+                json!([
+                    format!("x-zone-{num}"),
+                    {"tzid": format!("Zone {num}")},
+                    "unknown",
+                    "1"
+                ])
+            })
+            .collect::<Vec<_>>()
+    };
+    let response = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [64, 65].map(|count| {
+                json!({
+                    "@type": "Event",
+                    "uid": format!("tz-cap-{count}@example.com"),
+                    "title": "Time zone cap",
+                    "start": "2030-03-01T09:00:00",
+                    "duration": "PT1H",
+                    "calendarIds": {&calendar1_id: true},
+                    "iCalendar": {"name": "vevent", "properties": zone_properties(count)}
+                })
+            }),
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let at_cap_id = response.created(0).id().to_string();
+    assert_eq!(
+        response.not_created(1)["type"],
+        json!("invalidProperties"),
+        "{response:?}"
+    );
+    assert!(
+        response.not_created(1)["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("64 time zones")),
+        "{response:?}"
+    );
+
+    account
+        .jmap_destroy(
+            MethodObject::CalendarEvent,
+            [
+                at_cap_id.as_str(),
+                server_prodid_id.as_str(),
+                client_prodid_id.as_str(),
+                caldav_ids[0].as_str(),
+                caldav_ids[1].as_str(),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
 
     // Organizer assignment tests
     let response = account
@@ -1238,6 +1458,101 @@ pub fn test_jscalendar_4() -> Value {
       "uid": "tmp-event@example.com"
     })
 }
+
+pub(super) fn split_timezones(ical: &str) -> (Vec<String>, Vec<Vec<String>>) {
+    let mut lines = Vec::new();
+    let mut timezones = Vec::new();
+    let mut timezone: Option<Vec<String>> = None;
+    for line in ical.lines() {
+        if let Some(current) = timezone.as_mut() {
+            current.push(line.to_string());
+            if line == "END:VTIMEZONE" {
+                timezones.extend(timezone.take());
+            }
+        } else if line == "BEGIN:VTIMEZONE" {
+            timezone = Some(vec![line.to_string()]);
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    (lines, timezones)
+}
+
+pub(super) fn timezone_ids(timezones: &[Vec<String>]) -> Vec<&str> {
+    timezones
+        .iter()
+        .filter_map(|timezone| timezone.iter().find_map(|line| line.strip_prefix("TZID:")))
+        .collect()
+}
+
+pub(super) async fn caldav_event(
+    test: &TestServer,
+    client: &DummyWebDavClient,
+    account_id: u32,
+    id: &str,
+) -> String {
+    let resources = test
+        .server
+        .fetch_groupware_resources(account_id, account_id, SyncCollection::Calendar)
+        .await
+        .expect("calendar resources");
+    let document_id = Id::from_str(id).expect("valid id").document_id();
+    let path = resources.format_resource(
+        resources
+            .any_resource_path_by_id(document_id)
+            .expect("event path"),
+    );
+    client
+        .request("GET", &path, "")
+        .await
+        .with_status(StatusCode::OK)
+        .expect_body()
+        .to_string()
+}
+
+const CUSTOM_TZ_ICAL: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp//Client 1.0//EN
+BEGIN:VTIMEZONE
+TZID:Custom Zone
+X-CUSTOM-MARKER:original
+BEGIN:STANDARD
+DTSTART:19700101T000000
+TZOFFSETFROM:+0330
+TZOFFSETTO:+0330
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:custom-tz@example.com
+DTSTAMP:20300101T000000Z
+DTSTART;TZID=Custom Zone:20300301T090000
+DURATION:PT1H
+SUMMARY:Custom zone
+END:VEVENT
+END:VCALENDAR
+"#;
+
+const STALE_TZ_ICAL: &str = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp//Client 1.0//EN
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+X-CUSTOM-MARKER:original
+BEGIN:STANDARD
+DTSTART:19700101T000000
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0100
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:stale-tz@example.com
+DTSTAMP:20300101T000000Z
+DTSTART;TZID=Europe/Berlin:20300301T090000
+DURATION:PT1H
+SUMMARY:Stale zone
+END:VEVENT
+END:VCALENDAR
+"#;
 
 const TEST_ICAL_1: &str = r#"BEGIN:VCALENDAR
 VERSION:2.0

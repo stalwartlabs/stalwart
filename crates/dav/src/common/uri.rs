@@ -6,7 +6,7 @@
 
 use crate::{DavError, DavResourceName};
 use common::{
-    Server,
+    DavResourcePath, Server,
     auth::AccessToken,
     storage::dav::{DavFileNameError, canonical_calcard_uri, canonical_dav_resource_uri},
 };
@@ -26,7 +26,51 @@ pub(crate) struct UriResource<A, R> {
 
 pub(crate) enum Urn {
     Lock(u64),
-    Sync { id: u64, seq: u32 },
+    Sync(SyncToken),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SyncToken {
+    State(u64),
+    ChangesPage {
+        from: u64,
+        snapshot: u64,
+        offset: u64,
+    },
+    InitialPage {
+        snapshot: u64,
+        after: SyncCursor,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SyncCursor(u128);
+
+impl SyncCursor {
+    const PARENT_BITS: u32 = 33;
+    const DOCUMENT_BITS: u32 = 32;
+
+    pub fn new(
+        account_id: u32,
+        is_container: bool,
+        document_id: u32,
+        parent_id: Option<u32>,
+    ) -> Self {
+        let parent = parent_id.map_or(0, |parent_id| u128::from(parent_id) + 1);
+        let document = u128::from(document_id) << Self::PARENT_BITS;
+        let is_item = u128::from(!is_container) << (Self::PARENT_BITS + Self::DOCUMENT_BITS);
+        let account = u128::from(account_id) << (Self::PARENT_BITS + Self::DOCUMENT_BITS + 1);
+        SyncCursor(account | is_item | document | parent)
+    }
+
+    pub fn from_path(account_id: u32, path: &DavResourcePath<'_>) -> Self {
+        SyncCursor::new(
+            account_id,
+            path.is_container(),
+            path.document_id(),
+            path.parent_id(),
+        )
+    }
 }
 
 pub(crate) type UnresolvedUri<'x> = UriResource<Option<u32>, Option<&'x str>>;
@@ -202,17 +246,7 @@ impl Urn {
         let (kind, id) = inbox.split_once(':')?;
         match kind {
             "davlock" => u64::from_str_radix(id, 16).ok().map(Urn::Lock),
-            "davsync" => {
-                if let Some((id, seq)) = id.split_once(':') {
-                    let id = u64::from_str_radix(id, 16).ok()?;
-                    let seq = u32::from_str_radix(seq, 16).ok()?;
-                    Some(Urn::Sync { id, seq })
-                } else {
-                    u64::from_str_radix(id, 16)
-                        .ok()
-                        .map(|id| Urn::Sync { id, seq: 0 })
-                }
-            }
+            "davsync" => SyncToken::parse(id).map(Urn::Sync),
             _ => None,
         }
     }
@@ -224,9 +258,9 @@ impl Urn {
         }
     }
 
-    pub fn try_unwrap_sync(&self) -> Option<(u64, u32)> {
+    pub fn try_unwrap_sync(&self) -> Option<SyncToken> {
         match self {
-            Urn::Sync { id, seq } => Some((*id, *seq)),
+            Urn::Sync(token) => Some(*token),
             _ => None,
         }
     }
@@ -236,12 +270,140 @@ impl Display for Urn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Urn::Lock(id) => write!(f, "urn:stalwart:davlock:{id:x}",),
-            Urn::Sync { id, seq } => {
-                if *seq == 0 {
-                    write!(f, "urn:stalwart:davsync:{id:x}")
-                } else {
-                    write!(f, "urn:stalwart:davsync:{id:x}:{seq:x}")
+            Urn::Sync(token) => write!(f, "urn:stalwart:davsync:{token}"),
+        }
+    }
+}
+
+impl SyncToken {
+    fn parse(input: &str) -> Option<Self> {
+        let mut parts = input.splitn(3, ':');
+        let id = u64::from_str_radix(parts.next()?, 16).ok()?;
+        match (parts.next(), parts.next()) {
+            (None, None) => Some(SyncToken::State(id)),
+            (Some(after), None) => Some(SyncToken::InitialPage {
+                snapshot: id,
+                after: SyncCursor(u128::from_str_radix(after.strip_prefix('i')?, 16).ok()?),
+            }),
+            (Some(offset), Some(snapshot)) => Some(SyncToken::ChangesPage {
+                from: id,
+                snapshot: u64::from_str_radix(snapshot, 16).ok()?,
+                offset: u64::from_str_radix(offset, 16).ok()?,
+            }),
+            (None, Some(_)) => None,
+        }
+    }
+}
+
+impl Display for SyncToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncToken::State(id) => write!(f, "{id:x}"),
+            SyncToken::ChangesPage {
+                from,
+                snapshot,
+                offset,
+            } => write!(f, "{from:x}:{offset:x}:{snapshot:x}"),
+            SyncToken::InitialPage { snapshot, after } => {
+                write!(f, "{snapshot:x}:i{:x}", after.0)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SyncCursor, SyncToken, Urn};
+
+    const EDGES: [u32; 5] = [0, 1, 2, u32::MAX - 1, u32::MAX];
+
+    #[test]
+    fn sync_token_roundtrip() {
+        for token in [
+            SyncToken::State(0),
+            SyncToken::State(u64::MAX),
+            SyncToken::ChangesPage {
+                from: 1,
+                snapshot: 0xabc,
+                offset: 3,
+            },
+            SyncToken::ChangesPage {
+                from: u64::MAX,
+                snapshot: u64::MAX,
+                offset: u64::MAX,
+            },
+            SyncToken::InitialPage {
+                snapshot: 0,
+                after: SyncCursor::new(0, true, 0, None),
+            },
+            SyncToken::InitialPage {
+                snapshot: u64::MAX,
+                after: SyncCursor::new(u32::MAX, false, u32::MAX, Some(u32::MAX)),
+            },
+        ] {
+            let urn = Urn::Sync(token).to_string();
+            assert_eq!(
+                Urn::parse(&urn).and_then(|urn| urn.try_unwrap_sync()),
+                Some(token),
+                "{urn}"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_token_rejects_malformed() {
+        for urn in [
+            "urn:stalwart:davsync:",
+            "urn:stalwart:davsync:zz",
+            "urn:stalwart:davsync:1:2",
+            "urn:stalwart:davsync:1:i",
+            "urn:stalwart:davsync:1:ixyz",
+            "urn:stalwart:davsync:1:2:",
+            "urn:stalwart:davsync:1::3",
+            "urn:stalwart:davsync:1:2:3:4",
+            "urn:stalwart:davsync:1:i1:2",
+        ] {
+            assert!(
+                Urn::parse(urn)
+                    .and_then(|urn| urn.try_unwrap_sync())
+                    .is_none(),
+                "{urn}"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_cursor_matches_tuple_order() {
+        let mut keys = Vec::new();
+        for account_id in EDGES {
+            for is_container in [true, false] {
+                for document_id in EDGES {
+                    for parent_id in [None, Some(0), Some(1), Some(u32::MAX)] {
+                        keys.push((account_id, is_container, document_id, parent_id));
+                    }
                 }
+            }
+        }
+        let reference =
+            |(account_id, is_container, document_id, parent_id): (u32, bool, u32, Option<u32>)| {
+                (
+                    account_id,
+                    !is_container,
+                    document_id,
+                    parent_id.map_or(0, |parent_id| u64::from(parent_id) + 1),
+                )
+            };
+        let cursor =
+            |(account_id, is_container, document_id, parent_id): (u32, bool, u32, Option<u32>)| {
+                SyncCursor::new(account_id, is_container, document_id, parent_id)
+            };
+        for &a in &keys {
+            for &b in &keys {
+                assert_eq!(
+                    cursor(a).cmp(&cursor(b)),
+                    reference(a).cmp(&reference(b)),
+                    "{a:?} {b:?}"
+                );
             }
         }
     }

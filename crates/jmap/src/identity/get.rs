@@ -8,7 +8,7 @@ use crate::changes::state::StateManager;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use email::identity::{ArchivedEmailAddress, Identity};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::identity::{self, IdentityProperty, IdentityValue},
 };
 use jmap_tools::{Map, Value};
@@ -59,11 +59,10 @@ impl IdentityGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            identity_ids
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            all_ids(
+                identity_ids.iter().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),

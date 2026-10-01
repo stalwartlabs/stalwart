@@ -14,7 +14,7 @@ use crate::{
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use groupware::{cache::GroupwareCache, contact::AddressBook};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::addressbook::{self, AddressBookProperty, AddressBookValue},
     request::capability::CapabilityIds,
 };
@@ -97,11 +97,10 @@ impl AddressBookGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            address_book_ids
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            all_ids(
+                address_book_ids.iter().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut metadata_values = match &metadata_get {
             Some(get) => {

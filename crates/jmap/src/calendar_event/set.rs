@@ -12,6 +12,7 @@ use crate::api::pending_creates::PendingCreates;
 use crate::blob::embedded::EmbeddedExport;
 use crate::calendar_event::{
     CalendarSyntheticId, EventMainComponent, EventValue, JSCalendarEntries, UidIndex,
+    detach_iana_timezones,
     get::{EventInstanceBuilder, InstanceBinaries},
     is_origin,
     privacy::{
@@ -552,6 +553,7 @@ impl CalendarEventSet for Server {
                 .then(|| new_content.preferences(personal_id).cloned())
                 .flatten();
             view.apply_default_alerts(&view_default_alerts, DefaultAlertsView::Merge);
+            detach_iana_timezones(&mut view);
             let mut js_calendar_group = view.into_jscalendar::<Id, BlobId>();
             let tracked_before = update.base_patch().map(|patch| {
                 (

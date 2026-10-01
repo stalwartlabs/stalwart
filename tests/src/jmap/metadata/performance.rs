@@ -65,12 +65,20 @@ pub async fn test(test: &TestServer) {
 }
 
 pub async fn min_ops(test: &TestServer, measure: impl AsyncFn()) -> usize {
+    min_ops_by(test, StoreOps::total, measure).await
+}
+
+pub async fn min_ops_by(
+    test: &TestServer,
+    count: impl Fn(&StoreOps) -> usize,
+    measure: impl AsyncFn(),
+) -> usize {
     test.wait_for_tasks().await;
     let mut lowest = usize::MAX;
     for _ in 0..RUNS {
         StoreOps::take();
         measure().await;
-        lowest = lowest.min(StoreOps::take().total());
+        lowest = lowest.min(count(&StoreOps::take()));
     }
     lowest
 }

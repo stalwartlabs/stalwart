@@ -10,7 +10,7 @@ use common::{
     auth::{AccessToken, AccountCache},
 };
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::principal::{Principal, PrincipalProperty, PrincipalType, PrincipalValue},
     request::capability::Capability,
     types::state::State,
@@ -61,22 +61,22 @@ impl PrincipalGet for Server {
         // Return all principals
         let ids = match ids {
             Some(ids) => ids,
-            None if allow_directory_query => self
-                .registry()
-                .query::<RoaringBitmap>(
-                    RegistryQuery::new(ObjectType::Account).with_tenant(access_token.tenant_id()),
-                )
-                .await
-                .caused_by(trc::location!())?
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>(),
-            None => access_token
-                .all_ids()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>(),
+            None if allow_directory_query => all_ids(
+                self.registry()
+                    .query::<RoaringBitmap>(
+                        RegistryQuery::new(ObjectType::Account)
+                            .with_tenant(access_token.tenant_id()),
+                    )
+                    .await
+                    .caused_by(trc::location!())?
+                    .iter()
+                    .map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?,
+            None => all_ids(
+                access_token.all_ids().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?,
         };
         let may_get_availability = allow_directory_query
             && access_token.has_permission(Permission::JmapPrincipalGetAvailability);

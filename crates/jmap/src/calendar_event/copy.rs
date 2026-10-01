@@ -9,7 +9,7 @@ use crate::{
         MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, NewMetadata, ObjectMetadata,
     },
     calendar_event::{
-        CalendarSyntheticId, UidIndex,
+        CalendarSyntheticId, UidIndex, detach_iana_timezones,
         privacy::assert_privacy_access,
         server_set::{PendingBlobIds, ServerSetValues},
         set::{CalendarEventSet, CopiedEvent, EventSetContext, EventSource, too_many_events},
@@ -300,7 +300,7 @@ impl JmapCalendarEventCopy for Server {
             let preferences = content.preferences(from_personal_id);
             let use_default_alerts =
                 preferences.is_some_and(|preferences| preferences.use_default_alerts());
-            let event = if is_from_owner {
+            let mut event = if is_from_owner {
                 rkyv_deserialize::<_, ICalendar>(&content.data.event)
             } else {
                 preferences
@@ -314,6 +314,7 @@ impl JmapCalendarEventCopy for Server {
                     })
             }
             .caused_by(trc::location!())?;
+            detach_iana_timezones(&mut event);
             let source = EventSource::Copy(CopiedEvent {
                 event: event.into_jscalendar(),
                 flags,

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::uri::{DavUriResource, OwnedUri, UriResource, Urn, canonical_dav_uri};
+use super::uri::{DavUriResource, OwnedUri, SyncToken, UriResource, Urn, canonical_dav_uri};
 use crate::file::is_symlink;
 use crate::{DavError, DavErrorCondition, DavMethod};
 use common::KV_LOCK_DAV;
@@ -616,7 +616,7 @@ impl LockRequestHandler for Server {
                     )
                     .await?
                     .highest_change_id;
-                    resource_state.sync_token = Some(Urn::Sync { id, seq: 0 }.to_string());
+                    resource_state.sync_token = Some(Urn::Sync(SyncToken::State(id)).to_string());
                 }
             }
 

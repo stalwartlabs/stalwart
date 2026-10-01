@@ -8,7 +8,7 @@ use crate::changes::state::StateManager;
 use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::thread::{Thread, ThreadProperty, ThreadValue},
     request::MaybeInvalid,
 };
@@ -43,7 +43,6 @@ impl ThreadGet for Server {
             None
         };
         let mut thread_map: AHashMap<u32, RoaringBitmap> = AHashMap::with_capacity(32);
-        let mut all_ids = RoaringBitmap::new();
         for item in cache.emails.iter() {
             if shared_ids
                 .as_ref()
@@ -55,19 +54,16 @@ impl ThreadGet for Server {
                 .entry(item.thread_id())
                 .or_default()
                 .insert(item.document_id());
-            all_ids.insert(item.document_id());
         }
 
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            thread_map
-                .keys()
-                .copied()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect()
+            all_ids(
+                thread_map.keys().copied().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let add_email_ids = request.properties.is_none_or(|p| {
             p.unwrap()

@@ -15,7 +15,7 @@ pub(crate) use get::requested_href;
 
 use super::{
     ArchivedResource, DavCollection, DavQuery, DavQueryFilter, DavQueryResource,
-    uri::{DavUriResource, UriResource},
+    uri::{DavUriResource, SyncCursor, UriResource},
 };
 use crate::{
     DavErrorCondition,
@@ -282,7 +282,8 @@ impl PropFindRequestHandler for Server {
         let limit = std::cmp::min(
             query.limit.unwrap_or(u32::MAX) as usize,
             self.core.groupware.max_results,
-        );
+        )
+        .max(1);
         let mut is_sync_limited = false;
         let mut is_propfind = false;
 
@@ -445,7 +446,8 @@ impl PropFindRequestHandler for Server {
         );
         let needs_event_view = loader.needs_event_view();
 
-        let mut is_truncated = query_filter.is_none() && paths.len() > limit;
+        let mut is_truncated =
+            query_filter.is_none() && query.sync_type.is_none() && paths.len() > limit;
         if is_truncated {
             paths.truncate(limit);
         }
@@ -453,7 +455,11 @@ impl PropFindRequestHandler for Server {
             paths.sort_unstable_by_key(PropFindItem::storage_order);
         }
 
-        let mut remaining = limit;
+        let mut remaining = if query.sync_type.is_none() {
+            limit
+        } else {
+            usize::MAX
+        };
         let mut state = PropFindState {
             data,
             response,
@@ -533,7 +539,7 @@ impl PropFindRequestHandler for Server {
                                 (Some(tz), _) => tz,
                                 (None, Some(calendar_id)) => state
                                     .data
-                                    .resources(self, access_token, account_id, sync_collection)
+                                    .resources(self, access_token, account_id, sync_collection, 0)
                                     .await
                                     .caused_by(trc::location!())?
                                     .calendar_default_tz(calendar_id, account_id)
@@ -672,6 +678,15 @@ impl PropFindItem {
 
     fn storage_order(&self) -> (u32, bool, u32) {
         (self.account_id, !self.is_container, self.document_id)
+    }
+
+    pub(super) fn sync_cursor(&self) -> SyncCursor {
+        SyncCursor::new(
+            self.account_id,
+            self.is_container,
+            self.document_id,
+            self.parent_id,
+        )
     }
 
     fn into_property_names(

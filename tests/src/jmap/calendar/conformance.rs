@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::event::{caldav_event, split_timezones, timezone_ids};
 use crate::utils::{
     account::Account,
     jmap::{JmapResponse, JmapUtils},
@@ -47,6 +48,7 @@ pub async fn test(test: &TestServer) {
     event_query(test, john).await;
     event_parse(john).await;
     event_copy(test, john, jane).await;
+    event_copy_timezones(test, john, jane).await;
     event_instance_rights(john, jane).await;
     sharee_metadata_changes(john, jane).await;
     event_method_errors(john).await;
@@ -3725,6 +3727,110 @@ async fn event_parse(john: &Account) {
     }));
 }
 
+async fn event_copy_timezones(test: &TestServer, john: &Account, jane: &Account) {
+    let john_id = john.id_string().to_string();
+    let jane_id = jane.id_string().to_string();
+    let source_calendar_id = john
+        .jmap_create(
+            MethodObject::Calendar,
+            [json!({
+                "name": "Copy time zones",
+                "shareWith": {&jane_id: {"mayReadItems": true}}
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let target_calendar_id = jane
+        .jmap_create(
+            MethodObject::Calendar,
+            [json!({"name": "Copy time zones target"})],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    let source_id = john
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [json!({
+                "calendarIds": {&source_calendar_id: true},
+                "uid": "copy-time-zones",
+                "title": "Copied zones",
+                "start": "2030-03-01T09:00:00",
+                "timeZone": "Europe/Berlin",
+                "duration": "PT1H"
+            })],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+
+    let john_account_id = john.id().document_id();
+    let resources = test
+        .server
+        .fetch_groupware_resources(john_account_id, john_account_id, SyncCollection::Calendar)
+        .await
+        .expect("calendar resources");
+    let source_path = resources.format_resource(
+        resources
+            .any_resource_path_by_id(Id::from_str(&source_id).expect("valid id").document_id())
+            .expect("event path"),
+    );
+    john.webdav_client()
+        .request("PUT", &source_path, STALE_ZONES_ICAL)
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+
+    let jane_client = jane.webdav_client();
+    let jane_account_id = jane.id().document_id();
+    for (patch, tz_id) in [
+        (json!({}), "Europe/Berlin"),
+        (json!({"timeZone": "Asia/Tokyo"}), "Asia/Tokyo"),
+    ] {
+        let mut create = json!({"id": &source_id, "calendarIds": {&target_calendar_id: true}});
+        if let (Some(create), Some(patch)) = (create.as_object_mut(), patch.as_object()) {
+            create.extend(patch.clone());
+        }
+        let response = jane
+            .jmap_method_call(
+                "CalendarEvent/copy",
+                json!({
+                    "fromAccountId": &john_id,
+                    "accountId": &jane_id,
+                    "create": {"copy": create}
+                }),
+            )
+            .await;
+        let copy_id = response
+            .0
+            .pointer("/methodResponses/0/1/created/copy/id")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("{tz_id} copy failed: {response:?}"))
+            .to_string();
+        let ical = caldav_event(test, &jane_client, jane_account_id, &copy_id).await;
+        let (_, timezones) = split_timezones(&ical);
+        assert_eq!(timezone_ids(&timezones), [tz_id], "{ical}");
+        assert!(!ical.contains("X-STALE-MARKER"), "{ical}");
+        assert_eq!(
+            jane.jmap_destroy(
+                MethodObject::CalendarEvent,
+                [copy_id.as_str()],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .destroyed()
+            .collect::<Vec<_>>(),
+            [copy_id.as_str()]
+        );
+    }
+}
+
 async fn event_copy(test: &TestServer, john: &Account, jane: &Account) {
     let john_id = john.id_string().to_string();
     let jane_id = jane.id_string().to_string();
@@ -4619,3 +4725,34 @@ async fn identity_set(test: &TestServer, john: &Account) {
         .clear(PrincipalField::ParticipantIdentities);
     test.server.commit_batch(batch).await.unwrap();
 }
+
+const STALE_ZONES_ICAL: &str = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//Example Corp//Client 1.0//EN\r
+BEGIN:VTIMEZONE\r
+TZID:Europe/Berlin\r
+X-STALE-MARKER:berlin\r
+BEGIN:STANDARD\r
+DTSTART:19700101T000000\r
+TZOFFSETFROM:+0100\r
+TZOFFSETTO:+0100\r
+END:STANDARD\r
+END:VTIMEZONE\r
+BEGIN:VTIMEZONE\r
+TZID:America/New_York\r
+X-STALE-MARKER:orphan\r
+BEGIN:STANDARD\r
+DTSTART:19700101T000000\r
+TZOFFSETFROM:-0500\r
+TZOFFSETTO:-0500\r
+END:STANDARD\r
+END:VTIMEZONE\r
+BEGIN:VEVENT\r
+UID:copy-time-zones\r
+DTSTAMP:20300101T000000Z\r
+DTSTART;TZID=Europe/Berlin:20300301T090000\r
+DURATION:PT1H\r
+SUMMARY:Copied zones\r
+END:VEVENT\r
+END:VCALENDAR\r
+";

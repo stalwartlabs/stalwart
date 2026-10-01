@@ -8,7 +8,7 @@ use calcard::{
     common::timezone::Tz,
     icalendar::{
         ArchivedICalendar, ArchivedICalendarComponent, ICalendar, ICalendarComponent,
-        ICalendarProperty,
+        ICalendarComponentType, ICalendarProperty, ICalendarValue,
     },
     jscalendar::{JSCalendar, JSCalendarProperty, JSCalendarType, JSCalendarValue},
 };
@@ -344,6 +344,28 @@ impl EventMainComponent for ArchivedICalendar {
     }
 }
 
+pub(super) fn detach_iana_timezones(ical: &mut ICalendar) {
+    let Some((root, components)) = ical.components.split_first_mut() else {
+        return;
+    };
+    if root.component_type != ICalendarComponentType::VCalendar {
+        return;
+    }
+    root.component_ids.retain(|component_id| {
+        component_id
+            .checked_sub(1)
+            .and_then(|component_id| components.get(component_id as usize))
+            .is_none_or(|component| {
+                component.component_type != ICalendarComponentType::VTimezone
+                    || !component
+                        .property(&ICalendarProperty::Tzid)
+                        .and_then(|entry| entry.values.first())
+                        .and_then(ICalendarValue::as_text)
+                        .is_some_and(|tz_id| Tz::iana(tz_id).is_some())
+            })
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +453,93 @@ mod tests {
             archived.instance_recurrence_ids(),
             ical.instance_recurrence_ids()
         );
+    }
+
+    const ICAL: &str = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//Example Corp//Client 1.0//EN\r
+BEGIN:VTIMEZONE\r
+TZID:Custom Zone\r
+X-CUSTOM-MARKER:original\r
+BEGIN:STANDARD\r
+DTSTART:19700101T000000\r
+TZOFFSETFROM:+0330\r
+TZOFFSETTO:+0330\r
+END:STANDARD\r
+END:VTIMEZONE\r
+BEGIN:VTIMEZONE\r
+TZID:Europe/Berlin\r
+X-CUSTOM-MARKER:original\r
+BEGIN:STANDARD\r
+DTSTART:19700101T000000\r
+TZOFFSETFROM:+0100\r
+TZOFFSETTO:+0100\r
+END:STANDARD\r
+END:VTIMEZONE\r
+BEGIN:VEVENT\r
+UID:custom@example.com\r
+DTSTAMP:20300101T000000Z\r
+DTSTART;TZID=Custom Zone:20300301T090000\r
+DURATION:PT1H\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:berlin@example.com\r
+DTSTAMP:20300101T000000Z\r
+DTSTART;TZID=Europe/Berlin:20300301T090000\r
+DURATION:PT1H\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+
+    fn root_timezone_ids(ical: &ICalendar) -> Vec<&str> {
+        ical.components[0]
+            .component_ids
+            .iter()
+            .filter_map(|component_id| ical.components.get(*component_id as usize))
+            .filter(|component| component.component_type == ICalendarComponentType::VTimezone)
+            .filter_map(|component| component.property(&ICalendarProperty::Tzid))
+            .filter_map(|entry| entry.values.first().and_then(|value| value.as_text()))
+            .collect()
+    }
+
+    #[test]
+    fn detaches_only_iana_timezones() {
+        let mut ical = ICalendar::parse(ICAL).expect("valid iCalendar");
+        assert_eq!(root_timezone_ids(&ical), ["Custom Zone", "Europe/Berlin"]);
+        detach_iana_timezones(&mut ical);
+        assert_eq!(root_timezone_ids(&ical), ["Custom Zone"]);
+        assert_eq!(
+            ical.components[0]
+                .component_ids
+                .iter()
+                .filter(|component_id| {
+                    ical.components[**component_id as usize].component_type
+                        == ICalendarComponentType::VEvent
+                })
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn detached_iana_timezones_are_regenerated() {
+        let mut ical = ICalendar::parse(ICAL).expect("valid iCalendar");
+        detach_iana_timezones(&mut ical);
+        let mut ical = ical
+            .into_jscalendar::<Id, BlobId>()
+            .into_icalendar()
+            .expect("valid iCalendar");
+        ical.add_missing_timezones();
+
+        let mut ids = root_timezone_ids(&ical);
+        ids.sort_unstable();
+        assert_eq!(ids, ["Custom Zone", "Europe/Berlin"]);
+        let output = ical.to_string();
+        assert_eq!(
+            output.matches("X-CUSTOM-MARKER:original").count(),
+            1,
+            "{output}"
+        );
+        assert!(output.contains("TZOFFSETTO:+0200"), "{output}");
     }
 }

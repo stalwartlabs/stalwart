@@ -7,7 +7,7 @@
 use common::{Server, auth::AccessToken, sharing::EffectiveAcl};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::mailbox::{Mailbox, MailboxProperty, MailboxValue},
     request::capability::CapabilityIds,
 };
@@ -75,15 +75,16 @@ impl MailboxGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            cache
-                .mailboxes
-                .index
-                .keys()
-                .filter(|id| shared_ids.as_ref().is_none_or(|ids| ids.contains(**id)))
-                .copied()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            all_ids(
+                cache
+                    .mailboxes
+                    .index
+                    .keys()
+                    .filter(|id| shared_ids.as_ref().is_none_or(|ids| ids.contains(**id)))
+                    .copied()
+                    .map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),

@@ -11,7 +11,7 @@ use crate::{
 use common::{Server, auth::AccessToken};
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::sieve::{Sieve, SieveProperty, SieveValue},
     request::capability::CapabilityIds,
 };
@@ -71,11 +71,10 @@ impl SieveScriptGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            script_ids
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            all_ids(
+                script_ids.iter().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),

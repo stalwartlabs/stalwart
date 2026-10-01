@@ -28,7 +28,9 @@ use dav_proto::schema::{
         SupportedCollation, SupportedLock, WebDavProperty,
     },
     request::DavPropertyValue,
-    response::{AclRestrictions, Href, List, PropStat, Response, SupportedPrivilege},
+    response::{
+        AclRestrictions, BaseCondition, Href, List, PropStat, Response, SupportedPrivilege,
+    },
 };
 use groupware::{
     DavCalendarResource, DavResourceName,
@@ -98,6 +100,7 @@ impl PropFindItemBuilder for Server {
         let container = container.filter(|_| !is_private_view);
         let mut fields = Vec::with_capacity(properties.len());
         let mut fields_not_found = Vec::new();
+        let mut fields_too_large = Vec::new();
         for property in properties {
             if item.is_discover_only {
                 match property {
@@ -183,7 +186,7 @@ impl PropFindItemBuilder for Server {
                     WebDavProperty::GetCTag => {
                         if item.is_container {
                             let ctag = data
-                                .resources(self, access_token, account_id, sync_collection)
+                                .resources(self, access_token, account_id, sync_collection, 0)
                                 .await
                                 .caused_by(trc::location!())?
                                 .highest_change_id;
@@ -239,7 +242,7 @@ impl PropFindItemBuilder for Server {
                     }
                     WebDavProperty::SyncToken => {
                         let sync_token = data
-                            .resources(self, access_token, account_id, sync_collection)
+                            .resources(self, access_token, account_id, sync_collection, 0)
                             .await
                             .caused_by(trc::location!())?
                             .sync_token();
@@ -364,7 +367,7 @@ impl PropFindItemBuilder for Server {
                             {
                                 Some(access) => access.acl(item.document_id),
                                 None => data
-                                    .resources(self, access_token, account_id, sync_collection)
+                                    .resources(self, access_token, account_id, sync_collection, 0)
                                     .await
                                     .caused_by(trc::location!())?
                                     .file_acl(access_token, item.document_id),
@@ -378,7 +381,7 @@ impl PropFindItemBuilder for Server {
                             )
                         } else if let Some(parent_id) = item.parent_id {
                             current_user_privilege_set(
-                                data.resources(self, access_token, account_id, sync_collection)
+                                data.resources(self, access_token, account_id, sync_collection, 0)
                                     .await
                                     .caused_by(trc::location!())?
                                     .container_acl(access_token, parent_id),
@@ -631,7 +634,7 @@ impl PropFindItemBuilder for Server {
                         {
                             let default_tz = match (data_range, item.parent_id) {
                                 (Some(_), Some(calendar_id)) => data
-                                    .resources(self, access_token, account_id, sync_collection)
+                                    .resources(self, access_token, account_id, sync_collection, 0)
                                     .await
                                     .caused_by(trc::location!())?
                                     .calendar_default_tz(calendar_id, account_id)
@@ -659,8 +662,10 @@ impl PropFindItemBuilder for Server {
                                     property.clone(),
                                     DavValue::CData(ical),
                                 ));
-                            } else {
+                            } else if query.sync_type.is_none() {
                                 return Ok(false);
+                            } else {
+                                fields_too_large.push(DavPropertyValue::empty(property.clone()));
                             }
                         } else {
                             fields.push(DavPropertyValue::new(
@@ -744,6 +749,13 @@ impl PropFindItemBuilder for Server {
         }
         if !fields_not_found.is_empty() && !query.is_minimal() {
             prop_stat.push(PropStat::new_list(fields_not_found).with_status(StatusCode::NOT_FOUND));
+        }
+        if !fields_too_large.is_empty() {
+            prop_stat.push(
+                PropStat::new_list(fields_too_large)
+                    .with_status(StatusCode::INSUFFICIENT_STORAGE)
+                    .with_error(BaseCondition::NumberOfMatchesWithinLimit),
+            );
         }
         if prop_stat.is_empty() {
             prop_stat.push(PropStat::new_list(vec![]));

@@ -21,7 +21,7 @@ use groupware::{
     },
 };
 use jmap_proto::{
-    method::get::GetRequest,
+    method::get::{GetRequest, all_ids},
     object::calendar_event_notification::{
         self, CalendarEventNotificationGetResponse, CalendarEventNotificationObject,
         CalendarEventNotificationProperty, CalendarEventNotificationType, PersonObject,
@@ -84,12 +84,13 @@ impl CalendarEventNotificationGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            viewer
-                .visible_notifications(&cache)
-                .into_iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Into::into)
-                .collect::<Vec<_>>()
+            all_ids(
+                viewer
+                    .visible_notifications(&cache)
+                    .into_iter()
+                    .map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut response = CalendarEventNotificationGetResponse {
             account_id: request.account_id.into(),

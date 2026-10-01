@@ -39,7 +39,7 @@ use groupware::{
     },
 };
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::calendar_event,
     request::{IntoValid, capability::CapabilityIds},
 };
@@ -108,13 +108,14 @@ impl CalendarEventGet for Server {
                 .map(|(index, id)| (id, index))
                 .collect::<Vec<_>>()
         } else {
-            calendar_event_ids
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(Id::from)
-                .enumerate()
-                .map(|(index, id)| (id, index))
-                .collect::<Vec<_>>()
+            all_ids(
+                calendar_event_ids
+                    .iter()
+                    .map(Id::from)
+                    .enumerate()
+                    .map(|(index, id)| (id, index)),
+                self.core.jmap.get_max_objects,
+            )?
         };
         ids.sort_unstable_by_key(|(id, index)| (id.document_id(), u64::from(*id), *index));
         ids.dedup_by_key(|(id, _)| *id);

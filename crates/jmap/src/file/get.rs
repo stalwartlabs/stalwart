@@ -21,7 +21,7 @@ use groupware::{
     file::{FileNode, FileNodeRole},
 };
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::file_node::{self, FileNodeProperty, FileNodeValue},
     request::capability::CapabilityIds,
     types::date::UTCDate,
@@ -103,18 +103,17 @@ impl FileNodeGet for Server {
         let mut ids = match ids {
             Some(ids) => ids,
             None => match &access {
-                Some(access) => access
-                    .discoverable
-                    .iter()
-                    .take(self.core.jmap.get_max_objects)
-                    .map(Id::from)
-                    .collect(),
-                None => cache
-                    .resources
-                    .iter()
-                    .take(self.core.jmap.get_max_objects)
-                    .map(|resource| Id::from(resource.document_id()))
-                    .collect(),
+                Some(access) => all_ids(
+                    access.discoverable.iter().map(Id::from),
+                    self.core.jmap.get_max_objects,
+                )?,
+                None => all_ids(
+                    cache
+                        .resources
+                        .iter()
+                        .map(|resource| Id::from(resource.document_id())),
+                    self.core.jmap.get_max_objects,
+                )?,
             },
         };
 

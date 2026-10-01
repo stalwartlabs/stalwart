@@ -85,6 +85,7 @@ pub enum Query {
     Since(u64),
     SinceInclusive(u64),
     RangeInclusive(u64, u64),
+    Range(u64, u64),
 }
 
 pub trait DeserializeVanished: Sized + Sync + Send {
@@ -134,6 +135,7 @@ impl Store {
             Query::RangeInclusive(from_change_id, to_change_id) => {
                 (true, from_change_id, to_change_id)
             }
+            Query::Range(from_change_id, to_change_id) => (false, from_change_id, to_change_id),
         };
         let from_key = collection_.log_key(account_id, from_change_id);
         let to_key = collection_.log_key(account_id, to_change_id);
@@ -196,6 +198,7 @@ impl Store {
             Query::RangeInclusive(from_change_id, to_change_id) => {
                 (true, from_change_id, to_change_id)
             }
+            Query::Range(from_change_id, to_change_id) => (false, from_change_id, to_change_id),
         };
         let from_key = LogKey {
             account_id,
@@ -246,6 +249,7 @@ impl Store {
             Query::RangeInclusive(from_change_id, to_change_id) => {
                 (true, from_change_id, to_change_id)
             }
+            Query::Range(from_change_id, to_change_id) => (false, from_change_id, to_change_id),
         };
         let from_key = LogKey {
             account_id,

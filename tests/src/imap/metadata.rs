@@ -1040,11 +1040,11 @@ async fn message_metadata(test: &TestServer) {
     }
     imap.send_ok(&format!("SELECT \"{MESSAGE_BOX}\"")).await;
 
-    let plain = copy_reads(test, &mut imap, "2,4").await;
-    let flagged = copy_reads(test, &mut imap, "1,3").await;
+    let plain = copy_metadata_reads(test, &mut imap, "2,4").await;
+    let flagged = copy_metadata_reads(test, &mut imap, "1,3").await;
     assert_eq!(
-        flagged,
-        plain + 1,
+        (plain, flagged),
+        (0, 1),
         "a cross-account COPY reads the flagged containers in one bulk read"
     );
 
@@ -1121,7 +1121,7 @@ async fn message_metadata(test: &TestServer) {
     }
 }
 
-async fn copy_reads(test: &TestServer, imap: &mut ImapConnection, uids: &str) -> usize {
+async fn copy_metadata_reads(test: &TestServer, imap: &mut ImapConnection, uids: &str) -> usize {
     let mut lowest = usize::MAX;
     for _ in 0..COPY_RUNS {
         test.wait_for_tasks().await;
@@ -1129,7 +1129,7 @@ async fn copy_reads(test: &TestServer, imap: &mut ImapConnection, uids: &str) ->
         imap.send(&format!("UID COPY {uids} \"{SHARED_INBOUND_BOX}\""))
             .await;
         imap.assert_read(Type::Tagged, ResponseType::Ok).await;
-        lowest = lowest.min(StoreOps::take().total());
+        lowest = lowest.min(StoreOps::take().metadata);
     }
     lowest
 }

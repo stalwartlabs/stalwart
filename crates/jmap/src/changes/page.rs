@@ -304,7 +304,7 @@ pub(crate) fn private_query(
         Query::SinceInclusive(change_id) => {
             (change_id <= bound).then_some(Query::RangeInclusive(change_id, bound))
         }
-        Query::RangeInclusive(..) => Some(query),
+        Query::RangeInclusive(..) | Query::Range(..) => Some(query),
     }
 }
 

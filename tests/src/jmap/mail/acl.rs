@@ -202,6 +202,32 @@ pub async fn test(test: &TestServer) {
         "Email/changes leaked the id of a non-shared Trash email"
     );
 
+    // Email/get with null ids lists only the emails John can read
+    let response = john
+        .jmap_method_call(
+            "Email/get",
+            json!({"accountId": jane.id_string(), "ids": null, "properties": ["id"]}),
+        )
+        .await;
+    let listed_ids = response
+        .list()
+        .iter()
+        .filter_map(|email| email["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        listed_ids.contains(&jane_inbox_email.as_str()),
+        "{response:?}"
+    );
+    assert!(
+        !listed_ids.contains(&jane_trash_email.as_str()),
+        "{response:?}"
+    );
+    assert_eq!(
+        response.method_response()["notFound"],
+        json!([]),
+        "{response:?}"
+    );
+
     // John should only be able to copy blobs he has access to
     let blob_id = jane_client
         .email_get(

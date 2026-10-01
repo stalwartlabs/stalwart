@@ -8,7 +8,7 @@ use super::{DavKind, create_collection, files::PropertySet, home, item_name, put
 use crate::{
     jmap::metadata::{
         fixture::{Ctx, MetaType, Using, response_ids},
-        performance::{min_ops, stored},
+        performance::{min_ops, min_ops_by, stored},
     },
     utils::{server::TestServer, webdav::DummyWebDavClient},
 };
@@ -83,8 +83,9 @@ async fn min_request_ops(
     path: &str,
     headers: &[(&'static str, &str)],
     body: &str,
+    count: impl Fn(&StoreOps) -> usize,
 ) -> usize {
-    min_ops(test, async || {
+    min_ops_by(test, count, async || {
         let status = client
             .request_with_headers(method, path, headers.iter().copied(), body)
             .await
@@ -94,7 +95,7 @@ async fn min_request_ops(
     .await
 }
 
-async fn copy_delete_ops(
+async fn copy_delete_metadata_ops(
     test: &TestServer,
     client: &DummyWebDavClient,
     source: &str,
@@ -108,14 +109,14 @@ async fn copy_delete_ops(
             .request_with_headers("COPY", source, [("destination", target)], "")
             .await
             .with_status(StatusCode::CREATED);
-        copy = copy.min(StoreOps::take().total());
+        copy = copy.min(StoreOps::take().metadata);
         test.wait_for_tasks().await;
         StoreOps::take();
         client
             .request("DELETE", target, "")
             .await
             .with_status(StatusCode::NO_CONTENT);
-        delete = delete.min(StoreOps::take().total());
+        delete = delete.min(StoreOps::take().metadata);
     }
     (copy, delete)
 }
@@ -166,18 +167,47 @@ async fn measure(
         "<D:set><D:prop><D:creationdate>2024-01-01T00:00:00Z</D:creationdate>",
         "</D:prop></D:set></D:propertyupdate>"
     );
-    let (copy, delete) = copy_delete_ops(test, client, unflagged, copy_target).await;
+    let (copy, delete) = copy_delete_metadata_ops(test, client, unflagged, copy_target).await;
     Measures {
         cold: min_propfind_ops(test, client, kind, collection, &named, true).await,
         named: min_propfind_ops(test, client, kind, collection, &named, false).await,
         allprop: min_propfind_ops(test, client, kind, collection, "<D:allprop/>", false).await,
         propname: min_propfind_ops(test, client, kind, collection, "<D:propname/>", false).await,
-        sync: min_request_ops(test, client, "REPORT", collection, &depth, sync).await,
+        sync: min_request_ops(
+            test,
+            client,
+            "REPORT",
+            collection,
+            &depth,
+            sync,
+            StoreOps::total,
+        )
+        .await,
         multiget: match &multiget {
-            Some(body) => min_request_ops(test, client, "REPORT", collection, &depth, body).await,
+            Some(body) => {
+                min_request_ops(
+                    test,
+                    client,
+                    "REPORT",
+                    collection,
+                    &depth,
+                    body,
+                    StoreOps::total,
+                )
+                .await
+            }
             None => 0,
         },
-        proppatch: min_request_ops(test, client, "PROPPATCH", patched, &[], proppatch).await,
+        proppatch: min_request_ops(
+            test,
+            client,
+            "PROPPATCH",
+            patched,
+            &[],
+            proppatch,
+            |ops: &StoreOps| ops.metadata,
+        )
+        .await,
         copy,
         delete,
     }

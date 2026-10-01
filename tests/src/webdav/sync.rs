@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::{server::TestServer, webdav::GenerateTestDavResource};
+use crate::utils::{
+    server::TestServer,
+    webdav::{DavResponse, GenerateTestDavResource},
+};
 
 use ahash::AHashSet;
 use dav_proto::Depth;
 use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
 use serde_json::json;
+use store::write::LogCollection;
 use types::{collection::SyncCollection, id::Id};
 
 pub async fn test(test: &TestServer) {
@@ -287,6 +291,232 @@ pub async fn test(test: &TestServer) {
                 "D:multistatus.D:response.D:status",
                 "HTTP/1.1 404 Not Found",
             );
+
+        // Test 11: A truncated initial sync pages through every member while the collection changes
+        let (paged_folder, created) = client
+            .create_hierarchy(user_base_path.trim_end_matches('/'), 1, 0, 6)
+            .await;
+        let initial_files = created
+            .into_iter()
+            .map(|(href, _)| href)
+            .filter(|href| *href != paged_folder)
+            .collect::<Vec<_>>();
+        let added_file = format!("{paged_folder}added-file");
+        let mut deleted_files = Vec::new();
+        let mut synced = AHashSet::new();
+        let mut sync_token = String::new();
+        for page_num in 0.. {
+            assert!(page_num < 10, "initial sync did not finish");
+            let response = client
+                .sync_collection(
+                    &paged_folder,
+                    &sync_token,
+                    Depth::One,
+                    2.into(),
+                    ["D:getetag"],
+                )
+                .await;
+            sync_token = response.sync_token().to_string();
+            let page = SyncPage::parse(&response, &paged_folder);
+            assert!(page.removed.is_empty(), "{page:?}");
+            assert!(page.changed.len() <= 2, "{page:?}");
+            synced.extend(page.changed);
+            if !page.is_truncated {
+                break;
+            }
+            if page_num == 0 {
+                let delivered = initial_files
+                    .iter()
+                    .find(|href| synced.contains(*href))
+                    .expect("a file on the first page")
+                    .clone();
+                let pending = initial_files
+                    .iter()
+                    .rfind(|href| !synced.contains(*href))
+                    .expect("a file after the first page")
+                    .clone();
+                for href in [&delivered, &pending] {
+                    client
+                        .request("DELETE", href, "")
+                        .await
+                        .with_status(StatusCode::NO_CONTENT);
+                }
+                client
+                    .request("PUT", &added_file, &resource_type.generate())
+                    .await
+                    .with_status(StatusCode::CREATED);
+                deleted_files.extend([delivered, pending]);
+            }
+        }
+        let response = client
+            .sync_collection(&paged_folder, &sync_token, Depth::One, None, ["D:getetag"])
+            .await;
+        let follow_up = SyncPage::parse(&response, &paged_folder);
+        assert!(!follow_up.is_truncated, "{follow_up:?}");
+        for href in &deleted_files {
+            assert!(follow_up.removed.contains(href), "{href} {follow_up:?}");
+        }
+        assert!(follow_up.changed.contains(&added_file), "{follow_up:?}");
+        synced.extend(follow_up.changed);
+        for href in initial_files
+            .iter()
+            .filter(|href| !deleted_files.contains(*href))
+            .chain([&paged_folder, &added_file])
+        {
+            assert!(synced.contains(href), "{href} never synced: {synced:?}");
+        }
+
+        // Test 12: A truncated incremental sync keeps changes made while paging
+        let base_token = response.sync_token().to_string();
+        let mut new_files = Vec::new();
+        for num in 0..6 {
+            let href = format!("{paged_folder}incremental-{num}");
+            client
+                .request("PUT", &href, &resource_type.generate())
+                .await
+                .with_status(StatusCode::CREATED);
+            new_files.push(href);
+        }
+        let older_file = initial_files
+            .iter()
+            .find(|href| !deleted_files.contains(*href))
+            .expect("a file synced before the base token")
+            .clone();
+        let mut deleted_files = Vec::new();
+        let mut synced = AHashSet::new();
+        let mut sync_token = base_token;
+        for page_num in 0.. {
+            assert!(page_num < 10, "incremental sync did not finish");
+            let limit = 2 + page_num % 2;
+            let response = client
+                .sync_collection(
+                    &paged_folder,
+                    &sync_token,
+                    Depth::One,
+                    limit.into(),
+                    ["D:getetag"],
+                )
+                .await;
+            sync_token = response.sync_token().to_string();
+            let page = SyncPage::parse(&response, &paged_folder);
+            assert!(page.changed.len() + page.removed.len() <= limit, "{page:?}");
+            synced.extend(page.changed);
+            if !page.is_truncated {
+                break;
+            }
+            if page_num == 0 {
+                let delivered = new_files
+                    .iter()
+                    .find(|href| synced.contains(*href))
+                    .expect("a new file on the first page")
+                    .clone();
+                for href in [&delivered, &older_file] {
+                    client
+                        .request("DELETE", href, "")
+                        .await
+                        .with_status(StatusCode::NO_CONTENT);
+                }
+                deleted_files.extend([delivered, older_file.clone()]);
+            }
+        }
+        for href in new_files
+            .iter()
+            .filter(|href| !deleted_files.contains(*href))
+        {
+            assert!(synced.contains(href), "{href} never synced: {synced:?}");
+        }
+        let follow_up = SyncPage::parse(
+            &client
+                .sync_collection(&paged_folder, &sync_token, Depth::One, None, ["D:getetag"])
+                .await,
+            &paged_folder,
+        );
+        for href in &deleted_files {
+            assert!(follow_up.removed.contains(href), "{href} {follow_up:?}");
+        }
+
+        // Test 13: A card cannot gain a second name in the address book that holds it
+        if resource_type == DavResourceName::Card {
+            let original = format!("{paged_folder}no-uid.vcf");
+            let copy = format!("{paged_folder}no-uid-copy.vcf");
+            client
+                .request("PUT", &original, NO_UID_VCARD)
+                .await
+                .with_status(StatusCode::CREATED);
+            client
+                .request_with_headers("COPY", &original, [("destination", copy.as_str())], "")
+                .await
+                .with_status(StatusCode::PRECONDITION_FAILED);
+            client
+                .request("GET", &copy, "")
+                .await
+                .with_status(StatusCode::NOT_FOUND);
+        }
+
+        // Test 14: A sync token older than the retained change log is rejected
+        let stale_token = client
+            .sync_collection(&paged_folder, "", Depth::One, None, ["D:getetag"])
+            .await
+            .sync_token()
+            .to_string();
+        for num in 0..3 {
+            client
+                .request(
+                    "PUT",
+                    &format!("{paged_folder}purged-{num}"),
+                    &resource_type.generate(),
+                )
+                .await
+                .with_status(StatusCode::CREATED);
+        }
+        let sync_collection = match resource_type {
+            DavResourceName::Cal => SyncCollection::Calendar,
+            DavResourceName::Card => SyncCollection::AddressBook,
+            _ => SyncCollection::FileNode,
+        };
+        assert!(
+            test.server
+                .truncate_change_log(
+                    test.account("john@example.com").id().document_id(),
+                    LogCollection::Sync(sync_collection),
+                    1,
+                )
+                .await
+                .expect("change log truncated")
+                .is_some()
+        );
+        let body = format!(
+            concat!(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+                "<D:sync-collection xmlns:D=\"DAV:\">",
+                "<D:sync-token>{}</D:sync-token><D:sync-level>1</D:sync-level>",
+                "<D:prop><D:getetag/></D:prop></D:sync-collection>"
+            ),
+            stale_token
+        );
+        let response = client
+            .request("REPORT", &paged_folder, &body)
+            .await
+            .with_status(StatusCode::FORBIDDEN);
+        assert!(
+            response.expect_body().contains("valid-sync-token"),
+            "{:?}",
+            response.body
+        );
+        let fresh_token = client
+            .sync_collection(&paged_folder, "", Depth::One, None, ["D:getetag"])
+            .await
+            .sync_token()
+            .to_string();
+        client
+            .sync_collection(&paged_folder, &fresh_token, Depth::One, None, ["D:getetag"])
+            .await
+            .with_href_count(0);
+
+        client
+            .request("DELETE", &paged_folder, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
     }
 
     // Sharees are told when a shared collection is deleted
@@ -336,6 +566,65 @@ pub async fn test(test: &TestServer) {
         .request("DELETE", &kept_folder, "")
         .await
         .with_status(StatusCode::NO_CONTENT);
+
+    // Changes a sharee cannot see neither fill nor extend their pages
+    let team_folder = format!("{owner_base_path}team-sync/");
+    let private_folder = format!("{owner_base_path}private-sync/");
+    for folder in [&team_folder, &private_folder] {
+        owner_client
+            .mkcol("MKCOL", folder, [], [])
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    owner_client
+        .acl(&team_folder, sharee_principal.as_str(), ["read"])
+        .await
+        .with_status(StatusCode::OK);
+    let sync_token = client
+        .sync_collection(&owner_base_path, "", Depth::Infinity, None, ["D:getetag"])
+        .await
+        .sync_token()
+        .to_string();
+    for num in 0..4 {
+        owner_client
+            .request(
+                "PUT",
+                &format!("{private_folder}private-{num}.ics"),
+                &DavResourceName::Cal.generate(),
+            )
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    let team_event = format!("{team_folder}team.ics");
+    owner_client
+        .request("PUT", &team_event, &DavResourceName::Cal.generate())
+        .await
+        .with_status(StatusCode::CREATED);
+    let response = client
+        .sync_collection(
+            &owner_base_path,
+            &sync_token,
+            Depth::Infinity,
+            2.into(),
+            ["D:getetag"],
+        )
+        .await;
+    let page = SyncPage::parse(&response, &owner_base_path);
+    assert!(!page.is_truncated, "{page:?}");
+    assert!(page.removed.is_empty(), "{page:?}");
+    assert!(page.changed.contains(&team_event), "{page:?}");
+    assert!(
+        page.changed
+            .iter()
+            .all(|href| *href == team_event || *href == team_folder),
+        "{page:?}"
+    );
+    for folder in [&team_folder, &private_folder] {
+        owner_client
+            .request("DELETE", folder, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
 
     // Sharees are told when a shared file node stops being visible to them
     let owner = test.account("jane@example.com");
@@ -421,3 +710,41 @@ pub async fn test(test: &TestServer) {
     owner_client.delete_default_containers().await;
     test.assert_is_empty().await;
 }
+
+#[derive(Debug, Default)]
+struct SyncPage {
+    changed: Vec<String>,
+    removed: Vec<String>,
+    is_truncated: bool,
+}
+
+impl SyncPage {
+    fn parse(response: &DavResponse, request_uri: &str) -> Self {
+        let mut entries: Vec<(&str, Option<&str>)> = Vec::new();
+        for (key, value) in &response.xml {
+            match key.as_str() {
+                "D:multistatus.D:response.D:href" => entries.push((value, None)),
+                "D:multistatus.D:response.D:status" => {
+                    if let Some((_, status)) = entries.last_mut() {
+                        *status = Some(value);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut page = SyncPage::default();
+        for (href, status) in entries {
+            match status {
+                None => page.changed.push(href.to_string()),
+                Some("HTTP/1.1 404 Not Found") => page.removed.push(href.to_string()),
+                Some("HTTP/1.1 507 Insufficient Storage") if href == request_uri => {
+                    page.is_truncated = true
+                }
+                Some(status) => panic!("Unexpected status {status} for {href}"),
+            }
+        }
+        page
+    }
+}
+
+const NO_UID_VCARD: &str = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:No UID\r\nEND:VCARD\r\n";

@@ -6,7 +6,7 @@
 
 use super::assert_is_unique_uid;
 use crate::{
-    DavError, DavMethod,
+    DavError, DavErrorCondition, DavMethod,
     common::{
         ContainerOperation, assert_parent_limit,
         dead::{
@@ -23,7 +23,7 @@ use common::{
     auth::AccessToken,
     storage::{index::PresenceFlags, metadata::StoredEntry},
 };
-use dav_proto::{Depth, RequestHeaders};
+use dav_proto::{Depth, RequestHeaders, schema::response::CardCondition};
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
@@ -482,6 +482,23 @@ async fn copy_card(
         to_addressbook_id,
         Some(card.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
     )?;
+    if from_account_id == to_account_id
+        && card
+            .inner
+            .names
+            .iter()
+            .any(|name| name.parent_id == to_addressbook_id)
+    {
+        return Err(DavError::Condition(DavErrorCondition::new(
+            StatusCode::PRECONDITION_FAILED,
+            CardCondition::NoUidConflict(
+                to_resources
+                    .format_resource_path_by_parent(from_document_id, to_addressbook_id)
+                    .unwrap_or_default()
+                    .into(),
+            ),
+        )));
+    }
 
     if from_account_id == to_account_id {
         let mut new_card = card

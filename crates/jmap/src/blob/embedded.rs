@@ -10,7 +10,10 @@ use calcard::{
         blob::{BlobIdGenerator, BlobIdOutcome},
         export::{ExportError, ImportError},
     },
-    icalendar::ICalendar,
+    icalendar::{
+        ICalendar, ICalendarComponentType, ICalendarEntry, ICalendarParameterName,
+        ICalendarProperty, ICalendarValue,
+    },
     jscalendar::{
         JSCalendar, JSCalendarProperty, JSCalendarValue,
         export::ExportOptions as CalendarExportOptions, ext::JSCalendarPatch,
@@ -18,7 +21,7 @@ use calcard::{
     jscontact::{JSContact, JSContactProperty, export::ExportOptions as ContactExportOptions},
     vcard::VCard,
 };
-use common::{Server, auth::AccessToken};
+use common::{PROD_ID, Server, auth::AccessToken};
 use encodify::base64::LENIENT;
 use groupware::{
     cache::GroupwareCache,
@@ -27,10 +30,10 @@ use groupware::{
 };
 use jmap_proto::error::set::{InvalidProperty, SetError};
 use jmap_tools::{Key, Map, Property, Value};
-use std::future::Future;
+use std::{borrow::Cow, future::Future};
 use store::{
     ValueKey,
-    ahash::AHashMap,
+    ahash::{AHashMap, AHashSet},
     write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
@@ -56,6 +59,8 @@ pub enum EmbeddingError {
     NotFound(Vec<BlobId>),
     TooLarge { max_size: usize },
 }
+
+const MAX_EVENT_TIME_ZONES: usize = 64;
 
 type EventMap<'x> = Map<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>;
 type EventValue<'x> = Value<'x, JSCalendarProperty<Id>, JSCalendarValue<Id, BlobId>>;
@@ -358,7 +363,16 @@ impl EmbeddedExport for Server {
             return Ok(Err(EmbeddingError::TooLarge { max_size }.into()));
         }
 
-        let ical = match js_calendar.into_icalendar_with_report(
+        let event_prod_id = js_calendar
+            .0
+            .as_object_and_get(&Key::Property(JSCalendarProperty::Entries))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|event| event.as_object_and_get(&Key::Property(JSCalendarProperty::ProdId)))
+            .find_map(Value::as_str)
+            .map(Cow::into_owned);
+        let mut ical = match js_calendar.into_icalendar_with_report(
             CalendarExportOptions::new()
                 .max_expansions(max_instances)
                 .max_embedded_size(max_size)
@@ -379,6 +393,48 @@ impl EmbeddedExport for Server {
             },
             Err(err) => return Ok(Err(export_error(err, "calendar event", "iCalendar"))),
         };
+        let mut tz_ids = AHashSet::with_capacity(4);
+        if ical
+            .components
+            .iter()
+            .filter(|component| {
+                !matches!(
+                    component.component_type,
+                    ICalendarComponentType::VTimezone
+                        | ICalendarComponentType::Standard
+                        | ICalendarComponentType::Daylight
+                )
+            })
+            .flat_map(|component| &component.entries)
+            .flat_map(|entry| &entry.params)
+            .filter(|param| param.name == ICalendarParameterName::Tzid)
+            .filter_map(|param| param.value.as_text())
+            .any(|tz_id| tz_ids.insert(tz_id) && tz_ids.len() > MAX_EVENT_TIME_ZONES)
+        {
+            return Ok(Err(SetError::invalid_properties()
+                .with_property(JSCalendarProperty::TimeZone)
+                .with_description(format!(
+                    "An event cannot reference more than {MAX_EVENT_TIME_ZONES} time zones."
+                ))));
+        }
+        if let Some(root) = ical
+            .components
+            .first_mut()
+            .filter(|root| root.component_type == ICalendarComponentType::VCalendar)
+        {
+            match root.property_mut(&ICalendarProperty::Prodid) {
+                Some(entry) => {
+                    if let Some(prod_id) = event_prod_id {
+                        entry.values = [ICalendarValue::Text(prod_id)].into();
+                    }
+                }
+                None => root.entries.push(
+                    ICalendarEntry::new(ICalendarProperty::Prodid)
+                        .with_value(event_prod_id.unwrap_or_else(|| PROD_ID.to_string())),
+                ),
+            }
+        }
+        ical.add_missing_timezones();
 
         Ok(assert_embedded_size(
             ical.embedded_size(),

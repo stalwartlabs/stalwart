@@ -39,7 +39,7 @@ use types::{
     acl::{Acl, ArchivedAclGrant},
     collection::Collection,
 };
-use uri::{OwnedUri, Urn};
+use uri::{OwnedUri, SyncToken, Urn};
 
 pub mod acl;
 pub mod dead;
@@ -103,10 +103,7 @@ pub(crate) enum SyncType {
     #[default]
     None,
     Initial,
-    From {
-        id: u64,
-        seq: u32,
-    },
+    Token(SyncToken),
 }
 
 #[derive(Default, Debug)]
@@ -286,7 +283,7 @@ impl<'x> DavQuery<'x> {
                 .as_deref()
                 .and_then(Urn::parse)
                 .and_then(|urn| urn.try_unwrap_sync())
-                .map(|(id, seq)| SyncType::From { id, seq })
+                .map(SyncType::Token)
                 .unwrap_or(SyncType::Initial),
             depth: match changes.depth {
                 Depth::One => 1,
@@ -639,5 +636,12 @@ impl SyncType {
 
     pub fn is_none_or_initial(&self) -> bool {
         matches!(self, SyncType::None | SyncType::Initial)
+    }
+
+    pub fn is_incremental(&self) -> bool {
+        matches!(
+            self,
+            SyncType::Token(SyncToken::State(_) | SyncToken::ChangesPage { .. })
+        )
     }
 }

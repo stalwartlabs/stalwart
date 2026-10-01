@@ -8,7 +8,7 @@ use crate::participant_identity::set::identity_state;
 use common::Server;
 use groupware::calendar::{ParticipantIdentities, ParticipantIdentity};
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::participant_identity::{self, ParticipantIdentityProperty, ParticipantIdentityValue},
     types::state::State,
 };
@@ -69,12 +69,13 @@ impl ParticipantIdentityGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            identities
-                .identities
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(|i| Id::from(i.id.to_native()))
-                .collect::<Vec<_>>()
+            all_ids(
+                identities
+                    .identities
+                    .iter()
+                    .map(|i| Id::from(i.id.to_native())),
+                self.core.jmap.get_max_objects,
+            )?
         };
 
         for id in ids {

@@ -90,11 +90,14 @@ impl EmailSubmissionGet for Server {
                     |key, _| {
                         ids.push(Id::from(key.deserialize_be_u32(key.len() - U32_LEN)?));
 
-                        Ok(ids.len() < self.core.jmap.get_max_objects)
+                        Ok(ids.len() <= self.core.jmap.get_max_objects)
                     },
                 )
                 .await
                 .caused_by(trc::location!())?;
+            if ids.len() > self.core.jmap.get_max_objects {
+                return Err(trc::JmapEvent::RequestTooLarge.into_err());
+            }
 
             ids
         };

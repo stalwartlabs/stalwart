@@ -18,7 +18,7 @@ use email::{
     },
 };
 use jmap_proto::{
-    method::get::{GetRequest, GetResponse},
+    method::get::{GetRequest, GetResponse, all_ids},
     object::email::{Email, EmailProperty, EmailValue},
     request::{IntoValid, capability::CapabilityIds},
     types::date::UTCDate,
@@ -156,7 +156,8 @@ impl EmailGet for Server {
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        let message_ids = if access_token.is_member(account_id) {
+        let is_member = access_token.is_member(account_id);
+        let message_ids = if is_member {
             cache.email_document_ids()
         } else {
             cache.shared_messages(access_token, Acl::ReadItems)
@@ -165,12 +166,14 @@ impl EmailGet for Server {
         let ids = if let Some(ids) = ids {
             ids
         } else {
-            cache
-                .emails
-                .iter()
-                .take(self.core.jmap.get_max_objects)
-                .map(|item| Id::from_parts(item.thread_id(), item.document_id()))
-                .collect()
+            all_ids(
+                cache
+                    .emails
+                    .iter()
+                    .filter(|item| is_member || message_ids.contains(item.document_id()))
+                    .map(|item| Id::from_parts(item.thread_id(), item.document_id())),
+                self.core.jmap.get_max_objects,
+            )?
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),

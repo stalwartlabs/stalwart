@@ -425,6 +425,7 @@ impl Timeline {
             Query::Since(change_id) => (true, change_id, u64::MAX),
             Query::SinceInclusive(change_id) => (false, change_id, u64::MAX),
             Query::RangeInclusive(from, to) => (false, from, to),
+            Query::Range(from, to) => (true, from, to),
         };
         let mut result = Changes::default();
         for (change_id, row_log, change) in self.0.iter().take(committed) {
