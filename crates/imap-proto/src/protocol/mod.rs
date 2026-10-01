@@ -677,7 +677,13 @@ pub trait SerializeResponse {
 impl SerializeResponse for trc::Error {
     fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(128);
-        if let Some(tag) = self.value_as_str(trc::Key::Id) {
+        if let Some(tag) = self
+            .keys()
+            .iter()
+            .rev()
+            .find_map(|(key, value)| (*key == trc::Key::Id).then_some(value))
+            .and_then(|value| value.as_str())
+        {
             buf.extend_from_slice(tag.as_bytes());
         } else {
             buf.push(b'*');
@@ -813,8 +819,50 @@ impl Display for Command {
 #[cfg(test)]
 mod tests {
     use crate::parser::parse_sequence_set;
-    use crate::protocol::ObjectId;
+    use crate::protocol::{ObjectId, SerializeResponse};
     use types::id::Id;
+
+    #[test]
+    fn serialize_error_uses_command_tag() {
+        for (error, expected) in [
+            (
+                trc::AuthEvent::Failed.into_err().id("a1"),
+                "a1 NO [AUTHENTICATIONFAILED] ",
+            ),
+            (
+                trc::AuthEvent::Failed
+                    .into_err()
+                    .ctx(trc::Key::Id, 7u32)
+                    .id("a1"),
+                "a1 NO [AUTHENTICATIONFAILED] ",
+            ),
+            (
+                trc::AuthEvent::Error
+                    .into_err()
+                    .ctx(trc::Key::Id, "12")
+                    .id("a2"),
+                "a2 NO [AUTHENTICATIONFAILED] ",
+            ),
+            (
+                trc::AuthEvent::TooManyAttempts
+                    .into_err()
+                    .caused_by(trc::AuthEvent::Failed.into_err().ctx(trc::Key::Id, 7u32))
+                    .id("a3"),
+                "a3 NO [AUTHENTICATIONFAILED] ",
+            ),
+            (
+                trc::AuthEvent::Failed.into_err().ctx(trc::Key::Id, 7u32),
+                "* NO [AUTHENTICATIONFAILED] ",
+            ),
+        ] {
+            let response = error.serialize();
+            assert!(
+                response.starts_with(expected.as_bytes()),
+                "{:?} does not start with {expected:?}",
+                String::from_utf8_lossy(&response)
+            );
+        }
+    }
 
     #[test]
     fn serialize_objectid_compound() {

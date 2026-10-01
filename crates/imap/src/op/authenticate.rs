@@ -84,7 +84,10 @@ impl<T: SessionStream> Session<T> {
                             auth_failures: auth_failures + 1,
                         };
                     } else {
-                        return trc::AuthEvent::TooManyAttempts.into_err().caused_by(err);
+                        return trc::AuthEvent::TooManyAttempts
+                            .into_err()
+                            .caused_by(err)
+                            .id(tag.clone());
                     }
                 }
 

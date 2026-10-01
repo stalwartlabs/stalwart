@@ -13,6 +13,9 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 ## Fixed
 - JMAP: Creating a `MaskedEmail` with `emailDomain` fails with `forbidden` for every domain when the account has addresses on more than one domain.
 - Autodiscover: Requests for a response schema other than Outlook's, such as ActiveSync (`mobilesync`), are answered with the Outlook settings instead of error 601.
+- IMAP:
+  - `LOGIN` and `AUTHENTICATE` with a wrong, expired or unknown app password or API key are answered with an untagged `NO`, so clients keep waiting for the command to complete until the connection times out.
+  - The failed login that exceeds the maximum number of authentication failures is answered with an untagged `NO` before the connection is closed.
 
 ## [0.16.24] - 2026-09-27
 
