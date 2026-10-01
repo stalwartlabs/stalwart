@@ -79,7 +79,7 @@ pub(crate) async fn validate_masked_email(
                             account
                                 .addresses
                                 .iter()
-                                .all(|addr| addr.domain_id == domain.id)
+                                .any(|addr| addr.domain_id == domain.id)
                         })
                         .is_some()
                     {
