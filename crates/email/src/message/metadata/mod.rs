@@ -5,14 +5,11 @@
  */
 
 pub mod build;
-pub mod complete;
 pub mod header_id;
 pub mod row;
 pub mod source;
 pub mod view;
 
-#[cfg(test)]
-mod scan_tests;
 #[cfg(test)]
 mod tests;
 
@@ -20,7 +17,6 @@ use std::ops::{BitOr, BitOrAssign};
 use types::{blob::MAX_SECTION_CONTAINERS, blob_hash::BlobHash};
 
 pub use build::{ExtraHeaders, MAX_POOL_LEN, NewMetadata};
-pub use complete::{HeaderScan, HeaderSelection, ParsedHeaders, PartHeaders, ScannedHeader};
 pub use header_id::HeaderId;
 pub use row::{MetadataRow, MetadataStructure};
 pub use source::{DecodedText, PartSource, RawMessage, SourceChain};
@@ -29,15 +25,16 @@ pub use view::{
     HeaderList, HeaderMatcher, HeaderView, Mailbox, MessageView, Occurrence, PartView, TextItems,
 };
 
+pub use common::config::mailstore::limits::MAX_HEADER_ENTRIES;
+
 pub const NONE: u32 = u32::MAX;
 pub const GROUP_BIT: u16 = 1 << 15;
-pub const MAX_PART_ENTRIES: usize = Span::MAX_LEN;
-pub const MAX_HEADER_ENTRIES: usize = 16_384;
-pub const MAX_ADDRESS_ENTRIES: usize = 8_192;
-pub const MAX_FIELD_ADDRESSES: usize = 1_024;
+pub const MAX_PART_ENTRIES: usize = 16_384;
+pub const MAX_ADDRESS_ENTRIES: usize = Span::MAX_LEN;
+pub const MAX_FIELD_ADDRESSES: usize = GROUP_BIT as usize - 1;
 pub const MAX_TEXT_ITEMS: usize = 4_096;
 pub const MAX_PARAMS: usize = 4_096;
-pub const MAX_VALUE_LEN: usize = 32_768;
+pub const MAX_VALUE_LEN: usize = Str::MAX_LEN;
 pub const MAX_PROTECTED_VALUE_LEN: usize = 127;
 pub const MAX_SOURCE_DEPTH: usize = MAX_SECTION_CONTAINERS;
 pub const MAX_NESTING: usize = 256;
@@ -204,12 +201,6 @@ pub enum TransferEncoding {
     Base64 = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Completeness {
-    Complete,
-    Truncated,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PartFlags(pub u8);
 
@@ -218,8 +209,6 @@ impl PartFlags {
     pub const IN_HTML_BODY: PartFlags = PartFlags(1 << 1);
     pub const ATTACHMENT: PartFlags = PartFlags(1 << 2);
     pub const UNKNOWN_TRANSFER_ENCODING: PartFlags = PartFlags(1 << 3);
-    pub const HEADERS_TRUNCATED: PartFlags = PartFlags(1 << 4);
-    pub const TRUNCATED: PartFlags = PartFlags(1 << 5);
 
     pub fn contains(self, other: PartFlags) -> bool {
         self.0 & other.0 == other.0

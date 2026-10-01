@@ -11,7 +11,7 @@ use crate::message::{
     ingest::ThreadInfo,
     ingest_metadata::IngestMetadata,
     messagedata::{MessageData, PendingMessageData},
-    metadata::{HeaderId, HeaderSelection, MetadataRow},
+    metadata::{HeaderId, MetadataRow},
     sortkeys::MessageSortKeys,
 };
 use common::{
@@ -42,16 +42,6 @@ use types::{
     field::EmailField,
     keyword::Keyword,
 };
-
-const COPY_FIELDS: [HeaderId; 7] = [
-    HeaderId::MESSAGE_ID,
-    HeaderId::IN_REPLY_TO,
-    HeaderId::REFERENCES,
-    HeaderId::RESENT_MESSAGE_ID,
-    HeaderId::SUBJECT,
-    HeaderId::FROM,
-    HeaderId::TO,
-];
 
 pub enum CopyMessageError {
     NotFound,
@@ -152,11 +142,8 @@ impl EmailCopy for Server {
         // Obtain threadId
         let headers = row.raw_headers().caused_by(trc::location!())?;
         let mut message_ids = Vec::new();
-        let root_headers = metadata
-            .root()
-            .root_part()
-            .selected_headers(&headers, HeaderSelection::Ids(&COPY_FIELDS));
-        for header in root_headers.list().iter() {
+        let root_headers = metadata.root().root_part().headers();
+        for header in root_headers.iter() {
             if matches!(
                 header.id(),
                 HeaderId::MESSAGE_ID
@@ -173,7 +160,7 @@ impl EmailCopy for Server {
             }
         }
         let envelope = metadata.root().envelope();
-        let subject = metadata.thread_subject_with(root_headers.list(), &headers);
+        let subject = metadata.thread_subject_with(root_headers, &headers);
         let sent_at = envelope.datetime().map(|date| date.to_timestamp());
 
         message_ids.sort_unstable();
@@ -299,9 +286,6 @@ impl EmailCopy for Server {
 
         let sort_keys = match sort_keys_bytes {
             Some(sort_keys) => sort_keys.0,
-            None if metadata.completeness().is_truncated() => {
-                MessageSortKeys::from_headers(root_headers.list(), &headers).serialize()
-            }
             None => MessageSortKeys::from_envelope(envelope).serialize(),
         };
 

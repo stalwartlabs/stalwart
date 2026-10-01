@@ -7,7 +7,6 @@
 use email::message::metadata::{
     MAX_SOURCE_DEPTH, MessageView, PartView, RawMessage, TransferEncoding,
 };
-use imap_proto::protocol::fetch::Section;
 use std::{borrow::Cow, ops::Range};
 use utils::chained_bytes::ChainedBytes;
 
@@ -15,19 +14,11 @@ use utils::chained_bytes::ChainedBytes;
 pub struct DecodedSources {
     source: Option<Decoded>,
     leaf: Option<Decoded>,
-    fields: Option<SelectedFields>,
 }
 
 #[derive(Debug)]
 struct Decoded {
     part_id: u32,
-    bytes: Vec<u8>,
-}
-
-#[derive(Debug)]
-struct SelectedFields {
-    part_id: u32,
-    section: Section,
     bytes: Vec<u8>,
 }
 
@@ -51,7 +42,7 @@ impl DecodedSources {
         part: PartView<'_>,
         raw: RawMessage<'x>,
     ) -> Option<ChainedBytes<'x>> {
-        let DecodedSources { source, leaf, .. } = self;
+        let DecodedSources { source, leaf } = self;
         if leaf.as_ref().is_some_and(|leaf| leaf.part_id == part.id()) {
             return leaf.as_ref().map(|leaf| ChainedBytes::new(&leaf.bytes));
         }
@@ -70,34 +61,8 @@ impl DecodedSources {
         }
     }
 
-    pub(super) fn selected_fields<'x>(
-        &'x mut self,
-        part: PartView<'_>,
-        section: &Section,
-        raw: RawMessage<'x>,
-        collect: impl FnOnce(&SourceView<'_>) -> Vec<u8>,
-    ) -> Option<ChainedBytes<'x>> {
-        let DecodedSources { source, fields, .. } = self;
-        if !fields
-            .as_ref()
-            .is_some_and(|fields| fields.part_id == part.id() && fields.section == *section)
-        {
-            let bytes = collect(&Decoded::source(source, part.message(), raw)?);
-            *fields = Some(SelectedFields {
-                part_id: part.id(),
-                section: section.clone(),
-                bytes,
-            });
-        }
-        fields
-            .as_ref()
-            .map(|fields| ChainedBytes::new(&fields.bytes))
-    }
-
     pub fn len(&self) -> usize {
-        usize::from(self.source.is_some())
-            + usize::from(self.leaf.is_some())
-            + usize::from(self.fields.is_some())
+        usize::from(self.source.is_some()) + usize::from(self.leaf.is_some())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -110,7 +75,6 @@ impl DecodedSources {
             .into_iter()
             .flatten()
             .map(|decoded| decoded.bytes.len())
-            .chain(self.fields.as_ref().map(|fields| fields.bytes.len()))
             .sum()
     }
 }

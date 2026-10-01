@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{ArchivedMessageMetadata, MessageMetadata, build::NewMetadata};
-use std::borrow::Cow;
+use super::{
+    ArchivedAddressEntry, ArchivedHeaderEntry, ArchivedMessageEntry, ArchivedMessageMetadata,
+    ArchivedParamEntry, ArchivedPartEntry, ArchivedStr, MessageMetadata, build::NewMetadata,
+};
+use rkyv::{api::high::to_bytes_in, rancor};
+use std::{borrow::Cow, mem::size_of};
 use store::{
-    Deserialize, Serialize, U32_LEN,
+    Deserialize, U32_LEN,
     write::{
-        Archive, ArchiveBytes, Archiver, Compression, Dictionary,
+        Archive, ArchiveBytes, Dictionary,
         compress::{compress, compress_watermark, decompress_into},
     },
 };
@@ -18,6 +22,7 @@ const TRAILER_LEN: usize = U32_LEN + 1;
 const ROW_MARKER: u8 = 0x80;
 const HEADERS_COMPRESSED: u8 = 0x01;
 const HEADERS_DICTIONARY: Option<Dictionary> = Some(Dictionary::Email);
+const STRUCTURE_COMPRESS_WATERMARK: usize = 32 * 1024;
 
 pub struct MetadataStructure(Archive<ArchiveBytes>);
 
@@ -110,7 +115,15 @@ impl MetadataStructure {
 
 impl MetadataRow {
     pub fn encode(metadata: MessageMetadata, raw_headers: &[u8]) -> trc::Result<Vec<u8>> {
-        let mut row = Archiver::with_compression(metadata, Compression::None).serialize()?;
+        let capacity = metadata.archived_len() + TRAILER_LEN + raw_headers.len() + TRAILER_LEN;
+        let structure = to_bytes_in::<_, rancor::Error>(&metadata, Vec::with_capacity(capacity))
+            .map_err(|err| {
+                trc::StoreEvent::UnexpectedError
+                    .caused_by(trc::location!())
+                    .reason(err)
+            })?;
+        let mut row =
+            Archive::<ArchiveBytes>::serialize_raw(structure, STRUCTURE_COMPRESS_WATERMARK)?;
         let structure_len = u32::try_from(row.len()).map_err(|_| {
             trc::StoreEvent::UnexpectedError
                 .into_err()
@@ -168,6 +181,20 @@ impl MetadataRow {
         } else {
             Ok(Cow::Borrowed(stored))
         }
+    }
+}
+
+impl MessageMetadata {
+    pub(super) fn archived_len(&self) -> usize {
+        size_of::<ArchivedMessageMetadata>()
+            + self.messages.len() * size_of::<ArchivedMessageEntry>()
+            + self.parts.len() * size_of::<ArchivedPartEntry>()
+            + self.headers.len() * size_of::<ArchivedHeaderEntry>()
+            + self.ids.len() * U32_LEN
+            + self.addresses.len() * size_of::<ArchivedAddressEntry>()
+            + self.texts.len() * size_of::<ArchivedStr>()
+            + self.params.len() * size_of::<ArchivedParamEntry>()
+            + self.strings.len()
     }
 }
 

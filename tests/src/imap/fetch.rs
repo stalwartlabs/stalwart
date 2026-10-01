@@ -223,7 +223,7 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
     imap.send("FETCH 1 (ENVELOPE)").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok)
         .await
-        .assert_contains(&format!("\"{subject}\""))
+        .assert_contains(&format!("\"{}\"", &subject[..MAX_VALUE_LEN]))
         .assert_contains("(NIL NIL \"r0\" \"example.com\")")
         .assert_contains("(NIL NIL \"r1099\" \"example.com\")");
     imap.send("FETCH 1 (BODY.PEEK[1.MIME])").await;

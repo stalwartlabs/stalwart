@@ -8,7 +8,7 @@ use crate::blob::download::BlobDownload;
 use common::{Server, auth::AccessToken};
 use compact_str::format_compact;
 use email::message::{
-    jmap::{BodyValueOptions, EmailRender, HeaderNeeds},
+    jmap::{BodyValueOptions, EmailRender},
     metadata::{ArchivedMessageMetadata, ExtraHeaders, MessageMetadata},
 };
 use jmap_proto::{
@@ -116,7 +116,6 @@ impl EmailParse for Server {
                 .details(format_compact!("Invalid property {property:?}")));
         }
 
-        let header_needs = HeaderNeeds::new(&properties, &body_properties);
         let mut response = ParseResponse {
             account_id: request.account_id,
             parsed: VecMap::with_capacity(request.blob_ids.len()),
@@ -173,7 +172,6 @@ impl EmailParse for Server {
                 Some(&built.raw_headers),
                 Some(&raw_message),
                 &blob_id,
-                &header_needs,
                 &body_properties,
                 &options,
             )

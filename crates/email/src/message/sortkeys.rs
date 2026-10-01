@@ -6,10 +6,10 @@
 
 use crate::{
     cache::email::{MessageCacheAccess, thread_keywords},
-    message::metadata::{AddressHeader, EnvelopeView, HeaderId, HeaderList, Mailbox, Occurrence},
+    message::metadata::{AddressHeader, EnvelopeView, Mailbox, Occurrence},
 };
 use common::{MessageStoreCache, Server};
-use mail_parser::{HeaderForm, HeaderName, ParsedValue, thread_name};
+use mail_parser::{HeaderName, ParsedValue, thread_name};
 use store::{
     IterateParams, U32_LEN, ValueKey,
     ahash::AHashMap,
@@ -330,19 +330,6 @@ impl MessageSortKeys {
             first_mailbox(HeaderName::From),
             first_mailbox(HeaderName::To),
             headers.subject(),
-        )
-    }
-
-    pub fn from_headers(root: HeaderList<'_>, headers: &[u8]) -> Self {
-        let from = root.last_parsed(HeaderId::FROM, headers, HeaderForm::Addresses);
-        let to = root.last_parsed(HeaderId::TO, headers, HeaderForm::Addresses);
-        let subject = root.last_parsed(HeaderId::SUBJECT, headers, HeaderForm::Text);
-        MessageSortKeys::new(
-            from.as_ref().and_then(Mailbox::first_of),
-            to.as_ref().and_then(Mailbox::first_of),
-            subject
-                .as_ref()
-                .and_then(|subject| subject.value().as_text()),
         )
     }
 

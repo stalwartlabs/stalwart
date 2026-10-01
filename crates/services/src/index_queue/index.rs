@@ -705,8 +705,7 @@ async fn delete_email_metadata(
                     .as_ref()
                     .and_then(|e| e.deleted_items_retention.as_ref())
                 {
-                    use email::message::metadata::{AddressHeader, HeaderId, Mailbox, Occurrence};
-                    use mail_parser::HeaderForm;
+                    use email::message::metadata::{AddressHeader, Mailbox, Occurrence};
                     use registry::{
                         schema::{
                             prelude::{ObjectType, Property},
@@ -727,17 +726,10 @@ async fn delete_email_metadata(
                         (None, Some(name)) => Some(name.into()),
                         (None, None) => None,
                     };
-                    let from = match complete {
-                        Some((row, headers)) if metadata.completeness().is_truncated() => row
-                            .root_field_in(headers, HeaderId::FROM, HeaderForm::Addresses)
-                            .as_ref()
-                            .and_then(Mailbox::first_of)
-                            .and_then(describe),
-                        _ => envelope
-                            .addresses(AddressHeader::From, Occurrence::Last)
-                            .first()
-                            .and_then(describe),
-                    };
+                    let from = envelope
+                        .addresses(AddressHeader::From, Occurrence::Last)
+                        .first()
+                        .and_then(describe);
                     let subject = envelope.subject().map(Into::into);
                     let date = envelope.datetime().map(|date| date.to_timestamp());
 

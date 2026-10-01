@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{config::mailstore::limits::EmailLimits, storage::ObjectQuota};
+use crate::{
+    config::mailstore::limits::{EmailLimits, MAX_HEADER_ENTRIES},
+    storage::ObjectQuota,
+};
 use ahash::{AHashMap, AHashSet};
 use nlp::language::Language;
 use registry::{
@@ -281,6 +284,17 @@ impl EmailConfig {
             );
         }
 
+        let header_count = (email.max_header_count as usize).min(MAX_HEADER_ENTRIES);
+        if header_count < email.max_header_count as usize {
+            bp.build_warning(
+                ObjectType::Email.singleton(),
+                format!(
+                    "maxHeaderCount {} exceeds the supported maximum, using {header_count}",
+                    email.max_header_count
+                ),
+            );
+        }
+
         EmailConfig {
             default_language: Language::from_iso_639(search.default_language.as_str())
                 .unwrap_or(Language::English),
@@ -290,7 +304,7 @@ impl EmailConfig {
                 mailboxes_per_email: email.max_mailboxes_per_email as usize,
                 keywords_per_email: email.max_flags_per_email as usize,
                 keyword_length: email.max_flag_length as usize,
-                header_count: email.max_header_count as usize,
+                header_count,
                 header_size: email.max_header_size as usize,
             },
             mail_attachments_max_size: email.max_attachment_size as usize,

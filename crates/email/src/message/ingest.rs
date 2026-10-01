@@ -13,10 +13,7 @@ use crate::{
         index::IndexMessage,
         ingest_metadata::IngestMetadata,
         messagedata::{MessageData, PendingMessageData},
-        metadata::{
-            AddressHeader, ExtraHeaders, HeaderId, Mailbox, MetadataRow, MetadataStructure,
-            Occurrence,
-        },
+        metadata::{AddressHeader, ExtraHeaders, HeaderId, MetadataStructure, Occurrence},
         thread::ThreadFields,
     },
 };
@@ -29,7 +26,7 @@ use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
 };
-use mail_parser::{DateTime, HeaderForm, Message, MessageParser, thread_name};
+use mail_parser::{DateTime, Message, MessageParser, thread_name};
 use registry::{
     schema::{
         enums::StorageQuota,
@@ -860,43 +857,18 @@ impl EmailIngest for Server {
         if self.core.spam.classifier.is_some()
             && let Some(structure) = self
                 .store()
-                .get_value::<MetadataStructure>(key.clone())
+                .get_value::<MetadataStructure>(key)
                 .await
                 .caused_by(trc::location!())?
         {
             let metadata = structure.unarchive().caused_by(trc::location!())?;
             let envelope = metadata.root().envelope();
-            let from = if metadata.completeness().is_truncated() {
-                match self
-                    .store()
-                    .get_value::<MetadataRow>(key)
-                    .await
-                    .caused_by(trc::location!())?
-                {
-                    Some(row) => {
-                        let headers = row.raw_headers().caused_by(trc::location!())?;
-                        let parsed = row.unarchive().caused_by(trc::location!())?.root_field_in(
-                            &headers,
-                            HeaderId::FROM,
-                            HeaderForm::Addresses,
-                        );
-                        parsed
-                            .as_ref()
-                            .and_then(Mailbox::first_of)
-                            .and_then(|mailbox| mailbox.address)
-                            .unwrap_or_default()
-                            .to_string()
-                    }
-                    None => String::new(),
-                }
-            } else {
-                envelope
-                    .addresses(AddressHeader::From, Occurrence::Last)
-                    .first()
-                    .and_then(|mailbox| mailbox.address)
-                    .unwrap_or_default()
-                    .to_string()
-            };
+            let from = envelope
+                .addresses(AddressHeader::From, Occurrence::Last)
+                .first()
+                .and_then(|mailbox| mailbox.address)
+                .unwrap_or_default()
+                .to_string();
 
             self.add_spam_sample(
                 account_id,

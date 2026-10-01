@@ -5,24 +5,43 @@
  */
 
 use super::{
-    AddressEntry, AddressField, Completeness, ContentTypeEntry, Envelope, GROUP_BIT, HeaderEntry,
-    HeaderId, MAX_ADDRESS_ENTRIES, MAX_FIELD_ADDRESSES, MAX_HEADER_ENTRIES, MAX_PARAMS,
-    MAX_PART_ENTRIES, MAX_PROTECTED_VALUE_LEN, MAX_TEXT_ITEMS, MAX_VALUE_LEN, MessageEntry,
-    MessageMetadata, MetadataDate, NONE, ParamEntry, PartEntry, PartFlags, PartInfo, PartKind,
-    Span, Str, TransferEncoding,
+    AddressEntry, AddressField, ArchivedAddressEntry, ArchivedHeaderEntry, ArchivedMessageEntry,
+    ArchivedMessageMetadata, ArchivedParamEntry, ArchivedPartEntry, ArchivedStr, ContentTypeEntry,
+    Envelope, GROUP_BIT, HeaderEntry, HeaderId, MAX_ADDRESS_ENTRIES, MAX_FIELD_ADDRESSES,
+    MAX_HEADER_ENTRIES, MAX_PARAMS, MAX_PART_ENTRIES, MAX_PROTECTED_VALUE_LEN, MAX_TEXT_ITEMS,
+    MAX_VALUE_LEN, MessageEntry, MessageMetadata, MetadataDate, NONE, ParamEntry, PartEntry,
+    PartFlags, PartInfo, PartKind, Span, Str, TransferEncoding,
 };
 use crate::message::index::PREVIEW_LENGTH;
 use mail_parser::{
     Address, AddressList, ContentType, Encoding, Header, HeaderName, HeaderValue, Message,
     MessagePart, PartKind as ParsedKind, Source,
 };
-use std::mem::take;
+use std::mem::{size_of, take};
+use store::{U32_LEN, write::compress::MAX_ARCHIVE_SIZE};
 use types::blob_hash::BlobHash;
 
 pub const MAX_POOL_LEN: usize = 4 * 1024 * 1024;
 
 const CONTENT_TYPE_PROTECTED: &[&str] = &["charset", "name"];
 const CONTENT_DISPOSITION_PROTECTED: &[&str] = &["filename"];
+const PART_PROTECTED_PARAMS: usize =
+    CONTENT_TYPE_PROTECTED.len() + CONTENT_DISPOSITION_PROTECTED.len();
+const PART_PROTECTED_VALUES: usize = 2 * 2 + 2 * PART_PROTECTED_PARAMS;
+const PART_POOL_OVERFLOW: usize = PART_PROTECTED_VALUES * MAX_PROTECTED_VALUE_LEN + 2;
+const PART_IDS: usize = 4;
+const MAX_STRUCTURE_LEN: usize = size_of::<ArchivedMessageMetadata>()
+    + MAX_PART_ENTRIES
+        * (size_of::<ArchivedPartEntry>()
+            + size_of::<ArchivedMessageEntry>()
+            + PART_IDS * U32_LEN
+            + PART_PROTECTED_PARAMS * size_of::<ArchivedParamEntry>()
+            + PART_POOL_OVERFLOW)
+    + MAX_HEADER_ENTRIES * size_of::<ArchivedHeaderEntry>()
+    + MAX_ADDRESS_ENTRIES * size_of::<ArchivedAddressEntry>()
+    + MAX_TEXT_ITEMS * size_of::<ArchivedStr>()
+    + MAX_PARAMS * size_of::<ArchivedParamEntry>()
+    + MAX_POOL_LEN;
 
 const _: () = {
     assert!(MAX_VALUE_LEN <= Str::MAX_LEN);
@@ -34,6 +53,7 @@ const _: () = {
     assert!(MAX_TEXT_ITEMS <= Span::MAX_LEN);
     assert!(MAX_PARAMS + CONTENT_TYPE_PROTECTED.len() <= Span::MAX_LEN);
     assert!(MAX_PARAMS + CONTENT_DISPOSITION_PROTECTED.len() <= Span::MAX_LEN);
+    assert!(MAX_STRUCTURE_LEN < MAX_ARCHIVE_SIZE);
 };
 
 #[derive(Debug, Default, Clone)]
@@ -166,7 +186,6 @@ struct Builder<'m> {
     order: Vec<u32>,
     message_ends: Vec<u32>,
     shift: Shift,
-    truncated: bool,
 }
 
 impl MessageMetadata {
@@ -181,18 +200,14 @@ impl MessageMetadata {
         let mut builder = Builder::new(message, extra, block.len());
         builder.metadata.blob_hash = blob_hash;
         builder.metadata.blob_body_offset = root.offset_body();
+        builder.metadata.preview = message
+            .root()
+            .body_preview(PREVIEW_LENGTH)
+            .as_deref()
+            .map_or(Str::NONE, |preview| builder.push_whole(preview));
         builder.number();
         builder.messages();
         builder.parts(extra);
-        let preview = message.root().body_preview(PREVIEW_LENGTH);
-        builder.metadata.preview = preview
-            .as_deref()
-            .map_or(Str::NONE, |preview| builder.push_whole(preview));
-        if builder.truncated
-            && let Some(root) = builder.metadata.parts.first_mut()
-        {
-            root.info |= PartFlags::TRUNCATED;
-        }
 
         debug_assert!(
             builder
@@ -213,8 +228,8 @@ impl MessageMetadata {
 
 impl<'m> Builder<'m> {
     fn new(message: &'m Message<'m>, extra: &ExtraHeaders, block_len: usize) -> Self {
-        let parts_len = message.parts().len();
-        let messages_len = message.messages().len();
+        let parts_len = message.parts().len().min(MAX_PART_ENTRIES);
+        let messages_len = message.messages().len().min(MAX_PART_ENTRIES);
         Builder {
             metadata: MessageMetadata {
                 messages: Vec::with_capacity(messages_len),
@@ -234,7 +249,6 @@ impl<'m> Builder<'m> {
             order: Vec::new(),
             message_ends: Vec::new(),
             shift: Shift(extra.len() as u32),
-            truncated: false,
         }
     }
 
@@ -258,7 +272,6 @@ impl<'m> Builder<'m> {
             .headers
             .reserve(headers_len.min(MAX_HEADER_ENTRIES) + 2);
         let stored = parts_len.min(MAX_PART_ENTRIES);
-        self.truncated |= stored < parts_len;
         self.remap = vec![NONE; parts_len];
         self.order = vec![NONE; stored];
         for part in self.message.parts() {
@@ -298,7 +311,12 @@ impl<'m> Builder<'m> {
         let stored = self.order.len() as u32;
         let mut start = 0u32;
         let message_ends = take(&mut self.message_ends);
-        for (message, end) in self.message.messages().zip(message_ends.iter()) {
+        for (message, end) in self
+            .message
+            .messages()
+            .zip(message_ends.iter())
+            .take(MAX_PART_ENTRIES)
+        {
             let end = (*end).min(stored).max(start);
             let container = message
                 .container()
@@ -328,9 +346,7 @@ impl<'m> Builder<'m> {
         let limit = start + Span::MAX_LEN;
         for part in parts {
             let id = self.new_id(part.id());
-            if id == NONE || self.metadata.ids.len() >= limit {
-                self.truncated = true;
-            } else {
+            if id != NONE && self.metadata.ids.len() < limit {
                 self.metadata.ids.push(id);
             }
         }
@@ -364,10 +380,6 @@ impl<'m> Builder<'m> {
                 self.metadata
                     .headers
                     .extend_from_slice(extra.fields.get(..kept).unwrap_or_default());
-                if kept < extra.fields.len() {
-                    flags |= PartFlags::HEADERS_TRUNCATED;
-                    self.truncated = true;
-                }
             }
             for header in part.headers() {
                 let name = header.name();
@@ -379,9 +391,6 @@ impl<'m> Builder<'m> {
                         offset_value: shift.apply(header.offset_start()),
                         offset_end: shift.apply(header.offset_end()),
                     });
-                } else {
-                    flags |= PartFlags::HEADERS_TRUNCATED;
-                    self.truncated = true;
                 }
             }
             let headers = Span::between(headers_start, self.metadata.headers.len());
@@ -552,7 +561,6 @@ impl<'m> Builder<'m> {
     fn push_address_list(&mut self, list: AddressList<'m>, limit: usize) {
         for item in list.iter() {
             if self.metadata.addresses.len() >= limit {
-                self.truncated = true;
                 return;
             }
             match item {
@@ -575,7 +583,6 @@ impl<'m> Builder<'m> {
                     let mut members = 0u16;
                     for mailbox in group.mailboxes() {
                         if self.metadata.addresses.len() >= limit {
-                            self.truncated = true;
                             break;
                         }
                         let entry = AddressEntry {
@@ -648,7 +655,6 @@ impl<'m> Builder<'m> {
 
     fn push_item(&mut self, item: &str, index: usize, bracketed: bool) -> bool {
         if self.metadata.texts.len() >= MAX_TEXT_ITEMS {
-            self.truncated = true;
             return false;
         }
         let text = if bracketed {
@@ -699,10 +705,7 @@ impl<'m> Builder<'m> {
                     name: self.push_str(name),
                     value: self.push_str(value),
                 },
-                None => {
-                    self.truncated = true;
-                    continue;
-                }
+                None => continue,
             };
             self.metadata.params.push(entry);
         }
@@ -734,13 +737,11 @@ impl<'m> Builder<'m> {
     }
 
     fn push_raw(&mut self, text: &str) -> bool {
-        if self.metadata.strings.len() + text.len() <= MAX_POOL_LEN {
+        let fits = self.metadata.strings.len() + text.len() <= MAX_POOL_LEN;
+        if fits {
             self.metadata.strings.push_str(text);
-            true
-        } else {
-            self.truncated = true;
-            false
         }
+        fits
     }
 
     #[inline]
@@ -762,18 +763,14 @@ impl<'m> Builder<'m> {
         if text.len() <= self.pool_budget() {
             self.push_str(text)
         } else {
-            self.truncated = true;
             Str::NONE
         }
     }
 
     fn push_within(&mut self, text: &str, limit: usize) -> Str {
         let kept = floor_str(text, limit.min(Str::MAX_LEN));
-        if kept.len() < text.len() {
-            self.truncated = true;
-            if kept.is_empty() {
-                return Str::NONE;
-            }
+        if kept.is_empty() && !text.is_empty() {
+            return Str::NONE;
         }
         let start = self.metadata.strings.len() as u32;
         self.metadata.strings.push_str(kept);
@@ -803,23 +800,12 @@ impl PartEntry {
     };
 }
 
-impl NewMetadata {
-    pub fn completeness(&self) -> Completeness {
-        Completeness::of(
-            self.metadata
-                .parts
-                .first()
-                .map_or(PartFlags::default(), |root| root.info.flags()),
-        )
-    }
-}
-
 #[inline]
 pub(super) fn clamp(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-fn floor_str(text: &str, max: usize) -> &str {
+pub(crate) fn floor_str(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;
     }

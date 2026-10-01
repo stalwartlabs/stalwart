@@ -9,11 +9,11 @@ use common::{MessageStoreCache, Server};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     message::{
-        jmap::{BodyValueOptions, EmailNeeds, EmailRender, HeaderNeeds},
+        jmap::{BodyValueOptions, EmailNeeds, EmailRender},
         messagedata::MessageData,
         metadata::{
-            AddressHeader, ArchivedMessageMetadata, HeaderId, HeaderList, MetadataRow,
-            MetadataStructure, Occurrence, PartSource, RawMessage,
+            AddressHeader, ArchivedMessageMetadata, HeaderList, MetadataRow, MetadataStructure,
+            Occurrence, PartSource, RawMessage,
         },
     },
     push::EmailPush,
@@ -79,7 +79,6 @@ pub async fn build_email_push_object(
         .collect::<Vec<_>>();
     let options = BodyValueOptions::default();
     let needs = EmailNeeds::new(&keys, BODY_PROPERTIES, &options);
-    let (header_needs, filter_envelope) = FilterContext::header_needs(&keys, &config.filter);
     let needs_headers = needs.headers
         || config
             .filter
@@ -119,37 +118,17 @@ pub async fn build_email_push_object(
     } else {
         let Some(value) = server
             .store()
-            .get_value::<MetadataStructure>(key.clone())
+            .get_value::<MetadataStructure>(key)
             .await
             .caused_by(trc::location!())?
         else {
             return Ok(None);
         };
         structure = value;
-        let metadata = structure.unarchive().caused_by(trc::location!())?;
-        if needs.headers_for(metadata)
-            || (filter_envelope && metadata.completeness().is_truncated())
-        {
-            let Some(value) = server
-                .store()
-                .get_value::<MetadataRow>(key)
-                .await
-                .caused_by(trc::location!())?
-            else {
-                return Ok(None);
-            };
-            row = value;
-            raw_headers = row.raw_headers().caused_by(trc::location!())?;
-            (
-                row.unarchive().caused_by(trc::location!())?,
-                Some(raw_headers.as_ref()),
-            )
-        } else {
-            (metadata, None)
-        }
+        (structure.unarchive().caused_by(trc::location!())?, None)
     };
 
-    let blob = if filter_blob || needs.blob_for(metadata) {
+    let blob = if filter_blob || needs.blob {
         let Some(blob) = server
             .blob_store()
             .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
@@ -176,7 +155,6 @@ pub async fn build_email_push_object(
         headers,
         blob.as_deref(),
         &blob_id,
-        &header_needs,
         BODY_PROPERTIES,
         &options,
     );
@@ -302,55 +280,6 @@ struct FilterContext<'a> {
 }
 
 impl FilterContext<'_> {
-    fn header_needs(
-        keys: &[EmailProperty],
-        filters: &[Filter<EmailFilter>],
-    ) -> (HeaderNeeds, bool) {
-        let mut header_needs = HeaderNeeds::new(keys, BODY_PROPERTIES);
-        let mut filter_envelope = false;
-        for filter in filters {
-            if let Filter::Property(condition) = filter {
-                match condition {
-                    EmailFilter::Header(parts) => {
-                        if let Some(name) = parts.first() {
-                            header_needs.add_root_name(name);
-                        }
-                    }
-                    condition => {
-                        for id in FilterContext::envelope_ids(condition) {
-                            header_needs.add_root_id(*id);
-                            filter_envelope = true;
-                        }
-                    }
-                }
-            }
-        }
-        (header_needs, filter_envelope)
-    }
-
-    fn envelope_ids(condition: &EmailFilter) -> &'static [HeaderId] {
-        match condition {
-            EmailFilter::From(_) => &[HeaderId::FROM],
-            EmailFilter::To(_) => &[HeaderId::TO],
-            EmailFilter::Cc(_) => &[HeaderId::CC],
-            EmailFilter::Bcc(_) => &[HeaderId::BCC],
-            EmailFilter::Subject(_) => &[HeaderId::SUBJECT],
-            EmailFilter::Text(_) => &[
-                HeaderId::FROM,
-                HeaderId::TO,
-                HeaderId::CC,
-                HeaderId::BCC,
-                HeaderId::SUBJECT,
-            ],
-            _ => &[],
-        }
-    }
-
-    fn truncated_headers(&self) -> Option<&[u8]> {
-        self.headers
-            .filter(|_| self.meta.completeness().is_truncated())
-    }
-
     fn eval_node<'f, I>(&self, tokens: &mut Peekable<I>) -> Option<bool>
     where
         I: Iterator<Item = &'f Filter<EmailFilter>>,
@@ -473,30 +402,6 @@ impl FilterContext<'_> {
     }
 
     fn address_matches(&self, header: AddressHeader, matcher: &AhoCorasick) -> bool {
-        if let Some(headers) = self.truncated_headers() {
-            let id = match header {
-                AddressHeader::From => HeaderId::FROM,
-                AddressHeader::Sender => HeaderId::SENDER,
-                AddressHeader::ReplyTo => HeaderId::REPLY_TO,
-                AddressHeader::To => HeaderId::TO,
-                AddressHeader::Cc => HeaderId::CC,
-                AddressHeader::Bcc => HeaderId::BCC,
-            };
-            return self
-                .root_headers
-                .last_parsed(id, headers, HeaderForm::Addresses)
-                .is_some_and(|parsed| {
-                    parsed.value().as_address().is_some_and(|list| {
-                        list.mailboxes().any(|mailbox| {
-                            mailbox
-                                .name()
-                                .into_iter()
-                                .chain(mailbox.address())
-                                .any(|text| matcher.is_match(text))
-                        })
-                    })
-                });
-        }
         self.meta
             .root()
             .envelope()
@@ -512,17 +417,6 @@ impl FilterContext<'_> {
     }
 
     fn subject_matches(&self, matcher: &AhoCorasick) -> bool {
-        if let Some(headers) = self.truncated_headers() {
-            return self
-                .root_headers
-                .last_parsed(HeaderId::SUBJECT, headers, HeaderForm::Text)
-                .is_some_and(|parsed| {
-                    parsed
-                        .value()
-                        .as_text()
-                        .is_some_and(|subject| matcher.is_match(subject))
-                });
-        }
         self.meta
             .root()
             .envelope()
@@ -577,15 +471,15 @@ mod tests {
     use email::message::{
         jmap::{BodyValueOptions, EmailRender},
         messagedata::MessageData,
-        metadata::{Completeness, ExtraHeaders, MessageMetadata, MetadataRow},
+        metadata::{ExtraHeaders, MessageMetadata, MetadataRow},
     };
-    use jmap_proto::{method::query::Filter, object::email::EmailFilter};
+    use jmap_proto::object::email::EmailFilter;
     use mail_parser::MessageParser;
     use store::Deserialize;
     use types::{blob::BlobId, blob_hash::BlobHash};
 
     #[test]
-    fn filters_read_truncated_rows_from_section_b() {
+    fn filters_read_large_header_blocks() {
         let mut raw = String::new();
         for index in 0..16_400 {
             raw.push_str(&format!("X-Junk-{}: v\r\n", index % 97));
@@ -605,7 +499,6 @@ mod tests {
         let row = MetadataRow::deserialize(&built.encode().expect("row encodes")).expect("row");
         let headers = row.raw_headers().expect("headers");
         let meta = row.unarchive().expect("archive");
-        assert_eq!(meta.completeness(), Completeness::Truncated);
         let data = MessageData {
             mailboxes: Default::default(),
             keywords: 0,
@@ -631,12 +524,6 @@ mod tests {
             (EmailFilter::Subject("hello".into()), true),
             (EmailFilter::Subject("goodbye".into()), false),
         ];
-        let filters = conditions
-            .iter()
-            .map(|(condition, _)| Filter::Property(condition.clone()))
-            .collect::<Vec<_>>();
-        let (needs, filter_envelope) = FilterContext::header_needs(&[], &filters);
-        assert!(filter_envelope);
         let options = BodyValueOptions::default();
         let blob_id = BlobId::default();
         let render = EmailRender::new(
@@ -644,7 +531,6 @@ mod tests {
             Some(headers.as_ref()),
             Some(raw.as_bytes()),
             &blob_id,
-            &needs,
             BODY_PROPERTIES,
             &options,
         );

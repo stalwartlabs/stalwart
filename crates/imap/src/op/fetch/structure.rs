@@ -7,15 +7,13 @@
 use super::{section::MessageSections, source::DecodedSources};
 use email::message::metadata::{
     AddressHeader, AddressItem, Addresses, ArchivedMessageMetadata, ContentTypeView, EnvelopeView,
-    HeaderId, HeaderList, HeaderMatcher, HeaderSelection, MAX_NESTING, Mailbox, MessageView,
-    Occurrence, PartKind, PartView, RawMessage,
+    HeaderMatcher, MAX_NESTING, Mailbox, MessageView, Occurrence, PartKind, PartView, RawMessage,
 };
 use imap_proto::protocol::{
     fetch::{BodyContents, Section},
     push_int, quoted_or_literal_encoded_string, quoted_or_literal_encoded_string_or_nil,
     quoted_or_literal_raw_string, quoted_or_literal_raw_string_or_nil, quoted_rfc2822,
 };
-use mail_parser::{Address, HeaderForm, ParsedValue};
 use utils::chained_bytes::ChainedBytes;
 
 const DUMMY_ADDRESS: Mailbox<'static> = Mailbox {
@@ -52,7 +50,7 @@ impl<T> Binary<T> {
 }
 
 pub trait ImapMetadata {
-    fn write_envelope(&self, buf: &mut Vec<u8>, headers: Option<&[u8]>, is_utf8: bool);
+    fn write_envelope(&self, buf: &mut Vec<u8>, is_utf8: bool);
     fn write_structure(&self, buf: &mut Vec<u8>, is_extended: bool, is_utf8: bool);
     fn write_header_fields(
         &self,
@@ -81,21 +79,8 @@ pub trait ImapMetadata {
 }
 
 impl ImapMetadata for ArchivedMessageMetadata {
-    fn write_envelope(&self, buf: &mut Vec<u8>, headers: Option<&[u8]>, is_utf8: bool) {
-        match headers.filter(|_| self.completeness().is_truncated()) {
-            Some(headers) => {
-                let selected = self
-                    .root()
-                    .root_part()
-                    .selected_headers(headers, HeaderSelection::ENVELOPE);
-                HeaderEnvelope {
-                    headers: selected.list(),
-                    block: headers,
-                }
-                .write_imap(buf, is_utf8)
-            }
-            None => self.root().envelope().write_imap(buf, is_utf8),
-        }
+    fn write_envelope(&self, buf: &mut Vec<u8>, is_utf8: bool) {
+        self.root().envelope().write_imap(buf, is_utf8);
     }
 
     fn write_structure(&self, buf: &mut Vec<u8>, is_extended: bool, is_utf8: bool) {
@@ -330,159 +315,6 @@ impl ImapEnvelope for EnvelopeView<'_> {
             },
             is_utf8,
         );
-        buf.push(b')');
-    }
-}
-
-struct HeaderEnvelope<'x> {
-    headers: HeaderList<'x>,
-    block: &'x [u8],
-}
-
-impl HeaderEnvelope<'_> {
-    fn raw_value(&self, id: HeaderId) -> Option<&[u8]> {
-        self.headers.last(id)?.raw_value(self.block)
-    }
-
-    fn addresses(&self, id: HeaderId) -> Vec<ParsedValue<'_>> {
-        self.headers
-            .all(id)
-            .filter_map(|header| header.raw_value(self.block))
-            .map(|raw| HeaderForm::Addresses.parse(raw))
-            .collect()
-    }
-
-    fn write_message_ids(&self, buf: &mut Vec<u8>, id: HeaderId, all: bool, is_utf8: bool) {
-        let Some(raw) = self.raw_value(id) else {
-            buf.extend_from_slice(b"NIL");
-            return;
-        };
-        let parsed = HeaderForm::MessageIds.parse(raw);
-        let value = parsed.value();
-        let mut ids = String::new();
-        if let Some(list) = value.as_text_list() {
-            let skip = if all { 0 } else { list.len().saturating_sub(1) };
-            for (pos, item) in list.iter().skip(skip).enumerate() {
-                if pos > 0 {
-                    ids.push(' ');
-                }
-                ids.push('<');
-                ids.push_str(item);
-                ids.push('>');
-            }
-        }
-        quoted_or_literal_raw_string(buf, &ids, is_utf8);
-    }
-}
-
-impl ImapEnvelope for HeaderEnvelope<'_> {
-    fn write_imap(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        buf.push(b'(');
-        match self.raw_value(HeaderId::DATE) {
-            Some(raw) => match HeaderForm::Date.parse(raw).value().as_datetime() {
-                Some(date) => quoted_rfc2822(buf, &date),
-                None => {
-                    let text = String::from_utf8_lossy(raw.trim_ascii()).replace(['\r', '\n'], "");
-                    quoted_or_literal_encoded_string(buf, &text, is_utf8);
-                }
-            },
-            None => buf.extend_from_slice(b"NIL"),
-        }
-        buf.push(b' ');
-        match self.raw_value(HeaderId::SUBJECT) {
-            Some(raw) => {
-                let parsed = HeaderForm::Text.parse(raw);
-                quoted_or_literal_encoded_string_or_nil(buf, parsed.value().as_text(), is_utf8);
-            }
-            None => buf.extend_from_slice(b"NIL"),
-        }
-
-        let from = self.addresses(HeaderId::FROM);
-        let from = from.has_imap_address().then_some(from.as_slice());
-        for id in [HeaderId::FROM, HeaderId::SENDER, HeaderId::REPLY_TO] {
-            buf.push(b' ');
-            let values = if id == HeaderId::FROM {
-                Vec::new()
-            } else {
-                self.addresses(id)
-            };
-            if values.has_imap_address() {
-                values.write_imap(buf, is_utf8);
-            } else if let Some(from) = from {
-                from.write_imap(buf, is_utf8);
-            } else {
-                buf.push(b'(');
-                DUMMY_ADDRESS.write_imap(buf, is_utf8);
-                buf.push(b')');
-            }
-        }
-        for id in [HeaderId::TO, HeaderId::CC, HeaderId::BCC] {
-            buf.push(b' ');
-            let values = self.addresses(id);
-            if values.has_imap_address() {
-                values.write_imap(buf, is_utf8);
-            } else {
-                buf.extend_from_slice(b"NIL");
-            }
-        }
-
-        buf.push(b' ');
-        self.write_message_ids(buf, HeaderId::IN_REPLY_TO, true, is_utf8);
-        buf.push(b' ');
-        self.write_message_ids(buf, HeaderId::MESSAGE_ID, false, is_utf8);
-        buf.push(b')');
-    }
-}
-
-trait ParsedAddresses {
-    fn has_imap_address(&self) -> bool;
-    fn write_imap(&self, buf: &mut Vec<u8>, is_utf8: bool);
-}
-
-impl ParsedAddresses for [ParsedValue<'_>] {
-    fn has_imap_address(&self) -> bool {
-        self.iter().any(|value| {
-            value.value().as_address().is_some_and(|list| {
-                list.iter().any(|item| match item {
-                    Address::Mailbox(mailbox) => mailbox.address().is_some(),
-                    Address::Group(_) => true,
-                })
-            })
-        })
-    }
-
-    fn write_imap(&self, buf: &mut Vec<u8>, is_utf8: bool) {
-        buf.push(b'(');
-        for value in self {
-            let Some(list) = value.value().as_address() else {
-                continue;
-            };
-            for item in list.iter() {
-                match item {
-                    Address::Mailbox(mailbox) => Mailbox {
-                        name: mailbox.name(),
-                        address: mailbox.address(),
-                    }
-                    .write_imap(buf, is_utf8),
-                    Address::Group(group) => {
-                        buf.extend_from_slice(b"(NIL NIL ");
-                        match group.name() {
-                            Some(name) => quoted_or_literal_encoded_string(buf, name, is_utf8),
-                            None => buf.extend_from_slice(b"\"\""),
-                        }
-                        buf.extend_from_slice(b" NIL)");
-                        for mailbox in group.mailboxes() {
-                            Mailbox {
-                                name: mailbox.name(),
-                                address: mailbox.address(),
-                            }
-                            .write_imap(buf, is_utf8);
-                        }
-                        buf.extend_from_slice(b"(NIL NIL NIL NIL)");
-                    }
-                }
-            }
-        }
         buf.push(b')');
     }
 }
@@ -905,10 +737,11 @@ impl MediaToken for str {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use super::{Binary, HeaderEnvelope, HeaderSelection, ImapEnvelope, ImapMetadata};
+    use super::{Binary, ImapMetadata};
     use crate::op::fetch::source::DecodedSources;
     use email::message::metadata::{
-        ExtraHeaders, MAX_VALUE_LEN, MessageMetadata, MetadataRow, MetadataStructure,
+        ExtraHeaders, MAX_FIELD_ADDRESSES, MAX_VALUE_LEN, MessageMetadata, MetadataRow,
+        MetadataStructure,
     };
     use imap_proto::protocol::fetch::Section;
     use mail_parser::MessageParser;
@@ -1040,7 +873,7 @@ pub(super) mod tests {
             self.structure()
                 .unarchive()
                 .expect("unarchives")
-                .write_envelope(&mut buf, None, false);
+                .write_envelope(&mut buf, false);
             String::from_utf8(buf).expect("utf-8")
         }
 
@@ -1049,32 +882,7 @@ pub(super) mod tests {
             self.structure()
                 .unarchive()
                 .expect("unarchives")
-                .write_envelope(&mut buf, None, is_utf8);
-            buf
-        }
-
-        fn envelope_with_headers(&self, is_utf8: bool) -> Vec<u8> {
-            let row = self.row();
-            let headers = row.raw_headers().expect("headers");
-            let mut buf = Vec::new();
-            row.unarchive()
-                .expect("unarchives")
-                .write_envelope(&mut buf, Some(&headers), is_utf8);
-            buf
-        }
-
-        fn envelope_from_headers(&self, is_utf8: bool) -> Vec<u8> {
-            let row = self.row();
-            let headers = row.raw_headers().expect("headers");
-            let meta = row.unarchive().expect("unarchives");
-            let root = meta.root().root_part();
-            let selected = root.selected_headers(&headers, HeaderSelection::ENVELOPE);
-            let mut buf = Vec::new();
-            HeaderEnvelope {
-                headers: selected.list(),
-                block: &headers,
-            }
-            .write_imap(&mut buf, is_utf8);
+                .write_envelope(&mut buf, is_utf8);
             buf
         }
 
@@ -2020,7 +1828,7 @@ pub(super) mod tests {
 
     const PART_CAP_OVERFLOWS: [usize; 6] = [0, 1, 2, 3, 4, 5];
     const PART_CAP_FILLER: usize = 9_996;
-    const TRUNCATING_HEADERS: usize = 16_400;
+    const LARGE_HEADER_COUNT: usize = 16_400;
 
     fn part_cap_overflow(extra: usize) -> String {
         let mut message = String::from(concat!(
@@ -2057,8 +1865,8 @@ pub(super) mod tests {
         message
     }
 
-    fn truncated_envelopes() -> Vec<String> {
-        let junk = (0..TRUNCATING_HEADERS)
+    fn large_header_envelopes() -> Vec<String> {
+        let junk = (0..LARGE_HEADER_COUNT)
             .map(|index| format!("X-Junk: {index}\r\n"))
             .collect::<String>();
         EDGE_CASES
@@ -2105,9 +1913,9 @@ pub(super) mod tests {
 
     #[test]
     fn every_body_structure_matches_the_rfc_9051_grammar() {
-        let truncated = truncated_envelopes();
-        assert!(truncated.len() > 5);
-        for message in fixtures().into_iter().chain(truncated) {
+        let large = large_header_envelopes();
+        assert!(large.len() > 5);
+        for message in fixtures().into_iter().chain(large) {
             let stored = Stored::new(&message);
             for is_utf8 in [false, true] {
                 for is_extended in [false, true] {
@@ -2119,16 +1927,12 @@ pub(super) mod tests {
                         );
                     }
                 }
-                for envelope in [
-                    stored.envelope_with_headers(is_utf8),
-                    stored.envelope_bytes(is_utf8),
-                ] {
-                    if let Err(err) = Grammar::check_envelope(&envelope, is_utf8) {
-                        panic!(
-                            "{err}\nenvelope: {}\nmessage: {message:.300}",
-                            String::from_utf8_lossy(&envelope)
-                        );
-                    }
+                let envelope = stored.envelope_bytes(is_utf8);
+                if let Err(err) = Grammar::check_envelope(&envelope, is_utf8) {
+                    panic!(
+                        "{err}\nenvelope: {}\nmessage: {message:.300}",
+                        String::from_utf8_lossy(&envelope)
+                    );
                 }
             }
         }
@@ -2244,7 +2048,7 @@ pub(super) mod tests {
             envelope_nul,
             encoded_nul,
         ] {
-            let junk = (0..TRUNCATING_HEADERS)
+            let junk = (0..LARGE_HEADER_COUNT)
                 .map(|index| format!("X-Junk: {index}\r\n"))
                 .collect::<String>();
             for message in [message.to_string(), format!("{junk}{message}")] {
@@ -2254,7 +2058,6 @@ pub(super) mod tests {
                         stored.structure_bytes(false, is_utf8),
                         stored.structure_bytes(true, is_utf8),
                         stored.envelope_bytes(is_utf8),
-                        stored.envelope_with_headers(is_utf8),
                     ] {
                         assert!(
                             !output.contains(&0),
@@ -2266,7 +2069,7 @@ pub(super) mod tests {
             }
         }
         assert_eq!(
-            String::from_utf8(Stored::new(envelope_nul).envelope_with_headers(false)),
+            String::from_utf8(Stored::new(envelope_nul).envelope_bytes(false)),
             Ok(concat!(
                 "(\"nota date\" \"ab\" ((\"fn\" NIL \"fl\" \"fh.com\")) ",
                 "((NIL NIL \"sl\" \"example.com\")) ((NIL NIL \"rl\" \"example.com\")) ",
@@ -2379,7 +2182,7 @@ pub(super) mod tests {
             let structure = stored.structure_bytes(true, is_utf8);
             Grammar::check_body(&structure, is_utf8)
                 .unwrap_or_else(|err| panic!("{err}: {}", String::from_utf8_lossy(&structure)));
-            let envelope = stored.envelope_with_headers(is_utf8);
+            let envelope = stored.envelope_bytes(is_utf8);
             Grammar::check_envelope(&envelope, is_utf8)
                 .unwrap_or_else(|err| panic!("{err}: {}", String::from_utf8_lossy(&envelope)));
         }
@@ -2391,7 +2194,7 @@ pub(super) mod tests {
         ] {
             assert!(structure.contains(literal), "{literal:?} in {structure}");
         }
-        let envelope = String::from_utf8(stored.envelope_with_headers(false)).expect("utf-8");
+        let envelope = String::from_utf8(stored.envelope_bytes(false)).expect("utf-8");
         for literal in [
             "{5}\r\njos\u{e9} {12}\r\nex\u{e4}mple.com)",
             "{19}\r\n<\u{e9}t\u{e9}@example.com>)",
@@ -2404,9 +2207,9 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn envelope_falls_back_to_section_b_when_caps_were_hit() {
+    fn envelope_values_are_cut_at_the_caps() {
         let subject = "s".repeat(MAX_VALUE_LEN + 1);
-        let to = (0..1_100)
+        let to = (0..MAX_FIELD_ADDRESSES + 10)
             .map(|index| format!("r{index}@example.com"))
             .collect::<Vec<_>>()
             .join(",\r\n ");
@@ -2421,73 +2224,19 @@ pub(super) mod tests {
             ),
             to, subject
         ));
-        let row = stored.row();
-        assert!(
-            row.unarchive()
-                .expect("unarchives")
-                .completeness()
-                .is_truncated()
-        );
-
-        let envelope = String::from_utf8(stored.envelope_with_headers(false)).expect("utf-8");
+        let envelope = stored.envelope();
         Grammar::check_envelope(envelope.as_bytes(), false).expect("valid envelope");
-        assert!(envelope.contains(&format!("\"{subject}\"")));
-        for index in [0, 1_023, 1_024, 1_099] {
+        assert!(!envelope.contains(&subject));
+        assert!(envelope.contains(&subject[..MAX_VALUE_LEN]));
+        for index in [0, 1_023, 1_024, MAX_FIELD_ADDRESSES - 1] {
             assert!(
                 envelope.contains(&format!("(NIL NIL \"r{index}\" \"example.com\")")),
                 "r{index}"
             );
         }
+        assert!(!envelope.contains(&format!(
+            "(NIL NIL \"r{MAX_FIELD_ADDRESSES}\" \"example.com\")"
+        )));
         assert!(envelope.ends_with(" NIL \"<id@example.com>\")"));
-
-        let stored_only = stored.envelope();
-        assert!(!stored_only.contains(&format!("\"{subject}\"")));
-        assert!(!stored_only.contains("(NIL NIL \"r1099\" \"example.com\")"));
-    }
-
-    #[test]
-    fn envelope_from_headers_matches_the_stored_envelope() {
-        let mut messages = fixtures();
-        messages.extend([
-            concat!(
-                "Date:\r\n",
-                "Subject:\r\n",
-                "In-Reply-To:\r\n",
-                "Message-ID:\r\n",
-                "From: a@example.com\r\n",
-                "To: b@example.com\r\n\r\nbody\r\n"
-            )
-            .to_string(),
-            concat!(
-                "Date: not a date\r\n",
-                "Subject: hello\r\n",
-                "In-Reply-To: <a@b> <c@d>\r\n",
-                "Message-ID: <e@f>\r\n",
-                "Message-ID: <g@h>\r\n",
-                "From: a@example.com\r\n",
-                "From: Second <second@example.com>\r\n",
-                "Sender: Friends: ;\r\n",
-                "To: Friends and Family: John Doe <jdoe@example.com>;\r\n",
-                "Cc: no-at-sign, route@[1.2.3.4]\r\n\r\nbody\r\n"
-            )
-            .to_string(),
-            "Subject: no from\r\n\r\nbody\r\n".to_string(),
-        ]);
-        for message in messages {
-            let stored = Stored::new(&message);
-            for is_utf8 in [false, true] {
-                let mut expected = Vec::new();
-                stored
-                    .structure()
-                    .unarchive()
-                    .expect("unarchives")
-                    .write_envelope(&mut expected, None, is_utf8);
-                assert_eq!(
-                    String::from_utf8_lossy(&stored.envelope_from_headers(is_utf8)),
-                    String::from_utf8_lossy(&expected),
-                    "{message:.300}"
-                );
-            }
-        }
     }
 }

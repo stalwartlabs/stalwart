@@ -7,16 +7,10 @@
 use super::{EmailRender, JmapMap, JmapValue, str_value};
 use crate::message::{
     body::{truncate_html, truncate_plain},
-    index::PREVIEW_LENGTH,
-    metadata::{
-        BodyList, HeaderId, MAX_NESTING, PartFlags, PartKind, PartSource, PartView, RawMessage,
-    },
+    metadata::{BodyList, MAX_NESTING, PartFlags, PartKind, PartSource, PartView},
 };
 use jmap_proto::object::email::{EmailProperty, EmailValue};
 use jmap_tools::{Key, Map, Value};
-use mail_parser::{
-    HeaderForm as ParseForm, HeaderValue, ParsedValue, preview_html, preview_text, text_to_html,
-};
 use std::borrow::Cow;
 use types::blob::{BlobId, EncodedRange};
 
@@ -27,44 +21,16 @@ struct Level<'a> {
 }
 
 impl<'a> EmailRender<'a, '_> {
-    pub(super) fn body_part(&self, root: PartView<'a>) -> JmapValue<'a> {
-        if self.truncated {
-            self.truncated_body_part(root)
-        } else {
-            self.walk_parts::<false>(root)
-        }
-    }
-
     pub(super) fn body_list_values(&self, list: BodyList) -> JmapValue<'a> {
-        if self.truncated {
-            self.truncated_body_list(list)
-        } else {
-            self.walk_list::<false>(list)
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn truncated_body_part(&self, root: PartView<'a>) -> JmapValue<'a> {
-        self.walk_parts::<true>(root)
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn truncated_body_list(&self, list: BodyList) -> JmapValue<'a> {
-        self.walk_list::<true>(list)
-    }
-
-    fn walk_list<const TRUNCATED: bool>(&self, list: BodyList) -> JmapValue<'a> {
         Value::Array(
             self.root
                 .body_list(list)
-                .map(|part| self.walk_parts::<TRUNCATED>(part))
+                .map(|part| self.body_part(part))
                 .collect(),
         )
     }
 
-    fn walk_parts<const TRUNCATED: bool>(&self, root: PartView<'a>) -> JmapValue<'a> {
+    pub(super) fn body_part(&self, root: PartView<'a>) -> JmapValue<'a> {
         let mut levels = vec![Level {
             parent: None,
             next: 0,
@@ -80,11 +46,7 @@ impl<'a> EmailRender<'a, '_> {
             };
             if let Some(part) = next {
                 level.next += 1;
-                let mut values = self.part_values(part);
-                if TRUNCATED {
-                    self.read_truncated_fields(part, &mut values);
-                }
-                level.values.push(Value::Object(values));
+                level.values.push(Value::Object(self.part_values(part)));
                 if part.is_multipart() && levels.len() < MAX_NESTING {
                     levels.push(Level {
                         parent: Some(part),
@@ -163,81 +125,6 @@ impl<'a> EmailRender<'a, '_> {
         values
     }
 
-    #[cold]
-    #[inline(never)]
-    fn read_truncated_fields(&self, part: PartView<'a>, values: &mut JmapMap<'a>) {
-        for (key, value) in values.iter_mut() {
-            let (id, form) = match key {
-                Key::Property(EmailProperty::Cid) => (HeaderId::CONTENT_ID, ParseForm::MessageIds),
-                Key::Property(EmailProperty::Language) => {
-                    (HeaderId::CONTENT_LANGUAGE, ParseForm::CommaList)
-                }
-                Key::Property(EmailProperty::Location) => {
-                    (HeaderId::CONTENT_LOCATION, ParseForm::Text)
-                }
-                _ => continue,
-            };
-            if let Some(field) = self.truncated_part_field(part, id, form) {
-                *value = field;
-            }
-        }
-    }
-
-    fn truncated_part_field(
-        &self,
-        part: PartView<'a>,
-        id: HeaderId,
-        form: ParseForm,
-    ) -> Option<JmapValue<'a>> {
-        let raw = self.raw.filter(RawMessage::has_headers)?;
-        let source = self.meta.source(part.message(), raw)?;
-        self.with_part_headers(part, &source, |headers| {
-            let value = headers
-                .last(id)
-                .and_then(|header| source.get(header.value_range()));
-            let parsed = value.as_deref().map(|value| form.parse(value));
-            Some(match parsed.as_ref().map(ParsedValue::value) {
-                Some(HeaderValue::TextList(list)) if form == ParseForm::CommaList => Value::Array(
-                    list.iter()
-                        .map(|item| Value::Str(Cow::Owned(item.to_string())))
-                        .collect(),
-                ),
-                Some(HeaderValue::Text(text)) if form == ParseForm::CommaList => {
-                    Value::Array(vec![Value::Str(Cow::Owned(text.to_string()))])
-                }
-                Some(value) if form != ParseForm::CommaList => value
-                    .as_text()
-                    .map_or(Value::Null, |text| Value::Str(Cow::Owned(text.to_string()))),
-                _ => Value::Null,
-            })
-        })
-    }
-
-    #[cold]
-    #[inline(never)]
-    pub(super) fn fallback_preview(&self) -> Option<String> {
-        if !self.truncated {
-            return None;
-        }
-        let source = PartSource::Raw(self.raw?);
-        if let Some(part) = self.root.text_body().next() {
-            let text = part.text(&source)?.text;
-            match part.kind() {
-                PartKind::Text => Some(preview_text(&text, PREVIEW_LENGTH).into_owned()),
-                PartKind::Html => Some(preview_html(&text, PREVIEW_LENGTH)),
-                _ => None,
-            }
-        } else {
-            let part = self.root.html_body().next()?;
-            let text = part.text(&source)?.text;
-            match part.kind() {
-                PartKind::Html => Some(preview_html(&text, PREVIEW_LENGTH)),
-                PartKind::Text => Some(preview_html(&text_to_html(&text), PREVIEW_LENGTH)),
-                _ => None,
-            }
-        }
-    }
-
     fn part_blob_id(&self, part: PartView<'a>) -> JmapValue<'a> {
         self.inner_blob_id(part).map_or(Value::Null, |blob_id| {
             Value::Element(EmailValue::BlobId(blob_id))
@@ -280,12 +167,13 @@ impl<'a> EmailRender<'a, '_> {
         let Some(source) = self.meta.source(part.message(), raw) else {
             return Value::Null;
         };
-        self.with_part_headers(part, &source, |headers| match &source {
+        let headers = part.headers();
+        match &source {
             PartSource::Raw(raw) => headers.jmap_value(property, *raw),
             PartSource::Decoded(bytes) => {
                 headers.jmap_value(property, bytes.as_slice()).into_owned()
             }
-        })
+        }
     }
 
     pub(super) fn body_values(&self) -> JmapValue<'a> {

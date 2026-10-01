@@ -5,11 +5,11 @@
  */
 
 use super::{
-    AddressHeader, AddressItem, Completeness, EnvelopeView, ExtraHeaders, HeaderId, HeaderMatcher,
-    HeaderSelection, MAX_FIELD_ADDRESSES, MAX_HEADER_ENTRIES, MAX_PARAMS, MAX_PART_ENTRIES,
-    MAX_POOL_LEN, MAX_PROTECTED_VALUE_LEN, MAX_TEXT_ITEMS, MAX_VALUE_LEN, MessageMetadata,
-    MetadataRow, MetadataStructure, Occurrence, PartFlags, PartInfo, PartKind, PartSource,
-    PartView, TransferEncoding, TzMinute,
+    AddressHeader, AddressItem, EnvelopeView, ExtraHeaders, HeaderId, HeaderMatcher,
+    MAX_FIELD_ADDRESSES, MAX_HEADER_ENTRIES, MAX_PARAMS, MAX_PART_ENTRIES, MAX_POOL_LEN,
+    MAX_PROTECTED_VALUE_LEN, MAX_TEXT_ITEMS, MAX_VALUE_LEN, MessageMetadata, MetadataRow,
+    MetadataStructure, Occurrence, PartFlags, PartInfo, PartKind, PartSource, PartView,
+    TransferEncoding, TzMinute,
 };
 use crate::message::index::PREVIEW_LENGTH;
 use mail_parser::{
@@ -101,6 +101,44 @@ fn round_trips_plain_and_compressed_headers() {
 }
 
 #[test]
+fn archived_len_is_the_serialized_length() {
+    let mut samples = corpus();
+    samples.push(("headers".to_string(), sample(4_000)));
+    for (name, raw) in samples {
+        let Some(message) = MessageParser::new().parse(&raw) else {
+            continue;
+        };
+        for extra in [ExtraHeaders::default(), ExtraHeaders::delivery()] {
+            let built = MessageMetadata::build(&message, &extra, BlobHash::generate(&raw));
+            let serialized = rkyv::to_bytes::<rkyv::rancor::Error>(&built.metadata)
+                .expect("serializes")
+                .len();
+            assert_eq!(built.metadata.archived_len(), serialized, "{name}");
+        }
+    }
+}
+
+#[test]
+fn large_structures_are_compressed() {
+    let raw = sample(4_000);
+    let (row, headers) = ExtraHeaders::delivery().encode_raw(&raw);
+    let structure = MetadataStructure::deserialize(&row).expect("structure");
+    let inflated = structure.archive().inner.len();
+    assert!(inflated > 32 * 1024);
+    assert!(row.len() < inflated);
+    let meta = structure.unarchive().expect("archive");
+    assert_eq!(meta.root().root_part().headers().len(), 4_004);
+    assert_eq!(meta.root().envelope().subject(), Some("codec"));
+
+    let decoded = read_row(&row);
+    assert!(decoded.headers_compressed());
+    assert_eq!(decoded.raw_headers().expect("headers").as_ref(), headers);
+    let archived = decoded.unarchive().expect("archive");
+    assert_eq!(archived.headers_len(), headers.len());
+    assert_eq!(archived.root().root_part().headers().len(), 4_004);
+}
+
+#[test]
 fn rejects_malformed_rows() {
     for raw in [sample(10), sample(0)] {
         let (row, _) = ExtraHeaders::delivery().encode_raw(&raw);
@@ -169,7 +207,6 @@ fn header_entries_are_capped() {
     let meta = structure.unarchive().expect("archive");
     let root = meta.root().root_part();
     assert_eq!(root.headers().len(), MAX_HEADER_ENTRIES);
-    assert!(root.flags().contains(PartFlags::HEADERS_TRUNCATED));
     assert_eq!(meta.root().envelope().subject(), Some("after the flood"));
     assert!(structure.archive().inner.len() < 4 * 1024 * 1024);
 }
@@ -194,7 +231,6 @@ fn address_entries_are_capped() {
         to.mailboxes().last().and_then(|mailbox| mailbox.address),
         Some(format!("user{}@example.com", MAX_FIELD_ADDRESSES - 1).as_str())
     );
-    assert_eq!(meta.completeness(), Completeness::Truncated);
     assert_eq!(
         envelope
             .addresses(AddressHeader::From, Occurrence::Last)
@@ -531,7 +567,7 @@ fn header_longer_than_64_kib() {
 
 #[test]
 fn part_entries_are_capped() {
-    const PARTS: usize = 66_000;
+    const PARTS: usize = MAX_PART_ENTRIES + 1_000;
     let mut raw = String::with_capacity(PARTS * 16 + 256);
     raw.push_str("Subject: many parts\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n");
     for index in 0..PARTS {
@@ -544,7 +580,7 @@ fn part_entries_are_capped() {
         "--b--\r\n"
     ));
     let message = MessageParser::new()
-        .max_parts(70_000)
+        .max_parts(PARTS + 16)
         .parse(raw.as_bytes())
         .expect("parses");
     assert!(message.parts().len() > MAX_PART_ENTRIES);
@@ -552,7 +588,6 @@ fn part_entries_are_capped() {
     let (row, _) = ExtraHeaders::default().encode(&message);
     let row = read_row(&row);
     let meta = row.unarchive().expect("archive");
-    assert_eq!(meta.completeness(), Completeness::Truncated);
     assert_eq!(meta.parts().len(), MAX_PART_ENTRIES);
     assert_eq!(meta.root().parts().len(), MAX_PART_ENTRIES);
     assert!(meta.part(MAX_PART_ENTRIES as u32).is_none());
@@ -566,7 +601,7 @@ fn part_entries_are_capped() {
     let source = meta
         .source(meta.root(), meta.raw_message(None, raw.as_bytes()))
         .expect("source");
-    for index in [0, 32_767, 32_768, MAX_PART_ENTRIES - 2] {
+    for index in [0, 8_191, 8_192, MAX_PART_ENTRIES - 2] {
         let child = root.child(index).expect("child");
         assert_eq!(child.id() as usize, index + 1);
         assert_eq!(
@@ -612,10 +647,10 @@ fn part_info_packs_kind_encoding_and_flags() {
                 assert_eq!(info.kind(), kind);
                 assert_eq!(info.encoding(), encoding);
                 assert_eq!(info.flags(), PartFlags(bits));
-                info |= PartFlags::TRUNCATED;
+                info |= PartFlags(1 << 7);
                 assert_eq!(info.kind(), kind);
                 assert_eq!(info.encoding(), encoding);
-                assert_eq!(info.flags(), PartFlags(bits) | PartFlags::TRUNCATED);
+                assert_eq!(info.flags(), PartFlags(bits) | PartFlags(1 << 7));
             }
         }
     }
@@ -674,21 +709,12 @@ fn extra_header_fields_are_capped() {
     for _ in 0..MAX_HEADER_ENTRIES + 10 {
         extra.push(HeaderId::X_SPAM_STATUS, "No");
     }
-    let (row, headers) = extra.encode_raw(raw);
+    let (row, _) = extra.encode_raw(raw);
     let row = read_row(&row);
     let meta = row.unarchive().expect("archive");
     let root = meta.root().root_part();
     assert_eq!(root.headers().len(), MAX_HEADER_ENTRIES);
-    assert!(root.is_headers_truncated());
-    assert_eq!(meta.completeness(), Completeness::Truncated);
-    let complete = root.selected_headers(&headers, HeaderSelection::All);
-    assert!(complete.is_parsed());
-    assert_eq!(complete.list().len(), MAX_HEADER_ENTRIES + 12);
-    let subject = complete
-        .list()
-        .last(HeaderId::SUBJECT)
-        .expect("subject header");
-    assert_eq!(subject.raw_value(&headers), Some(&b" extra flood\r\n"[..]));
+    assert!(root.headers().last(HeaderId::SUBJECT).is_none());
     assert_eq!(meta.root().envelope().subject(), Some("extra flood"));
 }
 
@@ -725,7 +751,6 @@ fn group_members_fit_the_packed_count() {
             .and_then(|mailbox| mailbox.address),
         Some(format!("user{}@example.com", MAX_FIELD_ADDRESSES - 2).as_str())
     );
-    assert_eq!(meta.completeness(), Completeness::Truncated);
 }
 
 #[test]
@@ -736,13 +761,11 @@ fn longest_values_keep_their_length() {
     let row = read_row(&row);
     let meta = row.unarchive().expect("archive");
     assert_eq!(meta.root().envelope().subject(), Some(subject.as_str()));
-    assert_eq!(meta.completeness(), Completeness::Complete);
     let longer = format!("Subject: {subject}tail\r\n\r\nbody\r\n");
     let (row, _) = ExtraHeaders::default().encode_raw(longer.as_bytes());
     let row = read_row(&row);
     let meta = row.unarchive().expect("archive");
     assert_eq!(meta.root().envelope().subject(), Some(subject.as_str()));
-    assert_eq!(meta.completeness(), Completeness::Truncated);
 }
 
 fn digest(messages: usize, padding: usize) -> String {
@@ -1387,10 +1410,8 @@ impl PartView<'_> {
         let known = PartFlags::IN_TEXT_BODY
             | PartFlags::IN_HTML_BODY
             | PartFlags::ATTACHMENT
-            | PartFlags::UNKNOWN_TRANSFER_ENCODING
-            | PartFlags::HEADERS_TRUNCATED
-            | PartFlags::TRUNCATED;
-        if flags.0 & !known.0 != 0 || (self.id() != 0 && flags.contains(PartFlags::TRUNCATED)) {
+            | PartFlags::UNKNOWN_TRANSFER_ENCODING;
+        if flags.0 & !known.0 != 0 {
             return Err(format!("part {id} unknown flags"));
         }
         if flags.contains(PartFlags::IN_TEXT_BODY) != parsed.in_text_body()
@@ -1420,92 +1441,6 @@ impl PartView<'_> {
 }
 
 #[test]
-fn complete_messages_keep_stored_headers() {
-    let raw = sample(3);
-    for extra in [ExtraHeaders::default(), ExtraHeaders::delivery()] {
-        let (row, headers) = extra.encode_raw(&raw);
-        let row = read_row(&row);
-        let meta = row.unarchive().expect("archive");
-        assert_eq!(meta.completeness(), Completeness::Complete);
-        let root = meta.root().root_part();
-        assert!(!root.is_headers_truncated());
-        let complete = root.selected_headers(&headers, HeaderSelection::All);
-        assert!(!complete.is_parsed());
-        assert_eq!(complete.list().len(), root.headers().len());
-    }
-}
-
-#[test]
-fn truncated_header_blocks_are_parsed_again() {
-    const JUNK: usize = MAX_HEADER_ENTRIES + 16;
-    let mut raw = String::with_capacity(JUNK * 24 + 512);
-    for index in 0..JUNK {
-        let _ = write!(raw, "X-Junk-{}: value\r\n", index % 97);
-    }
-    raw.push_str(concat!(
-        "Subject: hidden\r\n",
-        "Bcc: blind@example.com\r\n",
-        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
-        "\r\n",
-        "--b\r\n",
-        "Content-Type: text/plain; charset=iso-8859-1\r\n",
-        "Content-Transfer-Encoding: quoted-printable\r\n",
-        "\r\n",
-        "caf=E9\r\n",
-        "--b--\r\n",
-    ));
-    for (extra, extra_fields) in [(ExtraHeaders::default(), 0), (ExtraHeaders::delivery(), 2)] {
-        let (row, headers) = extra.encode_raw(raw.as_bytes());
-        let row = read_row(&row);
-        let meta = row.unarchive().expect("archive");
-        assert_eq!(meta.completeness(), Completeness::Truncated);
-        let root = meta.root().root_part();
-        assert!(root.is_headers_truncated());
-        assert_eq!(root.headers().len(), MAX_HEADER_ENTRIES);
-        assert!(root.headers().last(HeaderId::SUBJECT).is_none());
-
-        let complete = root.selected_headers(&headers, HeaderSelection::All);
-        assert!(complete.is_parsed());
-        let list = complete.list();
-        assert_eq!(list.len(), extra_fields + JUNK + 3);
-        for (stored, parsed) in root.headers().iter().zip(list.iter()) {
-            assert_eq!(stored.id(), parsed.id());
-            assert_eq!(stored.field_range(), parsed.field_range());
-            assert_eq!(stored.value_range(), parsed.value_range());
-        }
-        let subject = list.last(HeaderId::SUBJECT).expect("subject");
-        assert_eq!(subject.raw_value(&headers), Some(&b" hidden\r\n"[..]));
-        assert_eq!(list.all(HeaderId::BCC).count(), 1);
-        assert_eq!(
-            meta.strip_root_fields(raw.as_bytes(), HeaderId::BCC)
-                .as_ref(),
-            raw.replace("Bcc: blind@example.com\r\n", "").as_bytes()
-        );
-
-        let raw_message = meta.raw_message(Some(&headers), raw.as_bytes());
-        let source = PartSource::Raw(raw_message);
-        let text = meta.part(1).expect("text part");
-        assert!(text.is_headers_truncated());
-        assert!(text.headers().is_empty());
-        let block = source.get(text.header_range()).expect("part header block");
-        let complete = text.selected_headers(&block, HeaderSelection::All);
-        let content_type = complete
-            .list()
-            .last(HeaderId::CONTENT_TYPE)
-            .and_then(|header| source.get(header.value_range()))
-            .expect("content type");
-        assert_eq!(
-            content_type.as_ref(),
-            b" text/plain; charset=iso-8859-1\r\n"
-        );
-        assert_eq!(text.charset(), Some("iso-8859-1"));
-        let decoded = text.text(&source).expect("text");
-        assert_eq!(decoded.text, "café");
-        assert!(!decoded.has_problems);
-    }
-}
-
-#[test]
 fn message_id_is_stored_before_in_reply_to() {
     let mut raw = String::from("In-Reply-To:");
     for index in 0..MAX_TEXT_ITEMS + 8 {
@@ -1518,13 +1453,12 @@ fn message_id_is_stored_before_in_reply_to() {
     let envelope = meta.root().envelope();
     assert_eq!(envelope.message_id().last(), Some("self@example.com"));
     assert_eq!(envelope.in_reply_to().len(), MAX_TEXT_ITEMS - 1);
-    assert_eq!(meta.completeness(), Completeness::Truncated);
 }
 
 #[test]
 fn each_address_field_has_its_own_budget() {
     let mut raw = String::from("From: ");
-    for index in 0..MAX_FIELD_ADDRESSES * 9 {
+    for index in 0..MAX_FIELD_ADDRESSES * 3 {
         if index > 0 {
             raw.push_str(",\r\n ");
         }
@@ -1556,7 +1490,6 @@ fn each_address_field_has_its_own_budget() {
             Some(address)
         );
     }
-    assert_eq!(meta.completeness(), Completeness::Truncated);
 }
 
 fn late_text_part(flood: impl Fn(&mut String)) -> String {
@@ -1589,7 +1522,7 @@ fn earlier_params_never_starve_a_later_charset() {
     let pool_flood = late_text_part(|raw| {
         for part in 0..5 {
             let _ = write!(raw, "--b\r\nContent-Type: application/x-{part}");
-            for index in 0..60 {
+            for index in 0..30 {
                 let _ = write!(raw, ";\r\n p{index}=\"{long}\"");
             }
             raw.push_str("\r\n\r\nx\r\n");
@@ -1599,7 +1532,6 @@ fn earlier_params_never_starve_a_later_charset() {
         let (row, headers) = ExtraHeaders::default().encode_raw(raw.as_bytes());
         let structure = MetadataStructure::deserialize(&row).expect("structure");
         let meta = structure.unarchive().expect("archive");
-        assert_eq!(meta.completeness(), Completeness::Truncated);
         assert!(meta.params.len() <= MAX_PARAMS + 3 * meta.parts.len());
         assert!(
             meta.pool().len() <= MAX_POOL_LEN + meta.parts.len() * 16 * MAX_PROTECTED_VALUE_LEN

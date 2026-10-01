@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{BodyValueOptions, EmailNeeds, EmailRender, HeaderNeeds, JmapValue};
-use crate::message::{
-    metadata::{
-        AddressHeader, Completeness, ExtraHeaders, HeaderId, HeaderSelection, MAX_FIELD_ADDRESSES,
-        MAX_HEADER_ENTRIES, MAX_VALUE_LEN, Mailbox, MessageMetadata, MetadataRow, Occurrence,
-    },
-    sortkeys::MessageSortKeys,
+use super::{BodyValueOptions, EmailNeeds, EmailRender, JmapValue};
+use crate::message::metadata::{
+    AddressHeader, ExtraHeaders, HeaderId, MAX_FIELD_ADDRESSES, MAX_HEADER_ENTRIES, MAX_VALUE_LEN,
+    MessageMetadata, MetadataRow, Occurrence,
 };
 use common::storage::blob::SectionDecode;
 use encodify::base64::MIME;
@@ -43,7 +40,6 @@ struct Fixture {
     row: MetadataRow,
     headers: Vec<u8>,
     blob_id: BlobId,
-    header_needs: HeaderNeeds,
 }
 
 impl Fixture {
@@ -62,7 +58,6 @@ impl Fixture {
             blob,
             row,
             headers,
-            header_needs: HeaderNeeds::new(&[EmailProperty::Headers], &[EmailProperty::Headers]),
             blob_id: BlobId::new(
                 hash,
                 BlobClass::Linked {
@@ -81,23 +76,11 @@ impl Fixture {
         body_properties: &'x [EmailProperty],
         options: &'x BodyValueOptions,
     ) -> EmailRender<'x, 'x> {
-        self.render_with(&self.header_needs, headers, blob, body_properties, options)
-    }
-
-    fn render_with<'x>(
-        &'x self,
-        header_needs: &'x HeaderNeeds,
-        headers: bool,
-        blob: bool,
-        body_properties: &'x [EmailProperty],
-        options: &'x BodyValueOptions,
-    ) -> EmailRender<'x, 'x> {
         EmailRender::new(
             self.row.unarchive().expect("archive"),
             headers.then_some(self.headers.as_slice()),
             blob.then_some(self.blob.as_slice()),
             &self.blob_id,
-            header_needs,
             body_properties,
             options,
         )
@@ -158,11 +141,8 @@ fn list_properties_borrow_from_the_archive() {
         EmailNeeds {
             headers: false,
             blob: false,
-            envelope: true,
-            fallback: true
         }
     );
-    assert!(!needs.headers_for(fixture.row.unarchive().expect("archive")));
     let render = fixture.render(false, false, &DEFAULT_BODY_PROPERTIES, &options);
 
     let subject = render.value(&EmailProperty::Subject).expect("subject");
@@ -257,8 +237,6 @@ fn references_and_headers_read_section_b() {
         EmailNeeds {
             headers: true,
             blob: false,
-            envelope: false,
-            fallback: false
         }
     );
     let render = fixture.render(true, false, &DEFAULT_BODY_PROPERTIES, &options);
@@ -386,8 +364,6 @@ fn content_type_as_text() {
         EmailNeeds {
             headers: true,
             blob: true,
-            envelope: false,
-            fallback: false
         }
     );
     let render = fixture.render(true, true, &body_properties, &options);
@@ -531,8 +507,6 @@ fn body_values_report_encoding_problems() {
         EmailNeeds {
             headers: false,
             blob: true,
-            envelope: false,
-            fallback: false
         }
     );
     let render = fixture.render(false, true, &DEFAULT_BODY_PROPERTIES, &options);
@@ -702,7 +676,7 @@ fn part_headers_without_sources_are_null() {
 }
 
 #[test]
-fn truncated_envelopes_are_read_from_section_b() {
+fn oversized_envelopes_are_cut() {
     const RECIPIENTS: usize = MAX_FIELD_ADDRESSES + 476;
     let mut raw = String::from("To: ");
     for index in 0..RECIPIENTS {
@@ -716,8 +690,6 @@ fn truncated_envelopes_are_read_from_section_b() {
         "\r\nSubject: {subject}\r\nFrom: a@example.com\r\nMessage-ID: <m@example.com>\r\n\r\nbody\r\n"
     ));
     let fixture = Fixture::with_extra(&raw, &ExtraHeaders::default());
-    let meta = fixture.row.unarchive().expect("archive");
-    assert_eq!(meta.completeness(), Completeness::Truncated);
     let options = BodyValueOptions::default();
     let needs = EmailNeeds::new(&[EmailProperty::To], &DEFAULT_BODY_PROPERTIES, &options);
     assert_eq!(
@@ -725,25 +697,22 @@ fn truncated_envelopes_are_read_from_section_b() {
         EmailNeeds {
             headers: false,
             blob: false,
-            envelope: true,
-            fallback: false
         }
     );
-    assert!(needs.headers_for(meta));
 
-    let render = fixture.render(true, false, &DEFAULT_BODY_PROPERTIES, &options);
+    let render = fixture.render(false, false, &DEFAULT_BODY_PROPERTIES, &options);
     let to = render.value(&EmailProperty::To).expect("to");
     let to = to.as_array().expect("array");
-    assert_eq!(to.len(), RECIPIENTS);
+    assert_eq!(to.len(), MAX_FIELD_ADDRESSES);
     assert_eq!(
         text(get(to.last().expect("last"), EmailProperty::Email)),
-        format!("r{}@example.com", RECIPIENTS - 1)
+        format!("r{}@example.com", MAX_FIELD_ADDRESSES - 1)
     );
     assert_eq!(
         render
             .value(&EmailProperty::Subject)
             .map(|value| text(&value)),
-        Some(subject)
+        Some("s".repeat(MAX_VALUE_LEN))
     );
     let from = render.value(&EmailProperty::From).expect("from");
     assert_eq!(
@@ -762,15 +731,10 @@ fn truncated_envelopes_are_read_from_section_b() {
     ] {
         assert_eq!(render.value(&property), Some(Value::Null));
     }
-
-    let complete = Fixture::new(LIST_MESSAGE);
-    let meta = complete.row.unarchive().expect("archive");
-    assert_eq!(meta.completeness(), Completeness::Complete);
-    assert!(!needs.headers_for(meta));
 }
 
 #[test]
-fn truncated_root_headers_are_read_from_section_b() {
+fn root_headers_past_the_cap_are_dropped() {
     let mut raw = String::new();
     for index in 0..MAX_HEADER_ENTRIES + 8 {
         raw.push_str(&format!("X-Junk-{}: value\r\n", index % 97));
@@ -781,22 +745,20 @@ fn truncated_root_headers_are_read_from_section_b() {
     let fixture = Fixture::with_extra(&raw, &extra);
     let options = BodyValueOptions::default();
     let render = fixture.render(true, false, &DEFAULT_BODY_PROPERTIES, &options);
-    let subject = render
-        .value(&header("Subject", HeaderForm::Text, false))
-        .expect("subject");
-    assert_eq!(text(&subject), "hidden");
-    let references = render
-        .value(&EmailProperty::References)
-        .expect("references");
-    assert_eq!(references.as_array().map(<[_]>::len), Some(2));
+    assert_eq!(
+        render.value(&header("Subject", HeaderForm::Text, false)),
+        Some(Value::Null)
+    );
+    assert_eq!(
+        render
+            .value(&EmailProperty::Subject)
+            .map(|value| text(&value)),
+        Some("hidden".to_string())
+    );
     let headers = render.value(&EmailProperty::Headers).expect("headers");
     let headers = headers.as_array().expect("array");
-    assert_eq!(headers.len(), MAX_HEADER_ENTRIES + 8 + 3);
+    assert_eq!(headers.len(), MAX_HEADER_ENTRIES);
     assert_eq!(text(get(&headers[0], EmailProperty::Name)), "Delivered-To");
-    assert_eq!(
-        text(get(headers.last().expect("last"), EmailProperty::Name)),
-        "References"
-    );
 }
 
 #[test]
@@ -1080,57 +1042,6 @@ fn parsed_blob_ids_skip_extra_headers() {
     );
 }
 
-#[test]
-fn truncated_part_headers_are_scanned_once_per_render() {
-    let junk: String = (0..MAX_HEADER_ENTRIES + 8)
-        .map(|index| format!("X-Junk: {index}\r\n"))
-        .collect();
-    let body = concat!(
-        "Subject: parts\r\n",
-        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
-        "\r\n",
-        "--b\r\n",
-        "Content-Type: text/plain\r\n",
-        "X-Target: found\r\n",
-        "X-Other: skipped\r\n",
-        "X-Target: again\r\n",
-        "\r\n",
-        "text\r\n",
-        "--b--\r\n",
-    );
-    let truncated = Fixture::new(&format!("{junk}{body}"));
-    let twin = Fixture::new(body);
-    let options = BodyValueOptions::default();
-    let body_properties = [
-        EmailProperty::PartId,
-        header("X-Target", HeaderForm::Text, false),
-        header("X-Target", HeaderForm::Raw, true),
-    ];
-    let properties = [EmailProperty::TextBody, EmailProperty::BodyStructure];
-    let needs = HeaderNeeds::new(&properties, &body_properties);
-    let values = |fixture: &Fixture| {
-        let render = fixture.render_with(&needs, true, true, &body_properties, &options);
-        properties
-            .iter()
-            .map(|property| format!("{:?}", render.value(property)))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(values(&truncated), values(&twin));
-    assert!(values(&truncated).concat().contains("again"));
-
-    let meta = truncated.row.unarchive().expect("archive");
-    assert!(meta.part(1).expect("text part").is_headers_truncated());
-    let render = truncated.render_with(&needs, true, true, &body_properties, &options);
-    for property in properties {
-        render.value(&property);
-    }
-    let memo = render.part_headers.borrow();
-    let memo = memo.as_ref().expect("memo");
-    assert_eq!(memo.len(), 2);
-    assert_eq!(memo.get(&0).map(|parsed| parsed.list().len()), Some(0));
-    assert_eq!(memo.get(&1).map(|parsed| parsed.list().len()), Some(2));
-}
-
 fn pool_exhausting_message(flood: bool) -> String {
     let mut raw = String::new();
     if flood {
@@ -1166,20 +1077,15 @@ fn pool_exhausting_message(flood: bool) -> String {
 }
 
 #[test]
-fn exhausted_pools_store_absent_values_and_read_them_from_the_source() {
-    let truncated = Fixture::new(&pool_exhausting_message(true));
-    let twin = Fixture::new(&pool_exhausting_message(false));
-    let meta = truncated.row.unarchive().expect("archive");
-    assert_eq!(meta.completeness(), Completeness::Truncated);
-    assert_eq!(
-        twin.row.unarchive().expect("archive").completeness(),
-        Completeness::Complete
-    );
+fn exhausted_pools_store_absent_values_and_keep_the_preview() {
+    let exhausted = Fixture::new(&pool_exhausting_message(true));
+    let meta = exhausted.row.unarchive().expect("archive");
     let part = meta.part(1).expect("html part");
     assert_eq!(part.content_id(), None);
     assert_eq!(part.content_location(), None);
     assert!(!part.content_language().is_present());
-    assert_eq!(meta.stored_preview(), None);
+    let preview = meta.stored_preview().expect("preview");
+    assert!(preview.contains("preview text here"));
     let last_from = meta
         .root()
         .envelope()
@@ -1190,65 +1096,31 @@ fn exhausted_pools_store_absent_values_and_read_them_from_the_source() {
             .all(|mailbox| mailbox.address.is_none() && mailbox.name.is_none())
     );
 
-    let options = BodyValueOptions::default();
-    let properties = [
-        EmailProperty::Preview,
-        EmailProperty::From,
-        EmailProperty::To,
-        EmailProperty::Subject,
-        EmailProperty::MessageId,
-        EmailProperty::BodyStructure,
-        EmailProperty::HtmlBody,
-    ];
-    let needs = EmailNeeds::new(&properties, &DEFAULT_BODY_PROPERTIES, &options);
-    assert!(needs.fallback);
-    assert!(needs.headers_for(meta) && needs.blob_for(meta));
-    let body_properties = DEFAULT_BODY_PROPERTIES
-        .iter()
-        .filter(|property| **property != EmailProperty::BlobId)
-        .cloned()
-        .collect::<Vec<_>>();
-    let values = |fixture: &Fixture| {
-        let render = fixture.render(true, true, &body_properties, &options);
-        properties
-            .iter()
-            .map(|property| format!("{property:?}: {:?}", render.value(property)))
-            .collect::<Vec<_>>()
-    };
-    let rendered = values(&truncated);
-    assert_eq!(rendered, values(&twin));
-    let rendered = rendered.concat();
-    for expected in [
-        "preview text here",
-        "real@example.com",
-        "logo@example.com",
-        "http://example.com/x",
-        "\"fr\"",
-    ] {
-        assert!(rendered.contains(expected), "{expected} in {rendered}");
-    }
-
-    let headers = truncated.headers.as_slice();
-    let parsed = meta.root_field_in(headers, HeaderId::FROM, mail_parser::HeaderForm::Addresses);
-    let sender = parsed.as_ref().and_then(Mailbox::first_of);
-    assert_eq!(
-        sender,
-        Some(Mailbox {
-            name: Some("Real Sender"),
-            address: Some("real@example.com")
-        })
-    );
-    let root = meta
-        .root()
-        .root_part()
-        .selected_headers(headers, HeaderSelection::ENVELOPE);
+    let twin = Fixture::new(&pool_exhausting_message(false));
     let twin_meta = twin.row.unarchive().expect("archive");
-    assert_eq!(
-        MessageSortKeys::from_headers(root.list(), headers).serialize(),
-        MessageSortKeys::from_envelope(twin_meta.root().envelope()).serialize()
+    let part = twin_meta.part(1).expect("html part");
+    assert_eq!(part.content_id(), Some("logo@example.com"));
+    assert_eq!(part.content_location(), Some("http://example.com/x"));
+    assert_eq!(twin_meta.stored_preview(), Some(preview));
+
+    let options = BodyValueOptions::default();
+    let needs = EmailNeeds::new(
+        &[EmailProperty::Preview, EmailProperty::HtmlBody],
+        &DEFAULT_BODY_PROPERTIES,
+        &options,
     );
-    assert_ne!(
-        MessageSortKeys::from_envelope(meta.root().envelope()).serialize(),
-        MessageSortKeys::from_envelope(twin_meta.root().envelope()).serialize()
+    assert_eq!(
+        needs,
+        EmailNeeds {
+            headers: false,
+            blob: false,
+        }
+    );
+    let render = exhausted.render(false, false, &DEFAULT_BODY_PROPERTIES, &options);
+    assert_eq!(
+        render
+            .value(&EmailProperty::Preview)
+            .map(|value| text(&value)),
+        Some(preview.to_string())
     );
 }

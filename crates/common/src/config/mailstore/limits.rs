@@ -12,6 +12,7 @@ use mail_parser::Message;
 use std::fmt::Display;
 use types::keyword::Keyword;
 
+pub const MAX_HEADER_ENTRIES: usize = 65_534;
 const HEADER_TERMINATOR_LEN: usize = b"\r\n".len();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub enum EmailLimitError {
     TooManyKeywords { max: usize },
     KeywordTooLong { max: usize },
     TooManyHeaders { max: usize },
+    TooManyMessageHeaders { max: usize },
     HeaderTooLarge { max: usize },
 }
 
@@ -130,6 +132,10 @@ impl EmailLimits {
             Err(EmailLimitError::TooManyHeaders {
                 max: self.header_count,
             })
+        } else if message.header_count() > MAX_HEADER_ENTRIES {
+            Err(EmailLimitError::TooManyMessageHeaders {
+                max: MAX_HEADER_ENTRIES,
+            })
         } else if root.offset_body().saturating_sub(root.offset_header()) as usize
             > self.header_size
         {
@@ -155,9 +161,9 @@ impl From<EmailLimitError> for SetError<EmailProperty> {
             EmailLimitError::KeywordTooLong { .. } => {
                 SetError::invalid_properties().with_property(EmailProperty::Keywords)
             }
-            EmailLimitError::TooManyHeaders { .. } | EmailLimitError::HeaderTooLarge { .. } => {
-                SetError::too_large()
-            }
+            EmailLimitError::TooManyHeaders { .. }
+            | EmailLimitError::TooManyMessageHeaders { .. }
+            | EmailLimitError::HeaderTooLarge { .. } => SetError::too_large(),
         }
         .with_description(err.to_string())
     }
@@ -177,6 +183,12 @@ impl Display for EmailLimitError {
             }
             EmailLimitError::TooManyHeaders { max } => {
                 write!(f, "An email header cannot have more than {max} fields.")
+            }
+            EmailLimitError::TooManyMessageHeaders { max } => {
+                write!(
+                    f,
+                    "An email cannot have more than {max} header fields across all its parts."
+                )
             }
             EmailLimitError::HeaderTooLarge { max } => {
                 write!(f, "An email header cannot exceed {max} bytes.")
@@ -366,6 +378,36 @@ mod tests {
     }
 
     #[test]
+    fn message_header_count_spans_every_part() {
+        let raw = |part_fields: usize| {
+            format!(
+                concat!(
+                    "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
+                    "\r\n",
+                    "--b\r\n",
+                    "{fields}",
+                    "\r\n",
+                    "part\r\n",
+                    "--b--\r\n"
+                ),
+                fields = HEADER_FIELD.repeat(part_fields)
+            )
+        };
+        let limits = EmailLimits {
+            header_count: 1,
+            header_size: usize::MAX,
+            ..LIMITS
+        };
+        assert_eq!(validate_raw(&limits, &raw(MAX_HEADER_ENTRIES - 1)), Ok(()));
+        assert_eq!(
+            validate_raw(&limits, &raw(MAX_HEADER_ENTRIES)),
+            Err(EmailLimitError::TooManyMessageHeaders {
+                max: MAX_HEADER_ENTRIES
+            })
+        );
+    }
+
+    #[test]
     fn set_error_mapping() {
         let err: SetError<EmailProperty> = EmailLimitError::TooManyMailboxes { max: 2 }.into();
         assert_eq!(err.error_type(), &SetErrorType::TooManyMailboxes);
@@ -382,6 +424,13 @@ mod tests {
         assert_eq!(
             err.description(),
             Some("An email header cannot have more than 100 fields.")
+        );
+        let err: SetError<EmailProperty> =
+            EmailLimitError::TooManyMessageHeaders { max: 100 }.into();
+        assert_eq!(err.error_type(), &SetErrorType::TooLarge);
+        assert_eq!(
+            err.description(),
+            Some("An email cannot have more than 100 header fields across all its parts.")
         );
         let err: SetError<EmailProperty> = EmailLimitError::HeaderTooLarge { max: 1024 }.into();
         assert_eq!(err.error_type(), &SetErrorType::TooLarge);

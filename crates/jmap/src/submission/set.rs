@@ -13,7 +13,7 @@ use common::{
 };
 use email::{
     identity::Identity,
-    message::metadata::{HeaderId, HeaderSelection, MetadataRow},
+    message::metadata::{HeaderId, MetadataRow},
     submission::{Address, Delivered, DeliveryStatus, EmailSubmission, UndoStatus},
 };
 use jmap_proto::{
@@ -648,11 +648,7 @@ impl EmailSubmissionSet for Server {
         // Add recipients to envelope if missing
         if rcpt_to.is_empty() {
             let headers = row.raw_headers().caused_by(trc::location!())?;
-            let root_headers = metadata.root().root_part().selected_headers(
-                &headers,
-                HeaderSelection::Ids(&[HeaderId::TO, HeaderId::CC, HeaderId::BCC]),
-            );
-            for header in root_headers.list().iter() {
+            for header in metadata.root().root_part().headers().iter() {
                 if !matches!(header.id(), HeaderId::TO | HeaderId::CC | HeaderId::BCC) {
                     continue;
                 }

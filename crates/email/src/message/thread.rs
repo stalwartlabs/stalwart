@@ -6,7 +6,7 @@
 
 use crate::message::{
     index::extractors::VisitText,
-    metadata::{ArchivedMessageMetadata, HeaderId, HeaderList, HeaderSelection},
+    metadata::{ArchivedMessageMetadata, HeaderId, HeaderList, MAX_VALUE_LEN, build::floor_str},
 };
 use mail_parser::{HeaderForm, HeaderName, HeaderValue, Message, thread_name};
 use std::borrow::Cow;
@@ -66,9 +66,6 @@ impl<'m> ThreadFields<'m> {
 
 impl ArchivedMessageMetadata {
     pub fn thread_subject(&self) -> ThreadSubject<'_> {
-        if self.completeness().is_truncated() {
-            return ThreadSubject::InHeaders;
-        }
         let root = self.root();
         let name = thread_name(root.envelope().subject().unwrap_or_default());
         if !name.is_empty()
@@ -86,11 +83,7 @@ impl ArchivedMessageMetadata {
     }
 
     pub fn thread_subject_in(&self, headers: &[u8]) -> Cow<'_, str> {
-        let root = self
-            .root()
-            .root_part()
-            .selected_headers(headers, HeaderSelection::Ids(&[HeaderId::SUBJECT]));
-        self.thread_subject_with(root.list(), headers)
+        self.thread_subject_with(self.root().root_part().headers(), headers)
     }
 
     pub fn thread_subject_with(&self, root: HeaderList<'_>, headers: &[u8]) -> Cow<'_, str> {
@@ -110,11 +103,12 @@ impl ArchivedMessageMetadata {
 }
 
 fn subject_thread_name<'x>(value: HeaderValue<'x>) -> &'x str {
-    thread_name(match value {
+    let subject = match value {
         HeaderValue::Text(text) => text,
         HeaderValue::TextList(list) => list.first().unwrap_or_default(),
         _ => "",
-    })
+    };
+    thread_name(floor_str(subject, MAX_VALUE_LEN))
 }
 
 #[cfg(test)]
@@ -152,7 +146,7 @@ mod tests {
                 "Subject: Hello\r\nSubject: Re: \r\n\r\nbody\r\n".to_string(),
                 false,
             ),
-            (format!("Subject: {long}\r\n\r\nbody\r\n"), false),
+            (format!("Subject: {long}\r\n\r\nbody\r\n"), true),
         ] {
             let message = MessageParser::new().parse(raw.as_bytes()).expect("parses");
             let ingest = ThreadFields::scan(&message).subject;

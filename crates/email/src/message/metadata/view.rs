@@ -339,6 +339,11 @@ impl ArchivedMessageMetadata {
             .map_or(0, |part| part.offset_body.to_native() as usize)
     }
 
+    #[inline]
+    pub fn extra_headers_len(&self) -> usize {
+        self.headers_len().saturating_sub(self.blob_body_offset())
+    }
+
     pub fn size(&self) -> usize {
         self.parts.first().map_or(0, |part| {
             part.offset_end
@@ -876,11 +881,6 @@ impl<'a> PartView<'a> {
 
 impl<'a> HeaderList<'a> {
     #[inline]
-    pub(super) fn new(entries: &'a [ArchivedHeaderEntry]) -> Self {
-        HeaderList { entries }
-    }
-
-    #[inline]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -936,11 +936,6 @@ impl<'a> HeaderList<'a> {
 }
 
 impl<'a> HeaderView<'a> {
-    #[inline]
-    pub(super) fn new(entry: &'a ArchivedHeaderEntry) -> Self {
-        HeaderView { entry }
-    }
-
     #[inline]
     pub fn id(&self) -> HeaderId {
         HeaderId(self.entry.name.0)

@@ -6,7 +6,6 @@
 
 use super::{
     ArchivedMessageMetadata, HeaderId, MAX_SOURCE_DEPTH, PartFlags, TransferEncoding,
-    complete::{HeaderScan, HeaderSelection, PartHeaders},
     view::{MessageView, PartView},
 };
 use mail_parser::{Charset, Encoding};
@@ -248,22 +247,10 @@ impl ArchivedMessageMetadata {
     }
 
     pub fn strip_root_fields<'b>(&self, blob: &'b [u8], id: HeaderId) -> Cow<'b, [u8]> {
-        let root = self.root().root_part();
-        let ids = [id];
-        let headers = if root.is_headers_truncated() {
-            PartHeaders::Parsed(
-                HeaderScan::new(
-                    blob.get(..self.blob_body_offset()).unwrap_or_default(),
-                    self.extra_headers_len(),
-                    HeaderSelection::Ids(&ids),
-                )
-                .collect(),
-            )
-        } else {
-            PartHeaders::Stored(root.headers())
-        };
-        let mut ranges = headers
-            .list()
+        let mut ranges = self
+            .root()
+            .root_part()
+            .headers()
             .all(id)
             .filter_map(|header| self.blob_range(header.field_range()))
             .filter(|range| range.end <= blob.len())

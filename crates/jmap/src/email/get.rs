@@ -17,7 +17,7 @@ use email::{
         mailbox::MailboxCacheAccess,
     },
     message::{
-        jmap::{BodyValueOptions, EmailNeeds, EmailRender, HeaderNeeds},
+        jmap::{BodyValueOptions, EmailNeeds, EmailRender},
         metadata::{MetadataRow, MetadataStructure},
     },
 };
@@ -150,7 +150,6 @@ impl EmailGet for Server {
                 .details(format_compact!("Invalid property {property:?}")));
         }
         let needs = EmailNeeds::new(&properties, &body_properties, &options);
-        let header_needs = HeaderNeeds::new(&properties, &body_properties);
 
         let account_id = request.account_id.document_id();
         let sampled = self
@@ -240,33 +239,17 @@ impl EmailGet for Server {
                 } else {
                     let Some(value) = self
                         .store()
-                        .get_value::<MetadataStructure>(metadata_key.clone())
+                        .get_value::<MetadataStructure>(metadata_key)
                         .await?
                     else {
                         response.push_not_found(id);
                         continue;
                     };
                     structure = value;
-                    let metadata = structure.unarchive().caused_by(trc::location!())?;
-                    if needs.headers_for(metadata) {
-                        let Some(value) =
-                            self.store().get_value::<MetadataRow>(metadata_key).await?
-                        else {
-                            response.push_not_found(id);
-                            continue;
-                        };
-                        row = value;
-                        raw_headers = row.raw_headers().caused_by(trc::location!())?;
-                        (
-                            row.unarchive().caused_by(trc::location!())?,
-                            Some(raw_headers.as_ref()),
-                        )
-                    } else {
-                        (metadata, None)
-                    }
+                    (structure.unarchive().caused_by(trc::location!())?, None)
                 };
                 let blob_hash = metadata.blob_hash();
-                if needs.blob_for(metadata) {
+                if needs.blob {
                     let Some(value) = self
                         .blob_store()
                         .get_blob(blob_hash.as_slice(), 0..usize::MAX)
@@ -309,7 +292,6 @@ impl EmailGet for Server {
                     *headers,
                     blob.as_deref(),
                     blob_id,
-                    &header_needs,
                     &body_properties,
                     &options,
                 )

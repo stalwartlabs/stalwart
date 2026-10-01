@@ -8,7 +8,7 @@ use crate::message::{
     index::{MAX_MESSAGE_PARTS, attachment::AttachmentText, extractors::VisitText},
     metadata::{
         AddressHeader, AddressItem, Addresses, ArchivedMessageMetadata, EnvelopeView, HeaderId,
-        HeaderList, HeaderSelection, Occurrence, PartFlags, PartKind, PartSource, PartView,
+        HeaderList, Occurrence, PartFlags, PartKind, PartSource, PartView,
     },
 };
 use common::config::mailstore::email::ExtractLimits;
@@ -58,20 +58,14 @@ impl ArchivedMessageMetadata {
         let raw = self.raw_message(Some(headers), blob);
         let source = PartSource::Raw(raw);
         let root = self.root();
-        let truncated = self.completeness().is_truncated();
         let mut language = Language::Unknown;
 
         for part in root.parts().take(MAX_MESSAGE_PARTS) {
             let part_language = part.language().unwrap_or(language);
             if part.id() == 0 {
                 language = part_language;
-                let root_headers = part.selected_headers(headers, builder.root_selection());
-                if truncated {
-                    builder.index_header_addresses(root_headers.list(), headers);
-                } else {
-                    builder.index_envelope(root.envelope().addresses_of_interest());
-                }
-                builder.index_root_headers(root_headers.list(), headers, part_language);
+                builder.index_envelope(root.envelope().addresses_of_interest());
+                builder.index_root_headers(part.headers(), headers, part_language);
             }
 
             match part.kind() {
@@ -107,18 +101,8 @@ impl ArchivedMessageMetadata {
                     let nested_language =
                         nested.root_part().language().unwrap_or(Language::Unknown);
                     let nested_source = self.source(nested, raw);
-                    let subject = if truncated {
-                        nested_source.as_ref().and_then(|source| {
-                            nested
-                                .root_part()
-                                .last_text_in(HeaderId::SUBJECT, source)
-                                .map(Cow::Owned)
-                        })
-                    } else {
-                        nested.envelope().subject().map(Cow::Borrowed)
-                    };
-                    if let Some(subject) = subject {
-                        builder.index_text(EmailSearchField::Attachment, &subject, nested_language);
+                    if let Some(subject) = nested.envelope().subject() {
+                        builder.index_text(EmailSearchField::Attachment, subject, nested_language);
                     }
                     let Some(nested_source) = nested_source else {
                         continue;
@@ -211,32 +195,6 @@ impl DocumentBuilder<'_> {
         }
     }
 
-    fn index_header_addresses(&mut self, list: HeaderList<'_>, headers: &[u8]) {
-        for (field, id) in [
-            (EmailSearchField::From, HeaderId::FROM),
-            (EmailSearchField::To, HeaderId::TO),
-            (EmailSearchField::Cc, HeaderId::CC),
-            (EmailSearchField::Bcc, HeaderId::BCC),
-        ] {
-            if !self.is_enabled(field.clone()) {
-                continue;
-            }
-            let search_field = SearchField::Email(field);
-            for header in list.all(id) {
-                let Some(raw) = headers.get(header.value_range()) else {
-                    continue;
-                };
-                HeaderForm::Addresses
-                    .parse(raw)
-                    .value()
-                    .visit_addresses(|_, text| {
-                        self.document
-                            .index_text(search_field.clone(), text, Language::None);
-                    });
-            }
-        }
-    }
-
     fn indexes_headers(&self) -> bool {
         #[cfg(not(feature = "test_mode"))]
         let index_headers = self
@@ -247,20 +205,6 @@ impl DocumentBuilder<'_> {
         let index_headers = true;
 
         index_headers
-    }
-
-    fn root_selection(&self) -> HeaderSelection<'static> {
-        if self.indexes_headers() {
-            HeaderSelection::All
-        } else {
-            HeaderSelection::Ids(&[
-                HeaderId::SUBJECT,
-                HeaderId::FROM,
-                HeaderId::TO,
-                HeaderId::CC,
-                HeaderId::BCC,
-            ])
-        }
     }
 
     fn index_root_headers(&mut self, root: HeaderList<'_>, headers: &[u8], language: Language) {
@@ -345,17 +289,6 @@ impl HeaderId {
 }
 
 impl<'a> PartView<'a> {
-    fn last_text_in(&self, id: HeaderId, source: &PartSource<'_>) -> Option<String> {
-        let ids = [id];
-        let headers = self.selected_headers_in(source, HeaderSelection::Ids(&ids));
-        let raw = source.get(headers.list().last(id)?.value_range())?;
-        HeaderForm::Text
-            .parse(&raw)
-            .value()
-            .as_text()
-            .map(str::to_string)
-    }
-
     pub fn plain_text<'x>(&self, source: &PartSource<'x>) -> Option<Cow<'x, str>> {
         let text = self.text(source)?.text;
         Some(if self.kind() == PartKind::Html {
@@ -418,8 +351,8 @@ impl<'a> EnvelopeView<'a> {
 #[cfg(test)]
 mod tests {
     use crate::message::metadata::{
-        Completeness, ExtraHeaders, HeaderId, MAX_FIELD_ADDRESSES, MAX_HEADER_ENTRIES,
-        MAX_VALUE_LEN, MessageMetadata, MetadataRow,
+        ExtraHeaders, HeaderId, MAX_FIELD_ADDRESSES, MAX_HEADER_ENTRIES, MAX_VALUE_LEN,
+        MessageMetadata, MetadataRow,
     };
     use common::config::mailstore::email::ExtractLimits;
     use mail_parser::MessageParser;
@@ -621,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn truncated_rows_index_from_section_b() {
+    fn capped_rows_index_the_stored_values() {
         let mut raw = String::from("To: ");
         for index in 0..MAX_FIELD_ADDRESSES + 10 {
             if index > 0 {
@@ -655,22 +588,10 @@ mod tests {
             ),
             padding
         ));
-        let message = MessageParser::new().parse(raw.as_bytes()).expect("parses");
-        let row = MessageMetadata::build(&message, &ExtraHeaders::default(), BlobHash::default())
-            .encode()
-            .expect("row encodes");
-        let row = MetadataRow::deserialize(&row).expect("row");
-        assert_eq!(
-            row.unarchive().expect("archive").completeness(),
-            Completeness::Truncated
-        );
-
         let indexed = Indexed::new(raw.as_bytes(), &ExtraHeaders::default(), &[]);
         let to = indexed.text(EmailSearchField::To);
-        assert!(
-            to.contains(&format!("r{}@example.com", MAX_FIELD_ADDRESSES + 9)),
-            "last To address missing"
-        );
+        assert!(to.contains(&format!("r{}@example.com", MAX_FIELD_ADDRESSES - 1)));
+        assert!(!to.contains(&format!("r{}@example.com", MAX_FIELD_ADDRESSES)));
         assert!(
             indexed
                 .text(EmailSearchField::From)
@@ -682,20 +603,18 @@ mod tests {
                 .contains("late@example.com")
         );
         assert!(
-            indexed
+            !indexed
                 .text(EmailSearchField::Subject)
                 .contains("capybara outer")
         );
-        assert!(indexed.text(EmailSearchField::Attachment).contains("okapi"));
+        let attachment = indexed.text(EmailSearchField::Attachment);
+        assert!(attachment.contains("nested"));
+        assert!(!attachment.contains("okapi"));
         let indexed = Indexed::new(
             raw.as_bytes(),
             &ExtraHeaders::default(),
             &[EmailSearchField::Headers],
         );
-        assert!(
-            indexed
-                .header("x-after")
-                .is_some_and(|value| value.contains("marmoset"))
-        );
+        assert!(indexed.header("x-after").is_none());
     }
 }

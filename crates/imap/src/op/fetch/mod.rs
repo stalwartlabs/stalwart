@@ -348,11 +348,7 @@ impl<T: SessionStream> SessionData<T> {
                 .map(MetadataStructure::unarchive)
                 .transpose()
                 .imap_ctx(&arguments.tag, trc::location!())?;
-            let row = if needs.headers
-                || (needs.envelope
-                    && structure_metadata
-                        .is_some_and(|metadata| metadata.completeness().is_truncated()))
-            {
+            let row = if needs.headers {
                 self.server
                     .store()
                     .get_value::<MetadataRow>(metadata_key)
@@ -471,7 +467,7 @@ impl<T: SessionStream> SessionData<T> {
                         if let Some(metadata) = metadata {
                             separate(&mut output, &mut has_items);
                             output.extend_from_slice(b"ENVELOPE ");
-                            metadata.write_envelope(&mut output, headers.as_deref(), is_utf8);
+                            metadata.write_envelope(&mut output, is_utf8);
                         }
                     }
                     Attribute::Body | Attribute::BodyStructure => {
@@ -696,7 +692,6 @@ pub struct FetchNeeds {
     pub structure: bool,
     pub headers: bool,
     pub blob: bool,
-    pub envelope: bool,
 }
 
 impl FetchNeeds {
@@ -704,11 +699,8 @@ impl FetchNeeds {
         let mut needs = FetchNeeds::default();
         for attribute in attributes {
             let (structure, headers, blob) = match attribute {
-                Attribute::Envelope => {
-                    needs.envelope = true;
-                    (true, false, false)
-                }
-                Attribute::Body
+                Attribute::Envelope
+                | Attribute::Body
                 | Attribute::BodyStructure
                 | Attribute::BinarySize { .. }
                 | Attribute::Preview { .. } => (true, false, false),

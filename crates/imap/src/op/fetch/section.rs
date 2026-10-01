@@ -9,8 +9,7 @@ use super::{
     structure::Binary,
 };
 use email::message::metadata::{
-    HeaderList, HeaderMatcher, HeaderSelection, HeaderView, MessageView, PartFlags, PartKind,
-    PartView, RawMessage,
+    HeaderList, HeaderMatcher, HeaderView, MessageView, PartFlags, PartKind, PartView, RawMessage,
 };
 use imap_proto::protocol::{
     fetch::{BodyContents, Section},
@@ -58,8 +57,7 @@ impl MessageSections for MessageView<'_> {
         matcher: &HeaderMatcher,
     ) {
         let part = self.root_part();
-        let selected = part.selected_headers(headers, section.header_selection(matcher));
-        let fields = selected.list();
+        let fields = part.headers();
         let gap = part.header_gap(&SourceView::Bytes(headers));
         if gap.is_empty() {
             fields.write_header_fields(buf, headers, section, matcher, |_| true);
@@ -135,12 +133,10 @@ impl MessageSections for MessageView<'_> {
                             &built
                         }
                     };
-                    return part.fields_section(sources, raw, section, partial, |source| {
-                        part.collect_fields(
-                            source,
-                            section.header_selection(matcher),
-                            |header, field| matcher.matches_field(header, field) != *not,
-                        )
+                    return part.fields_section(sources, raw, partial, |source| {
+                        part.collect_fields(source, |header, field| {
+                            matcher.matches_field(header, field) != *not
+                        })
                     });
                 }
                 Section::Text => {
@@ -173,10 +169,8 @@ impl MessageSections for MessageView<'_> {
                             .view(part.header_range())
                             .map(|bytes| BodyContents::Bytes(bytes).partial(partial));
                     }
-                    return part.fields_section(sources, raw, section, partial, |source| {
-                        part.collect_fields(source, HeaderSelection::Content, |header, field| {
-                            header.is_mime_field(field)
-                        })
+                    return part.fields_section(sources, raw, partial, |source| {
+                        part.collect_fields(source, |header, field| header.is_mime_field(field))
                     });
                 }
             }
@@ -249,7 +243,6 @@ trait PartSections<'a>: Sized {
         &self,
         sources: &'x mut DecodedSources,
         raw: RawMessage<'x>,
-        section: &Section,
         partial: Option<(u32, u32)>,
         collect: impl FnOnce(&SourceView<'_>) -> Vec<u8>,
     ) -> Option<BodyContents<'x>>;
@@ -257,7 +250,6 @@ trait PartSections<'a>: Sized {
     fn collect_fields(
         &self,
         source: &SourceView<'_>,
-        selection: HeaderSelection<'_>,
         select: impl Fn(HeaderView<'_>, &[u8]) -> bool,
     ) -> Vec<u8>;
 }
@@ -285,18 +277,11 @@ impl<'a> PartSections<'a> for PartView<'a> {
         &self,
         sources: &'x mut DecodedSources,
         raw: RawMessage<'x>,
-        section: &Section,
         partial: Option<(u32, u32)>,
         collect: impl FnOnce(&SourceView<'_>) -> Vec<u8>,
     ) -> Option<BodyContents<'x>> {
-        if self.is_headers_truncated() {
-            sources
-                .selected_fields(*self, section, raw, collect)
-                .map(|bytes| BodyContents::Bytes(bytes).partial(partial))
-        } else {
-            let source = sources.source(self.message(), raw)?;
-            Some(BodyContents::Owned(collect(&source)).partial(partial))
-        }
+        let source = sources.source(self.message(), raw)?;
+        Some(BodyContents::Owned(collect(&source)).partial(partial))
     }
 
     fn header_gap(&self, source: &SourceView<'_>) -> Range<usize> {
@@ -319,26 +304,18 @@ impl<'a> PartSections<'a> for PartView<'a> {
                         .is_some_and(|field| header.raw_name_in(&field).is_field_name())))
             .then_some(range.start)
         };
-        let end = if self.is_headers_truncated()
-            && let Some(block) = source.get(self.header_range())
-        {
-            self.scan_headers(&block, HeaderSelection::All)
-                .find_map(|scanned| first_field(scanned.view()))
-        } else {
-            self.headers().iter().find_map(first_field)
-        };
+        let end = self.headers().iter().find_map(first_field);
         start..end.unwrap_or(start)
     }
 
     fn collect_fields(
         &self,
         source: &SourceView<'_>,
-        selection: HeaderSelection<'_>,
         select: impl Fn(HeaderView<'_>, &[u8]) -> bool,
     ) -> Vec<u8> {
         let gap = self.header_gap(source);
         let mut headers = Vec::with_capacity(self.header_range().len().min(MAX_FIELDS_CAPACITY));
-        let mut push = |header: HeaderView<'_>| {
+        for header in self.headers().iter() {
             let range = header.field_range();
             if !gap.contains(&range.start)
                 && let Some(field) = source.get(range)
@@ -346,30 +323,9 @@ impl<'a> PartSections<'a> for PartView<'a> {
             {
                 headers.extend_from_slice(&field);
             }
-        };
-        if self.is_headers_truncated()
-            && let Some(block) = source.get(self.header_range())
-        {
-            self.scan_headers(&block, selection)
-                .for_each(|scanned| push(scanned.view()));
-        } else {
-            self.headers().iter().for_each(push);
         }
         headers.extend_from_slice(b"\r\n");
         headers
-    }
-}
-
-trait SectionSelection {
-    fn header_selection<'m>(&self, matcher: &'m HeaderMatcher) -> HeaderSelection<'m>;
-}
-
-impl SectionSelection for Section {
-    fn header_selection<'m>(&self, matcher: &'m HeaderMatcher) -> HeaderSelection<'m> {
-        match self {
-            Section::HeaderFields { not: true, .. } => HeaderSelection::Except(matcher),
-            _ => HeaderSelection::Named(matcher),
-        }
     }
 }
 
@@ -1271,7 +1227,7 @@ mod tests {
     }
 
     #[test]
-    fn header_fields_past_the_entry_cap_scan_the_raw_block() {
+    fn header_fields_of_large_header_blocks() {
         let mut raw = String::from("From: a@example.com\r\n");
         for index in 0..16_400 {
             raw.push_str(&format!("X-Junk: {index}\r\n"));
@@ -1281,7 +1237,6 @@ mod tests {
         let row = stored.row();
         let meta = row.unarchive().expect("unarchives");
         let headers = row.raw_headers().expect("headers");
-        assert!(meta.root().root_part().is_headers_truncated());
 
         for (not, fields, expected) in [
             (
