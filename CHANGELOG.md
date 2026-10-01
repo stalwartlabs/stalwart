@@ -12,6 +12,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 
 ## Fixed
 - JMAP: Creating a `MaskedEmail` with `emailDomain` fails with `forbidden` for every domain when the account has addresses on more than one domain.
+- Autodiscover: Requests for a response schema other than Outlook's, such as ActiveSync (`mobilesync`), are answered with the Outlook settings instead of error 601.
 
 ## [0.16.24] - 2026-09-27
 
