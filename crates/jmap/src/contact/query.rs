@@ -11,6 +11,7 @@ use crate::{
         },
         query::QueryResponseBuilder,
     },
+    calendar_event::query::{matched_items, rank_comparator},
     changes::state::JmapCacheState,
 };
 use common::{Server, auth::AccessToken};
@@ -25,7 +26,7 @@ use jmap_proto::{
 };
 use store::{
     roaring::RoaringBitmap,
-    search::{ContactSearchField, SearchComparator, SearchFilter, SearchQuery},
+    search::{ContactSearchField, QueryResults, SearchFilter, SearchQuery},
     write::SearchIndex,
 };
 use types::{acl::Acl, collection::SyncCollection};
@@ -247,51 +248,17 @@ impl ContactCardQuery for Server {
             }
         }
 
-        let comparators = request
+        let sort = request
             .sort
             .take()
             .unwrap_or_default()
             .into_iter()
             .map(|comparator| match comparator.property {
                 ContactCardComparator::Created => {
-                    let mut items = cache
-                        .resources
-                        .iter()
-                        .filter_map(|r| {
-                            r.created_at()
-                                .map(|created_at| (r.document_id(), created_at))
-                        })
-                        .collect::<Vec<_>>();
-                    items.sort_by_key(|(document_id, created_at)| (*created_at, *document_id));
-
-                    Ok(SearchComparator::sorted_set(
-                        items
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, (u, _))| (*u, idx as u32))
-                            .collect(),
-                        comparator.is_ascending,
-                    ))
+                    Ok((ContactSortKey::Created, comparator.is_ascending))
                 }
                 ContactCardComparator::Updated => {
-                    let mut items = cache
-                        .resources
-                        .iter()
-                        .filter_map(|r| {
-                            r.modified_at()
-                                .map(|modified_at| (r.document_id(), modified_at))
-                        })
-                        .collect::<Vec<_>>();
-                    items.sort_by_key(|(document_id, modified_at)| (*modified_at, *document_id));
-
-                    Ok(SearchComparator::sorted_set(
-                        items
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, (u, _))| (*u, idx as u32))
-                            .collect(),
-                        comparator.is_ascending,
-                    ))
+                    Ok((ContactSortKey::Updated, comparator.is_ascending))
                 }
                 other => Err(trc::JmapEvent::UnsupportedSort
                     .into_err()
@@ -301,14 +268,30 @@ impl ContactCardQuery for Server {
 
         let results = self
             .search_store()
-            .query_account(
+            .filter_account(
                 SearchQuery::new(SearchIndex::Contacts)
                     .with_filters(filters)
-                    .with_comparators(comparators)
                     .with_account_id(account_id)
                     .with_mask(mask),
             )
             .await?;
+        let results = if results.len() > 1 && !sort.is_empty() {
+            let items = matched_items(&cache, &results);
+            let comparators = sort
+                .into_iter()
+                .map(|(key, is_ascending)| match key {
+                    ContactSortKey::Created => {
+                        rank_comparator(&items, |item| item.created_at(), is_ascending)
+                    }
+                    ContactSortKey::Updated => {
+                        rank_comparator(&items, |item| item.modified_at(), is_ascending)
+                    }
+                })
+                .collect();
+            QueryResults::new(results, comparators).into_sorted()
+        } else {
+            results.into_iter().collect()
+        };
 
         let mut response = QueryResponseBuilder::new(
             results.len(),
@@ -391,4 +374,10 @@ impl ContactCardQuery for Server {
 
         response.build()
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ContactSortKey {
+    Created,
+    Updated,
 }

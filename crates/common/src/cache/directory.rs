@@ -8,7 +8,7 @@ use crate::{Server, auth::DomainCache, cache::invalidate::CacheInvalidationBuild
 use compact_str::CompactString;
 use registry::{
     schema::{
-        prelude::{Object, ObjectType},
+        prelude::{Object, ObjectInner, ObjectType},
         structs::{
             Account, Credential, EmailAlias, GroupAccount, PasswordCredential, Roles, UserAccount,
             UserRoles,
@@ -74,31 +74,22 @@ impl Server {
                 }
                 // SPDX-SnippetEnd
 
-                let mut updated_account = Account::from(current_account.clone())
-                    .into_user()
-                    .ok_or_else(|| {
-                        trc::AuthEvent::Error
-                            .into_err()
-                            .details(
-                                "Account ID from directory does not correspond to a user account",
-                            )
-                            .ctx(trc::Key::AccountName, account.email.clone())
-                            .ctx(trc::Key::AccountId, account_id)
-                    })?;
+                let ObjectInner::Account(Account::User(current_user)) = &current_account.inner
+                else {
+                    return Err(trc::AuthEvent::Error
+                        .into_err()
+                        .details("Account ID from directory does not correspond to a user account")
+                        .ctx(trc::Key::AccountName, account.email.clone())
+                        .ctx(trc::Key::AccountId, account_id));
+                };
 
-                let mut has_changes = false;
-                if let Some(secret) = account.secret
-                    && secret != updated_account.password().unwrap_or_default()
-                {
-                    has_changes = true;
-                    updated_account.set_password(secret);
-                }
-                if account.description.is_some()
-                    && account.description != updated_account.description
-                {
-                    updated_account.description = account.description;
-                    has_changes = true;
-                }
+                let secret = account
+                    .secret
+                    .filter(|secret| secret != current_user.password().unwrap_or_default());
+                let description = account
+                    .description
+                    .filter(|description| current_user.description.as_ref() != Some(description));
+                let mut new_aliases = Vec::new();
                 for alias in account.email_aliases {
                     if let Some((local, alias_domain)) = self.validate_alias(&alias).await?
                         && alias_domain.id_tenant == domain.id_tenant
@@ -107,15 +98,15 @@ impl Server {
                             .await?
                             .is_none()
                     {
-                        updated_account.aliases.push(EmailAlias {
+                        new_aliases.push(EmailAlias {
                             name: local.to_string(),
                             domain_id: Id::from(alias_domain.id),
                             enabled: true,
                             description: None,
                         });
-                        has_changes = true;
                     }
                 }
+                let mut new_member_group_ids = None;
                 if let Some(groups) = account.groups {
                     let mut member_group_ids = Vec::with_capacity(groups.len());
                     for email in groups {
@@ -129,18 +120,35 @@ impl Server {
                             .into(),
                         );
                     }
-                    if updated_account.member_group_ids.len() != member_group_ids.len()
-                        || !updated_account
+                    if current_user.member_group_ids.len() != member_group_ids.len()
+                        || !current_user
                             .member_group_ids
                             .iter()
                             .all(|id| member_group_ids.contains(id))
                     {
-                        updated_account.member_group_ids = member_group_ids.into();
-                        has_changes = true;
+                        new_member_group_ids = Some(member_group_ids);
                     }
                 }
 
+                let has_changes = secret.is_some()
+                    || description.is_some()
+                    || !new_aliases.is_empty()
+                    || new_member_group_ids.is_some();
+
                 if has_changes {
+                    let mut updated_account = current_user.clone();
+                    if let Some(secret) = secret {
+                        updated_account.set_password(secret);
+                    }
+                    if description.is_some() {
+                        updated_account.description = description;
+                    }
+                    for alias in new_aliases {
+                        updated_account.aliases.push(alias);
+                    }
+                    if let Some(member_group_ids) = new_member_group_ids {
+                        updated_account.member_group_ids = member_group_ids.into();
+                    }
                     let updated_account = Object::from(Account::User(updated_account));
                     match self
                         .registry()
@@ -173,7 +181,7 @@ impl Server {
                 } else {
                     Ok(AccountWithId {
                         id: account_id,
-                        account: Account::User(updated_account),
+                        account: Account::from(current_account),
                     })
                 }
             }
@@ -288,6 +296,25 @@ impl Server {
             .await
             .caused_by(trc::location!())?
         {
+            Some(account_id) if group.description.is_none() && group.email_aliases.is_empty() => {
+                match self
+                    .try_account(account_id)
+                    .await
+                    .caused_by(trc::location!())?
+                {
+                    Some(account) if !account.is_user_account() => Ok(account_id),
+                    Some(_) => Err(trc::AuthEvent::Error
+                        .into_err()
+                        .details("Account ID from directory does not correspond to a group account")
+                        .ctx(trc::Key::AccountName, group.email)
+                        .ctx(trc::Key::AccountId, account_id)),
+                    None => Err(trc::AuthEvent::Error
+                        .into_err()
+                        .details("Account ID from directory does not exist in registry")
+                        .ctx(trc::Key::AccountName, group.email)
+                        .ctx(trc::Key::AccountId, account_id)),
+                }
+            }
             Some(account_id) => {
                 let current_account = self
                     .registry()

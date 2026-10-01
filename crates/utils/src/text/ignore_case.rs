@@ -46,6 +46,7 @@ fn contains_long(haystack: &[u8], needle: &[u8]) -> Option<bool> {
     contains_windowed(haystack, &Finder::new(lowered))
 }
 
+#[derive(Debug, Clone)]
 pub struct IgnoreCaseNeedle {
     lowered: Box<str>,
     plan: Option<AsciiPlan>,
@@ -75,8 +76,17 @@ impl IgnoreCaseNeedle {
     }
 
     pub fn contains(&self, haystack: &str) -> bool {
+        self.contains_with(haystack, lowercase)
+    }
+
+    pub fn contains_with<'h, L: AsRef<str>>(
+        &self,
+        haystack: &'h str,
+        lower: impl FnOnce(&'h str) -> L,
+    ) -> bool {
         let Some(plan) = self.plan else {
-            return lowercase(haystack).contains(self.lowered.as_ref());
+            return !(haystack.is_ascii() && !self.lowered.is_ascii())
+                && lower(haystack).as_ref().contains(self.lowered.as_ref());
         };
         let found = if haystack.len() < Self::LONG_HAYSTACK_LEN {
             contains_ascii(haystack.as_bytes(), self.lowered.as_bytes(), plan)
@@ -86,11 +96,11 @@ impl IgnoreCaseNeedle {
                 .and_then(|finder| contains_windowed(haystack.as_bytes(), finder))
         };
         plan.settle(found, haystack)
-            .unwrap_or_else(|| lowercase(haystack).contains(self.lowered.as_ref()))
+            .unwrap_or_else(|| lower(haystack).as_ref().contains(self.lowered.as_ref()))
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct AsciiPlan {
     offset: usize,
     lower: u8,

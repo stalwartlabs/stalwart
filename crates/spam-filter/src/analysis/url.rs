@@ -19,9 +19,9 @@ use common::scripts::IsMixedCharset;
 use common::scripts::functions::unicode::CharUtils;
 use hyper::{Uri, header::LOCATION};
 use nlp::tokenizers::types::TokenType;
-use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::{borrow::Cow, future::Future, time::Duration};
+use store::ahash::AHashSet;
 
 const HTTPS_SCHEME: &str = "https://";
 
@@ -52,13 +52,13 @@ impl SpamFilterAnalyzeUrl for Server {
         let mut urls = collect_urls(ctx);
 
         if !ctx.input.is_train {
-            let mut redirected_urls = HashSet::new();
+            let mut redirected_urls = AHashSet::new();
             let mut has_zwsp = false;
             let mut has_suspicious = false;
-            let mut trusted_domains: HashSet<String> = HashSet::new();
+            let mut trusted_domains: AHashSet<String> = AHashSet::new();
 
             {
-                let mut checked_domains: HashSet<&str> = HashSet::new();
+                let mut checked_domains: AHashSet<&str> = AHashSet::new();
                 for url in &urls {
                     if let Some(url_parsed) = &url.element.url_parsed {
                         let host_sld = url_parsed.host.sld_or_default();
@@ -237,9 +237,9 @@ impl SpamFilterAnalyzeUrl for Server {
 
 pub fn collect_urls(
     ctx: &mut SpamFilterContext<'_>,
-) -> HashSet<ElementLocation<UrlParts<'static>>> {
-    let mut urls: HashSet<ElementLocation<UrlParts<'static>>> = HashSet::new();
-    let mut inferred_urls: HashSet<ElementLocation<UrlParts<'static>>> = HashSet::new();
+) -> AHashSet<ElementLocation<UrlParts<'static>>> {
+    let mut urls: AHashSet<ElementLocation<UrlParts<'static>>> = AHashSet::new();
+    let mut inferred_urls: AHashSet<ElementLocation<UrlParts<'static>>> = AHashSet::new();
     for token in &ctx.output.subject_tokens {
         if let TokenType::Url(url) | TokenType::UrlNoScheme(url) = token {
             collect_url(
@@ -271,9 +271,13 @@ pub fn collect_urls(
                             match value {
                                 Some(value) if [HREF, SRC].contains(attr) => {
                                     let value = value.trim();
-                                    if !urls.contains(to_lowercase_cow(value).as_ref()) {
+                                    let url = to_lowercase_cow(value);
+                                    if !urls.contains(url.as_ref()) {
                                         urls.insert(ElementLocation::new(
-                                            UrlParts::new(value.to_string()),
+                                            UrlParts::with_lowercase(
+                                                Cow::Owned(value.to_string()),
+                                                url.into_owned(),
+                                            ),
                                             if is_body {
                                                 Location::BodyHtml
                                             } else {
@@ -377,8 +381,8 @@ async fn http_get_header(
 }
 
 fn collect_url(
-    urls: &mut HashSet<ElementLocation<UrlParts<'static>>>,
-    inferred_urls: &mut HashSet<ElementLocation<UrlParts<'static>>>,
+    urls: &mut AHashSet<ElementLocation<UrlParts<'static>>>,
+    inferred_urls: &mut AHashSet<ElementLocation<UrlParts<'static>>>,
     url: &UrlParts<'_>,
     location: Location,
 ) {
@@ -473,7 +477,10 @@ impl<'x> UrlParts<'x> {
     pub fn new(url: impl Into<Cow<'x, str>>) -> Self {
         let url_original = url.into();
         let url = url_original.trim().to_lowercase();
+        Self::with_lowercase(url_original, url)
+    }
 
+    fn with_lowercase(url_original: Cow<'x, str>, url: String) -> Self {
         Self {
             url_parsed: Self::parse(&url),
             url,

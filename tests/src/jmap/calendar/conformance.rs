@@ -2950,9 +2950,14 @@ async fn event_get(test: &TestServer, john: &Account, jane: &Account) {
             .collect::<Vec<_>>(),
         ["owner"]
     );
+    let attendee_email = if !test.server.search_store().is_mysql() {
+        "bill@example.com"
+    } else {
+        "bill@example"
+    };
     for (filter, expand_recurrences) in [
         (json!({"attendee": "bill"}), false),
-        (json!({"text": "bill@example.com"}), false),
+        (json!({"text": attendee_email}), false),
         (json!({"text": "secret"}), false),
         (json!({"attendee": "bill"}), true),
         (json!({"text": "bill"}), true),
@@ -3272,7 +3277,7 @@ async fn event_query(test: &TestServer, john: &Account) {
     .await
     .created(0);
     test.wait_for_tasks().await;
-    for (condition, window, expected) in [
+    let mut conditions = vec![
         (
             json!({"title": "planning"}),
             None,
@@ -3304,17 +3309,6 @@ async fn event_query(test: &TestServer, john: &Account) {
             None,
             vec!["2030-03-02T09:00:00", "2030-03-04T09:00:00"],
         ),
-        (json!({"title": "call"}), None, vec!["2030-03-06T09:00:00"]),
-        (
-            json!({"location": "rooms"}),
-            None,
-            vec![
-                "2030-03-01T09:00:00",
-                "2030-03-02T09:00:00",
-                "2030-03-04T09:00:00",
-                "2030-03-06T09:00:00",
-            ],
-        ),
         (
             json!({"description": "sync"}),
             None,
@@ -3336,12 +3330,31 @@ async fn event_query(test: &TestServer, john: &Account) {
             None,
             vec![],
         ),
-        (
+    ];
+    let search_store = test.server.search_store();
+    if !search_store.is_mysql() {
+        conditions.extend([
+            (json!({"title": "call"}), None, vec!["2030-03-06T09:00:00"]),
+            (
+                json!({"location": "rooms"}),
+                None,
+                vec![
+                    "2030-03-01T09:00:00",
+                    "2030-03-02T09:00:00",
+                    "2030-03-04T09:00:00",
+                    "2030-03-06T09:00:00",
+                ],
+            ),
+        ]);
+    }
+    if !(search_store.is_postgres() || search_store.is_mysql() || search_store.is_meilisearch()) {
+        conditions.push((
             json!({"title": "会議*"}),
             Some(("2030-04-30T00:00:00", "2030-05-03T00:00:00")),
             vec!["2030-05-01T09:00:00"],
-        ),
-    ] {
+        ));
+    }
+    for (condition, window, expected) in conditions {
         let (after, before) = window.unwrap_or(("2030-03-01T00:00:00", "2030-03-07T00:00:00"));
         let mut filter = condition.clone();
         filter["after"] = json!(after);

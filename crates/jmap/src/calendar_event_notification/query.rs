@@ -156,13 +156,13 @@ impl CalendarEventNotificationQuery for Server {
         );
 
         if !results.is_empty() {
-            let mut notifications = cache
-                .resources
+            let mut notifications = results
                 .iter()
-                .filter_map(|r| {
-                    r.created_at()
-                        .filter(|_| !r.is_container() && results.contains(r.document_id()))
-                        .map(|created_at| (r.document_id(), created_at))
+                .filter_map(|document_id| {
+                    cache
+                        .item_by_id(document_id)
+                        .and_then(|resource| resource.created_at())
+                        .map(|created_at| (document_id, created_at))
                 })
                 .collect::<Vec<_>>();
             notifications

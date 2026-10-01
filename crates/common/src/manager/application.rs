@@ -7,6 +7,7 @@
 use crate::{Server, manager::fetch_resource};
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use compact_str::{CompactString, format_compact};
 use registry::schema::{enums::CompressionAlgo, structs::Application};
 use std::{
@@ -28,6 +29,7 @@ use types::{blob_hash::BlobHash, id::Id};
 
 const APP_BLOB_PREFIX: &str = "STALWART_APP_";
 const MAX_APP_SIZE: usize = 100 * 1024 * 1024;
+const INDEX_PAGE: &str = "index.html";
 const BASE_HREF: &str = "<base href=\"/\"";
 const OAUTH_CLIENT_ID: &str = "<meta name=\"oauth-client-id\" content=\"\"";
 
@@ -45,7 +47,7 @@ pub struct WebApplications {
 
 pub struct AppRoutes {
     resources: AHashMap<String, Resource<PathBuf>>,
-    oauth_client_id_meta: Option<String>,
+    index_pages: AHashMap<String, Bytes>,
     _bundle_dir: TempDir,
 }
 
@@ -76,7 +78,7 @@ impl<T> Resource<T> {
 }
 
 pub struct AppResource {
-    pub resource: Resource<Vec<u8>>,
+    pub resource: Resource<Bytes>,
     pub no_cache: bool,
 }
 
@@ -89,26 +91,35 @@ impl WebApplications {
         }
     }
 
+    pub fn has_prefix(&self, prefix: &str) -> bool {
+        self.routes.load().contains_key(prefix)
+    }
+
     pub async fn serve(&self, prefix: &str, path: &str) -> trc::Result<Option<AppResource>> {
         if let Some(routes) = self.routes.load().get(prefix)
             && let Some((is_index, resource)) = routes
                 .resources
                 .get(path)
-                .map(|res| (path == "index.html", res))
-                .or_else(|| routes.resources.get("index.html").map(|res| (true, res)))
+                .map(|res| (path == INDEX_PAGE, res))
+                .or_else(|| routes.resources.get(INDEX_PAGE).map(|res| (true, res)))
         {
+            if is_index && let Some(page) = routes.index_pages.get(prefix) {
+                return Ok(Some(AppResource {
+                    resource: Resource {
+                        content_type: resource.content_type.clone(),
+                        contents: page.clone(),
+                    },
+                    no_cache: true,
+                }));
+            }
+
             tokio::fs::read(&resource.contents)
                 .await
-                .map(|mut contents| {
-                    if is_index && let Ok(html) = std::str::from_utf8(&contents) {
-                        contents =
-                            rewrite_index(html, prefix, routes.oauth_client_id_meta.as_deref());
-                    }
-
+                .map(|contents| {
                     Some(AppResource {
                         resource: Resource {
                             content_type: resource.content_type.clone(),
-                            contents,
+                            contents: contents.into(),
                         },
                         no_cache: is_index,
                     })
@@ -242,7 +253,7 @@ impl WebApplicationManager {
 
         let url = self.url.clone();
         let bundle_path = staging.path.clone();
-        let (resources, bundle) = tokio::task::spawn_blocking(move || -> trc::Result<_> {
+        let (resources, index, bundle) = tokio::task::spawn_blocking(move || -> trc::Result<_> {
             let mut archive = zip::ZipArchive::new(Cursor::new(bundle)).map_err(|err| {
                 trc::ResourceEvent::Error
                     .caused_by(trc::location!())
@@ -251,6 +262,7 @@ impl WebApplicationManager {
                     .details("Failed to decompress application bundle")
             })?;
             let mut resources = AHashMap::with_capacity(archive.len());
+            let mut index = None;
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i).map_err(|err| {
                     trc::ResourceEvent::Error
@@ -268,7 +280,10 @@ impl WebApplicationManager {
                 drop(file);
 
                 let path = bundle_path.join(format!("{i:02}"));
-                std::fs::write(&path, contents).map_err(unpack_error)?;
+                std::fs::write(&path, &contents).map_err(unpack_error)?;
+                if file_name == INDEX_PAGE {
+                    index = Some(contents);
+                }
 
                 let resource = Resource {
                     content_type: match file_name
@@ -292,7 +307,7 @@ impl WebApplicationManager {
 
                 resources.insert(file_name, resource);
             }
-            Ok((resources, archive.into_inner().into_inner()))
+            Ok((resources, index, archive.into_inner().into_inner()))
         })
         .await
         .map_err(|err| {
@@ -323,7 +338,9 @@ impl WebApplicationManager {
 
         Ok(AppRoutes {
             resources,
-            oauth_client_id_meta: self.oauth_client_id.as_deref().map(oauth_client_id_meta),
+            index_pages: index
+                .map(|index| index_pages(&index, &self.prefixes, self.oauth_client_id.as_deref()))
+                .unwrap_or_default(),
             _bundle_dir: staging,
         })
     }
@@ -455,6 +472,25 @@ impl Default for WebApplications {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn index_pages(
+    index: &[u8],
+    prefixes: &[String],
+    oauth_client_id: Option<&str>,
+) -> AHashMap<String, Bytes> {
+    let client_id_meta = oauth_client_id.map(oauth_client_id_meta);
+    let html = std::str::from_utf8(index).ok();
+    prefixes
+        .iter()
+        .map(|prefix| {
+            let page = match html {
+                Some(html) => rewrite_index(html, prefix, client_id_meta.as_deref()),
+                None => index.to_vec(),
+            };
+            (prefix.clone(), Bytes::from(page))
+        })
+        .collect()
 }
 
 fn rewrite_index(html: &str, prefix: &str, oauth_client_id_meta: Option<&str>) -> Vec<u8> {
@@ -603,7 +639,11 @@ mod tests {
 
         let routes = Arc::new(AppRoutes {
             resources,
-            oauth_client_id_meta: client_id.map(oauth_client_id_meta),
+            index_pages: index_pages(
+                INDEX.as_bytes(),
+                &["admin".to_string(), "account".to_string()],
+                client_id,
+            ),
             _bundle_dir: dir,
         });
 
@@ -621,7 +661,7 @@ mod tests {
         let served = apps.serve(prefix, path).await.unwrap().unwrap();
         assert!(served.no_cache, "index responses must not be cached");
         assert_eq!(served.resource.content_type.as_ref(), "text/html");
-        String::from_utf8(served.resource.contents).unwrap()
+        String::from_utf8(served.resource.contents.to_vec()).unwrap()
     }
 
     #[tokio::test]
@@ -660,11 +700,21 @@ mod tests {
         let apps = fixture("serve-assets", Some("pocket-id-client")).await;
 
         let served = apps.serve("admin", "app.js").await.unwrap().unwrap();
-        assert_eq!(served.resource.contents, b"export const x = 1;\n");
+        assert_eq!(served.resource.contents, &b"export const x = 1;\n"[..]);
         assert_eq!(served.resource.content_type.as_ref(), "text/javascript");
         assert!(!served.no_cache);
 
         assert!(apps.serve("unknown", "index.html").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn prefixes_are_reported_for_every_route() {
+        let apps = fixture("serve-prefixes", None).await;
+
+        assert!(apps.has_prefix("admin"));
+        assert!(apps.has_prefix("account"));
+        assert!(!apps.has_prefix("php-tools"));
+        assert!(!apps.has_prefix(""));
     }
 
     #[tokio::test]

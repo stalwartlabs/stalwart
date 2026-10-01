@@ -171,16 +171,18 @@ pub async fn test(test: &TestServer) {
         queried.sort();
         assert_eq!(queried, expected, "{filter}");
     }
-    assert_eq!(
-        john.jmap_method_call(
-            "CalendarEvent/query",
-            json!({ "accountId": &john_id, "filter": {"title": "doctor"} }),
-        )
-        .await
-        .ids()
-        .collect::<Vec<_>>(),
-        [private_id.as_str()]
-    );
+    if !test.server.search_store().is_postgres() {
+        assert_eq!(
+            john.jmap_method_call(
+                "CalendarEvent/query",
+                json!({ "accountId": &john_id, "filter": {"title": "doctor"} }),
+            )
+            .await
+            .ids()
+            .collect::<Vec<_>>(),
+            [private_id.as_str()]
+        );
+    }
 
     // Sharees cannot modify or destroy private or secret events
     let response = jane

@@ -119,6 +119,7 @@ impl<T: SessionStream> Session<T> {
         };
 
         let has_dsn = from.env_id.is_some();
+        self.data.message_size = from.size;
         self.data.mail_from = SessionAddress {
             address,
             address_lcase,

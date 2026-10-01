@@ -7,6 +7,9 @@
 use super::LdapConnectionManager;
 use deadpool::managed;
 use ldap3::{Ldap, LdapConnAsync, LdapError, exop::WhoAmI};
+use std::time::Duration;
+
+const RECYCLE_PROBE_AFTER_IDLE: Duration = Duration::from_secs(5);
 
 impl managed::Manager for LdapConnectionManager {
     type Type = Ldap;
@@ -30,11 +33,17 @@ impl managed::Manager for LdapConnectionManager {
     async fn recycle(
         &self,
         conn: &mut Ldap,
-        _: &managed::Metrics,
+        metrics: &managed::Metrics,
     ) -> managed::RecycleResult<LdapError> {
-        conn.extended(WhoAmI)
-            .await
-            .map(|_| ())
-            .map_err(managed::RecycleError::Backend)
+        if conn.is_closed() {
+            Err(managed::RecycleError::message("LDAP connection closed"))
+        } else if metrics.last_used() < RECYCLE_PROBE_AFTER_IDLE {
+            Ok(())
+        } else {
+            conn.extended(WhoAmI)
+                .await
+                .map(|_| ())
+                .map_err(managed::RecycleError::Backend)
+        }
     }
 }

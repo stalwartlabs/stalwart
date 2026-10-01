@@ -28,45 +28,45 @@ trait XmlCdataEscape {
     fn write_cdata_escaped_to(&self, out: &mut impl Write) -> std::fmt::Result;
 }
 
+const CDATA_END: &[u8] = b"]]>";
+
 impl<T: AsRef<str>> XmlEscape for T {
     fn write_escaped_to(&self, out: &mut impl Write) -> std::fmt::Result {
-        let str = self.as_ref();
+        let text = self.as_ref();
+        let mut start = 0;
 
-        for c in str.chars() {
-            match c {
-                '<' => out.write_str("&lt;")?,
-                '>' => out.write_str("&gt;")?,
-                '&' => out.write_str("&amp;")?,
-                '"' => out.write_str("&quot;")?,
-                '\'' => out.write_str("&apos;")?,
-                _ => out.write_char(c)?,
-            }
+        for (pos, byte) in text.bytes().enumerate() {
+            let entity = match byte {
+                b'<' => "&lt;",
+                b'>' => "&gt;",
+                b'&' => "&amp;",
+                b'"' => "&quot;",
+                b'\'' => "&apos;",
+                _ => continue,
+            };
+            out.write_str(text.get(start..pos).unwrap_or_default())?;
+            out.write_str(entity)?;
+            start = pos + 1;
         }
 
-        Ok(())
+        out.write_str(text.get(start..).unwrap_or_default())
     }
 }
 
 impl<T: AsRef<str>> XmlCdataEscape for T {
     fn write_cdata_escaped_to(&self, out: &mut impl Write) -> std::fmt::Result {
-        let str = self.as_ref();
-        let mut last_ch = '\0';
-        let mut last_ch2 = '\0';
+        let text = self.as_ref();
+        let mut start = 0;
 
         out.write_str("<![CDATA[")?;
 
-        for ch in str.chars() {
-            match ch {
-                '>' if last_ch == ']' && last_ch2 == ']' => {
-                    out.write_str("]]><![CDATA[>")?;
-                }
-                _ => out.write_char(ch)?,
-            }
-
-            last_ch2 = last_ch;
-            last_ch = ch;
+        for pos in memchr::memmem::find_iter(text.as_bytes(), CDATA_END) {
+            out.write_str(text.get(start..pos).unwrap_or_default())?;
+            out.write_str("]]]]><![CDATA[>")?;
+            start = pos + CDATA_END.len();
         }
 
+        out.write_str(text.get(start..).unwrap_or_default())?;
         out.write_str("]]>")
     }
 }
@@ -180,7 +180,7 @@ mod tests {
     use crate::{
         Depth,
         parser::{Token, tokenizer::Tokenizer},
-        responses::XmlCdataEscape,
+        responses::{XmlCdataEscape, XmlEscape},
         schema::{
             Namespace,
             property::{
@@ -698,6 +698,64 @@ END:VCARD
     }
 
     #[test]
+    fn escape_text_matches_reference() {
+        fn reference(text: &str) -> String {
+            let mut out = String::new();
+            for ch in text.chars() {
+                match ch {
+                    '<' => out.push_str("&lt;"),
+                    '>' => out.push_str("&gt;"),
+                    '&' => out.push_str("&amp;"),
+                    '"' => out.push_str("&quot;"),
+                    '\'' => out.push_str("&apos;"),
+                    _ => out.push(ch),
+                }
+            }
+            out
+        }
+
+        let alphabet = [
+            'a',
+            '<',
+            '>',
+            '&',
+            '"',
+            '\'',
+            '\u{e9}',
+            '\u{1f600}',
+            ' ',
+            ']',
+        ];
+        let mut state = 0x9e37_79b9_u32;
+        let mut inputs = vec![
+            String::new(),
+            "/dav/cal/john%40example.com/default/event.ics".to_string(),
+            "\"3458762341\"".to_string(),
+            "Family & Friends".to_string(),
+            "<>&'\"".to_string(),
+            "caf\u{e9} <b>\u{1f600}</b>".to_string(),
+        ];
+        for _ in 0..5000 {
+            let mut text = String::new();
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            for _ in 0..state % 16 {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                text.push(alphabet[(state % alphabet.len() as u32) as usize]);
+            }
+            inputs.push(text);
+        }
+        for input in inputs {
+            let mut output = String::new();
+            input.write_escaped_to(&mut output).unwrap();
+            assert_eq!(output, reference(&input), "failed for input: {input:?}");
+        }
+    }
+
+    #[test]
     fn escape_cdata() {
         for (test, expected) in [
             ("", "<![CDATA[]]>"),
@@ -711,6 +769,12 @@ END:VCARD
             (">", "<![CDATA[>]]>"),
             ("]]>]", "<![CDATA[]]]]><![CDATA[>]]]>"),
             ("]]>", "<![CDATA[]]]]><![CDATA[>]]>"),
+            ("]]]>", "<![CDATA[]]]]]><![CDATA[>]]>"),
+            ("]]>]]>", "<![CDATA[]]]]><![CDATA[>]]]]><![CDATA[>]]>"),
+            (
+                "\u{e9}]]>\u{1f600}",
+                "<![CDATA[\u{e9}]]]]><![CDATA[>\u{1f600}]]>",
+            ),
             ("hello]]>world", "<![CDATA[hello]]]]><![CDATA[>world]]>"),
             (
                 "hello]]><nasty-xml>pure-evil</nasty-xml>",

@@ -20,7 +20,7 @@ use crate::queue::spool::{DSN_RETRY, SmtpSpool};
 use crate::queue::throttle::IsAllowed;
 use crate::queue::{
     Error, FROM_REPORT, HostResponse, MessageWrapper, Metadata, QueueEnvelope, QueuedMessage,
-    Status,
+    Status, eval_strategy,
 };
 use crate::reporting::send::MtaReportSend;
 use crate::{queue::ErrorDetails, reporting::tls::TlsRptOptions};
@@ -42,6 +42,7 @@ use std::{
     time::Instant,
 };
 use store::write::{BatchBuilder, QueueClass, ValueClass, now};
+use tokio::sync::OnceCell;
 use trc::{DaneEvent, DeliveryEvent, MtaStsEvent, ServerEvent, TlsRptEvent};
 
 impl QueuedMessage {
@@ -226,14 +227,19 @@ impl QueuedMessage {
         let mut arena = Bump::new();
         let mut routes: AHashMap<(&str, &RoutingStrategy, Option<&[u8]>), Vec<usize>> =
             AHashMap::new();
-        let mut has_rcpt_headers = false;
         let mut default_rcpt_header = None;
+        let mut rcpt_header_by_idx: Vec<Option<&[u8]>> = Vec::new();
         for metadata in message.message.metadata.iter() {
             if let Metadata::Headers { value, id } = metadata {
-                has_rcpt_headers = true;
                 if *id == u64::MAX {
-                    default_rcpt_header = Some(value.as_ref());
-                    break;
+                    default_rcpt_header.get_or_insert(value.as_ref());
+                } else if let Ok(idx) = usize::try_from(*id) {
+                    if rcpt_header_by_idx.is_empty() {
+                        rcpt_header_by_idx.resize(message.message.recipients.len(), None);
+                    }
+                    if let Some(slot) = rcpt_header_by_idx.get_mut(idx) {
+                        slot.get_or_insert(value.as_ref());
+                    }
                 }
             }
         }
@@ -245,31 +251,21 @@ impl QueuedMessage {
                 && rcpt.queue == message.queue_name
             {
                 let envelope = QueueEnvelope::new(&message.message, rcpt);
-                let route = server.get_route_or_default(
-                    &server
-                        .eval_if::<String, _>(
-                            &queue_config.route,
-                            &envelope,
-                            &mut arena,
-                            message.span_id,
-                        )
-                        .await
-                        .unwrap_or_else(|| "default".to_string()),
+                let route = eval_strategy(
+                    &server,
+                    &queue_config.route,
+                    &envelope,
+                    &mut arena,
                     message.span_id,
-                );
+                    Server::get_route_or_default,
+                )
+                .await;
 
-                // Map RCPT headers
-                let mut rcpt_headers = default_rcpt_header;
-                if has_rcpt_headers {
-                    for metadata in message.message.metadata.iter() {
-                        if let Metadata::Headers { value, id } = metadata
-                            && *id == rcpt_idx as u64
-                        {
-                            rcpt_headers = Some(value.as_ref());
-                            break;
-                        }
-                    }
-                }
+                let rcpt_headers = rcpt_header_by_idx
+                    .get(rcpt_idx)
+                    .copied()
+                    .flatten()
+                    .or(default_rcpt_header);
 
                 routes
                     .entry((rcpt.domain_part(), route, rcpt_headers))
@@ -280,6 +276,7 @@ impl QueuedMessage {
 
         let no_ip = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
         let mut delivery_results: Vec<DeliveryResult> = Vec::new();
+        let message_blob = OnceCell::new();
         'next_route: for ((domain, route, rcpt_headers), rcpt_idxs) in routes {
             trc::event!(
                 Delivery(DeliveryEvent::DomainDeliveryStart),
@@ -327,13 +324,15 @@ impl QueuedMessage {
             };
 
             // Prepare TLS strategy
-            let mut tls_strategy = server.get_tls_or_default(
-                &server
-                    .eval_if::<String, _>(&queue_config.tls, &envelope, &mut arena, message.span_id)
-                    .await
-                    .unwrap_or_else(|| "default".to_string()),
+            let mut tls_strategy = eval_strategy(
+                &server,
+                &queue_config.tls,
+                &envelope,
+                &mut arena,
                 message.span_id,
-            );
+                Server::get_tls_or_default,
+            )
+            .await;
 
             // Obtain TLS reporting
             let tls_report = if is_smtp
@@ -691,18 +690,15 @@ impl QueuedMessage {
                 }
 
                 // Update TLS strategy
-                tls_strategy = server.get_tls_or_default(
-                    &server
-                        .eval_if::<String, _>(
-                            &queue_config.tls,
-                            &envelope,
-                            &mut arena,
-                            message.span_id,
-                        )
-                        .await
-                        .unwrap_or_else(|| "default".to_string()),
+                tls_strategy = eval_strategy(
+                    &server,
+                    &queue_config.tls,
+                    &envelope,
+                    &mut arena,
                     message.span_id,
-                );
+                    Server::get_tls_or_default,
+                )
+                .await;
 
                 let validated_host;
                 let remote_host = if mx_unvalidated && tls_strategy.try_dane() {
@@ -1125,18 +1121,15 @@ impl QueuedMessage {
                     }
 
                     // Obtain connection parameters
-                    let conn_strategy = server.get_connection_or_default(
-                        &server
-                            .eval_if::<String, _>(
-                                &queue_config.connection,
-                                &envelope,
-                                &mut arena,
-                                message.span_id,
-                            )
-                            .await
-                            .unwrap_or_else(|| "default".to_string()),
+                    let conn_strategy = eval_strategy(
+                        &server,
+                        &queue_config.connection,
+                        &envelope,
+                        &mut arena,
                         message.span_id,
-                    );
+                        Server::get_connection_or_default,
+                    )
+                    .await;
 
                     // Set source IP, if any
                     let ip_host = conn_strategy.source_ip(remote_ip.is_ipv4());
@@ -1207,6 +1200,7 @@ impl QueuedMessage {
                         local_hostname,
                         conn_strategy,
                         capabilities: None,
+                        message_blob: &message_blob,
                     };
 
                     // Prepare TLS connector
@@ -1550,15 +1544,19 @@ impl QueuedMessage {
             // Update status
             delivery_results.push(DeliveryResult::domain(last_status, rcpt_idxs));
         }
+        drop(message_blob);
 
         // Apply status changes
         for delivery_result in delivery_results {
             match delivery_result {
                 DeliveryResult::Domain { status, rcpt_idxs } => {
-                    for rcpt_idx in rcpt_idxs {
-                        message
-                            .set_rcpt_status(status.clone(), rcpt_idx, &server)
-                            .await;
+                    if let Some((&last_idx, rcpt_idxs)) = rcpt_idxs.split_last() {
+                        for &rcpt_idx in rcpt_idxs {
+                            message
+                                .set_rcpt_status(status.clone(), rcpt_idx, &server)
+                                .await;
+                        }
+                        message.set_rcpt_status(status, last_idx, &server).await;
                     }
                 }
                 DeliveryResult::Account { status, rcpt_idx } => {
@@ -1700,18 +1698,15 @@ impl MessageWrapper {
         if needs_retry {
             let mut arena = Bump::new();
             let envelope = QueueEnvelope::new(&self.message, &self.message.recipients[rcpt_idx]);
-            let queue = server.get_queue_or_default(
-                &server
-                    .eval_if::<String, _>(
-                        &server.core.smtp.queue.queue,
-                        &envelope,
-                        &mut arena,
-                        self.span_id,
-                    )
-                    .await
-                    .unwrap_or_else(|| "default".to_string()),
+            let queue = eval_strategy(
+                server,
+                &server.core.smtp.queue.queue,
+                &envelope,
+                &mut arena,
                 self.span_id,
-            );
+                Server::get_queue_or_default,
+            )
+            .await;
             let rcpt = &mut self.message.recipients[rcpt_idx];
             rcpt.retry.due = now()
                 + queue.retry[std::cmp::min(rcpt.retry.inner as usize, queue.retry.len() - 1)];

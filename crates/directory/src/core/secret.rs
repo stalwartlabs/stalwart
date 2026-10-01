@@ -18,7 +18,6 @@ use sha1::Digest;
 use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Sha512;
-use tokio::sync::oneshot;
 use totp_rs::Totp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,84 +71,130 @@ pub async fn verify_mfa_secret_hash(
     }
 }
 
-async fn verify_hash_prefix(hashed_secret: &str, secret: &[u8]) -> trc::Result<bool> {
-    let is_argon = hashed_secret.starts_with("$argon2");
-    let is_pbkdf2 = !is_argon && hashed_secret.starts_with("$pbkdf2");
-    let is_scrypt = !is_argon && !is_pbkdf2 && hashed_secret.starts_with("$scrypt");
+#[derive(Debug, Clone, Copy)]
+enum CryptScheme {
+    Argon2,
+    Pbkdf2,
+    Scrypt,
+    Bcrypt,
+    Sha512Crypt,
+    Sha256Crypt,
+    Sha1Crypt,
+    Md5Crypt,
+    BsdiCrypt,
+    UnixCrypt,
+}
 
-    if is_argon || is_pbkdf2 || is_scrypt {
-        let (tx, rx) = oneshot::channel();
+impl CryptScheme {
+    fn from_prefix(hashed_secret: &str) -> Option<Self> {
+        if hashed_secret.starts_with("$argon2") {
+            Some(CryptScheme::Argon2)
+        } else if hashed_secret.starts_with("$pbkdf2") {
+            Some(CryptScheme::Pbkdf2)
+        } else if hashed_secret.starts_with("$scrypt") {
+            Some(CryptScheme::Scrypt)
+        } else if hashed_secret.starts_with("$2") {
+            Some(CryptScheme::Bcrypt)
+        } else if hashed_secret.starts_with("$6$") {
+            Some(CryptScheme::Sha512Crypt)
+        } else if hashed_secret.starts_with("$5$") {
+            Some(CryptScheme::Sha256Crypt)
+        } else if hashed_secret.starts_with("$sha1") {
+            Some(CryptScheme::Sha1Crypt)
+        } else if hashed_secret.starts_with("$1") {
+            Some(CryptScheme::Md5Crypt)
+        } else {
+            None
+        }
+    }
+
+    fn verify(self, hashed_secret: &str, secret: &[u8]) -> trc::Result<bool> {
+        match self {
+            CryptScheme::Argon2 | CryptScheme::Pbkdf2 | CryptScheme::Scrypt => {
+                let hash = PasswordHash::new(hashed_secret).map_err(|err| {
+                    trc::AuthEvent::Error
+                        .reason(err)
+                        .details(hashed_secret.to_string())
+                })?;
+                Ok(match self {
+                    CryptScheme::Argon2 => Argon2::default().verify_password(secret, &hash),
+                    CryptScheme::Pbkdf2 => Pbkdf2::default().verify_password(secret, &hash),
+                    _ => Scrypt::default().verify_password(secret, &hash),
+                }
+                .is_ok())
+            }
+            CryptScheme::Bcrypt => Ok(bcrypt::verify(secret, hashed_secret)),
+            CryptScheme::Sha512Crypt => Ok(sha512_crypt::verify(secret, hashed_secret)),
+            CryptScheme::Sha256Crypt => Ok(sha256_crypt::verify(secret, hashed_secret)),
+            CryptScheme::Sha1Crypt => Ok(sha1_crypt::verify(secret, hashed_secret)),
+            CryptScheme::Md5Crypt => Ok(md5_crypt::verify(secret, hashed_secret)),
+            CryptScheme::BsdiCrypt => Ok(bsdi_crypt::verify(secret, hashed_secret)),
+            CryptScheme::UnixCrypt => Ok(unix_crypt::verify(secret, hashed_secret)),
+        }
+    }
+
+    async fn verify_blocking(self, hashed_secret: &str, secret: &[u8]) -> trc::Result<bool> {
         let secret = secret.to_vec();
         let hashed_secret = hashed_secret.to_string();
 
-        tokio::task::spawn_blocking(move || match PasswordHash::new(&hashed_secret) {
-            Ok(hash) => {
-                let result = if is_argon {
-                    Argon2::default().verify_password(&secret, &hash)
-                } else if is_pbkdf2 {
-                    Pbkdf2::default().verify_password(&secret, &hash)
-                } else {
-                    Scrypt::default().verify_password(&secret, &hash)
-                };
-
-                tx.send(Ok(result.is_ok())).ok();
-            }
-            Err(err) => {
-                tx.send(Err(trc::AuthEvent::Error
+        tokio::task::spawn_blocking(move || self.verify(&hashed_secret, &secret))
+            .await
+            .map_err(|err| {
+                trc::EventType::Server(trc::ServerEvent::ThreadError)
+                    .caused_by(trc::location!())
                     .reason(err)
-                    .details(hashed_secret)))
-                    .ok();
-            }
-        });
-
-        match rx.await {
-            Ok(result) => result,
-            Err(err) => Err(trc::EventType::Server(trc::ServerEvent::ThreadError)
-                .caused_by(trc::location!())
-                .reason(err)),
-        }
-    } else if hashed_secret.starts_with("$2") {
-        // Blowfish crypt
-        Ok(bcrypt::verify(secret, hashed_secret))
-    } else if hashed_secret.starts_with("$6$") {
-        // SHA-512 crypt
-        Ok(sha512_crypt::verify(secret, hashed_secret))
-    } else if hashed_secret.starts_with("$5$") {
-        // SHA-256 crypt
-        Ok(sha256_crypt::verify(secret, hashed_secret))
-    } else if hashed_secret.starts_with("$sha1") {
-        // SHA-1 crypt
-        Ok(sha1_crypt::verify(secret, hashed_secret))
-    } else if hashed_secret.starts_with("$1") {
-        // MD5 based hash
-        Ok(md5_crypt::verify(secret, hashed_secret))
-    } else {
-        Err(trc::AuthEvent::Error
-            .into_err()
-            .details(CompactString::from(hashed_secret)))
+            })?
     }
 }
+
+async fn verify_hash_prefix(hashed_secret: &str, secret: &[u8]) -> trc::Result<bool> {
+    match CryptScheme::from_prefix(hashed_secret) {
+        Some(scheme) => scheme.verify_blocking(hashed_secret, secret).await,
+        None => Err(trc::AuthEvent::Error
+            .into_err()
+            .details(CompactString::from(hashed_secret))),
+    }
+}
+
+fn digest_matches(digest: &[u8], encoded: &str) -> bool {
+    let mut buf = [0u8; MAX_ENCODED_DIGEST_LEN];
+    STANDARD
+        .encode_slice(digest, &mut buf)
+        .ok()
+        .and_then(|len| buf.get(..len))
+        .is_some_and(|expected| expected == encoded.as_bytes())
+}
+
+const MAX_ENCODED_DIGEST_LEN: usize = STANDARD.encoded_len(64);
 
 pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Result<bool> {
     if hashed_secret.starts_with('$') {
         verify_hash_prefix(hashed_secret, secret).await
     } else if hashed_secret.starts_with('_') {
-        // Enhanced DES-based hash
-        Ok(bsdi_crypt::verify(secret, hashed_secret))
+        CryptScheme::BsdiCrypt
+            .verify_blocking(hashed_secret, secret)
+            .await
     } else if let Some(hashed_secret) = hashed_secret.strip_prefix('{') {
         if let Some((algo, hashed_secret)) = hashed_secret.split_once('}') {
-            match algo.to_ascii_uppercase().as_str() {
-                "ARGON2" | "ARGON2I" | "ARGON2ID" | "PBKDF2" => {
+            hashify::fnc_map_ignore_case!(algo.as_bytes(),
+                "ARGON2" => {
                     verify_hash_prefix(hashed_secret, secret).await
-                }
+                },
+                "ARGON2I" => {
+                    verify_hash_prefix(hashed_secret, secret).await
+                },
+                "ARGON2ID" => {
+                    verify_hash_prefix(hashed_secret, secret).await
+                },
+                "PBKDF2" => {
+                    verify_hash_prefix(hashed_secret, secret).await
+                },
                 "SHA" => {
-                    // SHA-1
                     let mut hasher = Sha1::new();
                     hasher.update(secret);
-                    Ok(STANDARD.encode(hasher.finalize()) == hashed_secret)
-                }
+                    Ok(digest_matches(&hasher.finalize(), hashed_secret))
+                },
                 "SSHA" => {
-                    // Salted SHA-1
                     let decoded = LENIENT.decode(hashed_secret).unwrap_or_default();
                     let hash = decoded.get(..20).unwrap_or_default();
                     let salt = decoded.get(20..).unwrap_or_default();
@@ -157,15 +202,13 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     hasher.update(secret);
                     hasher.update(salt);
                     Ok(&hasher.finalize()[..] == hash)
-                }
+                },
                 "SHA256" => {
-                    // Verify hash
                     let mut hasher = Sha256::new();
                     hasher.update(secret);
-                    Ok(STANDARD.encode(hasher.finalize()) == hashed_secret)
-                }
+                    Ok(digest_matches(&hasher.finalize(), hashed_secret))
+                },
                 "SSHA256" => {
-                    // Salted SHA-256
                     let decoded = LENIENT.decode(hashed_secret).unwrap_or_default();
                     let hash = decoded.get(..32).unwrap_or_default();
                     let salt = decoded.get(32..).unwrap_or_default();
@@ -173,15 +216,13 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     hasher.update(secret);
                     hasher.update(salt);
                     Ok(&hasher.finalize()[..] == hash)
-                }
+                },
                 "SHA512" => {
-                    // SHA-512
                     let mut hasher = Sha512::new();
                     hasher.update(secret);
-                    Ok(STANDARD.encode(hasher.finalize()) == hashed_secret)
-                }
+                    Ok(digest_matches(&hasher.finalize(), hashed_secret))
+                },
                 "SSHA512" => {
-                    // Salted SHA-512
                     let decoded = LENIENT.decode(hashed_secret).unwrap_or_default();
                     let hash = decoded.get(..64).unwrap_or_default();
                     let salt = decoded.get(64..).unwrap_or_default();
@@ -189,25 +230,31 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
                     hasher.update(secret);
                     hasher.update(salt);
                     Ok(&hasher.finalize()[..] == hash)
-                }
+                },
                 "MD5" => {
-                    // MD5
-                    let digest = md5::compute(secret);
-                    Ok(STANDARD.encode(&digest[..]) == hashed_secret)
-                }
+                    Ok(digest_matches(&md5::compute(secret)[..], hashed_secret))
+                },
                 "CRYPT" => {
                     if hashed_secret.starts_with('$') {
                         verify_hash_prefix(hashed_secret, secret).await
                     } else {
-                        // Unix crypt
-                        Ok(unix_crypt::verify(secret, hashed_secret))
+                        CryptScheme::UnixCrypt
+                            .verify_blocking(hashed_secret, secret)
+                            .await
                     }
+                },
+                "PLAIN" => {
+                    Ok(hashed_secret.as_bytes() == secret)
+                },
+                "CLEAR" => {
+                    Ok(hashed_secret.as_bytes() == secret)
+                },
+                _ => {
+                    Err(trc::AuthEvent::Error
+                        .ctx(trc::Key::Reason, "Unsupported algorithm")
+                        .details(CompactString::from(hashed_secret)))
                 }
-                "PLAIN" | "CLEAR" => Ok(hashed_secret.as_bytes() == secret),
-                _ => Err(trc::AuthEvent::Error
-                    .ctx(trc::Key::Reason, "Unsupported algorithm")
-                    .details(CompactString::from(hashed_secret))),
-            }
+            )
         } else {
             Err(trc::AuthEvent::Error
                 .into_err()
@@ -221,9 +268,7 @@ pub async fn verify_secret_hash(hashed_secret: &str, secret: &[u8]) -> trc::Resu
 }
 
 pub async fn hash_secret(algorithm: PasswordHashAlgorithm, secret: Vec<u8>) -> trc::Result<String> {
-    let (tx, rx) = oneshot::channel();
-
-    tokio::task::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
         let result = match algorithm {
             PasswordHashAlgorithm::Argon2id => {
                 let hasher = Argon2::default();
@@ -232,14 +277,11 @@ pub async fn hash_secret(algorithm: PasswordHashAlgorithm, secret: Vec<u8>) -> t
                     .map(|h| h.to_string())
             }
             PasswordHashAlgorithm::Bcrypt => {
-                return tx
-                    .send(bcrypt::hash(secret.as_slice()).map_err(|err| {
-                        trc::AuthEvent::Error
-                            .reason(err)
-                            .details("Bcrypt hash failed")
-                    }))
-                    .ok()
-                    .unwrap_or(());
+                return bcrypt::hash(secret.as_slice()).map_err(|err| {
+                    trc::AuthEvent::Error
+                        .reason(err)
+                        .details("Bcrypt hash failed")
+                });
             }
             PasswordHashAlgorithm::Scrypt => Scrypt::default()
                 .hash_password(secret.as_slice())
@@ -249,15 +291,15 @@ pub async fn hash_secret(algorithm: PasswordHashAlgorithm, secret: Vec<u8>) -> t
                 .map(|h| h.to_string()),
         };
 
-        tx.send(result.map_err(|err| {
+        result.map_err(|err| {
             trc::AuthEvent::Error
                 .reason(err)
                 .details("Password hash failed")
-        }))
-        .ok();
-    });
+        })
+    })
+    .await;
 
-    match rx.await {
+    match result {
         Ok(result) => result,
         Err(err) => Err(trc::EventType::Server(trc::ServerEvent::ThreadError)
             .caused_by(trc::location!())
@@ -375,7 +417,7 @@ fn is_sha1_crypt(body: &str) -> bool {
 }
 
 fn is_ldap_hash(scheme: &str, body: &str) -> bool {
-    match scheme.to_ascii_uppercase().as_str() {
+    hashify::fnc_map_ignore_case!(scheme.as_bytes(),
         "SHA" => b64_decoded_len_eq(body, 20),
         "SSHA" => b64_decoded_len_ge(body, 21),
         "SHA256" => b64_decoded_len_eq(body, 32),
@@ -383,10 +425,13 @@ fn is_ldap_hash(scheme: &str, body: &str) -> bool {
         "SHA512" => b64_decoded_len_eq(body, 64),
         "SSHA512" => b64_decoded_len_ge(body, 65),
         "MD5" => b64_decoded_len_eq(body, 16),
-        "ARGON2" | "ARGON2I" | "ARGON2ID" | "PBKDF2" => is_complete_phc(body),
+        "ARGON2" => is_complete_phc(body),
+        "ARGON2I" => is_complete_phc(body),
+        "ARGON2ID" => is_complete_phc(body),
+        "PBKDF2" => is_complete_phc(body),
         "CRYPT" => is_password_hash(body) || is_unix_des_crypt(body),
-        _ => false,
-    }
+        _ => false
+    )
 }
 
 fn is_unix_des_crypt(s: &str) -> bool {
@@ -552,6 +597,78 @@ mod tests {
         let digest = md5::compute(b"hello");
         let md5_mc = b64(&digest[..]);
         assert!(is_password_hash(&format!("{{Md5}}{md5_mc}")));
+    }
+
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn verify_secret_hash_all_schemes() {
+        let mut sha1 = Sha1::new();
+        sha1.update(b"hello");
+        let sha1 = b64(&sha1.finalize()[..]);
+        let mut sha256 = Sha256::new();
+        sha256.update(b"hello");
+        let sha256 = b64(&sha256.finalize()[..]);
+        let mut sha512 = Sha512::new();
+        sha512.update(b"hello");
+        let sha512 = b64(&sha512.finalize()[..]);
+        let mut ssha = Sha1::new();
+        ssha.update(b"hello");
+        ssha.update(b"saltbytes");
+        let mut ssha = ssha.finalize().to_vec();
+        ssha.extend_from_slice(b"saltbytes");
+        let ssha = b64(&ssha);
+        let md5 = b64(&md5::compute(b"hello")[..]);
+        let argon = Argon2::default()
+            .hash_password(b"hello")
+            .unwrap()
+            .to_string();
+        let pbkdf = Pbkdf2::default()
+            .hash_password(b"hello")
+            .unwrap()
+            .to_string();
+
+        let hashes = [
+            argon.clone(),
+            pbkdf.clone(),
+            format!("{{ARGON2ID}}{argon}"),
+            format!("{{argon2}}{argon}"),
+            format!("{{PBKDF2}}{pbkdf}"),
+            bcrypt::hash("hello").unwrap(),
+            sha512_crypt::hash("hello").unwrap(),
+            sha256_crypt::hash("hello").unwrap(),
+            sha1_crypt::hash("hello").unwrap(),
+            md5_crypt::hash("hello").unwrap(),
+            bsdi_crypt::hash("hello").unwrap(),
+            format!("{{CRYPT}}{}", unix_crypt::hash("hello").unwrap()),
+            format!("{{crypt}}{}", sha512_crypt::hash("hello").unwrap()),
+            format!("{{SHA}}{sha1}"),
+            format!("{{sha}}{sha1}"),
+            format!("{{SHA256}}{sha256}"),
+            format!("{{Sha512}}{sha512}"),
+            format!("{{SSHA}}{ssha}"),
+            format!("{{MD5}}{md5}"),
+            "{PLAIN}hello".to_string(),
+            "{clear}hello".to_string(),
+            "hello".to_string(),
+        ];
+
+        for hash in &hashes {
+            assert!(
+                verify_secret_hash(hash, b"hello").await.unwrap(),
+                "valid secret rejected for {hash}"
+            );
+            assert!(
+                !verify_secret_hash(hash, b"hellO").await.unwrap(),
+                "invalid secret accepted for {hash}"
+            );
+        }
+
+        for hash in ["{SHA}", "{SHA256}short", "{MD5}aGVsbG8="] {
+            assert!(!verify_secret_hash(hash, b"hello").await.unwrap(), "{hash}");
+        }
+        for hash in ["{UNKNOWN}abc", "$unknown$abc", "{SHA"] {
+            assert!(verify_secret_hash(hash, b"hello").await.is_err(), "{hash}");
+        }
     }
 
     #[test]

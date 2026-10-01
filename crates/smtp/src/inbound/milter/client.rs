@@ -29,6 +29,7 @@ impl MilterClient<TcpStream> {
             for addr in &config.addrs {
                 match TcpStream::connect(addr).await {
                     Ok(stream) => {
+                        let _ = stream.set_nodelay(true);
                         return Ok(MilterClient {
                             stream,
                             timeout_cmd: config.timeout_command,

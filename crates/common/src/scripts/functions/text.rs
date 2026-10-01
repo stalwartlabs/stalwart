@@ -7,6 +7,7 @@
 use mail_parser::decoders::html::html_to_text;
 use sieve::{Context, runtime::Variable};
 use std::borrow::Cow;
+use utils::text::contains_ignore_case;
 
 use super::ApplyString;
 
@@ -118,7 +119,7 @@ pub fn fn_contains<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
 pub fn fn_contains_ignore_case<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     let needle = v[1].to_string();
     match &v[0] {
-        Variable::String(s) => s.to_lowercase().contains(&needle.to_lowercase()),
+        Variable::String(s) => contains_ignore_case(s, &needle),
         Variable::Array(arr) => arr.iter().any(|v| match v {
             Variable::String(s) => s.eq_ignore_ascii_case(needle.as_ref()),
             _ => false,

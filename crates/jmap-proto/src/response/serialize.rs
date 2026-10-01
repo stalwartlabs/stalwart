@@ -35,8 +35,8 @@ mod tests {
         response::{Response, ResponseMethod},
         types::{date::UTCDate, state::State},
     };
+    use ahash::AHashMap as HashMap;
     use jmap_tools::Value;
-    use std::collections::HashMap;
     use types::{
         blob::{BlobClass, BlobId},
         blob_hash::BlobHash,

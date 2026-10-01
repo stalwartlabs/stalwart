@@ -260,6 +260,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                         self,
                         access_token,
                         &from_resources,
+                        &to_resources,
                         from_account_id,
                         from_resource.document_id(),
                         from_children_ids,
@@ -333,6 +334,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                         move_event(
                             self,
                             access_token,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             from_calendar_id,
@@ -348,6 +350,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                         copy_event(
                             self,
                             access_token,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             to_account_id,
@@ -420,6 +423,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                         move_event(
                             self,
                             access_token,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             from_calendar_id,
@@ -447,6 +451,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                     copy_event(
                         self,
                         access_token,
+                        &to_resources,
                         from_account_id,
                         from_resource.document_id(),
                         to_account_id,
@@ -488,6 +493,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                             self,
                             access_token,
                             &from_resources,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             if headers.depth != Depth::Zero {
@@ -519,6 +525,7 @@ impl CalendarCopyMoveRequestHandler for Server {
                         self,
                         access_token,
                         &from_resources,
+                        &to_resources,
                         from_account_id,
                         from_resource.document_id(),
                         if headers.depth != Depth::Zero {
@@ -591,6 +598,7 @@ impl<'x> OwnEventAccess<'x> {
 async fn copy_event(
     server: &Server,
     access_token: &AccessToken,
+    to_resources: &GroupwareResources,
     from_account_id: u32,
     from_document_id: u32,
     to_account_id: u32,
@@ -615,22 +623,14 @@ async fn copy_event(
     let mut batch = BatchBuilder::new();
 
     // Validate UID
-    let to_resources = server
-        .fetch_groupware_resources(
-            access_token.account_id(),
-            to_account_id,
-            SyncCollection::Calendar,
-        )
-        .await
-        .caused_by(trc::location!())?;
     assert_is_unique_uid(
-        to_resources.as_ref(),
+        to_resources,
         access_token,
         to_account_id,
         to_calendar_id,
         Some(event.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
     )?;
-    server
+    let checked_content = server
         .assert_stored_event_supported(
             from_account_id,
             from_document_id,
@@ -694,17 +694,20 @@ async fn copy_event(
             )
             .caused_by(trc::location!())?;
     } else {
-        let content_ = server
-            .store()
-            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
-                from_account_id,
-                Collection::CalendarEvent,
-                from_document_id,
-                CalendarEventField::Content,
-            ))
-            .await
-            .caused_by(trc::location!())?
-            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let content_ = match checked_content {
+            Some(content_) => content_,
+            None => server
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    from_account_id,
+                    Collection::CalendarEvent,
+                    from_document_id,
+                    CalendarEventField::Content,
+                ))
+                .await
+                .caused_by(trc::location!())?
+                .ok_or(DavError::Code(StatusCode::NOT_FOUND))?,
+        };
         let mut new_content = content_
             .deserialize::<CalendarEventContent>()
             .caused_by(trc::location!())?;
@@ -856,6 +859,7 @@ async fn copy_event(
 async fn move_event(
     server: &Server,
     access_token: &AccessToken,
+    to_resources: &GroupwareResources,
     from_account_id: u32,
     from_document_id: u32,
     from_calendar_id: u32,
@@ -894,22 +898,15 @@ async fn move_event(
         || to_document_id.is_none()
     {
         assert_is_unique_uid(
-            server
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    to_account_id,
-                    SyncCollection::Calendar,
-                )
-                .await
-                .caused_by(trc::location!())?
-                .as_ref(),
+            to_resources,
             access_token,
             to_account_id,
             to_calendar_id,
             Some(event.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
         )?;
     }
-    if from_account_id != to_account_id || from_calendar_id != to_calendar_id {
+    let checked_content = if from_account_id != to_account_id || from_calendar_id != to_calendar_id
+    {
         server
             .assert_stored_event_supported(
                 from_account_id,
@@ -917,8 +914,10 @@ async fn move_event(
                 to_account_id,
                 to_calendar_id,
             )
-            .await?;
-    }
+            .await?
+    } else {
+        None
+    };
 
     let account_info = server
         .account_info(access_token.account_id())
@@ -999,17 +998,20 @@ async fn move_event(
             .caused_by(trc::location!())?;
         batch.log_vanished_item(VanishedCollection::Calendar, from_resource_path);
     } else {
-        let content_ = server
-            .store()
-            .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
-                from_account_id,
-                Collection::CalendarEvent,
-                from_document_id,
-                CalendarEventField::Content,
-            ))
-            .await
-            .caused_by(trc::location!())?
-            .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
+        let content_ = match checked_content {
+            Some(content_) => content_,
+            None => server
+                .store()
+                .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+                    from_account_id,
+                    Collection::CalendarEvent,
+                    from_document_id,
+                    CalendarEventField::Content,
+                ))
+                .await
+                .caused_by(trc::location!())?
+                .ok_or(DavError::Code(StatusCode::NOT_FOUND))?,
+        };
         let mut new_content = content_
             .deserialize::<CalendarEventContent>()
             .caused_by(trc::location!())?;
@@ -1087,14 +1089,6 @@ async fn move_event(
                 .object_quota_limit(&to_account, StorageQuota::MaxCalendarEvents)
                 .is_some()
         {
-            let to_resources = server
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    to_account_id,
-                    SyncCollection::Calendar,
-                )
-                .await
-                .caused_by(trc::location!())?;
             server.assert_object_quota(&to_account, StorageQuota::MaxCalendarEvents, 1, || {
                 to_resources.resources.count(false)
             })?;
@@ -1252,6 +1246,7 @@ async fn copy_container(
     server: &Server,
     access_token: &AccessToken,
     from_resources: &GroupwareResources,
+    to_resources: &GroupwareResources,
     from_account_id: u32,
     from_document_id: u32,
     from_children_ids: Vec<u32>,
@@ -1336,20 +1331,7 @@ async fn copy_container(
         && server
             .object_quota_limit(&to_account, StorageQuota::MaxCalendarEvents)
             .is_some();
-    let to_resources = if has_container_quota || has_item_quota {
-        Some(
-            server
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    to_account_id,
-                    SyncCollection::Calendar,
-                )
-                .await
-                .caused_by(trc::location!())?,
-        )
-    } else {
-        None
-    };
+    let to_resources = (has_container_quota || has_item_quota).then_some(to_resources);
     if has_container_quota && let Some(to_resources) = &to_resources {
         server.assert_object_quota(&to_account, StorageQuota::MaxCalendars, 1, || {
             to_resources.resources.count(true)
@@ -1515,9 +1497,6 @@ async fn copy_container(
             } else {
                 continue;
             };
-            let event = event_
-                .to_unarchived::<CalendarEvent>()
-                .caused_by(trc::location!())?;
             let mut new_event = event
                 .deserialize::<CalendarEvent>()
                 .caused_by(trc::location!())?;

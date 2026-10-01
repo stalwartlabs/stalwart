@@ -542,7 +542,7 @@ impl AlarmScope {
 }
 
 impl AlarmSource<'_> {
-    fn may_have_alarms(&self, has_stored_alarms: bool) -> bool {
+    pub(crate) fn may_have_alarms(&self, has_stored_alarms: bool) -> bool {
         match self {
             AlarmSource::Stored(defaults) => has_stored_alarms || defaults.has_alerts(),
             AlarmSource::Personal(alarms, defaults) if defaults.is_enabled() => {

@@ -18,28 +18,60 @@ pub use file::{
 pub use presence::{DISPLAY_NAME_PROPERTY, FilePresence, PresenceBits};
 pub use store::ResourceChunkBuilder;
 
+use ::store::blake3;
 use percent_encoding::{
     AsciiSet, CONTROLS, percent_decode_str, percent_encode, utf8_percent_encode,
 };
 use std::{borrow::Cow, convert::Infallible};
+use utils::text::hex_encode_into;
 
 pub(crate) const SCHEDULE_INBOX_ID: u32 = u32::MAX - 1;
 pub const CONTAINER_FLAG: u32 = 1 << 31;
 pub const MAX_CACHED_UID_LEN: usize = 255;
+const HASHED_UID_MARKER: u8 = 0;
+const HASHED_UID_DIGEST_LEN: usize = 16;
+const HASHED_UID_SUFFIX_LEN: usize = 1 + 2 * HASHED_UID_DIGEST_LEN;
+const HASHED_UID_PREFIX_LEN: usize = MAX_CACHED_UID_LEN - HASHED_UID_SUFFIX_LEN;
 
 pub trait CachedUid {
-    fn cached_uid(&self) -> &str;
+    fn cached_uid(&self) -> Cow<'_, str>;
+    fn is_hashed_uid(&self) -> bool;
 }
 
 impl CachedUid for str {
-    fn cached_uid(&self) -> &str {
-        if self.len() <= MAX_CACHED_UID_LEN {
-            self
+    fn cached_uid(&self) -> Cow<'_, str> {
+        if self.len() <= MAX_CACHED_UID_LEN && !self.as_bytes().contains(&HASHED_UID_MARKER) {
+            Cow::Borrowed(self)
         } else {
-            self.get(..self.ceil_char_boundary(MAX_CACHED_UID_LEN))
-                .unwrap_or(self)
+            Cow::Owned(hashed_uid(self))
         }
     }
+
+    #[inline(always)]
+    fn is_hashed_uid(&self) -> bool {
+        matches!(
+            self.as_bytes().split_last_chunk::<HASHED_UID_SUFFIX_LEN>(),
+            Some((_, [HASHED_UID_MARKER, ..]))
+        )
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn hashed_uid(uid: &str) -> String {
+    let prefix = uid
+        .get(..uid.floor_char_boundary(HASHED_UID_PREFIX_LEN))
+        .unwrap_or_default();
+    let digest = blake3::hash(uid.as_bytes());
+    let mut hex = [0u8; 2 * HASHED_UID_DIGEST_LEN];
+    let mut cached = String::with_capacity(prefix.len() + HASHED_UID_SUFFIX_LEN);
+    cached.push_str(prefix);
+    cached.push(char::from(HASHED_UID_MARKER));
+    cached.push_str(hex_encode_into(
+        &digest.as_bytes()[..HASHED_UID_DIGEST_LEN],
+        &mut hex,
+    ));
+    cached
 }
 pub const MAX_FILE_NODE_DEPTH: usize = 64;
 

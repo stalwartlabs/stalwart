@@ -121,7 +121,7 @@ impl ManagementApi for Server {
                     include_str!("../../../../resources/schema/schema.json.sha256");
 
                 if path.get(1).is_some_and(|hash| hash == &SCHEMA_HASH) {
-                    Ok(Resource::new("application/json", SCHEMA_JSON.to_vec())
+                    Ok(Resource::new("application/json", SCHEMA_JSON)
                         .into_http_response()
                         .with_immutable_cache()
                         .with_header(CONTENT_ENCODING, "gzip"))

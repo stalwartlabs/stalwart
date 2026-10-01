@@ -7,8 +7,7 @@
 use super::url::UrlParts;
 use crate::{
     ContextToken, Email, Hostname, IpParts, Recipient, SpamFilterContext, SpamFilterInput,
-    SpamFilterOutput, SpamFilterResult, TextPart,
-    modules::html::{html_text_body, html_to_tokens},
+    SpamFilterOutput, SpamFilterResult, TextPart, modules::html::html_to_tokens,
 };
 use common::{Server, expr::Bump};
 use mail_auth::DmarcResult;
@@ -102,7 +101,7 @@ impl<'x> SpamFilterContext<'x> {
         }
 
         // Tokenize subject
-        let subject_tokens = tokenize(subject, borrowed);
+        let subject_tokens = tokenize(subject);
 
         // Tokenize and convert text parts
         let texts = input.texts;
@@ -112,14 +111,14 @@ impl<'x> SpamFilterContext<'x> {
             .map(|part| match (part.kind(), texts.get(part.id())) {
                 (PartKind::Text, Some(text)) => TextPart::Plain {
                     text_body: text,
-                    tokens: tokenize(text, borrowed),
+                    tokens: tokenize(text),
                 },
                 (PartKind::Html, Some(html)) => {
                     let html_tokens = html_to_tokens(html);
-                    let text_body = html_text_body(&html_tokens);
+                    let text_body = texts.html_text(part.id(), &html_tokens);
 
                     TextPart::Html {
-                        tokens: tokenize(&text_body, detached),
+                        tokens: tokenize(text_body),
                         html_tokens,
                         text_body,
                     }
@@ -144,11 +143,6 @@ impl<'x> SpamFilterContext<'x> {
                 env_from_addr,
                 env_to_orig_addr: input
                     .env_rcpt_orig_to
-                    .iter()
-                    .map(|rcpt| Email::new(rcpt))
-                    .collect(),
-                env_to_rewritten_addr: input
-                    .env_rcpt_rewritten_to
                     .iter()
                     .map(|rcpt| Email::new(rcpt))
                     .collect(),
@@ -181,10 +175,7 @@ impl<'x> SpamFilterContext<'x> {
     }
 }
 
-pub(crate) fn tokenize<'a, 'b>(
-    text: &'a str,
-    into_text: impl Fn(&'a str) -> Cow<'b, str>,
-) -> Vec<ContextToken<'b>> {
+pub(crate) fn tokenize(text: &str) -> Vec<ContextToken<'_>> {
     let mut tokens = Vec::with_capacity((text.len() / BYTES_PER_TOKEN).min(MAX_RESERVED_TOKENS));
     for token in TypesTokenizer::new(text)
         .tokenize_numbers(false)
@@ -193,33 +184,21 @@ pub(crate) fn tokenize<'a, 'b>(
         .tokenize_emails(true)
     {
         tokens.push(match token.word {
-            TokenType::Alphabetic(s) => TokenType::Alphabetic(into_text(s)),
-            TokenType::Alphanumeric(s) => TokenType::Alphanumeric(into_text(s)),
-            TokenType::Integer(s) => TokenType::Integer(into_text(s)),
+            TokenType::Alphabetic(s) => TokenType::Alphabetic(Cow::Borrowed(s)),
+            TokenType::Alphanumeric(s) => TokenType::Alphanumeric(Cow::Borrowed(s)),
+            TokenType::Integer(s) => TokenType::Integer(Cow::Borrowed(s)),
             TokenType::Other(s) => TokenType::Other(s),
             TokenType::Punctuation(s) => TokenType::Punctuation(s),
             TokenType::Space => TokenType::Space,
-            TokenType::Url(url) => TokenType::Url(Box::new(UrlParts::new(into_text(url)))),
-            TokenType::UrlNoHost(s) => TokenType::UrlNoHost(into_text(s)),
-            TokenType::UrlNoScheme(s) => {
-                TokenType::UrlNoScheme(Box::new(UrlParts::no_scheme(into_text(s))))
-            }
+            TokenType::Url(url) => TokenType::Url(Box::new(UrlParts::new(url))),
+            TokenType::UrlNoHost(s) => TokenType::UrlNoHost(Cow::Borrowed(s)),
+            TokenType::UrlNoScheme(s) => TokenType::UrlNoScheme(Box::new(UrlParts::no_scheme(s))),
             TokenType::IpAddr(i) => TokenType::IpAddr(IpParts::new(i)),
             TokenType::Email(e) => TokenType::Email(Box::new(Email::new(e))),
-            TokenType::Float(s) => TokenType::Float(into_text(s)),
+            TokenType::Float(s) => TokenType::Float(Cow::Borrowed(s)),
         });
     }
     tokens
-}
-
-#[inline(always)]
-pub(crate) fn borrowed(text: &str) -> Cow<'_, str> {
-    Cow::Borrowed(text)
-}
-
-#[inline(always)]
-pub(crate) fn detached(text: &str) -> Cow<'static, str> {
-    Cow::Owned(text.to_string())
 }
 
 impl From<Mailbox<'_>> for Recipient {

@@ -363,6 +363,82 @@ pub async fn test(test: &TestServer) {
         "An event with UID 00959BC664CA650E933C892C@example.com already exists."
     );
 
+    // UIDs longer than the cached prefix are compared in full
+    let long_uid = format!("{}@example.com", "a".repeat(300));
+    let other_long_uid = format!("{}b@example.com", "a".repeat(300));
+    let long_uid_event = |uid: &str, privacy: &str| {
+        json!({
+            "title": "Long UID",
+            "start": "2006-01-23T10:00:00",
+            "duration": "PT1H",
+            "timeZone": "US/Eastern",
+            "uid": uid,
+            "privacy": privacy,
+            "calendarIds": {
+                &calendar1_id: true
+            },
+        })
+    };
+    let response = account
+        .jmap_create(
+            MethodObject::CalendarEvent,
+            [
+                long_uid_event(&long_uid, "public"),
+                long_uid_event(&other_long_uid, "private"),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let mut long_uid_ids = vec![
+        response.created(0).id().to_string(),
+        response.created(1).id().to_string(),
+    ];
+    assert_eq!(
+        account
+            .jmap_create(
+                MethodObject::CalendarEvent,
+                [long_uid_event(&long_uid, "public")],
+                Vec::<(&str, &str)>::new()
+            )
+            .await
+            .not_created(0)
+            .description(),
+        format!("An event with UID {long_uid} already exists.")
+    );
+    for (uid, privacy) in [
+        (format!("{}c@example.com", "a".repeat(300)), "private"),
+        (format!("{}d@example.com", "a".repeat(300)), "public"),
+    ] {
+        long_uid_ids.push(
+            account
+                .jmap_create(
+                    MethodObject::CalendarEvent,
+                    [long_uid_event(&uid, privacy)],
+                    Vec::<(&str, &str)>::new(),
+                )
+                .await
+                .created(0)
+                .id()
+                .to_string(),
+        );
+    }
+    test.wait_for_tasks().await;
+    assert_eq!(
+        account
+            .jmap_destroy(
+                MethodObject::CalendarEvent,
+                long_uid_ids.iter().map(String::as_str),
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .destroyed()
+            .collect::<AHashSet<_>>(),
+        long_uid_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<AHashSet<_>>()
+    );
+
     // Patching tests
     let response = account
         .jmap_update(

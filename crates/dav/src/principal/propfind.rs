@@ -7,7 +7,10 @@
 use super::CurrentUserPrincipal;
 use crate::{
     DavResourceName,
-    common::propfind::{PropFindRequestHandler, SyncTokenUrn},
+    common::{
+        propfind::{PropFindRequestHandler, SyncTokenUrn},
+        quoted_etag,
+    },
 };
 use common::{
     Server,
@@ -203,7 +206,7 @@ impl PrincipalPropFind for Server {
 
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::String(format!("\"{ctag}\"")),
+                                DavValue::String(quoted_etag(ctag)),
                             ));
                         }
                         WebDavProperty::Owner => {

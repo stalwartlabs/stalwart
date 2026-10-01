@@ -11,6 +11,7 @@ use crate::{
 };
 use directory::Credentials;
 use encodify::base64::STANDARD;
+use memchr::memchr_iter;
 use rustls::ClientConnection;
 use rustls_pki_types::ServerName;
 use smtp_proto::{
@@ -32,10 +33,18 @@ use tokio::{
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use trc::DeliveryEvent;
 
+const READ_BUFFER_SIZE: usize = 8192;
+const WRITE_BUFFER_SIZE: usize = 65536;
+const WRITE_PREFIX_SIZE: usize = 16384;
+
 pub struct SmtpClient<T: AsyncRead + AsyncWrite> {
     pub stream: T,
     pub timeout: Duration,
     pub session_id: u64,
+    buf: Box<[u8]>,
+    buf_pos: usize,
+    buf_len: usize,
+    out_buf: Vec<u8>,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
@@ -151,12 +160,43 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
 
     pub async fn write_chunks(&mut self, chunks: &[&[u8]]) -> Result<(), ClientError> {
         for chunk in chunks {
-            self.stream
-                .write_all(chunk)
+            self.write_buffered(chunk)
                 .await
                 .map_err(ClientError::from)?;
         }
-        self.stream.flush().await.map_err(ClientError::from)
+        self.flush_buffered().await.map_err(ClientError::from)
+    }
+
+    async fn write_buffered(&mut self, bytes: &[u8]) -> tokio::io::Result<()> {
+        if bytes.len() >= WRITE_BUFFER_SIZE {
+            if !self.out_buf.is_empty() {
+                let prefix = WRITE_PREFIX_SIZE.saturating_sub(self.out_buf.len());
+                let (head, rest) = bytes.split_at_checked(prefix).unwrap_or((bytes, &[]));
+                self.out_buf.extend_from_slice(head);
+                self.stream.write_all(&self.out_buf).await?;
+                self.out_buf.clear();
+                return self.stream.write_all(rest).await;
+            }
+            return self.stream.write_all(bytes).await;
+        }
+        let room = WRITE_BUFFER_SIZE.saturating_sub(self.out_buf.len());
+        let Some((head, rest)) = bytes.split_at_checked(room) else {
+            self.out_buf.extend_from_slice(bytes);
+            return Ok(());
+        };
+        self.out_buf.extend_from_slice(head);
+        self.stream.write_all(&self.out_buf).await?;
+        self.out_buf.clear();
+        self.out_buf.extend_from_slice(rest);
+        Ok(())
+    }
+
+    async fn flush_buffered(&mut self) -> tokio::io::Result<()> {
+        if !self.out_buf.is_empty() {
+            self.stream.write_all(&self.out_buf).await?;
+            self.out_buf.clear();
+        }
+        self.stream.flush().await
     }
 
     pub async fn send_message(
@@ -166,90 +206,90 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         bdat_cmd: &mut Option<String>,
         params: &SessionParams<'_>,
     ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>> {
-        match params
-            .server
-            .blob_store()
-            .get_blob(message.message.blob_hash.as_slice(), 0..usize::MAX)
-            .await
-        {
-            Ok(Some(raw_message)) => {
-                tokio::time::timeout(params.conn_strategy.timeout_data, async {
-                    if let Some(bdat_cmd) = bdat_cmd {
-                        *bdat_cmd = format!(
-                            "BDAT {} LAST\r\n",
-                            raw_message.len() + rcpt_headers.map(|h| h.len()).unwrap_or(0)
-                        );
-
+        let raw_message = params
+            .message_blob
+            .get_or_try_init(|| async {
+                match params
+                    .server
+                    .blob_store()
+                    .get_blob(message.message.blob_hash.as_slice(), 0..usize::MAX)
+                    .await
+                {
+                    Ok(Some(raw_message)) => Ok(raw_message),
+                    Ok(None) => {
                         trc::event!(
-                            Delivery(DeliveryEvent::RawOutput),
-                            SpanId = self.session_id,
-                            Contents = bdat_cmd.clone(),
-                            Size = bdat_cmd.len()
+                            Queue(trc::QueueEvent::BlobNotFound),
+                            SpanId = message.span_id,
+                            BlobId = message.message.blob_hash.to_hex(),
+                            CausedBy = trc::location!()
                         );
-
-                        let chunks = if let Some(rcpt_headers) = rcpt_headers {
-                            &[bdat_cmd.as_bytes(), rcpt_headers, &raw_message][..]
-                        } else {
-                            &[bdat_cmd.as_bytes(), &raw_message][..]
-                        };
-
-                        self.write_chunks(chunks).await
-                    } else {
-                        trc::event!(
-                            Delivery(DeliveryEvent::RawOutput),
-                            SpanId = self.session_id,
-                            Contents = "DATA\r\n",
-                            Size = 6
-                        );
-
-                        self.write_chunks(&[b"DATA\r\n"]).await?;
-                        self.read().await?.assert_code(354)?;
-                        if let Some(rcpt_headers) = rcpt_headers
-                            && let Err(err) = self.write_chunks(&[rcpt_headers]).await
-                        {
-                            Err(err)
-                        } else {
-                            self.write_message(&raw_message)
-                                .await
-                                .map_err(ClientError::from)
-                        }
+                        Err(Status::TemporaryFailure(Box::new(ErrorDetails {
+                            entity: "localhost".into(),
+                            details: Error::Io("Queue system error.".into()),
+                        })))
                     }
-                })
-                .await
-                .map_err(|_| Status::timeout(params.hostname, "sending message"))?
-                .map_err(|err| {
-                    Status::from_smtp_error(
-                        params.hostname,
-                        bdat_cmd.as_deref().unwrap_or("DATA"),
-                        err,
-                    )
-                })
-            }
-            Ok(None) => {
-                trc::event!(
-                    Queue(trc::QueueEvent::BlobNotFound),
-                    SpanId = message.span_id,
-                    BlobId = message.message.blob_hash.to_hex(),
-                    CausedBy = trc::location!()
-                );
-                Err(Status::TemporaryFailure(Box::new(ErrorDetails {
-                    entity: "localhost".into(),
-                    details: Error::Io("Queue system error.".into()),
-                })))
-            }
-            Err(err) => {
-                trc::error!(
-                    err.span_id(message.span_id)
-                        .details("Failed to fetch blobId")
-                        .caused_by(trc::location!())
+                    Err(err) => {
+                        trc::error!(
+                            err.span_id(message.span_id)
+                                .details("Failed to fetch blobId")
+                                .caused_by(trc::location!())
+                        );
+
+                        Err(Status::TemporaryFailure(Box::new(ErrorDetails {
+                            entity: "localhost".into(),
+                            details: Error::Io("Queue system error.".into()),
+                        })))
+                    }
+                }
+            })
+            .await?;
+
+        tokio::time::timeout(params.conn_strategy.timeout_data, async {
+            if let Some(bdat_cmd) = bdat_cmd {
+                *bdat_cmd = format!(
+                    "BDAT {} LAST\r\n",
+                    raw_message.len() + rcpt_headers.map(|h| h.len()).unwrap_or(0)
                 );
 
-                Err(Status::TemporaryFailure(Box::new(ErrorDetails {
-                    entity: "localhost".into(),
-                    details: Error::Io("Queue system error.".into()),
-                })))
+                trc::event!(
+                    Delivery(DeliveryEvent::RawOutput),
+                    SpanId = self.session_id,
+                    Contents = bdat_cmd.clone(),
+                    Size = bdat_cmd.len()
+                );
+
+                let chunks = if let Some(rcpt_headers) = rcpt_headers {
+                    &[bdat_cmd.as_bytes(), rcpt_headers, raw_message][..]
+                } else {
+                    &[bdat_cmd.as_bytes(), raw_message][..]
+                };
+
+                self.write_chunks(chunks).await
+            } else {
+                trc::event!(
+                    Delivery(DeliveryEvent::RawOutput),
+                    SpanId = self.session_id,
+                    Contents = "DATA\r\n",
+                    Size = 6
+                );
+
+                self.write_chunks(&[b"DATA\r\n"]).await?;
+                self.read().await?.assert_code(354)?;
+                if let Some(rcpt_headers) = rcpt_headers {
+                    self.write_buffered(rcpt_headers)
+                        .await
+                        .map_err(ClientError::from)?;
+                }
+                self.write_message(raw_message)
+                    .await
+                    .map_err(ClientError::from)
             }
-        }
+        })
+        .await
+        .map_err(|_| Status::timeout(params.hostname, "sending message"))?
+        .map_err(|err| {
+            Status::from_smtp_error(params.hostname, bdat_cmd.as_deref().unwrap_or("DATA"), err)
+        })
     }
 
     pub async fn say_helo(
@@ -298,11 +338,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
     }
 
     pub async fn read_ehlo(&mut self) -> ClientResult<EhloResponse<String>> {
-        let mut buf = vec![0u8; 8192];
+        self.discard_buffered();
+        let buf = &mut self.buf;
         let mut buf_concat = Vec::with_capacity(0);
 
         loop {
-            let br = self.stream.read(&mut buf).await?;
+            let br = self.stream.read(buf).await?;
 
             if br == 0 {
                 return Err(ClientError::UnparseableReply);
@@ -354,81 +395,62 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
     }
 
     pub async fn read(&mut self) -> ClientResult<Response<String>> {
-        let mut buf = vec![0u8; 8192];
+        self.discard_buffered();
+        self.read_buffered().await
+    }
+
+    pub async fn read_many(&mut self, num: usize) -> ClientResult<Vec<Response<Box<str>>>> {
+        self.discard_buffered();
+        let mut response = Vec::with_capacity(num);
+        while response.len() < num {
+            response.push(self.read_buffered().await?.into_box());
+        }
+        Ok(response)
+    }
+
+    async fn read_buffered(&mut self) -> ClientResult<Response<String>> {
         let mut parser = ResponseReceiver::default();
 
         loop {
-            let br = self.stream.read(&mut buf).await?;
+            if self.buf_pos >= self.buf_len {
+                let br = self.stream.read(&mut self.buf).await?;
+                if br == 0 {
+                    return Err(ClientError::UnparseableReply);
+                }
 
-            if br > 0 {
                 trc::event!(
                     Delivery(DeliveryEvent::RawInput),
                     SpanId = self.session_id,
-                    Contents = trc::Value::from_maybe_string(&buf[..br]),
+                    Contents =
+                        trc::Value::from_maybe_string(self.buf.get(..br).unwrap_or_default()),
                     Size = br
                 );
 
-                match parser.parse(&mut buf[..br].iter()) {
-                    Ok(reply) => return Ok(reply),
-                    Err(err) => match err {
-                        smtp_proto::Error::NeedsMoreData { .. } => (),
-                        _ => {
-                            return Err(ClientError::UnparseableReply);
-                        }
-                    },
-                }
-            } else {
-                return Err(ClientError::UnparseableReply);
+                self.buf_pos = 0;
+                self.buf_len = br;
+            }
+
+            let pending = self.buf.get(self.buf_pos..self.buf_len).unwrap_or_default();
+            let mut iter = pending.iter();
+            let result = parser.parse(&mut iter);
+            self.buf_pos = self.buf_len - iter.as_slice().len();
+
+            match result {
+                Ok(reply) => return Ok(reply),
+                Err(smtp_proto::Error::NeedsMoreData { .. }) => (),
+                Err(_) => return Err(ClientError::UnparseableReply),
             }
         }
     }
 
-    pub async fn read_many(&mut self, num: usize) -> ClientResult<Vec<Response<Box<str>>>> {
-        let mut buf = vec![0u8; 1024];
-        let mut response = Vec::with_capacity(num);
-        let mut parser = ResponseReceiver::default();
-
-        'outer: loop {
-            let br = self.stream.read(&mut buf).await?;
-
-            if br > 0 {
-                let mut iter = buf[..br].iter();
-
-                trc::event!(
-                    Delivery(DeliveryEvent::RawInput),
-                    SpanId = self.session_id,
-                    Contents = trc::Value::from_maybe_string(&buf[..br]),
-                    Size = br
-                );
-
-                loop {
-                    match parser.parse(&mut iter) {
-                        Ok(reply) => {
-                            response.push(reply.into_box());
-                            if response.len() != num {
-                                parser.reset();
-                            } else {
-                                break 'outer;
-                            }
-                        }
-                        Err(err) => match err {
-                            smtp_proto::Error::NeedsMoreData { .. } => break,
-                            _ => {
-                                return Err(ClientError::UnparseableReply);
-                            }
-                        },
-                    }
-                }
-            } else {
-                return Err(ClientError::UnparseableReply);
-            }
-        }
-
-        Ok(response)
+    fn discard_buffered(&mut self) {
+        self.buf_pos = 0;
+        self.buf_len = 0;
     }
 
     /// Sends a command to the SMTP server and waits for a reply.
     pub async fn cmd(&mut self, cmd: impl AsRef<[u8]>) -> ClientResult<Response<String>> {
+        self.discard_buffered();
         tokio::time::timeout(self.timeout, async {
             let cmd = cmd.as_ref();
 
@@ -441,16 +463,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
 
             self.stream.write_all(cmd).await?;
             self.stream.flush().await?;
-            self.read().await
+            self.read_buffered().await
         })
         .await
         .map_err(|_| ClientError::Timeout)?
     }
 
+    pub async fn read_pipelined(&mut self) -> ClientResult<Response<String>> {
+        tokio::time::timeout(self.timeout, self.read_buffered())
+            .await
+            .map_err(|_| ClientError::Timeout)?
+    }
+
     pub async fn write_message(&mut self, message: &[u8]) -> tokio::io::Result<()> {
         // Transparency procedure
-        let mut is_cr_or_lf = false;
-
         // As per RFC 5322bis, section 2.3:
         // CR and LF MUST only occur together as CRLF; they MUST NOT appear
         // independently in the body.
@@ -465,23 +491,22 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         );
 
         let mut last_pos = 0;
-        for (pos, byte) in message.iter().enumerate() {
-            if *byte == b'.' && is_cr_or_lf {
-                if let Some(bytes) = message.get(last_pos..pos) {
-                    self.stream.write_all(bytes).await?;
-                    self.stream.write_all(b".").await?;
-                    last_pos = pos;
-                }
-                is_cr_or_lf = false;
-            } else {
-                is_cr_or_lf = *byte == b'\n' || *byte == b'\r';
+        for pos in memchr_iter(b'.', message) {
+            if matches!(
+                message.get(..pos).and_then(<[u8]>::last),
+                Some(b'\n' | b'\r')
+            ) && let Some(bytes) = message.get(last_pos..pos)
+            {
+                self.write_buffered(bytes).await?;
+                self.write_buffered(b".").await?;
+                last_pos = pos;
             }
         }
         if let Some(bytes) = message.get(last_pos..) {
-            self.stream.write_all(bytes).await?;
+            self.write_buffered(bytes).await?;
         }
-        self.stream.write_all("\r\n.\r\n".as_bytes()).await?;
-        self.stream.flush().await
+        self.write_buffered(b"\r\n.\r\n").await?;
+        self.flush_buffered().await
     }
 }
 
@@ -528,6 +553,10 @@ impl SmtpClient<TcpStream> {
                     })?,
                 timeout: self.timeout,
                 session_id: self.session_id,
+                buf: self.buf,
+                buf_pos: 0,
+                buf_len: 0,
+                out_buf: Vec::new(),
             })
         })
         .await
@@ -543,10 +572,16 @@ impl SmtpClient<TcpStream> {
         session_id: u64,
     ) -> ClientResult<Self> {
         tokio::time::timeout(timeout, async {
+            let stream = TcpStream::connect(remote_addr).await?;
+            let _ = stream.set_nodelay(true);
             Ok(SmtpClient {
-                stream: TcpStream::connect(remote_addr).await?,
+                stream,
                 timeout,
                 session_id,
+                buf: vec![0u8; READ_BUFFER_SIZE].into_boxed_slice(),
+                buf_pos: 0,
+                buf_len: 0,
+                out_buf: Vec::new(),
             })
         })
         .await
@@ -567,11 +602,17 @@ impl SmtpClient<TcpStream> {
                 TcpSocket::new_v6()?
             };
             socket.bind(SocketAddr::new(local_ip, 0))?;
+            let stream = socket.connect(remote_addr).await?;
+            let _ = stream.set_nodelay(true);
 
             Ok(SmtpClient {
-                stream: socket.connect(remote_addr).await?,
+                stream,
                 timeout,
                 session_id,
+                buf: vec![0u8; READ_BUFFER_SIZE].into_boxed_slice(),
+                buf_pos: 0,
+                buf_len: 0,
+                out_buf: Vec::new(),
             })
         })
         .await

@@ -9,7 +9,10 @@ use crate::{
         MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, NewMetadata, ObjectMetadata,
     },
     changes::state::JmapCacheState,
-    contact::set::{ContactCardSet, too_many_contacts},
+    contact::{
+        CreatedUids,
+        set::{ContactCardSet, too_many_contacts},
+    },
 };
 use calcard::jscontact::JSContactProperty;
 use common::{Server, auth::AccessToken};
@@ -33,7 +36,6 @@ use jmap_proto::{
 use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
-    roaring::RoaringBitmap,
     write::{Archive, ArchiveBytes, BatchBuilder, Slot},
 };
 use trc::AddContext;
@@ -102,10 +104,11 @@ impl JmapContactCardCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let from_contact_ids = if access_token.is_member(from_account_id) {
-            from_cache.document_ids(false).collect::<RoaringBitmap>()
-        } else {
-            from_cache.shared_items(access_token, [Acl::ReadItems], true)
+        let shared_from_contact_ids = (!access_token.is_member(from_account_id))
+            .then(|| from_cache.shared_items(access_token, [Acl::ReadItems], true));
+        let is_readable_source = |document_id: u32| match &shared_from_contact_ids {
+            Some(ids) => ids.contains(document_id),
+            None => from_cache.has_item_id(&document_id),
         };
 
         let can_add_address_books = if access_token.is_shared(account_id) {
@@ -132,7 +135,7 @@ impl JmapContactCardCopy for Server {
             .values()
             .filter_map(|create| create.source_id(JSContactProperty::Id))
             .map(|source_id| source_id.document_id())
-            .filter(|document_id| from_contact_ids.contains(*document_id))
+            .filter(|document_id| is_readable_source(*document_id))
         {
             let kinds = from_cache
                 .item_by_id(document_id)
@@ -144,6 +147,7 @@ impl JmapContactCardCopy for Server {
         metadata_writer
             .preload(self, from_account_id, preload)
             .await?;
+        let mut created_uids = CreatedUids::default();
 
         'create: for (create_id, mut create) in request.create {
             if !quota.has_room(created_slots.len()) {
@@ -167,7 +171,7 @@ impl JmapContactCardCopy for Server {
                 }
             };
             let from_contact_id = source_id.document_id();
-            if !from_contact_ids.contains(from_contact_id) {
+            if !is_readable_source(from_contact_id) {
                 response.not_created.append(
                     create_id,
                     SetError::not_found().with_description(format!(
@@ -210,6 +214,7 @@ impl JmapContactCardCopy for Server {
                     &account,
                     account_id,
                     &can_add_address_books,
+                    &mut created_uids,
                     contact.card.into_jscontact(),
                     create,
                     &mut metadata_writer,

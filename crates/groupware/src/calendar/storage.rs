@@ -48,6 +48,7 @@ use store::{
     write::{
         Archive, ArchiveBytes, BatchBuilder, Operation, PendingId, SetValue, Slot, TaskId,
         TaskQueueClass, ValueClass, ValueOp, key::DeserializeBigEndian, now,
+        serialize::rkyv_deserialize,
     },
 };
 use trc::AddContext;
@@ -1035,8 +1036,17 @@ struct NotificationUsage {
     limit: Option<usize>,
     stored: usize,
     created: usize,
-    expired: Vec<u32>,
+    expired: usize,
+    cursor: Option<NotificationCursor>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotificationCursor {
+    created: [u8; CREATED_LEN],
+    document_id: u32,
+}
+
+const CREATED_LEN: usize = std::mem::size_of::<i64>();
 
 impl NotificationQuota {
     pub(crate) async fn reserve(
@@ -1063,17 +1073,15 @@ impl NotificationQuota {
         }
 
         if let Some(limit) = usage.limit
-            && usage.stored + usage.created >= limit + usage.expired.len()
+            && usage.stored + usage.created >= limit + usage.expired
         {
             if limit == 0 {
                 return Ok(false);
             }
-            let Some(document_id) = server
-                .oldest_notification(account_id, &usage.expired)
-                .await?
-            else {
+            let Some(cursor) = server.oldest_notification(account_id, usage.cursor).await? else {
                 return Ok(false);
             };
+            let document_id = cursor.document_id;
             if let Some(notification) = server
                 .store()
                 .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
@@ -1097,7 +1105,8 @@ impl NotificationQuota {
                 )
                 .caused_by(trc::location!())?;
             }
-            usage.expired.push(document_id);
+            usage.expired += 1;
+            usage.cursor = Some(cursor);
         }
 
         usage.created += 1;
@@ -1125,7 +1134,8 @@ impl NotificationUsage {
             limit,
             stored,
             created: 0,
-            expired: Vec::new(),
+            expired: 0,
+            cursor: None,
         })
     }
 }
@@ -1144,8 +1154,8 @@ pub trait DirectChangeNotification: Sync + Send {
     fn oldest_notification(
         &self,
         account_id: u32,
-        expired: &[u32],
-    ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
+        after: Option<NotificationCursor>,
+    ) -> impl Future<Output = trc::Result<Option<NotificationCursor>>> + Send;
 
     fn may_have_notification_viewers(
         &self,
@@ -1377,10 +1387,11 @@ impl DirectChangeNotification for Server {
         };
 
         content
-            .deserialize::<CalendarEventContent>()
+            .unarchive::<CalendarEventContent>()
+            .and_then(|archived| rkyv_deserialize::<_, ICalendar>(&archived.data.event))
             .map(|event| {
                 Some(NotifiableEvent {
-                    event: event.data.event,
+                    event,
                     content: Some(content),
                 })
             })
@@ -1425,18 +1436,21 @@ impl DirectChangeNotification for Server {
     async fn oldest_notification(
         &self,
         account_id: u32,
-        expired: &[u32],
-    ) -> trc::Result<Option<u32>> {
+        after: Option<NotificationCursor>,
+    ) -> trc::Result<Option<NotificationCursor>> {
         let mut oldest = None;
+        let (from_created, from_document_id) = after.as_ref().map_or((&[][..], 0), |after| {
+            (&after.created[..], after.document_id)
+        });
         self.store()
             .iterate(
                 IterateParams::new(
                     IndexKey {
                         account_id,
                         collection: Collection::CalendarEventNotification.into(),
-                        document_id: 0,
+                        document_id: from_document_id,
                         field: CalendarNotificationField::Created.into(),
-                        key: &[][..],
+                        key: from_created,
                     },
                     IndexKey {
                         account_id,
@@ -1450,12 +1464,16 @@ impl DirectChangeNotification for Server {
                 .ascending(),
                 |key, _| {
                     let document_id = key.deserialize_be_u32(key.len() - U32_LEN)?;
-                    if expired.contains(&document_id) {
-                        Ok(true)
-                    } else {
-                        oldest = Some(document_id);
-                        Ok(false)
+                    if after.is_some_and(|after| after.document_id == document_id) {
+                        return Ok(true);
                     }
+                    oldest = Some(NotificationCursor {
+                        created: key
+                            .deserialize_be_u64(key.len().saturating_sub(U32_LEN + CREATED_LEN))?
+                            .to_be_bytes(),
+                        document_id,
+                    });
+                    Ok(false)
                 },
             )
             .await

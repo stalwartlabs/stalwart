@@ -11,7 +11,10 @@ use crate::{
         metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
-    request::{MaybeInvalid, deserialize::DeserializeArguments},
+    request::{
+        MaybeInvalid,
+        deserialize::{CowStr, DeserializeArguments},
+    },
     types::date::UTCDate,
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
@@ -837,7 +840,7 @@ impl<'de> DeserializeArguments<'de> for EmailComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"receivedAt" => {
                     *self = EmailComparator::ReceivedAt;
@@ -873,7 +876,7 @@ impl<'de> DeserializeArguments<'de> for EmailComparator {
                     *self = EmailComparator::SomeInThreadHaveKeyword(self.take_keyword());
                 },
                 _ => {
-                    *self = EmailComparator::_T(key.to_string());
+                    *self = EmailComparator::_T(value.into_owned());
                 }
             );
         } else if key == "keyword" {

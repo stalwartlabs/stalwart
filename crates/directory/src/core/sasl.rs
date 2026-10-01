@@ -9,31 +9,15 @@ use encodify::base64::URL_SAFE_NO_PAD;
 
 impl Credentials {
     pub fn decode_sasl_challenge_plain(challenge: &[u8]) -> Option<Self> {
-        let mut username = Vec::new();
-        let mut secret = Vec::new();
-        let mut arg_num = 0;
-        for &ch in challenge {
-            if ch != 0 {
-                if arg_num == 1 {
-                    username.push(ch);
-                } else if arg_num == 2 {
-                    secret.push(ch);
-                }
-            } else {
-                arg_num += 1;
-            }
-        }
+        let mut args = challenge.split(|&ch| ch == 0).skip(1);
+        let username = args.next().filter(|username| !username.is_empty())?;
+        let secret = args.next().filter(|secret| !secret.is_empty())?;
 
-        match (String::from_utf8(username), String::from_utf8(secret)) {
-            (Ok(username), Ok(secret)) if !username.is_empty() && !secret.is_empty() => {
-                Some(Credentials::Basic {
-                    username,
-                    secret,
-                    mfa_token: None,
-                })
-            }
-            _ => None,
-        }
+        Some(Credentials::Basic {
+            username: std::str::from_utf8(username).ok()?.to_string(),
+            secret: std::str::from_utf8(secret).ok()?.to_string(),
+            mfa_token: None,
+        })
     }
 
     pub fn decode_sasl_challenge_oauth(challenge: &[u8]) -> Option<Self> {
@@ -128,6 +112,61 @@ fn extract_email_from_jwt(token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reference_sasl_plain(challenge: &[u8]) -> Option<(String, String)> {
+        let mut username = Vec::new();
+        let mut secret = Vec::new();
+        let mut arg_num = 0;
+        for &ch in challenge {
+            if ch != 0 {
+                if arg_num == 1 {
+                    username.push(ch);
+                } else if arg_num == 2 {
+                    secret.push(ch);
+                }
+            } else {
+                arg_num += 1;
+            }
+        }
+        match (String::from_utf8(username), String::from_utf8(secret)) {
+            (Ok(username), Ok(secret)) if !username.is_empty() && !secret.is_empty() => {
+                Some((username, secret))
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn sasl_plain_matches_reference() {
+        let cases: &[&[u8]] = &[
+            b"",
+            b"\0",
+            b"\0\0",
+            b"user",
+            b"\0user",
+            b"\0user\0",
+            b"\0user\0pass",
+            b"authz\0user\0pass",
+            b"authz\0user\0pass\0extra",
+            b"authz\0user\0pass\0\0extra\0",
+            b"\0\0pass",
+            b"\0user\0\0pass",
+            b"\0us\xffer\0pass",
+            b"\0user\0pa\xc3\xa9ss",
+            b"\0user\0pa\xc3ss",
+            b"\xff\0user\0pass",
+            b"\0user\0pass\0\xff",
+        ];
+        for case in cases {
+            let decoded = Credentials::decode_sasl_challenge_plain(case).map(|c| match c {
+                Credentials::Basic {
+                    username, secret, ..
+                } => (username, secret),
+                Credentials::Bearer { .. } => unreachable!(),
+            });
+            assert_eq!(decoded, reference_sasl_plain(case), "{case:?}");
+        }
+    }
 
     #[test]
     fn test_extract_oauth_bearer() {

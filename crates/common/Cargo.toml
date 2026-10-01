@@ -84,7 +84,6 @@ percent-encoding = "2.3.2"
 bumpalo = { version = "3.20.3", features = ["collections"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["std", "syntax", "meta", "nfa-pikevm", "nfa-backtrack", "hybrid", "dfa-onepass", "perf-inline", "perf-literal", "unicode"] }
 memchr = "2.8.3"
-simdutf8 = "0.1.5"
 itoa = "1.0.18"
 zmij = "1.0.23"
 

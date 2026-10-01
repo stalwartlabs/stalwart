@@ -6,6 +6,7 @@
 
 use memchr::{memchr, memmem::Finder};
 
+#[derive(Debug, Clone)]
 pub struct ConstNeedle {
     needle: Box<str>,
     finder: Finder<'static>,

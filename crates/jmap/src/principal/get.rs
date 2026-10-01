@@ -65,7 +65,8 @@ impl PrincipalGet for Server {
                 self.registry()
                     .query::<RoaringBitmap>(
                         RegistryQuery::new(ObjectType::Account)
-                            .with_tenant(access_token.tenant_id()),
+                            .with_tenant(access_token.tenant_id())
+                            .with_limit(self.core.jmap.get_max_objects.saturating_add(1)),
                     )
                     .await
                     .caused_by(trc::location!())?

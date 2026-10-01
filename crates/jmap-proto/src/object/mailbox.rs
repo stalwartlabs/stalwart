@@ -10,7 +10,10 @@ use crate::{
         metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
-    request::{deserialize::DeserializeArguments, reference::MaybeIdReference},
+    request::{
+        deserialize::{CowStr, DeserializeArguments},
+        reference::MaybeIdReference,
+    },
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
 use serde::{Serialize, Serializer};
@@ -449,7 +452,7 @@ impl<'de> DeserializeArguments<'de> for MailboxComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"sortOrder" => {
                     *self = MailboxComparator::SortOrder;
@@ -461,7 +464,7 @@ impl<'de> DeserializeArguments<'de> for MailboxComparator {
                     *self = MailboxComparator::ParentId;
                 },
                 _ => {
-                    *self = MailboxComparator::_T(key.to_string());
+                    *self = MailboxComparator::_T(value.into_owned());
                 }
             );
         } else {

@@ -9,7 +9,10 @@ use std::time::Instant;
 use common::network::SessionStream;
 use registry::schema::enums::Permission;
 
-use crate::{Session, protocol::response::Response};
+use crate::{
+    Session,
+    protocol::response::{Response, UniqueId},
+};
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_list(&mut self, msg: Option<u32>) -> trc::Result<()> {
@@ -93,7 +96,10 @@ impl<T: SessionStream> Session<T> {
                     mailbox
                         .messages
                         .iter()
-                        .map(|m| format!("{}{}", mailbox.uid_validity, m.uid))
+                        .map(|m| UniqueId {
+                            uid_validity: mailbox.uid_validity,
+                            uid: m.uid,
+                        })
                         .collect::<Vec<_>>(),
                 )
                 .serialize(),

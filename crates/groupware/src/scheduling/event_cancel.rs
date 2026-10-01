@@ -48,16 +48,14 @@ pub fn itip_cancel(
 
         // Fetch guest emails
         let mut recipients = AHashSet::new();
-        let mut cancel_guests = AHashSet::new();
         let mut component_type = &ICalendarComponentType::VEvent;
         let mut sequence = 0;
         for (instance_id, comp) in &itip.components {
             component_type = &comp.comp.component_type;
             for attendee in &comp.attendees {
                 if attendee.send_update_messages() {
-                    recipients.insert(attendee.email.email.clone());
+                    recipients.insert(attendee.email.email.as_str());
                 }
-                cancel_guests.insert(&attendee.email);
             }
 
             // Increment sequence if needed
@@ -79,7 +77,7 @@ pub fn itip_cancel(
 
             itip_messages_per_recipient(
                 vec![ItipMessage {
-                    to: recipients.into_iter().collect(),
+                    to: recipients.into_iter().map(str::to_string).collect(),
                     summary: ItipSummary::Cancel(instance.build_summary(None, &[])),
                     from: itip.organizer.email.email,
                     from_organizer: true,

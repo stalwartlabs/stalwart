@@ -7,7 +7,7 @@
 use crate::api::{acl::JmapRights, parent_ref::ParentRef};
 use common::storage::dav::{
     FILE_KIND_DIRECTORY, FILE_KIND_FILE, FILE_KIND_SYMLINK, FORBIDDEN_FILE_NAME_CHARS,
-    FORBIDDEN_FILE_NODE_NAMES, MAX_DAV_FILE_NAME_LEN,
+    MAX_DAV_FILE_NAME_LEN,
 };
 use groupware::file::{
     FileNode, FileNodeContent, FileNodeRole, FileProperties,
@@ -485,9 +485,39 @@ fn is_reserved_name(name: &str) -> bool {
         Some((stem, _)) if !stem.is_empty() => stem,
         _ => name,
     };
-    FORBIDDEN_FILE_NODE_NAMES
-        .iter()
-        .any(|reserved| reserved.eq_ignore_ascii_case(name) || reserved.eq_ignore_ascii_case(stem))
+    is_reserved_stem(name) || is_reserved_stem(stem)
+}
+
+fn is_reserved_stem(name: &str) -> bool {
+    hashify::set_ignore_case!(
+        name.as_bytes(),
+        ".",
+        "..",
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM0",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT0",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    )
 }
 
 pub(super) fn node_type_id(node_type: FileNodeNodeType) -> u8 {
@@ -538,6 +568,7 @@ impl ResolveCreatedReference<FileNodeProperty, FileNodeValue> for NoResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::storage::dav::FORBIDDEN_FILE_NODE_NAMES;
 
     #[test]
     fn reserved_names() {
@@ -546,6 +577,13 @@ mod tests {
         }
         for name in ["console.txt", ".bashrc", "auxiliary", "com10", "a.con"] {
             assert!(!is_reserved_name(name), "{name}");
+        }
+        for reserved in FORBIDDEN_FILE_NODE_NAMES {
+            assert!(is_reserved_stem(reserved), "{reserved}");
+            assert!(
+                is_reserved_stem(&reserved.to_ascii_lowercase()),
+                "{reserved}"
+            );
         }
         assert!(validate_name("a\u{1}b").is_err());
         assert!(validate_name(&"a".repeat(256)).is_err());

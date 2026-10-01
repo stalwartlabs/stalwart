@@ -348,8 +348,10 @@ impl<T: SessionStream> SessionData<T> {
         let message_limit = message_limit as usize;
         let mut untagged = Vec::new();
         if ids.len() > message_limit {
+            let cutoff = ids.len() - message_limit;
+            ids.select_nth_unstable_by_key(cutoff, |resolved| resolved.uid);
+            ids.drain(..cutoff);
             ids.sort_unstable_by_key(|resolved| resolved.uid);
-            ids.drain(..ids.len() - message_limit);
             let lowest_uid = ids.first().map_or(0, |resolved| resolved.uid);
 
             let code = ResponseCode::MessageLimit {

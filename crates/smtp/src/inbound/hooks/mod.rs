@@ -8,16 +8,16 @@ pub mod client;
 pub mod message;
 
 use ahash::AHashMap;
-
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 #[derive(Serialize, Deserialize)]
-pub struct Request {
+pub struct Request<'x> {
     pub context: Context,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub envelope: Option<Envelope>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<Message>,
+    pub message: Option<Message<'x>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -113,13 +113,13 @@ pub struct Envelope {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Message {
-    pub headers: Vec<(String, String)>,
+pub struct Message<'x> {
+    pub headers: Vec<(Cow<'x, str>, Cow<'x, str>)>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(rename = "serverHeaders")]
     #[serde(default)]
     pub server_headers: Vec<(String, String)>,
-    pub contents: String,
+    pub contents: Cow<'x, str>,
     pub size: usize,
 }
 

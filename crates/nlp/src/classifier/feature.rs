@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::BuildHasher};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 #[derive(Debug)]
@@ -113,16 +113,58 @@ pub trait FeatureBuilder {
 
     fn build_feature(&self, bytes: &[u8], weight: f32) -> Self::Feature;
 
-    fn scale<I: UnprocessedFeature>(&self, features: &mut HashMap<I, f32>) {
+    fn scale<I: UnprocessedFeature, S: BuildHasher>(&self, features: &mut HashMap<I, f32, S>) {
         // Log frequency scaling
         for x in features.values_mut() {
             *x = x.ln_1p();
         }
     }
 
-    fn build<I: UnprocessedFeature>(
+    fn build_part<I: UnprocessedFeature, S: BuildHasher>(
         &self,
-        features_in: &HashMap<I, f32>,
+        features_in: &HashMap<I, f32, S>,
+        account_id: Option<u32>,
+        features_out: &mut Vec<Self::Feature>,
+    ) {
+        features_out.clear();
+        features_out.reserve(features_in.len());
+        let mut buf = Vec::with_capacity(2 + 4 + 63);
+        for (feature, count) in features_in {
+            buf.clear();
+            buf.extend_from_slice(&feature.prefix().to_be_bytes());
+            buf.extend_from_slice(feature.value());
+            if let Some(account_id) = account_id {
+                buf.extend_from_slice(&account_id.to_be_bytes());
+            }
+            features_out.push(self.build_feature(&buf, *count));
+        }
+    }
+
+    fn build_base_and_account<I: UnprocessedFeature, S: BuildHasher>(
+        &self,
+        features_in: &HashMap<I, f32, S>,
+        account_id: u32,
+        base_out: &mut Vec<Self::Feature>,
+        account_out: &mut Vec<Self::Feature>,
+    ) {
+        base_out.clear();
+        base_out.reserve(features_in.len());
+        account_out.clear();
+        account_out.reserve(features_in.len());
+        let mut buf = Vec::with_capacity(2 + 4 + 63);
+        for (feature, count) in features_in {
+            buf.clear();
+            buf.extend_from_slice(&feature.prefix().to_be_bytes());
+            buf.extend_from_slice(feature.value());
+            base_out.push(self.build_feature(&buf, *count));
+            buf.extend_from_slice(&account_id.to_be_bytes());
+            account_out.push(self.build_feature(&buf, *count));
+        }
+    }
+
+    fn build<I: UnprocessedFeature, S: BuildHasher>(
+        &self,
+        features_in: &HashMap<I, f32, S>,
         account_id: Option<u32>,
         l2_normalize: bool,
     ) -> Vec<Self::Feature> {

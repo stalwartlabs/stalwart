@@ -69,6 +69,7 @@ impl HasQueueQuota for Server {
         if !self.core.smtp.queue.quota.rcpt_domain.is_empty() {
             let mut seen_domains = AHashSet::new();
             for quota in &self.core.smtp.queue.quota.rcpt_domain {
+                seen_domains.clear();
                 for (rcpt_idx, rcpt) in message.message.recipients.iter().enumerate() {
                     if seen_domains.insert(rcpt.address.domain_part())
                         && !self
@@ -204,13 +205,14 @@ impl MessageWrapper {
         }
 
         if !quota_ids.is_empty() {
+            quota_ids.sort_unstable();
             let mut metadata = Vec::new();
             for entry in std::mem::take(&mut self.message.metadata) {
                 match entry {
-                    Metadata::QueueCount { id, key } if quota_ids.contains(&id) => {
+                    Metadata::QueueCount { id, key } if quota_ids.binary_search(&id).is_ok() => {
                         batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.into())), -1);
                     }
-                    Metadata::QueueSize { id, key } if quota_ids.contains(&id) => {
+                    Metadata::QueueSize { id, key } if quota_ids.binary_search(&id).is_ok() => {
                         batch.add(
                             ValueClass::Queue(QueueClass::QuotaSize(key.into())),
                             -(self.message.size as i64),

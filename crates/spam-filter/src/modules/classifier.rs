@@ -33,10 +33,10 @@ use std::time::Instant;
 use std::{
     borrow::Cow,
     collections::{HashMap, hash_map::Entry},
-    hash::{Hash, RandomState},
+    hash::Hash,
     sync::Arc,
 };
-use store::ahash::{AHashMap, AHashSet};
+use store::ahash::{AHashMap, AHashSet, RandomState};
 #[cfg(feature = "test_mode")]
 use store::rand::SeedableRng;
 use store::rand::{rngs::StdRng, seq::SliceRandom};
@@ -607,6 +607,9 @@ impl SpamClassifier for Server {
                 if config.log_scale {
                     feature_builder.scale(&mut tokens);
                 }
+                let mut base_features = Vec::new();
+                let mut account_features = Vec::new();
+                let mut base_score = None;
 
                 for rcpt in &ctx.input.env_rcpt_rewritten_to {
                     let prediction = if let Some(account_id) = self
@@ -615,12 +618,27 @@ impl SpamClassifier for Server {
                         .caused_by(trc::location!())?
                     {
                         has_prediction = true;
-                        classifier
-                            .predict_proba_sample(&feature_builder.build(
+                        let score = if let Some(score) = base_score {
+                            feature_builder.build_part(
                                 &tokens,
-                                account_id.into(),
+                                Some(account_id),
+                                &mut account_features,
+                            );
+                            score
+                        } else {
+                            feature_builder.build_base_and_account(
+                                &tokens,
+                                account_id,
+                                &mut base_features,
+                                &mut account_features,
+                            );
+                            *base_score.insert(classifier.score(&base_features))
+                        };
+                        classifier
+                            .predict_proba_score(
+                                score.combine(classifier.score(&account_features)),
                                 config.l2_normalize,
-                            ))
+                            )
                             .into()
                     } else {
                         None
@@ -632,11 +650,9 @@ impl SpamClassifier for Server {
                     ctx.result.classifier_confidence = classifier_confidence;
                 } else {
                     // None of the recipients are local, default to global model prediction
-                    let prediction = classifier.predict_proba_sample(&feature_builder.build(
-                        &tokens,
-                        None,
-                        config.l2_normalize,
-                    ));
+                    feature_builder.build_part(&tokens, None, &mut base_features);
+                    let prediction = classifier
+                        .predict_proba_score(classifier.score(&base_features), config.l2_normalize);
                     ctx.result.classifier_confidence =
                         vec![prediction.into(); ctx.input.env_rcpt_rewritten_to.len()];
                 }
@@ -650,6 +666,9 @@ impl SpamClassifier for Server {
                 if config.log_scale {
                     feature_builder.scale(&mut tokens);
                 }
+                let mut base_features = Vec::new();
+                let mut account_features = Vec::new();
+                let mut base_score = None;
 
                 for rcpt in &ctx.input.env_rcpt_rewritten_to {
                     let prediction = if let Some(account_id) = self
@@ -658,12 +677,27 @@ impl SpamClassifier for Server {
                         .caused_by(trc::location!())?
                     {
                         has_prediction = true;
-                        classifier
-                            .predict_proba_sample(&feature_builder.build(
+                        let score = if let Some(score) = base_score {
+                            feature_builder.build_part(
                                 &tokens,
-                                account_id.into(),
+                                Some(account_id),
+                                &mut account_features,
+                            );
+                            score
+                        } else {
+                            feature_builder.build_base_and_account(
+                                &tokens,
+                                account_id,
+                                &mut base_features,
+                                &mut account_features,
+                            );
+                            *base_score.insert(classifier.score(&base_features))
+                        };
+                        classifier
+                            .predict_proba_score(
+                                score.combine(classifier.score(&account_features)),
                                 config.l2_normalize,
-                            ))
+                            )
                             .into()
                     } else {
                         None
@@ -675,11 +709,9 @@ impl SpamClassifier for Server {
                     ctx.result.classifier_confidence = classifier_confidence;
                 } else {
                     // None of the recipients are local, default to global model prediction
-                    let prediction = classifier.predict_proba_sample(&feature_builder.build(
-                        &tokens,
-                        None,
-                        config.l2_normalize,
-                    ));
+                    feature_builder.build_part(&tokens, None, &mut base_features);
+                    let prediction = classifier
+                        .predict_proba_score(classifier.score(&base_features), config.l2_normalize);
                     ctx.result.classifier_confidence =
                         vec![prediction.into(); ctx.input.env_rcpt_rewritten_to.len()];
                 }
@@ -930,7 +962,7 @@ pub fn spam_collect_tokens<'x>(ctx: &'x SpamFilterContext<'_>) -> TokenBuilder<'
         .next()
         .or_else(|| ctx.input.message.text_body().next())
         .map(|part| part.id() as usize);
-    let mut alt_tokens = Tokens::default();
+    let mut alt_tokens = Tokens(HashMap::with_hasher(RandomState::new()));
     for (idx, part) in ctx.output.text_parts.iter().enumerate() {
         let is_body = Some(idx) == body_idx;
         if is_body || !ctx.input.is_body(idx as u32) {
@@ -1814,7 +1846,7 @@ impl CharType {
 
 impl<'x> Default for Tokens<'x> {
     fn default() -> Self {
-        Tokens(HashMap::with_capacity(128))
+        Tokens(HashMap::with_capacity_and_hasher(128, RandomState::new()))
     }
 }
 

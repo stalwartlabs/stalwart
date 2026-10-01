@@ -13,8 +13,8 @@ use jmap_proto::{
 };
 use jmap_tools::{Map, Value};
 use std::future::Future;
-use store::ahash::AHashSet;
-use types::{acl::Acl, collection::Collection, id::Id, keyword::Keyword, special_use::SpecialUse};
+use store::ahash::AHashMap;
+use types::{acl::Acl, collection::Collection, id::Id, special_use::SpecialUse};
 
 use crate::{
     api::{
@@ -114,6 +114,31 @@ impl MailboxGet for Server {
             }
             None => None,
         };
+        let count_threads = properties.iter().any(|property| {
+            matches!(
+                property,
+                MailboxProperty::TotalThreads | MailboxProperty::UnreadThreads
+            )
+        });
+        let counters = if count_threads
+            || properties.iter().any(|property| {
+                matches!(
+                    property,
+                    MailboxProperty::TotalEmails | MailboxProperty::UnreadEmails
+                )
+            }) {
+            cache.mailbox_counters(
+                ids.iter().map(Id::document_id).filter(|document_id| {
+                    cache.mailbox_by_id(document_id).is_some()
+                        && shared_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(*document_id))
+                }),
+                count_threads,
+            )
+        } else {
+            AHashMap::new()
+        };
 
         for id in ids {
             // Obtain the mailbox object
@@ -131,6 +156,7 @@ impl MailboxGet for Server {
             };
 
             let mut mailbox = Map::with_capacity(properties.len() + metadata_slots);
+            let counter = counters.get(&document_id);
 
             for property in &properties {
                 let value = match property {
@@ -151,30 +177,17 @@ impl MailboxGet for Server {
                         }
                     }
                     MailboxProperty::TotalEmails => {
-                        Value::Number(cache.in_mailbox(document_id).count().into())
+                        Value::Number(counter.map_or(0, |c| c.total).into())
                     }
-                    MailboxProperty::UnreadEmails => Value::Number(
-                        cache
-                            .in_mailbox_without_keyword(document_id, &Keyword::Seen)
-                            .count()
-                            .into(),
-                    ),
-                    MailboxProperty::TotalThreads => Value::Number(
-                        cache
-                            .in_mailbox(document_id)
-                            .map(|m| m.thread_id())
-                            .collect::<AHashSet<_>>()
-                            .len()
-                            .into(),
-                    ),
-                    MailboxProperty::UnreadThreads => Value::Number(
-                        cache
-                            .in_mailbox_without_keyword(document_id, &Keyword::Seen)
-                            .map(|m| m.thread_id())
-                            .collect::<AHashSet<_>>()
-                            .len()
-                            .into(),
-                    ),
+                    MailboxProperty::UnreadEmails => {
+                        Value::Number(counter.map_or(0, |c| c.unread).into())
+                    }
+                    MailboxProperty::TotalThreads => {
+                        Value::Number(counter.map_or(0, |c| c.threads.len()).into())
+                    }
+                    MailboxProperty::UnreadThreads => {
+                        Value::Number(counter.map_or(0, |c| c.unread_threads.len()).into())
+                    }
                     MailboxProperty::MyRights => {
                         if access_token.is_shared(account_id) {
                             JmapRights::rights::<Mailbox>(

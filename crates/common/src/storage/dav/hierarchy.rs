@@ -4,15 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{CONTAINER_FLAG, canonical_calcard_segment, canonical_path_segment};
+use super::{CONTAINER_FLAG, FILE_SEGMENT, canonical_calcard_segment, canonical_path_segment};
 use crate::{
     ArenaRef, DavPath, GroupwareResourceMetadata, GroupwareResourceRef, GroupwareResources, NO_ID,
     PathChunk, PathIndex, ResourceChunk, ResourceStore,
 };
 use ahash::{AHashMap, AHashSet};
+use percent_encoding::utf8_percent_encode;
 use std::borrow::Cow;
 
 const MAX_HIERARCHY_DEPTH: usize = 128;
+const NESTED_SEGMENT_CAPACITY: usize = 16;
 
 pub enum PathUpdate {
     Shared,
@@ -232,12 +234,14 @@ impl GroupwareResources {
             chain.push(ancestor);
         }
 
-        chain
-            .iter()
-            .rev()
-            .map(|node| node.container_name().map(canonical_path_segment))
-            .collect::<Option<Vec<_>>>()
-            .map(|segments| segments.join("/"))
+        let mut path = String::with_capacity(chain.len() * NESTED_SEGMENT_CAPACITY);
+        for (idx, node) in chain.iter().rev().enumerate() {
+            if idx > 0 {
+                path.push('/');
+            }
+            path.extend(utf8_percent_encode(node.container_name()?, FILE_SEGMENT));
+        }
+        Some(path)
     }
 
     fn nesting_parent(resource: &GroupwareResourceRef<'_>) -> Option<u32> {

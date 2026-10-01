@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::{crypto::SymmetricEncrypt, token::TOKEN_KEY_CONTEXT};
 use crate::{
     config::{EcKeyCurve, build_ecdsa_pem, build_rsa_keypair},
     manager::application::Resource,
@@ -27,6 +28,7 @@ use store::{
 #[derive(Clone)]
 pub struct OAuthConfig {
     pub oauth_key: String,
+    pub token_cipher: SymmetricEncrypt,
     pub oauth_expiry_user_code: u64,
     pub oauth_expiry_auth_code: u64,
     pub oauth_expiry_token: u64,
@@ -139,13 +141,16 @@ impl OAuthConfig {
             .into_bytes(),
         };
 
+        let oauth_key = auth
+            .encryption_key
+            .secret()
+            .await
+            .map_err(|err| bp.build_error(ObjectType::OidcProvider.singleton(), err))
+            .map_or_else(|_| rand_key.clone(), Cow::into_owned);
+
         OAuthConfig {
-            oauth_key: auth
-                .encryption_key
-                .secret()
-                .await
-                .map_err(|err| bp.build_error(ObjectType::OidcProvider.singleton(), err))
-                .map_or_else(|_| rand_key.clone(), Cow::into_owned),
+            token_cipher: SymmetricEncrypt::new(oauth_key.as_bytes(), TOKEN_KEY_CONTEXT),
+            oauth_key,
             oauth_expiry_user_code: auth.user_code_expiry.as_secs(),
             oauth_expiry_auth_code: auth.auth_code_expiry.as_secs(),
             oauth_expiry_token: auth.access_token_expiry.as_secs(),

@@ -8,6 +8,7 @@ store = { path =  "../store" }
 registry = { path =  "../registry" }
 trc = { path = "../trc" }
 futures = { version = "0.3", optional = true }
+parking_lot = { version = "0.12.5", optional = true }
 tokio = { version = "1.53", features = ["sync", "fs", "io-util"] }
 async-nats = { version = "0.50", default-features = false, features = ["server_2_10", "server_2_11", "aws-lc-rs"], optional = true }
 zenoh = { version = "1.10.0", default-features = false, features = ["auth_pubkey", "transport_multilink", "transport_compression", "transport_quic", "transport_tcp", "transport_tls", "transport_udp"], optional = true }
@@ -16,9 +17,9 @@ redis = { version = "1.6", features = [ "tokio-comp", "tokio-rustls-comp", "tls-
 
 [features]
 nats = ["async-nats", "futures"]
-zenoh = ["dep:zenoh"]
+zenoh = ["dep:zenoh", "dep:parking_lot"]
 kafka = ["rdkafka"]
-redis = ["dep:redis", "futures"]
+redis = ["dep:redis", "futures", "store/redis"]
 enterprise = []
 test_mode = []
 

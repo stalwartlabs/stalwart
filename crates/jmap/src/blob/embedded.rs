@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::download::BlobDownload;
+use super::download::{BlobDownload, is_shared_item_readable};
 use calcard::{
     common::{
         blob::{BlobIdGenerator, BlobIdOutcome},
@@ -38,7 +38,6 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    acl::Acl,
     blob::{BlobClass, BlobId},
     blob_hash::BlobHash,
     collection::{Collection, SyncCollection},
@@ -315,9 +314,7 @@ impl EmbeddedBlobs for Server {
         Ok(if access_token.is_member(account_id) {
             true
         } else {
-            resources
-                .shared_items(access_token, [Acl::ReadItems], true)
-                .contains(document_id)
+            is_shared_item_readable(&resources, resource, access_token)
                 && resource
                     .event_flags()
                     .is_none_or(|flags| EventPrivacy::from_flags(flags).is_public())

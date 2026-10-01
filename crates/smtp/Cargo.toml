@@ -43,6 +43,7 @@ rkyv.workspace = true
 compact_str = "0.10.0"
 hashify = { version = "0.3" }
 encodify = "1.0"
+memchr = "2.8"
 
 [dev-dependencies]
 mail-auth = { version = "0.14", features = ["test"] }

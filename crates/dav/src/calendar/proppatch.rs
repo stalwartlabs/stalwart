@@ -188,33 +188,38 @@ impl CalendarPropPatchRequestHandler for Server {
             let calendar = archive
                 .to_unarchived::<Calendar>()
                 .caused_by(trc::location!())?;
-            let mut new_calendar = archive
-                .deserialize::<Calendar>()
-                .caused_by(trc::location!())?;
             let personal_id = access_token.personal_id(account_id, Collection::Calendar);
             let is_member = access_token.is_member(account_id);
-            if is_member {
-                new_calendar.inherit_owner_preferences(account_id, personal_id);
-            }
 
             // Apply live properties
-            for op in request.ops {
-                match op {
-                    PropertyUpdateOp::Set(value) => self.apply_calendar_properties(
-                        personal_id,
-                        &mut new_calendar,
-                        true,
-                        [value],
-                        &mut items,
-                    ),
-                    PropertyUpdateOp::Remove(property) => remove_calendar_properties(
-                        personal_id,
-                        &mut new_calendar,
-                        [property],
-                        &mut items,
-                    ),
+            let new_calendar = if has_live_changes {
+                let mut new_calendar = archive
+                    .deserialize::<Calendar>()
+                    .caused_by(trc::location!())?;
+                if is_member {
+                    new_calendar.inherit_owner_preferences(account_id, personal_id);
                 }
-            }
+                for op in request.ops {
+                    match op {
+                        PropertyUpdateOp::Set(value) => self.apply_calendar_properties(
+                            personal_id,
+                            &mut new_calendar,
+                            true,
+                            [value],
+                            &mut items,
+                        ),
+                        PropertyUpdateOp::Remove(property) => remove_calendar_properties(
+                            personal_id,
+                            &mut new_calendar,
+                            [property],
+                            &mut items,
+                        ),
+                    }
+                }
+                Some(new_calendar)
+            } else {
+                None
+            };
 
             // Apply dead properties
             let mut dead_write = dead
@@ -234,7 +239,7 @@ impl CalendarPropPatchRequestHandler for Server {
             if items.has_errors() {
                 (false, etag)
             } else {
-                if has_live_changes {
+                if let Some(mut new_calendar) = new_calendar {
                     if is_member {
                         new_calendar.sync_owner_preferences(account_id, personal_id);
                     }
@@ -287,21 +292,26 @@ impl CalendarPropPatchRequestHandler for Server {
             let event = archive
                 .to_unarchived::<CalendarEvent>()
                 .caused_by(trc::location!())?;
-            let mut new_event = archive
-                .deserialize::<CalendarEvent>()
-                .caused_by(trc::location!())?;
 
             // Apply live properties
-            for op in request.ops {
-                match op {
-                    PropertyUpdateOp::Set(value) => {
-                        self.apply_event_properties(&mut new_event, [value], &mut items)
-                    }
-                    PropertyUpdateOp::Remove(property) => {
-                        remove_event_properties(&mut new_event, [property], &mut items)
+            let new_event = if has_live_changes {
+                let mut new_event = archive
+                    .deserialize::<CalendarEvent>()
+                    .caused_by(trc::location!())?;
+                for op in request.ops {
+                    match op {
+                        PropertyUpdateOp::Set(value) => {
+                            self.apply_event_properties(&mut new_event, [value], &mut items)
+                        }
+                        PropertyUpdateOp::Remove(property) => {
+                            remove_event_properties(&mut new_event, [property], &mut items)
+                        }
                     }
                 }
-            }
+                Some(new_event)
+            } else {
+                None
+            };
 
             // Apply dead properties
             let mut dead_write = dead
@@ -330,7 +340,7 @@ impl CalendarPropPatchRequestHandler for Server {
                         .build(document_id.into(), &mut batch)
                         .caused_by(trc::location!())?;
                 }
-                if has_live_changes {
+                if let Some(mut new_event) = new_event {
                     if let Some(dead_write) = &dead_write {
                         new_event.set_metadata_kinds(dead_write.kinds);
                     }

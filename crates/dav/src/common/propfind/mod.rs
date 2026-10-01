@@ -10,11 +10,11 @@ mod get;
 mod item;
 mod load;
 
-pub(crate) use data::{PropFindAccountQuota, PropFindData, SyncTokenUrn};
+pub(crate) use data::{ExpandedPrincipals, PropFindAccountQuota, PropFindData, SyncTokenUrn};
 pub(crate) use get::requested_href;
 
 use super::{
-    ArchivedResource, DavCollection, DavQuery, DavQueryFilter, DavQueryResource,
+    ArchivedResource, CachedItem, DavCollection, DavQuery, DavQueryFilter, DavQueryResource,
     uri::{DavUriResource, SyncCursor, UriResource},
 };
 use crate::{
@@ -86,6 +86,7 @@ pub(crate) struct PropFindItem {
     pub parent_id: Option<u32>,
     pub is_container: bool,
     pub is_discover_only: bool,
+    pub is_cache_exact: bool,
     pub dead: DeadPresence,
 }
 
@@ -489,16 +490,25 @@ impl PropFindRequestHandler for Server {
                 let collection = loader.collection_of(&item);
 
                 // Unarchive resource
-                let mut archive = if ctx.is_scheduling && item.is_container {
-                    ArchivedResource::CalendarEventNotificationCollection(
+                let archive = if ctx.is_scheduling && item.is_container {
+                    Some(ArchivedResource::CalendarEventNotificationCollection(
                         item.document_id == SCHEDULE_INBOX_ID,
-                    )
-                } else if let Some(archive) = archives
-                    .resource(collection, &item)
-                    .caused_by(trc::location!())?
-                {
-                    archive
+                    ))
+                } else if loader.is_cached(&item) {
+                    state
+                        .data
+                        .resources(self, access_token, account_id, sync_collection, 0)
+                        .await
+                        .caused_by(trc::location!())?
+                        .item_by_id(item.document_id)
+                        .and_then(|resource| CachedItem::new(collection, resource))
+                        .map(ArchivedResource::Cached)
                 } else {
+                    archives
+                        .resource(collection, &item)
+                        .caused_by(trc::location!())?
+                };
+                let Some(mut archive) = archive else {
                     state
                         .response
                         .add_response(Response::new_status([item.name], StatusCode::NOT_FOUND));
@@ -667,6 +677,7 @@ impl PropFindItem {
             parent_id: resource.parent_id(),
             is_container: resource.is_container(),
             is_discover_only: false,
+            is_cache_exact: CachedItem::is_exact(&resource.resource),
             dead: DeadPresence::from_resource(&resource),
         }
     }

@@ -71,7 +71,7 @@ impl TlsaLookup for Server {
                 .await;
         }
 
-        let key = key.to_fqdn().into_owned().into_boxed_str();
+        let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_mx.get::<str>(key.as_ref())
             && value.dnssec_status != DnssecStatus::Indeterminate
         {
@@ -103,7 +103,7 @@ impl TlsaLookup for Server {
                     };
                     if let Some(valid_until) = denial.valid_until {
                         self.inner.cache.dns_mx.insert_with_expiry(
-                            key,
+                            key.into_owned().into_boxed_str(),
                             records.clone(),
                             valid_until,
                         );
@@ -147,16 +147,17 @@ impl TlsaLookup for Server {
             dnssec_status: dnssec_status.unwrap_or(DnssecStatus::Indeterminate),
         };
 
-        self.inner
-            .cache
-            .dns_mx
-            .insert_with_expiry(key, records.clone(), mx_lookup.valid_until());
+        self.inner.cache.dns_mx.insert_with_expiry(
+            key.into_owned().into_boxed_str(),
+            records.clone(),
+            mx_lookup.valid_until(),
+        );
 
         Ok(records)
     }
 
     async fn tlsa_lookup(&self, key: impl ToFqdn + Sync + Send) -> mail_auth::Result<TlsaResult> {
-        let key = key.to_fqdn().into_owned().into_boxed_str();
+        let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_tlsa.get(key.as_ref()) {
             return Ok(match value {
                 Some(tlsa) => TlsaResult::Secure(tlsa),
@@ -187,7 +188,7 @@ impl TlsaLookup for Server {
                     if denial.dnssec_status == DnssecStatus::Bogus {
                         return Ok(TlsaResult::Bogus);
                     }
-                    self.cache_missing_tlsa(key, denial.valid_until);
+                    self.cache_missing_tlsa(key.into_owned().into_boxed_str(), denial.valid_until);
                     return Ok(TlsaResult::Missing);
                 }
                 return Err(err.into());
@@ -250,7 +251,7 @@ impl TlsaLookup for Server {
                 });
 
                 self.inner.cache.dns_tlsa.insert_with_expiry(
-                    key,
+                    key.into_owned().into_boxed_str(),
                     Some(tlsa.clone()),
                     tlsa_lookup.valid_until(),
                 );
@@ -258,7 +259,10 @@ impl TlsaLookup for Server {
                 Ok(TlsaResult::Secure(tlsa))
             }
             _ => {
-                self.cache_missing_tlsa(key, Some(tlsa_lookup.valid_until()));
+                self.cache_missing_tlsa(
+                    key.into_owned().into_boxed_str(),
+                    Some(tlsa_lookup.valid_until()),
+                );
                 Ok(TlsaResult::Missing)
             }
         }
@@ -278,7 +282,7 @@ impl TlsaLookup for Server {
                 .await;
         }
 
-        let key = key.to_fqdn().into_owned().into_boxed_str();
+        let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_ipv4.get::<str>(key.as_ref())
             && value.dnssec_status != DnssecStatus::Indeterminate
         {
@@ -311,7 +315,7 @@ impl TlsaLookup for Server {
                     };
                     if let Some(valid_until) = denial.valid_until {
                         self.inner.cache.dns_ipv4.insert_with_expiry(
-                            key,
+                            key.into_owned().into_boxed_str(),
                             records.clone(),
                             valid_until,
                         );
@@ -334,10 +338,11 @@ impl TlsaLookup for Server {
             dnssec_status: tlsa_base_status(&name, answers, RecordType::A),
         };
 
-        self.inner
-            .cache
-            .dns_ipv4
-            .insert_with_expiry(key, records.clone(), lookup.valid_until());
+        self.inner.cache.dns_ipv4.insert_with_expiry(
+            key.into_owned().into_boxed_str(),
+            records.clone(),
+            lookup.valid_until(),
+        );
 
         Ok(records)
     }
@@ -356,7 +361,7 @@ impl TlsaLookup for Server {
                 .await;
         }
 
-        let key = key.to_fqdn().into_owned().into_boxed_str();
+        let key = key.to_fqdn();
         if let Some(value) = self.inner.cache.dns_ipv6.get::<str>(key.as_ref())
             && value.dnssec_status != DnssecStatus::Indeterminate
         {
@@ -389,7 +394,7 @@ impl TlsaLookup for Server {
                     };
                     if let Some(valid_until) = denial.valid_until {
                         self.inner.cache.dns_ipv6.insert_with_expiry(
-                            key,
+                            key.into_owned().into_boxed_str(),
                             records.clone(),
                             valid_until,
                         );
@@ -412,10 +417,11 @@ impl TlsaLookup for Server {
             dnssec_status: tlsa_base_status(&name, answers, RecordType::AAAA),
         };
 
-        self.inner
-            .cache
-            .dns_ipv6
-            .insert_with_expiry(key, records.clone(), lookup.valid_until());
+        self.inner.cache.dns_ipv6.insert_with_expiry(
+            key.into_owned().into_boxed_str(),
+            records.clone(),
+            lookup.valid_until(),
+        );
 
         Ok(records)
     }

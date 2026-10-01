@@ -19,7 +19,11 @@ use common::{
 };
 use email::message::headers::{BuildHeader, ValueToHeader};
 use email::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
+    cache::{
+        MessageCacheFetch,
+        email::{MessageAccess, MessageCacheAccess},
+        mailbox::MailboxCacheAccess,
+    },
     mailbox::{JUNK_ID, TRASH_ID},
     message::{
         delete::EmailDeletion,
@@ -1335,32 +1339,32 @@ impl EmailSet for Server {
 
         // Process deletions
         if !will_destroy.is_empty() {
-            let email_ids = cache.email_document_ids();
-            let can_destroy_message_ids = if access_token.is_shared(account_id) {
-                cache.shared_messages(access_token, Acl::RemoveItems).into()
+            let can_destroy = if access_token.is_shared(account_id) {
+                MessageAccess::Mailboxes(cache.shared_mailboxes(access_token, Acl::RemoveItems))
             } else {
-                None
+                MessageAccess::All
             };
             let mut destroy_ids = RoaringBitmap::new();
             for destroy_id in will_destroy {
                 let document_id = destroy_id.document_id();
 
-                if email_ids.contains(document_id) {
-                    if !matches!(&can_destroy_message_ids, Some(ids) if !ids.contains(document_id))
-                    {
+                match cache.email_by_id(&document_id) {
+                    Some(message) if can_destroy.allows(message) => {
                         destroy_ids.insert(document_id);
                         response.destroyed.push(destroy_id);
-                    } else {
+                    }
+                    Some(_) => {
                         response.not_destroyed.append(
                             destroy_id,
                             SetError::forbidden()
                                 .with_description("You are not allowed to delete this message."),
                         );
                     }
-                } else {
-                    response
-                        .not_destroyed
-                        .append(destroy_id, SetError::not_found());
+                    None => {
+                        response
+                            .not_destroyed
+                            .append(destroy_id, SetError::not_found());
+                    }
                 }
             }
 

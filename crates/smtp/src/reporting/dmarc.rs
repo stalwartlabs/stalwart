@@ -37,7 +37,7 @@ use registry::{
     },
     types::{EnumImpl, ObjectImpl, datetime::UTCDateTime, map::Map},
 };
-use std::{borrow::Cow, future::Future};
+use std::{borrow::Cow, future::Future, sync::Arc};
 use store::{
     Deserialize, U64_LEN, ValueKey,
     registry::ObjectIdVersioned,
@@ -549,59 +549,36 @@ impl DmarcReporting for Server {
     }
 
     async fn schedule_dmarc(&self, event: Box<DmarcEvent>) {
+        let DmarcEvent {
+            domain,
+            report_record,
+            dmarc_record,
+            interval,
+            span_id,
+        } = *event;
         let object_id = ObjectType::DmarcInternalReport.to_id();
-        let policy_hash = event.dmarc_record.to_hash();
+        let policy_hash = dmarc_record.to_hash();
         let pk = ValueClass::Registry(RegistryClass::PrimaryKey {
             object_id: object_id.into(),
             index_id: Property::Domain.to_id(),
-            key: KeySerializer::new(event.domain.len() + U64_LEN)
-                .write(&event.domain)
+            key: KeySerializer::new(domain.len() + U64_LEN)
+                .write(&domain)
                 .write(policy_hash)
                 .finalize(),
         });
+        let record = Arc::new(DmarcReportRecord::from(report_record));
         let mut rety_count = 0;
         let mut arena = Bump::new();
 
         loop {
             // Find the report by domain name
             let mut batch = BatchBuilder::new();
-            let report = match self
+            let object_id_v = match self
                 .store()
                 .get_value::<ObjectIdVersioned>(ValueKey::from(pk.clone()))
                 .await
             {
-                Ok(Some(object_id_v)) => {
-                    match self
-                        .store()
-                        .get_value::<DmarcInternalReport>(ValueKey::from(ValueClass::Registry(
-                            RegistryClass::Item {
-                                object_id,
-                                item_id: object_id_v.object_id.id().id(),
-                            },
-                        )))
-                        .await
-                    {
-                        Ok(Some(report)) => Some((object_id_v, report)),
-                        Ok(None) => {
-                            trc::event!(
-                                OutgoingReport(OutgoingReportEvent::NotFound),
-                                Id = object_id_v.object_id.id().id(),
-                                CausedBy = trc::location!(),
-                                Details = "Failed to find DMARC report for domain"
-                            );
-
-                            return;
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.caused_by(trc::location!())
-                                    .details("Failed to query registry for DMARC report")
-                            );
-                            return;
-                        }
-                    }
-                }
-                Ok(None) => None,
+                Ok(object_id_v) => object_id_v,
                 Err(err) => {
                     trc::error!(
                         err.caused_by(trc::location!())
@@ -616,19 +593,18 @@ impl DmarcReporting for Server {
             let max_report_size = self
                 .eval_if(
                     &config.max_size,
-                    &RecipientDomain::new(&event.domain),
+                    &RecipientDomain::new(&domain),
                     &mut arena,
-                    event.span_id,
+                    span_id,
                 )
                 .await
                 .unwrap_or(5 * 1024 * 1024);
 
-            let (item_id, mut report) = if let Some((object_id_v, _)) = report {
+            let (item_id, mut report) = if let Some(object_id_v) = object_id_v {
                 // Merge the record into the stored report
                 let item_id = object_id_v.object_id.id().id();
-                let record = event.report_record.clone();
-                let domain = event.domain.clone();
-                let span_id = event.span_id;
+                let record = record.clone();
+                let domain = domain.clone();
 
                 batch.merge_fnc(
                     ValueClass::Registry(RegistryClass::Item { object_id, item_id }),
@@ -641,7 +617,7 @@ impl DmarcReporting for Server {
                         };
 
                         let mut report = DmarcInternalReport::deserialize(bytes)?;
-                        add_dmarc_record(&mut report, DmarcReportRecord::from(record.clone()));
+                        add_dmarc_record(&mut report, &record);
 
                         let report_bytes = report.to_pickled_vec();
                         if max_report_size != 0 && report_bytes.len() > max_report_size {
@@ -678,15 +654,14 @@ impl DmarcReporting for Server {
                 let item_id = self.inner.data.queue_id_gen.generate();
                 let date_range_begin = UTCDateTime::now();
                 let date_range_end = UTCDateTime::from_timestamp(
-                    date_range_begin.timestamp() + event.interval.as_secs() as i64,
+                    date_range_begin.timestamp() + interval.as_secs() as i64,
                 );
-                let policy =
-                    PolicyPublished::from_record(event.domain.clone(), &event.dmarc_record);
+                let policy = PolicyPublished::from_record(domain.clone(), &dmarc_record);
 
                 let report = DmarcInternalReport {
                     created_at: date_range_begin,
                     deliver_at: date_range_end,
-                    domain: event.domain.clone(),
+                    domain: domain.clone(),
                     report: DmarcReport {
                         report_id: format!("{}_{policy_hash}", date_range_begin.timestamp()),
                         date_range_begin,
@@ -694,26 +669,26 @@ impl DmarcReporting for Server {
                         email: self
                             .eval_if(
                                 &config.address,
-                                &RecipientDomain::new(event.domain.as_str()),
+                                &RecipientDomain::new(domain.as_str()),
                                 &mut arena,
-                                event.span_id,
+                                span_id,
                             )
                             .await
                             .unwrap_or_else(|| "MAILER-DAEMON@localhost".to_string()),
                         extra_contact_info: self
                             .eval_if::<String, _>(
                                 &config.contact_info,
-                                &RecipientDomain::new(event.domain.as_str()),
+                                &RecipientDomain::new(domain.as_str()),
                                 &mut arena,
-                                event.span_id,
+                                span_id,
                             )
                             .await,
                         org_name: self
                             .eval_if::<String, _>(
                                 &config.org_name,
-                                &RecipientDomain::new(event.domain.as_str()),
+                                &RecipientDomain::new(domain.as_str()),
                                 &mut arena,
-                                event.span_id,
+                                span_id,
                             )
                             .await
                             .unwrap_or_default(),
@@ -721,7 +696,7 @@ impl DmarcReporting for Server {
                         policy_aspf: policy.aspf.into(),
                         policy_disposition: policy.p.into(),
                         policy_domain: policy.domain,
-                        policy_failure_reporting_options: match event.dmarc_record.fo {
+                        policy_failure_reporting_options: match dmarc_record.fo {
                             FailureOptions::All => vec![FailureReportingOption::All],
                             FailureOptions::Any => vec![FailureReportingOption::Any],
                             FailureOptions::Dkim => vec![FailureReportingOption::DkimFailure],
@@ -741,14 +716,7 @@ impl DmarcReporting for Server {
                         ..Default::default()
                     },
                     policy_identifier: policy_hash,
-                    rua: Map::new(
-                        event
-                            .dmarc_record
-                            .rua()
-                            .iter()
-                            .map(|u| u.uri.clone())
-                            .collect(),
-                    ),
+                    rua: Map::new(dmarc_record.rua().iter().map(|u| u.uri.clone()).collect()),
                 };
 
                 report.write_ops(&mut batch, item_id, true);
@@ -757,18 +725,15 @@ impl DmarcReporting for Server {
             };
 
             // Add record
-            add_dmarc_record(
-                &mut report,
-                DmarcReportRecord::from(event.report_record.clone()),
-            );
+            add_dmarc_record(&mut report, &record);
 
             // Write entry
             let report_bytes = report.to_pickled_vec();
             if max_report_size != 0 && report_bytes.len() > max_report_size {
                 trc::event!(
                     OutgoingReport(OutgoingReportEvent::MaxSizeExceeded),
-                    SpanId = event.span_id,
-                    Domain = event.domain.clone(),
+                    SpanId = span_id,
+                    Domain = domain.clone(),
                     Details = report_bytes.len(),
                     Limit = max_report_size,
                 );
@@ -800,17 +765,18 @@ impl DmarcReporting for Server {
     }
 }
 
-fn add_dmarc_record(report: &mut DmarcInternalReport, mut record: DmarcReportRecord) {
-    if let Some(idx) = report
+fn add_dmarc_record(report: &mut DmarcInternalReport, record: &DmarcReportRecord) {
+    if let Some(existing) = report
         .report
         .records
         .0
         .inner
-        .iter()
-        .position(|d| d.value.eq_except_count(&record))
+        .iter_mut()
+        .find(|d| d.value.eq_except_count(record))
     {
-        report.report.records.0.inner[idx].value.count += 1;
+        existing.value.count += 1;
     } else {
+        let mut record = record.clone();
         record.count = 1;
         report.report.records.push(record);
     }

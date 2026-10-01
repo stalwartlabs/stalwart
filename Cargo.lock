@@ -1355,7 +1355,6 @@ dependencies = [
  "sha1 0.11.0",
  "sha2 0.11.0",
  "sieve-rs",
- "simdutf8",
  "smtp-proto",
  "socket2 0.6.5",
  "store",
@@ -1480,6 +1479,7 @@ version = "0.16.24"
 dependencies = [
  "async-nats",
  "futures",
+ "parking_lot",
  "rdkafka",
  "redis",
  "registry",
@@ -1918,6 +1918,7 @@ dependencies = [
  "hashify",
  "hyper",
  "mail-parser",
+ "memchr",
  "quick-xml 0.41.0",
  "serde",
  "serde_json",
@@ -2131,6 +2132,7 @@ dependencies = [
  "compact_str",
  "deadpool",
  "encodify",
+ "hashify",
  "jsonwebtoken",
  "ldap3",
  "md5",
@@ -4802,12 +4804,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "maplit"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5149,7 +5145,6 @@ dependencies = [
  "ahash",
  "hashify",
  "jieba-rs",
- "maplit",
  "memchr",
  "psl",
  "rand 0.10.3",
@@ -8014,6 +8009,7 @@ dependencies = [
  "mail-auth",
  "mail-builder 2.0.0",
  "mail-parser",
+ "memchr",
  "parking_lot",
  "rand 0.10.3",
  "registry",
@@ -8141,6 +8137,7 @@ dependencies = [
  "infer 0.22.0",
  "mail-auth",
  "mail-parser",
+ "memchr",
  "nlp",
  "psl",
  "registry",
@@ -9461,6 +9458,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
+ "simdutf8",
  "tokio",
  "tokio-rustls",
  "trc",

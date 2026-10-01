@@ -31,6 +31,7 @@ pub(super) struct ArchiveLoader {
     needs_content: bool,
     needs_content_length: bool,
     content_field: Option<Field>,
+    cached_items: bool,
 }
 
 pub(super) struct BatchArchives {
@@ -46,6 +47,13 @@ impl ArchiveLoader {
     pub fn new(ctx: &PropFindContext<'_>, has_filter: bool) -> Self {
         let properties = ctx.properties;
         ArchiveLoader {
+            cached_items: !has_filter
+                && !ctx.is_scheduling
+                && matches!(
+                    ctx.collection_children,
+                    Collection::CalendarEvent | Collection::ContactCard
+                )
+                && properties.iter().all(is_cache_answerable),
             collection_container: ctx.collection_container,
             collection_children: ctx.collection_children,
             is_scheduling: ctx.is_scheduling,
@@ -80,6 +88,10 @@ impl ArchiveLoader {
             && (self.needs_content || self.needs_content_length)
     }
 
+    pub fn is_cached(&self, item: &PropFindItem) -> bool {
+        self.cached_items && !item.is_container && item.is_cache_exact
+    }
+
     pub fn collection_of(&self, item: &PropFindItem) -> Collection {
         if item.is_container {
             self.collection_container
@@ -96,7 +108,7 @@ impl ArchiveLoader {
     ) -> trc::Result<BatchArchives> {
         let mut groups: AHashMap<(u32, Collection), RoaringBitmap> = AHashMap::with_capacity(4);
         for item in batch {
-            if !(self.is_scheduling && item.is_container) {
+            if !(self.is_scheduling && item.is_container) && !self.is_cached(item) {
                 groups
                     .entry((item.account_id, self.collection_of(item)))
                     .or_default()
@@ -177,6 +189,17 @@ impl ArchiveLoader {
         }
 
         Ok(BatchArchives { metadata, contents })
+    }
+}
+
+fn is_cache_answerable(property: &DavProperty) -> bool {
+    match property {
+        DavProperty::WebDav(property) => !matches!(
+            property,
+            WebDavProperty::DisplayName | WebDavProperty::GetContentLength
+        ),
+        DavProperty::Dead(_) => true,
+        _ => false,
     }
 }
 

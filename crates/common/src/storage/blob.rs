@@ -179,8 +179,18 @@ impl Server {
         data: &[u8],
         hold_for: u64,
     ) -> trc::Result<(BlobHash, BlobOp)> {
+        self.put_temporary_blob_with_hash(account_id, BlobHash::generate(data), data, hold_for)
+            .await
+    }
+
+    pub async fn put_temporary_blob_with_hash(
+        &self,
+        account_id: u32,
+        hash: BlobHash,
+        data: &[u8],
+        hold_for: u64,
+    ) -> trc::Result<(BlobHash, BlobOp)> {
         // First reserve the hash
-        let hash = BlobHash::generate(data);
         let mut batch = BatchBuilder::new();
         let until = now() + hold_for;
 

@@ -101,7 +101,7 @@ impl Server {
     pub async fn logo_resource(
         &self,
         _: &str,
-    ) -> trc::Result<Option<crate::manager::application::Resource<Vec<u8>>>> {
+    ) -> trc::Result<Option<crate::manager::application::Resource<bytes::Bytes>>> {
         Ok(None)
     }
 }

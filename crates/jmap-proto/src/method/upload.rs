@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
-
 use super::ahash_is_empty;
 use crate::{
     error::set::SetError,
     object::{AnyId, blob::BlobProperty},
     request::{
-        deserialize::{DeserializeArguments, deserialize_request},
+        deserialize::{CowStr, DeserializeArguments, deserialize_request},
         reference::MaybeIdReference,
     },
     response::Response,
@@ -121,7 +119,7 @@ impl<'de> DeserializeArguments<'de> for DataSourceObject {
                 *self = DataSourceObject::Value(map.next_value::<String>().map(|v| v.into_bytes())?);
             },
             b"data:asBase64" => {
-                *self = DataSourceObject::Value(LENIENT.decode(map.next_value::<Cow<'_, str>>()?.as_bytes()).map_err(|_| serde::de::Error::custom("Failed to decode base64 data"))?);
+                *self = DataSourceObject::Value(LENIENT.decode(map.next_value::<CowStr>()?.0.as_bytes()).map_err(|_| serde::de::Error::custom("Failed to decode base64 data"))?);
             },
             b"blobId" => {
                 match self {

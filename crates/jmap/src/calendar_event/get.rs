@@ -48,7 +48,6 @@ use std::{ops::Range, str::FromStr};
 use store::{
     ValueKey,
     ahash::AHashSet,
-    roaring::RoaringBitmap,
     write::{Archive, ArchiveBytes, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
@@ -91,12 +90,17 @@ impl CalendarEventGet for Server {
             )
             .await?;
         let is_account_member = access_token.is_member(account_id);
-        let calendar_event_ids = if is_account_member {
-            cache.document_ids(false).collect::<RoaringBitmap>()
-        } else {
+        let shared_event_ids = (!is_account_member).then(|| {
             let mut shared_ids = cache.shared_items(access_token, [Acl::ReadItems], true);
             shared_ids -= cache.event_ids_with_flags(EVENT_SECRET);
             shared_ids
+        });
+        let readable_event = |document_id: u32| {
+            shared_event_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(document_id))
+                .then(|| cache.item_by_id(document_id))
+                .flatten()
         };
         let mut ids = if let Some(rr) = request.ids.take() {
             let rr = rr.unwrap();
@@ -107,10 +111,19 @@ impl CalendarEventGet for Server {
                 .enumerate()
                 .map(|(index, id)| (id, index))
                 .collect::<Vec<_>>()
+        } else if let Some(shared_event_ids) = &shared_event_ids {
+            all_ids(
+                shared_event_ids
+                    .iter()
+                    .map(Id::from)
+                    .enumerate()
+                    .map(|(index, id)| (id, index)),
+                self.core.jmap.get_max_objects,
+            )?
         } else {
             all_ids(
-                calendar_event_ids
-                    .iter()
+                cache
+                    .document_ids(false)
                     .map(Id::from)
                     .enumerate()
                     .map(|(index, id)| (id, index)),
@@ -124,16 +137,11 @@ impl CalendarEventGet for Server {
                 let mut documents = MetadataDocuments::default();
                 for (id, _) in &ids {
                     let document_id = id.document_id();
-                    if let Some(resource) = calendar_event_ids
-                        .contains(document_id)
-                        .then(|| cache.item_by_id(document_id))
-                        .flatten()
-                        .filter(|resource| {
-                            EventPrivacy::from_flags(resource.event_flags().unwrap_or_default())
-                                .private_view(is_account_member)
-                                == Some(false)
-                        })
-                    {
+                    if let Some(resource) = readable_event(document_id).filter(|resource| {
+                        EventPrivacy::from_flags(resource.event_flags().unwrap_or_default())
+                            .private_view(is_account_member)
+                            == Some(false)
+                    }) {
                         documents.insert(document_id, resource.metadata_kinds());
                     }
                 }
@@ -178,11 +186,7 @@ impl CalendarEventGet for Server {
                 continue;
             };
             let document_id = first_id.document_id();
-            let Some(resource) = calendar_event_ids
-                .contains(document_id)
-                .then(|| cache.item_by_id(document_id))
-                .flatten()
-            else {
+            let Some(resource) = readable_event(document_id) else {
                 results.push_not_found(group);
                 continue;
             };

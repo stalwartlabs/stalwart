@@ -530,4 +530,35 @@ async fn test_store(store: BlobStore) {
             .unwrap()
             .is_none()
     );
+
+    let hash = BlobHash::generate(b"overwritten blob");
+    for (fill, len) in [
+        (b'a', 5 * 1024 * 1024),
+        (b'b', 4 * 1024 * 1024),
+        (b'c', 2 * 1024 * 1024),
+        (b'd', 1024),
+        (b'e', 5 * 1024 * 1024 + 7),
+    ] {
+        let data = vec![fill; len];
+        store
+            .put_blob(hash.as_slice(), &data, CompressionAlgo::None)
+            .await
+            .expect("overwrite blob");
+        let stored = store
+            .get_blob(hash.as_slice(), 0..usize::MAX)
+            .await
+            .expect("read overwritten blob")
+            .expect("blob missing after overwrite");
+        assert!(
+            stored == data,
+            "overwriting a blob with {len} bytes read back {} bytes",
+            stored.len()
+        );
+    }
+    assert!(
+        store
+            .delete_blob(hash.as_slice())
+            .await
+            .expect("delete overwritten blob")
+    );
 }

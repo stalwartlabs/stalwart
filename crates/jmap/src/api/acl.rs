@@ -17,8 +17,6 @@ use jmap_proto::{
     object::{JmapRight, JmapSharedObject},
 };
 use jmap_tools::{JsonPointerIter, Key, Map, Property, Value};
-use registry::schema::prelude::ObjectType;
-use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use types::{
     acl::{Acl, AclGrant},
     id::Id,
@@ -292,6 +290,7 @@ pub trait JmapAcl {
 pub enum ShareValidationError {
     MaxSharesExceeded(usize),
     InvalidAccountId(Id),
+    Unavailable,
 }
 
 impl JmapAcl for Server {
@@ -302,17 +301,18 @@ impl JmapAcl for Server {
             ));
         }
 
-        let principal_ids = self
-            .registry()
-            .query::<RoaringBitmap>(RegistryQuery::new(ObjectType::Account))
-            .await
-            .unwrap_or_default();
-
         for grant in grants {
-            if !principal_ids.contains(grant.account_id) {
-                return Err(ShareValidationError::InvalidAccountId(Id::from(
-                    grant.account_id,
-                )));
+            match self.try_account(grant.account_id).await {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Err(ShareValidationError::InvalidAccountId(Id::from(
+                        grant.account_id,
+                    )));
+                }
+                Err(err) => {
+                    trc::error!(err.caused_by(trc::location!()));
+                    return Err(ShareValidationError::Unavailable);
+                }
             }
         }
 
@@ -349,6 +349,8 @@ impl<T: Property> From<ShareValidationError> for SetError<T> {
                 )),
             ShareValidationError::InvalidAccountId(id) => SetError::invalid_properties()
                 .with_description(format!("Account id {id} is invalid.")),
+            ShareValidationError::Unavailable => SetError::invalid_properties()
+                .with_description("Shares could not be validated, please try again later."),
         }
     }
 }

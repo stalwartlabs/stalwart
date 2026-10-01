@@ -168,6 +168,10 @@ impl FdbStore {
                 .ctx(trc::Key::Reason, "Blob exceeds the maximum chunk count"));
         }
 
+        if chunks.is_empty() {
+            return self.delete_blob(key).await.map(|_| ());
+        }
+
         for (pos, group) in chunks.chunks(N_CHUNKS).enumerate() {
             self.put_blob_chunks(key, pos * N_CHUNKS, group).await?;
         }
@@ -186,6 +190,10 @@ impl FdbStore {
 
         loop {
             let trx = self.db.create_trx().map_err(into_error)?;
+            if first_chunk == 0 {
+                let (begin, end) = Self::blob_chunk_range(key);
+                trx.clear_range(&begin, &end);
+            }
             for (pos, bytes) in chunks.iter().enumerate() {
                 trx.set(
                     &Self::blob_chunk_key(key, (first_chunk + pos) as u16),

@@ -52,6 +52,7 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
 };
+use utils::map::bitmap::Bitmap;
 
 pub(crate) trait CalendarQueryRequestHandler: Sync + Send {
     fn handle_calendar_query_request(
@@ -109,15 +110,12 @@ impl CalendarQueryRequestHandler for Server {
                 .with_xml_body(MultiStatus::not_found(headers.uri).to_string()));
         };
 
-        let shared_ids = (!access_token.is_member(account_id)).then(|| {
-            let mut shared_ids = resources.shared_items(access_token, [Acl::ReadItems], false);
-            shared_ids -= resources.event_ids_with_flags(EVENT_SECRET);
-            shared_ids
-        });
+        let is_owner = access_token.is_member(account_id);
+        let read_items = Bitmap::from_iter([Acl::ReadItems]);
         let is_visible = |item: &DavResourcePath<'_>| {
-            shared_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(item.document_id()))
+            is_owner
+                || (item.resource.event_flags().unwrap_or_default() & EVENT_SECRET == 0
+                    && resources.is_shared_item(&item.resource, access_token, &read_items, false))
         };
         let scope = if resource.is_container() {
             QueryScope::new(
@@ -595,10 +593,6 @@ impl CalendarQueryHandler {
         }
 
         Some(out)
-    }
-
-    pub fn into_expanded_times(self) -> Vec<CalendarEventExpansion> {
-        self.expanded_times
     }
 }
 

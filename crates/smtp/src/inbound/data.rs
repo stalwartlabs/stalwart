@@ -24,7 +24,7 @@ use common::{
             session::Stage,
         },
     },
-    expr::Bump,
+    expr::{Bump, Variable as ExprVariable},
     network::SessionStream,
     scripts::ScriptModification,
 };
@@ -39,7 +39,7 @@ use mail_auth::{
     headers::HeaderWriter,
     spf::verify::SpfParameters,
 };
-use mail_builder::headers::{date::Date, message_id::generate_message_id_header};
+use mail_builder::headers::{Header, date::Date, message_id::generate_message_id_header};
 use mail_parser::{MessageParser, PartKind, thread_name};
 use registry::schema::structs::Rate;
 use sieve::runtime::Variable;
@@ -48,6 +48,7 @@ use smtp_proto::{
 };
 use std::{
     borrow::Cow,
+    io::Write,
     time::{Instant, SystemTime},
 };
 use trc::{SmtpEvent, SpamEvent};
@@ -700,8 +701,8 @@ impl<T: SessionStream> Session<T> {
         }
 
         // Build message
-        let mail_from = self.data.mail_from.clone().unwrap();
         let rcpt_to = std::mem::take(&mut self.data.rcpt_to);
+        let mail_from = self.data.mail_from.as_ref().unwrap();
         let source = if !self.is_authenticated() {
             let dmarc_pass = dmarc_result.is_some_and(|result| result == DmarcResult::Pass);
 
@@ -733,8 +734,7 @@ impl<T: SessionStream> Session<T> {
         // Add any missing headers
         if !has_date_header && self.eval_if(&dc.add_date).await.unwrap_or(true) {
             headers.extend_from_slice(b"Date: ");
-            headers.extend_from_slice(Date::now().to_rfc822().as_bytes());
-            headers.extend_from_slice(b"\r\n");
+            Date::now().write_header(&mut headers, 0);
         }
         if !has_message_id_header && self.eval_if(&dc.add_message_id).await.unwrap_or(true) {
             headers.extend_from_slice(b"Message-ID: ");
@@ -782,7 +782,7 @@ impl<T: SessionStream> Session<T> {
 
     pub async fn build_message(
         &self,
-        mail_from: SessionAddress,
+        mail_from: &SessionAddress,
         mut rcpt_to: Vec<SessionAddress>,
         source: MessageSource,
         queue_id: u64,
@@ -802,7 +802,7 @@ impl<T: SessionStream> Session<T> {
             flags: mail_from.flags | source.flags(),
             priority: self.data.priority,
             size: 0,
-            env_id: mail_from.dsn_info.map(|i| i.into_boxed_str()),
+            env_id: mail_from.dsn_info.as_deref().map(Box::from),
             blob_hash: Default::default(),
             metadata: Default::default(),
             received_from_ip: self.data.remote_ip,
@@ -842,19 +842,24 @@ impl<T: SessionStream> Session<T> {
             };
 
             // Resolve queue
-            let queue = self.server.get_queue_or_default(
-                &self
-                    .server
-                    .eval_if::<String, _>(
-                        &self.server.core.smtp.queue.queue,
-                        &envelope,
-                        &mut arena,
-                        self.data.session_id,
-                    )
-                    .await
-                    .unwrap_or_else(|| "default".to_string()),
-                self.data.session_id,
-            );
+            let session_id = self.data.session_id;
+            let queue = self
+                .server
+                .eval_if_with(
+                    &self.server.core.smtp.queue.queue,
+                    &envelope,
+                    &mut arena,
+                    session_id,
+                    |name| match name {
+                        ExprVariable::String(name) => {
+                            Some(self.server.get_queue_or_default(name, session_id))
+                        }
+                        _ => None,
+                    },
+                )
+                .await
+                .flatten()
+                .unwrap_or_else(|| self.server.get_queue_or_default("default", session_id));
 
             // Set expiration and notification times
             let num_intervals = std::cmp::max(queue.notify.len(), 1);
@@ -968,13 +973,12 @@ impl<T: SessionStream> Session<T> {
                 .as_bytes(),
         );
         headers.extend_from_slice(b" [");
-        headers.extend_from_slice(self.data.remote_ip.to_string().as_bytes());
+        headers.extend_from_slice(self.data.remote_ip_str.as_bytes());
         headers.extend_from_slice(b"]");
         if self.data.asn_geo_data.asn.is_some() || self.data.asn_geo_data.country.is_some() {
             headers.extend_from_slice(b" (");
             if let Some(asn) = &self.data.asn_geo_data.asn {
-                headers.extend_from_slice(b"AS");
-                headers.extend_from_slice(asn.id.to_string().as_bytes());
+                let _ = write!(headers, "AS{}", asn.id);
                 if let Some(name) = &asn.name {
                     headers.extend_from_slice(b" ");
                     headers.extend_from_slice(name.as_bytes());
@@ -1006,11 +1010,8 @@ impl<T: SessionStream> Session<T> {
             (false, true) => b"ESMTP",
             (false, false) => b"ESMTPA",
         });
-        headers.extend_from_slice(b" id ");
-        headers.extend_from_slice(format!("{id:X}").as_bytes());
-        headers.extend_from_slice(b";\r\n\t");
-        headers.extend_from_slice(Date::now().to_rfc822().as_bytes());
-        headers.extend_from_slice(b"\r\n");
+        let _ = write!(headers, " id {id:X};\r\n\t");
+        Date::now().write_header(headers, 0);
     }
 }
 

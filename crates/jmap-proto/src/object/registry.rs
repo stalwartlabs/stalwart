@@ -6,10 +6,9 @@
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::deserialize::DeserializeArguments,
+    request::deserialize::{CowStr, DeserializeArguments},
 };
 use registry::{jmap::RegistryValue, schema::prelude::Property, types::EnumImpl};
-use std::borrow::Cow;
 use types::id::Id;
 
 #[derive(Debug)]
@@ -161,7 +160,7 @@ impl<'de> DeserializeArguments<'de> for RegistryComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
 
             if let Some(property) = Property::parse(value.as_ref()) {
                 *self = RegistryComparator::Property(property);

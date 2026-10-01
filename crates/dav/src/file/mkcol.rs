@@ -70,8 +70,8 @@ impl FileMkColRequestHandler for Server {
             .resource
             .ok_or(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))?;
         if !access_token.is_member(account_id) {
-            resources.hide_undiscoverable(
-                &resources.file_access(access_token).discoverable,
+            resources.hide_undiscoverable_for(
+                access_token,
                 path,
                 StatusCode::FORBIDDEN,
                 StatusCode::CONFLICT,

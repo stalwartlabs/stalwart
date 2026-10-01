@@ -212,7 +212,7 @@ impl<T: ResolveVariable> ResolveVariable for SpamFilterResolver<'_, T> {
                 .and_then(|part| output.text_parts.get(part.id() as usize))
                 .map(|part| {
                     if let TextPart::Html { text_body, .. } = part {
-                        text_body.as_str()
+                        *text_body
                     } else {
                         ""
                     }

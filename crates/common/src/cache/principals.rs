@@ -458,9 +458,10 @@ impl Server {
                                 .await
                                 .caused_by(trc::location!())?
                             {
-                                parse_public_key(&public_key)
-                                    .unwrap_or_default()
-                                    .map(|params| {
+                                match parse_public_key(&public_key).and_then(|params| {
+                                    params.ok_or(Cow::Borrowed("No public key found"))
+                                }) {
+                                    Ok(params) => {
                                         match params.method {
                                             EncryptionMethod::PGP => {
                                                 flags |= ACCOUNT_FLAG_ENCRYPT_METHOD_PGP
@@ -469,8 +470,23 @@ impl Server {
                                                 flags |= ACCOUNT_FLAG_ENCRYPT_METHOD_SMIME
                                             }
                                         }
-                                        params.certs
-                                    })
+                                        Some(params.certs)
+                                    }
+                                    Err(err) => {
+                                        trc::error!(
+                                            trc::EventType::Registry(
+                                                trc::RegistryEvent::ValidationError
+                                            )
+                                            .into_err()
+                                            .details("Invalid public key, encryption disabled")
+                                            .reason(err)
+                                            .account_id(account_id)
+                                            .ctx(trc::Key::Id, settings.public_key.id())
+                                            .caused_by(trc::location!())
+                                        );
+                                        None
+                                    }
+                                }
                             } else {
                                 None
                             }
@@ -874,7 +890,7 @@ impl Server {
                     Collection = "dkimSigners",
                 );
 
-                Ok(Some(signers))
+                Ok(has_dkim_signers(&signers).then_some(signers))
             }
             Err(guard) => {
                 trc::event!(
@@ -904,16 +920,16 @@ impl Server {
                     }
                 }
 
-                if !signers.dkim1.is_empty() || signers.dkim2.is_some() {
-                    let signers = Arc::new(signers);
-                    let _ = guard.insert(signers.clone());
-                    Ok(Some(signers))
-                } else {
-                    Ok(None)
-                }
+                let signers = Arc::new(signers);
+                let _ = guard.insert(signers.clone());
+                Ok(has_dkim_signers(&signers).then_some(signers))
             }
         }
     }
+}
+
+fn has_dkim_signers(signers: &DkimSigners) -> bool {
+    !signers.dkim1.is_empty() || signers.dkim2.is_some()
 }
 
 impl AccountInfo {

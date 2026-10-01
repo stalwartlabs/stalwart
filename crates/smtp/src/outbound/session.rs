@@ -15,13 +15,19 @@ use common::config::smtp::queue::ConnectionStrategy;
 use compact_str::CompactString;
 use directory::Credentials;
 use smtp_proto::{
-    EXT_CHUNKING, EXT_DSN, EXT_REQUIRE_TLS, EXT_SIZE, EXT_SMTP_UTF8, EhloResponse, MAIL_REQUIRETLS,
-    MAIL_RET_FULL, MAIL_RET_HDRS, MAIL_SMTPUTF8, RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE,
-    RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, Severity,
+    EXT_CHUNKING, EXT_DSN, EXT_PIPELINING, EXT_REQUIRE_TLS, EXT_SIZE, EXT_SMTP_UTF8, EhloResponse,
+    MAIL_REQUIRETLS, MAIL_RET_FULL, MAIL_RET_HDRS, MAIL_SMTPUTF8, RCPT_NOTIFY_DELAY,
+    RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, Severity,
 };
-use std::{fmt::Write, time::Instant};
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::{fmt::Write, ops::Range, time::Instant};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::OnceCell,
+};
 use trc::DeliveryEvent;
+
+const MAX_PIPELINED_RCPTS: usize = 100;
+const MAX_PIPELINED_BYTES: usize = 8192;
 
 pub struct SessionParams<'x> {
     pub server: &'x Server,
@@ -32,6 +38,7 @@ pub struct SessionParams<'x> {
     pub local_hostname: &'x str,
     pub conn_strategy: &'x ConnectionStrategy,
     pub session_id: u64,
+    pub message_blob: &'x OnceCell<Vec<u8>>,
 }
 
 impl MessageWrapper {
@@ -123,8 +130,30 @@ impl MessageWrapper {
         // MAIL FROM
         let time = Instant::now();
         smtp_client.timeout = params.conn_strategy.timeout_mail;
-        let cmd = self.build_mail_from(&capabilities);
-        match smtp_client.cmd(cmd.as_bytes()).await.and_then(|r| {
+        let mut commands = self.build_mail_from(&capabilities);
+        let mail_from_len = commands.len();
+        let max_batch = if capabilities.has_capability(EXT_PIPELINING) {
+            MAX_PIPELINED_RCPTS
+        } else {
+            1
+        };
+        let mut pending_rcpts = rcpt_idxs.iter().copied().filter(|rcpt_idx| {
+            !matches!(
+                &self.message.recipients[*rcpt_idx].status,
+                Status::Completed(_) | Status::PermanentFailure(_)
+            )
+        });
+        let mut batch = Vec::new();
+        if max_batch > 1 {
+            self.write_rcpt_batch(
+                &mut pending_rcpts,
+                max_batch,
+                &capabilities,
+                &mut commands,
+                &mut batch,
+            );
+        }
+        match smtp_client.cmd(commands.as_bytes()).await.and_then(|r| {
             if r.is_positive_completion() {
                 Ok(r)
             } else {
@@ -151,9 +180,21 @@ impl MessageWrapper {
                     Elapsed = time.elapsed(),
                 );
 
+                if matches!(err, ClientError::UnexpectedReply(_)) {
+                    smtp_client.timeout = params.conn_strategy.timeout_rcpt;
+                    for _ in batch.drain(..) {
+                        if smtp_client.read_pipelined().await.is_err() {
+                            break;
+                        }
+                    }
+                }
                 smtp_client.quit().await;
                 statuses.push(DeliveryResult::domain(
-                    Status::from_smtp_error(params.hostname, &cmd, err),
+                    Status::from_smtp_error(
+                        params.hostname,
+                        commands.get(..mail_from_len).unwrap_or_default(),
+                        err,
+                    ),
                     rcpt_idxs,
                 ));
                 return;
@@ -162,85 +203,102 @@ impl MessageWrapper {
 
         // RCPT TO
         let mut accepted_rcpts = Vec::new();
+        let mut needs_write = false;
         smtp_client.timeout = params.conn_strategy.timeout_rcpt;
-        for rcpt_idx in &rcpt_idxs {
-            let time = Instant::now();
-            let rcpt = &self.message.recipients[*rcpt_idx];
-            if matches!(
-                &rcpt.status,
-                Status::Completed(_) | Status::PermanentFailure(_)
-            ) {
-                continue;
+        loop {
+            if batch.is_empty() {
+                commands.clear();
+                self.write_rcpt_batch(
+                    &mut pending_rcpts,
+                    max_batch,
+                    &capabilities,
+                    &mut commands,
+                    &mut batch,
+                );
+                if batch.is_empty() {
+                    break;
+                }
+                needs_write = true;
             }
 
-            let cmd = self.build_rcpt_to(rcpt, &capabilities);
-            match smtp_client.cmd(cmd.as_bytes()).await {
-                Ok(response) => match response.severity() {
-                    Severity::PositiveCompletion => {
+            for (rcpt_idx, rcpt, cmd_range) in batch.drain(..) {
+                let time = Instant::now();
+                let result = if needs_write {
+                    needs_write = false;
+                    smtp_client.cmd(commands.as_bytes()).await
+                } else {
+                    smtp_client.read_pipelined().await
+                };
+                let cmd = commands.get(cmd_range).unwrap_or_default();
+
+                match result {
+                    Ok(response) => match response.severity() {
+                        Severity::PositiveCompletion => {
+                            trc::event!(
+                                Delivery(DeliveryEvent::RcptTo),
+                                SpanId = params.session_id,
+                                Hostname = CompactString::from(params.hostname),
+                                To = CompactString::from(rcpt.address()),
+                                Code = response.code,
+                                Details = CompactString::from(&response.message),
+                                Elapsed = time.elapsed(),
+                            );
+
+                            accepted_rcpts.push((
+                                rcpt,
+                                rcpt_idx,
+                                Status::Completed(Box::new(HostResponse {
+                                    hostname: params.hostname.into(),
+                                    response: response.into_box(),
+                                })),
+                            ));
+                        }
+                        severity => {
+                            trc::event!(
+                                Delivery(DeliveryEvent::RcptToRejected),
+                                SpanId = params.session_id,
+                                Hostname = CompactString::from(params.hostname),
+                                To = CompactString::from(rcpt.address()),
+                                Code = response.code,
+                                Details = CompactString::from(&response.message),
+                                Elapsed = time.elapsed(),
+                            );
+
+                            let response = ErrorDetails {
+                                entity: params.hostname.into(),
+                                details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
+                                    command: cmd.trim().into(),
+                                    response: response.into_box(),
+                                })),
+                            };
+                            statuses.push(DeliveryResult::account(
+                                if severity == Severity::PermanentNegativeCompletion {
+                                    Status::PermanentFailure(Box::new(response))
+                                } else {
+                                    Status::TemporaryFailure(Box::new(response))
+                                },
+                                rcpt_idx,
+                            ));
+                        }
+                    },
+                    Err(err) => {
                         trc::event!(
-                            Delivery(DeliveryEvent::RcptTo),
+                            Delivery(DeliveryEvent::RcptToFailed),
                             SpanId = params.session_id,
                             Hostname = CompactString::from(params.hostname),
                             To = CompactString::from(rcpt.address()),
-                            Code = response.code,
-                            Details = CompactString::from(&response.message),
+                            CausedBy = from_mail_send_error(&err),
                             Elapsed = time.elapsed(),
                         );
 
-                        accepted_rcpts.push((
-                            rcpt,
-                            rcpt_idx,
-                            Status::Completed(Box::new(HostResponse {
-                                hostname: params.hostname.into(),
-                                response: response.into_box(),
-                            })),
+                        // Something went wrong, abort.
+                        smtp_client.quit().await;
+                        statuses.push(DeliveryResult::domain(
+                            Status::from_smtp_error(params.hostname, "", err),
+                            rcpt_idxs,
                         ));
+                        return;
                     }
-                    severity => {
-                        trc::event!(
-                            Delivery(DeliveryEvent::RcptToRejected),
-                            SpanId = params.session_id,
-                            Hostname = CompactString::from(params.hostname),
-                            To = CompactString::from(rcpt.address()),
-                            Code = response.code,
-                            Details = CompactString::from(&response.message),
-                            Elapsed = time.elapsed(),
-                        );
-
-                        let response = ErrorDetails {
-                            entity: params.hostname.into(),
-                            details: Error::UnexpectedResponse(Box::new(UnexpectedResponse {
-                                command: cmd.trim().into(),
-                                response: response.into_box(),
-                            })),
-                        };
-                        statuses.push(DeliveryResult::account(
-                            if severity == Severity::PermanentNegativeCompletion {
-                                Status::PermanentFailure(Box::new(response))
-                            } else {
-                                Status::TemporaryFailure(Box::new(response))
-                            },
-                            *rcpt_idx,
-                        ));
-                    }
-                },
-                Err(err) => {
-                    trc::event!(
-                        Delivery(DeliveryEvent::RcptToFailed),
-                        SpanId = params.session_id,
-                        Hostname = CompactString::from(params.hostname),
-                        To = CompactString::from(rcpt.address()),
-                        CausedBy = from_mail_send_error(&err),
-                        Elapsed = time.elapsed(),
-                    );
-
-                    // Something went wrong, abort.
-                    smtp_client.quit().await;
-                    statuses.push(DeliveryResult::domain(
-                        Status::from_smtp_error(params.hostname, "", err),
-                        rcpt_idxs,
-                    ));
-                    return;
                 }
             }
         }
@@ -287,7 +345,7 @@ impl MessageWrapper {
                                     Elapsed = time.elapsed(),
                                 );
 
-                                statuses.push(DeliveryResult::account(status, *rcpt_idx));
+                                statuses.push(DeliveryResult::account(status, rcpt_idx));
                             }
                         } else {
                             trc::event!(
@@ -384,7 +442,7 @@ impl MessageWrapper {
                                     }
                                 };
 
-                            statuses.push(DeliveryResult::account(status, *rcpt_idx));
+                            statuses.push(DeliveryResult::account(status, rcpt_idx));
                         }
                     }
                     Err(status) => {
@@ -434,8 +492,32 @@ impl MessageWrapper {
         mail_from
     }
 
-    fn build_rcpt_to(&self, rcpt: &Recipient, capabilities: &EhloResponse<String>) -> String {
-        let mut rcpt_to = String::with_capacity(rcpt.address().len() + 60);
+    fn write_rcpt_batch<'x>(
+        &'x self,
+        pending_rcpts: &mut impl Iterator<Item = usize>,
+        max_batch: usize,
+        capabilities: &EhloResponse<String>,
+        commands: &mut String,
+        batch: &mut Vec<(usize, &'x Recipient, Range<usize>)>,
+    ) {
+        while batch.len() < max_batch
+            && (batch.is_empty() || commands.len() < MAX_PIPELINED_BYTES)
+            && let Some(rcpt_idx) = pending_rcpts.next()
+        {
+            let rcpt = &self.message.recipients[rcpt_idx];
+            let start = commands.len();
+            self.write_rcpt_to(rcpt, capabilities, commands);
+            batch.push((rcpt_idx, rcpt, start..commands.len()));
+        }
+    }
+
+    fn write_rcpt_to(
+        &self,
+        rcpt: &Recipient,
+        capabilities: &EhloResponse<String>,
+        rcpt_to: &mut String,
+    ) {
+        rcpt_to.reserve(rcpt.address().len() + 60);
         let _ = write!(rcpt_to, "RCPT TO:<{}>", rcpt.address());
         if capabilities.has_capability(EXT_DSN) {
             if rcpt.has_flag(RCPT_NOTIFY_SUCCESS | RCPT_NOTIFY_FAILURE | RCPT_NOTIFY_DELAY) {
@@ -465,7 +547,6 @@ impl MessageWrapper {
             }
         }
         rcpt_to.push_str("\r\n");
-        rcpt_to
     }
 
     #[inline(always)]

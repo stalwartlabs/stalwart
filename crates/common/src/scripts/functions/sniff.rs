@@ -18,18 +18,29 @@ const ZSTD_SKIPPABLE_MASK: u32 = 0xFFFF_FFF0;
 const HTML_SIGNATURE_LEN: usize = b"<!DOCTYPE HTML".len() + 1;
 const XML_SIGNATURE_LEN: usize = b"<?xml".len();
 
+pub enum Sniffed<'m> {
+    Prefix(Cow<'m, [u8]>),
+    Whole(Cow<'m, [u8]>),
+}
+
 pub trait SniffPrefix<'m> {
-    fn sniff_prefix(&self) -> Cow<'m, [u8]>;
+    fn sniff(&self) -> Sniffed<'m>;
+
+    fn sniff_prefix(&self) -> Cow<'m, [u8]> {
+        match self.sniff() {
+            Sniffed::Prefix(bytes) | Sniffed::Whole(bytes) => bytes,
+        }
+    }
 }
 
 impl<'m> SniffPrefix<'m> for MessagePart<'m> {
-    fn sniff_prefix(&self) -> Cow<'m, [u8]> {
+    fn sniff(&self) -> Sniffed<'m> {
         let Some((window, _)) = self
             .raw_body()
             .split_at_checked(SNIFF_WINDOW)
             .filter(|(_, rest)| !rest.is_empty())
         else {
-            return self.decoded();
+            return Sniffed::Whole(self.decoded());
         };
         let prefix = match self.encoding() {
             Encoding::None => Cow::Borrowed(window),
@@ -48,9 +59,9 @@ impl<'m> SniffPrefix<'m> for MessagePart<'m> {
             }
         };
         if is_enough_to_sniff(&prefix) {
-            prefix
+            Sniffed::Prefix(prefix)
         } else {
-            self.decoded()
+            Sniffed::Whole(self.decoded())
         }
     }
 }

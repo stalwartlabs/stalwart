@@ -11,7 +11,7 @@ use crate::api::metadata::{
 use crate::api::pending_creates::PendingCreates;
 use crate::blob::embedded::EmbeddedExport;
 use crate::changes::state::JmapCacheState;
-use crate::contact::assert_is_unique_uid;
+use crate::contact::{CreatedUids, assert_is_unique_uid};
 use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
 use common::{
     DavName, GroupwareResources, Server,
@@ -66,6 +66,7 @@ pub trait ContactCardSet: Sync + Send {
         account: &AccountCache,
         account_id: u32,
         can_add_address_books: &Option<RoaringBitmap>,
+        created_uids: &mut CreatedUids,
         js_contact: JSContact<'_, Id, BlobId>,
         updates: Value<'_, JSContactProperty<Id>, JSContactValue<Id, BlobId>>,
         metadata_writer: &mut MetadataWriter,
@@ -127,6 +128,7 @@ impl ContactCardSet for Server {
         // Process creates
         let mut batch = BatchBuilder::new();
         let mut created_slots = PendingCreates::new();
+        let mut created_uids = CreatedUids::default();
         'create: for (id, mut object) in request.unwrap_create() {
             if !quota.has_room(created_slots.len()) {
                 response.not_created.append(id, too_many_contacts());
@@ -149,6 +151,7 @@ impl ContactCardSet for Server {
                     &account,
                     account_id,
                     &can_add_address_books,
+                    &mut created_uids,
                     JSContact::default(),
                     object,
                     &mut metadata_writer,
@@ -299,16 +302,20 @@ impl ContactCardSet for Server {
             }
 
             // Validate UID
+            let mut assigned_uid = None;
             match (
                 content.inner.card.uid().filter(|uid| !uid.is_empty()),
                 new_content.card.uid().filter(|uid| !uid.is_empty()),
             ) {
                 (Some(stored_uid), Some(uid)) if stored_uid == uid => {}
                 (None, uid) => {
-                    if let Err(err) = assert_is_unique_uid(&cache, &new_contact_card.names, uid)? {
+                    if let Err(err) =
+                        assert_is_unique_uid(&cache, &created_uids, &new_contact_card.names, uid)?
+                    {
                         response.not_updated.append(id, err);
                         continue 'update;
                     }
+                    assigned_uid = uid.map(str::to_string);
                 }
                 _ => {
                     response.not_updated.append(
@@ -450,6 +457,7 @@ impl ContactCardSet for Server {
             if let Some(prepared) = prepared_metadata {
                 metadata_writer.write(prepared, document_id, &mut batch)?;
             }
+            created_uids.record(&new_contact_card.names, assigned_uid.as_deref());
             new_contact_card
                 .update_full(
                     new_content,
@@ -583,6 +591,7 @@ impl ContactCardSet for Server {
         account: &AccountCache,
         account_id: u32,
         can_add_address_books: &Option<RoaringBitmap>,
+        created_uids: &mut CreatedUids,
         mut js_contact: JSContact<'_, Id, BlobId>,
         updates: Value<'_, JSContactProperty<Id>, JSContactValue<Id, BlobId>>,
         metadata_writer: &mut MetadataWriter,
@@ -626,7 +635,7 @@ impl ContactCardSet for Server {
         };
 
         // Validate UID
-        if let Err(err) = assert_is_unique_uid(cache, &names, card.uid())? {
+        if let Err(err) = assert_is_unique_uid(cache, created_uids, &names, card.uid())? {
             return Ok(Err(err));
         }
 
@@ -684,6 +693,7 @@ impl ContactCardSet for Server {
         if let Some(prepared) = prepared_metadata {
             metadata_writer.write(prepared, document_id, batch)?;
         }
+        created_uids.record(&contact_card.names, card.uid());
         contact_card
             .insert(
                 ContactCardContent { card },

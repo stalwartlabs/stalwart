@@ -122,17 +122,10 @@ pub(crate) fn assert_is_unique_uid(
     let Some(uid) = uid else {
         return Ok(());
     };
-    let hits = resources.uid_matches(uid);
-    if hits.is_empty() {
-        return Ok(());
-    }
 
     let is_owner = access_token.is_member(account_id);
     let mut has_hidden_conflict = false;
-    for path in resources
-        .children(calendar_id)
-        .filter(|path| hits.contains(path.document_id()))
-    {
+    for path in resources.children_with_uid(calendar_id, uid) {
         if is_owner
             || EventPrivacy::from_flags(path.resource.event_flags().unwrap_or_default())
                 != EventPrivacy::Secret
@@ -228,7 +221,7 @@ pub(crate) trait CalendarComponentSupport: Sync + Send {
         event_document_id: u32,
         account_id: u32,
         calendar_id: u32,
-    ) -> impl Future<Output = crate::Result<()>> + Send;
+    ) -> impl Future<Output = crate::Result<Option<Archive<ArchiveBytes>>>> + Send;
 }
 
 impl CalendarComponentSupport for Server {
@@ -264,10 +257,10 @@ impl CalendarComponentSupport for Server {
         event_document_id: u32,
         account_id: u32,
         calendar_id: u32,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<Option<Archive<ArchiveBytes>>> {
         let supported_components = self.supported_components(account_id, calendar_id).await?;
         if !supported_components.is_restricted() {
-            return Ok(());
+            return Ok(None);
         }
 
         let content = self
@@ -288,7 +281,8 @@ impl CalendarComponentSupport for Server {
                 .data
                 .event
                 .object_component(),
-        )
+        )?;
+        Ok(Some(content))
     }
 }
 

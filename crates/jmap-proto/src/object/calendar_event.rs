@@ -9,7 +9,10 @@ use crate::{
         AnyId, JmapObject, JmapObjectId,
         metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
     },
-    request::{MaybeInvalid, deserialize::DeserializeArguments},
+    request::{
+        MaybeInvalid,
+        deserialize::{CowStr, DeserializeArguments, next_lowercase_value},
+    },
 };
 use calcard::{
     common::timezone::Tz,
@@ -168,22 +171,22 @@ impl<'de> DeserializeArguments<'de> for CalendarEventFilter {
                 *self = CalendarEventFilter::Before(map.next_value::<LocalTime>()?.0);
             },
             b"text" => {
-                *self = CalendarEventFilter::Text(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = CalendarEventFilter::Text(next_lowercase_value(map)?);
             },
             b"title" => {
-                *self = CalendarEventFilter::Title(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = CalendarEventFilter::Title(next_lowercase_value(map)?);
             },
             b"description" => {
-                *self = CalendarEventFilter::Description(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = CalendarEventFilter::Description(next_lowercase_value(map)?);
             },
             b"location" => {
-                *self = CalendarEventFilter::Location(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = CalendarEventFilter::Location(next_lowercase_value(map)?);
             },
             b"owner" => {
-                *self = CalendarEventFilter::Owner(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = CalendarEventFilter::Owner(next_lowercase_value(map)?);
             },
             b"attendee" => {
-                *self = CalendarEventFilter::Attendee(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = CalendarEventFilter::Attendee(next_lowercase_value(map)?);
             },
             b"uid" => {
                 *self = CalendarEventFilter::Uid(map.next_value()?);
@@ -208,7 +211,7 @@ impl<'de> DeserializeArguments<'de> for CalendarEventComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"start" => {
                     *self = CalendarEventComparator::Start;
@@ -226,7 +229,7 @@ impl<'de> DeserializeArguments<'de> for CalendarEventComparator {
                     *self = CalendarEventComparator::Updated;
                 },
                 _ => {
-                    *self = CalendarEventComparator::_T(value.to_string());
+                    *self = CalendarEventComparator::_T(value.into_owned());
                 }
             );
         } else {

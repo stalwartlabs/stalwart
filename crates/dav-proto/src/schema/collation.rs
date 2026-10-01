@@ -85,7 +85,27 @@ impl MatchType {
         )
     }
 
-    fn matches(&self, haystack: &[u8], needle: &[u8], fold: impl Fn(u8) -> u8) -> bool {
+    fn matches(&self, haystack: &[u8], needle: &[u8], fold: Fold) -> bool {
+        match fold {
+            Fold::Identity => self.matches_with(haystack, needle, identity, |haystack, needle| {
+                memchr::memmem::find(haystack, needle).is_some()
+            }),
+            Fold::AsciiUppercase => self.matches_with(
+                haystack,
+                needle,
+                |byte| byte.to_ascii_uppercase(),
+                ascii_uppercase_contains,
+            ),
+        }
+    }
+
+    fn matches_with(
+        &self,
+        haystack: &[u8],
+        needle: &[u8],
+        fold: impl Fn(u8) -> u8,
+        prefiltered_contains: impl Fn(&[u8], &[u8]) -> bool,
+    ) -> bool {
         let is_equal = |(h, n): (&u8, &u8)| fold(*h) == *n;
         match self {
             MatchType::Equals => {
@@ -98,14 +118,42 @@ impl MatchType {
                 haystack.len() >= needle.len()
                     && haystack.iter().rev().zip(needle.iter().rev()).all(is_equal)
             }
-            MatchType::Contains => {
-                needle.is_empty()
-                    || haystack
-                        .windows(needle.len())
-                        .any(|window| window.iter().zip(needle).all(is_equal))
-            }
+            MatchType::Contains if needle.is_empty() => true,
+            MatchType::Contains if haystack.len() < PREFILTER_MIN_LEN => haystack
+                .windows(needle.len())
+                .any(|window| window.iter().zip(needle).all(is_equal)),
+            MatchType::Contains => prefiltered_contains(haystack, needle),
         }
     }
+}
+
+const PREFILTER_MIN_LEN: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fold {
+    Identity,
+    AsciiUppercase,
+}
+
+fn ascii_uppercase_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    let Some(first) = needle.first() else {
+        return true;
+    };
+    memchr::memchr2_iter(
+        first.to_ascii_uppercase(),
+        first.to_ascii_lowercase(),
+        haystack,
+    )
+    .any(|start| {
+        haystack
+            .get(start..start + needle.len())
+            .is_some_and(|window| {
+                window
+                    .iter()
+                    .zip(needle)
+                    .all(|(h, n)| h.to_ascii_uppercase() == *n)
+            })
+    })
 }
 
 impl TextMatch {
@@ -120,34 +168,111 @@ impl TextMatch {
     }
 
     pub fn is_match(&self, text: &str) -> bool {
+        self.is_match_with(text, &mut String::new())
+    }
+
+    fn is_match_with(&self, text: &str, folded: &mut String) -> bool {
         let needle = self.needle.as_bytes();
         match self.collation {
-            Collation::Octet => self.match_type.matches(text.as_bytes(), needle, identity),
-            Collation::AsciiCasemap => self
+            Collation::Octet => self
                 .match_type
-                .matches(text.as_bytes(), needle, |ch| ch.to_ascii_uppercase()),
+                .matches(text.as_bytes(), needle, Fold::Identity),
+            Collation::AsciiCasemap => {
+                self.match_type
+                    .matches(text.as_bytes(), needle, Fold::AsciiUppercase)
+            }
             Collation::UnicodeCasemap if text.is_ascii() => {
                 self.needle.is_ascii()
                     && self
                         .match_type
-                        .matches(text.as_bytes(), needle, |ch| ch.to_ascii_uppercase())
+                        .matches(text.as_bytes(), needle, Fold::AsciiUppercase)
             }
-            Collation::UnicodeCasemap => self.match_type.matches(
-                Collation::UnicodeCasemap.prepare(text).as_bytes(),
-                needle,
-                identity,
-            ),
+            Collation::UnicodeCasemap => {
+                folded.clear();
+                unicode_casemap(text, folded);
+                self.match_type
+                    .matches(folded.as_bytes(), needle, Fold::Identity)
+            }
         }
     }
 
     pub fn is_match_any<T: AsRef<str>>(&self, mut values: impl Iterator<Item = T>) -> bool {
-        values.any(|value| self.is_match(value.as_ref())) != self.negate
+        let mut folded = String::new();
+        values.any(|value| self.is_match_with(value.as_ref(), &mut folded)) != self.negate
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn match_types_agree_with_a_window_scan() {
+        fn reference(
+            match_type: MatchType,
+            haystack: &[u8],
+            needle: &[u8],
+            fold: impl Fn(u8) -> u8,
+        ) -> bool {
+            let is_equal = |(h, n): (&u8, &u8)| fold(*h) == *n;
+            match match_type {
+                MatchType::Equals => {
+                    haystack.len() == needle.len() && haystack.iter().zip(needle).all(is_equal)
+                }
+                MatchType::StartsWith => {
+                    haystack.len() >= needle.len() && haystack.iter().zip(needle).all(is_equal)
+                }
+                MatchType::EndsWith => {
+                    haystack.len() >= needle.len()
+                        && haystack.iter().rev().zip(needle.iter().rev()).all(is_equal)
+                }
+                MatchType::Contains => {
+                    needle.is_empty()
+                        || haystack
+                            .windows(needle.len())
+                            .any(|window| window.iter().zip(needle).all(is_equal))
+                }
+            }
+        }
+
+        let alphabet = b"aAbBzZ09 _-\xc3\xa9";
+        let mut state = 0x2545_f491_u32;
+        let mut next = |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as usize % bound
+        };
+        for _ in 0..20_000 {
+            let haystack = (0..next(200))
+                .map(|_| alphabet[next(alphabet.len())])
+                .collect::<Vec<_>>();
+            let needle = (0..next(6))
+                .map(|_| alphabet[next(alphabet.len())])
+                .collect::<Vec<_>>();
+            let needle_upper = needle.to_ascii_uppercase();
+            for match_type in [
+                MatchType::Equals,
+                MatchType::Contains,
+                MatchType::StartsWith,
+                MatchType::EndsWith,
+            ] {
+                assert_eq!(
+                    match_type.matches(&haystack, &needle, Fold::Identity),
+                    reference(match_type, &haystack, &needle, identity),
+                    "{match_type:?} {haystack:?} {needle:?}"
+                );
+                for needle in [&needle, &needle_upper] {
+                    assert_eq!(
+                        match_type.matches(&haystack, needle, Fold::AsciiUppercase),
+                        reference(match_type, &haystack, needle, |byte| byte
+                            .to_ascii_uppercase()),
+                        "{match_type:?} {haystack:?} {needle:?}"
+                    );
+                }
+            }
+        }
+    }
 
     fn text_match(value: &str, match_type: MatchType, collation: Collation) -> TextMatch {
         TextMatch::new(value.to_string(), match_type, collation, false)

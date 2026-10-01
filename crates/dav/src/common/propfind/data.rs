@@ -20,7 +20,11 @@ use common::{
 };
 use dav_proto::{
     parser::header::dav_base_uri,
-    schema::{property::ActiveLock, response::Href},
+    schema::{
+        property::ActiveLock,
+        request::PropFind,
+        response::{Href, Response},
+    },
 };
 use groupware::cache::GroupwareCache;
 use std::{borrow::Cow, sync::Arc};
@@ -33,14 +37,18 @@ use types::collection::{Collection, SyncCollection};
 
 pub(crate) struct PropFindData {
     pub accounts: AHashMap<u32, PropFindAccountData>,
+    pub principals: ExpandedPrincipals,
 }
+
+#[derive(Default)]
+pub(crate) struct ExpandedPrincipals(AHashMap<u32, Option<Response>>);
 
 #[derive(Default)]
 pub(crate) struct PropFindAccountData {
     pub resources: Option<Arc<GroupwareResources>>,
     pub quota: Option<PropFindAccountQuota>,
     pub owner: Option<Href>,
-    pub locks: Option<Archive<ArchiveBytes>>,
+    pub locks: Option<LockData>,
     pub locks_not_found: bool,
     pub file_access: Option<FileNodeAccess>,
 }
@@ -55,6 +63,7 @@ impl PropFindData {
     pub fn new() -> Self {
         Self {
             accounts: AHashMap::with_capacity(2),
+            principals: ExpandedPrincipals::default(),
         }
     }
 
@@ -137,6 +146,9 @@ impl PropFindData {
                     build_lock_key(account_id, collection_container).as_slice(),
                 )
                 .await
+                .caused_by(trc::location!())?
+                .map(|lock_data| lock_data.deserialize::<LockData>())
+                .transpose()
                 .caused_by(trc::location!())?;
             if data.locks.is_none() {
                 data.locks_not_found = true;
@@ -159,14 +171,26 @@ impl PropFindData {
         else {
             return Ok(None);
         };
-        lock_data.unarchive::<LockData>().map(|locks| {
-            locks
-                .find_locks(path, false)
-                .iter()
-                .map(|(path, lock)| lock.to_active_lock(format!("{base_uri}/{path}")))
-                .collect::<Vec<_>>()
-                .into()
-        })
+        Ok(Some(lock_data.active_locks(path, base_uri)))
+    }
+}
+
+impl ExpandedPrincipals {
+    pub async fn expand(
+        &mut self,
+        server: &Server,
+        access_token: &AccessToken,
+        account_id: u32,
+        propfind: &PropFind,
+    ) -> crate::Result<Option<Response>> {
+        if let Some(response) = self.0.get(&account_id) {
+            return Ok(response.clone());
+        }
+        let response = server
+            .expand_principal(access_token, account_id, propfind)
+            .await?;
+        self.0.insert(account_id, response.clone());
+        Ok(response)
     }
 }
 

@@ -13,7 +13,7 @@ pub mod response;
 pub use form_urlencoded;
 
 use common::network::ServerInstance;
-use hyper::StatusCode;
+use hyper::{StatusCode, body::Bytes};
 use std::{net::IpAddr, sync::Arc};
 
 pub type HttpRequest = hyper::Request<hyper::body::Incoming>;
@@ -31,7 +31,7 @@ pub struct HtmlResponse {
 
 pub enum HttpResponseBody {
     Text(String),
-    Binary(Vec<u8>),
+    Binary(Bytes),
     Stream(http_body_util::combinators::BoxBody<hyper::body::Bytes, hyper::Error>),
     WebsocketUpgrade(String),
     Empty,

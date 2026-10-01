@@ -345,24 +345,37 @@ impl EventAlarmScheduler for Server {
         }
 
         let mut alarms = Vec::new();
+        let has_stored_alarms = data.has_stored_alarms();
         for user in users.users() {
             let target_id = user.target.account_id(account_id);
-            if !resolver
-                .is_subscribed(self, account_id, target_id, calendar_ids.iter().copied())
-                .await?
-            {
-                continue;
-            }
-            let defaults = resolver
-                .resolve(
-                    self,
-                    account_id,
-                    target_id,
-                    user.uses_defaults,
-                    calendar_ids.iter().copied(),
-                    users.with_time,
-                )
-                .await?;
+            let defaults = if user.uses_defaults {
+                if !resolver
+                    .is_subscribed(self, account_id, target_id, calendar_ids.iter().copied())
+                    .await?
+                {
+                    continue;
+                }
+                resolver
+                    .resolve(
+                        self,
+                        account_id,
+                        target_id,
+                        true,
+                        calendar_ids.iter().copied(),
+                        users.with_time,
+                    )
+                    .await?
+            } else {
+                let defaults = DefaultAlerts::disabled();
+                if !user.source(&defaults).may_have_alarms(has_stored_alarms)
+                    || !resolver
+                        .is_subscribed(self, account_id, target_id, calendar_ids.iter().copied())
+                        .await?
+                {
+                    continue;
+                }
+                defaults
+            };
             let source = user.source(&defaults);
             let default_tz = if data.needs_default_tz(&source) {
                 resolver

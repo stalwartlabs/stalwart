@@ -19,6 +19,9 @@ use serde::{
 };
 use simdutf8::basic::from_utf8;
 use std::fmt::{self, Display};
+use utils::text::utf8_lossy;
+
+const MAX_ERROR_EXCERPT: usize = 1024;
 
 impl<'x> Request<'x> {
     pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
@@ -37,10 +40,9 @@ impl<'x> Request<'x> {
                         Err(trc::LimitEvent::CallsIn.into_err())
                     }
                 }
-                Err(err) => Err(trc::JmapEvent::NotRequest
-                    .into_err()
-                    .reason(err)
-                    .details(CompactString::from(String::from_utf8_lossy(json)))),
+                Err(err) => Err(trc::JmapEvent::NotRequest.into_err().reason(err).details(
+                    CompactString::from(utf8_lossy(json.get(..MAX_ERROR_EXCERPT).unwrap_or(json))),
+                )),
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())
@@ -1027,6 +1029,33 @@ mod tests {
             assert!(is_not_request(&error));
             assert_eq!(reason(&error), Some("invalid utf-8 sequence"));
         }
+    }
+
+    #[test]
+    fn malformed_request_detail_is_capped() {
+        let body = format!("{{\"using\": \"{}", "\u{20ac}".repeat(400));
+        let error = Request::parse(body.as_bytes(), 10, usize::MAX).expect_err("malformed");
+        assert!(is_not_request(&error));
+        let details = error
+            .value(trc::Key::Details)
+            .and_then(|value| value.as_str())
+            .expect("details");
+        assert!(details.starts_with("{\"using\": \""));
+        assert!(details.ends_with('\u{fffd}'));
+        assert_eq!(details.matches('\u{fffd}').count(), 1);
+        assert_eq!(
+            details.trim_end_matches('\u{fffd}').len(),
+            super::MAX_ERROR_EXCERPT - 2
+        );
+
+        let short = "{\"using\": [";
+        let error = Request::parse(short.as_bytes(), 10, usize::MAX).expect_err("malformed");
+        assert_eq!(
+            error
+                .value(trc::Key::Details)
+                .and_then(|value| value.as_str()),
+            Some(short)
+        );
     }
 
     #[test]

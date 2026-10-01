@@ -13,7 +13,14 @@ use dav_proto::Depth;
 use groupware::{DavResourceName, cache::GroupwareCache};
 use hyper::StatusCode;
 use mail_parser::DateTime;
-use registry::schema::structs::{Action, Task};
+use registry::{
+    schema::{
+        enums::StorageQuota,
+        prelude::{ObjectType, Property},
+        structs::{Action, Task},
+    },
+    types::EnumImpl,
+};
 use serde_json::json;
 use store::{
     ValueKey,
@@ -810,6 +817,8 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
     }
 
     alarms_follow_calendars(test).await;
+    container_copy_item_quota(test).await;
+    container_copy_with_duplicate_child(test).await;
 
     client.delete_default_containers().await;
     client
@@ -817,6 +826,199 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
         .await;
     mike_noquota.delete_default_containers().await;
     test.assert_is_empty().await;
+}
+
+async fn container_copy_item_quota(test: &TestServer) {
+    let admin = test.account("admin@example.com");
+    let client = test.account("jane@example.com").webdav_client();
+    let support_id = test.account("support@example.com").id();
+    admin
+        .registry_update_object(
+            ObjectType::Account,
+            support_id,
+            json!({
+                Property::Quotas: {
+                    StorageQuota::MaxCalendarEvents.as_str(): 2,
+                    StorageQuota::MaxContactCards.as_str(): 2
+                }
+            }),
+        )
+        .await;
+
+    for resource_type in [DavResourceName::Cal, DavResourceName::Card] {
+        let user_base = format!("{}/jane%40example.com", resource_type.base_path());
+        let group_base = format!("{}/support%40example.com", resource_type.base_path());
+
+        for (items, name, status) in [
+            (3, "quota-exceeds", StatusCode::INSUFFICIENT_STORAGE),
+            (2, "quota-fits", StatusCode::CREATED),
+        ] {
+            let source = format!("{user_base}/{name}/");
+            client
+                .mkcol("MKCOL", &source, [], [])
+                .await
+                .with_status(StatusCode::CREATED);
+            for idx in 0..items {
+                client
+                    .request(
+                        "PUT",
+                        &format!("{source}item-{idx}"),
+                        resource_type.generate(),
+                    )
+                    .await
+                    .with_status(StatusCode::CREATED);
+            }
+
+            let destination = format!("{group_base}/{name}/");
+            let response = client
+                .request_with_headers("COPY", &source, [("destination", destination.as_str())], "")
+                .await
+                .with_status(status);
+            if status == StatusCode::INSUFFICIENT_STORAGE {
+                response.with_failed_precondition("D:quota-not-exceeded", "");
+                client
+                    .request("GET", &format!("{destination}item-0"), "")
+                    .await
+                    .with_status(StatusCode::NOT_FOUND);
+            } else {
+                for idx in 0..items {
+                    client
+                        .request("GET", &format!("{destination}item-{idx}"), "")
+                        .await
+                        .with_status(StatusCode::OK);
+                }
+                client
+                    .request("DELETE", &destination, "")
+                    .await
+                    .with_status(StatusCode::NO_CONTENT);
+            }
+            client
+                .request("DELETE", &source, "")
+                .await
+                .with_status(StatusCode::NO_CONTENT);
+        }
+    }
+
+    admin
+        .registry_update_object(
+            ObjectType::Account,
+            support_id,
+            json!({ Property::Quotas: {} }),
+        )
+        .await;
+}
+
+async fn container_copy_with_duplicate_child(test: &TestServer) {
+    let client = test.account("jane@example.com").webdav_client();
+    let user_base = format!("{}/jane%40example.com", DavResourceName::Card.base_path());
+    let source = format!("{user_base}/duplicate-source/");
+    let staging = format!("{user_base}/duplicate-staging/");
+    let destination = format!("{user_base}/duplicate-copy/");
+
+    for book in [&source, &staging] {
+        client
+            .mkcol("MKCOL", book, [], [])
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    for idx in 0..70 {
+        client
+            .request(
+                "PUT",
+                &format!("{source}c{idx:03}.vcf"),
+                DavResourceName::Card.generate(),
+            )
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    client
+        .request(
+            "PUT",
+            &format!("{source}c010x.vcf"),
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:No UID\r\nEND:VCARD\r\n",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request_with_headers(
+            "COPY",
+            &format!("{source}c010x.vcf"),
+            [("destination", format!("{source}c062x.vcf").as_str())],
+            "",
+        )
+        .await
+        .with_status(StatusCode::PRECONDITION_FAILED);
+    client
+        .request_with_headers(
+            "COPY",
+            &format!("{source}c010x.vcf"),
+            [("destination", format!("{staging}c062x.vcf").as_str())],
+            "",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .request_with_headers(
+            "MOVE",
+            &format!("{staging}c062x.vcf"),
+            [("destination", format!("{source}c062x.vcf").as_str())],
+            "",
+        )
+        .await
+        .with_status(StatusCode::CREATED);
+
+    let response = client
+        .request_with_headers(
+            "COPY",
+            &source,
+            [("destination", destination.as_str()), ("depth", "infinity")],
+            "",
+        )
+        .await;
+    match response.status {
+        StatusCode::CREATED => {
+            for idx in 0..70 {
+                client
+                    .request("GET", &format!("{destination}c{idx:03}.vcf"), "")
+                    .await
+                    .with_status(StatusCode::OK);
+            }
+            let mut copied_duplicates = 0;
+            for name in ["c010x.vcf", "c062x.vcf"] {
+                let response = client
+                    .request("GET", &format!("{destination}{name}"), "")
+                    .await;
+                if response.status == StatusCode::OK {
+                    copied_duplicates += 1;
+                } else {
+                    response.with_status(StatusCode::NOT_FOUND);
+                }
+            }
+            assert_eq!(copied_duplicates, 1, "the shared card is copied once");
+            client
+                .request("DELETE", &destination, "")
+                .await
+                .with_status(StatusCode::NO_CONTENT);
+        }
+        StatusCode::CONFLICT => {
+            for idx in [0, 11, 63, 69] {
+                client
+                    .request("GET", &format!("{destination}c{idx:03}.vcf"), "")
+                    .await
+                    .with_status(StatusCode::NOT_FOUND);
+            }
+        }
+        _ => {
+            response.with_status(StatusCode::CREATED);
+        }
+    }
+
+    for path in [format!("{source}c062x.vcf"), source, staging] {
+        client
+            .request("DELETE", &path, "")
+            .await
+            .with_status(StatusCode::NO_CONTENT);
+    }
 }
 
 async fn alarms_follow_calendars(test: &TestServer) {

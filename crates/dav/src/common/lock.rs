@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use super::quoted_etag;
 use super::uri::{DavUriResource, OwnedUri, SyncToken, UriResource, Urn, canonical_dav_uri};
 use crate::file::is_symlink;
 use crate::{DavError, DavErrorCondition, DavMethod};
@@ -587,7 +588,7 @@ impl LockRequestHandler for Server {
                                 )
                                 .is_public()
                         }) {
-                            resource_state.etag = format!("\"{}\"", resource.etag()).into();
+                            resource_state.etag = quoted_etag(resource.etag().into()).into();
                         }
                     }
                 }
@@ -864,6 +865,36 @@ impl LockItem {
     }
 }
 
+impl LockData {
+    pub fn active_locks(&self, resource: &str, base_uri: &str) -> Vec<ActiveLock> {
+        let now = now();
+        let mut resource_part = resource;
+        let mut active_locks = Vec::new();
+
+        loop {
+            if let Some(locks) = self.locks.get(resource_part) {
+                active_locks.extend(
+                    locks
+                        .0
+                        .iter()
+                        .filter(|lock| {
+                            lock.expires > now && (resource == resource_part || lock.depth_infinity)
+                        })
+                        .map(|lock| lock.to_active_lock(format!("{base_uri}/{resource_part}"))),
+                );
+            }
+
+            if let Some((resource_part_, _)) = resource_part.rsplit_once('/') {
+                resource_part = resource_part_;
+            } else {
+                break;
+            }
+        }
+
+        active_locks
+    }
+}
+
 impl ArchivedLockData {
     pub fn find_locks<'x: 'y, 'y>(
         &'x self,
@@ -914,25 +945,6 @@ impl ArchivedLockData {
 }
 
 impl ArchivedLockItem {
-    pub fn to_active_lock(&self, href: String) -> ActiveLock {
-        ActiveLock::new(
-            href,
-            if self.exclusive {
-                LockScope::Exclusive
-            } else {
-                LockScope::Shared
-            },
-        )
-        .with_depth(if self.depth_infinity {
-            Depth::Infinity
-        } else {
-            Depth::Zero
-        })
-        .with_owner_opt(self.owner_dav.as_deref().and_then(owner_value))
-        .with_timeout(u64::from(self.expires).saturating_sub(now()))
-        .with_lock_token(self.urn().to_string())
-    }
-
     pub fn urn(&self) -> Urn {
         Urn::Lock(self.lock_id.into())
     }

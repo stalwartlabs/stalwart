@@ -54,8 +54,8 @@ use crate::{
     },
     request::{Call, method::MethodName},
 };
+use ahash::AHashMap;
 use jmap_tools::{Null, Value};
-use std::collections::HashMap;
 
 #[derive(Debug, serde::Serialize)]
 #[serde(untagged)]
@@ -170,16 +170,16 @@ pub struct Response<'x> {
     pub session_state: u32,
 
     #[serde(rename = "createdIds")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub created_ids: HashMap<String, AnyId>,
+    #[serde(skip_serializing_if = "crate::method::ahash_is_empty")]
+    pub created_ids: AHashMap<String, AnyId>,
 }
 
 impl<'x> Response<'x> {
-    pub fn to_json(&self) -> String {
-        sonic_rs::to_string(self).unwrap_or_default()
+    pub fn to_json(&self) -> Result<String, sonic_rs::Error> {
+        sonic_rs::to_string(self)
     }
 
-    pub fn new(session_state: u32, created_ids: HashMap<String, AnyId>, capacity: usize) -> Self {
+    pub fn new(session_state: u32, created_ids: AHashMap<String, AnyId>, capacity: usize) -> Self {
         Response {
             session_state,
             created_ids,

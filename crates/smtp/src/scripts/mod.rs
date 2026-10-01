@@ -56,7 +56,7 @@ pub struct ScriptParameters<'x> {
 impl<'x> ScriptParameters<'x> {
     pub fn new() -> Self {
         ScriptParameters {
-            variables: AHashMap::with_capacity(10),
+            variables: AHashMap::with_capacity(24),
             envelope: Vec::with_capacity(6),
             message: None,
             headers: None,

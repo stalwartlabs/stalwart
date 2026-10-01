@@ -165,7 +165,17 @@ impl PathChunk {
 
     #[inline(always)]
     pub fn path_str(&self, path: &DavPath) -> &str {
-        std::str::from_utf8(&self.bytes[path.path.range()]).unwrap_or_default()
+        std::str::from_utf8(self.path_bytes(path)).unwrap_or_default()
+    }
+
+    #[inline(always)]
+    pub fn path_bytes(&self, path: &DavPath) -> &[u8] {
+        &self.bytes[path.path.range()]
+    }
+
+    #[inline(always)]
+    fn first_path_bytes(&self) -> &[u8] {
+        self.path_bytes(&self.paths[0])
     }
 
     #[inline(always)]
@@ -241,12 +251,12 @@ impl PathIndex {
             .flat_map(|chunk| chunk.paths.iter().map(move |path| (chunk.as_ref(), path)))
     }
 
-    fn chunk_for(&self, key: &str) -> usize {
+    fn chunk_for(&self, key: &[u8]) -> usize {
         let mut lo = 0usize;
         let mut hi = self.chunks.len();
         while lo + 1 < hi {
             let mid = (lo + hi) / 2;
-            if self.chunks[mid].first_path() <= key {
+            if self.chunks[mid].first_path_bytes() <= key {
                 lo = mid;
             } else {
                 hi = mid;
@@ -259,17 +269,12 @@ impl PathIndex {
         if self.chunks.is_empty() {
             return None;
         }
-        let idx = self.chunk_for(name);
-        let chunk = &self.chunks[idx];
         let key = name.as_bytes();
+        let idx = self.chunk_for(key);
+        let chunk = &self.chunks[idx];
         chunk
             .paths
-            .binary_search_by(|probe| {
-                std::str::from_utf8(&chunk.bytes[probe.path.range()])
-                    .unwrap_or_default()
-                    .as_bytes()
-                    .cmp(key)
-            })
+            .binary_search_by(|probe| chunk.path_bytes(probe).cmp(key))
             .ok()
             .map(|slot| (idx, slot))
     }
@@ -281,7 +286,7 @@ impl PathIndex {
         })
     }
 
-    fn lower_bound(&self, key: &str) -> (usize, usize) {
+    fn lower_bound(&self, key: &[u8]) -> (usize, usize) {
         if self.chunks.is_empty() {
             return (0, 0);
         }
@@ -289,7 +294,7 @@ impl PathIndex {
         let chunk = &self.chunks[idx];
         let slot = chunk
             .paths
-            .partition_point(|probe| chunk.path_str(probe) < key);
+            .partition_point(|probe| chunk.path_bytes(probe) < key);
         if slot < chunk.paths.len() {
             (idx, slot)
         } else {
@@ -298,7 +303,7 @@ impl PathIndex {
     }
 
     pub fn range(&self, prefix: String) -> impl Iterator<Item = (&PathChunk, &DavPath)> + '_ {
-        let (start_chunk, start_slot) = self.lower_bound(&prefix);
+        let (start_chunk, start_slot) = self.lower_bound(prefix.as_bytes());
         self.chunks
             .iter()
             .skip(start_chunk)
@@ -310,7 +315,7 @@ impl PathIndex {
                     .skip(if offset == 0 { start_slot } else { 0 })
                     .map(move |path| (chunk.as_ref(), path))
             })
-            .take_while(move |(chunk, path)| chunk.path_str(path).starts_with(&prefix))
+            .take_while(move |(chunk, path)| chunk.path_bytes(path).starts_with(prefix.as_bytes()))
     }
 
     pub fn heap_size(&self) -> u64 {
@@ -340,7 +345,7 @@ impl PathIndex {
         for (idx, chunk) in self.chunks.iter().enumerate() {
             let add_end = match self.chunks.get(idx + 1) {
                 Some(next) => {
-                    let bound = next.first_path().as_bytes();
+                    let bound = next.first_path_bytes();
                     add_start
                         + adds[add_start..].partition_point(|(name, _)| name.as_bytes() < bound)
                 }

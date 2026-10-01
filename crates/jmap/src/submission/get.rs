@@ -139,7 +139,12 @@ impl EmailSubmissionGet for Server {
                 .map(|(k, v)| (k.to_string(), DeliveryStatus::from(v)))
                 .collect::<VecMap<_, _>>();
             let mut queued_status = None;
-            if let Some(queue_id) = submission.queue_id.as_ref().map(u64::from) {
+            if let Some(queue_id) = submission
+                .queue_id
+                .as_ref()
+                .filter(|_| !matches!(submission.undo_status, ArchivedUndoStatus::Canceled))
+                .map(u64::from)
+            {
                 if let Some(queued_message_) = self
                     .read_message_archive(queue_id)
                     .await

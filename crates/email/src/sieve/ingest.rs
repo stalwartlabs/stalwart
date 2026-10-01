@@ -329,12 +329,21 @@ impl<'x> Handler<'x> for SieveHandler<'x, '_> {
                 match target_id {
                     Some(target_id) => self.file_into(target_id, flags, message_id, true),
                     None if create => {
-                        self.pending = Some(PendingWork::CreateMailbox {
-                            folder: folder.to_string(),
-                            flags,
-                            message_id,
-                        });
-                        return Reply::Pending;
+                        match self
+                            .cache
+                            .mailbox_by_folded_path(folder)
+                            .map(|mailbox| mailbox.document_id)
+                        {
+                            Some(target_id) => self.file_into(target_id, flags, message_id, true),
+                            None => {
+                                self.pending = Some(PendingWork::CreateMailbox {
+                                    folder: folder.to_string(),
+                                    flags,
+                                    message_id,
+                                });
+                                return Reply::Pending;
+                            }
+                        }
                     }
                     None => {
                         let target_id = self
@@ -453,12 +462,8 @@ impl SieveScriptIngest for Server {
         // Load the compiled script
         let included = ScriptArena::new();
         let mut resolved_includes: Vec<(String, &Sieve<'static>)> = Vec::new();
-        let script = Sieve::from_bytes(active_script.bytecode()?).map_err(|err| {
-            trc::StoreEvent::UnexpectedError
-                .caused_by(trc::location!())
-                .reason(err)
-                .details("Failed to load compiled Sieve script")
-        })?;
+        let mut recompiled = None;
+        let script = verified_script(self, account_id, &active_script, &mut recompiled).await?;
 
         // Create Sieve instance
         let mut arena = Arena::new();
@@ -755,15 +760,11 @@ impl SieveScriptIngest for Server {
         let Some(active_script) = self.sieve_script_load(account_id, document_id).await? else {
             return Ok(None);
         };
+        let mut recompiled = None;
 
-        Sieve::from_bytes(active_script.bytecode()?)
+        verified_script(self, account_id, &active_script, &mut recompiled)
+            .await
             .map(|script| Some(script.into_owned()))
-            .map_err(|err| {
-                trc::StoreEvent::UnexpectedError
-                    .caused_by(trc::location!())
-                    .reason(err)
-                    .details("Failed to load compiled Sieve script")
-            })
     }
 
     async fn sieve_script_load(
@@ -771,8 +772,7 @@ impl SieveScriptIngest for Server {
         account_id: u32,
         document_id: u32,
     ) -> trc::Result<Option<ActiveScript>> {
-        // Obtain script object
-        let Some(archive) = self
+        Ok(self
             .store()
             .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
                 account_id,
@@ -780,27 +780,11 @@ impl SieveScriptIngest for Server {
                 document_id,
             ))
             .await?
-        else {
-            return Ok(None);
-        };
-
-        let version = archive.version;
-        let script_object = archive
-            .unarchive::<SieveScript>()
-            .caused_by(trc::location!())?;
-
-        if Sieve::from_bytes(script_object.script.as_ref()).is_ok() {
-            Ok(Some(ActiveScript {
+            .map(|archive| ActiveScript {
                 document_id,
-                version,
-                script_name: script_object.name.to_string(),
+                version: archive.version,
                 script: Bytecode::Stored(archive),
             }))
-        } else {
-            self.sieve_script_recompile(account_id, document_id, version, &archive, script_object)
-                .await
-                .map(Some)
-        }
     }
 
     async fn sieve_script_recompile(
@@ -851,7 +835,6 @@ impl SieveScriptIngest for Server {
             script: script.to_bytes(),
             metadata_flags: script_object.metadata_flags,
         };
-        let script_name = new_script_object.name.clone();
         let bytecode = new_script_object.script.clone();
         let bytes = Archiver::new(new_script_object)
             .serialize()
@@ -869,10 +852,47 @@ impl SieveScriptIngest for Server {
         Ok(ActiveScript {
             document_id,
             version,
-            script_name,
             script: Bytecode::Compiled(bytecode),
         })
     }
+}
+
+async fn verified_script<'x>(
+    server: &Server,
+    account_id: u32,
+    script: &'x ActiveScript,
+    recompiled: &'x mut Option<ActiveScript>,
+) -> trc::Result<Sieve<'x>> {
+    if let Ok(sieve) = Sieve::from_bytes(script.bytecode()?) {
+        return Ok(sieve);
+    }
+
+    let script = match &script.script {
+        Bytecode::Stored(archive) => {
+            let script_object = archive
+                .unarchive::<SieveScript>()
+                .caused_by(trc::location!())?;
+            &*recompiled.insert(
+                server
+                    .sieve_script_recompile(
+                        account_id,
+                        script.document_id,
+                        script.version,
+                        archive,
+                        script_object,
+                    )
+                    .await?,
+            )
+        }
+        Bytecode::Compiled(_) => script,
+    };
+
+    Sieve::from_bytes(script.bytecode()?).map_err(|err| {
+        trc::StoreEvent::UnexpectedError
+            .caused_by(trc::location!())
+            .reason(err)
+            .details("Failed to load compiled Sieve script")
+    })
 }
 
 fn write_received_header(buf: &mut Vec<u8>, hostname: &str, id: u64) {

@@ -169,28 +169,33 @@ impl CardPropPatchRequestHandler for Server {
             let book = archive
                 .to_unarchived::<AddressBook>()
                 .caused_by(trc::location!())?;
-            let mut new_book = archive
-                .deserialize::<AddressBook>()
-                .caused_by(trc::location!())?;
             let personal_id = access_token.personal_id(account_id, Collection::AddressBook);
 
             // Apply live properties
-            for op in request.ops {
-                match op {
-                    PropertyUpdateOp::Set(value) => self.apply_addressbook_properties(
-                        personal_id,
-                        &mut new_book,
-                        [value],
-                        &mut items,
-                    ),
-                    PropertyUpdateOp::Remove(property) => remove_addressbook_properties(
-                        personal_id,
-                        &mut new_book,
-                        [property],
-                        &mut items,
-                    ),
+            let new_book = if has_live_changes {
+                let mut new_book = archive
+                    .deserialize::<AddressBook>()
+                    .caused_by(trc::location!())?;
+                for op in request.ops {
+                    match op {
+                        PropertyUpdateOp::Set(value) => self.apply_addressbook_properties(
+                            personal_id,
+                            &mut new_book,
+                            [value],
+                            &mut items,
+                        ),
+                        PropertyUpdateOp::Remove(property) => remove_addressbook_properties(
+                            personal_id,
+                            &mut new_book,
+                            [property],
+                            &mut items,
+                        ),
+                    }
                 }
-            }
+                Some(new_book)
+            } else {
+                None
+            };
 
             // Apply dead properties
             let mut dead_write = dead
@@ -218,7 +223,7 @@ impl CardPropPatchRequestHandler for Server {
                         .build(document_id.into(), &mut batch)
                         .caused_by(trc::location!())?;
                 }
-                if has_live_changes {
+                if let Some(mut new_book) = new_book {
                     if let Some(dead_write) = &dead_write {
                         new_book.set_metadata_kinds(dead_write.kinds);
                     }
@@ -248,21 +253,26 @@ impl CardPropPatchRequestHandler for Server {
             let card = archive
                 .to_unarchived::<ContactCard>()
                 .caused_by(trc::location!())?;
-            let mut new_card = archive
-                .deserialize::<ContactCard>()
-                .caused_by(trc::location!())?;
 
             // Apply live properties
-            for op in request.ops {
-                match op {
-                    PropertyUpdateOp::Set(value) => {
-                        self.apply_card_properties(&mut new_card, [value], &mut items)
-                    }
-                    PropertyUpdateOp::Remove(property) => {
-                        remove_card_properties(&mut new_card, [property], &mut items)
+            let new_card = if has_live_changes {
+                let mut new_card = archive
+                    .deserialize::<ContactCard>()
+                    .caused_by(trc::location!())?;
+                for op in request.ops {
+                    match op {
+                        PropertyUpdateOp::Set(value) => {
+                            self.apply_card_properties(&mut new_card, [value], &mut items)
+                        }
+                        PropertyUpdateOp::Remove(property) => {
+                            remove_card_properties(&mut new_card, [property], &mut items)
+                        }
                     }
                 }
-            }
+                Some(new_card)
+            } else {
+                None
+            };
 
             // Apply dead properties
             let mut dead_write = dead
@@ -291,7 +301,7 @@ impl CardPropPatchRequestHandler for Server {
                         .build(document_id.into(), &mut batch)
                         .caused_by(trc::location!())?;
                 }
-                if has_live_changes {
+                if let Some(mut new_card) = new_card {
                     if let Some(dead_write) = &dead_write {
                         new_card.set_metadata_kinds(dead_write.kinds);
                     }

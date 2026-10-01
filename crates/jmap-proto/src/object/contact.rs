@@ -9,7 +9,10 @@ use crate::{
         AnyId, JmapObject, JmapObjectId,
         metadata::{MetadataFilter, MetadataProperty, MetadataRoot},
     },
-    request::{MaybeInvalid, deserialize::DeserializeArguments},
+    request::{
+        MaybeInvalid,
+        deserialize::{CowStr, DeserializeArguments, next_lowercase_value},
+    },
     types::date::UTCDate,
 };
 use calcard::jscontact::{JSContactProperty, JSContactValue};
@@ -149,40 +152,40 @@ impl<'de> DeserializeArguments<'de> for ContactCardFilter {
                 *self = ContactCardFilter::UpdatedAfter(map.next_value()?);
             },
             b"text" => {
-                *self = ContactCardFilter::Text(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Text(next_lowercase_value(map)?);
             },
             b"name" => {
-                *self = ContactCardFilter::Name(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Name(next_lowercase_value(map)?);
             },
             b"name/given" => {
-                *self = ContactCardFilter::NameGiven(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::NameGiven(next_lowercase_value(map)?);
             },
             b"name/surname" => {
-                *self = ContactCardFilter::NameSurname(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::NameSurname(next_lowercase_value(map)?);
             },
             b"name/surname2" => {
-                *self = ContactCardFilter::NameSurname2(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::NameSurname2(next_lowercase_value(map)?);
             },
             b"nickname" => {
-                *self = ContactCardFilter::Nickname(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Nickname(next_lowercase_value(map)?);
             },
             b"organization" => {
-                *self = ContactCardFilter::Organization(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Organization(next_lowercase_value(map)?);
             },
             b"email" => {
-                *self = ContactCardFilter::Email(map.next_value()?);
+                *self = ContactCardFilter::Email(next_lowercase_value(map)?);
             },
             b"phone" => {
-                *self = ContactCardFilter::Phone(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Phone(next_lowercase_value(map)?);
             },
             b"onlineService" => {
-                *self = ContactCardFilter::OnlineService(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::OnlineService(next_lowercase_value(map)?);
             },
             b"address" => {
-                *self = ContactCardFilter::Address(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Address(next_lowercase_value(map)?);
             },
             b"note" => {
-                *self = ContactCardFilter::Note(map.next_value::<Cow<str>>()?.to_lowercase());
+                *self = ContactCardFilter::Note(next_lowercase_value(map)?);
             },
             _ => {
                 *self = match MetadataFilter::try_deserialize(key, map)? {
@@ -204,7 +207,7 @@ impl<'de> DeserializeArguments<'de> for ContactCardComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"created" => {
                     *self = ContactCardComparator::Created;
@@ -222,7 +225,7 @@ impl<'de> DeserializeArguments<'de> for ContactCardComparator {
                     *self = ContactCardComparator::NameSurname2;
                 },
                 _ => {
-                    *self = ContactCardComparator::_T(value.to_string());
+                    *self = ContactCardComparator::_T(value.into_owned());
                 }
             );
         } else {

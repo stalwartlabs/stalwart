@@ -99,21 +99,19 @@ pub(super) async fn get(
         .as_ref()
         .filter(|_| container_has_children)
         .map(|containers| {
-            let mut children =
-                RoaringBitmap::from_iter(resources.resources.iter().filter_map(|r| {
-                    if r.child_names()
-                        .iter()
-                        .any(|n| containers.contains(n.parent_id))
-                    {
-                        Some(r.document_id())
-                    } else {
-                        None
-                    }
-                }));
-            if sync_collection == SyncCollection::Calendar {
-                children -= resources.event_ids_with_flags(EVENT_SECRET);
-            }
-            children
+            let hide_secret = sync_collection == SyncCollection::Calendar;
+            containers
+                .iter()
+                .flat_map(|container_id| resources.children(container_id))
+                .filter(|child| {
+                    !hide_secret
+                        || child
+                            .resource
+                            .event_flags()
+                            .is_none_or(|flags| flags & EVENT_SECRET == 0)
+                })
+                .map(|child| child.document_id())
+                .collect::<RoaringBitmap>()
         });
 
     // Filter by changelog

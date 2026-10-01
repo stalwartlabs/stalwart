@@ -5,8 +5,9 @@
  */
 
 use common::{
+    Server,
     config::smtp::queue::{QueueExpiry, QueueName},
-    expr::{Bump, Variable, bumpalo, functions::ResolveVariable},
+    expr::{Bump, Variable, bumpalo, functions::ResolveVariable, if_block::IfBlock},
 };
 use registry::schema::enums::ExpressionVariable;
 use smtp_proto::Response;
@@ -469,6 +470,23 @@ impl ResolveVariable for RecipientDomain<'_> {
             _ => "".into(),
         }
     }
+}
+
+pub(crate) async fn eval_strategy<'x, T: Sync>(
+    server: &'x Server,
+    if_block: &IfBlock,
+    resolver: &impl ResolveVariable,
+    arena: &mut Bump,
+    session_id: u64,
+    lookup: fn(&'x Server, &str, u64) -> &'x T,
+) -> &'x T {
+    server
+        .eval_if_with(if_block, resolver, arena, session_id, |value| match value {
+            Variable::String(name) => lookup(server, name, session_id),
+            _ => lookup(server, "default", session_id),
+        })
+        .await
+        .unwrap_or_else(|| lookup(server, "default", session_id))
 }
 
 #[inline(always)]

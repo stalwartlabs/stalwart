@@ -15,7 +15,12 @@ use types::acl::AclGrant;
 impl ResourceChunk {
     #[inline(always)]
     pub fn str_at(&self, r: ArenaRef) -> &str {
-        std::str::from_utf8(&self.bytes[r.range()]).unwrap_or_default()
+        std::str::from_utf8(self.bytes_at(r)).unwrap_or_default()
+    }
+
+    #[inline(always)]
+    pub fn bytes_at(&self, r: ArenaRef) -> &[u8] {
+        &self.bytes[r.range()]
     }
 
     #[inline(always)]
@@ -74,20 +79,28 @@ impl ResourceChunkBuilder {
     }
 
     pub fn push_str(&mut self, s: &str) -> ArenaRef {
+        self.push_arena_bytes(s.as_bytes())
+    }
+
+    fn push_arena_bytes(&mut self, bytes: &[u8]) -> ArenaRef {
         let off = self.bytes.len() as u32;
-        self.bytes.extend_from_slice(s.as_bytes());
+        self.bytes.extend_from_slice(bytes);
         ArenaRef {
             off,
-            len: s.len() as u32,
+            len: bytes.len() as u32,
         }
     }
 
     pub fn push_uid(&mut self, uid: &str, names: ArenaRef) -> ArenaRef {
+        self.push_uid_bytes(uid.as_bytes(), names)
+    }
+
+    fn push_uid_bytes(&mut self, uid: &[u8], names: ArenaRef) -> ArenaRef {
         for name in self.names.get(names.range()).unwrap_or_default() {
             if self
                 .bytes
                 .get(name.name.range())
-                .is_some_and(|bytes| bytes.starts_with(uid.as_bytes()))
+                .is_some_and(|bytes| bytes.starts_with(uid))
             {
                 return ArenaRef {
                     off: name.name.off,
@@ -95,7 +108,7 @@ impl ResourceChunkBuilder {
                 };
             }
         }
-        self.push_str(uid)
+        self.push_arena_bytes(uid)
     }
 
     pub fn push_acls(&mut self, acls: &[AclGrant]) -> ArenaRef {
@@ -180,7 +193,7 @@ impl ResourceChunkBuilder {
                 etag,
                 metadata,
             } => GroupwareResourceMetadata::Calendar {
-                name: self.push_str(src.chunk.str_at(*name)),
+                name: self.push_arena_bytes(src.chunk.bytes_at(*name)),
                 acls: self.push_acls(src.chunk.acls_at(*acls)),
                 preferences: self.push_prefs(src.chunk.prefs_at(*preferences)),
                 etag: *etag,
@@ -192,7 +205,7 @@ impl ResourceChunkBuilder {
                 etag,
                 metadata,
             } => GroupwareResourceMetadata::AddressBook {
-                name: self.push_str(src.chunk.str_at(*name)),
+                name: self.push_arena_bytes(src.chunk.bytes_at(*name)),
                 acls: self.push_acls(src.chunk.acls_at(*acls)),
                 etag: *etag,
                 metadata: *metadata,
@@ -214,7 +227,7 @@ impl ResourceChunkBuilder {
                     duration: *duration,
                     created_at: *created_at,
                     modified_at: *modified_at,
-                    uid: self.push_uid(src.chunk.str_at(*uid), names),
+                    uid: self.push_uid_bytes(src.chunk.bytes_at(*uid), names),
                     etag: *etag,
                     flags: *flags,
                 }
@@ -232,7 +245,7 @@ impl ResourceChunkBuilder {
                     names,
                     created_at: *created_at,
                     modified_at: *modified_at,
-                    uid: self.push_uid(src.chunk.str_at(*uid), names),
+                    uid: self.push_uid_bytes(src.chunk.bytes_at(*uid), names),
                     etag: *etag,
                     flags: *flags,
                 }
@@ -266,16 +279,17 @@ impl ResourceChunkBuilder {
 
     fn push_cached_names(&mut self, chunk: &ResourceChunk, names: ArenaRef) -> ArenaRef {
         let off = self.names.len() as u32;
-        let len = names.len;
-        for idx in names.range() {
-            let name = chunk.names[idx];
-            let name_ref = self.push_str(chunk.str_at(name.name));
+        for name in chunk.names_at(names) {
+            let name_ref = self.push_arena_bytes(chunk.bytes_at(name.name));
             self.names.push(CachedName {
                 name: name_ref,
                 parent_id: name.parent_id,
             });
         }
-        ArenaRef { off, len }
+        ArenaRef {
+            off,
+            len: names.len,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -388,7 +402,17 @@ impl ResourceStore {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
-        self.chunks.iter().flat_map(|chunk| {
+        Self::iter_chunks(&self.chunks)
+    }
+
+    pub fn iter_run(&self, is_container: bool) -> impl Iterator<Item = GroupwareResourceRef<'_>> {
+        Self::iter_chunks(&self.chunks[self.run(is_container)])
+    }
+
+    fn iter_chunks(
+        chunks: &[Arc<ResourceChunk>],
+    ) -> impl Iterator<Item = GroupwareResourceRef<'_>> {
+        chunks.iter().flat_map(|chunk| {
             chunk
                 .records
                 .iter()

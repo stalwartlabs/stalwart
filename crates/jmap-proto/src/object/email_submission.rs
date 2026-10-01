@@ -10,7 +10,11 @@ use crate::{
         email::{EmailProperty, EmailValue},
         parse_ref,
     },
-    request::{MaybeInvalid, deserialize::DeserializeArguments, reference::MaybeIdReference},
+    request::{
+        MaybeInvalid,
+        deserialize::{CowStr, DeserializeArguments},
+        reference::MaybeIdReference,
+    },
     types::date::UTCDate,
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property, Value};
@@ -431,7 +435,7 @@ impl<'de> DeserializeArguments<'de> for EmailSubmissionComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
 
                 b"emailId" => {
@@ -444,7 +448,7 @@ impl<'de> DeserializeArguments<'de> for EmailSubmissionComparator {
                     *self = EmailSubmissionComparator::SentAt;
                 },
                 _ => {
-                    *self = EmailSubmissionComparator::_T(key.to_string());
+                    *self = EmailSubmissionComparator::_T(value.into_owned());
                 }
             );
         } else {

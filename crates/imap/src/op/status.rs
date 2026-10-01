@@ -10,7 +10,7 @@ use crate::{
     op::ImapContext,
     spawn_op,
 };
-use common::{MessageStoreCache, network::SessionStream};
+use common::{MessageStoreCache, auth::AccessToken, network::SessionStream};
 use compact_str::{CompactString, format_compact};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -65,20 +65,25 @@ impl<T: SessionStream> Session<T> {
                     Ok(arguments) => {
                         let op_start = Instant::now();
                         let synchronized = match &mut caches {
-                            Some(caches) => Ok(caches),
+                            Some(refresh) => Ok(refresh),
                             None => {
                                 // Refresh mailboxes
                                 data.synchronize_mailboxes(false)
                                     .await
                                     .imap_ctx(&arguments.tag, trc::location!())
-                                    .map(|state| caches.insert(state.caches))
+                                    .map(|refresh| caches.insert(refresh))
                             }
                         };
 
                         // Fetch status
                         let status = match synchronized {
-                            Ok(caches) => data
-                                .status(caches, arguments.mailbox_name, &arguments.items)
+                            Ok(refresh) => data
+                                .status(
+                                    &mut refresh.caches,
+                                    &refresh.access_token,
+                                    arguments.mailbox_name,
+                                    &arguments.items,
+                                )
                                 .await
                                 .imap_ctx(&arguments.tag, trc::location!()),
                             Err(err) => Err(err),
@@ -123,6 +128,7 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn status(
         &self,
         caches: &mut AccountCaches,
+        access_token: &AccessToken,
         mailbox_name: CompactString,
         items: &[Status],
     ) -> trc::Result<StatusItem> {
@@ -174,18 +180,21 @@ impl<T: SessionStream> SessionData<T> {
 
         let cache = caches.fetch(&self.server, mailbox.account_id).await?;
 
-        self.status_in(&cache, mailbox, mailbox_name, items).await
+        self.status_in(&cache, access_token, mailbox, mailbox_name, items)
+            .await
     }
 
     pub async fn status_in(
         &self,
         cache: &MessageStoreCache,
+        access_token: &AccessToken,
         mailbox: MailboxId,
         mailbox_name: CompactString,
         items: &[Status],
     ) -> trc::Result<StatusItem> {
         if !self
-            .check_mailbox_acl(
+            .check_mailbox_acl_as(
+                access_token,
                 Some(cache),
                 mailbox.account_id,
                 mailbox.mailbox_id,

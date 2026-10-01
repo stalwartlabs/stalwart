@@ -6,7 +6,7 @@
 
 use crate::changes::state::StateManager;
 use common::{Server, auth::AccessToken};
-use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
+use email::cache::{MessageCacheFetch, email::MessageAccess, mailbox::MailboxCacheAccess};
 use jmap_proto::{
     method::get::{GetRequest, GetResponse, all_ids},
     object::thread::{Thread, ThreadProperty, ThreadValue},
@@ -14,7 +14,7 @@ use jmap_proto::{
 };
 use jmap_tools::Map;
 use std::future::Future;
-use store::{ahash::AHashMap, roaring::RoaringBitmap};
+use store::ahash::AHashMap;
 use trc::AddContext;
 use types::{acl::Acl, collection::SyncCollection, id::Id};
 
@@ -37,29 +37,37 @@ impl ThreadGet for Server {
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        let shared_ids = if access_token.is_shared(account_id) {
-            Some(cache.shared_messages(access_token, Acl::ReadItems))
+        let access = if access_token.is_shared(account_id) {
+            MessageAccess::Mailboxes(cache.shared_mailboxes(access_token, Acl::ReadItems))
         } else {
-            None
+            MessageAccess::All
         };
-        let mut thread_map: AHashMap<u32, RoaringBitmap> = AHashMap::with_capacity(32);
-        for item in cache.emails.iter() {
-            if shared_ids
-                .as_ref()
-                .is_some_and(|ids| !ids.contains(item.document_id()))
-            {
-                continue;
-            }
-            thread_map
-                .entry(item.thread_id())
-                .or_default()
-                .insert(item.document_id());
-        }
 
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let mut thread_map: AHashMap<u32, Vec<u32>>;
         let ids = if let Some(ids) = ids {
+            thread_map = ids
+                .iter()
+                .map(|id| (id.document_id(), Vec::new()))
+                .collect();
+            if !access.is_empty() {
+                for item in cache.emails.iter() {
+                    if let Some(document_ids) = thread_map.get_mut(&item.thread_id())
+                        && access.allows(item)
+                    {
+                        document_ids.push(item.document_id());
+                    }
+                }
+            }
             ids
         } else {
+            thread_map = AHashMap::with_capacity(32);
+            for item in cache.emails.iter().filter(|item| access.allows(*item)) {
+                thread_map
+                    .entry(item.thread_id())
+                    .or_default()
+                    .push(item.document_id());
+            }
             all_ids(
                 thread_map.keys().copied().map(Into::into),
                 self.core.jmap.get_max_objects,
@@ -81,21 +89,20 @@ impl ThreadGet for Server {
 
         for id in ids {
             let thread_id = id.document_id();
-            if let Some(mut document_ids) = thread_map.remove(&thread_id) {
+            if let Some(document_ids) = thread_map
+                .remove(&thread_id)
+                .filter(|document_ids| !document_ids.is_empty())
+            {
                 let mut thread: Map<'_, ThreadProperty, ThreadValue> =
                     Map::with_capacity(2).with_key_value(ThreadProperty::Id, id);
                 if add_email_ids {
-                    let mut ids = Vec::with_capacity(document_ids.len() as usize);
-                    for m in cache.emails.iter() {
-                        if document_ids.remove(m.document_id()) {
-                            ids.push(Id::from_parts(thread_id, m.document_id()));
-                        }
-                    }
-                    for id in document_ids.iter() {
-                        ids.push(Id::from_parts(thread_id, id));
-                    }
-
-                    thread.insert_unchecked(ThreadProperty::EmailIds, ids);
+                    thread.insert_unchecked(
+                        ThreadProperty::EmailIds,
+                        document_ids
+                            .into_iter()
+                            .map(|document_id| Id::from_parts(thread_id, document_id))
+                            .collect::<Vec<_>>(),
+                    );
                 }
                 response.list.push(thread.into());
             } else {

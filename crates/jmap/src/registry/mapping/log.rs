@@ -13,6 +13,7 @@ use crate::{
 };
 use jiff::Timestamp;
 use jmap_proto::types::state::State;
+use memchr::memrchr;
 use registry::{
     jmap::IntoValue,
     schema::{enums::TracingLevel, prelude::Property, structs::Log},
@@ -451,21 +452,26 @@ impl<R: Seek + Read> RawRevLines<R> {
                 }
             }
 
-            let buffer_length = self.buffer_end;
-
-            for ch in self.buffer[..self.buffer_end].iter().rev() {
-                self.buffer_end -= 1;
-                // Found a new line character to break on
-                if *ch == LF_BYTE {
-                    result.push(self.buffer[self.buffer_end + 1..buffer_length].to_vec());
+            let buffer = self.buffer.get(..self.buffer_end).unwrap_or_default();
+            match memrchr(LF_BYTE, buffer) {
+                Some(pos) => {
+                    result.push(buffer.get(pos + 1..).unwrap_or_default().to_vec());
+                    self.buffer_end = pos;
                     break 'outer;
                 }
+                None => {
+                    result.push(buffer.to_vec());
+                    self.buffer_end = 0;
+                }
             }
-
-            result.push(self.buffer[..buffer_length].to_vec());
         }
 
-        Ok(Some(result.into_iter().rev().flatten().collect()))
+        result.reverse();
+        Ok(Some(if result.len() == 1 {
+            result.swap_remove(0)
+        } else {
+            result.concat()
+        }))
     }
 }
 
@@ -506,5 +512,50 @@ impl<R: Read + Seek> Iterator for RevLines<R> {
             String::from_utf8(line)
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8")),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RawRevLines;
+    use std::io::Cursor;
+
+    fn reference(text: &str) -> Vec<Vec<u8>> {
+        let text = text.strip_suffix('\n').unwrap_or(text);
+        let mut lines = text.split('\n').collect::<Vec<_>>();
+        if lines.first().is_some_and(|line| line.is_empty()) {
+            lines.remove(0);
+        }
+        lines
+            .into_iter()
+            .rev()
+            .map(|line| line.as_bytes().to_vec())
+            .collect()
+    }
+
+    #[test]
+    fn rev_lines_match_reference() {
+        let long = "x".repeat(37);
+        let longer = "y".repeat(100);
+        let samples = [
+            String::new(),
+            "\n".to_string(),
+            "\n\n".to_string(),
+            "a".to_string(),
+            "\na".to_string(),
+            "a\n\n".to_string(),
+            ["first", "", "short line", &long, &longer, "", "tail"].join("\n"),
+            ["", &longer, "b", &long, ""].join("\n"),
+        ];
+        for text in &samples {
+            for text in [text.clone(), format!("{text}\n")] {
+                for cap in [1, 2, 3, 7, 16, 64, 4096] {
+                    let lines = RawRevLines::with_capacity(cap, Cursor::new(text.as_bytes()))
+                        .collect::<Result<Vec<_>, _>>()
+                        .expect("read");
+                    assert_eq!(lines, reference(&text), "{text:?} cap {cap}");
+                }
+            }
+        }
     }
 }

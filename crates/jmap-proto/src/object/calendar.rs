@@ -207,7 +207,7 @@ impl Element for CalendarValue {
 
     fn to_cow(&self) -> Cow<'static, str> {
         match self {
-            CalendarValue::Id(id) => id.to_string().into(),
+            CalendarValue::Id(id) => id.as_string().into(),
             CalendarValue::IdReference(r) => format!("#{r}").into(),
             CalendarValue::IncludeInAvailability(include) => include.as_str().into(),
             CalendarValue::Date(date) => date.to_string().into(),
@@ -222,9 +222,18 @@ impl Element for CalendarValue {
     fn serialize_text<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             CalendarValue::Id(id) => serializer.serialize_str(id.text().as_str()),
+            CalendarValue::IdReference(reference) => {
+                serializer.collect_str(&format_args!("#{reference}"))
+            }
             CalendarValue::Date(date) => date.serialize(serializer),
             CalendarValue::Duration(duration) => serializer.collect_str(duration),
-            value => serializer.serialize_str(&value.to_cow()),
+            CalendarValue::IncludeInAvailability(include) => {
+                serializer.serialize_str(include.as_str())
+            }
+            CalendarValue::Action(action) => serializer.serialize_str(action.as_str()),
+            CalendarValue::RelativeTo(relative) => serializer.serialize_str(relative.as_str()),
+            CalendarValue::Type(typ) => serializer.serialize_str(typ.as_str()),
+            CalendarValue::Timezone(tz) => serializer.serialize_str(&tz.name().unwrap_or_default()),
         }
     }
 }

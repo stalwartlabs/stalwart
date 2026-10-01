@@ -183,6 +183,7 @@ impl<T: SessionStream> SessionData<T> {
                 .caused_by(trc::location!())?;
             let changes = refresh.changes.unwrap_or_default();
             let mut caches = refresh.caches;
+            let access_token = refresh.access_token;
 
             let mut buf = Vec::with_capacity(64);
 
@@ -212,6 +213,7 @@ impl<T: SessionStream> SessionData<T> {
                 if let Ok(status) = self
                     .status(
                         &mut caches,
+                        &access_token,
                         mailbox_name.into(),
                         &[
                             Status::Messages,

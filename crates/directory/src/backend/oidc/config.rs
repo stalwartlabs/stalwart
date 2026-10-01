@@ -172,7 +172,7 @@ impl OpenIdDirectory {
             });
         }*/
 
-        let keys = fetch_jwks_keys(http, &discovery.jwks_uri).await?;
+        let keys = fetch_jwks_keys(http, &discovery.jwks_uri, config, &discovery.issuer).await?;
 
         Ok((discovery, keys))
     }

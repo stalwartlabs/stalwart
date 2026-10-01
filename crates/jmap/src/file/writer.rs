@@ -319,7 +319,7 @@ impl<'x> FileNodeWriter<'x> {
                 None => Some((document_id, id)),
             })
             .collect::<Vec<_>>();
-        roots.sort_unstable_by_key(|(document_id, _)| self.depth_of(ParentRef::Node(*document_id)));
+        roots.sort_by_cached_key(|(document_id, _)| self.depth_of(ParentRef::Node(*document_id)));
         for (document_id, id) in roots {
             if self.destroyed.contains(&document_id) {
                 continue;
@@ -566,7 +566,7 @@ impl<'x> FileNodeWriter<'x> {
             };
             let (hash, _) = self
                 .server
-                .put_temporary_blob(self.account_id, &bytes, 60)
+                .put_temporary_blob_with_hash(self.account_id, blob_id.hash.clone(), &bytes, 60)
                 .await
                 .caused_by(trc::location!())?;
             (hash, bytes.len() as u64)

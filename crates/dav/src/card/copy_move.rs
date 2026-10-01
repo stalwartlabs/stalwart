@@ -211,6 +211,7 @@ impl CardCopyMoveRequestHandler for Server {
                         self,
                         access_token,
                         &from_resources,
+                        &to_resources,
                         from_account_id,
                         from_resource.document_id(),
                         from_children_ids,
@@ -253,6 +254,7 @@ impl CardCopyMoveRequestHandler for Server {
                         move_card(
                             self,
                             access_token,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             from_addressbook_id,
@@ -267,6 +269,7 @@ impl CardCopyMoveRequestHandler for Server {
                         copy_card(
                             self,
                             access_token,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             to_account_id,
@@ -320,6 +323,7 @@ impl CardCopyMoveRequestHandler for Server {
                         move_card(
                             self,
                             access_token,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             from_addressbook_id,
@@ -346,6 +350,7 @@ impl CardCopyMoveRequestHandler for Server {
                     copy_card(
                         self,
                         access_token,
+                        &to_resources,
                         from_account_id,
                         from_resource.document_id(),
                         to_account_id,
@@ -387,6 +392,7 @@ impl CardCopyMoveRequestHandler for Server {
                             self,
                             access_token,
                             &from_resources,
+                            &to_resources,
                             from_account_id,
                             from_resource.document_id(),
                             if headers.depth != Depth::Zero {
@@ -418,6 +424,7 @@ impl CardCopyMoveRequestHandler for Server {
                         self,
                         access_token,
                         &from_resources,
+                        &to_resources,
                         from_account_id,
                         from_resource.document_id(),
                         if headers.depth != Depth::Zero {
@@ -445,6 +452,7 @@ impl CardCopyMoveRequestHandler for Server {
 async fn copy_card(
     server: &Server,
     access_token: &AccessToken,
+    to_resources: &GroupwareResources,
     from_account_id: u32,
     from_document_id: u32,
     to_account_id: u32,
@@ -469,16 +477,8 @@ async fn copy_card(
     let mut batch = BatchBuilder::new();
 
     // Validate UID
-    let to_resources = server
-        .fetch_groupware_resources(
-            access_token.account_id(),
-            to_account_id,
-            SyncCollection::AddressBook,
-        )
-        .await
-        .caused_by(trc::location!())?;
     assert_is_unique_uid(
-        to_resources.as_ref(),
+        to_resources,
         to_addressbook_id,
         Some(card.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
     )?;
@@ -642,6 +642,7 @@ async fn copy_card(
 async fn move_card(
     server: &Server,
     access_token: &AccessToken,
+    to_resources: &GroupwareResources,
     from_account_id: u32,
     from_document_id: u32,
     from_addressbook_id: u32,
@@ -672,15 +673,7 @@ async fn move_card(
         || to_document_id.is_none()
     {
         assert_is_unique_uid(
-            server
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    to_account_id,
-                    SyncCollection::AddressBook,
-                )
-                .await
-                .caused_by(trc::location!())?
-                .as_ref(),
+            to_resources,
             to_addressbook_id,
             Some(card.inner.uid.as_str()).filter(|uid| !uid.is_empty()),
         )?;
@@ -795,14 +788,6 @@ async fn move_card(
                 .object_quota_limit(&to_account, StorageQuota::MaxContactCards)
                 .is_some()
         {
-            let to_resources = server
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    to_account_id,
-                    SyncCollection::AddressBook,
-                )
-                .await
-                .caused_by(trc::location!())?;
             server.assert_object_quota(&to_account, StorageQuota::MaxContactCards, 1, || {
                 to_resources.resources.count(false)
             })?;
@@ -933,6 +918,7 @@ async fn copy_container(
     server: &Server,
     access_token: &AccessToken,
     from_resources: &GroupwareResources,
+    to_resources: &GroupwareResources,
     from_account_id: u32,
     from_document_id: u32,
     from_children_ids: Vec<u32>,
@@ -1017,20 +1003,7 @@ async fn copy_container(
         && server
             .object_quota_limit(&to_account, StorageQuota::MaxContactCards)
             .is_some();
-    let to_resources = if has_container_quota || has_item_quota {
-        Some(
-            server
-                .fetch_groupware_resources(
-                    access_token.account_id(),
-                    to_account_id,
-                    SyncCollection::AddressBook,
-                )
-                .await
-                .caused_by(trc::location!())?,
-        )
-    } else {
-        None
-    };
+    let to_resources = (has_container_quota || has_item_quota).then_some(to_resources);
     if has_container_quota && let Some(to_resources) = &to_resources {
         server.assert_object_quota(&to_account, StorageQuota::MaxAddressBooks, 1, || {
             to_resources.resources.count(true)
@@ -1167,9 +1140,6 @@ async fn copy_container(
             } else {
                 continue;
             };
-            let card = card_
-                .to_unarchived::<ContactCard>()
-                .caused_by(trc::location!())?;
             let mut new_card = card
                 .deserialize::<ContactCard>()
                 .caused_by(trc::location!())?;

@@ -14,6 +14,7 @@ use std::{
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use mail_auth::dns::ToReverseName;
+use memchr::memchr3_iter;
 use store::write::now;
 use tokio::sync::Semaphore;
 
@@ -183,10 +184,10 @@ impl Server {
                             let mut col_start = 0;
                             let mut line_start = 0;
 
-                            for (idx, ch) in data.char_indices() {
-                                match ch {
-                                    '"' => in_quote = !in_quote,
-                                    ',' | '\n' if !in_quote => {
+                            for idx in memchr3_iter(b'"', b',', b'\n', data.as_bytes()) {
+                                match data.as_bytes().get(idx) {
+                                    Some(b'"') => in_quote = !in_quote,
+                                    Some(&ch) if !in_quote => {
                                         let column =
                                             data.get(col_start..idx).unwrap_or_default().trim();
                                         match col_num {
@@ -202,10 +203,10 @@ impl Server {
                                                     details = Some(column);
                                                 }
                                             }
-                                            _ => break,
+                                            _ => {}
                                         }
 
-                                        if ch == '\n' {
+                                        if ch == b'\n' {
                                             let is_success = match (from_ip, to_ip, asn, details) {
                                                 (
                                                     Some(from_ip),
@@ -227,10 +228,11 @@ impl Server {
                                                 (Some(from_ip), Some(to_ip), _, Some(code))
                                                     if !is_asn && [2, 3].contains(&code.len()) =>
                                                 {
-                                                    let code = code.to_uppercase();
                                                     let data = geo_mappings
-                                                        .entry(code.clone())
-                                                        .or_insert_with(|| Arc::new(code))
+                                                        .entry(code)
+                                                        .or_insert_with(|| {
+                                                            Arc::new(code.to_uppercase())
+                                                        })
                                                         .clone();
                                                     country_data.insert(from_ip, to_ip, data)
                                                 }

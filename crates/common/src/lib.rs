@@ -27,6 +27,7 @@ use crate::{
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use auth::oauth::config::OAuthConfig;
+use bytes::Bytes;
 use calcard::common::timezone::Tz;
 use compact_str::CompactString;
 use config::{
@@ -174,7 +175,7 @@ pub struct Data {
 pub struct LogoCache {
     domain_id: u32,
     tenant_id: Option<u32>,
-    data: Option<Resource<Vec<u8>>>,
+    data: Option<Resource<Bytes>>,
 }
 
 pub struct Caches {

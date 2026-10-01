@@ -11,7 +11,11 @@ use crate::{
 use common::{Server, auth::AccessToken};
 use compact_str::format_compact;
 use email::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess},
+    cache::{
+        MessageCacheFetch,
+        email::{MessageAccess, MessageCacheAccess},
+        mailbox::MailboxCacheAccess,
+    },
     message::{
         jmap::{BodyValueOptions, EmailNeeds, EmailRender, HeaderNeeds},
         metadata::{MetadataRow, MetadataStructure},
@@ -156,11 +160,10 @@ impl EmailGet for Server {
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        let is_member = access_token.is_member(account_id);
-        let message_ids = if is_member {
-            cache.email_document_ids()
+        let access = if access_token.is_member(account_id) {
+            MessageAccess::All
         } else {
-            cache.shared_messages(access_token, Acl::ReadItems)
+            MessageAccess::Mailboxes(cache.shared_mailboxes(access_token, Acl::ReadItems))
         };
 
         let ids = if let Some(ids) = ids {
@@ -170,7 +173,7 @@ impl EmailGet for Server {
                 cache
                     .emails
                     .iter()
-                    .filter(|item| is_member || message_ids.contains(item.document_id()))
+                    .filter(|item| access.allows(*item))
                     .map(|item| Id::from_parts(item.thread_id(), item.document_id())),
                 self.core.jmap.get_max_objects,
             )?
@@ -184,12 +187,11 @@ impl EmailGet for Server {
         let mut metadata_values = match &metadata {
             Some(metadata) => {
                 let mut documents = MetadataDocuments::default();
-                for document_id in ids
-                    .iter()
-                    .map(Id::document_id)
-                    .filter(|document_id| message_ids.contains(*document_id))
-                {
-                    if let Some(email) = cache.email_by_id(&document_id) {
+                for document_id in ids.iter().map(Id::document_id) {
+                    if let Some(email) = cache
+                        .email_by_id(&document_id)
+                        .filter(|email| access.allows(*email))
+                    {
                         documents.insert(document_id, cache.metadata_kinds(email));
                     }
                 }
@@ -203,19 +205,13 @@ impl EmailGet for Server {
         };
 
         for id in ids {
-            // Obtain the email object
-            if !message_ids.contains(id.document_id()) {
+            // Obtain message data
+            let Some(data) = cache
+                .email_by_id(&id.document_id())
+                .filter(|data| access.allows(*data))
+            else {
                 response.push_not_found(id);
                 continue;
-            }
-
-            // Obtain message data
-            let data = match cache.email_by_id(&id.document_id()) {
-                Some(data) => data,
-                None => {
-                    response.push_not_found(id);
-                    continue;
-                }
             };
 
             let metadata_key = ValueKey::immutable(

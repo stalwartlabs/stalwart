@@ -67,8 +67,10 @@ fn second_level_domain(fqdn: &str) -> Option<String> {
 
 impl Hostname {
     pub fn new(host: &str) -> Self {
-        let mut fqdn = host.trim_end_matches('.').to_lowercase();
+        Hostname::from_lowercase(host.trim_end_matches('.').to_lowercase())
+    }
 
+    fn from_lowercase(mut fqdn: String) -> Self {
         if fqdn.contains("xn--") {
             fqdn = decode_punycode(&fqdn);
         }
@@ -98,7 +100,7 @@ impl Email {
 
         Email {
             local_part: local_part.into(),
-            domain_part: Hostname::new(domain),
+            domain_part: Hostname::from_lowercase(domain.trim_end_matches('.').into()),
             address,
         }
     }

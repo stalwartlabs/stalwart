@@ -468,13 +468,7 @@ fn create(flags: c_uint) -> Result<File> {
 /// See: https://github.com/tokio-rs/tracing/issues/1879
 #[cfg(target_os = "linux")]
 fn memfd_create_syscall(flags: c_uint) -> c_int {
-    unsafe {
-        syscall(
-            SYS_memfd_create,
-            "tracing-journald\0".as_ptr() as *const c_char,
-            flags,
-        ) as c_int
-    }
+    unsafe { syscall(SYS_memfd_create, c"tracing-journald".as_ptr(), flags) as c_int }
 }
 
 #[cfg(target_os = "linux")]

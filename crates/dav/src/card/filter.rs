@@ -9,7 +9,7 @@ use calcard::vcard::{
     ArchivedVCard, ArchivedVCardEntry, ArchivedVCardParameterValue, ArchivedVCardValue,
     ArchivedVCardValueType, VCardParameterName, VCardProperty,
 };
-use common::storage::dav::MAX_CACHED_UID_LEN;
+use common::storage::dav::CachedUid;
 use dav_proto::schema::request::{
     CardFilter, CardPropFilter, CardPropMatch, FilterTest, ParamFilter, Presence,
     VCardPropertyWithGroup,
@@ -197,9 +197,7 @@ impl CardFilterPlan for CardPropFilter {
             } else if is_uid {
                 scope.matching(|resource| {
                     resource.uid().is_none_or(|uid| {
-                        uid.is_empty()
-                            || uid.len() >= MAX_CACHED_UID_LEN
-                            || text_match.is_match(uid)
+                        uid.is_empty() || uid.is_hashed_uid() || text_match.is_match(uid)
                     })
                 })
             } else if let Some((field, text)) = &field {

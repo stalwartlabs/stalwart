@@ -5,13 +5,42 @@
  */
 
 use super::{Mechanism, dot_stuffer::DotStuffer};
-use std::{borrow::Cow, fmt::Display};
+use std::borrow::Cow;
 use utils::chained_bytes::ChainedBytes;
 
 const STATUS_LINE_LEN: usize = 32;
 const STUFFING_RESERVE_DIVISOR: usize = 64;
 const BLANK_LINE_TAIL_LEN: usize = 3;
 const CRLF_LEN: usize = 2;
+const LIST_NUMBER_LEN: usize = 6;
+
+pub trait ListValue {
+    const LEN_HINT: usize;
+
+    fn write_value(&self, buf: &mut Vec<u8>);
+}
+
+impl ListValue for u32 {
+    const LEN_HINT: usize = 8;
+
+    fn write_value(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(itoa::Buffer::new().format(*self).as_bytes());
+    }
+}
+
+pub struct UniqueId {
+    pub uid_validity: u32,
+    pub uid: u32,
+}
+
+impl ListValue for UniqueId {
+    const LEN_HINT: usize = 20;
+
+    fn write_value(&self, buf: &mut Vec<u8>) {
+        self.uid_validity.write_value(buf);
+        self.uid.write_value(buf);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageEnd {
@@ -55,6 +84,74 @@ impl<'x, T> Response<'x, T> {
     }
 }
 
+pub struct MessageWriter<'x> {
+    current: &'x [u8],
+    next: &'x [u8],
+    stuffer: Option<DotStuffer>,
+    end: MessageEnd,
+    chunk_len: usize,
+}
+
+impl<'x> MessageWriter<'x> {
+    pub fn new(
+        bytes: ChainedBytes<'x>,
+        end: MessageEnd,
+        buf: &mut Vec<u8>,
+        chunk_len: usize,
+    ) -> Self {
+        let mut octets = DotStuffer::wire_len(&bytes);
+        if end == MessageEnd::BlankLine {
+            octets += CRLF_LEN;
+        }
+        buf.reserve(
+            octets.min(chunk_len)
+                + bytes.len().min(chunk_len) / STUFFING_RESERVE_DIVISOR
+                + STATUS_LINE_LEN,
+        );
+        buf.extend_from_slice(b"+OK ");
+        buf.extend_from_slice(itoa::Buffer::new().format(octets).as_bytes());
+        buf.extend_from_slice(b" octets\r\n");
+        let [current, next] = bytes.segments();
+        MessageWriter {
+            current,
+            next,
+            stuffer: Some(DotStuffer::default()),
+            end,
+            chunk_len,
+        }
+    }
+
+    pub fn fill(&mut self, buf: &mut Vec<u8>) -> bool {
+        loop {
+            let Some(stuffer) = &mut self.stuffer else {
+                return true;
+            };
+            if buf.len() >= self.chunk_len {
+                return false;
+            }
+            if self.current.is_empty() {
+                if self.next.is_empty() {
+                    if let Some(stuffer) = self.stuffer.take() {
+                        stuffer.finish(buf, self.end);
+                    }
+                    return true;
+                }
+                self.current = std::mem::take(&mut self.next);
+            }
+            let take = self
+                .current
+                .len()
+                .min(self.chunk_len.saturating_sub(buf.len()));
+            let (slice, rest) = self
+                .current
+                .split_at_checked(take)
+                .unwrap_or((self.current, &[]));
+            stuffer.push(buf, slice);
+            self.current = rest;
+        }
+    }
+}
+
 fn ends_with_blank_line(bytes: &ChainedBytes<'_>) -> bool {
     let len = bytes.len();
     bytes
@@ -67,7 +164,7 @@ fn ends_with_blank_line(bytes: &ChainedBytes<'_>) -> bool {
         })
 }
 
-impl<T: Display> Response<'_, T> {
+impl<T: ListValue> Response<'_, T> {
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             Response::Ok(message) => {
@@ -84,34 +181,26 @@ impl<T: Display> Response<'_, T> {
                 buf.extend_from_slice(b"\r\n");
                 buf
             }
-            Response::List(octets) => {
-                let mut buf = Vec::with_capacity(octets.len() * 8 + 10);
-                buf.extend_from_slice(format!("+OK {} messages\r\n", octets.len()).as_bytes());
-                for (num, octet) in octets.iter().enumerate() {
-                    buf.extend_from_slice((num + 1).to_string().as_bytes());
-                    buf.extend_from_slice(b" ");
-                    buf.extend_from_slice(octet.to_string().as_bytes());
+            Response::List(values) => {
+                let mut buf = Vec::with_capacity(
+                    values.len() * (LIST_NUMBER_LEN + T::LEN_HINT + CRLF_LEN) + STATUS_LINE_LEN,
+                );
+                let mut number = itoa::Buffer::new();
+                buf.extend_from_slice(b"+OK ");
+                buf.extend_from_slice(number.format(values.len()).as_bytes());
+                buf.extend_from_slice(b" messages\r\n");
+                for (num, value) in values.iter().enumerate() {
+                    buf.extend_from_slice(number.format(num + 1).as_bytes());
+                    buf.push(b' ');
+                    value.write_value(&mut buf);
                     buf.extend_from_slice(b"\r\n");
                 }
                 buf.extend_from_slice(b".\r\n");
                 buf
             }
             Response::Message(bytes, end) => {
-                let mut octets = DotStuffer::wire_len(bytes);
-                if *end == MessageEnd::BlankLine {
-                    octets += CRLF_LEN;
-                }
-                let mut buf = Vec::with_capacity(
-                    octets + bytes.len() / STUFFING_RESERVE_DIVISOR + STATUS_LINE_LEN,
-                );
-                buf.extend_from_slice(b"+OK ");
-                buf.extend_from_slice(itoa::Buffer::new().format(octets).as_bytes());
-                buf.extend_from_slice(b" octets\r\n");
-                let mut stuffer = DotStuffer::default();
-                for segment in bytes.segments() {
-                    stuffer.push(&mut buf, segment);
-                }
-                stuffer.finish(&mut buf, *end);
+                let mut buf = Vec::new();
+                MessageWriter::new(*bytes, *end, &mut buf, usize::MAX).fill(&mut buf);
                 buf
             }
             Response::Capability { mechanisms, stls } => {
@@ -191,7 +280,7 @@ impl SerializeResponse for trc::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{MessageEnd, Response};
+    use super::{MessageEnd, MessageWriter, Response, UniqueId};
     use crate::protocol::{
         Mechanism,
         dot_stuffer::tests::{reference_pop3_with_end, strings_over},
@@ -304,6 +393,32 @@ mod tests {
     }
 
     #[test]
+    fn chunked_message_matches_serialized() {
+        for message in strings_over(b"a\r\n.", 6) {
+            for split in 0..=message.len() {
+                let (head, tail) = message.split_at(split);
+                let bytes = ChainedBytes::chain(head, tail);
+                for end in [MessageEnd::AsIs, MessageEnd::BlankLine] {
+                    let expected = Response::<u32>::Message(bytes, end).serialize();
+                    for chunk_len in [1, 2, 3, 5, 8, 64] {
+                        let mut buf = Vec::new();
+                        let mut chunks = Vec::new();
+                        let mut writer = MessageWriter::new(bytes, end, &mut buf, chunk_len);
+                        while !writer.fill(&mut buf) {
+                            assert!(buf.len() >= chunk_len);
+                            chunks.extend_from_slice(&buf);
+                            buf.clear();
+                        }
+                        assert!(writer.fill(&mut buf));
+                        chunks.extend_from_slice(&buf);
+                        assert_eq!(chunks, expected, "{message:?} {split} {chunk_len}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn serialize_response() {
         for (cmd, expected) in [
             (
@@ -315,7 +430,7 @@ mod tests {
                 "-ERR permission denied\r\n",
             ),
             (
-                Response::List(vec![100, 200, 300]),
+                Response::List(vec![100u32, 200, 300]),
                 "+OK 3 messages\r\n1 100\r\n2 200\r\n3 300\r\n.\r\n",
             ),
             (
@@ -355,5 +470,22 @@ mod tests {
         ] {
             assert_eq!(expected, String::from_utf8(cmd.serialize()).unwrap());
         }
+        assert_eq!(
+            String::from_utf8(
+                Response::List(vec![
+                    UniqueId {
+                        uid_validity: 1234,
+                        uid: 1,
+                    },
+                    UniqueId {
+                        uid_validity: 1234,
+                        uid: 4_000_000_000,
+                    },
+                ])
+                .serialize()
+            )
+            .unwrap(),
+            "+OK 2 messages\r\n1 12341\r\n2 12344000000000\r\n.\r\n"
+        );
     }
 }

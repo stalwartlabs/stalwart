@@ -22,6 +22,8 @@ use jmap_proto::{
     request::{QueryChangesRequestMethod, capability::CapabilityIds, method::MethodObject},
 };
 use std::future::Future;
+use store::ahash::AHashSet;
+use types::id::Id;
 
 pub trait QueryChanges: Sync + Send {
     fn query_changes(
@@ -287,16 +289,23 @@ impl QueryChanges for Server {
 
         if has_changes {
             if is_mutable {
+                let changed = changes
+                    .created
+                    .iter()
+                    .chain(changes.updated.iter())
+                    .copied()
+                    .collect::<AHashSet<Id>>();
                 for (index, id) in results.ids.into_iter().enumerate() {
-                    if changes.created.contains(&id) || changes.updated.contains(&id) {
+                    if changed.contains(&id) {
                         response.added.push(AddedItem::new(id, index));
                     }
                 }
 
                 response.removed = changes.updated;
             } else {
+                let created = changes.created.iter().copied().collect::<AHashSet<Id>>();
                 for (index, id) in results.ids.into_iter().enumerate() {
-                    if changes.created.contains(&id) {
+                    if created.contains(&id) {
                         response.added.push(AddedItem::new(id, index));
                     }
                     if matches!(up_to_id, Some(up_to_id) if up_to_id == id) {

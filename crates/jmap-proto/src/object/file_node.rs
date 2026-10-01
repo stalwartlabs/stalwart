@@ -10,7 +10,10 @@ use crate::{
         metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
-    request::{MaybeInvalid, deserialize::DeserializeArguments},
+    request::{
+        MaybeInvalid,
+        deserialize::{CowStr, DeserializeArguments},
+    },
     types::date::UTCDate,
 };
 use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, PointerDepth, Property};
@@ -406,8 +409,8 @@ impl<'de> serde::Deserialize<'de> for OnExists {
     where
         D: serde::Deserializer<'de>,
     {
-        let value: Option<Cow<'_, str>> = Option::deserialize(deserializer)?;
-        match value.as_deref() {
+        let value: Option<CowStr<'_>> = Option::deserialize(deserializer)?;
+        match value.as_ref().map(|value| value.0.as_ref()) {
             Some("replace") => Ok(OnExists::Replace),
             Some("rename") => Ok(OnExists::Rename),
             Some("newest") => Ok(OnExists::Newest),
@@ -699,7 +702,7 @@ impl<'de> DeserializeArguments<'de> for FileNodeComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"name" => {
                     *self = FileNodeComparator::Name;

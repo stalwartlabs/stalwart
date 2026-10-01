@@ -5,7 +5,7 @@
  */
 
 use super::*;
-use crate::cache::MessageCacheFetch;
+use crate::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
 use common::{Server, storage::index::ObjectIndexBuilder};
 use registry::schema::enums::StorageQuota;
 use std::future::Future;
@@ -85,32 +85,20 @@ impl MailboxFnc for Server {
         let mut next_parent_id = 0;
         let mut create_paths = Vec::with_capacity(2);
 
+        let mut found_path = String::with_capacity(path.len());
         let mut path = path.split('/').map(|v| v.trim());
-        let mut found_path = String::with_capacity(16);
-        {
-            while let Some(name) = path.next() {
-                if !found_path.is_empty() {
-                    found_path.push('/');
-                }
+        while let Some(name) = path.next() {
+            if !found_path.is_empty() {
+                found_path.push('/');
+            }
+            found_path.extend(name.chars().flat_map(char::to_lowercase));
 
-                for ch in name.chars() {
-                    for ch in ch.to_lowercase() {
-                        found_path.push(ch);
-                    }
-                }
-
-                if let Some(item) = cache
-                    .mailboxes
-                    .items
-                    .iter()
-                    .find(|item| item.path.to_lowercase() == found_path)
-                {
-                    next_parent_id = item.document_id + 1;
-                } else {
-                    create_paths.push(name.to_string());
-                    create_paths.extend(path.map(|v| v.to_string()));
-                    break;
-                }
+            if let Some(item) = cache.mailbox_by_lowercase_path(&found_path) {
+                next_parent_id = item.document_id + 1;
+            } else {
+                create_paths.push(name.to_string());
+                create_paths.extend(path.map(|v| v.to_string()));
+                break;
             }
         }
 

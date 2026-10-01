@@ -11,6 +11,7 @@ use crate::expr::{
     if_block::{BootstrapExprExt, IfBlock},
 };
 use ahash::AHashSet;
+use bytes::Bytes;
 use hyper::HeaderMap;
 use registry::schema::{
     enums::{self, ExpressionConstant, MtaStage},
@@ -40,10 +41,16 @@ pub struct SessionConfig {
     pub rcpt: Rcpt,
     pub data: Data,
     pub extensions: Extensions,
-    pub mta_sts_policy: Option<Policy>,
+    pub mta_sts_policy: Option<LocalMtaStsPolicy>,
 
     pub milters: Vec<Milter>,
     pub hooks: Vec<MTAHook>,
+}
+
+#[derive(Clone)]
+pub struct LocalMtaStsPolicy {
+    pub policy: Policy,
+    pub text: Bytes,
 }
 
 #[derive(Clone)]
@@ -372,7 +379,10 @@ impl SessionConfig {
                     &ext.ctx_mt_priority(),
                 ),
             },
-            mta_sts_policy: Policy::try_parse(bp).await,
+            mta_sts_policy: Policy::try_parse(bp).await.map(|policy| LocalMtaStsPolicy {
+                text: Bytes::from(policy.to_string()),
+                policy,
+            }),
             milters: bp
                 .list_infallible::<MtaMilter>()
                 .await

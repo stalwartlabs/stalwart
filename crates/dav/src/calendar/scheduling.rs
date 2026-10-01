@@ -164,12 +164,11 @@ impl CalendarEventNotificationHandler for Server {
             .unarchive::<CalendarEventNotificationContent>()
             .caused_by(trc::location!())?;
 
-        Ok(response.with_binary_body(
-            content
-                .calendar_data()
-                .map(|ical| ical.to_string())
-                .unwrap_or_default(),
-        ))
+        let mut body = String::with_capacity(event.size.to_native() as usize);
+        if let Some(ical) = content.calendar_data() {
+            let _ = ical.write_to(&mut body);
+        }
+        Ok(response.with_binary_body(body))
     }
 
     async fn handle_scheduling_delete_request(

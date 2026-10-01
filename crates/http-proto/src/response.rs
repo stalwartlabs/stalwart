@@ -121,7 +121,7 @@ impl HttpResponse {
         self.with_content_length(body_len)
     }
 
-    pub fn with_binary_body(mut self, body: impl Into<Vec<u8>>) -> Self {
+    pub fn with_binary_body(mut self, body: impl Into<Bytes>) -> Self {
         let body = body.into();
         let body_len = body.len();
         self.body = HttpResponseBody::Binary(body);
@@ -222,11 +222,9 @@ impl HttpResponse {
                     .map_err(|never| match never {})
                     .boxed(),
             ),
-            HttpResponseBody::Binary(body) => self.builder.body(
-                Full::new(Bytes::from(body))
-                    .map_err(|never| match never {})
-                    .boxed(),
-            ),
+            HttpResponseBody::Binary(body) => self
+                .builder
+                .body(Full::new(body).map_err(|never| match never {}).boxed()),
             HttpResponseBody::Empty => {
                 let has_content_length = self
                     .builder
@@ -300,7 +298,7 @@ impl ToHttpResponse for DownloadResponse {
     }
 }
 
-impl ToHttpResponse for Resource<Vec<u8>> {
+impl<T: Into<Bytes>> ToHttpResponse for Resource<T> {
     fn into_http_response(self) -> HttpResponse {
         HttpResponse::new(StatusCode::OK)
             .with_content_type(self.content_type.as_ref())

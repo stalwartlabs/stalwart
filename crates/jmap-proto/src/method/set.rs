@@ -273,13 +273,12 @@ impl<T: JmapObject> SetResponse<T> {
         &mut self,
         id: Id,
     ) -> Option<&mut Value<'static, T::Property, T::Element>> {
-        if let Some(obj) = self.updated.get_mut(&id) {
-            if let Some(obj) = obj {
-                return Some(obj);
-            } else {
-                *obj = Some(Value::Object(Map::with_capacity(1)));
-                return obj.as_mut().unwrap().into();
-            }
+        if let Some(entry) = self.updated.inner.iter_mut().rev().find(|kv| kv.key == id) {
+            return Some(
+                entry
+                    .value
+                    .get_or_insert_with(|| Value::Object(Map::with_capacity(1))),
+            );
         }
 
         (&mut self.created)

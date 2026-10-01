@@ -27,7 +27,12 @@ use std::{
     net::IpAddr,
     sync::Arc,
 };
-use store::{query::acl::AclQuery, rand, write::now};
+use store::{
+    Deserialize, IterateParams, ValueKey,
+    query::acl::{AclItem, AclQuery},
+    rand,
+    write::{ValueClass, key::DeserializeBigEndian, now},
+};
 use tinyvec::TinyVec;
 use trc::{AddContext, CacheEvent};
 use types::{acl::Acl, collection::Collection};
@@ -75,52 +80,49 @@ impl Server {
                     .map(|m| m.id() as u32)
                     .collect::<TinyVec<[u32; 3]>>();
                 let mut access_to: Vec<AccessTo> = Vec::new();
-                for grant_account_id in [account_id].into_iter().chain(member_of.iter().copied()) {
-                    for acl_item in self
-                        .store()
-                        .acl_query(AclQuery::HasAccess { grant_account_id })
-                        .await
-                        .caused_by(trc::location!())?
+                for (grant_account_id, acl_item) in
+                    self.acl_items_by_grantee(account_id, &member_of).await?
+                {
+                    if acl_item.to_account_id == account_id
+                        || member_of.contains(&acl_item.to_account_id)
                     {
-                        if acl_item.to_account_id != account_id
-                            && !member_of.contains(&acl_item.to_account_id)
+                        continue;
+                    }
+
+                    let acl = Bitmap::<Acl>::from(acl_item.permissions);
+                    let collection = acl_item.to_collection;
+                    if !collection.is_valid() {
+                        return Err(trc::StoreEvent::DataCorruption
+                            .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
+                            .details(format_compact!("{acl_item:?}"))
+                            .account_id(grant_account_id)
+                            .caused_by(trc::location!()));
+                    }
+
+                    let mut collections: Bitmap<Collection> = Bitmap::new();
+                    if acl.contains(Acl::Read) {
+                        collections.insert(collection);
+                    }
+                    if acl.contains(Acl::ReadItems)
+                        && let Some(child_col) = collection.child_collection()
+                    {
+                        collections.insert(child_col);
+                    }
+
+                    if !collections.is_empty() {
+                        let is_writable = acl.intersects(&Acl::WRITE);
+                        if let Some(entry) = access_to
+                            .iter_mut()
+                            .find(|a| a.account_id == acl_item.to_account_id)
                         {
-                            let acl = Bitmap::<Acl>::from(acl_item.permissions);
-                            let collection = acl_item.to_collection;
-                            if !collection.is_valid() {
-                                return Err(trc::StoreEvent::DataCorruption
-                                    .ctx(trc::Key::Reason, "Corrupted collection found in ACL key.")
-                                    .details(format_compact!("{acl_item:?}"))
-                                    .account_id(grant_account_id)
-                                    .caused_by(trc::location!()));
-                            }
-
-                            let mut collections: Bitmap<Collection> = Bitmap::new();
-                            if acl.contains(Acl::Read) {
-                                collections.insert(collection);
-                            }
-                            if acl.contains(Acl::ReadItems)
-                                && let Some(child_col) = collection.child_collection()
-                            {
-                                collections.insert(child_col);
-                            }
-
-                            if !collections.is_empty() {
-                                let is_writable = acl.intersects(&Acl::WRITE);
-                                if let Some(entry) = access_to
-                                    .iter_mut()
-                                    .find(|a| a.account_id == acl_item.to_account_id)
-                                {
-                                    entry.collections.union(&collections);
-                                    entry.is_writable |= is_writable;
-                                } else {
-                                    access_to.push(AccessTo {
-                                        account_id: acl_item.to_account_id,
-                                        collections,
-                                        is_writable,
-                                    });
-                                }
-                            }
+                            entry.collections.union(&collections);
+                            entry.is_writable |= is_writable;
+                        } else {
+                            access_to.push(AccessTo {
+                                account_id: acl_item.to_account_id,
+                                collections,
+                                is_writable,
+                            });
                         }
                     }
                 }
@@ -259,6 +261,75 @@ impl Server {
                 .update_size())
             }
         }
+    }
+
+    async fn acl_items_by_grantee(
+        &self,
+        account_id: u32,
+        member_of: &[u32],
+    ) -> trc::Result<Vec<(u32, AclItem)>> {
+        if member_of.is_empty() {
+            return self
+                .store()
+                .acl_query(AclQuery::HasAccess {
+                    grant_account_id: account_id,
+                })
+                .await
+                .caused_by(trc::location!())
+                .map(|items| items.into_iter().map(|item| (account_id, item)).collect());
+        }
+
+        let grantees = [account_id]
+            .into_iter()
+            .chain(member_of.iter().copied())
+            .collect::<TinyVec<[u32; 4]>>();
+        let mut items = Vec::new();
+        self.store()
+            .iterate_many(
+                grantees
+                    .iter()
+                    .map(|&grant_account_id| {
+                        IterateParams::new(
+                            ValueKey {
+                                account_id: 0,
+                                collection: 0,
+                                document_id: 0,
+                                class: ValueClass::Acl(grant_account_id),
+                            },
+                            ValueKey {
+                                account_id: u32::MAX,
+                                collection: u8::MAX,
+                                document_id: u32::MAX,
+                                class: ValueClass::Acl(grant_account_id),
+                            },
+                        )
+                        .ascending()
+                    })
+                    .collect(),
+                |key, value| {
+                    let grant_account_id = key.deserialize_be_u32(0)?;
+                    let mut item = AclItem::deserialize(key)?;
+                    item.permissions = u64::deserialize(value)?;
+                    items.push((grant_account_id, item));
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        items.sort_unstable_by_key(|(grant_account_id, item)| {
+            (
+                grantees
+                    .iter()
+                    .position(|id| id == grant_account_id)
+                    .unwrap_or(usize::MAX),
+                item.to_account_id,
+                u8::from(item.to_collection),
+                item.to_document_id,
+            )
+        });
+
+        Ok(items)
     }
 
     pub async fn access_token(&self, account_id: u32) -> trc::Result<Arc<AccessTokenInner>> {

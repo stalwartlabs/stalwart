@@ -45,7 +45,6 @@ async fn sign_and_seal() {
             ..Default::default()
         })
         .await;
-    admin.create_dkim_signatures(domain_id).await;
     admin.mta_no_auth().await;
     admin.mta_add_all_headers().await;
     admin
@@ -129,6 +128,23 @@ async fn sign_and_seal() {
     session.data.remote_ip_str = "10.0.0.2".into();
     session.eval_session_params().await;
     session.ehlo("mx.example.com").await;
+    session
+        .send_message(
+            "bill@foobar.org",
+            &["jdoe@example.com"],
+            "test:no_dkim",
+            "250",
+        )
+        .await;
+    test.expect_message()
+        .await
+        .read_lines(&test)
+        .await
+        .assert_not_contains("DKIM-Signature:");
+
+    test.account("admin")
+        .create_dkim_signatures(domain_id)
+        .await;
     session
         .send_message(
             "bill@foobar.org",

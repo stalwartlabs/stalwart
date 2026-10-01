@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::server::TestServer;
 use crate::utils::smtp::SmtpConnection;
+use crate::{telemetry::tracing::clear_trace_index, utils::server::TestServer};
 use aws_lc_rs::hmac;
 use common::{manager::application::Resource, telemetry::tracers::store::TracingStore};
 use encodify::base64::STANDARD;
@@ -123,6 +123,7 @@ pub async fn test(test: &TestServer) {
         .purge_spans(Duration::from_secs(0), test.server.search_store().into())
         .await
         .unwrap();
+    clear_trace_index(test).await;
     test.cleanup().await;
 }
 

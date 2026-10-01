@@ -166,8 +166,8 @@ impl<T: SessionStream> Session<T> {
             }
 
             // Check for duplicates
-            let rcpt = self.data.rcpt_to.last().unwrap();
-            if self.data.rcpt_to.iter().filter(|r| r == &rcpt).count() > 1 {
+            let (rcpt, previous) = self.data.rcpt_to.split_last().unwrap();
+            if previous.contains(rcpt) {
                 trc::event!(
                     Smtp(SmtpEvent::RcptToDuplicate),
                     SpanId = self.data.session_id,
@@ -272,7 +272,12 @@ impl<T: SessionStream> Session<T> {
                 key.extend_from_slice(from_addr);
                 key.extend_from_slice(to_addr);
 
-                match self.server.in_memory_store().key_exists(key.clone()).await {
+                match self
+                    .server
+                    .in_memory_store()
+                    .key_exists(key.as_slice())
+                    .await
+                {
                     Ok(true) => (),
                     Ok(false) => {
                         match self

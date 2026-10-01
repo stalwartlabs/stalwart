@@ -10,6 +10,7 @@ use crate::{
 use common::{Server, config::mailstore::spamfilter::Location};
 use compact_str::CompactString;
 use mail_parser::{Header, HeaderForm};
+use memchr::memchr2_iter;
 use std::{
     borrow::Cow,
     hash::{Hash, Hasher},
@@ -70,7 +71,7 @@ impl SpamFilterOutput<'_> {
             .and_then(|idx| self.text_parts.get(idx as usize))
             .and_then(|part| match part {
                 TextPart::Plain { text_body, .. } => Some(*text_body),
-                TextPart::Html { text_body, .. } => Some(text_body.as_str()),
+                TextPart::Html { text_body, .. } => Some(*text_body),
                 TextPart::None => None,
             })
     }
@@ -242,20 +243,20 @@ pub(crate) fn starts_with_ignore_ascii_case(text: &str, prefix: &str) -> bool {
 }
 
 pub(crate) fn contains_ignore_ascii_case(text: &str, needle: &str) -> bool {
-    let bytes = text.as_bytes();
-    let needle_bytes = needle.as_bytes();
-
-    if needle_bytes.is_empty() {
-        true
-    } else if bytes.len() > 512 {
-        text.to_ascii_lowercase()
-            .contains(needle.to_ascii_lowercase().as_str())
-    } else {
-        bytes.len() >= needle_bytes.len()
-            && bytes
-                .windows(needle_bytes.len())
-                .any(|window| window.eq_ignore_ascii_case(needle_bytes))
-    }
+    let haystack = text.as_bytes();
+    let Some((&first, rest)) = needle.as_bytes().split_first() else {
+        return true;
+    };
+    memchr2_iter(
+        first.to_ascii_lowercase(),
+        first.to_ascii_uppercase(),
+        haystack,
+    )
+    .any(|pos| {
+        haystack
+            .get(pos + 1..pos + 1 + rest.len())
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(rest))
+    })
 }
 
 #[cfg(test)]
@@ -324,6 +325,15 @@ mod tests {
         assert!(contains_ignore_ascii_case(&long_lower, "ABC"));
         assert!(contains_ignore_ascii_case("ABC", "abc"));
         assert!(contains_ignore_ascii_case("abc", "ABC"));
+        assert!(contains_ignore_ascii_case("x;BASE64,", ";base64,"));
+        assert!(!contains_ignore_ascii_case("x;BASE64", ";base64,"));
+        assert!(contains_ignore_ascii_case("\u{e9}ABC", "abc"));
+        assert!(!contains_ignore_ascii_case("\u{212a}", "k"));
+        let mut long_data = String::from("data:image/png");
+        long_data.push_str(&"A".repeat(4096));
+        assert!(!contains_ignore_ascii_case(&long_data, ";base64,"));
+        long_data.push_str(";Base64,");
+        assert!(contains_ignore_ascii_case(&long_data, ";base64,"));
         assert!(starts_with_ignore_ascii_case("DATA:x", "data:"));
         assert!(!starts_with_ignore_ascii_case("dat", "data:"));
         assert!(starts_with_ignore_ascii_case("anything", ""));

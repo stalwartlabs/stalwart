@@ -6,12 +6,12 @@
 
 use crate::{
     Account, Credentials,
-    backend::oidc::{CachedKey, OidcError, OpenIdDirectory},
+    backend::oidc::{CachedKey, OidcConfig, OidcError, OpenIdDirectory},
 };
 use ahash::AHashMap;
 use compact_str::{CompactString, format_compact};
 use jsonwebtoken::{
-    Algorithm, DecodingKey, Header, Validation, decode, decode_header,
+    Algorithm, DecodingKey, Header, decode, decode_header,
     jwk::{self, JwkSet},
 };
 use reqwest::Client;
@@ -58,20 +58,7 @@ impl OpenIdDirectory {
         let candidates = self.get_key(header.kid.as_deref()).await?;
         let mut last_err = None;
         for cached in &candidates {
-            let dk = &cached.decoding_key;
-            let alg = cached.algorithm;
-            let mut validation = Validation::new(alg);
-
-            if let Some(aud) = &self.config.require_aud {
-                validation.set_audience(&[aud]);
-            } else {
-                validation.validate_aud = false;
-            }
-
-            validation.set_issuer(&[&self.discovery.document.issuer]);
-            validation.leeway = 60;
-
-            match decode::<serde_json::Value>(token, dk, &validation) {
+            match decode::<serde_json::Value>(token, &cached.decoding_key, &cached.validation) {
                 Ok(token_data) => {
                     if self.config.require_aud.is_some() && token_data.claims.get("aud").is_none() {
                         last_err = Some(jsonwebtoken::errors::Error::from(
@@ -149,7 +136,13 @@ impl OpenIdDirectory {
             }
         }
 
-        let new_keys = fetch_jwks_keys(&self.http, &self.discovery.document.jwks_uri).await?;
+        let new_keys = fetch_jwks_keys(
+            &self.http,
+            &self.discovery.document.jwks_uri,
+            &self.config,
+            &self.discovery.document.issuer,
+        )
+        .await?;
         {
             let mut guard = self.cache.write().await;
             guard.keys = new_keys;
@@ -288,6 +281,8 @@ impl OpenIdDirectory {
 pub(super) async fn fetch_jwks_keys(
     http: &Client,
     jwks_uri: &str,
+    config: &OidcConfig,
+    issuer: &str,
 ) -> Result<AHashMap<String, Arc<CachedKey>>, OidcError> {
     let jwks_bytes = http
         .get(jwks_uri)
@@ -393,7 +388,7 @@ pub(super) async fn fetch_jwks_keys(
             },
             CachedKey {
                 decoding_key,
-                algorithm,
+                validation: config.validation(algorithm, issuer),
             }
             .into(),
         );

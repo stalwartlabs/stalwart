@@ -6,7 +6,7 @@
 
 use super::{
     ArchivedMessage, ArchivedStatus, Message, MessageSource, Metadata, QueueEnvelope, QueueId,
-    QueuedMessage, Recipient, Schedule, Status,
+    QueuedMessage, Recipient, Schedule, Status, eval_strategy,
 };
 use crate::inbound::dkim::DkimSign;
 use crate::queue::MessageWrapper;
@@ -651,18 +651,15 @@ impl MessageWrapper {
     pub async fn add_expanded_recipient(&mut self, rcpt: impl AsRef<str>, server: &Server) {
         self.message.recipients.push(Recipient::new(rcpt.as_ref()));
         let mut arena = Bump::new();
-        let queue = server.get_queue_or_default(
-            &server
-                .eval_if::<String, _>(
-                    &server.core.smtp.queue.queue,
-                    &QueueEnvelope::new(&self.message, self.message.recipients.last().unwrap()),
-                    &mut arena,
-                    self.span_id,
-                )
-                .await
-                .unwrap_or_else(|| "default".to_string()),
+        let queue = eval_strategy(
+            server,
+            &server.core.smtp.queue.queue,
+            &QueueEnvelope::new(&self.message, self.message.recipients.last().unwrap()),
+            &mut arena,
             self.span_id,
-        );
+            Server::get_queue_or_default,
+        )
+        .await;
 
         // Update expiration
         let recipient = self.message.recipients.last_mut().unwrap();
@@ -740,18 +737,15 @@ impl MessageWrapper {
                         }
 
                         if !released_quotas.is_empty() {
-                            cur_message.metadata = cur_message
-                                .metadata
-                                .iter()
-                                .filter(|entry| match entry {
-                                    Metadata::QueueCount { id, .. }
-                                    | Metadata::QueueSize { id, .. } => {
-                                        !released_quotas.contains(id)
-                                    }
-                                    Metadata::Headers { .. } => true,
-                                })
-                                .cloned()
-                                .collect();
+                            let mut metadata = std::mem::take(&mut cur_message.metadata).into_vec();
+                            metadata.retain(|entry| match entry {
+                                Metadata::QueueCount { id, .. }
+                                | Metadata::QueueSize { id, .. } => {
+                                    released_quotas.binary_search(id).is_err()
+                                }
+                                Metadata::Headers { .. } => true,
+                            });
+                            cur_message.metadata = metadata.into_boxed_slice();
                         }
 
                         Archiver::new(cur_message)
@@ -916,16 +910,14 @@ impl MessageWrapper {
                     }
 
                     if !released_quotas.is_empty() {
-                        cur_message.metadata = cur_message
-                            .metadata
-                            .iter()
-                            .filter(|entry| match entry {
-                                Metadata::QueueCount { id, .. }
-                                | Metadata::QueueSize { id, .. } => !released_quotas.contains(id),
-                                Metadata::Headers { .. } => true,
-                            })
-                            .cloned()
-                            .collect();
+                        let mut metadata = std::mem::take(&mut cur_message.metadata).into_vec();
+                        metadata.retain(|entry| match entry {
+                            Metadata::QueueCount { id, .. } | Metadata::QueueSize { id, .. } => {
+                                released_quotas.binary_search(id).is_err()
+                            }
+                            Metadata::Headers { .. } => true,
+                        });
+                        cur_message.metadata = metadata.into_boxed_slice();
                     }
 
                     Archiver::new(cur_message)

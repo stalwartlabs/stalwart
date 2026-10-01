@@ -77,6 +77,7 @@ pub struct SessionData {
     pub rcpt_errors: usize,
     pub rcpt_oks: usize,
     pub message: Vec<u8>,
+    pub message_size: usize,
 
     pub authenticated_as: Option<AccountInfo>,
     pub auth_errors: usize,
@@ -160,6 +161,7 @@ impl SessionData {
             rcpt_errors: 0,
             rcpt_oks: 0,
             message: Vec::with_capacity(0),
+            message_size: 0,
             auth_errors: 0,
             messages_sent: 0,
             bytes_left: 0,
@@ -292,6 +294,7 @@ impl SessionData {
             rcpt_errors: 0,
             rcpt_oks: 0,
             message,
+            message_size: 0,
             authenticated_as: Some(authenticated_as),
             auth_errors: 0,
             priority: 0,
@@ -325,8 +328,14 @@ impl SessionAddress {
     }
 
     pub fn orcpt_parameter(&self) -> Option<String> {
-        self.dsn_info
-            .as_deref()
-            .map(|orcpt| format!("{ORCPT_ADDR_TYPE}{}", orcpt.to_lowercase()))
+        self.dsn_info.as_deref().map(|orcpt| {
+            if orcpt.is_ascii() {
+                let mut parameter = format!("{ORCPT_ADDR_TYPE}{orcpt}");
+                parameter.make_ascii_lowercase();
+                parameter
+            } else {
+                format!("{ORCPT_ADDR_TYPE}{}", orcpt.to_lowercase())
+            }
+        })
     }
 }

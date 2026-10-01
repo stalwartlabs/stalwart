@@ -29,6 +29,7 @@ farmhash = "1.1.5"
 nohash-hasher = "0.2.0"
 arcstr = "1.2.0"
 memchr = "2.8"
+simdutf8 = "0.1.5"
 
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.6"

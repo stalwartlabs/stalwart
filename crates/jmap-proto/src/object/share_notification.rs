@@ -6,7 +6,7 @@
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::deserialize::DeserializeArguments,
+    request::deserialize::{CowStr, DeserializeArguments},
     types::date::UTCDate,
 };
 use jmap_tools::{Element, Key, Property};
@@ -218,13 +218,13 @@ impl<'de> DeserializeArguments<'de> for ShareNotificationComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"created" => {
                     *self = ShareNotificationComparator::Created;
                 },
                 _ => {
-                    *self = ShareNotificationComparator::_T(value.to_string());
+                    *self = ShareNotificationComparator::_T(value.into_owned());
                 }
             );
         } else {

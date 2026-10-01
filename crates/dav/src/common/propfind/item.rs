@@ -16,8 +16,9 @@ use crate::{
     common::{
         ArchivedResource,
         acl::{DavAclHandler, Privileges, current_user_privilege_set},
+        quoted_etag,
     },
-    principal::{CurrentUserPrincipal, propfind::PrincipalPropFind},
+    principal::CurrentUserPrincipal,
 };
 use calcard::{common::timezone::Tz, icalendar::ICalendarComponentType};
 use common::{Server, storage::dav::DISPLAY_NAME_PROPERTY};
@@ -91,12 +92,14 @@ impl PropFindItemBuilder for Server {
         };
 
         // Fill properties
-        let is_private_view = matches!(
-            &archive,
-            ArchivedResource::CalendarEvent(event, _)
-                if !access_token.is_member(account_id)
-                    && !EventPrivacy::from_flags(event.inner.flags.to_native()).is_public()
-        );
+        let event_flags = match archive {
+            ArchivedResource::CalendarEvent(event, _) => Some(event.inner.flags.to_native()),
+            ArchivedResource::Cached(item) => item.event_flags(),
+            _ => None,
+        };
+        let is_private_view = event_flags.is_some_and(|flags| {
+            !access_token.is_member(account_id) && !EventPrivacy::from_flags(flags).is_public()
+        });
         let container = container.filter(|_| !is_private_view);
         let mut fields = Vec::with_capacity(properties.len());
         let mut fields_not_found = Vec::new();
@@ -193,7 +196,7 @@ impl PropFindItemBuilder for Server {
 
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                DavValue::String(format!("\"{ctag}\"")),
+                                DavValue::String(quoted_etag(ctag)),
                             ));
                         } else {
                             fields_not_found.push(DavPropertyValue::empty(property.clone()));
@@ -258,14 +261,16 @@ impl PropFindItemBuilder for Server {
                         } else {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                self.expand_principal(
-                                    access_token,
-                                    access_token.account_id(),
-                                    &query.propfind,
-                                )
-                                .await?
-                                .map(|r| DavValue::Response(Box::new(r)))
-                                .unwrap_or(DavValue::Null),
+                                data.principals
+                                    .expand(
+                                        self,
+                                        access_token,
+                                        access_token.account_id(),
+                                        &query.propfind,
+                                    )
+                                    .await?
+                                    .map(|r| DavValue::Response(Box::new(r)))
+                                    .unwrap_or(DavValue::Null),
                             ));
                         }
                     }
@@ -311,7 +316,8 @@ impl PropFindItemBuilder for Server {
                         } else {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                self.expand_principal(access_token, account_id, &query.propfind)
+                                data.principals
+                                    .expand(self, access_token, account_id, &query.propfind)
                                     .await?
                                     .map(|r| DavValue::Response(Box::new(r)))
                                     .unwrap_or(DavValue::Null),
@@ -403,7 +409,9 @@ impl PropFindItemBuilder for Server {
                                     access_token,
                                     account_id,
                                     acls,
-                                    query.expand.then_some(&query.propfind),
+                                    query
+                                        .expand
+                                        .then_some((&query.propfind, &mut data.principals)),
                                 )
                                 .await?;
 
@@ -490,7 +498,7 @@ impl PropFindItemBuilder for Server {
                             properties,
                             version,
                         },
-                        ArchivedResource::ContactCard(_, Some(content)),
+                        ArchivedResource::ContactCard(card, Some(content)),
                     ) => {
                         fields.push(DavPropertyValue::new(
                             property.clone(),
@@ -500,6 +508,7 @@ impl PropFindItemBuilder for Server {
                                 (*version)
                                     .or(query.vcard_version)
                                     .unwrap_or(self.core.groupware.vcard_version),
+                                u32::from(card.inner.size) as usize,
                             )),
                         ));
                     }
@@ -693,9 +702,12 @@ impl PropFindItemBuilder for Server {
                     {
                         fields.push(DavPropertyValue::new(
                             property.clone(),
-                            DavValue::String(format!(
-                                "\"{}\"",
-                                event.inner.schedule_tag.as_ref().unwrap()
+                            DavValue::String(quoted_etag(
+                                event
+                                    .inner
+                                    .schedule_tag
+                                    .as_ref()
+                                    .map_or(0, |tag| tag.to_native().into()),
                             )),
                         ));
                     }

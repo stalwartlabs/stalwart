@@ -209,10 +209,13 @@ where
                                 .details("Id reference points to invalid type."));
                         }
                     } else if let Graph::Some { child_id, graph } = graph {
-                        graph
-                            .entry(child_id.to_string())
-                            .or_insert_with(Vec::new)
-                            .push(id_ref.to_string());
+                        let id_ref = id_ref.to_string();
+                        match graph.get_mut(*child_id) {
+                            Some(parents) => parents.push(id_ref),
+                            None => {
+                                graph.insert(child_id.to_string(), vec![id_ref]);
+                            }
+                        }
                     } else {
                         return Err(trc::JmapEvent::InvalidResultReference
                             .into_err()

@@ -280,6 +280,100 @@ pub async fn test(test: &TestServer) {
             .collect::<AHashSet<_>>()
     );
 
+    // Two cards with the same UID cannot be created in one request
+    let uid_card = |uid: &str, name: &str, book_id: &str| {
+        json!({
+            "uid": uid,
+            "name": {
+                "full": name,
+            },
+            "addressBookIds": {
+                book_id: true
+            },
+        })
+    };
+    let response = account
+        .jmap_create(
+            MethodObject::ContactCard,
+            [
+                uid_card("urn:uuid:3f0c2d8e-same-request", "First", &book1_id),
+                uid_card("urn:uuid:3f0c2d8e-same-request", "Second", &book1_id),
+                uid_card("urn:uuid:3f0c2d8e-same-request", "Third", &book2_id),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let same_request_ids = [
+        response.created(0).id().to_string(),
+        response.created(2).id().to_string(),
+    ];
+    assert!(
+        response
+            .not_created(1)
+            .description()
+            .contains("Contact with UID urn:uuid:3f0c2d8e-same-request is already created"),
+    );
+
+    // UIDs longer than the cached prefix are compared in full
+    let long_uid = format!("urn:uuid:{}", "a".repeat(300));
+    let other_long_uid = format!("urn:uuid:{}b", "a".repeat(300));
+    let response = account
+        .jmap_create(
+            MethodObject::ContactCard,
+            [
+                uid_card(&long_uid, "Long UID", &book1_id),
+                uid_card(&other_long_uid, "Other long UID", &book1_id),
+            ],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await;
+    let long_uid_id = response.created(0).id().to_string();
+    let other_long_uid_id = response.created(1).id().to_string();
+    assert!(
+        account
+            .jmap_create(
+                MethodObject::ContactCard,
+                [uid_card(&long_uid, "Long UID again", &book1_id)],
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .not_created(0)
+            .description()
+            .contains(&format!("Contact with UID {long_uid} already exists")),
+    );
+    let third_long_uid_id = account
+        .jmap_create(
+            MethodObject::ContactCard,
+            [uid_card(
+                &format!("urn:uuid:{}c", "a".repeat(300)),
+                "Third long UID",
+                &book1_id,
+            )],
+            Vec::<(&str, &str)>::new(),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+    test.wait_for_tasks().await;
+    let uid_test_ids = same_request_ids
+        .iter()
+        .chain([&long_uid_id, &other_long_uid_id, &third_long_uid_id])
+        .map(String::as_str)
+        .collect::<AHashSet<_>>();
+    assert_eq!(
+        account
+            .jmap_destroy(
+                MethodObject::ContactCard,
+                uid_test_ids.iter().copied(),
+                Vec::<(&str, &str)>::new(),
+            )
+            .await
+            .destroyed()
+            .collect::<AHashSet<_>>(),
+        uid_test_ids
+    );
+
     // Patching tests
     let response = account
         .jmap_update(

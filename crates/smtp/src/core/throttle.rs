@@ -175,17 +175,11 @@ impl<T: SessionStream> Session<T> {
 
         for t in throttles {
             if t.expr.is_empty() || self.eval_if(&t.expr).await.unwrap_or(false) {
-                if (t.keys & THROTTLE_RCPT_DOMAIN) != 0 {
-                    let d = self
-                        .data
-                        .rcpt_to
-                        .last()
-                        .map(|r| r.domain.as_str())
-                        .unwrap_or_default();
-
-                    if self.data.rcpt_to.iter().filter(|p| p.domain == d).count() > 1 {
-                        continue;
-                    }
+                if (t.keys & THROTTLE_RCPT_DOMAIN) != 0
+                    && let Some((last, previous)) = self.data.rcpt_to.split_last()
+                    && previous.iter().any(|p| p.domain == last.domain)
+                {
+                    continue;
                 }
 
                 // Build throttle key

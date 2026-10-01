@@ -143,7 +143,7 @@ impl CardGetRequestHandler for Server {
             .unarchive::<ContactCardContent>()
             .caused_by(trc::location!())?;
 
-        let mut vcard = String::with_capacity(128);
+        let mut vcard = String::with_capacity(card.size.to_native() as usize);
         let _ = content.card.write_to(&mut vcard, version);
 
         if !is_head {

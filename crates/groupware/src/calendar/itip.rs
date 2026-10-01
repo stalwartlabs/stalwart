@@ -47,7 +47,7 @@ use registry::schema::enums::{Permission, StorageQuota};
 use std::net::IpAddr;
 use store::{
     ValueKey, rand,
-    write::{Archive, ArchiveBytes, BatchBuilder, now},
+    write::{Archive, ArchiveBytes, BatchBuilder, now, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
 use types::{
@@ -477,27 +477,27 @@ impl ItipIngest for Server {
 
         // Without a participation status this is a request for the invitation details
         let Some(part_stat) = part_stat else {
-            let event = archive
-                .deserialize::<CalendarEvent>()
-                .caused_by(trc::location!())?;
-            let content = content_archive
-                .deserialize::<CalendarEventContent>()
+            let flags = archive
+                .unarchive::<CalendarEvent>()
+                .caused_by(trc::location!())?
+                .flags
+                .to_native();
+            let ical = content_archive
+                .unarchive::<CalendarEventContent>()
+                .and_then(|content| rkyv_deserialize::<_, ICalendar>(&content.data.event))
                 .caused_by(trc::location!())?;
 
             return Ok(build_rsvp_invitation(
-                &content.data.event,
+                &ical,
                 &rsvp.attendee,
                 organizer_info.addresses(),
-                event.flags & EVENT_HIDE_ATTENDEES != 0,
+                flags & EVENT_HIDE_ATTENDEES != 0,
                 language,
             ));
         };
         let comment = request.sanitized_comment();
 
         // Locate the attendee within the organizer's copy of the event
-        let event = archive
-            .deserialize::<CalendarEvent>()
-            .caused_by(trc::location!())?;
         let content = content_archive
             .deserialize::<CalendarEventContent>()
             .caused_by(trc::location!())?;
@@ -531,6 +531,9 @@ impl ItipIngest for Server {
             return Ok(RsvpResponse::recorded(&part_stat));
         }
         instances.sort_unstable();
+        let event = archive
+            .deserialize::<CalendarEvent>()
+            .caused_by(trc::location!())?;
 
         // Deliver the reply to the organizer without going through the mail queue
         let mut reply = build_rsvp_reply(

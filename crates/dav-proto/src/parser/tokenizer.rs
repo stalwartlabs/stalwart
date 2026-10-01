@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Error, RawElement, Token, UnexpectedToken, XmlValueParser, value::known_namespace};
+use super::{
+    Error, RawElement, Token, UnexpectedToken, XmlValueParser,
+    value::{extension_namespace, known_namespace},
+};
 use crate::schema::{Attribute, AttributeValue, Element, NamedElement};
 use quick_xml::{
     NsReader, XmlVersion,
@@ -72,19 +75,23 @@ impl<'x> Tokenizer<'x> {
             let name = tag.name();
             match resolve_result {
                 ResolveResult::Bound(raw_ns) if !raw_ns.as_ref().is_empty() => {
-                    if let (Some((ns, uri)), Some(element)) = (
-                        known_namespace(raw_ns.as_ref()),
-                        Element::try_parse(name.local_name().as_ref()).copied(),
-                    ) {
-                        return Ok(Token::ElementStart {
+                    let element = Element::try_parse(name.local_name().as_ref()).copied();
+                    let raw = RawElement::new(tag);
+                    return Ok(match (known_namespace(raw_ns.as_ref()), element) {
+                        (Some((ns, uri)), Some(element)) => Token::ElementStart {
                             name: NamedElement { ns: *ns, element },
-                            raw: RawElement::new(tag).with_namespace_static(uri.as_bytes()),
-                        });
-                    } else {
-                        return Ok(Token::UnknownElement(
-                            RawElement::new(tag).with_namespace(raw_ns),
-                        ));
-                    }
+                            raw: raw.with_namespace_static(uri.as_bytes()),
+                        },
+                        (Some((_, uri)), None) => {
+                            Token::UnknownElement(raw.with_namespace_static(uri.as_bytes()))
+                        }
+                        (None, _) => {
+                            Token::UnknownElement(match extension_namespace(raw_ns.as_ref()) {
+                                Some(uri) => raw.with_namespace_static(uri.as_bytes()),
+                                None => raw.with_namespace(raw_ns),
+                            })
+                        }
+                    });
                 }
                 ResolveResult::Unknown(p) => {
                     return Err(Error::Xml(Box::new(quick_xml::Error::Namespace(

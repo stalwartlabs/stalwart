@@ -238,7 +238,7 @@ impl TestSession for Session<DummyIo> {
     async fn test_builder(&self) {
         let message = self
             .build_message(
-                SessionAddress {
+                &SessionAddress {
                     address: "bill@foobar.org".into(),
                     address_lcase: "bill@foobar.org".into(),
                     domain: "foobar.org".into(),

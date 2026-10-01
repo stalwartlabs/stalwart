@@ -6,7 +6,7 @@
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::deserialize::DeserializeArguments,
+    request::deserialize::{CowStr, DeserializeArguments},
 };
 use jmap_tools::{Element, Key, Property};
 use serde::{Serialize, Serializer};
@@ -196,7 +196,7 @@ impl<'de> DeserializeArguments<'de> for QuotaComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"name" => {
                     *self = QuotaComparator::Name;
@@ -208,7 +208,7 @@ impl<'de> DeserializeArguments<'de> for QuotaComparator {
                     *self = QuotaComparator::Used;
                 },
                 _ => {
-                    *self = QuotaComparator::_T(key.to_string());
+                    *self = QuotaComparator::_T(value.into_owned());
                 }
             );
         } else {

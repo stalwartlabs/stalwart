@@ -20,7 +20,8 @@ use common::{
 use mail_auth::DkimResult;
 use mail_parser::{HeaderForm, HeaderName, HeaderValue, Host};
 use nlp::tokenizers::types::TokenType;
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
+use store::ahash::AHashSet;
 
 pub trait SpamFilterAnalyzeDomain: Sync + Send {
     fn spam_filter_analyze_domain(
@@ -79,14 +80,14 @@ impl SpamFilterAnalyzeDomain for Server {
 }
 
 type DomainsAndEmails = (
-    HashSet<ElementLocation<String>>,
-    HashSet<ElementLocation<Recipient>>,
+    AHashSet<ElementLocation<String>>,
+    AHashSet<ElementLocation<Recipient>>,
 );
 
 pub fn collect_domains_and_emails(ctx: &mut SpamFilterContext<'_>) -> DomainsAndEmails {
     // Obtain email addresses and domains
-    let mut domains: HashSet<ElementLocation<String>> = HashSet::new();
-    let mut emails: HashSet<ElementLocation<Recipient>> = HashSet::new();
+    let mut domains: AHashSet<ElementLocation<String>> = AHashSet::new();
+    let mut emails: AHashSet<ElementLocation<Recipient>> = AHashSet::new();
 
     // Add DKIM domains
     for dkim in ctx.input.dkim_result {

@@ -10,6 +10,7 @@ use common::{
     DEFAULT_LOGO_BASE64, Server,
     auth::AccountInfo,
     config::groupware::CalendarTemplateVariable,
+    i18n::Locale,
     network::{ServerInstance, stream::NullIo},
 };
 use compact_str::format_compact;
@@ -35,7 +36,7 @@ use smtp_proto::{MailFrom, RcptTo};
 use std::{sync::Arc, time::Duration};
 use store::{ahash::AHashMap, write::now};
 use trc::AddContext;
-use utils::template::{Variable, Variables};
+use utils::template::{Template, Variable, Variables};
 
 pub(crate) trait SendImipTask: Sync + Send {
     fn send_imip(
@@ -98,7 +99,7 @@ async fn send_imip(
     let logo = if let Some(logo) = &logo {
         MimePart::new(
             ContentType::new(logo.content_type.as_ref()),
-            BodyPart::Binary(logo.contents.as_slice().into()),
+            BodyPart::Binary(logo.contents[..].into()),
         )
     } else {
         MimePart::new(
@@ -114,6 +115,7 @@ async fn send_imip(
         .account_info(account_id)
         .await
         .caused_by(trc::location!())?;
+    let formatter = TextFormatter::new(account_info.locale().as_str())?;
 
     for itip_message in imip.messages.iter() {
         let Ok(summary) = serde_json::from_str::<ItipSummary>(&itip_message.summary) else {
@@ -152,21 +154,33 @@ async fn send_imip(
             }
         };
         let sender_info = organizer_info.as_ref().unwrap_or(&account_info);
+        let mut template = ItipTemplate::new(
+            server,
+            &formatter,
+            itip_message.from.as_str(),
+            &summary,
+            &logo_cid,
+        );
+        let mut shared_body = None;
 
         for recipient in itip_message.to.iter() {
             // Build template
-            let tpl = build_itip_template(
-                server,
-                &account_info,
-                account_id,
-                document_id,
-                itip_message.from.as_str(),
-                recipient.as_str(),
-                &summary,
-                &logo_cid,
-            )
-            .await?;
-            let txt_body = html_to_text(&tpl.body);
+            let personal_body;
+            let body = if template
+                .set_recipient(
+                    server,
+                    &account_info,
+                    account_id,
+                    document_id,
+                    recipient.as_str(),
+                )
+                .await
+            {
+                personal_body = template.render();
+                &personal_body
+            } else {
+                &*shared_body.get_or_insert_with(|| template.render())
+            };
 
             // Build message
             let message = MessageBuilder::new()
@@ -181,7 +195,7 @@ async fn send_imip(
                     HeaderType::Text(itip_message.from.as_str().into()),
                 )
                 .message_id(server.core.network.message_id())
-                .subject(&tpl.subject)
+                .subject(template.subject.as_str())
                 .body(MimePart::new(
                     ContentType::new("multipart/mixed"),
                     BodyPart::Multipart(vec![
@@ -193,11 +207,11 @@ async fn send_imip(
                                     BodyPart::Multipart(vec![
                                         MimePart::new(
                                             ContentType::new("text/plain"),
-                                            BodyPart::Text(txt_body.into()),
+                                            BodyPart::Text(body.text.as_str().into()),
                                         ),
                                         MimePart::new(
                                             ContentType::new("text/html"),
-                                            BodyPart::Text(tpl.body.as_str().into()),
+                                            BodyPart::Text(body.html.as_str().into()),
                                         ),
                                         MimePart::new(
                                             ContentType::new("text/calendar")
@@ -316,6 +330,19 @@ pub struct Details {
     pub body: String,
 }
 
+pub struct RenderedBody {
+    pub html: String,
+    pub text: String,
+}
+
+pub struct ItipTemplate<'x> {
+    template: &'x Template<CalendarTemplateVariable>,
+    locale: &'static Locale,
+    variables: Variables<CalendarTemplateVariable, String>,
+    has_rsvp: bool,
+    pub subject: String,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn build_itip_template(
     server: &Server,
@@ -327,301 +354,349 @@ pub async fn build_itip_template(
     summary: &ItipSummary,
     logo_cid: &str,
 ) -> trc::Result<Details> {
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
-    let template = server
-        .core
-        .enterprise
-        .as_ref()
-        .and_then(|e| e.template_scheduling_email.as_ref())
-        .unwrap_or(&server.core.groupware.itip_template);
-    // SPDX-SnippetEnd
-    #[cfg(not(feature = "enterprise"))]
-    let template = &server.core.groupware.itip_template;
     let formatter = TextFormatter::new(account_info.locale().as_str())?;
-    let locale = formatter.locale;
+    let mut template = ItipTemplate::new(server, &formatter, from, summary, logo_cid);
+    template
+        .set_recipient(server, account_info, account_id, document_id, to)
+        .await;
+    Ok(Details {
+        body: template.template.eval(&template.variables),
+        subject: template.subject,
+    })
+}
 
-    let mut variables = Variables::new();
-    let mut subject;
-    let (fields, old_fields) = match summary {
-        ItipSummary::Invite(fields) => {
-            subject = format!("{}: ", locale.calendar_invitation);
+impl<'x> ItipTemplate<'x> {
+    pub fn new(
+        server: &'x Server,
+        formatter: &TextFormatter,
+        from: &str,
+        summary: &ItipSummary,
+        logo_cid: &str,
+    ) -> Self {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        let template = server
+            .core
+            .enterprise
+            .as_ref()
+            .and_then(|e| e.template_scheduling_email.as_ref())
+            .unwrap_or(&server.core.groupware.itip_template);
+        // SPDX-SnippetEnd
+        #[cfg(not(feature = "enterprise"))]
+        let template = &server.core.groupware.itip_template;
+        let locale = formatter.locale;
 
-            (fields, None)
-        }
-        ItipSummary::Update {
-            current, previous, ..
-        } => {
-            subject = format!("{}: ", locale.calendar_updated_invitation);
-            variables.insert_single(
-                CalendarTemplateVariable::Header,
-                locale.calendar_event_updated.to_string(),
-            );
-            variables.insert_single(CalendarTemplateVariable::Color, "info".to_string());
-            (current, Some(previous))
-        }
-        ItipSummary::Cancel(fields) => {
-            subject = format!("{}: ", locale.calendar_cancelled);
-            variables.insert_single(
-                CalendarTemplateVariable::Header,
-                locale.calendar_event_cancelled.to_string(),
-            );
-            variables.insert_single(CalendarTemplateVariable::Color, "danger".to_string());
-            (fields, None)
-        }
-        ItipSummary::Rsvp { part_stat, current } => {
-            let (color, value) = match part_stat {
-                ICalendarParticipationStatus::Accepted => {
-                    subject = format!("{}: ", locale.calendar_accepted);
+        let mut variables = Variables::new();
+        let mut subject;
+        let (fields, old_fields) = match summary {
+            ItipSummary::Invite(fields) => {
+                subject = format!("{}: ", locale.calendar_invitation);
 
-                    (
-                        "info",
-                        locale.calendar_participant_accepted.replace("$name", from),
-                    )
-                }
-                ICalendarParticipationStatus::Declined => {
-                    subject = format!("{}: ", locale.calendar_declined);
-                    (
-                        "danger",
-                        locale.calendar_participant_declined.replace("$name", from),
-                    )
-                }
-                ICalendarParticipationStatus::Tentative => {
-                    subject = format!("{}: ", locale.calendar_tentative);
-                    (
-                        "warning",
-                        locale.calendar_participant_tentative.replace("$name", from),
-                    )
-                }
-                ICalendarParticipationStatus::Delegated => {
-                    subject = format!("{}: ", locale.calendar_delegated);
-                    (
-                        "warning",
-                        locale.calendar_participant_delegated.replace("$name", from),
-                    )
-                }
-                _ => {
-                    subject = format!("{}: ", locale.calendar_reply);
-                    (
-                        "info",
-                        locale.calendar_participant_reply.replace("$name", from),
-                    )
-                }
-            };
-
-            variables.insert_single(CalendarTemplateVariable::Header, value);
-            variables.insert_single(CalendarTemplateVariable::Color, color.to_string());
-
-            (current, None)
-        }
-    };
-
-    let mut when_detail: Option<(usize, &ItipValue)> = None;
-    let mut details: Vec<AHashMap<CalendarTemplateVariable, String>> = Vec::with_capacity(4);
-    for field in [
-        ICalendarProperty::Summary,
-        ICalendarProperty::Description,
-        ICalendarProperty::Dtstart,
-        ICalendarProperty::Rrule,
-        ICalendarProperty::Location,
-        ICalendarProperty::Conference,
-    ] {
-        let mut old_entries = old_fields.into_iter().flatten().filter(|e| e.name == field);
-
-        for entry in fields.iter().filter(|e| e.name == field) {
-            let field_name = match &field {
-                ICalendarProperty::Summary => locale.calendar_summary,
-                ICalendarProperty::Description => locale.calendar_description,
-                ICalendarProperty::Dtstart | ICalendarProperty::Rrule => locale.calendar_when,
-                ICalendarProperty::Location => locale.calendar_location,
-                ICalendarProperty::Conference => locale.calendar_conference,
-                _ => continue,
-            };
-            let value = formatter.field_to_string(&entry.value, DateStyle::Long);
-
-            let old_entry = old_entries.next();
-
-            match &field {
-                ICalendarProperty::Summary => {
-                    subject.push_str(&value);
-                }
-                ICalendarProperty::Dtstart if when_detail.is_none() => {
-                    subject.push_str(" @ ");
-                    subject.push_str(&value);
-                }
-                ICalendarProperty::Rrule if when_detail.is_none() => {
-                    subject.push_str(" @ ");
-                    subject.push_str(&value);
-                }
-                _ => (),
+                (fields, None)
             }
+            ItipSummary::Update {
+                current, previous, ..
+            } => {
+                subject = format!("{}: ", locale.calendar_updated_invitation);
+                variables.insert_single(
+                    CalendarTemplateVariable::Header,
+                    locale.calendar_event_updated.to_string(),
+                );
+                variables.insert_single(CalendarTemplateVariable::Color, "info".to_string());
+                (current, Some(previous))
+            }
+            ItipSummary::Cancel(fields) => {
+                subject = format!("{}: ", locale.calendar_cancelled);
+                variables.insert_single(
+                    CalendarTemplateVariable::Header,
+                    locale.calendar_event_cancelled.to_string(),
+                );
+                variables.insert_single(CalendarTemplateVariable::Color, "danger".to_string());
+                (fields, None)
+            }
+            ItipSummary::Rsvp { part_stat, current } => {
+                let (color, value) = match part_stat {
+                    ICalendarParticipationStatus::Accepted => {
+                        subject = format!("{}: ", locale.calendar_accepted);
 
-            if let ICalendarProperty::Summary | ICalendarProperty::Description = &field {
-                let variable = if matches!(field, ICalendarProperty::Summary) {
-                    CalendarTemplateVariable::EventTitle
-                } else {
-                    CalendarTemplateVariable::EventDescription
+                        (
+                            "info",
+                            locale.calendar_participant_accepted.replace("$name", from),
+                        )
+                    }
+                    ICalendarParticipationStatus::Declined => {
+                        subject = format!("{}: ", locale.calendar_declined);
+                        (
+                            "danger",
+                            locale.calendar_participant_declined.replace("$name", from),
+                        )
+                    }
+                    ICalendarParticipationStatus::Tentative => {
+                        subject = format!("{}: ", locale.calendar_tentative);
+                        (
+                            "warning",
+                            locale.calendar_participant_tentative.replace("$name", from),
+                        )
+                    }
+                    ICalendarParticipationStatus::Delegated => {
+                        subject = format!("{}: ", locale.calendar_delegated);
+                        (
+                            "warning",
+                            locale.calendar_participant_delegated.replace("$name", from),
+                        )
+                    }
+                    _ => {
+                        subject = format!("{}: ", locale.calendar_reply);
+                        (
+                            "info",
+                            locale.calendar_participant_reply.replace("$name", from),
+                        )
+                    }
                 };
 
-                if old_entry.is_none() {
-                    variables.insert_single(variable, value);
+                variables.insert_single(CalendarTemplateVariable::Header, value);
+                variables.insert_single(CalendarTemplateVariable::Color, color.to_string());
+
+                (current, None)
+            }
+        };
+
+        let mut when_detail: Option<(usize, &ItipValue)> = None;
+        let mut details: Vec<AHashMap<CalendarTemplateVariable, String>> = Vec::with_capacity(4);
+        for field in [
+            ICalendarProperty::Summary,
+            ICalendarProperty::Description,
+            ICalendarProperty::Dtstart,
+            ICalendarProperty::Rrule,
+            ICalendarProperty::Location,
+            ICalendarProperty::Conference,
+        ] {
+            let mut old_entries = old_fields.into_iter().flatten().filter(|e| e.name == field);
+
+            for entry in fields.iter().filter(|e| e.name == field) {
+                let field_name = match &field {
+                    ICalendarProperty::Summary => locale.calendar_summary,
+                    ICalendarProperty::Description => locale.calendar_description,
+                    ICalendarProperty::Dtstart | ICalendarProperty::Rrule => locale.calendar_when,
+                    ICalendarProperty::Location => locale.calendar_location,
+                    ICalendarProperty::Conference => locale.calendar_conference,
+                    _ => continue,
+                };
+                let value = formatter.field_to_string(&entry.value, DateStyle::Long);
+
+                let old_entry = old_entries.next();
+
+                match &field {
+                    ICalendarProperty::Summary => {
+                        subject.push_str(&value);
+                    }
+                    ICalendarProperty::Dtstart if when_detail.is_none() => {
+                        subject.push_str(" @ ");
+                        subject.push_str(&value);
+                    }
+                    ICalendarProperty::Rrule if when_detail.is_none() => {
+                        subject.push_str(" @ ");
+                        subject.push_str(&value);
+                    }
+                    _ => (),
+                }
+
+                if let ICalendarProperty::Summary | ICalendarProperty::Description = &field {
+                    let variable = if matches!(field, ICalendarProperty::Summary) {
+                        CalendarTemplateVariable::EventTitle
+                    } else {
+                        CalendarTemplateVariable::EventDescription
+                    };
+
+                    if old_entry.is_none() {
+                        variables.insert_single(variable, value);
+                        continue;
+                    }
+                    variables.insert_single(variable, value.clone());
+                }
+
+                if matches!(field, ICalendarProperty::Rrule)
+                    && let Some((index, start_value)) = when_detail
+                    && let Some(detail) = details.get_mut(index)
+                {
+                    if let Some(when_value) = detail.get_mut(&CalendarTemplateVariable::Value) {
+                        when_value.push_str(", ");
+                        when_value.push_str(&value);
+                    }
+
+                    if let Some(old_entry) = old_entry {
+                        detail.insert(
+                            CalendarTemplateVariable::Changed,
+                            locale.calendar_changed.to_string(),
+                        );
+                        let old_value = detail
+                            .entry(CalendarTemplateVariable::OldValue)
+                            .or_insert_with(|| {
+                                formatter.field_to_string(start_value, DateStyle::Short)
+                            });
+                        old_value.push_str(", ");
+                        old_value.push_str(
+                            &formatter.field_to_string(&old_entry.value, DateStyle::Short),
+                        );
+                    }
+
                     continue;
                 }
-                variables.insert_single(variable, value.clone());
-            }
 
-            if matches!(field, ICalendarProperty::Rrule)
-                && let Some((index, start_value)) = when_detail
-                && let Some(detail) = details.get_mut(index)
-            {
-                if let Some(when_value) = detail.get_mut(&CalendarTemplateVariable::Value) {
-                    when_value.push_str(", ");
-                    when_value.push_str(&value);
+                let mut detail = AHashMap::with_capacity(4);
+                detail.insert(CalendarTemplateVariable::Key, field_name.to_string());
+                if matches!(field, ICalendarProperty::Conference)
+                    && let Some(link) = hyperlink(&value)
+                {
+                    detail.insert(CalendarTemplateVariable::Link, link.to_string());
                 }
-
+                detail.insert(CalendarTemplateVariable::Value, value);
                 if let Some(old_entry) = old_entry {
                     detail.insert(
                         CalendarTemplateVariable::Changed,
                         locale.calendar_changed.to_string(),
                     );
-                    let old_value = detail
-                        .entry(CalendarTemplateVariable::OldValue)
-                        .or_insert_with(|| {
-                            formatter.field_to_string(start_value, DateStyle::Short)
-                        });
-                    old_value.push_str(", ");
-                    old_value
-                        .push_str(&formatter.field_to_string(&old_entry.value, DateStyle::Short));
+                    detail.insert(
+                        CalendarTemplateVariable::OldValue,
+                        formatter.field_to_string(&old_entry.value, DateStyle::Short),
+                    );
                 }
+                if matches!(field, ICalendarProperty::Dtstart) && when_detail.is_none() {
+                    when_detail = Some((details.len(), &entry.value));
+                }
+                details.push(detail);
+            }
+        }
+        if !details.is_empty() {
+            variables.items.insert(
+                CalendarTemplateVariable::EventDetails,
+                Variable::Block(details),
+            );
+        }
+        variables.insert_single(CalendarTemplateVariable::PageTitle, subject.clone());
+        variables.insert_single(CalendarTemplateVariable::Lang, locale.name.to_string());
+        variables.insert_single(CalendarTemplateVariable::Dir, locale.direction.to_string());
+        variables.insert_single(CalendarTemplateVariable::LogoCid, format!("cid:{logo_cid}"));
 
-                continue;
-            }
+        if let Some(guests) = fields
+            .iter()
+            .find(|e| e.name == ICalendarProperty::Attendee)
+            && let ItipValue::Participants(guests) = &guests.value
+        {
+            variables.insert_single(
+                CalendarTemplateVariable::AttendeesTitle,
+                locale.calendar_attendees.to_string(),
+            );
+            variables.insert_block(
+                CalendarTemplateVariable::Attendees,
+                guests.iter().map(|guest| {
+                    [
+                        (
+                            CalendarTemplateVariable::Key,
+                            if guest.is_organizer {
+                                if let Some(name) = guest.name.as_ref() {
+                                    format!("{name} - {}", locale.calendar_organizer)
+                                } else {
+                                    locale.calendar_organizer.to_string()
+                                }
+                            } else {
+                                guest.name.as_deref().unwrap_or_default().to_string()
+                            },
+                        ),
+                        (CalendarTemplateVariable::Value, guest.email.to_string()),
+                    ]
+                }),
+            );
+        }
 
-            let mut detail = AHashMap::with_capacity(4);
-            detail.insert(CalendarTemplateVariable::Key, field_name.to_string());
-            if matches!(field, ICalendarProperty::Conference)
-                && let Some(link) = hyperlink(&value)
-            {
-                detail.insert(CalendarTemplateVariable::Link, link.to_string());
-            }
-            detail.insert(CalendarTemplateVariable::Value, value);
-            if let Some(old_entry) = old_entry {
-                detail.insert(
-                    CalendarTemplateVariable::Changed,
-                    locale.calendar_changed.to_string(),
-                );
-                detail.insert(
-                    CalendarTemplateVariable::OldValue,
-                    formatter.field_to_string(&old_entry.value, DateStyle::Short),
-                );
-            }
-            if matches!(field, ICalendarProperty::Dtstart) && when_detail.is_none() {
-                when_detail = Some((details.len(), &entry.value));
-            }
-            details.push(detail);
+        // Add footer
+        variables.insert_block(
+            CalendarTemplateVariable::Footer,
+            [
+                [(
+                    CalendarTemplateVariable::Key,
+                    locale.calendar_imip_footer_1.to_string(),
+                )],
+                [(
+                    CalendarTemplateVariable::Key,
+                    locale.calendar_imip_footer_2.to_string(),
+                )],
+            ],
+        );
+
+        ItipTemplate {
+            template,
+            locale,
+            variables,
+            has_rsvp: matches!(summary, ItipSummary::Invite(_) | ItipSummary::Update { .. }),
+            subject,
         }
     }
-    if !details.is_empty() {
-        variables.items.insert(
-            CalendarTemplateVariable::EventDetails,
-            Variable::Block(details),
-        );
-    }
-    variables.insert_single(CalendarTemplateVariable::PageTitle, subject.clone());
-    variables.insert_single(CalendarTemplateVariable::Lang, locale.name.to_string());
-    variables.insert_single(CalendarTemplateVariable::Dir, locale.direction.to_string());
-    variables.insert_single(CalendarTemplateVariable::LogoCid, format!("cid:{logo_cid}"));
 
-    if let Some(guests) = fields
-        .iter()
-        .find(|e| e.name == ICalendarProperty::Attendee)
-        && let ItipValue::Participants(guests) = &guests.value
-    {
-        variables.insert_single(
-            CalendarTemplateVariable::AttendeesTitle,
-            locale.calendar_attendees.to_string(),
-        );
-        variables.insert_block(
-            CalendarTemplateVariable::Attendees,
-            guests.iter().map(|guest| {
+    pub async fn set_recipient(
+        &mut self,
+        server: &Server,
+        account_info: &AccountInfo,
+        account_id: u32,
+        document_id: u32,
+        to: &str,
+    ) -> bool {
+        let locale = self.locale;
+        let variables = &mut self.variables;
+        variables.items.remove(&CalendarTemplateVariable::Rsvp);
+        variables.items.remove(&CalendarTemplateVariable::Actions);
+
+        // Add RSVP buttons
+        if self.has_rsvp
+            && let Some(rsvp_url) = server
+                .http_rsvp_url(account_id, account_info.name(), document_id, to)
+                .await
+        {
+            variables.insert_single(
+                CalendarTemplateVariable::Rsvp,
+                locale.calendar_reply_as.replace("$name", to),
+            );
+            variables.insert_block(
+                CalendarTemplateVariable::Actions,
                 [
                     (
-                        CalendarTemplateVariable::Key,
-                        if guest.is_organizer {
-                            if let Some(name) = guest.name.as_ref() {
-                                format!("{name} - {}", locale.calendar_organizer)
-                            } else {
-                                locale.calendar_organizer.to_string()
-                            }
-                        } else {
-                            guest.name.as_deref().unwrap_or_default().to_string()
-                        },
+                        ICalendarParticipationStatus::Accepted,
+                        locale.calendar_yes.to_string(),
+                        "info",
                     ),
-                    (CalendarTemplateVariable::Value, guest.email.to_string()),
+                    (
+                        ICalendarParticipationStatus::Declined,
+                        locale.calendar_no.to_string(),
+                        "danger",
+                    ),
+                    (
+                        ICalendarParticipationStatus::Tentative,
+                        locale.calendar_maybe.to_string(),
+                        "warning",
+                    ),
                 ]
-            }),
-        );
+                .into_iter()
+                .map(|(status, title, color)| {
+                    [
+                        (CalendarTemplateVariable::ActionName, title.to_string()),
+                        (CalendarTemplateVariable::ActionUrl, rsvp_url.url(&status)),
+                        (CalendarTemplateVariable::Color, color.to_string()),
+                    ]
+                }),
+            );
+            true
+        } else {
+            false
+        }
     }
 
-    // Add RSVP buttons
-    if matches!(summary, ItipSummary::Invite(_) | ItipSummary::Update { .. })
-        && let Some(rsvp_url) = server
-            .http_rsvp_url(account_id, account_info.name(), document_id, to)
-            .await
-    {
-        variables.insert_single(
-            CalendarTemplateVariable::Rsvp,
-            locale.calendar_reply_as.replace("$name", to),
-        );
-        variables.insert_block(
-            CalendarTemplateVariable::Actions,
-            [
-                (
-                    ICalendarParticipationStatus::Accepted,
-                    locale.calendar_yes.to_string(),
-                    "info",
-                ),
-                (
-                    ICalendarParticipationStatus::Declined,
-                    locale.calendar_no.to_string(),
-                    "danger",
-                ),
-                (
-                    ICalendarParticipationStatus::Tentative,
-                    locale.calendar_maybe.to_string(),
-                    "warning",
-                ),
-            ]
-            .into_iter()
-            .map(|(status, title, color)| {
-                [
-                    (CalendarTemplateVariable::ActionName, title.to_string()),
-                    (CalendarTemplateVariable::ActionUrl, rsvp_url.url(&status)),
-                    (CalendarTemplateVariable::Color, color.to_string()),
-                ]
-            }),
-        );
+    pub fn render(&self) -> RenderedBody {
+        let html = self.template.eval(&self.variables);
+        RenderedBody {
+            text: html_to_text(&html),
+            html,
+        }
     }
-
-    // Add footer
-    variables.insert_block(
-        CalendarTemplateVariable::Footer,
-        [
-            [(
-                CalendarTemplateVariable::Key,
-                locale.calendar_imip_footer_1.to_string(),
-            )],
-            [(
-                CalendarTemplateVariable::Key,
-                locale.calendar_imip_footer_2.to_string(),
-            )],
-        ],
-    );
-
-    Ok(Details {
-        subject,
-        body: template.eval(&variables),
-    })
 }

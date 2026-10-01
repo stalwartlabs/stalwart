@@ -187,7 +187,7 @@ impl CardUpdateRequestHandler for Server {
                 Err(DavError::Code(StatusCode::PRECONDITION_FAILED))
                     if headers.ret == Return::Representation =>
                 {
-                    let mut vcard = String::with_capacity(128);
+                    let mut vcard = String::with_capacity(u32::from(card.inner.size) as usize);
                     let _ = content.inner.card.write_to(
                         &mut vcard,
                         headers
@@ -240,10 +240,7 @@ impl CardUpdateRequestHandler for Server {
             let new_card = card
                 .deserialize::<ContactCard>()
                 .caused_by(trc::location!())?;
-            let mut new_content = content
-                .deserialize::<ContactCardContent>()
-                .caused_by(trc::location!())?;
-            new_content.card = vcard;
+            let new_content = ContactCardContent { card: vcard };
 
             // Validate quota
             let extra_bytes =

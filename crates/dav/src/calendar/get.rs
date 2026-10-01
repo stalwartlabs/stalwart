@@ -165,13 +165,18 @@ impl CalendarGetRequestHandler for Server {
             )
             .await?;
 
-        Ok(match (view, is_head) {
-            (Some((view, _)), true) => {
-                response.with_content_length(SizeWriter::ical(&view.data.event))
-            }
-            (None, true) => response.with_content_length(event.size.to_native() as usize),
-            (Some((view, _)), false) => response.with_binary_body(view.data.event.to_string()),
-            (None, false) => response.with_binary_body(content.inner.data.event.to_string()),
-        })
+        if is_head {
+            return Ok(match view {
+                Some((view, _)) => response.with_content_length(SizeWriter::ical(&view.data.event)),
+                None => response.with_content_length(event.size.to_native() as usize),
+            });
+        }
+
+        let mut body = String::with_capacity(event.size.to_native() as usize);
+        let _ = match view {
+            Some((view, _)) => view.data.event.write_to(&mut body),
+            None => content.inner.data.event.write_to(&mut body),
+        };
+        Ok(response.with_binary_body(body))
     }
 }

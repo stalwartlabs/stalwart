@@ -303,14 +303,16 @@ impl<T: SessionStream> SessionData<T> {
 
         // Process each message
         let mut batch = BatchBuilder::new();
-        ids.sort_unstable_by_key(|resolved| resolved.uid);
-
         // RFC 9738 requires the highest UIDs to be processed first when truncating
         let message_limit = message_limit as usize;
         let limited_uid = if ids.len() > message_limit {
-            ids.drain(..ids.len() - message_limit);
+            let cutoff = ids.len() - message_limit;
+            ids.select_nth_unstable_by_key(cutoff, |resolved| resolved.uid);
+            ids.drain(..cutoff);
+            ids.sort_unstable_by_key(|resolved| resolved.uid);
             ids.first().map(|resolved| resolved.uid)
         } else {
+            ids.sort_unstable_by_key(|resolved| resolved.uid);
             None
         };
 

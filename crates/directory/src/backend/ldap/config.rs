@@ -29,14 +29,14 @@ impl LdapDirectory {
             None
         };
 
-        let manager = LdapConnectionManager::new(
-            config.url,
-            LdapConnSettings::new()
-                .set_conn_timeout(config.timeout.into_inner())
-                .set_starttls(config.use_tls)
-                .set_no_tls_verify(config.allow_invalid_certs),
-            bind_dn,
-        );
+        let settings = LdapConnSettings::new()
+            .set_conn_timeout(config.timeout.into_inner())
+            .set_starttls(config.use_tls)
+            .set_no_tls_verify(config.allow_invalid_certs);
+        let bind_manager = config
+            .bind_authentication
+            .then(|| LdapConnectionManager::new(config.url.clone(), settings.clone(), None));
+        let manager = LdapConnectionManager::new(config.url, settings, bind_dn);
 
         let mut mappings = LdapMappings {
             base_dn: config.base_dn,
@@ -111,19 +111,21 @@ impl LdapDirectory {
         }
         mappings.attrs_principal = attrs_principal;
 
-        let pool = Pool::builder(manager)
-            .runtime(Runtime::Tokio1)
-            .max_size(config.pool_max_connections as usize)
-            .create_timeout(config.pool_timeout_create.into_inner().into())
-            .wait_timeout(config.pool_timeout_wait.into_inner().into())
-            .recycle_timeout(config.pool_timeout_recycle.into_inner().into())
-            .build()
-            .map_err(|err| format!("Failed to build LDAP pool: {err}"))?;
+        let build_pool = |manager: LdapConnectionManager| {
+            Pool::builder(manager)
+                .runtime(Runtime::Tokio1)
+                .max_size(config.pool_max_connections as usize)
+                .create_timeout(config.pool_timeout_create.into_inner().into())
+                .wait_timeout(config.pool_timeout_wait.into_inner().into())
+                .recycle_timeout(config.pool_timeout_recycle.into_inner().into())
+                .build()
+                .map_err(|err| format!("Failed to build LDAP pool: {err}"))
+        };
 
         Ok(Directory::Ldap(LdapDirectory {
             mappings,
-            pool,
-            auth_bind: config.bind_authentication,
+            pool: build_pool(manager)?,
+            bind_pool: bind_manager.map(build_pool).transpose()?,
         }))
     }
 }

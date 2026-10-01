@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use utils::text::hex_encode;
+
 pub const BLOB_HASH_LEN: usize = 32;
 
 #[derive(
@@ -43,11 +45,7 @@ impl BlobHash {
     }
 
     pub fn to_hex(&self) -> String {
-        let mut hex = String::with_capacity(BLOB_HASH_LEN * 2);
-        for byte in self.0.iter() {
-            hex.push_str(&format!("{:02x}", byte));
-        }
-        hex
+        hex_encode(&self.0)
     }
 
     pub fn is_empty(&self) -> bool {

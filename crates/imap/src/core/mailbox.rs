@@ -106,14 +106,23 @@ impl<T: SessionStream> SessionData<T> {
     pub async fn synchronize_mailboxes_using(
         &self,
         return_changes: bool,
-        mut caches: AccountCaches,
+        caches: AccountCaches,
     ) -> trc::Result<MailboxRefresh> {
-        let mut changes = return_changes.then(MailboxSync::default);
-
         let access_token = self
             .refresh_access_token()
             .await
             .caused_by(trc::location!())?;
+        self.synchronize_mailboxes_as(access_token, return_changes, caches)
+            .await
+    }
+
+    pub async fn synchronize_mailboxes_as(
+        &self,
+        access_token: AccessToken,
+        return_changes: bool,
+        mut caches: AccountCaches,
+    ) -> trc::Result<MailboxRefresh> {
+        let mut changes = return_changes.then(MailboxSync::default);
         let state = access_token.state();
 
         if self.state.load(Ordering::Relaxed) != state {
@@ -201,7 +210,11 @@ impl<T: SessionStream> SessionData<T> {
             }
         }
 
-        Ok(MailboxRefresh { changes, caches })
+        Ok(MailboxRefresh {
+            changes,
+            caches,
+            access_token,
+        })
     }
 
     fn refresh_account_structure(
@@ -413,6 +426,18 @@ impl<T: SessionStream> SessionData<T> {
         item: Acl,
     ) -> trc::Result<bool> {
         let access_token = self.refresh_access_token().await?;
+        self.check_mailbox_acl_as(&access_token, cache, account_id, mailbox_id, item)
+            .await
+    }
+
+    pub async fn check_mailbox_acl_as(
+        &self,
+        access_token: &AccessToken,
+        cache: Option<&MessageStoreCache>,
+        account_id: u32,
+        mailbox_id: u32,
+        item: Acl,
+    ) -> trc::Result<bool> {
         if access_token.is_member(account_id) {
             return Ok(true);
         }
@@ -434,7 +459,7 @@ impl<T: SessionStream> SessionData<T> {
                 mailbox
                     .acls
                     .as_slice()
-                    .effective_acl(&access_token)
+                    .effective_acl(access_token)
                     .contains(item)
             })
             .ok_or_else(|| {

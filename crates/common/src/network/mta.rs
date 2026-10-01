@@ -221,28 +221,42 @@ impl Server {
         list_id: u32,
         recipients: Arc<[Box<str>]>,
     ) -> trc::Result<Arc<[Box<str>]>> {
-        let mut has_nested = false;
-        for member in recipients.iter() {
-            if let Some(EmailCache::MailingList(_)) = self.rcpt_id_from_email(member).await? {
-                has_nested = true;
+        let mut first_nested = None;
+        for (index, member) in recipients.iter().enumerate() {
+            if let Some(EmailCache::MailingList(nested_id)) =
+                self.rcpt_id_from_email(member).await?
+            {
+                first_nested = Some((index, nested_id));
                 break;
             }
         }
-        if !has_nested {
+        let Some((mut start, nested_id)) = first_nested else {
             return Ok(recipients);
-        }
+        };
 
         let mut expanded = Vec::with_capacity(recipients.len());
         let mut seen: AHashSet<Box<str>> = AHashSet::with_capacity(recipients.len());
         let mut visited = AHashSet::from_iter([list_id]);
         let mut pending: Vec<Arc<[Box<str>]>> = Vec::new();
-        let mut members = recipients;
+        let mut resolved = Some(nested_id);
 
+        for member in recipients.get(..start).unwrap_or_default() {
+            if seen.insert(member.to_canonical_address().into()) {
+                expanded.push(member.clone());
+            }
+        }
+
+        let mut members = recipients;
         loop {
-            for member in members.iter() {
-                if let Some(EmailCache::MailingList(nested_id)) =
-                    self.rcpt_id_from_email(member).await?
-                {
+            for member in members.get(start..).unwrap_or_default() {
+                let nested_id = match resolved.take() {
+                    Some(nested_id) => Some(nested_id),
+                    None => match self.rcpt_id_from_email(member).await? {
+                        Some(EmailCache::MailingList(nested_id)) => Some(nested_id),
+                        _ => None,
+                    },
+                };
+                if let Some(nested_id) = nested_id {
                     if !visited.insert(nested_id) {
                         continue;
                     }
@@ -261,6 +275,7 @@ impl Server {
                 break;
             };
             members = next;
+            start = 0;
         }
 
         Ok(expanded.into())

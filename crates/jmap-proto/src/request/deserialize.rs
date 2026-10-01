@@ -5,10 +5,50 @@
  */
 
 use serde::{
-    Deserializer,
+    Deserialize, Deserializer,
     de::{self, MapAccess, Visitor},
 };
-use std::{fmt, marker::PhantomData};
+use std::{borrow::Cow, fmt, marker::PhantomData};
+
+pub(crate) struct CowStr<'x>(pub Cow<'x, str>);
+
+impl<'de> Deserialize<'de> for CowStr<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CowStrVisitor;
+
+        impl<'de> Visitor<'de> for CowStrVisitor {
+            type Value = CowStr<'de>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_borrowed_str<E: de::Error>(self, value: &'de str) -> Result<Self::Value, E> {
+                Ok(CowStr(Cow::Borrowed(value)))
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(CowStr(Cow::Owned(value.to_owned())))
+            }
+
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(CowStr(Cow::Owned(value)))
+            }
+        }
+
+        deserializer.deserialize_str(CowStrVisitor)
+    }
+}
+
+pub(crate) fn next_lowercase_value<'de, A>(map: &mut A) -> Result<String, A::Error>
+where
+    A: MapAccess<'de>,
+{
+    Ok(utils::text::lowercase(&map.next_value::<CowStr<'de>>()?.0).into_owned())
+}
 
 pub trait DeserializeArguments<'de> {
     fn deserialize_argument<A>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>

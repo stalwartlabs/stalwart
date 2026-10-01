@@ -22,6 +22,7 @@ decancer = "3.3.3"
 unicode-security = "0.1.2"
 infer = "0.22"
 hashify = "0.3"
+memchr = "2.8"
 sha1 = "0.11"
 compact_str = "0.10.0"
 rkyv.workspace = true

@@ -27,6 +27,7 @@ use std::fmt::Write;
 use store::write::SearchIndex;
 use trc::AddContext;
 use types::{acl::Acl, collection::SyncCollection};
+use utils::map::bitmap::Bitmap;
 
 pub(crate) trait CardQueryRequestHandler: Sync + Send {
     fn handle_card_query_request(
@@ -67,12 +68,10 @@ impl CardQueryRequestHandler for Server {
                 .with_xml_body(MultiStatus::not_found(headers.uri).to_string()));
         };
 
-        let shared_ids = (!access_token.is_member(account_id))
-            .then(|| resources.shared_items(access_token, [Acl::ReadItems], false));
+        let is_owner = access_token.is_member(account_id);
+        let read_items = Bitmap::from_iter([Acl::ReadItems]);
         let is_visible = |item: &DavResourcePath<'_>| {
-            shared_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(item.document_id()))
+            is_owner || resources.is_shared_item(&item.resource, access_token, &read_items, false)
         };
         let scope = if resource.is_container() {
             QueryScope::new(
@@ -105,12 +104,19 @@ impl CardQueryRequestHandler for Server {
     }
 }
 
+const PARTIAL_VCARD_CAPACITY: usize = 128;
+
 pub(crate) fn serialize_vcard_with_props(
     card: &ArchivedVCard,
     props: &[CardDavPropertyName],
     version: VCardVersion,
+    size_hint: usize,
 ) -> String {
-    let mut vcard = String::with_capacity(128);
+    let mut vcard = String::with_capacity(if props.is_empty() {
+        size_hint
+    } else {
+        PARTIAL_VCARD_CAPACITY
+    });
     if !props.is_empty() {
         let _ = write!(&mut vcard, "BEGIN:VCARD\r\n");
 

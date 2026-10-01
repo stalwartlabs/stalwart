@@ -23,7 +23,7 @@ use sieve::{
     runtime::{RuntimeError, Script, Variable},
 };
 use smtp_proto::{MAIL_BY_TRACE, MAIL_RET_FULL, MAIL_RET_HDRS};
-use std::{borrow::Cow, future::Future, time::Instant};
+use std::{future::Future, time::Instant};
 use trc::SieveEvent;
 
 use super::{ScriptParameters, ScriptResult, notify_flags};
@@ -55,7 +55,6 @@ enum PendingWork<'x> {
     ListContains {
         lists: Vec<String>,
         values: Vec<String>,
-        match_as: MatchAs,
     },
     Function {
         id: u32,
@@ -110,10 +109,19 @@ impl<'x> Handler<'x> for SmtpHandler<'x> {
         values: &[&str],
         match_as: MatchAs,
     ) -> Reply<bool> {
+        let lowercase = matches!(match_as, MatchAs::Lowercase);
         self.pending = Some(PendingWork::ListContains {
             lists: lists.iter().map(|list| list.to_string()).collect(),
-            values: values.iter().map(|value| value.to_string()).collect(),
-            match_as,
+            values: values
+                .iter()
+                .map(|value| {
+                    if lowercase {
+                        value.to_lowercase()
+                    } else {
+                        value.to_string()
+                    }
+                })
+                .collect(),
         });
 
         Reply::Pending
@@ -219,13 +227,20 @@ impl RunScript for Server {
         // Create filter instance
         let time = Instant::now();
         let session_id = params.session_id;
-        let empty = Message::default();
+        let empty;
+        let message = match params.message.take() {
+            Some(message) => message,
+            None => {
+                empty = Message::default();
+                &empty
+            }
+        };
         let mut arena = Arena::new();
         let mut ctx = self
             .core
             .sieve
             .trusted_runtime
-            .filter_parsed(params.message.take().unwrap_or(&empty), script, &mut arena)
+            .filter_parsed(message, script, &mut arena)
             .with_vars_env(std::mem::take(&mut params.variables))
             .with_envelope_list(std::mem::take(&mut params.envelope))
             .with_user_address(&params.from_addr)
@@ -251,11 +266,7 @@ impl RunScript for Server {
                 Ok(Status::Finished) => break,
                 Ok(Status::Pending) => {
                     let input = match handler.pending.take() {
-                        Some(PendingWork::ListContains {
-                            lists,
-                            values,
-                            match_as,
-                        }) => {
+                        Some(PendingWork::ListContains { lists, values }) => {
                             let mut contains = false;
 
                             'outer: for list in lists {
@@ -271,13 +282,7 @@ impl RunScript for Server {
                                 };
 
                                 for value in &values {
-                                    let key = if matches!(match_as, MatchAs::Lowercase) {
-                                        Cow::Owned(value.to_lowercase())
-                                    } else {
-                                        Cow::Borrowed(value.as_str())
-                                    };
-
-                                    if let Ok(true) = store.key_exists(key).await {
+                                    if let Ok(true) = store.key_exists(value.as_str()).await {
                                         contains = true;
                                         break 'outer;
                                     }

@@ -41,7 +41,7 @@ use calcard::{
 use common::{
     ArchivedDavName, DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountInfo},
-    storage::quota::ObjectQuotaUsage,
+    storage::{dav::CachedUid, quota::ObjectQuotaUsage},
 };
 use compact_str::ToCompactString;
 use groupware::{
@@ -241,7 +241,7 @@ impl CalendarEventSet for Server {
                 .flat_map(|create| create.values())
                 .filter_map(|object| {
                     match object.as_object_and_get(&Key::Property(JSCalendarProperty::Uid)) {
-                        Some(Value::Str(uid)) => Some(uid.as_ref()),
+                        Some(Value::Str(uid)) => Some(uid.cached_uid()),
                         _ => None,
                     }
                 }),
@@ -410,6 +410,7 @@ impl CalendarEventSet for Server {
                     cache
                         .item_by_id(update.document_id)
                         .and_then(|resource| resource.uid())
+                        .map(Cow::Borrowed)
                 }),
             )
         } else {
@@ -450,13 +451,7 @@ impl CalendarEventSet for Server {
                 update.fail(&mut response, uid_privacy_conflict());
                 continue 'update;
             }
-            if update
-                .base_patch()
-                .and_then(EventValue::as_object)
-                .zip(update.base_id())
-                .is_some_and(|(patch, id)| {
-                    is_empty_update::<calendar_event::CalendarEvent>(patch, id)
-                })
+            if update.is_empty_base_update()
                 && let Some(patches) = update_metadata.take()
             {
                 let access = event_metadata_access(
@@ -2690,6 +2685,15 @@ impl<'x> EventUpdate<'x> {
         match &self.ops {
             EventOps::Base { patch, .. } => Some(patch),
             EventOps::Instances(_) => None,
+        }
+    }
+
+    fn is_empty_base_update(&self) -> bool {
+        match &self.ops {
+            EventOps::Base { id, patch } => patch
+                .as_object()
+                .is_some_and(|patch| is_empty_update::<calendar_event::CalendarEvent>(patch, *id)),
+            EventOps::Instances(_) => false,
         }
     }
 

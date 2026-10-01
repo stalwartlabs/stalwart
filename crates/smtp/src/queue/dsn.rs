@@ -11,7 +11,7 @@ use super::{
 };
 use crate::inbound::dkim::DkimSign;
 use crate::queue::spool::{DSN_RETRY, QueueParams};
-use crate::queue::{MessageWrapper, UnexpectedResponse};
+use crate::queue::{MessageWrapper, UnexpectedResponse, eval_strategy};
 use common::{Server, expr::Bump};
 use compact_str::{CompactString, ToCompactString};
 use email::message::delivery::ORCPT_ADDR_TYPE;
@@ -393,16 +393,15 @@ impl MessageWrapper {
 
                 let envelope = QueueEnvelope::new(&self.message, rcpt);
 
-                let queue_id = server
-                    .eval_if::<String, _>(
-                        &server.core.smtp.queue.queue,
-                        &envelope,
-                        &mut arena,
-                        self.span_id,
-                    )
-                    .await
-                    .unwrap_or_else(|| "default".to_string());
-                let queue = server.get_queue_or_default(&queue_id, self.span_id);
+                let queue = eval_strategy(
+                    server,
+                    &server.core.smtp.queue.queue,
+                    &envelope,
+                    &mut arena,
+                    self.span_id,
+                    Server::get_queue_or_default,
+                )
+                .await;
 
                 if let Some(next_notify) =
                     queue.notify.get((rcpt.notify.inner + 1) as usize).copied()

@@ -79,8 +79,8 @@ impl FileUpdateRequestHandler for Server {
         }
 
         if !access_token.is_member(account_id) {
-            resources.hide_undiscoverable(
-                &resources.file_access(access_token).discoverable,
+            resources.hide_undiscoverable_for(
+                access_token,
                 resource_name.as_ref(),
                 StatusCode::FORBIDDEN,
                 StatusCode::CONFLICT,
@@ -167,11 +167,12 @@ impl FileUpdateRequestHandler for Server {
             }
 
             // Verify that the node is a file
-            let current_size = if let Some(file) = node.inner.file() {
-                if BlobHash::generate(&bytes).as_slice() == file.blob_hash.0.as_slice() {
+            let (current_size, blob_hash) = if let Some(file) = node.inner.file() {
+                let blob_hash = BlobHash::generate(&bytes);
+                if blob_hash.as_slice() == file.blob_hash.0.as_slice() {
                     return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
                 }
-                u32::from(file.size) as u64
+                (u32::from(file.size) as u64, blob_hash)
             } else {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
             };
@@ -185,7 +186,7 @@ impl FileUpdateRequestHandler for Server {
 
             // Write blob
             let (blob_hash, blob_hold) = self
-                .put_temporary_blob(account_id, &bytes, 60)
+                .put_temporary_blob_with_hash(account_id, blob_hash, &bytes, 60)
                 .await
                 .caused_by(trc::location!())?;
 

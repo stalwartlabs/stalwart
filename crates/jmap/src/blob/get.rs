@@ -23,7 +23,7 @@ use std::future::Future;
 use store::ValueKey;
 use trc::AddContext;
 use types::{blob::BlobClass, collection::Collection, id::Id, type_state::DataType};
-use utils::map::vec_map::VecMap;
+use utils::{map::vec_map::VecMap, text::validate_utf8};
 
 pub trait BlobOperations: Sync + Send {
     fn blob_get(
@@ -104,20 +104,20 @@ impl BlobOperations for Server {
                         }
                         .into(),
                         BlobProperty::Data(data) => match data {
-                            DataProperty::AsText => match std::str::from_utf8(bytes_range) {
-                                Ok(text) => text.to_string().into(),
-                                Err(_) => {
+                            DataProperty::AsText => match validate_utf8(bytes_range) {
+                                Some(text) => text.to_string().into(),
+                                None => {
                                     blob.insert_unchecked(BlobProperty::IsEncodingProblem, true);
                                     Value::Null
                                 }
                             },
                             DataProperty::AsBase64 => STANDARD.encode(bytes_range).into(),
-                            DataProperty::Default => match std::str::from_utf8(bytes_range) {
-                                Ok(text) => {
+                            DataProperty::Default => match validate_utf8(bytes_range) {
+                                Some(text) => {
                                     property = BlobProperty::Data(DataProperty::AsText);
                                     text.to_string().into()
                                 }
-                                Err(_) => {
+                                None => {
                                     property = BlobProperty::Data(DataProperty::AsBase64);
                                     blob.insert_unchecked(BlobProperty::IsEncodingProblem, true);
                                     STANDARD.encode(bytes_range).into()

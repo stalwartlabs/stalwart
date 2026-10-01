@@ -479,6 +479,7 @@ pub async fn test(test: &TestServer) {
             .with_failed_precondition(precond_key, precond_value);
     }
     card_uid_changes(test).await;
+    long_uid_conflicts(test).await;
 
     // iCal containing different component types should fail
     client
@@ -874,5 +875,57 @@ async fn card_uid_changes(test: &TestServer) {
             .request("DELETE", path, "")
             .await
             .with_status(StatusCode::NO_CONTENT);
+    }
+}
+
+async fn long_uid_conflicts(test: &TestServer) {
+    let client = test.account("john@example.com").webdav_client();
+    let long_uid = "a".repeat(300);
+    let sibling_uid = format!("{}b", "a".repeat(299));
+    let vcard = |uid: &str| {
+        format!("BEGIN:VCARD\r\nVERSION:4.0\r\nUID:{uid}\r\nFN:Long UID\r\nEND:VCARD\r\n")
+    };
+    let ical = |uid: &str| {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:20231001T100000Z\r\nDTSTART:20231001T120000Z\r\nDTEND:20231001T130000Z\r\nSUMMARY:Long UID\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    };
+
+    for (base, extension, precondition, body) in [
+        (
+            "/dav/card/john%40example.com/default",
+            "vcf",
+            "B:no-uid-conflict.D:href",
+            &vcard as &dyn Fn(&str) -> String,
+        ),
+        (
+            "/dav/cal/john%40example.com/default",
+            "ics",
+            "A:no-uid-conflict.D:href",
+            &ical as &dyn Fn(&str) -> String,
+        ),
+    ] {
+        let long_path = format!("{base}/long-uid.{extension}");
+        let sibling_path = format!("{base}/long-uid-sibling.{extension}");
+        let copy_path = format!("{base}/long-uid-copy.{extension}");
+
+        for (path, uid) in [(&long_path, &long_uid), (&sibling_path, &sibling_uid)] {
+            client
+                .request_with_headers("PUT", path, [("if-none-match", "*")], body(uid))
+                .await
+                .with_status(StatusCode::CREATED);
+        }
+        client
+            .request_with_headers("PUT", &copy_path, [("if-none-match", "*")], body(&long_uid))
+            .await
+            .with_status(StatusCode::PRECONDITION_FAILED)
+            .with_failed_precondition(precondition, &long_path);
+
+        for path in [&long_path, &sibling_path] {
+            client
+                .request("DELETE", path, "")
+                .await
+                .with_status(StatusCode::NO_CONTENT);
+        }
     }
 }

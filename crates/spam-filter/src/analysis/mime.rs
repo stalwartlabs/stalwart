@@ -15,7 +15,8 @@ use common::{
 };
 use mail_parser::{HeaderName, PartFlags};
 use nlp::tokenizers::types::TokenType;
-use std::{collections::HashSet, future::Future, vec};
+use std::{future::Future, vec};
+use store::ahash::AHashSet;
 
 pub trait SpamFilterAnalyzeMime: Sync + Send {
     fn spam_filter_analyze_mime(
@@ -175,7 +176,7 @@ impl SpamFilterAnalyzeMime for Server {
                             _ => continue,
                         };
 
-                        let mut uris = HashSet::new();
+                        let mut uris = AHashSet::new();
                         words.reserve(tokens.len());
                         for token in tokens {
                             match token {

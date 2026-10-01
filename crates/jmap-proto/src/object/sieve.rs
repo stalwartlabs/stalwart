@@ -10,7 +10,7 @@ use crate::{
         metadata::{MetadataFilter, MetadataProperty, MetadataRoot, property_names},
         parse_ref,
     },
-    request::reference::MaybeIdReference,
+    request::{deserialize::CowStr, reference::MaybeIdReference},
 };
 use jmap_tools::{Element, JsonPointer, Key, PointerDepth, Property};
 use serde::{Serialize, Serializer};
@@ -292,7 +292,7 @@ impl<'de> DeserializeArguments<'de> for SieveComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"name" => {
                     *self = SieveComparator::Name;
@@ -301,7 +301,7 @@ impl<'de> DeserializeArguments<'de> for SieveComparator {
                     *self = SieveComparator::IsActive;
                 },
                 _ => {
-                    *self = SieveComparator::_T(key.to_string());
+                    *self = SieveComparator::_T(value.into_owned());
                 }
             );
         } else {

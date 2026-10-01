@@ -82,17 +82,20 @@ impl AddressBookGet for Server {
         } else {
             cache.shared_containers(access_token, [Acl::Read, Acl::ReadItems], true)
         };
-        let default_address_book_id = self
-            .store()
-            .get_value::<u32>(ValueKey {
-                account_id,
-                collection: Collection::Principal.into(),
-                document_id: 0,
-                class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
-            })
-            .await
-            .caused_by(trc::location!())?
-            .or_else(|| cache.document_ids(true).min());
+        let default_address_book_id = if properties.contains(&AddressBookProperty::IsDefault) {
+            self.store()
+                .get_value::<u32>(ValueKey {
+                    account_id,
+                    collection: Collection::Principal.into(),
+                    document_id: 0,
+                    class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
+                })
+                .await
+                .caused_by(trc::location!())?
+                .or_else(|| cache.document_ids(true).min())
+        } else {
+            None
+        };
 
         let ids = if let Some(ids) = ids {
             ids

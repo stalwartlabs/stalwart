@@ -10,6 +10,7 @@ use aes_gcm_siv::{
 };
 use store::blake3;
 
+#[derive(Clone)]
 pub struct SymmetricEncrypt {
     aes: Aes256GcmSiv,
 }

@@ -79,8 +79,8 @@ impl FilePropPatchRequestHandler for Server {
         if !access_token.is_member(account_id)
             && let Some(path) = resource_.resource
         {
-            files.hide_undiscoverable(
-                &files.file_access(access_token).discoverable,
+            files.hide_undiscoverable_for(
+                access_token,
                 path,
                 StatusCode::NOT_FOUND,
                 StatusCode::NOT_FOUND,

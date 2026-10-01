@@ -28,13 +28,13 @@ impl SpamFilterAnalyzeFrom for Server {
         if !ctx.output.env_from_addr.address.is_empty() && ctx.output.env_from_addr.is_valid() {
             // Mail from no resolve to A or MX
             if matches!(
-                (
-                    self.dns_exists_ip(&ctx.output.env_from_addr.domain_part.fqdn)
-                        .await,
-                    self.dns_exists_mx(&ctx.output.env_from_addr.domain_part.fqdn)
-                        .await
-                ),
-                (Ok(false), Ok(false))
+                self.dns_exists_ip(&ctx.output.env_from_addr.domain_part.fqdn)
+                    .await,
+                Ok(false)
+            ) && matches!(
+                self.dns_exists_mx(&ctx.output.env_from_addr.domain_part.fqdn)
+                    .await,
+                Ok(false)
             ) {
                 // Helo no resolve to A or MX
                 ctx.result.add_tag("FROMHOST_NORES_A_OR_MX");

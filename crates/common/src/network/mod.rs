@@ -6,7 +6,7 @@
 
 use self::limiter::{ConcurrencyLimiter, InFlight};
 use crate::{Server, config::server::ServerProtocol};
-use compact_str::ToCompactString;
+use compact_str::{CompactString, ToCompactString};
 use registry::types::ipmask::IpAddrOrMask;
 use rustls::ServerConfig;
 use std::fmt::Debug;
@@ -17,6 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tinyvec::ArrayVec;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::watch,
@@ -146,7 +147,11 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
                                 Event::with_keys(
                                     span_start,
                                     vec![
-                                        (Key::ListenerId, session.instance.id.clone().into()),
+                                        (
+                                            Key::ListenerId,
+                                            CompactString::from(session.instance.id.as_str())
+                                                .into(),
+                                        ),
                                         (Key::LocalPort, session.local_port.into()),
                                         (Key::RemoteIp, session.remote_ip.into()),
                                         (Key::RemotePort, session.remote_port.into()),
@@ -192,7 +197,10 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
                         Event::with_keys(
                             span_start,
                             vec![
-                                (Key::ListenerId, session.instance.id.clone().into()),
+                                (
+                                    Key::ListenerId,
+                                    CompactString::from(session.instance.id.as_str()).into(),
+                                ),
                                 (Key::LocalPort, session.local_port.into()),
                                 (Key::RemoteIp, session.remote_ip.into()),
                                 (Key::RemotePort, session.remote_port.into()),
@@ -227,7 +235,10 @@ pub trait SessionManager: Sync + Send + 'static + Clone {
                 Event::with_keys(
                     span_start,
                     vec![
-                        (Key::ListenerId, session.instance.id.clone().into()),
+                        (
+                            Key::ListenerId,
+                            CompactString::from(session.instance.id.as_str()).into(),
+                        ),
                         (Key::LocalPort, session.local_port.into()),
                         (Key::RemoteIp, session.remote_ip.into()),
                         (Key::RemotePort, session.remote_port.into()),
@@ -350,11 +361,13 @@ fn is_global_ipv6(ip: &Ipv6Addr) -> bool {
         || is_orchid)
 }
 
-pub fn ip_to_bytes(ip: &IpAddr) -> Vec<u8> {
+pub fn ip_to_bytes(ip: &IpAddr) -> ArrayVec<[u8; 16]> {
+    let mut bytes = ArrayVec::new();
     match ip {
-        IpAddr::V4(ip) => ip.octets().to_vec(),
-        IpAddr::V6(ip) => ip.octets().to_vec(),
+        IpAddr::V4(ip) => bytes.extend_from_slice(&ip.octets()),
+        IpAddr::V6(ip) => bytes.extend_from_slice(&ip.octets()),
     }
+    bytes
 }
 
 pub fn ip_to_bytes_prefix(prefix: u8, ip: &IpAddr) -> Vec<u8> {

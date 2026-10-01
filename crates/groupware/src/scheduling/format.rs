@@ -407,15 +407,21 @@ fn write_number(out: &mut String, template: &str, placeholder: &str, value: u64)
 pub fn hyperlink(value: &str) -> Option<&str> {
     let (scheme, _) = value.split_once(':')?;
 
-    ["https", "http", "tel", "sip", "sips", "xmpp"]
-        .iter()
-        .any(|candidate| scheme.eq_ignore_ascii_case(candidate))
-        .then_some(value)
+    hashify::set_ignore_case!(
+        scheme.as_bytes(),
+        "https",
+        "http",
+        "tel",
+        "sip",
+        "sips",
+        "xmpp"
+    )
+    .then_some(value)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PluralCategoryExt, PluralForms, TextFormatter, i18n};
+    use super::{PluralCategoryExt, PluralForms, TextFormatter, hyperlink, i18n};
     use calcard::icalendar::{
         ICalendarDay, ICalendarFrequency, ICalendarRecurrenceRule, ICalendarWeekday,
     };
@@ -590,5 +596,24 @@ mod tests {
             format("zz", &rule(ICalendarFrequency::Weekly, Some(3))),
             "Every 3 weeks"
         );
+    }
+
+    #[test]
+    fn hyperlink_accepts_known_schemes_in_any_case() {
+        for (value, expected) in [
+            ("https://meet.example.com/x", true),
+            ("HTTP://example.com", true),
+            ("Tel:+15551234", true),
+            ("sip:alice@example.com", true),
+            ("SIPS:alice@example.com", true),
+            ("xmpp:room@example.com", true),
+            ("ftp://example.com", false),
+            ("httpsx://example.com", false),
+            ("mailto:alice@example.com", false),
+            ("no scheme here", false),
+            ("", false),
+        ] {
+            assert_eq!(hyperlink(value).is_some(), expected, "{value}");
+        }
     }
 }

@@ -130,7 +130,7 @@ impl Server {
 
                         records.push(NamedDnsRecord {
                             name: format!("_mta-sts.{domain_name}."),
-                            record: DnsRecord::TXT(format!("v=STSv1; id={}", policy.id)),
+                            record: DnsRecord::TXT(format!("v=STSv1; id={}", policy.policy.id)),
                         });
                     }
                 }

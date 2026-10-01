@@ -78,18 +78,15 @@ pub(crate) fn assert_is_unique_uid(
     addressbook_id: u32,
     uid: Option<&str>,
 ) -> crate::Result<()> {
-    if let Some(uid) = uid {
-        let hits = resources.uid_matches(uid);
-        if !hits.is_empty() {
-            for path in resources.children(addressbook_id) {
-                if hits.contains(path.document_id()) {
-                    return Err(DavError::Condition(DavErrorCondition::new(
-                        StatusCode::PRECONDITION_FAILED,
-                        CardCondition::NoUidConflict(resources.format_resource(path).into()),
-                    )));
-                }
-            }
-        }
+    let Some(uid) = uid else {
+        return Ok(());
+    };
+
+    if let Some(path) = resources.children_with_uid(addressbook_id, uid).next() {
+        return Err(DavError::Condition(DavErrorCondition::new(
+            StatusCode::PRECONDITION_FAILED,
+            CardCondition::NoUidConflict(resources.format_resource(path).into()),
+        )));
     }
 
     Ok(())

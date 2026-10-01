@@ -17,12 +17,12 @@ use mail_auth::{
     ArcOutput, DkimOutput, DmarcResult, IprevOutput, SpfOutput, dkim2::Dkim2Output, dmarc::Policy,
 };
 use mail_parser::{Message, PartId};
-use modules::html::HtmlToken;
+use modules::html::{HtmlToken, html_text_body};
 use nlp::tokenizers::types::TokenType;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::OnceLock;
 use store::ahash::AHashSet;
 use sync_wrapper::SyncWrapper;
 
@@ -69,8 +69,7 @@ pub struct SpamFilterOutput<'x> {
 
     pub env_from_addr: Email,
     pub env_from_postmaster: bool,
-    pub env_to_orig_addr: HashSet<Email>,
-    pub env_to_rewritten_addr: HashSet<Email>,
+    pub env_to_orig_addr: AHashSet<Email>,
     pub from: Recipient,
     pub recipients_to: Vec<Recipient>,
     pub recipients_cc: Vec<Recipient>,
@@ -84,15 +83,16 @@ pub struct SpamFilterOutput<'x> {
     pub subject_tokens: Vec<ContextToken<'x>>,
 
     pub ips: AHashSet<ElementLocation<IpAddr>>,
-    pub urls: HashSet<ElementLocation<UrlParts<'x>>>,
-    pub emails: HashSet<ElementLocation<Recipient>>,
-    pub domains: HashSet<ElementLocation<String>>,
+    pub urls: AHashSet<ElementLocation<UrlParts<'x>>>,
+    pub emails: AHashSet<ElementLocation<Recipient>>,
+    pub domains: AHashSet<ElementLocation<String>>,
 
     pub text_parts: Vec<TextPart<'x>>,
 }
 
 pub struct MessageTexts<'x> {
     texts: Vec<Option<Cow<'x, str>>>,
+    html_texts: Box<[OnceLock<String>]>,
 }
 
 #[derive(Debug)]
@@ -107,7 +107,7 @@ pub enum TextPart<'x> {
     },
     Html {
         html_tokens: Vec<HtmlToken<'x>>,
-        text_body: String,
+        text_body: &'x str,
         tokens: Vec<ContextToken<'x>>,
     },
     None,
@@ -154,13 +154,21 @@ pub struct Recipient {
 
 impl<'x> MessageTexts<'x> {
     pub fn new(message: &'x Message<'x>) -> Self {
+        let texts: Vec<_> = message.parts().map(|part| part.text()).collect();
         MessageTexts {
-            texts: message.parts().map(|part| part.text()).collect(),
+            html_texts: texts.iter().map(|_| OnceLock::new()).collect(),
+            texts,
         }
     }
 
     pub fn get(&self, part_id: PartId) -> Option<&str> {
         self.texts.get(part_id as usize)?.as_deref()
+    }
+
+    pub fn html_text(&self, part_id: PartId, html_tokens: &[HtmlToken<'_>]) -> &str {
+        self.html_texts
+            .get(part_id as usize)
+            .map_or("", |text| text.get_or_init(|| html_text_body(html_tokens)))
     }
 }
 

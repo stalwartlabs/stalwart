@@ -85,6 +85,17 @@ impl<'x> GroupwareResourceRef<'x> {
     }
 
     #[inline(always)]
+    pub fn has_cached_uid(&self, cached_uid: &[u8]) -> bool {
+        match &self.resource.data {
+            GroupwareResourceMetadata::CalendarEvent { uid, .. }
+            | GroupwareResourceMetadata::ContactCard { uid, .. } => {
+                self.chunk.bytes_at(*uid) == cached_uid
+            }
+            _ => false,
+        }
+    }
+
+    #[inline(always)]
     pub fn container_name(&self) -> Option<&'x str> {
         match &self.resource.data {
             GroupwareResourceMetadata::File { name, .. }
@@ -550,10 +561,7 @@ impl GroupwareResources {
         self.by_path(search_path)
             .into_iter()
             .chain(self.paths.range(prefix).filter_map(move |entry| {
-                (entry.0.path_str(entry.1).as_bytes()[cut..]
-                    .iter()
-                    .filter(|&&c| c == b'/')
-                    .count()
+                (count_separators(entry.0.path_bytes(entry.1).get(cut..).unwrap_or_default())
                     < depth)
                     .then(|| self.pair(entry))
                     .flatten()
@@ -562,9 +570,7 @@ impl GroupwareResources {
 
     pub fn tree_with_depth(&self, depth: usize) -> impl Iterator<Item = DavResourcePath<'_>> {
         self.paths.iter().filter_map(move |entry| {
-            let path =
-                std::str::from_utf8(&entry.0.bytes[entry.1.path.range()]).unwrap_or_default();
-            (path.as_bytes().iter().filter(|&&c| c == b'/').count() <= depth)
+            (count_separators(entry.0.path_bytes(entry.1)) <= depth)
                 .then(|| self.pair(entry))
                 .flatten()
         })
@@ -632,7 +638,7 @@ impl GroupwareResources {
 
     #[inline(always)]
     pub fn containers(&self) -> impl Iterator<Item = GroupwareResourceRef<'_>> + '_ {
-        self.resources.iter().filter(|r| r.is_container())
+        self.resources.iter_run(true).filter(|r| r.is_container())
     }
 
     #[inline(always)]
@@ -646,4 +652,9 @@ impl GroupwareResources {
             + self.resources.heap_size()
             + self.paths.heap_size();
     }
+}
+
+#[inline(always)]
+fn count_separators(path: &[u8]) -> usize {
+    path.iter().filter(|&&byte| byte == b'/').count()
 }

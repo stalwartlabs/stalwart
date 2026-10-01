@@ -8,8 +8,8 @@ use super::alarm::{AlarmTarget, CalendarComponentView, CalendarView};
 use super::schedule::{EventAlarmContent, EventAlarmScheduler, EventAlarmUsers};
 use super::{
     ALERT_EMAIL, ALERT_RELATIVE_TO_END, ALERT_WITH_TIME, AlarmDelta, ArchivedCalendar,
-    CALENDAR_SUBSCRIBED, Calendar, CalendarEvent, CalendarEventContent, DefaultAlert,
-    EVENT_HAS_ALARMS, EVENT_USES_DEFAULT_ALERTS, default_preference_flags,
+    CALENDAR_SUBSCRIBED, Calendar, CalendarEventContent, DefaultAlert, EVENT_HAS_ALARMS,
+    EVENT_USES_DEFAULT_ALERTS, default_preference_flags,
 };
 use calcard::{
     common::timezone::Tz,
@@ -19,7 +19,7 @@ use calcard::{
         ICalendarRelated, ICalendarRelationshipType, ICalendarValue, Uri,
     },
 };
-use common::{ArchivedDavName, GroupwareResources, Server};
+use common::{GroupwareResources, Server};
 use std::{collections::hash_map::Entry, sync::Arc};
 use store::{
     ValueKey,
@@ -575,17 +575,16 @@ impl CalendarAlarmsReschedule for Server {
         )
         .with_calendar(account_id, calendar_id, current);
         let now = now() as i64;
+        let mut calendar_ids = Vec::new();
 
-        for document_id in resources
-            .children(calendar_id)
-            .filter(|resource| {
-                resource
-                    .resource
-                    .event_flags()
-                    .is_some_and(|flags| flags & required_flags != 0)
-            })
-            .map(|resource| resource.document_id())
-        {
+        for (event_flags, resource) in resources.children(calendar_id).filter_map(|resource| {
+            resource
+                .resource
+                .event_flags()
+                .filter(|flags| flags & required_flags != 0)
+                .map(|flags| (flags, resource.resource))
+        }) {
+            let document_id = resource.document_id();
             let Some(content_) = self
                 .store()
                 .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
@@ -602,28 +601,9 @@ impl CalendarAlarmsReschedule for Server {
             let content = content_
                 .unarchive::<CalendarEventContent>()
                 .caused_by(trc::location!())?;
-            let Some(event_) = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::CalendarEvent,
-                    document_id,
-                ))
-                .await
-                .caused_by(trc::location!())?
-            else {
-                continue;
-            };
-            let event = event_
-                .unarchive::<CalendarEvent>()
-                .caused_by(trc::location!())?;
+            calendar_ids.clear();
+            calendar_ids.extend(resource.child_names().iter().map(|name| name.parent_id));
 
-            let event_flags = event.flags.to_native();
-            let calendar_ids = event
-                .names
-                .iter()
-                .map(ArchivedDavName::parent_id)
-                .collect::<Vec<_>>();
             for target in targets.iter().copied() {
                 let users = EventAlarmUsers::for_target(account_id, content, target)?
                     .with_event_flags(event_flags);

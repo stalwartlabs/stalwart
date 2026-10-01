@@ -28,6 +28,7 @@ const RECURRENCE_KEY_GRANULARITY: i64 = 60;
 pub const SECONDS_PER_DAY: i64 = 86_400;
 const NAIVE_EPOCH: DateTime = DateTime::constant(1970, 1, 1, 0, 0, 0, 0);
 pub const MAX_UTC_OFFSET: i64 = SECONDS_PER_DAY;
+const EXPANSION_SKIP_MARGIN: i64 = 2 * MAX_UTC_OFFSET;
 
 pub trait NaiveTimestamp: Sized {
     fn naive_timestamp(&self) -> i64;
@@ -378,6 +379,9 @@ trait ExpansionSource {
             }
 
             if instances.len() > bytes_read {
+                let skip_before = (limit.start <= limit.end
+                    && (rule == OverlapRule::Jmap || condition != OverlapCondition::TodoCreated))
+                    .then(|| limit.start.saturating_sub(EXPANSION_SKIP_MARGIN));
                 let unpacker =
                     BitpackIterator::from_bytes_and_offset(instances, bytes_read, offset_or_count);
                 for start_offset in unpacker {
@@ -394,6 +398,11 @@ trait ExpansionSource {
                             recurrence_tz,
                         )
                     });
+                    if skip_before
+                        .is_some_and(|before| start_date_naive < before && end_date_naive < before)
+                    {
+                        continue;
+                    }
                     let (Some(start), Some(end)) = (
                         flags.resolve_start(start_tz, start_date_naive),
                         flags.resolve_end(end_tz, end_date_naive),
@@ -957,6 +966,96 @@ mod tests {
             ),
         ] {
             assert!(expanded.contains(&expected), "{expected:?} in {expanded:?}");
+        }
+    }
+
+    #[test]
+    fn windowed_expansion_matches_the_filtered_full_expansion() {
+        const THIS_AND_FUTURE: &str = concat!(
+            "BEGIN:VEVENT\r\nUID:u@example.com\r\nDTSTAMP:20270101T000000Z\r\n",
+            "RECURRENCE-ID;RANGE=THISANDFUTURE:20270315T090000Z\r\n",
+            "DTSTART:20270315T100000Z\r\nDTEND:20270315T113000Z\r\n",
+            "SUMMARY:Longer\r\nEND:VEVENT\r\n",
+        );
+        const DAILY_BERLIN: &str = concat!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+            "BEGIN:VEVENT\r\nUID:b@example.com\r\nDTSTAMP:20270101T000000Z\r\n",
+            "DTSTART;TZID=Europe/Berlin:20270101T023000\r\nDURATION:PT45M\r\n",
+            "RRULE:FREQ=DAILY;COUNT=800\r\nSUMMARY:Daily\r\nEND:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nUID:b@example.com\r\nDTSTAMP:20270101T000000Z\r\n",
+            "RECURRENCE-ID;TZID=Europe/Berlin;RANGE=THISANDFUTURE:20270601T023000\r\n",
+            "DTSTART;TZID=Europe/Berlin:20270601T063000\r\nDURATION:PT2H\r\n",
+            "END:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        const FLOATING_DAILY: &str = concat!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n",
+            "BEGIN:VEVENT\r\nUID:f@example.com\r\nDTSTAMP:20270101T000000Z\r\n",
+            "DTSTART:20270101T233000\r\nDTEND:20270102T003000\r\n",
+            "RRULE:FREQ=DAILY;COUNT=500\r\nSUMMARY:Floating\r\nEND:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nUID:a@example.com\r\nDTSTAMP:20270101T000000Z\r\n",
+            "DTSTART;VALUE=DATE:20270101\r\nRRULE:FREQ=WEEKLY;COUNT=100\r\n",
+            "SUMMARY:All day\r\nEND:VEVENT\r\n",
+            "BEGIN:VTODO\r\nUID:t@example.com\r\nDTSTAMP:20270101T000000Z\r\n",
+            "DTSTART:20270101T090000Z\r\nDUE:20270101T100000Z\r\n",
+            "RRULE:FREQ=DAILY;COUNT=300\r\nSUMMARY:Todo\r\nEND:VTODO\r\n",
+            "END:VCALENDAR\r\n",
+        );
+
+        let calendars = [
+            format!("{MASTER}{THIS_AND_FUTURE}END:VCALENDAR\r\n"),
+            DAILY_BERLIN.to_string(),
+            FLOATING_DAILY.to_string(),
+            REPEATED_HOUR.to_string(),
+        ];
+        let zones = [
+            Tz::Floating,
+            Tz::from_str("Pacific/Kiritimati").expect("time zone"),
+            Tz::from_str("Pacific/Pago_Pago").expect("time zone"),
+        ];
+        let first = naive(2026, 10, 1, 0, 0, 0);
+        let last = naive(2029, 6, 1, 0, 0, 0);
+
+        for ical in &calendars {
+            let Entry::ICalendar(ical) = Parser::new(ical).entry() else {
+                panic!("failed to parse iCalendar");
+            };
+            let data = CalendarEventData::new(ical, Tz::Floating, 1000);
+            let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&data).expect("archive");
+            let archived =
+                rkyv::access::<ArchivedCalendarEventData, rkyv::rancor::Error>(&archived)
+                    .expect("access");
+            for default_tz in zones {
+                for rule in [OverlapRule::CalDav, OverlapRule::Jmap] {
+                    let full = data
+                        .expand(default_tz, TimeRange::default(), rule)
+                        .expect("expansion");
+                    for width in [3_600, 7 * SECONDS_PER_DAY] {
+                        let mut start = first;
+                        while start < last {
+                            let window = TimeRange::new(start, start + width);
+                            let expected = full
+                                .iter()
+                                .filter(|expansion| {
+                                    window.matches(
+                                        rule,
+                                        expansion.flags.condition(),
+                                        expansion.start,
+                                        expansion.end,
+                                    )
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            let owned = data.expand(default_tz, window, rule).expect("expansion");
+                            let archived = archived
+                                .expand(default_tz, window, rule)
+                                .expect("expansion");
+                            assert_eq!(owned, expected, "{default_tz:?} {rule:?} {window:?}");
+                            assert_eq!(archived, expected, "{default_tz:?} {rule:?} {window:?}");
+                            start += 11 * SECONDS_PER_DAY + 7_919;
+                        }
+                    }
+                }
+            }
         }
     }
 

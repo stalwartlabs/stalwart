@@ -269,8 +269,16 @@ impl CacheInvalidationBuilder {
     }
 
     pub fn process_create(&mut self, object: &Object) {
-        if matches!(&object.inner, ObjectInner::Domain(_)) {
-            self.invalidate(CacheInvalidation::DomainNegative);
+        match &object.inner {
+            ObjectInner::Domain(_) => {
+                self.invalidate(CacheInvalidation::DomainNegative);
+            }
+            ObjectInner::DkimSignature(object) => {
+                self.invalidate(CacheInvalidation::DkimSignature(
+                    object.domain_id().document_id(),
+                ));
+            }
+            _ => {}
         }
         self.invalidate_negative_email(&object.inner);
     }

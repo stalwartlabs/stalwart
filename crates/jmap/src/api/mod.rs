@@ -40,9 +40,20 @@ pub trait ToJmapHttpResponse {
 
 impl ToJmapHttpResponse for Response<'_> {
     fn into_http_response(self) -> HttpResponse {
-        HttpResponse::new(StatusCode::OK)
-            .with_content_type("application/json; charset=utf-8")
-            .with_text_body(self.to_json())
+        match self.to_json() {
+            Ok(body) => HttpResponse::new(StatusCode::OK)
+                .with_content_type("application/json; charset=utf-8")
+                .with_text_body(body),
+            Err(err) => {
+                trc::error!(
+                    trc::ResourceEvent::Error
+                        .into_err()
+                        .details("Failed to serialize JMAP response")
+                        .reason(err)
+                );
+                RequestError::internal_server_error().into_http_response()
+            }
+        }
     }
 }
 

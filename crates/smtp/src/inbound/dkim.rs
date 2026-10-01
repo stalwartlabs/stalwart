@@ -5,6 +5,7 @@
  */
 
 use crate::queue::{MessageWrapper, Metadata, spool::QueueParams};
+use ahash::AHashSet;
 use common::{
     Server,
     config::smtp::auth::{Dkim1Signer, DkimSigners},
@@ -16,7 +17,7 @@ use mail_auth::{
     headers::HeaderWriter,
 };
 use mail_parser::HeaderForm;
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use utils::sanitize_email;
 
 pub(crate) trait DkimSign: Sync + Send {
@@ -195,7 +196,7 @@ impl MessageWrapper {
             };
         }
 
-        let mut recipients = HashSet::with_capacity(self.message.recipients.len());
+        let mut recipients = AHashSet::with_capacity(self.message.recipients.len());
 
         for (name, value) in message.headers() {
             let name = name.trim_ascii();

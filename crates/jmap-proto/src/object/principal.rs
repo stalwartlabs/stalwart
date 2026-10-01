@@ -11,7 +11,10 @@ use types::{id::Id, text::Text};
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::{capability::Capability, deserialize::DeserializeArguments},
+    request::{
+        capability::Capability,
+        deserialize::{CowStr, DeserializeArguments},
+    },
 };
 
 #[derive(Debug, Clone, Default)]
@@ -273,7 +276,7 @@ impl<'de> DeserializeArguments<'de> for PrincipalComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"name" => {
                     *self = PrincipalComparator::Name;
@@ -285,7 +288,7 @@ impl<'de> DeserializeArguments<'de> for PrincipalComparator {
                     *self = PrincipalComparator::Type;
                 },
                 _ => {
-                    *self = PrincipalComparator::_T(key.to_string());
+                    *self = PrincipalComparator::_T(value.into_owned());
                 }
             );
         } else {

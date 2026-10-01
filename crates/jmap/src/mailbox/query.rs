@@ -26,6 +26,7 @@ use store::{
     write::SearchIndex,
 };
 use types::{acl::Acl, collection::Collection, metadata::MetadataKinds, special_use::SpecialUse};
+use utils::text::IgnoreCaseNeedle;
 
 pub trait MailboxQuery: Sync + Send {
     fn mailbox_query(
@@ -108,13 +109,13 @@ impl MailboxQuery for Server {
                                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                 }
                             }
-                            let name = name.to_lowercase();
+                            let name = IgnoreCaseNeedle::new(&name);
                             filters.push(SearchFilter::is_in_set(
                                 mailboxes
                                     .mailboxes
                                     .items
                                     .iter()
-                                    .filter(|mailbox| mailbox.name.to_lowercase().contains(&name))
+                                    .filter(|mailbox| name.contains(&mailbox.name))
                                     .map(|m| m.document_id)
                                     .collect::<RoaringBitmap>(),
                             ));
@@ -283,15 +284,17 @@ impl MailboxQuery for Server {
             for document_id in results.results() {
                 let mut check_id = document_id;
                 for _ in 0..self.core.email.mailbox_max_depth {
-                    if let Some(mailbox) = mailboxes.mailbox_by_id(&check_id) {
-                        if let Some(parent_id) = mailbox.parent_id() {
-                            if results.results().contains(parent_id) {
-                                check_id = parent_id;
-                            } else {
-                                break;
-                            }
-                        } else {
+                    let Some(mailbox) = mailboxes.mailbox_by_id(&check_id) else {
+                        break;
+                    };
+                    match mailbox.parent_id() {
+                        Some(parent_id) if results.results().contains(parent_id) => {
+                            check_id = parent_id;
+                        }
+                        Some(_) => break,
+                        None => {
                             new_results.insert(document_id);
+                            break;
                         }
                     }
                 }

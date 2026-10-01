@@ -11,6 +11,7 @@ use common::network::SessionStream;
 use mail_auth::dns::ToReverseName;
 use sieve::{Envelope, Sieve, runtime::Variable};
 use smtp_proto::*;
+use utils::text::lowercase;
 
 use crate::{core::Session, inbound::AuthResult};
 
@@ -20,9 +21,9 @@ impl<T: SessionStream> Session<T> {
     pub fn build_script_parameters(&self, stage: &'static str) -> ScriptParameters<'_> {
         let (tls_version, tls_cipher) = self.stream.tls_version_and_cipher();
         let mut params = ScriptParameters::new()
-            .set_variable("remote_ip", self.data.remote_ip.to_string())
+            .set_variable("remote_ip", self.data.remote_ip_str.as_str())
             .set_variable("remote_ip.reverse", self.data.remote_ip.to_reverse_name())
-            .set_variable("helo_domain", self.data.helo_domain.as_str().to_lowercase())
+            .set_variable("helo_domain", lowercase(&self.data.helo_domain))
             .set_variable(
                 "authenticated_as",
                 self.authenticated_as().unwrap_or_default(),
@@ -73,10 +74,8 @@ impl<T: SessionStream> Session<T> {
         if let Some(ip_rev) = &self.data.iprev {
             params = params.set_variable("iprev.result", ip_rev.result().as_str());
             if let Some(ptr) = ip_rev.ptr.as_ref().and_then(|addrs| addrs.first()) {
-                params = params.set_variable(
-                    "iprev.ptr",
-                    ptr.strip_suffix('.').unwrap_or(ptr).to_lowercase(),
-                );
+                params = params
+                    .set_variable("iprev.ptr", lowercase(ptr.strip_suffix('.').unwrap_or(ptr)));
             }
         }
 
@@ -87,7 +86,7 @@ impl<T: SessionStream> Session<T> {
             if let Some(env_id) = &mail_from.dsn_info {
                 params
                     .envelope
-                    .push((Envelope::Envid, env_id.as_str().to_lowercase().into()));
+                    .push((Envelope::Envid, lowercase(env_id).into()));
             }
 
             if stage != "data" {

@@ -22,9 +22,9 @@ pub trait SpamFilterAnalyzeHtml: Sync + Send {
 }
 
 #[derive(Debug)]
-struct Href {
-    url_parsed: Option<Uri>,
-    host: Option<Hostname>,
+struct Href<'x> {
+    url_parsed: Option<Cow<'x, Uri>>,
+    host: Option<Cow<'x, Hostname>>,
 }
 
 impl SpamFilterAnalyzeHtml for Server {
@@ -76,12 +76,24 @@ impl SpamFilterAnalyzeHtml for Server {
                                 }
                             }) {
                                 let url = to_lowercase_cow(attr.trim());
-                                let url_parsed = url.parse::<Uri>().ok();
-                                let href = Href {
-                                    host: url_parsed
-                                        .as_ref()
-                                        .and_then(|uri| uri.host().map(Hostname::new)),
-                                    url_parsed,
+                                let href = if let Some(parsed) = ctx
+                                    .output
+                                    .urls
+                                    .get(url.as_ref())
+                                    .and_then(|url| url.element.url_parsed.as_ref())
+                                {
+                                    Href {
+                                        url_parsed: Some(Cow::Borrowed(&parsed.parts)),
+                                        host: Some(Cow::Borrowed(&parsed.host)),
+                                    }
+                                } else {
+                                    let url_parsed = url.parse::<Uri>().ok();
+                                    Href {
+                                        host: url_parsed.as_ref().and_then(|uri| {
+                                            uri.host().map(|host| Cow::Owned(Hostname::new(host)))
+                                        }),
+                                        url_parsed: url_parsed.map(Cow::Owned),
+                                    }
                                 };
 
                                 if is_body_part
@@ -233,7 +245,9 @@ impl SpamFilterAnalyzeHtml for Server {
                     HtmlToken::Text { text } if in_head == 0 => {
                         if let Some((href_url, href_host)) = last_href
                             .as_ref()
-                            .and_then(|href| Some((href.url_parsed.as_ref()?, href.host.as_ref()?)))
+                            .and_then(|href| {
+                                Some((href.url_parsed.as_deref()?, href.host.as_deref()?))
+                            })
                             .filter(|_| can_contain_url(text))
                         {
                             for token in TypesTokenizer::new(text.as_ref())

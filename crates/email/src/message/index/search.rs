@@ -76,15 +76,18 @@ impl ArchivedMessageMetadata {
 
             match part.kind() {
                 PartKind::Text | PartKind::Html => {
-                    let Some(text) = part.plain_text(&source) else {
-                        continue;
-                    };
                     let field = if part.flags().contains(PartFlags::IN_TEXT_BODY)
                         || part.flags().contains(PartFlags::IN_HTML_BODY)
                     {
                         EmailSearchField::Body
                     } else {
                         EmailSearchField::Attachment
+                    };
+                    if !builder.is_enabled(field.clone()) {
+                        continue;
+                    }
+                    let Some(text) = part.plain_text(&source) else {
+                        continue;
                     };
                     builder.index_part_text(part, &text, part_language, field);
                 }
@@ -313,7 +316,7 @@ impl HeaderId {
     }
 
     fn key_value(self, raw: &[u8]) -> String {
-        let mut value = String::new();
+        let mut value = String::with_capacity(raw.len());
         let mut push = |text: &str| {
             if !value.is_empty() {
                 value.push(' ');

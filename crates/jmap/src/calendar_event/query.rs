@@ -14,7 +14,7 @@ use crate::{
     changes::state::JmapCacheState,
 };
 use calcard::{common::timezone::Tz, jscalendar::JSCalendarDateTime};
-use common::{GroupwareResources, Server, auth::AccessToken};
+use common::{GroupwareResourceRef, GroupwareResources, Server, auth::AccessToken};
 use groupware::{
     cache::GroupwareCache,
     calendar::{
@@ -36,7 +36,9 @@ use std::cmp::Ordering;
 use store::{
     ValueKey,
     roaring::RoaringBitmap,
-    search::{CalendarSearchField, SearchComparator, SearchField, SearchFilter, SearchQuery},
+    search::{
+        CalendarSearchField, QueryResults, SearchComparator, SearchField, SearchFilter, SearchQuery,
+    },
     write::{Archive, ArchiveBytes, SearchIndex},
 };
 use trc::AddContext;
@@ -333,101 +335,25 @@ impl CalendarEventQuery for Server {
         } else {
             None
         };
-        let comparators = if !expand_recurrences {
+        let sort = if !expand_recurrences {
             request
                 .sort
                 .take()
                 .unwrap_or_default()
                 .into_iter()
-                .map(|comparator| match comparator.property {
-                    CalendarEventComparator::Start | CalendarEventComparator::RecurrenceId => {
-                        let mut items = cache
-                            .resources
-                            .iter()
-                            .filter_map(|r| {
-                                r.event_time_range()
-                                    .map(|(start, _)| (r.document_id(), start))
-                            })
-                            .collect::<Vec<_>>();
-                        items.sort_by_key(|(document_id, start)| (*start, *document_id));
-
-                        Ok(SearchComparator::sorted_set(
-                            items
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, (u, _))| (*u, idx as u32))
-                                .collect(),
-                            comparator.is_ascending,
-                        ))
-                    }
-                    CalendarEventComparator::Uid => {
-                        let mut items = cache
-                            .resources
-                            .iter()
-                            .filter_map(|r| r.uid().map(|uid| (r.document_id(), uid)))
-                            .collect::<Vec<_>>();
-                        items.sort_by(|(doc_id_a, uid_a), (doc_id_b, uid_b)| {
-                            let uid_order = uid_a.cmp(uid_b);
-                            if uid_order == Ordering::Equal {
-                                doc_id_a.cmp(doc_id_b)
-                            } else {
-                                uid_order
-                            }
-                        });
-
-                        Ok(SearchComparator::sorted_set(
-                            items
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, (u, _))| (*u, idx as u32))
-                                .collect(),
-                            comparator.is_ascending,
-                        ))
-                    }
-                    CalendarEventComparator::Created => {
-                        let mut items = cache
-                            .resources
-                            .iter()
-                            .filter_map(|r| {
-                                r.created_at()
-                                    .map(|created_at| (r.document_id(), created_at))
-                            })
-                            .collect::<Vec<_>>();
-                        items.sort_by_key(|(document_id, created_at)| (*created_at, *document_id));
-
-                        Ok(SearchComparator::sorted_set(
-                            items
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, (u, _))| (*u, idx as u32))
-                                .collect(),
-                            comparator.is_ascending,
-                        ))
-                    }
-                    CalendarEventComparator::Updated => {
-                        let mut items = cache
-                            .resources
-                            .iter()
-                            .filter_map(|r| {
-                                r.modified_at()
-                                    .map(|modified_at| (r.document_id(), modified_at))
-                            })
-                            .collect::<Vec<_>>();
-                        items
-                            .sort_by_key(|(document_id, modified_at)| (*modified_at, *document_id));
-
-                        Ok(SearchComparator::sorted_set(
-                            items
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, (u, _))| (*u, idx as u32))
-                                .collect(),
-                            comparator.is_ascending,
-                        ))
-                    }
-                    CalendarEventComparator::_T(other) => {
-                        Err(trc::JmapEvent::UnsupportedSort.into_err().details(other))
-                    }
+                .map(|comparator| {
+                    let key = match comparator.property {
+                        CalendarEventComparator::Start | CalendarEventComparator::RecurrenceId => {
+                            EventSortKey::Start
+                        }
+                        CalendarEventComparator::Uid => EventSortKey::Uid,
+                        CalendarEventComparator::Created => EventSortKey::Created,
+                        CalendarEventComparator::Updated => EventSortKey::Updated,
+                        CalendarEventComparator::_T(other) => {
+                            return Err(trc::JmapEvent::UnsupportedSort.into_err().details(other));
+                        }
+                    };
+                    Ok((key, comparator.is_ascending))
                 })
                 .collect::<Result<Vec<_>, _>>()?
         } else {
@@ -436,14 +362,36 @@ impl CalendarEventQuery for Server {
 
         let results = self
             .search_store()
-            .query_account(
+            .filter_account(
                 SearchQuery::new(SearchIndex::Calendar)
                     .with_filters(filters)
-                    .with_comparators(comparators)
                     .with_account_id(account_id)
                     .with_mask(mask),
             )
             .await?;
+        let results = if results.len() > 1 && !sort.is_empty() {
+            let items = matched_items(&cache, &results);
+            let comparators = sort
+                .into_iter()
+                .map(|(key, is_ascending)| match key {
+                    EventSortKey::Start => rank_comparator(
+                        &items,
+                        |item| item.event_time_range().map(|(start, _)| start),
+                        is_ascending,
+                    ),
+                    EventSortKey::Uid => rank_comparator(&items, |item| item.uid(), is_ascending),
+                    EventSortKey::Created => {
+                        rank_comparator(&items, |item| item.created_at(), is_ascending)
+                    }
+                    EventSortKey::Updated => {
+                        rank_comparator(&items, |item| item.modified_at(), is_ascending)
+                    }
+                })
+                .collect();
+            QueryResults::new(results, comparators).into_sorted()
+        } else {
+            results.into_iter().collect()
+        };
         let query_state = sampled.state(cache.get_state(false));
 
         // Extract comparators
@@ -660,6 +608,62 @@ impl CalendarEventQuery for Server {
     }
 }
 
+const ITEM_LOOKUP_RATIO: u64 = 16;
+
+#[derive(Debug, Clone, Copy)]
+enum EventSortKey {
+    Start,
+    Uid,
+    Created,
+    Updated,
+}
+
+pub(crate) fn matched_items<'x>(
+    cache: &'x GroupwareResources,
+    results: &RoaringBitmap,
+) -> Vec<GroupwareResourceRef<'x>> {
+    let mut items = Vec::with_capacity(results.len() as usize);
+    if results.len().saturating_mul(ITEM_LOOKUP_RATIO) < cache.resources.len() as u64 {
+        items.extend(
+            results
+                .iter()
+                .filter_map(|document_id| cache.item_by_id(document_id)),
+        );
+    } else {
+        let mut ids = results.iter().peekable();
+        for resource in cache.resources.iter_run(false) {
+            let document_id = resource.document_id();
+            while ids.next_if(|id| *id < document_id).is_some() {}
+            if ids.next_if_eq(&document_id).is_some() && !resource.is_container() {
+                items.push(resource);
+            }
+            if ids.peek().is_none() {
+                break;
+            }
+        }
+    }
+    items
+}
+
+pub(crate) fn rank_comparator<'x, K: Ord>(
+    items: &[GroupwareResourceRef<'x>],
+    key: impl Fn(&GroupwareResourceRef<'x>) -> Option<K>,
+    is_ascending: bool,
+) -> SearchComparator {
+    let mut keys = items
+        .iter()
+        .filter_map(|item| key(item).map(|key| (key, item.document_id())))
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    SearchComparator::sorted_set(
+        keys.into_iter()
+            .enumerate()
+            .map(|(rank, (_, document_id))| (document_id, rank as u32))
+            .collect(),
+        is_ascending,
+    )
+}
+
 fn local_timestamp(dt: &JSCalendarDateTime, tz: Tz) -> Option<i64> {
     tz.from_local(dt.to_naive_date_time()?)
         .map(|dt| dt.timestamp())
@@ -830,7 +834,7 @@ impl TimeBound {
         };
         let mut event_ids = RoaringBitmap::new();
 
-        for resource in cache.resources.iter() {
+        for resource in cache.resources.iter_run(false) {
             let Some(range) = resource.event_time_range() else {
                 continue;
             };

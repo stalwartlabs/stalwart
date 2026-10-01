@@ -729,6 +729,7 @@ impl MailboxSet for Server {
         }
 
         changes.parent_id = parent.as_stored();
+        let cached_mailboxes = self.get_cached_messages(ctx.account_id).await?;
 
         // Validate depth and circular parent-child relationship. A parent created within
         // this request has no ancestors in storage yet, so there is nothing to walk.
@@ -757,22 +758,12 @@ impl MailboxSet for Server {
                 }
                 let parent_document_id = mailbox_parent_id - 1;
 
-                if let Some(mailbox_) = self
-                    .store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                        ctx.account_id,
-                        Collection::Mailbox,
-                        parent_document_id,
-                    ))
-                    .await?
-                {
-                    let mailbox = mailbox_
-                        .unarchive::<email::mailbox::Mailbox>()
-                        .caused_by(trc::location!())?;
+                if let Some(mailbox) = cached_mailboxes.mailbox_by_id(&parent_document_id) {
                     if depth == 0
                         && ctx.is_shared
                         && !mailbox
                             .acls
+                            .as_slice()
                             .effective_acl(ctx.access_token)
                             .contains(Acl::CreateChild)
                     {
@@ -781,7 +772,7 @@ impl MailboxSet for Server {
                         )));
                     }
 
-                    mailbox_parent_id = mailbox.parent_id.into();
+                    mailbox_parent_id = mailbox.parent_id().map_or(0, |parent_id| parent_id + 1);
                 } else if ctx.mailbox_ids.contains(parent_document_id) {
                     // Parent mailbox is probably created within the same request
                     success = true;
@@ -801,8 +792,6 @@ impl MailboxSet for Server {
                     )));
             }
         }
-
-        let cached_mailboxes = self.get_cached_messages(ctx.account_id).await?;
 
         let role_change = match &update {
             Some((document_id, current)) => RoleChange::Update {
@@ -829,7 +818,7 @@ impl MailboxSet for Server {
                 .is_none_or(|(_, m)| m.inner.name != changes.name)
                 && let Some(parent_cache_id) = parent.cache_id()
                 && let Some(existing) = cached_mailboxes.mailboxes.items.iter().find(|m| {
-                    m.name.to_lowercase() == lower_name && m.parent_id() == parent_cache_id
+                    m.parent_id() == parent_cache_id && m.name.to_lowercase() == lower_name
                 })
             {
                 return Ok(Err(SetError::already_exists()

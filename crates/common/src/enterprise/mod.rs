@@ -19,6 +19,7 @@ use crate::{
     expr::if_block::IfBlock, manager::application::Resource,
 };
 use ahash::{AHashMap, AHashSet};
+use bytes::Bytes;
 use license::LicenseKey;
 use llm::AiApiConfig;
 use mail_parser::DateTime;
@@ -154,7 +155,7 @@ impl Server {
         Ok(true)
     }
 
-    pub async fn logo_resource(&self, domain: &str) -> trc::Result<Option<Resource<Vec<u8>>>> {
+    pub async fn logo_resource(&self, domain: &str) -> trc::Result<Option<Resource<Bytes>>> {
         const MAX_IMAGE_SIZE: usize = 1024 * 1024;
 
         if !self.is_enterprise_edition() {
@@ -194,9 +195,26 @@ impl Server {
         if logo_url.is_none()
             && let Some(default_logo_url) = self.default_logo_url()
         {
-            let logo = { self.inner.data.logos.lock().get("*").cloned() };
+            let logo = {
+                self.inner
+                    .data
+                    .logos
+                    .lock()
+                    .get("*")
+                    .map(|logo| logo.data.clone())
+            };
             if let Some(logo) = logo {
-                return Ok(logo.data);
+                if domain != "*" {
+                    self.inner.data.logos.lock().insert(
+                        domain.into(),
+                        LogoCache {
+                            domain_id,
+                            tenant_id,
+                            data: logo.clone(),
+                        },
+                    );
+                }
+                return Ok(logo);
             }
             logo_url = Some(default_logo_url);
         }
@@ -239,7 +257,7 @@ impl Server {
                         .details("Download exceeded maximum size")
                 })?;
 
-            logo = Resource::new(content_type, contents).into();
+            logo = Resource::new(content_type, Bytes::from(contents)).into();
         }
 
         self.inner.data.logos.lock().insert(

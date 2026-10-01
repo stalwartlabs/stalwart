@@ -225,7 +225,7 @@ async fn send_email_alarm(
     let logo = if let Some(logo) = &logo {
         MimePart::new(
             ContentType::new(logo.content_type.as_ref()),
-            BodyPart::Binary(logo.contents.as_slice().into()),
+            BodyPart::Binary(logo.contents[..].into()),
         )
     } else {
         MimePart::new(

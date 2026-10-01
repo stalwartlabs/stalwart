@@ -51,7 +51,6 @@ use groupware::{
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use registry::schema::enums::StorageQuota;
-use std::collections::HashSet;
 use store::write::{BatchBuilder, now};
 use store::{
     ValueKey,
@@ -851,7 +850,8 @@ impl CalendarUpdateRequestHandler for Server {
 }
 
 fn validate_ical(ical: &ICalendar) -> crate::Result<(&str, SupportedComponent)> {
-    let mut uids = HashSet::with_capacity(1);
+    let mut uid = None;
+    let mut has_mixed_uids = false;
     let mut object_type = None;
     let mut has_mixed_types = false;
     for comp in &ical.components {
@@ -869,17 +869,14 @@ fn validate_ical(ical: &ICalendar) -> crate::Result<(&str, SupportedComponent)> 
             .replace(component)
             .is_some_and(|previous| previous != component);
 
-        if let Some(uid) = comp.uid() {
-            uids.insert(uid);
+        if let Some(comp_uid) = comp.uid() {
+            has_mixed_uids |= uid
+                .replace(comp_uid)
+                .is_some_and(|previous| previous != comp_uid);
         }
     }
 
-    let uid = if uids.len() == 1 {
-        uids.into_iter().next()
-    } else {
-        None
-    };
-    match (uid, object_type) {
+    match (uid.filter(|_| !has_mixed_uids), object_type) {
         (Some(uid), Some(object_type)) if !has_mixed_types => Ok((uid, object_type)),
         _ => Err(DavError::Condition(
             DavErrorCondition::new(

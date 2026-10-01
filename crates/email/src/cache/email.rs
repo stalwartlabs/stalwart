@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::message::messagedata::{
-    EmailMessageData, KEYWORD_BITS, KeywordsIter, MessageData, SERVER_SET_KEYWORDS,
+use crate::{
+    cache::mailbox::MailboxCacheAccess,
+    message::messagedata::{
+        EmailMessageData, KEYWORD_BITS, KeywordsIter, MessageData, SERVER_SET_KEYWORDS,
+    },
 };
 use common::{
     CustomKeywords, MessageCache, MessageStoreCache, MessagesCache, Server, auth::AccessToken,
-    cache::email::MessageRef, sharing::EffectiveAcl,
+    cache::email::MessageRef,
 };
 use compact_str::CompactString;
 use std::sync::Arc;
@@ -266,6 +269,53 @@ pub enum SearchOperator {
     Contains,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct MailboxCounters {
+    pub total: usize,
+    pub unread: usize,
+    pub threads: AHashSet<u32>,
+    pub unread_threads: AHashSet<u32>,
+}
+
+impl MailboxCounters {
+    #[inline]
+    fn add(&mut self, thread_id: u32, is_unread: bool, count_threads: bool) {
+        self.total += 1;
+        self.unread += usize::from(is_unread);
+        if count_threads {
+            self.threads.insert(thread_id);
+            if is_unread {
+                self.unread_threads.insert(thread_id);
+            }
+        }
+    }
+}
+
+pub enum MessageAccess {
+    All,
+    Mailboxes(RoaringBitmap),
+}
+
+impl MessageAccess {
+    #[inline]
+    pub fn allows(&self, message: MessageRef<'_>) -> bool {
+        match self {
+            MessageAccess::All => true,
+            MessageAccess::Mailboxes(mailboxes) => message
+                .mailboxes()
+                .iter()
+                .any(|uid| mailboxes.contains(uid.mailbox_id)),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            MessageAccess::All => false,
+            MessageAccess::Mailboxes(mailboxes) => mailboxes.is_empty(),
+        }
+    }
+}
+
 pub trait MessageCacheAccess {
     fn email_by_id(&self, id: &u32) -> Option<MessageRef<'_>>;
 
@@ -298,6 +348,12 @@ pub trait MessageCacheAccess {
     ) -> impl Iterator<Item = MessageRef<'_>>;
 
     fn email_document_ids(&self) -> RoaringBitmap;
+
+    fn mailbox_counters(
+        &self,
+        mailbox_ids: impl IntoIterator<Item = u32>,
+        count_threads: bool,
+    ) -> AHashMap<u32, MailboxCounters>;
 
     fn shared_messages(
         &self,
@@ -418,26 +474,53 @@ impl MessageCacheAccess for MessageStoreCache {
         access_token: &AccessToken,
         check_acls: impl Into<Bitmap<Acl>> + Sync + Send,
     ) -> RoaringBitmap {
-        let check_acls = check_acls.into();
-        let mut shared_messages = RoaringBitmap::new();
-        for mailbox in &self.mailboxes.items {
-            if mailbox
-                .acls
-                .as_slice()
-                .effective_acl(access_token)
-                .contains_all(check_acls)
-            {
-                shared_messages.extend(
-                    self.in_mailbox(mailbox.document_id)
-                        .map(|item| item.document_id()),
-                );
-            }
+        let access = MessageAccess::Mailboxes(self.shared_mailboxes(access_token, check_acls));
+        if access.is_empty() {
+            return RoaringBitmap::new();
         }
-        shared_messages
+        self.emails
+            .iter()
+            .filter(|message| access.allows(*message))
+            .map(|message| message.document_id())
+            .collect()
     }
 
     fn email_document_ids(&self) -> RoaringBitmap {
-        RoaringBitmap::from_iter(self.emails.document_ids())
+        RoaringBitmap::from_sorted_iter(self.emails.document_ids())
+            .unwrap_or_else(|_| RoaringBitmap::from_iter(self.emails.document_ids()))
+    }
+
+    fn mailbox_counters(
+        &self,
+        mailbox_ids: impl IntoIterator<Item = u32>,
+        count_threads: bool,
+    ) -> AHashMap<u32, MailboxCounters> {
+        let mut counters = mailbox_ids
+            .into_iter()
+            .map(|mailbox_id| (mailbox_id, MailboxCounters::default()))
+            .collect::<AHashMap<_, _>>();
+        if counters.is_empty() {
+            return counters;
+        }
+
+        for message in self.emails.iter() {
+            let mailboxes = message.mailboxes();
+            let mut is_unread = None;
+            for (pos, uid) in mailboxes.iter().enumerate() {
+                if let Some(counter) = counters.get_mut(&uid.mailbox_id)
+                    && !mailboxes
+                        .iter()
+                        .take(pos)
+                        .any(|prev| prev.mailbox_id == uid.mailbox_id)
+                {
+                    let is_unread = *is_unread
+                        .get_or_insert_with(|| !self.has_keyword(message, &Keyword::Seen));
+                    counter.add(message.thread_id(), is_unread, count_threads);
+                }
+            }
+        }
+
+        counters
     }
 
     fn email_by_id(&self, id: &u32) -> Option<MessageRef<'_>> {
@@ -772,5 +855,105 @@ mod tests {
             Arc::ptr_eq(&cache.shared_keywords(), &merged.shared_keywords()),
             "a flag toggle that touches no custom keyword must not rebuild the keyword array"
         );
+    }
+
+    fn sample_with_repeated_mailbox() -> MessageStoreCache {
+        let (mut items, keywords) = sample(CACHE_CHUNK as u32 * 3 + 17);
+        let document_id = items.len() as u32 + 100;
+        items.push(MessageCache::new(
+            document_id,
+            [
+                MessageUid {
+                    mailbox_id: 3,
+                    uid: 1,
+                },
+                MessageUid {
+                    mailbox_id: 3,
+                    uid: 2,
+                },
+            ]
+            .into_iter()
+            .collect(),
+            0,
+            document_id,
+            1,
+            10,
+            BASE,
+            0,
+        ));
+        items.sort_unstable_by_key(MessageCache::sort_rank);
+        store_cache(items, keywords)
+    }
+
+    #[test]
+    fn mailbox_counters_match_per_mailbox_scans() {
+        let cache = sample_with_repeated_mailbox();
+        let requested = [0u32, 3, 6, 42];
+
+        for count_threads in [false, true] {
+            let counters = cache.mailbox_counters(requested, count_threads);
+            assert_eq!(counters.len(), requested.len());
+            for mailbox_id in requested {
+                let counter = &counters[&mailbox_id];
+                let threads = cache
+                    .in_mailbox(mailbox_id)
+                    .map(|m| m.thread_id())
+                    .collect::<AHashSet<_>>();
+                let unread_threads = cache
+                    .in_mailbox_without_keyword(mailbox_id, &Keyword::Seen)
+                    .map(|m| m.thread_id())
+                    .collect::<AHashSet<_>>();
+                assert_eq!(counter.total, cache.in_mailbox(mailbox_id).count());
+                assert_eq!(
+                    counter.unread,
+                    cache
+                        .in_mailbox_without_keyword(mailbox_id, &Keyword::Seen)
+                        .count()
+                );
+                if count_threads {
+                    assert_eq!(counter.threads, threads);
+                    assert_eq!(counter.unread_threads, unread_threads);
+                } else {
+                    assert!(counter.threads.is_empty() && counter.unread_threads.is_empty());
+                }
+            }
+            assert!(counters[&0].unread > 0 && counters[&0].unread < counters[&0].total);
+            assert_eq!(counters[&42], MailboxCounters::default());
+        }
+
+        assert!(cache.mailbox_counters([], true).is_empty());
+    }
+
+    #[test]
+    fn message_access_matches_the_union_of_mailbox_scans() {
+        let cache = sample_with_repeated_mailbox();
+        let mailboxes = RoaringBitmap::from_iter([1u32, 3, 4]);
+        let expected = mailboxes
+            .iter()
+            .flat_map(|mailbox_id| cache.in_mailbox(mailbox_id).map(|m| m.document_id()))
+            .collect::<RoaringBitmap>();
+        let access = MessageAccess::Mailboxes(mailboxes);
+
+        assert!(!access.is_empty());
+        assert_eq!(
+            cache
+                .emails
+                .iter()
+                .filter(|m| access.allows(*m))
+                .map(|m| m.document_id())
+                .collect::<RoaringBitmap>(),
+            expected
+        );
+        assert!(MessageAccess::Mailboxes(RoaringBitmap::new()).is_empty());
+        assert_eq!(
+            cache.email_document_ids(),
+            cache
+                .emails
+                .iter()
+                .map(|m| m.document_id())
+                .collect::<RoaringBitmap>()
+        );
+        assert!(cache.emails.iter().all(|m| MessageAccess::All.allows(m)
+            && !MessageAccess::Mailboxes(RoaringBitmap::new()).allows(m)));
     }
 }

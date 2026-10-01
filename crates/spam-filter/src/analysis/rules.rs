@@ -132,7 +132,7 @@ impl SpamFilterAnalyzeRules for Server {
             for (idx, part) in ctx.output.text_parts.iter().enumerate() {
                 let text = match part {
                     TextPart::Plain { text_body, .. } => *text_body,
-                    TextPart::Html { text_body, .. } => text_body.as_str(),
+                    TextPart::Html { text_body, .. } => *text_body,
                     TextPart::None => continue,
                 };
                 let idx = idx as u32;

@@ -6,9 +6,9 @@
 
 use crate::Server;
 use store::{
-    Deserialize, IterateParams, U32_LEN, ValueKey,
+    Deserialize, IterateParams, Key, U32_LEN, ValueKey,
     dispatch::{DocumentSet, ScanShape},
-    write::{Archive, ArchiveBytes, ValueClass, key::DeserializeBigEndian},
+    write::{AnyKey, Archive, ArchiveBytes, ValueClass, key::DeserializeBigEndian},
 };
 use trc::AddContext;
 use types::{collection::Collection, field::Field};
@@ -28,11 +28,28 @@ impl Server {
     {
         let collection: u8 = collection.into();
         let field: u8 = field.into();
-        let key = |document_id| ValueKey {
-            account_id,
-            collection,
-            document_id,
-            class: ValueClass::Property(field),
+        let subspace = ValueClass::Property(field).subspace(collection);
+        let key = |document_id| {
+            ValueKey {
+                account_id,
+                collection,
+                document_id,
+                class: ValueClass::Property(field),
+            }
+            .serialize(0)
+        };
+        let range = |from_document_id, to_document_id| {
+            let mut end = key(to_document_id);
+            if documents.contains(to_document_id) {
+                end.push(u8::MAX);
+            }
+            IterateParams::new(
+                AnyKey {
+                    subspace,
+                    key: key(from_document_id),
+                },
+                AnyKey { subspace, key: end },
+            )
         };
 
         let mut collect = |key: &[u8], value: &[u8]| {
@@ -50,10 +67,7 @@ impl Server {
                 self.core
                     .storage
                     .data
-                    .iterate(
-                        IterateParams::new(key(from_document_id), key(to_document_id)),
-                        &mut collect,
-                    )
+                    .iterate(range(from_document_id, to_document_id), &mut collect)
                     .await
             }
             ScanShape::Ranges(ranges) => {
@@ -64,7 +78,7 @@ impl Server {
                         ranges
                             .into_iter()
                             .map(|(from_document_id, to_document_id)| {
-                                IterateParams::new(key(from_document_id), key(to_document_id))
+                                range(from_document_id, to_document_id)
                             })
                             .collect(),
                         &mut collect,

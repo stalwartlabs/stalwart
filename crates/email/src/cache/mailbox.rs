@@ -224,6 +224,8 @@ pub trait MailboxCacheAccess {
     fn mailbox_by_id(&self, id: &u32) -> Option<&MailboxCache>;
     fn mailbox_by_name(&self, name: &str) -> Option<&MailboxCache>;
     fn mailbox_by_path(&self, name: &str) -> Option<&MailboxCache>;
+    fn mailbox_by_folded_path(&self, path: &str) -> Option<&MailboxCache>;
+    fn mailbox_by_lowercase_path(&self, lowercase_path: &str) -> Option<&MailboxCache>;
     fn mailbox_by_role(&self, role: &SpecialUse) -> Option<&MailboxCache>;
     fn shared_mailboxes(
         &self,
@@ -246,6 +248,28 @@ impl MailboxCacheAccess for MessageStoreCache {
             .items
             .iter()
             .find(|m| m.path.eq_ignore_ascii_case(path))
+    }
+
+    fn mailbox_by_folded_path(&self, path: &str) -> Option<&MailboxCache> {
+        let mut folded_path = String::with_capacity(path.len());
+        let mut found = None;
+        for name in path.split('/').map(str::trim) {
+            if !folded_path.is_empty() {
+                folded_path.push('/');
+            }
+            folded_path.extend(name.chars().flat_map(char::to_lowercase));
+            found = Some(self.mailbox_by_lowercase_path(&folded_path)?);
+        }
+        found
+    }
+
+    fn mailbox_by_lowercase_path(&self, lowercase_path: &str) -> Option<&MailboxCache> {
+        self.mailboxes.items.iter().find(|m| {
+            m.path
+                .chars()
+                .flat_map(char::to_lowercase)
+                .eq(lowercase_path.chars())
+        })
     }
 
     fn mailbox_by_role(&self, role: &SpecialUse) -> Option<&MailboxCache> {
@@ -326,3 +350,6 @@ fn item_size(item: &MailboxCache) -> u64 {
             0
         })) as u64
 }
+
+#[cfg(test)]
+mod tests;

@@ -37,6 +37,7 @@ use types::{
     collection::{Collection, SyncCollection},
     field::CalendarEventField,
 };
+use utils::map::bitmap::Bitmap;
 
 pub(crate) trait CalendarFreebusyRequestHandler: Sync + Send {
     fn handle_calendar_freebusy_request(
@@ -107,17 +108,7 @@ impl CalendarFreebusyRequestHandler for Server {
     ) -> crate::Result<ICalendar> {
         // Obtain shared ids
         let is_owner = access_token.is_member(account_id);
-        let shared_ids = if !is_owner {
-            resources
-                .shared_items(
-                    access_token,
-                    [Acl::ReadItems, Acl::SchedulingReadFreeBusy],
-                    false,
-                )
-                .into()
-        } else {
-            None
-        };
+        let shared_acls = Bitmap::from_iter([Acl::ReadItems, Acl::SchedulingReadFreeBusy]);
 
         // Build FreeBusy component
         let default_tz = resource
@@ -162,9 +153,13 @@ impl CalendarFreebusyRequestHandler for Server {
                 };
                 let document_id = resource.document_id();
                 if privacy != EventPrivacy::Secret
-                    && shared_ids
-                        .as_ref()
-                        .is_none_or(|ids| ids.contains(document_id))
+                    && (is_owner
+                        || resources.is_shared_item(
+                            &resource.resource,
+                            access_token,
+                            &shared_acls,
+                            false,
+                        ))
                     && resource.resource.resource.is_in_time_range(&range)
                 {
                     document_ids.insert(document_id);
@@ -224,14 +219,14 @@ impl CalendarFreebusyRequestHandler for Server {
                             return Ok(true);
                         }
 
-                        let events = CalendarQueryHandler::new(event, Some(range), default_tz)
-                            .into_expanded_times();
+                        let events = CalendarQueryHandler::new(event, Some(range), default_tz);
 
-                        if events.is_empty() {
+                        if events.expanded_times.is_empty() {
                             return Ok(true);
                         }
 
-                        total_instances = total_instances.saturating_add(events.len());
+                        total_instances =
+                            total_instances.saturating_add(events.expanded_times.len());
                         if total_instances > max_instances {
                             return Ok(false);
                         }
@@ -250,21 +245,21 @@ impl CalendarFreebusyRequestHandler for Server {
                                         _ => ICalendarFreeBusyType::Busy,
                                     };
 
-                                    let mut events_in_range = Vec::new();
-                                    for event in &events {
-                                        if event.comp_id == component_id
-                                            && event.start < event.end
-                                            && range.is_in_range(
-                                                OverlapCondition::Event,
-                                                event.start,
-                                                event.end,
-                                            )
-                                        {
-                                            events_in_range.push((event.start, event.end));
-                                        }
-                                    }
+                                    let mut events_in_range = events
+                                        .expansions_of(component_id)
+                                        .iter()
+                                        .filter(|event| {
+                                            event.start < event.end
+                                                && range.is_in_range(
+                                                    OverlapCondition::Event,
+                                                    event.start,
+                                                    event.end,
+                                                )
+                                        })
+                                        .map(|event| (event.start, event.end))
+                                        .peekable();
 
-                                    if !events_in_range.is_empty() {
+                                    if events_in_range.peek().is_some() {
                                         fb_entries
                                             .entry(fbtype)
                                             .or_default()

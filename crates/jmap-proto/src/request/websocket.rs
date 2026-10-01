@@ -11,13 +11,14 @@ use crate::{
     request::{Call, deserialize::DeserializeArguments},
     response::{Response, ResponseMethod, serialize::serialize_hex, status::PushObject},
 };
+use ahash::AHashMap;
 use compact_str::{ToCompactString, format_compact};
 use serde::{
     Deserialize, Deserializer,
     de::{self, MapAccess, Visitor},
 };
 use simdutf8::basic::from_utf8;
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, fmt};
 use types::type_state::DataType;
 
 #[derive(Debug)]
@@ -39,8 +40,8 @@ pub struct WebSocketResponse<'x> {
     session_state: u32,
 
     #[serde(rename(deserialize = "createdIds"))]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    created_ids: HashMap<String, AnyId>,
+    #[serde(skip_serializing_if = "crate::method::ahash_is_empty")]
+    created_ids: AHashMap<String, AnyId>,
 
     #[serde(rename = "requestId")]
     #[serde(skip_serializing_if = "Option::is_none")]

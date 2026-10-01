@@ -8,7 +8,7 @@ use super::{
     BinaryOperator, Constant, ExpressionItem, SystemVariable, UnaryOperator, Variable,
     capture::CaptureRegex,
     functions::{FUNCTIONS, SyncFn, SyncFunction, text},
-    kernels::{ConstNeedle, ConstSet, IgnoreCaseNeedle},
+    kernels::{self, ConstNeedle, ConstSet, IgnoreCaseNeedle},
 };
 use ahash::AHashMap;
 use bumpalo::Bump;
@@ -287,7 +287,10 @@ impl CaseNeedle {
     }
 
     pub fn matches<'a>(&self, haystack: Variable<'a>, arena: &'a Bump) -> bool {
-        text::contains_ignore_case(haystack, &self.text, arena, |s| self.needle.contains(s))
+        text::contains_ignore_case(haystack, &self.text, arena, |s| {
+            self.needle
+                .contains_with(s, |s| kernels::to_lowercase(s, arena))
+        })
     }
 }
 

@@ -9,10 +9,11 @@ use calcard::{
     icalendar::ICalendar,
     jscalendar::{JSCalendarPrivacy, JSCalendarProperty, JSCalendarValue},
 };
-use common::GroupwareResources;
+use common::{GroupwareResources, storage::dav::CachedUid};
 use groupware::calendar::privacy::{EventPrivacy, EventViewer, ICalendarPrivacy, PrivacyDenied};
 use jmap_proto::{error::set::SetError, request::MaybeInvalid};
 use jmap_tools::{Key, Value};
+use std::borrow::Cow;
 use store::{
     ahash::{AHashMap, AHashSet},
     roaring::RoaringBitmap,
@@ -65,11 +66,11 @@ impl UidPrivacyConflicts {
         updates: Option<&VecMap<MaybeInvalid<Id>, EventValue<'_>>>,
         will_destroy: &[Id],
     ) -> Self {
-        let mut touched: AHashMap<&str, UidEvents<'_>> = AHashMap::new();
+        let mut touched: AHashMap<Cow<'_, str>, UidEvents<'_>> = AHashMap::new();
 
         for (create_id, object) in creates.into_iter().flat_map(|creates| creates.iter()) {
             if let Some(Value::Str(uid)) = object_property(object, JSCalendarProperty::Uid) {
-                let events = touched.entry(uid).or_default();
+                let events = touched.entry(uid.cached_uid()).or_default();
                 events.create_ids.push(create_id);
                 events
                     .create_privacies
@@ -88,7 +89,7 @@ impl UidPrivacyConflicts {
                     .and_then(|resource| resource.uid())
             {
                 patched.insert(id.document_id(), privacy);
-                touched.entry(uid).or_default();
+                touched.entry(Cow::Borrowed(uid)).or_default();
             }
         }
 
@@ -96,7 +97,7 @@ impl UidPrivacyConflicts {
         if touched.is_empty() {
             return conflicts;
         }
-        for resource in cache.resources.iter() {
+        for resource in cache.resources.iter_run(false) {
             if let Some(events) = resource.uid().and_then(|uid| touched.get_mut(uid)) {
                 events.documents.push((
                     resource.document_id(),

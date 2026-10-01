@@ -764,6 +764,84 @@ fn value_gen(chunks: impl IntoIterator<Item = (u8, usize)>) -> Vec<u8> {
     value
 }
 
+#[cfg(feature = "foundationdb")]
+async fn test_chunked_archives(test: &TestServer) {
+    use store::{Serialize, roaring::RoaringBitmap};
+    use types::field::Field;
+
+    const ARCHIVE_ACCOUNT: u32 = ID_ACCOUNT_BASE + 6;
+
+    println!("Running FoundationDB chunked archive range test...");
+    let class = ValueClass::Property(Field::ARCHIVE.into());
+    let values = [
+        (3u32, value_gen([(b'a', 16)])),
+        (
+            5,
+            value_gen([
+                (b'b', MAX_VALUE_SIZE),
+                (b'c', MAX_VALUE_SIZE),
+                (b'd', 50_000),
+            ]),
+        ),
+        (6, value_gen([(b'e', 16)])),
+        (9, value_gen([(b'f', MAX_VALUE_SIZE), (b'g', 1)])),
+    ];
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(ARCHIVE_ACCOUNT)
+        .with_collection(Collection::Email);
+    for (document_id, value) in &values {
+        batch.with_document(*document_id).set(
+            class.clone(),
+            Archiver::with_compression(value.clone(), Compression::None)
+                .serialize()
+                .unwrap(),
+        );
+    }
+    test.server.store().write_batch(&mut batch).await.unwrap();
+
+    for requested in [
+        &[5u32][..],
+        &[3, 5],
+        &[9],
+        &[5, 9],
+        &[3, 6, 9],
+        &[3, 5, 6, 9],
+    ] {
+        let documents = RoaringBitmap::from_iter(requested.iter().copied());
+        let mut results = Vec::new();
+        test.server
+            .archives(
+                ARCHIVE_ACCOUNT,
+                Collection::Email,
+                Field::ARCHIVE,
+                &documents,
+                |document_id, archive| {
+                    results.push((document_id, archive.deserialize::<Vec<u8>>()?));
+                    Ok(true)
+                },
+            )
+            .await
+            .unwrap();
+        results.sort_unstable_by_key(|(document_id, _)| *document_id);
+        let expected = values
+            .iter()
+            .filter(|(document_id, _)| requested.contains(document_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(results == expected, "archives of {requested:?}");
+    }
+
+    let mut batch = BatchBuilder::new();
+    batch
+        .with_account_id(ARCHIVE_ACCOUNT)
+        .with_collection(Collection::Email);
+    for (document_id, _) in &values {
+        batch.with_document(*document_id).clear(class.clone());
+    }
+    test.server.store().write_batch(&mut batch).await.unwrap();
+}
+
 pub async fn test(test: &TestServer) {
     let db = test.server.store().clone();
 
@@ -773,6 +851,8 @@ pub async fn test(test: &TestServer) {
     #[cfg(feature = "foundationdb")]
     if matches!(db, store::Store::FoundationDb(_)) {
         use store::write::RegistryClass;
+        test_chunked_archives(test).await;
+
         println!("Running FoundationDB chunked iterator test...");
         let kvs = [
             (1, value_gen([(b'a', 1)])),

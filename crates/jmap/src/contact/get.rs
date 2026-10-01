@@ -20,7 +20,6 @@ use jmap_proto::{
 use jmap_tools::{Map, Value};
 use store::{
     ValueKey,
-    roaring::RoaringBitmap,
     write::{Archive, ArchiveBytes},
 };
 use trc::AddContext;
@@ -66,33 +65,36 @@ impl ContactCardGet for Server {
                 SyncCollection::AddressBook,
             )
             .await?;
-        let contact_ids = if access_token.is_member(account_id) {
-            cache.document_ids(false).collect::<RoaringBitmap>()
-        } else {
-            cache.shared_items(access_token, [Acl::ReadItems], true)
+        let shared_contact_ids = (!access_token.is_member(account_id))
+            .then(|| cache.shared_items(access_token, [Acl::ReadItems], true));
+        let readable_contact = |document_id: u32| {
+            shared_contact_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(document_id))
+                .then(|| cache.item_by_id(document_id))
+                .flatten()
         };
         let ids = if let Some(ids) = ids {
             ids
+        } else if let Some(shared_contact_ids) = &shared_contact_ids {
+            all_ids(
+                shared_contact_ids.iter().map(Into::into),
+                self.core.jmap.get_max_objects,
+            )?
         } else {
             all_ids(
-                contact_ids.iter().map(Into::into),
+                cache.document_ids(false).map(Into::into),
                 self.core.jmap.get_max_objects,
             )?
         };
         let mut metadata_values = match &metadata_get {
             Some(get) => {
                 let mut documents = MetadataDocuments::default();
-                for document_id in ids
-                    .iter()
-                    .map(|id| id.document_id())
-                    .filter(|document_id| contact_ids.contains(*document_id))
-                {
-                    documents.insert(
-                        document_id,
-                        cache
-                            .item_by_id(document_id)
-                            .map_or_else(Default::default, |resource| resource.metadata_kinds()),
-                    );
+                for id in &ids {
+                    let document_id = id.document_id();
+                    if let Some(resource) = readable_contact(document_id) {
+                        documents.insert(document_id, resource.metadata_kinds());
+                    }
                 }
                 Some(metadata.load(self, account_id, get, &documents).await?)
             }
@@ -138,12 +140,7 @@ impl ContactCardGet for Server {
         for id in ids {
             // Obtain the contact object
             let document_id = id.document_id();
-            if !contact_ids.contains(document_id) {
-                response.push_not_found(id);
-                continue;
-            }
-
-            let Some(resource) = cache.item_by_id(document_id) else {
+            let Some(resource) = readable_contact(document_id) else {
                 response.push_not_found(id);
                 continue;
             };

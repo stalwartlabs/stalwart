@@ -14,7 +14,7 @@ pub mod pool;
 pub struct LdapDirectory {
     pool: Pool<LdapConnectionManager>,
     mappings: LdapMappings,
-    auth_bind: bool,
+    bind_pool: Option<Pool<LdapConnectionManager>>,
 }
 
 #[derive(Debug, Default)]

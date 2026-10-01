@@ -146,6 +146,7 @@ pub struct AccountCaches(Vec<(u32, Arc<MessageStoreCache>)>);
 pub struct MailboxRefresh {
     pub changes: Option<MailboxSync>,
     pub caches: AccountCaches,
+    pub access_token: AccessToken,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

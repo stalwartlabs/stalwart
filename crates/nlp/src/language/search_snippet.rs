@@ -5,6 +5,7 @@
  */
 
 use super::Language;
+use std::collections::VecDeque;
 
 fn escape_char(c: char, string: &mut String) {
     match c {
@@ -28,9 +29,29 @@ fn escape_char_len(c: char) -> usize {
     }
 }
 
-pub struct Term {
+const MAX_SNIPPET_LEN: usize = 255;
+const MARK_LEN: usize = "<mark>".len() * 2;
+const LEADING_CONTEXT_THRESHOLD: usize = 240;
+const LEADING_CONTEXT_CHARS: usize = 40;
+const LEADING_CONTEXT_WORDS: usize = 3;
+const MAX_TOKEN_LEN: usize = 200;
+const MAX_WINDOW_CAPACITY: usize = 64;
+
+struct Term {
     offset: usize,
     len: usize,
+}
+
+struct SnippetWriter<'x> {
+    text: &'x str,
+    snippet: String,
+    last_end: Option<usize>,
+    stop_offset: usize,
+}
+
+enum Flow {
+    Continue,
+    Full,
 }
 
 pub fn generate_snippet(
@@ -39,125 +60,363 @@ pub fn generate_snippet(
     language: Language,
     is_exact: bool,
 ) -> Option<String> {
-    let mut terms = Vec::new();
+    let mut writer = SnippetWriter {
+        text,
+        snippet: String::new(),
+        last_end: None,
+        stop_offset: usize::MAX,
+    };
+    let tokens = language.tokenize_text(text, MAX_TOKEN_LEN);
+
     if is_exact {
-        let tokens = language.tokenize_text(text, 200).collect::<Vec<_>>();
-        for tokens in tokens.windows(needles.len()) {
+        if needles.is_empty() {
+            return None;
+        }
+        let mut window = VecDeque::with_capacity(needles.len().min(MAX_WINDOW_CAPACITY));
+        for token in tokens {
+            if window.len() == needles.len() {
+                window.pop_front();
+            }
+            window.push_back(token);
+            if window.len() < needles.len() {
+                continue;
+            }
+            if window
+                .front()
+                .is_some_and(|first| first.from >= writer.stop_offset)
+            {
+                break;
+            }
             if needles
                 .iter()
-                .zip(tokens)
+                .zip(&window)
                 .all(|(needle, token)| needle.as_ref() == token.word.as_ref())
             {
-                for token in tokens {
-                    terms.push(Term {
+                for token in &window {
+                    if let Flow::Full = writer.push(Term {
+                        offset: token.from,
+                        len: token.to - token.from,
+                    })? {
+                        return Some(writer.snippet);
+                    }
+                }
+            }
+        }
+    } else {
+        for token in tokens {
+            if token.from >= writer.stop_offset {
+                break;
+            }
+            if needles.iter().any(|needle| {
+                let needle = needle.as_ref();
+                needle == token.word.as_ref() || needle.len() > 2 && token.word.contains(needle)
+            }) && let Flow::Full = writer.push(Term {
+                offset: token.from,
+                len: token.to - token.from,
+            })? {
+                return Some(writer.snippet);
+            }
+        }
+    }
+
+    writer.finish()
+}
+
+impl SnippetWriter<'_> {
+    fn push(&mut self, term: Term) -> Option<Flow> {
+        match self.last_end {
+            Some(end) => {
+                if let Flow::Full = self.write_gap(end, term.offset)? {
+                    return Some(Flow::Full);
+                }
+            }
+            None => self.write_leading_context(term.offset)?,
+        }
+
+        if self.snippet.len() + MARK_LEN + term.len + 1 > MAX_SNIPPET_LEN {
+            return Some(Flow::Full);
+        }
+
+        let end = term.offset + term.len;
+        self.snippet.push_str("<mark>");
+        self.snippet.push_str(self.text.get(term.offset..end)?);
+        self.snippet.push_str("</mark>");
+        self.last_end = Some(end);
+        self.stop_offset = self.overflow_offset(end);
+
+        Some(Flow::Continue)
+    }
+
+    fn finish(mut self) -> Option<String> {
+        let end = self.last_end?;
+        self.write_gap(end, self.text.len())?;
+        Some(self.snippet)
+    }
+
+    fn write_leading_context(&mut self, start_offset: usize) -> Option<()> {
+        self.snippet
+            .reserve(self.text.len().min(MAX_SNIPPET_LEN + 1));
+
+        if start_offset > 0 {
+            let mut word_count = 0;
+            let mut from_offset = 0;
+            let mut last_is_space = false;
+
+            if self.text.len() > LEADING_CONTEXT_THRESHOLD {
+                for (pos, char) in self.text.get(0..start_offset)?.char_indices().rev() {
+                    if char.is_whitespace() {
+                        if !last_is_space {
+                            word_count += 1;
+                            if word_count == LEADING_CONTEXT_WORDS {
+                                break;
+                            }
+                            last_is_space = true;
+                        }
+                    } else {
+                        last_is_space = false;
+                    }
+                    from_offset = pos;
+                    if start_offset - from_offset >= LEADING_CONTEXT_CHARS {
+                        break;
+                    }
+                }
+            }
+
+            last_is_space = false;
+            for char in self.text.get(from_offset..start_offset)?.chars() {
+                if !char.is_whitespace() {
+                    last_is_space = false;
+                } else {
+                    if last_is_space {
+                        continue;
+                    }
+                    last_is_space = true;
+                }
+                escape_char(char, &mut self.snippet);
+            }
+        }
+
+        Some(())
+    }
+
+    fn write_gap(&mut self, from: usize, to: usize) -> Option<Flow> {
+        let mut last_is_space = false;
+        for char in self.text.get(from..to)?.chars() {
+            if !char.is_whitespace() {
+                last_is_space = false;
+            } else {
+                if last_is_space {
+                    continue;
+                }
+                last_is_space = true;
+            }
+
+            if self.snippet.len() + escape_char_len(char) <= MAX_SNIPPET_LEN {
+                escape_char(char, &mut self.snippet);
+            } else {
+                return Some(Flow::Full);
+            }
+        }
+
+        Some(Flow::Continue)
+    }
+
+    fn overflow_offset(&self, from: usize) -> usize {
+        let Some(rest) = self.text.get(from..) else {
+            return usize::MAX;
+        };
+        let mut len = self.snippet.len();
+        let mut last_is_space = false;
+        for (pos, char) in rest.char_indices() {
+            if !char.is_whitespace() {
+                last_is_space = false;
+            } else {
+                if last_is_space {
+                    continue;
+                }
+                last_is_space = true;
+            }
+            len += escape_char_len(char);
+            if len > MAX_SNIPPET_LEN {
+                return from + pos;
+            }
+        }
+        usize::MAX
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::language::{
+        Language,
+        search_snippet::{escape_char, escape_char_len, generate_snippet},
+    };
+
+    struct ReferenceTerm {
+        offset: usize,
+        len: usize,
+    }
+
+    fn reference_snippet(
+        text: &str,
+        needles: &[impl AsRef<str>],
+        language: Language,
+        is_exact: bool,
+    ) -> Option<String> {
+        let mut terms = Vec::new();
+        if is_exact {
+            let tokens = language.tokenize_text(text, 200).collect::<Vec<_>>();
+            for tokens in tokens.windows(needles.len()) {
+                if needles
+                    .iter()
+                    .zip(tokens)
+                    .all(|(needle, token)| needle.as_ref() == token.word.as_ref())
+                {
+                    for token in tokens {
+                        terms.push(ReferenceTerm {
+                            offset: token.from,
+                            len: token.to - token.from,
+                        });
+                    }
+                }
+            }
+        } else {
+            for token in language.tokenize_text(text, 200) {
+                if needles.iter().any(|needle| {
+                    let needle = needle.as_ref();
+                    needle == token.word.as_ref() || needle.len() > 2 && token.word.contains(needle)
+                }) {
+                    terms.push(ReferenceTerm {
                         offset: token.from,
                         len: token.to - token.from,
                     });
                 }
             }
         }
-    } else {
-        for token in language.tokenize_text(text, 200) {
-            if needles.iter().any(|needle| {
-                let needle = needle.as_ref();
-                needle == token.word.as_ref() || needle.len() > 2 && token.word.contains(needle)
-            }) {
-                terms.push(Term {
-                    offset: token.from,
-                    len: token.to - token.from,
-                });
-            }
+        if terms.is_empty() {
+            return None;
         }
-    }
-    if terms.is_empty() {
-        return None;
-    }
 
-    let mut snippet = String::with_capacity(text.len());
-    let start_offset = terms.first()?.offset;
+        let mut snippet = String::with_capacity(text.len());
+        let start_offset = terms.first()?.offset;
 
-    if start_offset > 0 {
-        let mut word_count = 0;
-        let mut from_offset = 0;
-        let mut last_is_space = false;
+        if start_offset > 0 {
+            let mut word_count = 0;
+            let mut from_offset = 0;
+            let mut last_is_space = false;
 
-        if text.len() > 240 {
-            for (pos, char) in text.get(0..start_offset)?.char_indices().rev() {
-                // Add up to 2 words or 40 characters of context
-                if char.is_whitespace() {
-                    if !last_is_space {
-                        word_count += 1;
-                        if word_count == 3 {
-                            break;
+            if text.len() > 240 {
+                for (pos, char) in text.get(0..start_offset)?.char_indices().rev() {
+                    if char.is_whitespace() {
+                        if !last_is_space {
+                            word_count += 1;
+                            if word_count == 3 {
+                                break;
+                            }
+                            last_is_space = true;
                         }
-                        last_is_space = true;
+                    } else {
+                        last_is_space = false;
                     }
-                } else {
-                    last_is_space = false;
+                    from_offset = pos;
+                    if start_offset - from_offset >= 40 {
+                        break;
+                    }
                 }
-                from_offset = pos;
-                if start_offset - from_offset >= 40 {
-                    break;
+            }
+
+            last_is_space = false;
+            for char in text.get(from_offset..start_offset)?.chars() {
+                if !char.is_whitespace() {
+                    last_is_space = false;
+                } else {
+                    if last_is_space {
+                        continue;
+                    }
+                    last_is_space = true;
+                }
+                escape_char(char, &mut snippet);
+            }
+        }
+
+        let mut terms = terms.iter().peekable();
+
+        'outer: while let Some(term) = terms.next() {
+            if snippet.len() + ("<mark>".len() * 2) + term.len + 1 > 255 {
+                break;
+            }
+
+            snippet.push_str("<mark>");
+            snippet.push_str(text.get(term.offset..term.offset + term.len)?);
+            snippet.push_str("</mark>");
+
+            let next_offset = if let Some(next_term) = terms.peek() {
+                next_term.offset
+            } else {
+                text.len()
+            };
+
+            let mut last_is_space = false;
+            for char in text.get(term.offset + term.len..next_offset)?.chars() {
+                if !char.is_whitespace() {
+                    last_is_space = false;
+                } else {
+                    if last_is_space {
+                        continue;
+                    }
+                    last_is_space = true;
+                }
+
+                if snippet.len() + escape_char_len(char) <= 255 {
+                    escape_char(char, &mut snippet);
+                } else {
+                    break 'outer;
                 }
             }
         }
 
-        last_is_space = false;
-        for char in text.get(from_offset..start_offset)?.chars() {
-            if !char.is_whitespace() {
-                last_is_space = false;
-            } else {
-                if last_is_space {
-                    continue;
-                }
-                last_is_space = true;
-            }
-            escape_char(char, &mut snippet);
-        }
+        Some(snippet)
     }
 
-    let mut terms = terms.iter().peekable();
-
-    'outer: while let Some(term) = terms.next() {
-        if snippet.len() + ("<mark>".len() * 2) + term.len + 1 > 255 {
-            break;
-        }
-
-        snippet.push_str("<mark>");
-        snippet.push_str(text.get(term.offset..term.offset + term.len)?);
-        snippet.push_str("</mark>");
-
-        let next_offset = if let Some(next_term) = terms.peek() {
-            next_term.offset
-        } else {
-            text.len()
+    #[test]
+    fn snippets_match_reference() {
+        const WORDS: [&str; 12] = [
+            "alpha", "Beta", "gamma", "delta", "<tag>", "a&b", "\"q\"", "côte", "x", "alphabet",
+            "beta", "gam",
+        ];
+        const GAPS: [&str; 6] = [" ", "  ", "\n", " \r\n ", "\t\t", "    \n\n    "];
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |bound: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound as u64) as usize
         };
 
-        let mut last_is_space = false;
-        for char in text.get(term.offset + term.len..next_offset)?.chars() {
-            if !char.is_whitespace() {
-                last_is_space = false;
-            } else {
-                if last_is_space {
+        for _ in 0..4000 {
+            let mut text = String::new();
+            for _ in 0..next(400) {
+                text.push_str(WORDS[next(WORDS.len())]);
+                text.push_str(GAPS[next(GAPS.len())]);
+            }
+            let needles: Vec<&str> = (0..next(4)).map(|_| WORDS[next(WORDS.len())]).collect();
+            let needles: Vec<String> = needles.iter().map(|n| n.to_lowercase()).collect();
+            for is_exact in [false, true] {
+                if is_exact && needles.is_empty() {
+                    assert_eq!(
+                        generate_snippet(&text, &needles, Language::English, true),
+                        None
+                    );
                     continue;
                 }
-                last_is_space = true;
-            }
-
-            if snippet.len() + escape_char_len(char) <= 255 {
-                escape_char(char, &mut snippet);
-            } else {
-                break 'outer;
+                assert_eq!(
+                    generate_snippet(&text, &needles, Language::English, is_exact),
+                    reference_snippet(&text, &needles, Language::English, is_exact),
+                    "{text:?} {needles:?} {is_exact}"
+                );
             }
         }
     }
-
-    Some(snippet)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::language::{Language, search_snippet::generate_snippet};
 
     #[test]
     fn search_snippets() {

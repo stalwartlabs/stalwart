@@ -39,8 +39,9 @@ use crate::{
     },
     request::{capability::CapabilityIds, reference::MaybeIdReference},
 };
+use ahash::AHashMap;
 use jmap_tools::{Null, Value};
-use std::{collections::HashMap, fmt::Debug, str::FromStr};
+use std::{fmt::Debug, str::FromStr};
 use types::id::Id;
 use utils::map::vec_map::VecMap;
 
@@ -60,7 +61,7 @@ where
 pub struct Request<'x> {
     pub using: CapabilityIds,
     pub method_calls: Vec<Call<RequestMethod<'x>>>,
-    pub created_ids: Option<HashMap<String, AnyId>>,
+    pub created_ids: Option<AHashMap<String, AnyId>>,
 }
 
 #[derive(Debug)]

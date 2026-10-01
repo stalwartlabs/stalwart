@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::utils::{server::TestServer, smtp::SmtpConnection};
+use crate::utils::{server::TestServer, smtp::SmtpConnection, storage::wait_for_index};
 use common::telemetry::tracers::store::TracingStore;
 use registry::schema::{
     prelude::{ObjectType, Property},
     structs::Trace,
 };
 use std::time::Duration;
+use store::{
+    ValueKey,
+    write::{TelemetryClass, ValueClass},
+};
 use trc::{DeliveryEvent, EventType, SmtpEvent};
 use types::id::Id;
 
@@ -147,6 +151,17 @@ pub async fn test(test: &TestServer) {
     }
 
     // Purge should delete the span entries
+    let span_ids = admin
+        .registry_query(
+            ObjectType::Trace,
+            Vec::<(&str, &str)>::new(),
+            Vec::<&str>::new(),
+        )
+        .await
+        .object_ids()
+        .collect::<Vec<_>>();
+    assert_eq!(span_ids.len(), 2);
+
     tokio::time::sleep(Duration::from_millis(800)).await;
     test.server
         .tracing_store()
@@ -154,19 +169,28 @@ pub async fn test(test: &TestServer) {
         .await
         .unwrap();
 
-    assert_eq!(
-        admin
-            .registry_query(
-                ObjectType::Trace,
-                Vec::<(&str, &str)>::new(),
-                Vec::<&str>::new(),
-            )
-            .await
-            .object_ids()
-            .collect::<Vec<_>>(),
-        Vec::<Id>::new()
-    );
+    for span_id in span_ids {
+        assert!(
+            test.server
+                .tracing_store()
+                .get_value::<Trace>(ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(
+                    span_id.id()
+                ))))
+                .await
+                .unwrap()
+                .is_none(),
+            "span {span_id} was not purged"
+        );
+    }
+    clear_trace_index(test).await;
 
     admin.destroy_account(account).await;
     test.cleanup().await;
+}
+
+pub async fn clear_trace_index(test: &TestServer) {
+    wait_for_index(&test.server).await;
+    if let Some(store) = test.server.search_store().internal_fts() {
+        store.unindex_traces(u64::MAX).await.unwrap();
+    }
 }

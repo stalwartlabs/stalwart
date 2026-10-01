@@ -39,11 +39,11 @@ impl SpamFilterAnalyzeEhlo for Server {
             }
 
             if matches!(
-                (
-                    self.dns_exists_ip(&ctx.output.ehlo_host.fqdn).await,
-                    self.dns_exists_mx(&ctx.output.ehlo_host.fqdn).await
-                ),
-                (Ok(false), Ok(false))
+                self.dns_exists_ip(&ctx.output.ehlo_host.fqdn).await,
+                Ok(false)
+            ) && matches!(
+                self.dns_exists_mx(&ctx.output.ehlo_host.fqdn).await,
+                Ok(false)
             ) {
                 // Helo no resolve to A or MX
                 ctx.result.add_tag("HELO_NORES_A_OR_MX");

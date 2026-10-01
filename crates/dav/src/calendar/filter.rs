@@ -16,7 +16,7 @@ use calcard::{
     common::timezone::Tz,
     icalendar::{ICalendarComponentType, ICalendarParameterName, ICalendarProperty},
 };
-use common::storage::dav::MAX_CACHED_UID_LEN;
+use common::storage::dav::CachedUid;
 use dav_proto::schema::request::{
     CalendarPropFilter, CalendarPropMatch, CompFilter, CompFilterMatch, ParamFilter, Presence,
     PropValueMatch,
@@ -344,9 +344,7 @@ impl PropFilterPlan for CalendarPropFilter {
             {
                 scope.matching(|resource| {
                     resource.uid().is_none_or(|uid| {
-                        uid.is_empty()
-                            || uid.len() >= MAX_CACHED_UID_LEN
-                            || text_match.is_match(uid)
+                        uid.is_empty() || uid.is_hashed_uid() || text_match.is_match(uid)
                     })
                 })
             }

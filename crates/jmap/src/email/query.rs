@@ -61,14 +61,10 @@ impl EmailQuery for Server {
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        let readable: RoaringBitmap = if access_token.is_shared(account_id) {
+        let readable = if access_token.is_shared(account_id) {
             cached_messages.shared_messages(access_token, Acl::ReadItems)
         } else {
-            cached_messages
-                .emails
-                .iter()
-                .map(|item| item.document_id())
-                .collect()
+            cached_messages.email_document_ids()
         };
         let metadata =
             object_metadata.query(request.filter.iter().filter_map(|filter| match filter {
@@ -428,17 +424,20 @@ impl EmailQuery for Server {
             .await?;
 
         let collapse_threads = request.arguments.collapse_threads.unwrap_or(false);
+        let mut collapsed = Vec::new();
         let total_results = if collapse_threads {
             let mut seen_thread_ids = AHashSet::new();
-            results
-                .iter()
-                .filter_map(|document_id| {
-                    cached_messages
-                        .email_by_id(document_id)
-                        .map(|email| email.thread_id())
-                })
-                .filter(|thread_id| seen_thread_ids.insert(*thread_id))
-                .count()
+            collapsed.extend(
+                results
+                    .iter()
+                    .filter_map(|document_id| {
+                        cached_messages
+                            .email_by_id(document_id)
+                            .map(|email| (email.thread_id(), *document_id))
+                    })
+                    .filter(|(thread_id, _)| seen_thread_ids.insert(*thread_id)),
+            );
+            collapsed.len()
         } else {
             results.len()
         };
@@ -450,9 +449,13 @@ impl EmailQuery for Server {
             &request,
         );
 
-        if !results.is_empty() {
-            let mut seen_thread_ids = AHashSet::new();
-
+        if collapse_threads {
+            for (thread_id, document_id) in collapsed {
+                if !response.add(thread_id, document_id) {
+                    break;
+                }
+            }
+        } else {
             for document_id in results {
                 let Some(thread_id) = cached_messages
                     .email_by_id(&document_id)
@@ -460,9 +463,6 @@ impl EmailQuery for Server {
                 else {
                     continue;
                 };
-                if collapse_threads && !seen_thread_ids.insert(thread_id) {
-                    continue;
-                }
 
                 if !response.add(thread_id, document_id) {
                     break;

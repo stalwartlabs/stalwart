@@ -4,59 +4,45 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::segments::{Change, find_change, is_ascii};
 use bumpalo::Bump;
-use std::borrow::Cow;
+use utils::text::CaseChange;
 
 pub fn to_lowercase<'a>(text: &'a str, arena: &'a Bump) -> &'a str {
-    match find_change(text, |byte| byte.is_ascii_uppercase(), lower_fixed) {
-        None => text,
-        Some(change) => convert_ascii(text, change, arena, str::make_ascii_lowercase)
-            .unwrap_or_else(|| arena.alloc_str(&text.to_lowercase())),
-    }
+    convert(
+        text,
+        CaseChange::lowercase(text),
+        arena,
+        str::make_ascii_lowercase,
+        str::to_lowercase,
+    )
 }
 
 pub fn to_uppercase<'a>(text: &'a str, arena: &'a Bump) -> &'a str {
-    match find_change(text, |byte| byte.is_ascii_lowercase(), upper_fixed) {
-        None => text,
-        Some(change) => convert_ascii(text, change, arena, str::make_ascii_uppercase)
-            .unwrap_or_else(|| arena.alloc_str(&text.to_uppercase())),
-    }
+    convert(
+        text,
+        CaseChange::uppercase(text),
+        arena,
+        str::make_ascii_uppercase,
+        str::to_uppercase,
+    )
 }
 
-pub(crate) fn lowercase(text: &str) -> Cow<'_, str> {
-    if find_change(text, |byte| byte.is_ascii_uppercase(), lower_fixed).is_some() {
-        Cow::Owned(text.to_lowercase())
-    } else {
-        Cow::Borrowed(text)
-    }
-}
-
-fn convert_ascii<'a>(
-    text: &str,
-    change: Change,
+fn convert<'a>(
+    text: &'a str,
+    change: CaseChange,
     arena: &'a Bump,
-    convert: fn(&mut str),
-) -> Option<&'a str> {
-    let Change::Ascii { position, checked } = change else {
-        return None;
-    };
-    if !text.as_bytes().get(checked..).is_none_or(is_ascii) {
-        return None;
+    ascii: fn(&mut str),
+    unicode: fn(&str) -> String,
+) -> &'a str {
+    match change {
+        CaseChange::Unchanged => text,
+        CaseChange::AsciiFrom(position) => {
+            let out = arena.alloc_str(text);
+            if let Some(changed) = out.get_mut(position..) {
+                ascii(changed);
+            }
+            out
+        }
+        CaseChange::Unicode => arena.alloc_str(&unicode(text)),
     }
-    let out = arena.alloc_str(text);
-    if let Some(changed) = out.get_mut(position..) {
-        convert(changed);
-    }
-    Some(out)
-}
-
-fn lower_fixed(c: char) -> bool {
-    let mut lower = c.to_lowercase();
-    lower.next() == Some(c) && lower.next().is_none()
-}
-
-fn upper_fixed(c: char) -> bool {
-    let mut upper = c.to_uppercase();
-    upper.next() == Some(c) && upper.next().is_none()
 }

@@ -7,7 +7,7 @@
 use super::ArchivedResource;
 use crate::{
     DavError, DavErrorCondition, DavResourceName,
-    common::uri::DavUriResource,
+    common::{propfind::ExpandedPrincipals, uri::DavUriResource},
     file::{DavFileResource, is_symlink},
     principal::propfind::PrincipalPropFind,
 };
@@ -71,7 +71,7 @@ pub(crate) trait DavAclHandler: Sync + Send {
         access_token: &AccessToken,
         account_id: u32,
         grants: &ArchivedVec<ArchivedAclGrant>,
-        expand: Option<&PropFind>,
+        expand: Option<(&PropFind, &mut ExpandedPrincipals)>,
     ) -> impl Future<Output = crate::Result<Vec<Ace>>> + Send;
 }
 
@@ -107,10 +107,7 @@ impl DavAclHandler for Server {
                 collection != Collection::FileNode
                     || (!is_symlink(r)
                         && (access_token.is_member(account_id)
-                            || resources
-                                .file_access(access_token)
-                                .discoverable
-                                .contains(r.document_id())))
+                            || resources.file_discoverable(access_token, r.document_id())))
             })
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         if !resource.resource.is_container() && !matches!(collection, Collection::FileNode) {
@@ -485,7 +482,7 @@ impl DavAclHandler for Server {
         access_token: &AccessToken,
         account_id: u32,
         grants: &ArchivedVec<ArchivedAclGrant>,
-        expand: Option<&PropFind>,
+        mut expand: Option<(&PropFind, &mut ExpandedPrincipals)>,
     ) -> crate::Result<Vec<Ace>> {
         let mut aces = Vec::with_capacity(grants.len());
         if access_token.is_member(account_id)
@@ -497,8 +494,9 @@ impl DavAclHandler for Server {
                     continue;
                 }
                 let grant_account_id = u32::from(grant.account_id);
-                let principal = if let Some(expand) = expand {
-                    self.expand_principal(access_token, grant_account_id, expand)
+                let principal = if let Some((propfind, principals)) = &mut expand {
+                    principals
+                        .expand(self, access_token, grant_account_id, propfind)
                         .await?
                         .map(Principal::Response)
                         .unwrap_or_else(|| {

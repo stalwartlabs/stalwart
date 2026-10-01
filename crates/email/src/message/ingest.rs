@@ -359,10 +359,7 @@ impl EmailIngest for Server {
                         .access_token
                         .has_permission(Permission::CalendarSchedulingReceive)
                 {
-                    let account_info = self
-                        .build_account_info(account.clone())
-                        .await
-                        .caused_by(trc::location!())?;
+                    let mut account_info = None;
                     let mut sender = None;
                     for part in message.root().parts() {
                         if part.content_type().is_some_and(|ct| {
@@ -381,9 +378,17 @@ impl EmailIngest for Server {
                                         .and_then(|s| s.address())
                                         .and_then(sanitize_email)
                                 }) {
+                                    let account_info = match &account_info {
+                                        Some(account_info) => account_info,
+                                        None => account_info.insert(
+                                            self.build_account_info(account.clone())
+                                                .await
+                                                .caused_by(trc::location!())?,
+                                        ),
+                                    };
                                     match self
                                         .itip_ingest(
-                                            &account_info,
+                                            account_info,
                                             sender,
                                             deliver_to,
                                             &itip_message,
@@ -542,11 +547,6 @@ impl EmailIngest for Server {
 
         // Build write batch
         let mut batch = BatchBuilder::new();
-        let mailbox_ids_event = params
-            .mailbox_ids
-            .iter()
-            .map(|mailbox_id| trc::Value::from(*mailbox_id))
-            .collect::<Vec<_>>();
         batch.with_account_id(account_id);
 
         // Reserve a document id and one IMAP UID per target mailbox
@@ -658,10 +658,11 @@ impl EmailIngest for Server {
 
         // Merge threads if necessary
         if !thread_result.merge_ids.is_empty()
-            || matches!(
-                params.source,
-                IngestSource::Jmap { .. } | IngestSource::Imap { .. }
-            )
+            || (!message_ids.is_empty()
+                && matches!(
+                    params.source,
+                    IngestSource::Jmap { .. } | IngestSource::Imap { .. }
+                ))
         {
             batch.schedule_task(Task::MergeThreads(TaskMergeThreads {
                 account_id: account_id.into(),
@@ -710,7 +711,11 @@ impl EmailIngest for Server {
             SpanId = params.session_id,
             AccountId = account_id,
             DocumentId = document_id,
-            MailboxId = mailbox_ids_event,
+            MailboxId = params
+                .mailbox_ids
+                .iter()
+                .map(|mailbox_id| trc::Value::from(*mailbox_id))
+                .collect::<Vec<_>>(),
             BlobId = blob_hash.to_hex(),
             ChangeId = change_id,
             MessageId = message_id,
@@ -973,22 +978,29 @@ impl EmailIngest for Server {
 }
 
 pub fn has_message_id(a: &[u128], b: &[u8]) -> bool {
-    let mut i = 0;
-    let mut j = 0;
+    let mut a = a.iter().copied();
+    let mut b = b
+        .as_chunks::<U128_LEN>()
+        .0
+        .iter()
+        .map(|chunk| u128::from_be_bytes(*chunk));
+    let (Some(mut left), Some(mut right)) = (a.next(), b.next()) else {
+        return false;
+    };
 
-    let a_len = a.len();
-    let b_len = b.len() / U128_LEN;
-
-    while i < a_len && j < b_len {
-        let bj = u128::from_be_bytes(b[j * U128_LEN..(j + 1) * U128_LEN].try_into().unwrap());
-        match a[i].cmp(&bj) {
-            std::cmp::Ordering::Equal => return true,
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
+    loop {
+        match left.cmp(&right) {
+            Ordering::Equal => return true,
+            Ordering::Less => match a.next() {
+                Some(next) => left = next,
+                None => return false,
+            },
+            Ordering::Greater => match b.next() {
+                Some(next) => right = next,
+                None => return false,
+            },
         }
     }
-
-    false
 }
 
 impl IngestSource<'_> {
@@ -1106,3 +1118,6 @@ impl ThreadMerge {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -7,21 +7,18 @@
 use common::config::smtp::session::MTAHook;
 use utils::HttpLimitResponse;
 
-use super::{Request, Response};
+use super::Response;
 
 pub(super) async fn send_mta_hook_request(
     mta_hook: &MTAHook,
-    request: Request,
+    payload: Vec<u8>,
 ) -> Result<Response, String> {
     let response = mta_hook
         .client
         .post(&mta_hook.url)
         .timeout(mta_hook.timeout)
         .headers(mta_hook.headers.clone())
-        .body(
-            serde_json::to_string(&request)
-                .map_err(|err| format!("Failed to serialize Hook request: {}", err))?,
-        )
+        .body(payload)
         .send()
         .await
         .map_err(|err| format!("Hook request failed: {err}"))?;

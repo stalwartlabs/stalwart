@@ -63,6 +63,8 @@ static RSVP_PAGE: &[u8] = include_bytes!(concat!(
     "/../../resources/html-templates/calendar-rsvp.html.min.gz"
 ));
 
+const FORWARDED_FOR: &[u8] = b"for=";
+
 static LOGIN_PAGE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../resources/html-templates/login.html.min.gz"
@@ -342,8 +344,7 @@ impl ParseHttp for Server {
                         .await?;
 
                     return if let Some(policy) = &self.core.smtp.session.mta_sts_policy {
-                        Ok(Resource::new("text/plain", policy.to_string().into_bytes())
-                            .into_http_response())
+                        Ok(Resource::new("text/plain", policy.text.clone()).into_http_response())
                     } else {
                         Err(trc::ResourceEvent::NotFound.into_err())
                     };
@@ -689,6 +690,11 @@ impl ParseHttp for Server {
             external => {
                 if path.next().is_none() {
                     if !external.is_empty() {
+                        if !self.inner.data.applications.has_prefix(external)
+                            && ban_scanned_path(self, req.uri().path(), &session).await?
+                        {
+                            return Err(trc::ResourceEvent::NotFound.into_err());
+                        }
                         return Ok(HttpResponse::redirect(format!("/{external}/")));
                     } else if let Some(url) = &self.core.network.http.redirect_root {
                         return Ok(HttpResponse::redirect(url.clone()));
@@ -717,18 +723,50 @@ impl ParseHttp for Server {
         }
 
         // Block dangerous URLs
-        let path = req.uri().path();
-        if self.is_http_banned_path(path, session.remote_ip).await? {
-            trc::event!(
-                Security(SecurityEvent::ScanBan),
-                SpanId = session.session_id,
-                RemoteIp = session.remote_ip,
-                Path = CompactString::from(path),
-            );
-        }
+        ban_scanned_path(self, req.uri().path(), &session).await?;
 
         Err(trc::ResourceEvent::NotFound.into_err())
     }
+}
+
+fn forwarded_for(header: &str) -> Option<IpAddr> {
+    let bytes = header.as_bytes();
+    let start = bytes
+        .windows(FORWARDED_FOR.len())
+        .position(|window| window.eq_ignore_ascii_case(FORWARDED_FOR))?;
+    let rest = bytes.get(start + FORWARDED_FOR.len()..)?;
+    let mut span = None;
+    for (pos, byte) in rest.iter().enumerate() {
+        match byte {
+            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' | b':' | b'.' => {
+                span = Some(span.map_or((pos, pos), |(start, _)| (start, pos)));
+            }
+            b'"' | b'[' | b' ' if span.is_none() => {}
+            _ => break,
+        }
+    }
+    let (start, end) = span?;
+    std::str::from_utf8(rest.get(start..=end)?)
+        .ok()?
+        .parse()
+        .ok()
+}
+
+async fn ban_scanned_path(
+    server: &Server,
+    path: &str,
+    session: &HttpSessionData,
+) -> trc::Result<bool> {
+    let banned = server.is_http_banned_path(path, session.remote_ip).await?;
+    if banned {
+        trc::event!(
+            Security(SecurityEvent::ScanBan),
+            SpanId = session.session_id,
+            RemoteIp = session.remote_ip,
+            Path = CompactString::from(path),
+        );
+    }
+    Ok(banned)
 }
 
 async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionData<T>) {
@@ -760,31 +798,7 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                         .headers()
                         .get(header::FORWARDED)
                         .and_then(|h| h.to_str().ok())
-                        .and_then(|h| {
-                            let h = h.to_ascii_lowercase();
-                            h.split_once("for=").and_then(|(_, rest)| {
-                                let mut start_ip = usize::MAX;
-                                let mut end_ip = usize::MAX;
-
-                                for (pos, ch) in rest.char_indices() {
-                                    match ch {
-                                        '0'..='9' | 'a'..='f' | ':' | '.' => {
-                                            if start_ip == usize::MAX {
-                                                start_ip = pos;
-                                            }
-                                            end_ip = pos;
-                                        }
-                                        '"' | '[' | ' ' if start_ip == usize::MAX => {}
-                                        _ => {
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                rest.get(start_ip..=end_ip)
-                                    .and_then(|h| h.parse::<IpAddr>().ok())
-                            })
-                        })
+                        .and_then(forwarded_for)
                         .or_else(|| {
                             req.headers()
                                 .get("X-Forwarded-For")
@@ -931,7 +945,56 @@ impl SessionManager for HttpSessionManager {
 #[cfg(test)]
 mod tests {
     use flate2::read::GzDecoder;
-    use std::io::Read;
+    use std::{io::Read, net::IpAddr};
+
+    fn reference_forwarded_for(header: &str) -> Option<IpAddr> {
+        let header = header.to_ascii_lowercase();
+        header.split_once("for=").and_then(|(_, rest)| {
+            let mut start_ip = usize::MAX;
+            let mut end_ip = usize::MAX;
+            for (pos, ch) in rest.char_indices() {
+                match ch {
+                    '0'..='9' | 'a'..='f' | ':' | '.' => {
+                        if start_ip == usize::MAX {
+                            start_ip = pos;
+                        }
+                        end_ip = pos;
+                    }
+                    '"' | '[' | ' ' if start_ip == usize::MAX => {}
+                    _ => break,
+                }
+            }
+            rest.get(start_ip..=end_ip)
+                .and_then(|h| h.parse::<IpAddr>().ok())
+        })
+    }
+
+    #[test]
+    fn forwarded_for_matches_lowercased_scan() {
+        for header in [
+            "",
+            "for=",
+            "for=192.0.2.60",
+            "For=192.0.2.60;proto=http;by=203.0.113.43",
+            "FOR=\"[2001:DB8:CAFE::17]:4711\"",
+            "for=\"[2001:db8:cafe::17]\", for=198.51.100.17",
+            "proto=https; for=203.0.113.43",
+            "by=203.0.113.1;for= 10.0.0.1",
+            "for=unknown",
+            "for=_hidden, for=198.51.100.17",
+            "xfor=10.1.2.3",
+            "for=10.1.2.3é",
+            "é;for=10.1.2.3",
+            "for=\"[::FFFF:192.0.2.1]\"",
+            "host=example.com;FoR=172.16.0.1",
+        ] {
+            assert_eq!(
+                super::forwarded_for(header),
+                reference_forwarded_for(header),
+                "{header:?}"
+            );
+        }
+    }
 
     const PAGES: [(&str, &[u8], &str); 2] = [
         (

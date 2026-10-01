@@ -6,6 +6,7 @@
 
 use crate::calendar::filter::FilterTimeRanges;
 use calcard::{common::timezone::Tz, vcard::VCardVersion};
+use common::{GroupwareResourceMetadata, GroupwareResourceRef};
 use dav_proto::{
     Depth, RequestHeaders, Return,
     schema::{
@@ -34,6 +35,7 @@ use groupware::{
 use hyper::StatusCode;
 use propfind::PropFindItem;
 use rkyv::vec::ArchivedVec;
+use std::fmt::Write;
 use store::write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder};
 use types::{
     acl::{Acl, ArchivedAclGrant},
@@ -145,20 +147,28 @@ pub(crate) trait ExtractETag {
 
 impl<T> ETag for Archive<T> {
     fn etag(&self) -> String {
-        format!("\"{}\"", self.version.hash().unwrap_or_default())
+        quoted_etag(self.version.hash().unwrap_or_default().into())
     }
 }
 
 impl ExtractETag for BatchBuilder {
     fn etag(&self) -> Option<String> {
-        self.last_archive_hash().map(|hash| format!("\"{}\"", hash))
+        self.last_archive_hash()
+            .map(|hash| quoted_etag(hash.into()))
     }
 }
 
 impl ExtractETag for AssignedIds {
     fn etag(&self) -> Option<String> {
-        self.last_archive_hash().map(|hash| format!("\"{}\"", hash))
+        self.last_archive_hash()
+            .map(|hash| quoted_etag(hash.into()))
     }
+}
+
+pub(crate) fn quoted_etag(hash: u64) -> String {
+    let mut etag = String::with_capacity(22);
+    let _ = write!(etag, "\"{hash}\"");
+    etag
 }
 
 pub(crate) trait DavCollection {
@@ -347,6 +357,45 @@ pub(crate) enum ArchivedResource<'x> {
         Option<&'x ArchivedContactCardContent>,
     ),
     FileNode(Archive<&'x ArchivedFileNode>),
+    Cached(CachedItem),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CachedItem {
+    collection: Collection,
+    etag: u32,
+    created: i64,
+    modified: i64,
+    event_flags: u16,
+}
+
+impl CachedItem {
+    pub fn new(collection: Collection, resource: GroupwareResourceRef<'_>) -> Option<Self> {
+        Some(CachedItem {
+            collection,
+            etag: resource.etag(),
+            created: resource.created_at()?,
+            modified: resource.modified_at()?,
+            event_flags: resource.event_flags().unwrap_or_default(),
+        })
+    }
+
+    pub fn event_flags(&self) -> Option<u16> {
+        (self.collection == Collection::CalendarEvent).then_some(self.event_flags)
+    }
+
+    pub fn is_exact(resource: &GroupwareResourceRef<'_>) -> bool {
+        !matches!(
+            resource.resource.data,
+            GroupwareResourceMetadata::CalendarEvent {
+                modified_at: i32::MIN | i32::MAX,
+                ..
+            } | GroupwareResourceMetadata::ContactCard {
+                modified_at: i32::MIN | i32::MAX,
+                ..
+            }
+        )
+    }
 }
 
 pub(crate) enum EventContent<'x> {
@@ -479,9 +528,10 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::AddressBook(archive) => archive.version.hash().unwrap_or_default(),
             ArchivedResource::FileNode(archive) => archive.inner.etag.to_native(),
             ArchivedResource::CalendarEventNotificationCollection(_) => 0,
+            ArchivedResource::Cached(item) => item.etag,
         };
 
-        format!("\"{hash}\"")
+        quoted_etag(hash.into())
     }
 
     pub fn acls(&self) -> Option<&ArchivedVec<ArchivedAclGrant>> {
@@ -504,6 +554,7 @@ impl<'x> ArchivedResource<'x> {
                 archive.inner.created.to_native()
             }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
+            ArchivedResource::Cached(item) => item.created,
         }
     }
 
@@ -518,6 +569,7 @@ impl<'x> ArchivedResource<'x> {
                 archive.inner.modified.to_native()
             }
             ArchivedResource::CalendarEventNotificationCollection(_) => 1634515200,
+            ArchivedResource::Cached(item) => item.modified,
         }
     }
 
@@ -535,7 +587,8 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::ContactCard(archive, _) => archive.inner.size.to_native().into(),
             ArchivedResource::AddressBook(_)
             | ArchivedResource::Calendar(_)
-            | ArchivedResource::CalendarEventNotificationCollection(_) => None,
+            | ArchivedResource::CalendarEventNotificationCollection(_)
+            | ArchivedResource::Cached(_) => None,
         }
     }
 
@@ -547,6 +600,11 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::CalendarEvent(..)
             | ArchivedResource::CalendarEventNotification(..) => "text/calendar".into(),
             ArchivedResource::ContactCard(..) => "text/vcard".into(),
+            ArchivedResource::Cached(item) => match item.collection {
+                Collection::CalendarEvent => "text/calendar".into(),
+                Collection::ContactCard => "text/vcard".into(),
+                _ => None,
+            },
             ArchivedResource::AddressBook(_)
             | ArchivedResource::Calendar(_)
             | ArchivedResource::CalendarEventNotificationCollection(_) => None,
@@ -566,7 +624,8 @@ impl<'x> ArchivedResource<'x> {
             ArchivedResource::ContactCard(archive, _) => archive.inner.display_name.as_deref(),
             ArchivedResource::FileNode(_)
             | ArchivedResource::CalendarEventNotification(..)
-            | ArchivedResource::CalendarEventNotificationCollection(_) => None,
+            | ArchivedResource::CalendarEventNotificationCollection(_)
+            | ArchivedResource::Cached(_) => None,
         }
     }
 

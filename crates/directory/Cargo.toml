@@ -27,6 +27,7 @@ encodify = "1.0"
 nohash-hasher = "0.2.0"
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 compact_str = "0.10.0"
+hashify = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }

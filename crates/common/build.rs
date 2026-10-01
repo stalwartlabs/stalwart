@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -23,8 +23,8 @@ fn main() {
     println!("cargo:rerun-if-changed={}", yaml_path.display());
 }
 
-fn parse_yaml(content: &str) -> HashMap<String, HashMap<String, String>> {
-    let mut result: HashMap<String, HashMap<String, String>> = HashMap::new();
+fn parse_yaml(content: &str) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut result: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut current_key = None;
 
     for line in content.lines() {
@@ -78,7 +78,7 @@ fn split_plural_forms(value: &str) -> Option<Vec<(&str, &str)>> {
         .collect()
 }
 
-fn plural_keys(locales: &HashMap<String, HashMap<String, String>>) -> HashSet<String> {
+fn plural_keys(locales: &BTreeMap<String, BTreeMap<String, String>>) -> HashSet<String> {
     let mut keys = HashSet::new();
 
     for (key, translations) in locales {
@@ -132,7 +132,7 @@ fn plural_forms_literal(value: &str) -> String {
     literal
 }
 
-fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> String {
+fn generate_locale_code(locales: &BTreeMap<String, BTreeMap<String, String>>) -> String {
     let mut code = String::new();
     let plural = plural_keys(locales);
 
@@ -159,7 +159,7 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
 
     code.push_str("}\n\n");
 
-    let mut languages = std::collections::HashSet::new();
+    let mut languages = BTreeSet::new();
     for translations in locales.values() {
         for lang in translations.keys() {
             languages.insert(lang.clone());
@@ -188,13 +188,11 @@ fn generate_locale_code(locales: &HashMap<String, HashMap<String, String>>) -> S
         code.push_str("};\n\n");
     }
 
-    let mut sorted: Vec<&String> = languages.iter().collect();
-    sorted.sort_unstable();
     code.push_str(&format!(
         "pub static ALL_LOCALES: [&Locale; {}] = [\n",
-        sorted.len()
+        languages.len()
     ));
-    for lang in &sorted {
+    for lang in &languages {
         code.push_str(&format!("    &{}_LOCALES,\n", const_name(lang)));
     }
     code.push_str("];\n\n");

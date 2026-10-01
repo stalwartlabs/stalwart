@@ -285,8 +285,22 @@ pub(super) fn known_namespace(raw: &[u8]) -> Option<&'static (Namespace, &'stati
     })
 }
 
+pub(super) fn extension_namespace(raw: &[u8]) -> Option<&'static str> {
+    hashify::map!(raw, &'static str,
+        "http://apple.com/ns/ical/" => "http://apple.com/ns/ical/",
+        "http://me.com/_namespace/" => "http://me.com/_namespace/",
+        "urn:mobileme:davservices" => "urn:mobileme:davservices",
+        "http://owncloud.org/ns" => "http://owncloud.org/ns",
+        "http://nextcloud.org/ns" => "http://nextcloud.org/ns",
+        "http://sabredav.org/ns" => "http://sabredav.org/ns"
+    )
+    .copied()
+}
+
 fn namespace_uri(raw: &[u8]) -> Result<Cow<'static, str>> {
     if let Some((_, uri)) = Namespace::try_parse_uri(raw) {
+        Ok(Cow::Borrowed(uri))
+    } else if let Some(uri) = extension_namespace(raw) {
         Ok(Cow::Borrowed(uri))
     } else if raw
         .iter()

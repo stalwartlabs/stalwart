@@ -12,6 +12,7 @@ use store::write::now;
 pub mod concurrent;
 pub mod dsn;
 pub mod manager;
+pub mod quota;
 pub mod retry;
 pub mod virtualq;
 

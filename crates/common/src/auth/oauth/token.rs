@@ -19,7 +19,7 @@ pub const FAILED_TO_DECODE_TOKEN: &str = concat!(
 );
 
 pub(crate) const TOKEN_HEADER: &str = "sw1.";
-const TOKEN_KEY_CONTEXT: &str = "stalwart-oauth-token-sw1";
+pub(super) const TOKEN_KEY_CONTEXT: &str = "stalwart-oauth-token-sw1";
 const OAUTH_EPOCH: u64 = 946684800; // Jan 1, 2000
 
 pub struct TokenInfo {
@@ -62,12 +62,7 @@ impl Server {
                 .unwrap_or_default(),
         };
 
-        seal_token(
-            self.core.oauth.oauth_key.as_bytes(),
-            &raw,
-            account_name.as_bytes(),
-        )
-        .map_err(|err| {
+        seal_token(&self.core.oauth.token_cipher, &raw, account_name.as_bytes()).map_err(|err| {
             trc::AuthEvent::Error
                 .into_err()
                 .ctx(trc::Key::Reason, "Failed to encrypt token")
@@ -81,7 +76,7 @@ impl Server {
         expected_grant_type: Option<GrantType>,
         token_: &str,
     ) -> trc::Result<TokenInfo> {
-        let token = open_token(self.core.oauth.oauth_key.as_bytes(), token_).map_err(|_| {
+        let token = open_token(&self.core.oauth.token_cipher, token_).map_err(|_| {
             trc::AuthEvent::Error
                 .into_err()
                 .ctx(trc::Key::Reason, FAILED_TO_DECODE_TOKEN)
@@ -127,7 +122,11 @@ impl Server {
     }
 }
 
-fn seal_token(key: &[u8], token: &RawToken, footer: &[u8]) -> Result<String, String> {
+fn seal_token(
+    cipher: &SymmetricEncrypt,
+    token: &RawToken,
+    footer: &[u8],
+) -> Result<String, String> {
     let mut payload = Vec::with_capacity(32);
     payload.push_leb128(token.account_id);
     payload.push(token.grant_type.id());
@@ -139,8 +138,7 @@ fn seal_token(key: &[u8], token: &RawToken, footer: &[u8]) -> Result<String, Str
     }
 
     let nonce = rng().random::<[u8; SymmetricEncrypt::NONCE_LEN]>();
-    let ciphertext =
-        SymmetricEncrypt::new(key, TOKEN_KEY_CONTEXT).encrypt_with_aad(&payload, &nonce, footer)?;
+    let ciphertext = cipher.encrypt_with_aad(&payload, &nonce, footer)?;
 
     let mut body = Vec::with_capacity(nonce.len() + ciphertext.len());
     body.extend_from_slice(&nonce);
@@ -157,7 +155,7 @@ fn seal_token(key: &[u8], token: &RawToken, footer: &[u8]) -> Result<String, Str
     Ok(out)
 }
 
-fn open_token(key: &[u8], token: &str) -> Result<RawToken, ()> {
+fn open_token(cipher: &SymmetricEncrypt, token: &str) -> Result<RawToken, ()> {
     let rest = token.strip_prefix(TOKEN_HEADER).ok_or(())?;
     let (body, footer) = match rest.split_once('.') {
         Some((body, footer)) => (
@@ -172,7 +170,7 @@ fn open_token(key: &[u8], token: &str) -> Result<RawToken, ()> {
     }
     let (nonce, ciphertext) = body.split_at(SymmetricEncrypt::NONCE_LEN);
 
-    let payload = SymmetricEncrypt::new(key, TOKEN_KEY_CONTEXT)
+    let payload = cipher
         .decrypt_with_aad(ciphertext, nonce, &footer)
         .map_err(|_| ())?;
 
@@ -213,6 +211,10 @@ mod tests {
 
     const KEY: &[u8] = b"a-test-encryption-key-of-some-length";
     const NAME: &[u8] = b"user@example.org";
+
+    fn cipher(key: &[u8]) -> SymmetricEncrypt {
+        SymmetricEncrypt::new(key, TOKEN_KEY_CONTEXT)
+    }
 
     fn sample(grant_type: GrantType, claims: Option<&str>, cv: u64) -> RawToken {
         RawToken {
@@ -256,9 +258,9 @@ mod tests {
                 "名字@example.org".as_bytes(),
             ),
         ] {
-            let token = seal_token(KEY, &raw, footer).unwrap();
+            let token = seal_token(&cipher(KEY), &raw, footer).unwrap();
             assert!(token.starts_with(TOKEN_HEADER));
-            let opened = open_token(KEY, &token).unwrap();
+            let opened = open_token(&cipher(KEY), &token).unwrap();
             assert_eq_fields(&raw, &opened);
 
             // The footer (account name) round-trips in clear text for proxies
@@ -274,7 +276,7 @@ mod tests {
     #[test]
     fn account_name_is_readable_in_clear_text_footer() {
         let token = seal_token(
-            KEY,
+            &cipher(KEY),
             &sample(GrantType::AccessToken, None, 0),
             b"route-me@example.org",
         )
@@ -286,14 +288,15 @@ mod tests {
 
     #[test]
     fn wrong_key_is_rejected() {
-        let token = seal_token(KEY, &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
-        assert!(open_token(b"a-different-encryption-key-entirely!", &token).is_err());
+        let token =
+            seal_token(&cipher(KEY), &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
+        assert!(open_token(&cipher(b"a-different-encryption-key-entirely!"), &token).is_err());
     }
 
     #[test]
     fn tampering_with_ciphertext_is_rejected() {
         let raw = sample(GrantType::AccessToken, None, 0);
-        let token = seal_token(KEY, &raw, NAME).unwrap();
+        let token = seal_token(&cipher(KEY), &raw, NAME).unwrap();
         let (header, rest) = token.split_at(TOKEN_HEADER.len());
         let (body_b64, footer) = match rest.split_once('.') {
             Some((b, f)) => (b.to_string(), Some(f.to_string())),
@@ -311,27 +314,27 @@ mod tests {
                 rebuilt.push_str(footer);
             }
             assert!(
-                open_token(KEY, &rebuilt).is_err(),
+                open_token(&cipher(KEY), &rebuilt).is_err(),
                 "flipping byte {idx} of the body must invalidate the token"
             );
         }
 
         // Sanity: the untampered token still opens
         body[0] ^= 0x00;
-        assert!(open_token(KEY, &token).is_ok());
+        assert!(open_token(&cipher(KEY), &token).is_ok());
     }
 
     #[test]
     fn tampering_with_clear_text_footer_is_rejected() {
         let raw = sample(GrantType::AccessToken, None, 0);
-        let token = seal_token(KEY, &raw, b"victim@example.org").unwrap();
+        let token = seal_token(&cipher(KEY), &raw, b"victim@example.org").unwrap();
         let (body, _) = token.rsplit_once('.').unwrap();
 
         // An attacker rewrites the clear-text account name to impersonate another account
         let forged_footer = URL_SAFE_NO_PAD.encode(b"attacker@example.org");
         let forged = format!("{body}.{forged_footer}");
         assert!(
-            open_token(KEY, &forged).is_err(),
+            open_token(&cipher(KEY), &forged).is_err(),
             "the footer is bound through the associated data and must be authenticated"
         );
     }
@@ -339,13 +342,13 @@ mod tests {
     #[test]
     fn swapping_footers_between_tokens_is_rejected() {
         let a = seal_token(
-            KEY,
+            &cipher(KEY),
             &sample(GrantType::AccessToken, None, 0),
             b"alice@example.org",
         )
         .unwrap();
         let b = seal_token(
-            KEY,
+            &cipher(KEY),
             &sample(GrantType::AccessToken, None, 0),
             b"bob@example.org",
         )
@@ -353,12 +356,13 @@ mod tests {
         let a_body = a.rsplit_once('.').unwrap().0;
         let b_footer = b.rsplit_once('.').unwrap().1;
         let frankentoken = format!("{a_body}.{b_footer}");
-        assert!(open_token(KEY, &frankentoken).is_err());
+        assert!(open_token(&cipher(KEY), &frankentoken).is_err());
     }
 
     #[test]
     fn malformed_input_never_panics_and_is_rejected() {
-        let valid = seal_token(KEY, &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
+        let valid =
+            seal_token(&cipher(KEY), &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
         let cases = [
             String::new(),
             "sw1.".to_string(),
@@ -373,13 +377,17 @@ mod tests {
             "\u{0}\u{0}\u{0}".to_string(),
         ];
         for case in cases {
-            assert!(open_token(KEY, &case).is_err(), "must reject {case:?}");
+            assert!(
+                open_token(&cipher(KEY), &case).is_err(),
+                "must reject {case:?}"
+            );
         }
     }
 
     #[test]
     fn truncating_the_body_is_rejected() {
-        let token = seal_token(KEY, &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
+        let token =
+            seal_token(&cipher(KEY), &sample(GrantType::AccessToken, None, 0), NAME).unwrap();
         let (header, rest) = token.split_at(TOKEN_HEADER.len());
         let body_b64 = rest.split_once('.').map(|(b, _)| b).unwrap_or(rest);
         let body = URL_SAFE_NO_PAD.decode(body_b64).unwrap();
@@ -387,7 +395,7 @@ mod tests {
             let mut rebuilt = String::from(header);
             rebuilt.push_str(&URL_SAFE_NO_PAD.encode(&body[..len]));
             assert!(
-                open_token(KEY, &rebuilt).is_err(),
+                open_token(&cipher(KEY), &rebuilt).is_err(),
                 "truncation to {len} must be rejected"
             );
         }
@@ -396,17 +404,20 @@ mod tests {
     #[test]
     fn identical_input_produces_distinct_tokens() {
         let raw = sample(GrantType::AccessToken, None, 7);
-        let a = seal_token(KEY, &raw, NAME).unwrap();
-        let b = seal_token(KEY, &raw, NAME).unwrap();
+        let a = seal_token(&cipher(KEY), &raw, NAME).unwrap();
+        let b = seal_token(&cipher(KEY), &raw, NAME).unwrap();
         assert_ne!(a, b, "a random nonce must make each token unique");
-        assert_eq_fields(&open_token(KEY, &a).unwrap(), &open_token(KEY, &b).unwrap());
+        assert_eq_fields(
+            &open_token(&cipher(KEY), &a).unwrap(),
+            &open_token(&cipher(KEY), &b).unwrap(),
+        );
     }
 
     #[test]
     fn claims_with_separators_round_trip_exactly() {
         let raw = sample(GrantType::Rsvp, Some("a;b;c;d@e.org;999"), 0);
-        let token = seal_token(KEY, &raw, b"owner@example.org").unwrap();
-        let opened = open_token(KEY, &token).unwrap();
+        let token = seal_token(&cipher(KEY), &raw, b"owner@example.org").unwrap();
+        let opened = open_token(&cipher(KEY), &token).unwrap();
         assert_eq!(opened.claims.as_deref(), Some("a;b;c;d@e.org;999"));
     }
 }

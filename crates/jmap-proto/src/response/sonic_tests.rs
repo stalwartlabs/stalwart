@@ -35,6 +35,7 @@ use crate::{
     response::{Response, ResponseMethod},
     types::{date::UTCDate, state::State},
 };
+use ahash::AHashMap as HashMap;
 use calcard::jscalendar::{JSCalendar, JSCalendarProperty, JSCalendarValue};
 use jmap_tools::{JsonPointer, Key, Map, Null, Value};
 use registry::types::EnumImpl;
@@ -46,7 +47,6 @@ use serde::{
         SerializeTupleStruct, SerializeTupleVariant,
     },
 };
-use std::collections::HashMap;
 use types::{
     blob::{BlobClass, BlobId},
     blob_hash::BlobHash,
@@ -909,8 +909,8 @@ fn responses_match_serde_json() {
     for round in 0..200 {
         let response = rng.response(&templates);
         assert_eq!(
-            response.to_json(),
-            serde_json::to_string(&response).unwrap_or_default(),
+            response.to_json().ok(),
+            serde_json::to_string(&response).ok(),
             "round {round}"
         );
         let websocket =

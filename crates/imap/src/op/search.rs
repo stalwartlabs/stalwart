@@ -209,13 +209,13 @@ impl<T: SessionStream> SessionData<T> {
         // RFC 9738 exempts SORT, whose ordering is meaningless once truncated
         let mut limited_uid = None;
         if !is_sort {
-            imap_ids.sort_unstable();
-
             let message_limit = message_limit as usize;
             if imap_ids.len() > message_limit {
                 let cutoff = imap_ids.len() - message_limit;
-                let threshold = imap_ids.get(cutoff).copied().unwrap_or_default();
+                let (_, threshold, _) = imap_ids.select_nth_unstable(cutoff);
+                let threshold = *threshold;
                 imap_ids.drain(..cutoff);
+                imap_ids.sort_unstable();
                 let threshold_uid = if is_uid {
                     Some(threshold)
                 } else {
@@ -229,6 +229,8 @@ impl<T: SessionStream> SessionData<T> {
                 {
                     saved_results.retain(|row| row.uid >= threshold_uid);
                 }
+            } else {
+                imap_ids.sort_unstable();
             }
         }
 

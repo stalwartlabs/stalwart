@@ -17,6 +17,9 @@ use std::time::Instant;
 use tokio_rustls::server::TlsStream;
 use trc::{SecurityEvent, SmtpEvent};
 
+const READ_BUFFER: usize = 8192;
+const DATA_READ_BUFFER: usize = 65536;
+
 impl SessionManager for SmtpSessionManager {
     async fn handle<T: SessionStream>(self, session: network::SessionData<T>) {
         // Build server and create session
@@ -133,7 +136,7 @@ impl<T: SessionStream> Session<T> {
     }
 
     pub async fn handle_conn(&mut self) -> bool {
-        let mut buf = vec![0; 8192];
+        let mut buf = Vec::with_capacity(READ_BUFFER);
         let mut shutdown_rx = self.instance.shutdown_rx.clone();
 
         loop {
@@ -146,8 +149,21 @@ impl<T: SessionStream> Session<T> {
                                 if bytes_read > 0 {
                                     if Instant::now() < self.data.valid_until && bytes_read <= self.data.bytes_left  {
                                         self.data.bytes_left -= bytes_read;
-                                        match Box::pin(self.ingest(&buf[..bytes_read])).await {
-                                            Ok(true) => (),
+                                        match Box::pin(self.ingest(&buf)).await {
+                                            Ok(true) => match &self.state {
+                                                State::Data(_) | State::Bdat(_)
+                                                    if buf.capacity() < DATA_READ_BUFFER =>
+                                                {
+                                                    buf = Vec::with_capacity(DATA_READ_BUFFER);
+                                                }
+                                                State::Request(_)
+                                                    if buf.capacity() > READ_BUFFER
+                                                        && self.data.message.is_empty() =>
+                                                {
+                                                    buf = Vec::with_capacity(READ_BUFFER);
+                                                }
+                                                _ => {}
+                                            },
                                             Ok(false) => {
                                                 return true;
                                             }

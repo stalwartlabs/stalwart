@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Action, Queue, Response, client::send_mta_hook_request};
+use super::{Action, Queue, client::send_mta_hook_request};
 use crate::{
     core::Session,
     inbound::{
@@ -17,12 +17,7 @@ use crate::{
     queue::QueueId,
 };
 use ahash::AHashMap;
-use common::{
-    DAEMON_NAME,
-    config::smtp::session::{MTAHook, Stage},
-    expr::Bump,
-    network::SessionStream,
-};
+use common::{DAEMON_NAME, config::smtp::session::Stage, expr::Bump, network::SessionStream};
 use compact_str::ToCompactString;
 use mail_auth::AuthenticatedMessage;
 use std::time::Instant;
@@ -42,7 +37,8 @@ impl<T: SessionStream> Session<T> {
 
         let mut modifications = Vec::new();
         let mut arena = Bump::new();
-        for mta_hook in mta_hooks {
+        let mut payload = None;
+        for (idx, mta_hook) in mta_hooks.iter().enumerate() {
             if !mta_hook.run_on_stage.contains(&stage)
                 || !self
                     .server
@@ -54,7 +50,19 @@ impl<T: SessionStream> Session<T> {
             }
 
             let time = Instant::now();
-            match self.run_mta_hook(stage, mta_hook, message, queue_id).await {
+            let has_next = mta_hooks
+                .get(idx + 1..)
+                .unwrap_or_default()
+                .iter()
+                .any(|next| next.run_on_stage.contains(&stage));
+            let result = match payload
+                .get_or_insert_with(|| self.mta_hook_payload(stage, message, queue_id))
+            {
+                Ok(body) if has_next => send_mta_hook_request(mta_hook, body.clone()).await,
+                Ok(body) => send_mta_hook_request(mta_hook, std::mem::take(body)).await,
+                Err(err) => Err(err.clone()),
+            };
+            match result {
                 Ok(response) => {
                     trc::event!(
                         MtaHook(match response.action {
@@ -89,7 +97,7 @@ impl<T: SessionStream> Session<T> {
                             }
                             super::Modification::ReplaceContents { value } => {
                                 Modification::ReplaceBody {
-                                    value: value.as_bytes().to_vec(),
+                                    value: value.into_bytes(),
                                 }
                             }
                             super::Modification::AddHeader { name, value } => {
@@ -171,20 +179,18 @@ impl<T: SessionStream> Session<T> {
         Ok(modifications)
     }
 
-    pub async fn run_mta_hook(
+    pub fn mta_hook_payload(
         &self,
         stage: Stage,
-        mta_hook: &MTAHook,
         message: Option<&AuthenticatedMessage<'_>>,
         queue_id: Option<QueueId>,
-    ) -> Result<Response, String> {
-        // Build request
+    ) -> Result<Vec<u8>, String> {
         let (tls_version, tls_cipher) = self.stream.tls_version_and_cipher();
         let request = Request {
             context: Context {
                 stage: stage.into(),
                 client: Client {
-                    ip: self.data.remote_ip.to_string(),
+                    ip: self.data.remote_ip_str.clone(),
                     port: self.data.remote_port,
                     ptr: self
                         .data
@@ -211,7 +217,7 @@ impl<T: SessionStream> Session<T> {
                 server: Server {
                     name: Some(DAEMON_NAME.into()),
                     port: self.data.local_port,
-                    ip: self.data.local_ip.to_string().into(),
+                    ip: self.data.local_ip_str.clone().into(),
                 },
                 queue: queue_id.map(|id| Queue {
                     id: format!("{:x}", id),
@@ -237,20 +243,19 @@ impl<T: SessionStream> Session<T> {
                 headers: message
                     .headers()
                     .iter()
-                    .map(|(k, v)| {
-                        (
-                            String::from_utf8_lossy(k).into_owned(),
-                            String::from_utf8_lossy(v).into_owned(),
-                        )
-                    })
+                    .map(|(k, v)| (String::from_utf8_lossy(k), String::from_utf8_lossy(v)))
                     .collect(),
                 server_headers: vec![],
-                contents: String::from_utf8_lossy(message.raw_body()).into_owned(),
+                contents: String::from_utf8_lossy(message.raw_body()),
                 size: message.raw_message().len(),
             }),
         };
 
-        send_mta_hook_request(mta_hook, request).await
+        let size = message.map_or(0, |message| message.raw_message().len());
+        let mut payload = Vec::with_capacity(size + (size / 8) + 1024);
+        serde_json::to_writer(&mut payload, &request)
+            .map_err(|err| format!("Failed to serialize Hook request: {}", err))?;
+        Ok(payload)
     }
 }
 

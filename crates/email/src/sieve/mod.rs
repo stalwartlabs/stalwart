@@ -21,7 +21,6 @@ pub mod ingest;
 pub struct ActiveScript {
     pub document_id: u32,
     pub version: ArchiveVersion,
-    pub script_name: String,
     pub script: Bytecode,
 }
 

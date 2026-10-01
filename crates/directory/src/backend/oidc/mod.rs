@@ -5,7 +5,7 @@
  */
 
 use ahash::AHashMap;
-use jsonwebtoken::{Algorithm, DecodingKey};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Arc, time::Instant};
 use tokio::sync::RwLock;
@@ -22,6 +22,20 @@ pub struct OidcConfig {
     pub claim_name: Option<String>,
     pub claim_groups: Option<String>,
     pub default_domain: Option<String>,
+}
+
+impl OidcConfig {
+    fn validation(&self, algorithm: Algorithm, issuer: &str) -> Validation {
+        let mut validation = Validation::new(algorithm);
+        if let Some(aud) = &self.require_aud {
+            validation.set_audience(&[aud]);
+        } else {
+            validation.validate_aud = false;
+        }
+        validation.set_issuer(&[issuer]);
+        validation.leeway = 60;
+        validation
+    }
 }
 
 pub struct OidcDiscovery {
@@ -48,7 +62,7 @@ pub struct DiscoveryDocument {
 
 struct CachedKey {
     decoding_key: DecodingKey,
-    algorithm: Algorithm,
+    validation: Validation,
 }
 
 struct JwksCache {

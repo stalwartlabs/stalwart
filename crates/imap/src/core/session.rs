@@ -281,12 +281,16 @@ impl<T: SessionStream> Session<T> {
 }
 
 pub const OUTPUT_FLUSH_THRESHOLD: usize = 64 * 1024;
+const OUTPUT_RETAIN_CAPACITY: usize = 4 * OUTPUT_FLUSH_THRESHOLD;
 
 impl<T: SessionStream> super::SessionData<T> {
     pub async fn flush_output(&self, output: &mut Vec<u8>, force: bool) -> trc::Result<()> {
         if !output.is_empty() && (force || output.len() >= OUTPUT_FLUSH_THRESHOLD) {
             self.write_bytes(&output).await?;
             output.clear();
+            if output.capacity() > OUTPUT_RETAIN_CAPACITY {
+                output.shrink_to(OUTPUT_FLUSH_THRESHOLD);
+            }
         }
         Ok(())
     }

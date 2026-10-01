@@ -18,6 +18,7 @@ pub mod http;
 pub mod map;
 pub mod snowflake;
 pub mod template;
+pub mod text;
 pub mod tls;
 pub mod topological;
 pub mod url_params;
@@ -28,7 +29,6 @@ pub use reqwest::Client;
 use reqwest::Response;
 pub use reqwest::header::HeaderMap;
 use std::borrow::Cow;
-use std::fmt::Write;
 
 pub trait HttpLimitResponse: Sync + Send {
     fn bytes_with_limit(
@@ -160,7 +160,7 @@ impl<T: AsRef<str>> DomainPart for T {
         let address = self.as_ref();
         if let Some((local, domain)) = address.rsplit_once('@') {
             let mut address = String::with_capacity(address.len());
-            if lower_local {
+            if lower_local && !local.is_ascii() {
                 for ch in local.chars() {
                     for ch in ch.to_lowercase() {
                         address.push(ch);
@@ -168,13 +168,16 @@ impl<T: AsRef<str>> DomainPart for T {
                 }
             } else {
                 address.push_str(local);
+                if lower_local {
+                    address.make_ascii_lowercase();
+                }
             }
             address.push('@');
             if domain.is_ascii() {
-                for ch in domain.chars() {
-                    for ch in ch.to_lowercase() {
-                        address.push(ch);
-                    }
+                let domain_start = address.len();
+                address.push_str(domain);
+                if let Some(domain) = address.get_mut(domain_start..) {
+                    domain.make_ascii_lowercase();
                 }
             } else {
                 let domain =
@@ -238,12 +241,7 @@ pub trait HexEncode {
 
 impl<T: AsRef<[u8]>> HexEncode for T {
     fn hex_encode(&self) -> String {
-        let bytes = self.as_ref();
-        let mut s = String::with_capacity(bytes.len() * 2);
-        for &b in bytes {
-            let _ = write!(&mut s, "{b:02x}");
-        }
-        s
+        text::hex_encode(self.as_ref())
     }
 }
 
@@ -448,9 +446,67 @@ pub fn is_valid_domain(domain: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::DomainPart;
+    use crate::{DomainPart, HexEncode};
 
     use super::{sanitize_domain, sanitize_email};
+
+    fn reference_lowercase_address(address: &str, lower_local: bool) -> String {
+        let Some((local, domain)) = address.rsplit_once('@') else {
+            return address.to_lowercase();
+        };
+        let mut out = String::new();
+        if lower_local {
+            out.extend(local.chars().flat_map(char::to_lowercase));
+        } else {
+            out.push_str(local);
+        }
+        out.push('@');
+        if domain.is_ascii() {
+            out.extend(domain.chars().flat_map(char::to_lowercase));
+        } else {
+            out.push_str(&idna::domain_to_ascii(domain).unwrap_or_else(|_| domain.to_lowercase()));
+        }
+        out
+    }
+
+    #[test]
+    fn lowercase_address_matches_char_by_char_lowering() {
+        for address in [
+            "",
+            "@",
+            "John.Doe@Example.COM",
+            "john@example.com",
+            "JOHN@EXAMPLE.COM",
+            "a@b@C.D",
+            "no-at-sign",
+            "NO-AT-SIGN",
+            "ΟΔΥΣΣΕΥΣ@Example.com",
+            "\u{212A}elvin@EXAMPLE.org",
+            "İnci@example.COM",
+            "user@Straße.DE",
+            "USER@münchen.de",
+            "Mixed.Case+Tag@Sub.Domain.Example.Com",
+        ] {
+            for lower_local in [false, true] {
+                assert_eq!(
+                    address.to_lowercase_address(lower_local),
+                    reference_lowercase_address(address, lower_local),
+                    "{address:?} {lower_local}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hex_encode_matches_format() {
+        for bytes in [&[][..], &[0], &[0xff, 0x00, 0x7f], &[0xab; 33]] {
+            let expected = bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            assert_eq!(bytes.hex_encode(), expected);
+        }
+    }
 
     #[test]
     fn idn_domains_canonicalize_to_a_label() {

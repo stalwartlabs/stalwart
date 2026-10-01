@@ -6,9 +6,10 @@
 
 use super::{ImapContext, metadata::ListMetadataTarget};
 use crate::{
-    core::{AccountView, Session, SessionData},
+    core::{AccountView, MailboxRefresh, Session, SessionData},
     spawn_op,
 };
+use ahash::AHashSet;
 use common::network::SessionStream;
 use compact_str::{CompactString, format_compact};
 use imap_proto::{
@@ -118,11 +119,14 @@ impl<T: SessionStream> SessionData<T> {
         };
 
         // Refresh mailboxes
-        let mut caches = self
+        let MailboxRefresh {
+            mut caches,
+            access_token,
+            ..
+        } = self
             .synchronize_mailboxes(false)
             .await
-            .imap_ctx(&tag, trc::location!())?
-            .caches;
+            .imap_ctx(&tag, trc::location!())?;
 
         // Process arguments
         let mut filter_subscribed = false;
@@ -186,14 +190,10 @@ impl<T: SessionStream> SessionData<T> {
         let metadata_access = match include_metadata {
             Some(entries) => {
                 self.assert_metadata_request(&tag, entries.len())?;
-                let access_token = self
-                    .refresh_access_token()
-                    .await
-                    .imap_ctx(&tag, trc::location!())?;
                 access_token
                     .enforce_permission(Permission::ImapMetadataGet)
                     .map_err(|err| err.id(tag.clone()))?;
-                Some(access_token)
+                Some(access_token.clone())
             }
             None => None,
         };
@@ -201,6 +201,7 @@ impl<T: SessionStream> SessionData<T> {
 
         let mut list_items = Vec::with_capacity(10);
         let mut lsub_unmatched = Vec::new();
+        let mut child_prefix = String::new();
 
         // Add mailboxes
         let mut added_shared_folder = false;
@@ -251,11 +252,19 @@ impl<T: SessionStream> SessionData<T> {
                     };
                     let is_subscribed = mailbox.subscribers.contains(&self.account_id);
                     let has_recursive_match = recursive_match && {
-                        let prefix = format!("{}/", mailbox_name);
-                        account.names.iter().any(|child| {
-                            child.name.starts_with(&prefix)
-                                && account.is_subscribed(child.mailbox_id, self.account_id)
-                        })
+                        child_prefix.clear();
+                        child_prefix.push_str(mailbox_name);
+                        child_prefix.push('/');
+                        let start = account
+                            .names
+                            .partition_point(|child| child.name.as_str() < child_prefix.as_str());
+                        account
+                            .names
+                            .get(start..)
+                            .unwrap_or_default()
+                            .iter()
+                            .take_while(|child| child.name.starts_with(child_prefix.as_str()))
+                            .any(|child| account.is_subscribed(child.mailbox_id, self.account_id))
                     };
                     if !filter_subscribed || is_subscribed || has_recursive_match {
                         let mut attributes = Vec::with_capacity(2);
@@ -309,20 +318,28 @@ impl<T: SessionStream> SessionData<T> {
 
         // RFC 3501 6.3.9 requires LSUB with % to report the unsubscribed parents
         // of a subscribed mailbox, flagged \Noselect
-        for mailbox_name in lsub_unmatched {
-            for (pos, _) in mailbox_name.match_indices('/') {
-                let parent = &mailbox_name[..pos];
-                if matches_pattern(&patterns, parent)
-                    && !list_items.iter().any(|item| item.mailbox_name == parent)
-                {
-                    list_items.push(ListItem {
-                        mailbox_name: parent.into(),
-                        attributes: vec![Attribute::NoSelect],
-                        tags: vec![],
-                        metadata: None,
-                    });
+        if !lsub_unmatched.is_empty() {
+            let mut emitted = list_items
+                .iter()
+                .map(|item| item.mailbox_name.as_str())
+                .collect::<AHashSet<_>>();
+            let mut parents = Vec::new();
+            for mailbox_name in &lsub_unmatched {
+                for (pos, _) in mailbox_name.match_indices('/') {
+                    if let Some(parent) = mailbox_name.get(..pos)
+                        && matches_pattern(&patterns, parent)
+                        && emitted.insert(parent)
+                    {
+                        parents.push(parent);
+                    }
                 }
             }
+            list_items.extend(parents.into_iter().map(|parent| ListItem {
+                mailbox_name: parent.into(),
+                attributes: vec![Attribute::NoSelect],
+                tags: vec![],
+                metadata: None,
+            }));
         }
 
         if let (Some(requested), Some(access_token)) = (include_metadata, &metadata_access)
@@ -340,16 +357,23 @@ impl<T: SessionStream> SessionData<T> {
 
         // RFC 5258 3.5 requires redundant CHILDINFO responses to be suppressed
         if recursive_match {
+            let mut names = list_items
+                .iter()
+                .map(|item| item.mailbox_name.as_str())
+                .collect::<Vec<_>>();
+            names.sort_unstable();
             let redundant = list_items
                 .iter()
                 .map(|item| {
-                    item.tags.iter().any(|tag| matches!(tag, Tag::ChildInfo(_)))
-                        && list_items.iter().any(|other| {
-                            other
-                                .mailbox_name
-                                .strip_prefix(item.mailbox_name.as_str())
-                                .is_some_and(|rest| rest.starts_with('/'))
-                        })
+                    item.tags.iter().any(|tag| matches!(tag, Tag::ChildInfo(_))) && {
+                        child_prefix.clear();
+                        child_prefix.push_str(item.mailbox_name.as_str());
+                        child_prefix.push('/');
+                        let pos = names.partition_point(|name| *name < child_prefix.as_str());
+                        names
+                            .get(pos)
+                            .is_some_and(|name| name.starts_with(child_prefix.as_str()))
+                    }
                 })
                 .collect::<Vec<_>>();
 
@@ -377,6 +401,7 @@ impl<T: SessionStream> SessionData<T> {
                 match self
                     .status_in(
                         &cache,
+                        &access_token,
                         mailbox,
                         list_item.mailbox_name.clone(),
                         include_status,

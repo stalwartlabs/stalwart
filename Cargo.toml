@@ -51,6 +51,12 @@ debug-assertions = true
 overflow-checks = false
 rpath = false
 
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 debug = false

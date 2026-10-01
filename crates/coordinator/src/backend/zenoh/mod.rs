@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use parking_lot::Mutex;
 use registry::schema::structs::ZenohCoordinator;
+use std::sync::Arc;
+use zenoh::pubsub::Publisher;
 
 use crate::Coordinator;
 pub mod pubsub;
@@ -12,6 +15,7 @@ pub mod pubsub;
 #[derive(Debug)]
 pub struct ZenohPubSub {
     session: zenoh::Session,
+    publishers: Mutex<Vec<(&'static str, Arc<Publisher<'static>>)>>,
 }
 
 impl ZenohPubSub {
@@ -21,7 +25,10 @@ impl ZenohPubSub {
         zenoh::open(zenoh_config)
             .await
             .map_err(|err| format!("Failed to create Zenoh session: {}", err))
-            .map(|session| ZenohPubSub { session })
-            .map(|store| Coordinator::Zenoh(std::sync::Arc::new(store)))
+            .map(|session| ZenohPubSub {
+                session,
+                publishers: Mutex::new(Vec::new()),
+            })
+            .map(|store| Coordinator::Zenoh(Arc::new(store)))
     }
 }

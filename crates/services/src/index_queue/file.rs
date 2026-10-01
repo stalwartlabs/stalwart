@@ -24,7 +24,6 @@ use store::{
 use trc::AddContext;
 use types::collection::Collection;
 
-const MAX_LANGUAGE_SAMPLE: usize = 64 << 10;
 const HTML_INPUT_FACTOR: usize = 4;
 
 pub(crate) async fn build_file_document(
@@ -126,11 +125,7 @@ impl FileIndexRequest {
             .with_document_id(self.document_id);
         if let Some(text) = self.text() {
             let mut detector = LanguageDetector::new();
-            detector.detect(
-                text.get(..text.floor_char_boundary(MAX_LANGUAGE_SAMPLE))
-                    .unwrap_or_default(),
-                MIN_LANGUAGE_SCORE,
-            );
+            detector.detect(&text, MIN_LANGUAGE_SCORE);
             document.index_text(FileSearchField::Content, &text, Language::Unknown);
             document.set_unknown_language(
                 detector

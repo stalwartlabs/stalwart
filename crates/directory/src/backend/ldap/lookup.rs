@@ -7,7 +7,7 @@
 use super::{LdapDirectory, LdapMappings};
 use crate::{Account, Credentials, Group, IntoError, Recipient, core::secret::verify_secret_hash};
 use compact_str::CompactString;
-use ldap3::{Ldap, LdapConnAsync, ResultEntry, Scope, SearchEntry};
+use ldap3::{Ldap, ResultEntry, Scope, SearchEntry};
 use store::xxhash_rust;
 use utils::sanitize_email;
 
@@ -26,20 +26,12 @@ impl LdapDirectory {
         }
         let mut conn = self.pool.get().await.map_err(|err| err.into_error())?;
 
-        let mut result = if self.auth_bind {
+        let mut result = if let Some(bind_pool) = &self.bind_pool {
             let filter = self.mappings.filter_login.build(username);
             if let Some(mut result) = self.find_object(&mut conn, &filter).await? {
-                // Perform bind auth using the found dn
-                let (auth_bind_conn, mut ldap) = LdapConnAsync::with_settings(
-                    self.pool.manager().settings.clone(),
-                    &self.pool.manager().address,
-                )
-                .await
-                .map_err(|err| err.into_error().caused_by(trc::location!()))?;
+                let mut bind_conn = bind_pool.get().await.map_err(|err| err.into_error())?;
 
-                ldap3::drive!(auth_bind_conn);
-
-                if ldap
+                if bind_conn
                     .simple_bind(&result.dn, secret)
                     .await
                     .map_err(|err| err.into_error().caused_by(trc::location!()))?

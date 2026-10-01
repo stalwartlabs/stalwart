@@ -218,16 +218,18 @@ impl<T: SessionStream> Session<T> {
             .assert_continue()?;
 
         // EHLO/HELO
-        let (tls_version, tls_cipher) = self.stream.tls_version_and_cipher();
-        client
-            .helo(
-                &self.data.helo_domain,
-                Macros::new()
-                    .with_cipher(tls_cipher.as_ref())
-                    .with_tls_version(tls_version.as_ref()),
-            )
-            .await?
-            .assert_continue()?;
+        if !self.data.helo_domain.is_empty() {
+            let (tls_version, tls_cipher) = self.stream.tls_version_and_cipher();
+            client
+                .helo(
+                    &self.data.helo_domain,
+                    Macros::new()
+                        .with_cipher(tls_cipher.as_ref())
+                        .with_tls_version(tls_version.as_ref()),
+                )
+                .await?
+                .assert_continue()?;
+        }
 
         // Mail from
         if let Some(mail_from) = &self.data.mail_from {
@@ -382,7 +384,11 @@ impl SessionData {
                     self.rcpt_to.retain(|r| r.address_lcase != recipient);
                 }
                 Modification::ReplaceBody { value } => {
-                    body.extend(value);
+                    if body.is_empty() {
+                        body = value;
+                    } else {
+                        body.extend(value);
+                    }
                 }
                 Modification::AddHeader { name, value } => {
                     header_changes.push((0, name, value, false));

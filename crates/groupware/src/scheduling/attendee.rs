@@ -49,8 +49,7 @@ pub(crate) fn attendee_handle_update(
                 {
                     // Distinguish a genuine add/remove of a restricted property from a value-only drift
                     // caused by a client re-encoding the same property
-                    let old_name_counts = count_entry_names(&old_instance.entries);
-                    let new_name_counts = count_entry_names(&instance.entries);
+                    let mut name_counts = None;
 
                     // Check added fields
                     let mut send_update = false;
@@ -91,8 +90,14 @@ pub(crate) fn attendee_handle_update(
                                     &instance.comp.component_type,
                                     new_entry.name,
                                 ) {
-                                    if name_count(&new_name_counts, new_entry.name)
-                                        > name_count(&old_name_counts, new_entry.name)
+                                    if name_counts
+                                        .get_or_insert_with(|| {
+                                            NameCounts::new(
+                                                &old_instance.entries,
+                                                &instance.entries,
+                                            )
+                                        })
+                                        .is_added(new_entry.name)
                                     {
                                         return Err(ItipError::CannotModifyProperty(
                                             new_entry.name.clone(),
@@ -166,8 +171,11 @@ pub(crate) fn attendee_handle_update(
                         if !can_attendee_modify_property(
                             &instance.comp.component_type,
                             removed_entry.name,
-                        ) && name_count(&old_name_counts, removed_entry.name)
-                            > name_count(&new_name_counts, removed_entry.name)
+                        ) && name_counts
+                            .get_or_insert_with(|| {
+                                NameCounts::new(&old_instance.entries, &instance.entries)
+                            })
+                            .is_removed(removed_entry.name)
                         {
                             // Removing these properties is not allowed
                             return Err(ItipError::CannotModifyProperty(
@@ -424,26 +432,44 @@ impl OrganizerSequences {
     }
 }
 
-fn count_entry_names<'x>(entries: &'x ItipEntries<'x>) -> AHashMap<&'x ICalendarProperty, usize> {
-    let mut counts = AHashMap::with_capacity(entries.len());
-    for entry in entries {
-        *counts.entry(entry.name).or_insert(0) += 1;
-    }
-    counts
+struct NameCounts<'x> {
+    old: AHashMap<&'x ICalendarProperty, usize>,
+    new: AHashMap<&'x ICalendarProperty, usize>,
 }
 
-#[inline]
-fn name_count(counts: &AHashMap<&ICalendarProperty, usize>, name: &ICalendarProperty) -> usize {
-    counts.get(name).copied().unwrap_or(0)
+impl<'x> NameCounts<'x> {
+    fn new(old: &ItipEntries<'x>, new: &ItipEntries<'x>) -> Self {
+        NameCounts {
+            old: Self::count(old),
+            new: Self::count(new),
+        }
+    }
+
+    fn count(entries: &ItipEntries<'x>) -> AHashMap<&'x ICalendarProperty, usize> {
+        let mut counts = AHashMap::with_capacity(entries.len());
+        for entry in entries {
+            *counts.entry(entry.name).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    fn is_added(&self, name: &ICalendarProperty) -> bool {
+        self.new.get(name).copied().unwrap_or(0) > self.old.get(name).copied().unwrap_or(0)
+    }
+
+    fn is_removed(&self, name: &ICalendarProperty) -> bool {
+        self.old.get(name).copied().unwrap_or(0) > self.new.get(name).copied().unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::scheduling::{
+        ItipError,
         event_update::itip_update,
         recipient::{AttendeeVisibility, RecipientPolicy},
     };
-    use calcard::icalendar::ICalendar;
+    use calcard::icalendar::{ICalendar, ICalendarProperty};
 
     const ATTENDEE: &str = "bob@example.com";
 
@@ -523,5 +549,75 @@ mod tests {
             "RFC 6638 Section 3.2.2.1: SEQUENCE is not an attendee change\n{stored}"
         );
         assert!(!stored.contains("SEQUENCE:3"), "{stored}");
+    }
+
+    fn attendee_copy_with_rdates(part_stat: &str, days: impl Iterator<Item = u32>) -> ICalendar {
+        let rdates = days
+            .map(|day| {
+                format!(
+                    "RDATE;TZID=Europe/Berlin:2026{:02}{:02}T090000\r\n",
+                    1 + day / 28,
+                    1 + day % 28
+                )
+            })
+            .collect::<String>();
+        ICalendar::parse(format!(
+            concat!(
+                "BEGIN:VCALENDAR\r\n",
+                "VERSION:2.0\r\n",
+                "PRODID:-//Test//EN\r\n",
+                "BEGIN:VEVENT\r\n",
+                "UID:rdates@example.com\r\n",
+                "SEQUENCE:1\r\n",
+                "DTSTAMP:20250101T000000Z\r\n",
+                "DTSTART;TZID=Europe/Berlin:20250106T090000\r\n",
+                "DTEND;TZID=Europe/Berlin:20250106T100000\r\n",
+                "{}",
+                "SUMMARY:Planning\r\n",
+                "ORGANIZER:mailto:org@example.net\r\n",
+                "ATTENDEE;PARTSTAT=ACCEPTED:mailto:org@example.net\r\n",
+                "ATTENDEE;PARTSTAT={}:mailto:bob@example.com\r\n",
+                "END:VEVENT\r\n",
+                "END:VCALENDAR\r\n"
+            ),
+            rdates, part_stat
+        ))
+        .expect("valid iCalendar")
+    }
+
+    #[test]
+    fn attendee_may_reencode_but_not_add_or_remove_restricted_properties() {
+        let stored = attendee_copy_with_rdates("NEEDS-ACTION", 0..40);
+        let account = [ATTENDEE.to_string()];
+        let is_restricted = |result: &Result<_, ItipError>| {
+            matches!(
+                result,
+                Err(ItipError::CannotModifyProperty(ICalendarProperty::Rdate))
+            )
+        };
+
+        let mut drifted = attendee_copy_with_rdates("ACCEPTED", 40..80);
+        assert!(!is_restricted(&itip_update(
+            &mut drifted,
+            &stored,
+            &account,
+            policy()
+        )));
+
+        let mut added = attendee_copy_with_rdates("ACCEPTED", 0..41);
+        assert!(is_restricted(&itip_update(
+            &mut added,
+            &stored,
+            &account,
+            policy()
+        )));
+
+        let mut removed = attendee_copy_with_rdates("ACCEPTED", 0..39);
+        assert!(is_restricted(&itip_update(
+            &mut removed,
+            &stored,
+            &account,
+            policy()
+        )));
     }
 }

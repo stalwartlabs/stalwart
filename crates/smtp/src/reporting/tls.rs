@@ -268,43 +268,12 @@ impl TlsReporting for Server {
         loop {
             // Find the report by domain name
             let mut batch = BatchBuilder::new();
-            let report = match self
+            let object_id_v = match self
                 .store()
                 .get_value::<ObjectIdVersioned>(ValueKey::from(pk.clone()))
                 .await
             {
-                Ok(Some(object_id_v)) => {
-                    match self
-                        .store()
-                        .get_value::<TlsInternalReport>(ValueKey::from(ValueClass::Registry(
-                            RegistryClass::Item {
-                                object_id,
-                                item_id: object_id_v.object_id.id().id(),
-                            },
-                        )))
-                        .await
-                    {
-                        Ok(Some(report)) => Some((object_id_v, report)),
-                        Ok(None) => {
-                            trc::event!(
-                                OutgoingReport(OutgoingReportEvent::NotFound),
-                                Id = object_id_v.object_id.id().id(),
-                                CausedBy = trc::location!(),
-                                Details = "Failed to find TLS report for domain"
-                            );
-
-                            return;
-                        }
-                        Err(err) => {
-                            trc::error!(
-                                err.caused_by(trc::location!())
-                                    .details("Failed to query registry for TLS report")
-                            );
-                            return;
-                        }
-                    }
-                }
-                Ok(None) => None,
+                Ok(object_id_v) => object_id_v,
                 Err(err) => {
                     trc::error!(
                         err.caused_by(trc::location!())
@@ -326,7 +295,7 @@ impl TlsReporting for Server {
                 .await
                 .unwrap_or(5 * 1024 * 1024);
 
-            let (item_id, mut report) = if let Some((object_id_v, _)) = report {
+            let (item_id, mut report) = if let Some(object_id_v) = object_id_v {
                 // Merge the record into the stored report
                 let item_id = object_id_v.object_id.id().id();
                 let domain = event.domain.clone();
@@ -397,8 +366,7 @@ impl TlsReporting for Server {
                                 &mut arena,
                                 event.span_id,
                             )
-                            .await
-                            .clone(),
+                            .await,
                         contact_info: self
                             .eval_if::<String, _>(
                                 &config.contact_info,
@@ -406,8 +374,7 @@ impl TlsReporting for Server {
                                 &mut arena,
                                 event.span_id,
                             )
-                            .await
-                            .clone(),
+                            .await,
                         date_range_end,
                         date_range_start,
                         policies: Default::default(),

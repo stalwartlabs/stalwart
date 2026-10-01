@@ -11,7 +11,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Map, Value};
-use std::{borrow::Cow, future::Future};
+use std::future::Future;
 use trc::AddContext;
 use types::{id::Id, type_state::DataType};
 
@@ -27,7 +27,7 @@ impl QuotaGet for Server {
     async fn quota_get(
         &self,
         mut request: GetRequest<Quota>,
-        access_token: &AccessToken,
+        _access_token: &AccessToken,
     ) -> trc::Result<GetResponse<Quota>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
         let properties = request.unwrap_properties(&[
@@ -61,12 +61,6 @@ impl QuotaGet for Server {
             not_found: not_found_ids,
         };
 
-        let account = if account_id == access_token.account_id() {
-            Cow::Borrowed(&account)
-        } else {
-            Cow::Owned(self.account(account_id).await.caused_by(trc::location!())?)
-        };
-
         for id in ids {
             // Obtain the sieve script object
             let document_id = id.document_id();
@@ -83,15 +77,12 @@ impl QuotaGet for Server {
                     QuotaProperty::Used => {
                         (self.get_used_quota_account(account_id).await?.max(0) as u64).into()
                     }
-                    QuotaProperty::HardLimit => account.as_ref().disk_quota().into(),
+                    QuotaProperty::HardLimit => account.disk_quota().into(),
                     QuotaProperty::Scope => "account".to_string().into(),
-                    QuotaProperty::Name => account.as_ref().name().to_string().into(),
-                    QuotaProperty::Description => account
-                        .as_ref()
-                        .description
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .into(),
+                    QuotaProperty::Name => account.name().to_string().into(),
+                    QuotaProperty::Description => {
+                        account.description.as_ref().map(|s| s.to_string()).into()
+                    }
                     QuotaProperty::Types => vec![
                         Value::Element(QuotaValue::Types(DataType::Email)),
                         Value::Element(QuotaValue::Types(DataType::SieveScript)),

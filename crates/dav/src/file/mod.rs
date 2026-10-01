@@ -6,7 +6,10 @@
 
 use crate::{
     DavError,
-    common::uri::{OwnedUri, UriResource},
+    common::{
+        quoted_etag,
+        uri::{OwnedUri, UriResource},
+    },
 };
 use common::{
     DavResourcePath, GroupwareResources,
@@ -102,6 +105,14 @@ pub(crate) trait DavFileResource {
         hidden_target: StatusCode,
         hidden_parent: StatusCode,
     ) -> crate::Result<()>;
+
+    fn hide_undiscoverable_for(
+        &self,
+        access_token: &AccessToken,
+        path: &str,
+        hidden_target: StatusCode,
+        hidden_parent: StatusCode,
+    ) -> crate::Result<()>;
 }
 
 impl DavFileResource for GroupwareResources {
@@ -164,21 +175,45 @@ impl DavFileResource for GroupwareResources {
         hidden_target: StatusCode,
         hidden_parent: StatusCode,
     ) -> crate::Result<()> {
-        let mut current = Some(path);
-        let mut status = hidden_target;
-        while let Some(path) = current {
-            if let Some(resource) = self.by_path(path) {
-                return if discoverable.contains(resource.document_id()) {
-                    Ok(())
-                } else {
-                    Err(DavError::Code(status))
-                };
-            }
-            status = hidden_parent;
-            current = path.rsplit_once('/').map(|(parent, _)| parent);
-        }
-        Ok(())
+        hide_unless(self, path, hidden_target, hidden_parent, |document_id| {
+            discoverable.contains(document_id)
+        })
     }
+
+    fn hide_undiscoverable_for(
+        &self,
+        access_token: &AccessToken,
+        path: &str,
+        hidden_target: StatusCode,
+        hidden_parent: StatusCode,
+    ) -> crate::Result<()> {
+        hide_unless(self, path, hidden_target, hidden_parent, |document_id| {
+            self.file_discoverable(access_token, document_id)
+        })
+    }
+}
+
+fn hide_unless(
+    resources: &GroupwareResources,
+    path: &str,
+    hidden_target: StatusCode,
+    hidden_parent: StatusCode,
+    is_discoverable: impl Fn(u32) -> bool,
+) -> crate::Result<()> {
+    let mut current = Some(path);
+    let mut status = hidden_target;
+    while let Some(path) = current {
+        if let Some(resource) = resources.by_path(path) {
+            return if is_discoverable(resource.document_id()) {
+                Ok(())
+            } else {
+                Err(DavError::Code(status))
+            };
+        }
+        status = hidden_parent;
+        current = path.rsplit_once('/').map(|(parent, _)| parent);
+    }
+    Ok(())
 }
 
 pub(crate) fn file_name_from_uri(uri: &str) -> crate::Result<String> {
@@ -197,7 +232,7 @@ pub(crate) fn file_name_from_uri(uri: &str) -> crate::Result<String> {
 }
 
 pub(crate) fn file_etag(node: &ArchivedFileNode) -> String {
-    format!("\"{}\"", node.etag.to_native())
+    quoted_etag(node.etag.to_native().into())
 }
 
 pub(crate) fn is_symlink(resource: &DavResourcePath<'_>) -> bool {

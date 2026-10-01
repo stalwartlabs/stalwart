@@ -23,6 +23,9 @@ use smtp_proto::{
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use trc::{NetworkEvent, SecurityEvent, SmtpEvent};
 
+const MAX_BATCHED_RESPONSE: usize = 4096;
+const MIN_DATA_BUFFER: usize = 1024;
+const MAX_RESERVED_BUFFER: usize = 32 * 1024 * 1024;
 const MIN_PRIORITY: i16 = -9;
 const PRIORITIES: [&str; 19] = [
     "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2", "-1", "0", "1", "2", "3", "4", "5", "6", "7",
@@ -63,7 +66,11 @@ impl<T: SessionStream> Session<T> {
                                 } else {
                                     self.write(b"354 Start mail input; end with <CRLF>.<CRLF>\r\n")
                                         .await?;
-                                    self.data.message = Vec::with_capacity(1024);
+                                    self.data.message = Vec::with_capacity(
+                                        self.data
+                                            .message_size
+                                            .clamp(MIN_DATA_BUFFER, MAX_RESERVED_BUFFER),
+                                    );
                                     state = State::Data(DataReceiver::new());
                                     continue 'outer;
                                 }
@@ -80,10 +87,11 @@ impl<T: SessionStream> Session<T> {
                                 } else if chunk_size.saturating_add(self.data.message.len())
                                     < self.params.max_message_size
                                 {
+                                    let reserve = chunk_size.min(MAX_RESERVED_BUFFER);
                                     if self.data.message.is_empty() {
-                                        self.data.message = Vec::with_capacity(chunk_size);
+                                        self.data.message = Vec::with_capacity(reserve);
                                     } else {
-                                        self.data.message.reserve(chunk_size);
+                                        self.data.message.reserve(reserve);
                                     }
                                     State::Bdat(BdatReceiver::new(chunk_size, is_last))
                                 } else {
@@ -365,15 +373,8 @@ impl<T: SessionStream> Session<T> {
                     if self.data.message.len() + bytes.len() < self.params.max_message_size {
                         if receiver.ingest(&mut iter, &mut self.data.message) {
                             let message = self.queue_message(MessageOrigin::Client).await;
-                            let num_responses = if self.instance.protocol == ServerProtocol::Smtp {
-                                1
-                            } else {
-                                self.data.rcpt_oks
-                            };
                             if !message.is_empty() {
-                                for _ in 0..num_responses {
-                                    self.write(message.as_ref()).await?;
-                                }
+                                self.write_data_responses(message.as_ref()).await?;
                                 self.reset();
                                 state = State::default();
                             } else {
@@ -402,15 +403,7 @@ impl<T: SessionStream> Session<T> {
                         if receiver.is_last {
                             let message = self.queue_message(MessageOrigin::Client).await;
                             if !message.is_empty() {
-                                let num_responses =
-                                    if self.instance.protocol == ServerProtocol::Smtp {
-                                        1
-                                    } else {
-                                        self.data.rcpt_oks
-                                    };
-                                for _ in 0..num_responses {
-                                    self.write(message.as_ref()).await?;
-                                }
+                                self.write_data_responses(message.as_ref()).await?;
                                 self.reset();
                             } else {
                                 // Disconnect requested
@@ -480,6 +473,30 @@ impl<T: SessionStream> Session<T> {
 
         Ok(true)
     }
+
+    async fn write_data_responses(&mut self, response: &[u8]) -> Result<(), ()> {
+        let count = if self.instance.protocol == ServerProtocol::Smtp {
+            1
+        } else {
+            self.data.rcpt_oks
+        };
+        match count {
+            0 => return Ok(()),
+            1 => return self.write(response).await,
+            _ => {}
+        }
+
+        let per_write = (MAX_BATCHED_RESPONSE / response.len().max(1)).clamp(1, count);
+        let batch = response.repeat(per_write);
+        let mut remaining = count;
+        while remaining > 0 {
+            let chunk = remaining.min(per_write);
+            self.write(batch.get(..chunk * response.len()).unwrap_or_default())
+                .await?;
+            remaining -= chunk;
+        }
+        Ok(())
+    }
 }
 
 impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
@@ -488,6 +505,7 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
         self.data.spf_mail_from = None;
         self.data.rcpt_to.clear();
         self.data.message = Vec::with_capacity(0);
+        self.data.message_size = 0;
         self.data.priority = 0;
         self.data.delivery_by = 0;
         self.data.future_release = 0;
@@ -537,8 +555,9 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
     }
 
     #[inline(always)]
-    pub async fn read(&mut self, bytes: &mut [u8]) -> Result<usize, ()> {
-        match self.stream.read(bytes).await {
+    pub async fn read(&mut self, bytes: &mut Vec<u8>) -> Result<usize, ()> {
+        bytes.clear();
+        match self.stream.read_buf(bytes).await {
             Ok(len) => {
                 trc::event!(
                     Smtp(SmtpEvent::RawInput),

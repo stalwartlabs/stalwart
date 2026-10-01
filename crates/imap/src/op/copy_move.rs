@@ -236,9 +236,9 @@ impl<T: SessionStream> SessionData<T> {
         let message_limit = message_limit as usize;
         let mut limited_uid = None;
         if ids.len() > message_limit {
-            ids.sort_unstable_by_key(|resolved| resolved.uid);
             let cutoff = ids.len() - message_limit;
-            let lowest_uid = ids.get(cutoff).map_or(0, |resolved| resolved.uid);
+            let (_, lowest, _) = ids.select_nth_unstable_by_key(cutoff, |resolved| resolved.uid);
+            let lowest_uid = lowest.uid;
 
             if !is_move {
                 return self
@@ -255,6 +255,7 @@ impl<T: SessionStream> SessionData<T> {
             }
 
             ids.drain(..cutoff);
+            ids.sort_unstable_by_key(|resolved| resolved.uid);
             limited_uid = Some(lowest_uid);
         }
 

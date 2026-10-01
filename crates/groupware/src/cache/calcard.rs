@@ -388,7 +388,7 @@ pub(super) fn push_event(
             })
             .collect::<Vec<_>>(),
     );
-    let uid = builder.push_uid(event.uid.as_str().cached_uid(), names);
+    let uid = builder.push_uid(&event.uid.as_str().cached_uid(), names);
     builder.records.push(GroupwareResource {
         document_id,
         data: GroupwareResourceMetadata::CalendarEvent {
@@ -424,7 +424,7 @@ pub(super) fn push_card(
             })
             .collect::<Vec<_>>(),
     );
-    let uid = builder.push_uid(card.uid.as_str().cached_uid(), names);
+    let uid = builder.push_uid(&card.uid.as_str().cached_uid(), names);
     builder.records.push(GroupwareResource {
         document_id,
         data: GroupwareResourceMetadata::ContactCard {

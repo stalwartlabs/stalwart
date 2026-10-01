@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use ahash::{AHashMap, AHashSet};
 use compact_str::format_compact;
-use std::collections::HashMap;
 use utils::map::vec_map::VecMap;
 
 pub mod eval;
@@ -15,14 +15,14 @@ pub mod resolve;
 pub(crate) enum Graph<'x> {
     Some {
         child_id: &'x str,
-        graph: &'x mut HashMap<String, Vec<String>>,
+        graph: &'x mut AHashMap<String, Vec<String>>,
     },
     None,
 }
 
 fn topological_sort<T>(
     create: &mut VecMap<String, T>,
-    graph: HashMap<String, Vec<String>>,
+    graph: AHashMap<String, Vec<String>>,
 ) -> trc::Result<VecMap<String, T>> {
     // Make sure all references exist
     for (from_id, to_ids) in graph.iter() {
@@ -38,39 +38,47 @@ fn topological_sort<T>(
     }
 
     let mut sorted_create = VecMap::with_capacity(create.len());
+    let mut placed = AHashSet::with_capacity(create.len());
     let mut it_stack = Vec::new();
-    let keys = graph.keys().cloned().collect::<Vec<_>>();
-    let mut it = keys.iter();
 
-    'main: loop {
-        while let Some(from_id) = it.next() {
-            if let Some(to_ids) = graph.get(from_id) {
-                it_stack.push((it, from_id));
-                if it_stack.len() > 1000 {
-                    return Err(trc::JmapEvent::InvalidArguments
-                        .into_err()
-                        .details("Cyclical references are not allowed."));
+    'main: for root in graph.keys() {
+        let mut it = std::slice::from_ref(root).iter();
+        loop {
+            while let Some(from_id) = it.next() {
+                if placed.contains(from_id.as_str()) {
+                    continue;
                 }
-                it = to_ids.iter();
-                continue;
-            } else if let Some((id, value)) = create.remove_entry(from_id) {
-                sorted_create.append(id, value);
-                if create.is_empty() {
-                    break 'main;
+                if let Some(to_ids) = graph.get(from_id) {
+                    it_stack.push((it, from_id));
+                    if it_stack.len() > 1000 {
+                        return Err(trc::JmapEvent::InvalidArguments
+                            .into_err()
+                            .details("Cyclical references are not allowed."));
+                    }
+                    it = to_ids.iter();
+                } else if placed.insert(from_id.as_str())
+                    && let Some((id, value)) = create.remove_entry(from_id)
+                {
+                    sorted_create.append(id, value);
+                    if create.is_empty() {
+                        break 'main;
+                    }
                 }
             }
-        }
 
-        if let Some((prev_it, from_id)) = it_stack.pop() {
-            it = prev_it;
-            if let Some((id, value)) = create.remove_entry(from_id) {
-                sorted_create.append(id, value);
-                if create.is_empty() {
-                    break 'main;
+            if let Some((prev_it, from_id)) = it_stack.pop() {
+                it = prev_it;
+                if placed.insert(from_id.as_str())
+                    && let Some((id, value)) = create.remove_entry(from_id)
+                {
+                    sorted_create.append(id, value);
+                    if create.is_empty() {
+                        break 'main;
+                    }
                 }
+            } else {
+                break;
             }
-        } else {
-            break;
         }
     }
 
@@ -100,9 +108,11 @@ mod tests {
         },
         response::{ChangesResponseMethod, GetResponseMethod, Response, ResponseMethod},
     };
+    use ahash::AHashMap as HashMap;
     use jmap_tools::{Key, Map, Value};
-    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
     use types::id::Id;
+    use utils::map::vec_map::VecMap;
 
     #[test]
     fn eval_value_references() {
@@ -940,5 +950,107 @@ mod tests {
             .get(&Key::Property(MailboxProperty::ParentId))
             .unwrap();
         assert_eq!(resolved, &Value::Element(MailboxValue::Id(Id::new(99))));
+    }
+
+    fn sort_ids(ids: &[&str], edges: &[(&str, &[&str])]) -> trc::Result<Vec<String>> {
+        let mut create = VecMap::with_capacity(ids.len());
+        for id in ids {
+            create.append(id.to_string(), ());
+        }
+        let mut graph = HashMap::new();
+        for (from, to) in edges {
+            graph.insert(
+                from.to_string(),
+                to.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            );
+        }
+        super::topological_sort(&mut create, graph)
+            .map(|sorted| sorted.into_iter().map(|(id, _)| id).collect())
+    }
+
+    fn assert_valid_order(sorted: &[String], ids: &[&str], edges: &[(&str, &[&str])]) {
+        assert_eq!(sorted.len(), ids.len(), "{sorted:?}");
+        let position = |id: &str| {
+            sorted
+                .iter()
+                .position(|sorted_id| sorted_id == id)
+                .unwrap_or_else(|| panic!("{id} missing from {sorted:?}"))
+        };
+        for id in ids {
+            position(id);
+        }
+        for (from, to) in edges {
+            for to in *to {
+                assert!(
+                    position(to) < position(from),
+                    "{to} must come before {from} in {sorted:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn topological_sort_shared_chain_is_linear() {
+        let ids = (0..=40).map(|i| format!("b{i}")).collect::<Vec<_>>();
+        let targets = (1..=40)
+            .map(|i| [format!("b{i}"), format!("b{i}")])
+            .collect::<Vec<_>>();
+        let id_refs = ids.iter().map(String::as_str).collect::<Vec<_>>();
+        let target_refs = targets
+            .iter()
+            .map(|pair| [pair[0].as_str(), pair[1].as_str()])
+            .collect::<Vec<_>>();
+        let edges = id_refs
+            .iter()
+            .zip(target_refs.iter())
+            .map(|(from, to)| (*from, &to[..]))
+            .collect::<Vec<_>>();
+
+        let started = Instant::now();
+        let sorted = sort_ids(&id_refs, &edges).expect("acyclic");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(sorted, ids.iter().rev().cloned().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn topological_sort_rejects_cycles() {
+        for edges in [
+            &[("a", &["b"][..]), ("b", &["a"][..])][..],
+            &[("a", &["a"][..])][..],
+            &[("a", &["b"][..]), ("b", &["c"][..]), ("c", &["a"][..])][..],
+        ] {
+            let err = sort_ids(&["a", "b", "c"], edges).expect_err("cycle");
+            assert!(
+                matches!(
+                    err.as_ref(),
+                    trc::EventType::Jmap(trc::JmapEvent::InvalidArguments)
+                ),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn topological_sort_orders_diamonds_and_trees() {
+        let diamond = [("a", &["b", "c"][..]), ("b", &["d"][..]), ("c", &["d"][..])];
+        let ids = ["a", "b", "c", "d", "free"];
+        assert_valid_order(&sort_ids(&ids, &diamond).expect("acyclic"), &ids, &diamond);
+
+        let tree = [
+            ("c1", &["root"][..]),
+            ("c2", &["root"][..]),
+            ("g1", &["c1"][..]),
+            ("g2", &["c1"][..]),
+            ("g3", &["c2"][..]),
+            ("g4", &["c2", "g3"][..]),
+        ];
+        let ids = ["g4", "g3", "g2", "g1", "c2", "c1", "root", "free"];
+        assert_valid_order(&sort_ids(&ids, &tree).expect("acyclic"), &ids, &tree);
+
+        let missing = sort_ids(&["a"], &[("a", &["b"][..])]).expect_err("missing reference");
+        assert!(matches!(
+            missing.as_ref(),
+            trc::EventType::Jmap(trc::JmapEvent::InvalidResultReference)
+        ));
     }
 }

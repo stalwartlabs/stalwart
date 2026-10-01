@@ -6,7 +6,10 @@
 
 use crate::{
     object::{AnyId, JmapObject, JmapObjectId},
-    request::{MaybeInvalid, deserialize::DeserializeArguments},
+    request::{
+        MaybeInvalid,
+        deserialize::{CowStr, DeserializeArguments},
+    },
     types::{date::UTCDate, state::State},
 };
 use calcard::jscalendar::JSCalendar;
@@ -328,13 +331,13 @@ impl<'de> DeserializeArguments<'de> for CalendarEventNotificationComparator {
         A: serde::de::MapAccess<'de>,
     {
         if key == "property" {
-            let value = map.next_value::<Cow<str>>()?;
+            let value = map.next_value::<CowStr>()?.0;
             hashify::fnc_map!(value.as_bytes(),
                 b"created" => {
                     *self = CalendarEventNotificationComparator::Created;
                 },
                 _ => {
-                    *self = CalendarEventNotificationComparator::_T(value.to_string());
+                    *self = CalendarEventNotificationComparator::_T(value.into_owned());
                 }
             );
         } else {

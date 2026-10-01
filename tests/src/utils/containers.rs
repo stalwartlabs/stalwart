@@ -137,6 +137,15 @@ pub async fn ensure_postgres() {
                 .with_env_var("POSTGRES_USER", "stalwart")
                 .with_env_var("POSTGRES_PASSWORD", "stalwart")
                 .with_env_var("POSTGRES_DB", "stalwart")
+                .with_cmd([
+                    "postgres",
+                    "-c",
+                    "fsync=off",
+                    "-c",
+                    "synchronous_commit=off",
+                    "-c",
+                    "full_page_writes=off",
+                ])
                 .with_mapped_port(5432, 5432.tcp())
                 .with_startup_timeout(READY_TIMEOUT)
                 .with_container_name("stalwart-test-postgres")

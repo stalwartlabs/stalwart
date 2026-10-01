@@ -10,7 +10,6 @@ use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::INBOX_ID,
 };
-use std::collections::BTreeMap;
 use trc::AddContext;
 use types::special_use::SpecialUse;
 
@@ -49,7 +48,7 @@ impl<T: SessionStream> Session<T> {
             .unwrap_or_default();
 
         // Sort by UID
-        let message_map = cache
+        let mut messages = cache
             .emails
             .iter()
             .filter_map(|message| {
@@ -57,28 +56,25 @@ impl<T: SessionStream> Session<T> {
                     .mailboxes()
                     .iter()
                     .find(|m| m.mailbox_id == INBOX_ID)
-                    .map(|m| (m.uid, (message.document_id(), message.size())))
+                    .map(|m| Message {
+                        id: message.document_id(),
+                        uid: m.uid,
+                        size: message.size(),
+                        deleted: false,
+                    })
             })
-            .collect::<BTreeMap<u32, (u32, u32)>>();
+            .collect::<Vec<_>>();
+        messages.sort_unstable_by_key(|message| message.uid);
+        messages.dedup_by_key(|message| message.uid);
 
-        // Create mailbox
-        let mut mailbox = Mailbox {
-            messages: Vec::with_capacity(message_map.len()),
+        Ok(Mailbox {
+            total: messages.len() as u32,
+            size: messages
+                .iter()
+                .fold(0u32, |size, message| size.wrapping_add(message.size)),
+            messages,
             uid_validity,
             account_id,
-            ..Default::default()
-        };
-        for (uid, (id, size)) in message_map {
-            mailbox.messages.push(Message {
-                id,
-                uid,
-                size,
-                deleted: false,
-            });
-            mailbox.total += 1;
-            mailbox.size += size;
-        }
-
-        Ok(mailbox)
+        })
     }
 }

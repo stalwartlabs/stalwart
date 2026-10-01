@@ -46,7 +46,23 @@ pub(crate) trait DkimManagementTask: Sync + Send {
 
 impl DkimManagementTask for Server {
     async fn dkim_management(&self, task: &TaskDomainManagement) -> TaskResult {
-        match dkim_management(self, task).await {
+        let mut do_refresh = false;
+        let result = dkim_management(self, task, &mut do_refresh).await;
+
+        if do_refresh
+            && let Err(err) = self
+                .invalidate_caches(CacheInvalidationBuilder::default().with_invalidation(
+                    CacheInvalidation::DkimSignature(task.domain_id.document_id()),
+                ))
+                .await
+        {
+            trc::error!(
+                err.caused_by(trc::location!())
+                    .details("Failed to invalidate caches after DKIM management task")
+            );
+        }
+
+        match result {
             Ok(result) => result,
             Err(err) => {
                 let result = TaskResult::temporary(err.to_string());
@@ -60,7 +76,11 @@ impl DkimManagementTask for Server {
     }
 }
 
-async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::Result<TaskResult> {
+async fn dkim_management(
+    server: &Server,
+    task: &TaskDomainManagement,
+    do_refresh: &mut bool,
+) -> trc::Result<TaskResult> {
     let Some(domain) = server.registry().object::<Domain>(task.domain_id).await? else {
         return Ok(TaskResult::permanent("Domain not found".to_string()));
     };
@@ -142,7 +162,6 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
     }
 
     let now = now();
-    let mut do_refresh = false;
 
     for algorithm in create_signatures {
         #[cfg(feature = "test_mode")]
@@ -242,7 +261,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     Details = domain.name.clone()
                 );
 
-                do_refresh = true;
+                *do_refresh = true;
                 UTCDateTime::from_timestamp((now + dkim.rotate_after.as_secs()) as i64)
             } else {
                 // Something went wrong, reschedule.
@@ -258,12 +277,14 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
         }
 
         // Write key
+        let is_active = signature.is_active();
         match server
             .registry()
             .write(RegistryWrite::insert(&signature.into()))
             .await?
         {
             RegistryWriteResult::Success(_) => {
+                *do_refresh |= is_active;
                 trc::event!(
                     Dkim(DkimEvent::SignatureCreated),
                     Id = selector,
@@ -335,7 +356,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     {
                         return Ok(task_result);
                     }
-                    do_refresh = true;
+                    *do_refresh = true;
                 }
                 Ok(false) => {
                     if !temporary_errors.is_empty() {
@@ -403,7 +424,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
         {
             return Ok(task_result);
         }
-        do_refresh = true;
+        *do_refresh = true;
     }
 
     // Retire signatures
@@ -446,7 +467,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                         return Ok(task_result);
                     }
 
-                    do_refresh = true;
+                    *do_refresh = true;
                 }
                 Err(err) => {
                     if !temporary_errors.is_empty() {
@@ -526,19 +547,6 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                 }
             }
         }
-    }
-
-    if do_refresh
-        && let Err(err) = server
-            .invalidate_caches(CacheInvalidationBuilder::default().with_invalidation(
-                CacheInvalidation::DkimSignature(task.domain_id.document_id()),
-            ))
-            .await
-    {
-        trc::error!(
-            err.caused_by(trc::location!())
-                .details("Failed to invalidate caches after DKIM management task")
-        );
     }
 
     if !temporary_errors.is_empty() {

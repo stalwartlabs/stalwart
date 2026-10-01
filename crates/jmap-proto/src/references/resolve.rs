@@ -24,9 +24,9 @@ use crate::{
     },
     response::Response,
 };
+use ahash::AHashMap;
 use compact_str::format_compact;
 use jmap_tools::{Element, Key, Property, Value};
-use std::collections::HashMap;
 use types::id::Id;
 
 const EMBEDDED_BLOB_REFERENCE_DEPTH: usize = 8;
@@ -261,7 +261,7 @@ impl<'x, T: JmapObject> ResolveSetReference for SetRequest<'x, T> {
     ) -> trc::Result<()> {
         // Resolve create references
         if let Some(create) = &mut self.create {
-            let mut graph = HashMap::with_capacity(create.len());
+            let mut graph = AHashMap::new();
             for (id, obj) in create.iter_mut() {
                 obj.eval_object_references(
                     response,
@@ -383,7 +383,7 @@ impl ResolveReference for GetSearchSnippetRequest {
 
 impl ResolveReference for BlobUploadRequest {
     fn resolve_references(&mut self, response: &Response<'_>) -> trc::Result<()> {
-        let mut graph = HashMap::with_capacity(self.create.len());
+        let mut graph = AHashMap::<String, Vec<String>>::new();
         for (create_id, object) in self.create.iter_mut() {
             for data in &mut object.data {
                 if let DataSourceObject::Id { id, .. } = data
@@ -401,10 +401,13 @@ impl ResolveReference for BlobUploadRequest {
                             ));
                         }
                         None => {
-                            graph
-                                .entry(create_id.to_string())
-                                .or_insert_with(Vec::new)
-                                .push(parent_id.to_string());
+                            let parent_id = parent_id.to_string();
+                            match graph.get_mut(create_id.as_str()) {
+                                Some(parents) => parents.push(parent_id),
+                                None => {
+                                    graph.insert(create_id.to_string(), vec![parent_id]);
+                                }
+                            }
                         }
                     }
                 }

@@ -14,7 +14,11 @@ use crate::{
 };
 use common::{MAX_RECEIVED_AT, Server, auth::AccessToken, sharing::EffectiveAcl};
 use email::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
+    cache::{
+        MessageCacheFetch,
+        email::{MessageAccess, MessageCacheAccess},
+        mailbox::MailboxCacheAccess,
+    },
     mailbox::JUNK_ID,
     message::{
         copy::{CopyMessageError, EmailCopy},
@@ -40,7 +44,7 @@ use jmap_tools::{Key, Value};
 use std::future::Future;
 use store::write::{BatchBuilder, now};
 use trc::AddContext;
-use types::{acl::Acl, metadata::MetadataKinds};
+use types::acl::Acl;
 use utils::map::vec_map::VecMap;
 
 pub trait JmapEmailCopy: Sync + Send {
@@ -88,10 +92,10 @@ impl JmapEmailCopy for Server {
             .get_cached_messages(from_account_id)
             .await
             .caused_by(trc::location!())?;
-        let from_message_ids = if access_token.is_member(from_account_id) {
-            from_cache.email_document_ids()
+        let from_access = if access_token.is_member(from_account_id) {
+            MessageAccess::All
         } else {
-            from_cache.shared_messages(access_token, Acl::ReadItems)
+            MessageAccess::Mailboxes(from_cache.shared_mailboxes(access_token, Acl::ReadItems))
         };
 
         let can_add_mailbox_ids = if access_token.is_shared(account_id) {
@@ -114,13 +118,14 @@ impl JmapEmailCopy for Server {
             .values()
             .filter_map(|create| create.source_id(EmailProperty::Id))
             .map(|source_id| source_id.document_id())
-            .filter(|document_id| from_message_ids.contains(*document_id))
         {
-            let kinds = from_cache
+            let Some(email) = from_cache
                 .email_by_id(&document_id)
-                .map_or(MetadataKinds::NONE, |email| {
-                    from_cache.metadata_kinds(email)
-                });
+                .filter(|email| from_access.allows(*email))
+            else {
+                continue;
+            };
+            let kinds = from_cache.metadata_kinds(email);
             if viewer.is_some() || !kinds.is_empty() {
                 preload.insert_source(document_id, kinds);
             }
@@ -208,7 +213,10 @@ impl JmapEmailCopy for Server {
                 }
             }
 
-            if !from_message_ids.contains(from_message_id.document_id()) {
+            if !from_cache
+                .email_by_id(&from_message_id.document_id())
+                .is_some_and(|email| from_access.allows(email))
+            {
                 response.not_created.append(
                     id,
                     SetError::not_found().with_description(format!(

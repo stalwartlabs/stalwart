@@ -263,6 +263,7 @@ pub async fn imap_tests() {
         append::test(&mut imap, &mut imap_check, &test).await;
         search::test(&mut imap, &mut imap_check, &test).await;
         fetch::test(&mut imap, &mut imap_check).await;
+        fetch::test_large_headers(test.account("jdoe@example.com")).await;
         objectid::test(&test).await;
         store::test(&mut imap, &mut imap_check, &test).await;
         copy_move::test(&mut imap, &mut imap_check).await;

@@ -6,6 +6,7 @@
 
 use crate::{SpamFilterContext, analysis::eq_lowercase};
 use common::Server;
+use compact_str::CompactString;
 use mail_parser::HeaderName;
 use std::future::Future;
 use store::ahash::AHashSet;
@@ -151,8 +152,8 @@ impl SpamFilterAnalyzeHeaders for Server {
     }
 }
 
-fn header_exists_tag(name: &str) -> String {
-    let mut tag = String::with_capacity(name.len() + 6);
+fn header_exists_tag(name: &str) -> CompactString {
+    let mut tag = CompactString::with_capacity(name.len() + 6);
     tag.push_str("X_HDR_");
     for &byte in name.as_bytes() {
         let mapped = TAG_BYTE[byte as usize];

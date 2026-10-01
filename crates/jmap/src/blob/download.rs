@@ -5,9 +5,12 @@
  */
 
 use super::embedded::EmbeddedBlobs;
-use common::{Server, auth::AccessToken};
+use common::{
+    GroupwareResourceRef, GroupwareResources, Server, auth::AccessToken, sharing::EffectiveAcl,
+};
 use email::cache::MessageCacheFetch;
 use email::cache::email::MessageCacheAccess;
+use email::cache::mailbox::MailboxCacheAccess;
 use email::message::metadata::MetadataRow;
 use groupware::cache::GroupwareCache;
 use registry::schema::enums::Permission;
@@ -18,7 +21,6 @@ use types::acl::Acl;
 use types::blob::{BlobClass, BlobId};
 use types::collection::{Collection, SyncCollection};
 use types::field::EmailField;
-use utils::chained_bytes::ChainedBytes;
 
 pub struct DownloadedBlob {
     pub bytes: Vec<u8>,
@@ -111,9 +113,10 @@ impl BlobDownload for Server {
                         let body_offset = metadata.blob_body_offset();
                         if metadata.headers_len() != body_offset {
                             let headers = row.raw_headers().caused_by(trc::location!())?;
+                            let mut bytes = data;
+                            bytes.splice(..body_offset.min(bytes.len()), headers.iter().copied());
                             Ok(Some(DownloadedBlob {
-                                bytes: ChainedBytes::from_blob(&headers, &data, body_offset)
-                                    .to_vec(),
+                                bytes,
                                 extra_headers_len: metadata.extra_headers_len(),
                             }))
                         } else {
@@ -161,12 +164,25 @@ impl BlobDownload for Server {
                                 true
                             } else {
                                 match Collection::from(*collection) {
-                                    Collection::Email => self
-                                        .get_cached_messages(*account_id)
-                                        .await
-                                        .caused_by(trc::location!())?
-                                        .shared_messages(access_token, Acl::ReadItems)
-                                        .contains(*document_id),
+                                    Collection::Email => {
+                                        let cache = self
+                                            .get_cached_messages(*account_id)
+                                            .await
+                                            .caused_by(trc::location!())?;
+                                        cache.email_by_id(document_id).is_some_and(|message| {
+                                            message.mailboxes().iter().any(|mailbox| {
+                                                cache
+                                                    .mailbox_by_id(&mailbox.mailbox_id)
+                                                    .is_some_and(|mailbox| {
+                                                        mailbox
+                                                            .acls
+                                                            .as_slice()
+                                                            .effective_acl(access_token)
+                                                            .contains(Acl::ReadItems)
+                                                    })
+                                            })
+                                        })
+                                    }
                                     Collection::FileNode => self
                                         .fetch_groupware_resources(
                                             access_token.account_id(),
@@ -178,16 +194,19 @@ impl BlobDownload for Server {
                                         .file_acl(access_token, *document_id)
                                         .contains(Acl::ReadItems),
                                     collection @ (Collection::ContactCard
-                                    | Collection::CalendarEvent) => self
-                                        .fetch_groupware_resources(
-                                            access_token.account_id(),
-                                            *account_id,
-                                            SyncCollection::from(collection),
-                                        )
-                                        .await
-                                        .caused_by(trc::location!())?
-                                        .shared_items(access_token, [Acl::ReadItems], true)
-                                        .contains(*document_id),
+                                    | Collection::CalendarEvent) => {
+                                        let resources = self
+                                            .fetch_groupware_resources(
+                                                access_token.account_id(),
+                                                *account_id,
+                                                SyncCollection::from(collection),
+                                            )
+                                            .await
+                                            .caused_by(trc::location!())?;
+                                        resources.item_by_id(*document_id).is_some_and(|item| {
+                                            is_shared_item_readable(&resources, item, access_token)
+                                        })
+                                    }
                                     _ => false,
                                 }
                             }
@@ -199,4 +218,14 @@ impl BlobDownload for Server {
                     }),
         )
     }
+}
+
+pub(crate) fn is_shared_item_readable(
+    resources: &GroupwareResources,
+    item: GroupwareResourceRef<'_>,
+    access_token: &AccessToken,
+) -> bool {
+    item.child_names()
+        .iter()
+        .any(|name| resources.has_access_to_container(access_token, name.parent_id, Acl::ReadItems))
 }

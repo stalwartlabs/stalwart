@@ -5,8 +5,13 @@
  */
 
 use super::{AssertResult, ImapConnection, Type};
+use crate::utils::account::Account;
 use email::message::metadata::MAX_VALUE_LEN;
 use imap_proto::ResponseType;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::TcpStream,
+};
 
 pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
     println!("Running FETCH tests...");
@@ -235,4 +240,175 @@ pub async fn test(imap: &mut ImapConnection, imap_check: &mut ImapConnection) {
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
     imap.send("SELECT INBOX").await;
     imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+}
+
+pub async fn test_large_headers(account: &Account) {
+    println!("Running large header FETCH tests...");
+
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    let mut message = String::with_capacity(LARGE_HEADERS_LEN + 1024);
+    message.push_str("From: a@example.com\r\nSubject: padded headers\r\n");
+    for pad in 0..LARGE_HEADERS_LEN / LARGE_HEADER_VALUE_LEN {
+        let mut bytes = Vec::with_capacity(LARGE_HEADER_VALUE_LEN);
+        while bytes.len() < LARGE_HEADER_VALUE_LEN * 3 / 4 {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            bytes.extend_from_slice(&seed.to_le_bytes());
+        }
+        let encoded = encodify::base64::STANDARD.encode(&bytes);
+        message.push_str(&format!("X-Pad-{pad}:"));
+        for line in encoded.as_bytes().chunks(76) {
+            message.push_str("\r\n ");
+            message.push_str(std::str::from_utf8(line).unwrap());
+        }
+        message.push_str("\r\n");
+    }
+    message.push_str("Content-Type: text/plain\r\n\r\nshort body\r\n");
+
+    let mut client = RawClient::connect().await;
+    client
+        .command(&format!(
+            "LOGIN \"{}\" \"{}\"",
+            account.name(),
+            account.secret()
+        ))
+        .await;
+    client.command("CREATE \"Large Headers\"").await;
+    client
+        .command(&format!(
+            "APPEND \"Large Headers\" {{{}+}}\r\n{message}",
+            message.len()
+        ))
+        .await;
+    client.command("SELECT \"Large Headers\"").await;
+
+    for (command, expected) in [
+        (
+            "UID FETCH 1 (BODYSTRUCTURE)",
+            "BODYSTRUCTURE (\"text\" \"plain\"",
+        ),
+        ("UID FETCH 1 (ENVELOPE)", "\"padded headers\""),
+        (
+            "UID FETCH 1 (BODY.PEEK[HEADER.FIELDS (SUBJECT X-PAD-0)])",
+            "Subject: padded headers",
+        ),
+    ] {
+        let response = client.response(command).await;
+        assert!(
+            response.contains(expected),
+            "{command}: {}",
+            response.get(..512).unwrap_or(&response)
+        );
+    }
+    let header = client
+        .literal("UID FETCH 1 (BODY.PEEK[HEADER])")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        header.len(),
+        message.find("\r\n\r\n").unwrap() + 4,
+        "full header section"
+    );
+
+    client.command("DELETE \"Large Headers\"").await;
+    client.command("LOGOUT").await;
+}
+
+const LARGE_HEADERS_LEN: usize = 256 * 1024;
+const LARGE_HEADER_VALUE_LEN: usize = 4096;
+
+struct RawClient {
+    stream: BufReader<TcpStream>,
+    line: Vec<u8>,
+}
+
+impl RawClient {
+    async fn connect() -> Self {
+        let mut client = RawClient {
+            stream: BufReader::new(TcpStream::connect("127.0.0.1:9991").await.unwrap()),
+            line: Vec::new(),
+        };
+        client.read_line().await;
+        client
+    }
+
+    async fn read_line(&mut self) {
+        self.line.clear();
+        let read = self.stream.read_until(b'\n', &mut self.line).await.unwrap();
+        assert!(read > 0, "connection closed");
+    }
+
+    async fn send(&mut self, command: &str) {
+        let request = format!("C1 {command}\r\n");
+        self.stream
+            .get_mut()
+            .write_all(request.as_bytes())
+            .await
+            .unwrap();
+    }
+
+    async fn command(&mut self, command: &str) {
+        self.send(command).await;
+        loop {
+            self.read_line().await;
+            if self.line.starts_with(b"C1 ") {
+                assert!(
+                    self.line.starts_with(b"C1 OK"),
+                    "{command}: {}",
+                    String::from_utf8_lossy(&self.line)
+                );
+                return;
+            }
+        }
+    }
+
+    async fn response(&mut self, command: &str) -> String {
+        self.send(command).await;
+        let mut response = Vec::new();
+        loop {
+            self.read_line().await;
+            if self.line.starts_with(b"C1 ") {
+                assert!(
+                    self.line.starts_with(b"C1 OK"),
+                    "{command}: {}",
+                    String::from_utf8_lossy(&self.line)
+                );
+                return String::from_utf8_lossy(&response).into_owned();
+            }
+            response.extend_from_slice(&self.line);
+        }
+    }
+
+    async fn literal(&mut self, command: &str) -> Option<Vec<u8>> {
+        self.send(command).await;
+        let mut literal = None;
+        loop {
+            self.read_line().await;
+            if self.line.starts_with(b"C1 ") {
+                assert!(
+                    self.line.starts_with(b"C1 OK"),
+                    "{command}: {}",
+                    String::from_utf8_lossy(&self.line)
+                );
+                return literal;
+            }
+            let Some(size) = self
+                .line
+                .strip_suffix(b"}\r\n")
+                .and_then(|head| {
+                    head.iter()
+                        .rposition(|byte| *byte == b'{')
+                        .map(|pos| (head, pos))
+                })
+                .and_then(|(head, pos)| head.get(pos + 1..))
+                .and_then(|digits| std::str::from_utf8(digits).ok()?.parse::<usize>().ok())
+            else {
+                continue;
+            };
+            let mut bytes = vec![0; size];
+            self.stream.read_exact(&mut bytes).await.unwrap();
+            literal = Some(bytes);
+        }
+    }
 }

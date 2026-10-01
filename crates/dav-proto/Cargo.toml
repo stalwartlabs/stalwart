@@ -12,6 +12,7 @@ calcard = { version = "0.4", features = ["rkyv"] }
 mail-parser = { version = "1.0", features = ["full_encoding"] }
 hyper = "1.11.1"
 compact_str = "0.10.0"
+memchr = "2.8.3"
 
 [dev-dependencies]
 calcard = { version = "0.4", features = ["serde", "rkyv"] }

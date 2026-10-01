@@ -94,7 +94,7 @@ impl<T: SessionStream> SessionData<T> {
         access_token: &AccessToken,
     ) -> trc::Result<MetadataMailbox> {
         let mut caches = self
-            .synchronize_mailboxes(false)
+            .synchronize_mailboxes_as(access_token.clone(), false, Default::default())
             .await
             .imap_ctx(tag, trc::location!())?
             .caches;

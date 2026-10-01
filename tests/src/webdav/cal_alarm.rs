@@ -14,14 +14,17 @@ use groupware::scheduling::{
 use hyper::StatusCode;
 use mail_parser::{DateTime, MessageParser};
 use registry::types::EnumImpl;
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 use store::write::now;
 
 pub async fn test(test: &TestServer) {
     println!("Running calendar e-mail alarms tests...");
     let account = test.account("john@example.com");
     let client = account.webdav_client();
-    let start = now() as i64 + 5;
+    let start = now() as i64 + 12;
     client
         .request_with_headers(
             "PUT",
@@ -37,14 +40,19 @@ pub async fn test(test: &TestServer) {
         .await
         .with_status(StatusCode::CREATED);
 
-    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-
     // Check that the alarm was sent
-    let messages = test
-        .server
-        .get_cached_messages(client.account_id)
-        .await
-        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let messages = loop {
+        let messages = test
+            .server
+            .get_cached_messages(client.account_id)
+            .await
+            .unwrap();
+        if messages.emails.len() >= 2 || Instant::now() >= deadline {
+            break messages;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
     assert_eq!(messages.emails.len(), 2);
 
     let formatter = TextFormatter::new(
@@ -161,7 +169,7 @@ SUMMARY:I feel pretty and witty and gay
 DESCRIPTION:I feel charming, Oh, so charming, It's alarming how charming I feel.
 END:VALARM
 BEGIN:VALARM
-TRIGGER:-P4S
+TRIGGER:-P8S
 ACTION:EMAIL
 END:VALARM
 END:VEVENT

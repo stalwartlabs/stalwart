@@ -12,7 +12,7 @@ use calcard::{
     },
     jscalendar::{JSCalendar, JSCalendarProperty, JSCalendarType, JSCalendarValue},
 };
-use common::{DavName, GroupwareResources, Server};
+use common::{DavName, GroupwareResources, Server, storage::dav::CachedUid};
 use groupware::calendar::{
     CalendarEventContent,
     expand::{ComponentRecurrenceId, RecurrenceKey},
@@ -81,13 +81,13 @@ pub struct UidIndex<'x>(AHashMap<Cow<'x, str>, Vec<UidEntry>>);
 impl<'x> UidIndex<'x> {
     pub fn new<'y>(
         resources: &'x GroupwareResources,
-        uids: impl IntoIterator<Item = &'y str>,
+        cached_uids: impl IntoIterator<Item = Cow<'y, str>>,
     ) -> Self {
-        let uids = uids.into_iter().collect::<AHashSet<_>>();
+        let uids = cached_uids.into_iter().collect::<AHashSet<_>>();
         let mut index = AHashMap::with_capacity(uids.len());
         if !uids.is_empty() {
-            for resource in resources.resources.iter() {
-                if let Some(uid) = resource.uid().filter(|uid| uids.contains(uid)) {
+            for resource in resources.resources.iter_run(false) {
+                if let Some(uid) = resource.uid().filter(|uid| uids.contains(*uid)) {
                     index
                         .entry(Cow::Borrowed(uid))
                         .or_insert_with(Vec::new)
@@ -106,21 +106,23 @@ impl<'x> UidIndex<'x> {
     }
 
     fn documents(&self, uid: &str) -> &[UidEntry] {
-        self.0.get(uid).map_or(&[], Vec::as_slice)
+        self.0
+            .get(uid.cached_uid().as_ref())
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn record(&mut self, ical: &ICalendar, calendar_ids: &[u32]) {
-        let Some(uid) = ical.object_uid() else {
+        let Some(uid) = ical.object_uid().map(CachedUid::cached_uid) else {
             return;
         };
         let entry = UidEntry::Created {
             calendar_ids: calendar_ids.to_vec(),
             recurrence_ids: ical.instance_recurrence_ids(),
         };
-        match self.0.get_mut(uid) {
+        match self.0.get_mut(uid.as_ref()) {
             Some(entries) => entries.push(entry),
             None => {
-                self.0.insert(Cow::Owned(uid.to_string()), vec![entry]);
+                self.0.insert(Cow::Owned(uid.into_owned()), vec![entry]);
             }
         }
     }
@@ -163,7 +165,7 @@ impl<'x> UidIndex<'x> {
                     {
                         continue;
                     }
-                    let recurrence_ids = server
+                    let stored_content = server
                         .store()
                         .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
                             account_id,
@@ -171,14 +173,13 @@ impl<'x> UidIndex<'x> {
                             *stored_id,
                             CalendarEventField::Content,
                         ))
-                        .await?
-                        .map(|content| {
-                            content
-                                .unarchive::<CalendarEventContent>()
-                                .map(|content| content.data.event.instance_recurrence_ids())
-                                .caused_by(trc::location!())
-                        })
-                        .transpose()?
+                        .await?;
+                    let recurrence_ids = stored_content
+                        .as_ref()
+                        .map(|content| content.unarchive::<CalendarEventContent>())
+                        .transpose()
+                        .caused_by(trc::location!())?
+                        .map(|content| content.data.event.instance_recurrence_ids())
                         .unwrap_or_default();
                     (calendar_ids, is_distinct_instance(&recurrence_ids))
                 }

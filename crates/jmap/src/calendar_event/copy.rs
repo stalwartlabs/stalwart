@@ -17,7 +17,7 @@ use crate::{
     changes::state::JmapCacheState,
 };
 use calcard::{icalendar::ICalendar, jscalendar::JSCalendarProperty};
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, storage::dav::CachedUid};
 use groupware::{
     cache::GroupwareCache,
     calendar::{
@@ -47,9 +47,9 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Value};
 use registry::schema::enums::StorageQuota;
+use std::borrow::Cow;
 use store::{
     ValueKey,
-    roaring::RoaringBitmap,
     write::{Archive, ArchiveBytes, BatchBuilder, Slot, serialize::rkyv_deserialize},
 };
 use trc::AddContext;
@@ -121,12 +121,14 @@ impl JmapCalendarEventCopy for Server {
         from_sampled.assert_state(from_cache.get_state(false), &request.if_from_in_state)?;
         let is_from_owner = access_token.is_member(from_account_id);
         let from_personal_id = access_token.personal_id(from_account_id, Collection::Calendar);
-        let from_calendar_event_ids = if is_from_owner {
-            from_cache.document_ids(false).collect::<RoaringBitmap>()
-        } else {
+        let shared_from_event_ids = (!is_from_owner).then(|| {
             let mut shared_ids = from_cache.shared_items(access_token, [Acl::ReadItems], true);
             shared_ids -= from_cache.event_ids_with_flags(EVENT_SECRET);
             shared_ids
+        });
+        let is_readable_source = |document_id: u32| match &shared_from_event_ids {
+            Some(ids) => ids.contains(document_id),
+            None => from_cache.has_item_id(&document_id),
         };
 
         let is_shared = access_token.is_shared(account_id);
@@ -157,7 +159,7 @@ impl JmapCalendarEventCopy for Server {
             let patches = metadata_writer.extract(MetadataPatches::for_create(), &mut create);
             if let (Ok(source_id), Ok(_)) = (&source_id, &patches)
                 && !source_id.is_synthetic()
-                && from_calendar_event_ids.contains(source_id.document_id())
+                && is_readable_source(source_id.document_id())
             {
                 let document_id = source_id.document_id();
                 let kinds = from_cache
@@ -176,12 +178,13 @@ impl JmapCalendarEventCopy for Server {
             &cache,
             creates.iter().filter_map(|(_, source_id, create, _)| {
                 match create.as_object_and_get(&Key::Property(JSCalendarProperty::Uid)) {
-                    Some(Value::Str(uid)) => Some(uid.as_ref()),
+                    Some(Value::Str(uid)) => Some(uid.cached_uid()),
                     _ => source_id.as_ref().ok().and_then(|source_id| {
                         from_cache
                             .resources
                             .find(source_id.document_id(), false)
                             .and_then(|resource| resource.uid())
+                            .map(Cow::Borrowed)
                     }),
                 }
             }),
@@ -231,7 +234,7 @@ impl JmapCalendarEventCopy for Server {
             };
 
             let from_calendar_event_id = source_id.document_id();
-            if !from_calendar_event_ids.contains(from_calendar_event_id) {
+            if !is_readable_source(from_calendar_event_id) {
                 response.not_created.append(
                     create_id,
                     SetError::not_found().with_description(format!(

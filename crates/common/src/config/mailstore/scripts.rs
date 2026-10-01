@@ -25,8 +25,9 @@ use registry::{
     types::EnumImpl,
 };
 use sieve::{Compiler, Runtime, Sieve, compiler::grammar::Capability};
-use std::collections::hash_map::Entry;
+use std::{borrow::Cow, collections::hash_map::Entry};
 use store::registry::bootstrap::Bootstrap;
+use utils::text::lowercase;
 
 pub struct Scripting {
     pub untrusted_compiler: Compiler,
@@ -256,9 +257,10 @@ fn script_by_name<'x>(
     scripts: &'x AHashMap<String, Sieve<'static>>,
     name: &str,
 ) -> Option<&'x Sieve<'static>> {
-    scripts
-        .get(name)
-        .or_else(|| scripts.get(name.to_lowercase().as_str()))
+    scripts.get(name).or_else(|| match lowercase(name) {
+        Cow::Owned(name) => scripts.get(name.as_str()),
+        Cow::Borrowed(_) => None,
+    })
 }
 
 impl Clone for Scripting {

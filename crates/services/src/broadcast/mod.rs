@@ -225,18 +225,8 @@ where
                     let event_account_id = self.messages.next_leb128().ok_or(())?;
                     let event_id = self.messages.next_leb128().ok_or(())?;
                     let recurrence_id = self.messages.next_leb128::<u64>().ok_or(())? as i64;
-                    let uid_len = self.messages.next_leb128::<usize>().ok_or(())?;
-                    let mut uid_bytes = vec![0u8; uid_len];
-                    for byte in uid_bytes.iter_mut() {
-                        *byte = self.messages.next().ok_or(())?.borrow().to_owned();
-                    }
-                    let uid = String::from_utf8(uid_bytes).map_err(|_| ())?;
-                    let alert_id_len = self.messages.next_leb128::<usize>().ok_or(())?;
-                    let mut alert_id_bytes = vec![0u8; alert_id_len];
-                    for byte in alert_id_bytes.iter_mut() {
-                        *byte = self.messages.next().ok_or(())?.borrow().to_owned();
-                    }
-                    let alert_id = String::from_utf8(alert_id_bytes).map_err(|_| ())?;
+                    let uid = self.next_string()?;
+                    let alert_id = self.next_string()?;
                     Ok(Some(BroadcastEvent::PushNotification(
                         PushNotification::CalendarAlert(CalendarAlert {
                             account_id,
@@ -291,7 +281,7 @@ where
                 }
                 7 => {
                     let count = self.messages.next_leb128::<usize>().ok_or(())?;
-                    let mut items = Vec::with_capacity(count);
+                    let mut items = Vec::with_capacity(count.min(self.messages.size_hint().0));
                     for _ in 0..count {
                         let marker = self.messages.next().ok_or(())?.borrow().to_owned();
                         let id = self.messages.next_leb128::<u32>().ok_or(())?;
@@ -335,6 +325,21 @@ where
             Ok(None)
         }
     }
+
+    fn next_string(&mut self) -> Result<String, ()> {
+        let len = self.messages.next_leb128::<usize>().ok_or(())?;
+        let bytes: Vec<u8> = self
+            .messages
+            .by_ref()
+            .take(len)
+            .map(|byte| *byte.borrow())
+            .collect();
+        if bytes.len() == len {
+            String::from_utf8(bytes).map_err(|_| ())
+        } else {
+            Err(())
+        }
+    }
 }
 
 impl<T> BroadcastBatch<T> {
@@ -346,7 +351,9 @@ impl<T> BroadcastBatch<T> {
 #[cfg(test)]
 mod tests {
     use super::BroadcastBatch;
-    use common::ipc::{BroadcastEvent, CacheInvalidation, PushNotification, ViewerStateChange};
+    use common::ipc::{
+        BroadcastEvent, CacheInvalidation, CalendarAlert, PushNotification, ViewerStateChange,
+    };
     use types::type_state::{DataType, StateChange};
     use utils::{codec::leb128::Leb128Writer, map::bitmap::Bitmap};
 
@@ -404,6 +411,58 @@ mod tests {
             decoded.types,
             Bitmap::from_iter([DataType::Email, DataType::Mailbox])
         );
+    }
+
+    #[test]
+    fn oversized_lengths_are_rejected_without_allocating() {
+        for tag in [1u8, 7] {
+            let mut bytes = Vec::new();
+            let _ = bytes.write_leb128(3u16);
+            let _ = bytes.write_leb128(0u64);
+            bytes.push(tag);
+            if tag == 1 {
+                for value in [1u64, 2, 3, 0] {
+                    let _ = bytes.write_leb128(value);
+                }
+            }
+            let _ = bytes.write_leb128(u64::MAX >> 1);
+            bytes.extend_from_slice(b"abc");
+            let mut batch = BroadcastBatch::new(bytes.iter());
+            assert_eq!(batch.node_id(), Some(3));
+            assert_eq!(batch.read_version(), Some(None));
+            assert!(batch.next_event().is_err(), "tag {tag}");
+        }
+    }
+
+    #[test]
+    fn calendar_alerts_round_trip() {
+        let alert = CalendarAlert {
+            account_id: 1,
+            event_account_id: 2,
+            event_id: 3,
+            recurrence_id: Some(4),
+            uid: "uid-é".to_string(),
+            alert_id: "alert".to_string(),
+        };
+        let bytes = encode([BroadcastEvent::PushNotification(
+            PushNotification::CalendarAlert(alert),
+        )]);
+        match decode(&bytes).as_slice() {
+            [BroadcastEvent::PushNotification(PushNotification::CalendarAlert(decoded))] => {
+                assert_eq!(
+                    (
+                        decoded.account_id,
+                        decoded.event_account_id,
+                        decoded.event_id,
+                        decoded.recurrence_id,
+                        decoded.uid.as_str(),
+                        decoded.alert_id.as_str()
+                    ),
+                    (1, 2, 3, Some(4), "uid-é", "alert")
+                );
+            }
+            events => panic!("unexpected events {events:?}"),
+        }
     }
 
     #[test]

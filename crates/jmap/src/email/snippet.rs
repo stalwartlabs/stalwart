@@ -6,7 +6,11 @@
 
 use common::{Server, auth::AccessToken};
 use email::{
-    cache::{MessageCacheFetch, email::MessageCacheAccess},
+    cache::{
+        MessageCacheFetch,
+        email::{MessageAccess, MessageCacheAccess},
+        mailbox::MailboxCacheAccess,
+    },
     message::metadata::{MetadataStructure, PartKind, PartSource},
 };
 use jmap_proto::{
@@ -85,28 +89,28 @@ impl EmailSearchSnippet for Server {
                 }
             }
         }
+        let email_ids = request.email_ids.unwrap();
+        if email_ids.len() > self.core.jmap.snippet_max_results {
+            return Err(trc::JmapEvent::RequestTooLarge.into_err());
+        }
+
         let account_id = request.account_id.document_id();
         let cached_messages = self
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        let document_ids = if access_token.is_member(account_id) {
-            cached_messages.email_document_ids()
+        let access = if access_token.is_member(account_id) {
+            MessageAccess::All
         } else {
-            cached_messages.shared_messages(access_token, Acl::ReadItems)
+            MessageAccess::Mailboxes(cached_messages.shared_mailboxes(access_token, Acl::ReadItems))
         };
 
-        let email_ids = request.email_ids.unwrap();
         let mut response = GetSearchSnippetResponse {
             account_id: request.account_id,
             list: Vec::with_capacity(email_ids.len()),
             not_found: None,
         };
         let mut not_found = Vec::new();
-
-        if email_ids.len() > self.core.jmap.snippet_max_results {
-            return Err(trc::JmapEvent::RequestTooLarge.into_err());
-        }
 
         for email_id in email_ids {
             let email_id = match email_id {
@@ -122,7 +126,10 @@ impl EmailSearchSnippet for Server {
                 subject: None,
                 preview: None,
             };
-            if !document_ids.contains(document_id) {
+            if !cached_messages
+                .email_by_id(&document_id)
+                .is_some_and(|message| access.allows(message))
+            {
                 not_found.push(MaybeInvalid::Value(email_id));
                 continue;
             } else if terms.is_empty() {

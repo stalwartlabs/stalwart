@@ -9,6 +9,9 @@ use ahash::AHashMap;
 use whatlang::{Lang, detect};
 
 pub const MIN_LANGUAGE_SCORE: f64 = 0.6;
+pub const MAX_LANGUAGE_SAMPLE: usize = 64 << 10;
+const SAMPLE_WINDOWS: usize = 3;
+const SAMPLE_WINDOW: usize = MAX_LANGUAGE_SAMPLE / SAMPLE_WINDOWS;
 
 #[derive(Debug)]
 struct WeightedAverage {
@@ -71,7 +74,21 @@ impl LanguageDetector {
     }
 
     pub fn detect_single(text: &str) -> Option<(Language, f64)> {
-        detect(text).map(|info| {
+        let mut sample = String::new();
+        if text.len() > MAX_LANGUAGE_SAMPLE {
+            sample.reserve(MAX_LANGUAGE_SAMPLE + SAMPLE_WINDOWS);
+            let tail = text.len() - SAMPLE_WINDOW;
+            for start in [0, tail / 2, tail] {
+                let start = text.floor_char_boundary(start);
+                if let Some(window) =
+                    text.get(start..text.floor_char_boundary(start + SAMPLE_WINDOW))
+                {
+                    sample.push_str(window);
+                    sample.push('\n');
+                }
+            }
+        }
+        detect(if sample.is_empty() { text } else { &sample }).map(|info| {
             (
                 match info.lang() {
                     Lang::Epo => Language::Esperanto,
@@ -205,6 +222,55 @@ mod tests {
         for input in inputs.iter() {
             assert_eq!(detector.detect(input.0, 0.0), input.1);
         }
+    }
+
+    #[test]
+    fn detect_single_samples_head_middle_and_tail() {
+        let english = "The quick brown fox jumps over the lazy dog while the cat sleeps. ";
+        let german = "Zwölf Boxkämpfer jagten Victor quer über den großen Sylter Deich, \
+            während die Katze auf dem warmen Ofen schläft und nicht aufwacht. ";
+        let mut text = String::new();
+        while text.len() < MAX_LANGUAGE_SAMPLE + 1 {
+            text.push_str(english);
+        }
+        text.push('é');
+        while text.len() < 4 * MAX_LANGUAGE_SAMPLE {
+            text.push_str(german);
+        }
+        assert_eq!(
+            LanguageDetector::detect_single(&text).map(|(language, _)| language),
+            Some(Language::German)
+        );
+
+        let mut detector = LanguageDetector::new();
+        assert_eq!(detector.detect(&text, 0.0), Language::German);
+        assert_eq!(
+            detector
+                .lang_detected
+                .get(&Language::German)
+                .map(|w| w.weight),
+            Some(text.len())
+        );
+
+        let mut sandwich = String::new();
+        while sandwich.len() < 2 * MAX_LANGUAGE_SAMPLE {
+            sandwich.push_str(german);
+        }
+        while sandwich.len() < 3 * MAX_LANGUAGE_SAMPLE {
+            sandwich.push_str(english);
+        }
+        while sandwich.len() < 5 * MAX_LANGUAGE_SAMPLE {
+            sandwich.push_str(german);
+        }
+        assert_eq!(
+            LanguageDetector::detect_single(&sandwich).map(|(language, _)| language),
+            Some(Language::German)
+        );
+
+        let mut boundary = String::from("a");
+        boundary.push_str(&"é".repeat(MAX_LANGUAGE_SAMPLE));
+        assert!(!boundary.is_char_boundary(MAX_LANGUAGE_SAMPLE));
+        LanguageDetector::detect_single(&boundary);
     }
 
     #[test]

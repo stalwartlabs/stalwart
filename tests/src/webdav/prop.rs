@@ -5,7 +5,7 @@
  */
 
 use crate::utils::server::TestServer;
-use crate::utils::webdav::{DeadPropertyName, GenerateTestDavResource};
+use crate::utils::webdav::{DeadPropertyName, DummyWebDavClient, GenerateTestDavResource};
 use crate::webdav::{TEST_ICAL_2, TEST_VTIMEZONE_1};
 use dav_proto::schema::property::{
     CalDavProperty, CardDavProperty, DavProperty, PrincipalProperty, WebDavProperty,
@@ -708,11 +708,75 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
             .with_status(StatusCode::NO_CONTENT);
     }
 
+    for resource_type in [DavResourceName::Cal, DavResourceName::Card] {
+        last_modified_beyond_cache_range(&client, resource_type).await;
+    }
+
     client.delete_default_containers().await;
     client
         .delete_default_containers_by_account("support@example.com")
         .await;
     test.assert_is_empty().await;
+}
+
+async fn last_modified_beyond_cache_range(
+    client: &DummyWebDavClient,
+    resource_type: DavResourceName,
+) {
+    println!(
+        "Running out-of-range modification time tests ({})...",
+        resource_type.base_path()
+    );
+    let collection = format!("{}/jane%40example.com/default/", resource_type.base_path());
+    let path = format!("{collection}modified-range");
+    client
+        .request("PUT", &path, resource_type.generate())
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .patch_and_check(
+            &path,
+            [(
+                DavProperty::WebDav(WebDavProperty::CreationDate),
+                "1950-01-01T00:00:00Z",
+            )],
+        )
+        .await;
+
+    for target in [collection.as_str(), path.as_str()] {
+        let response = client
+            .propfind(
+                target,
+                [
+                    DavProperty::WebDav(WebDavProperty::GetETag),
+                    DavProperty::WebDav(WebDavProperty::GetLastModified),
+                    DavProperty::WebDav(WebDavProperty::DisplayName),
+                ],
+            )
+            .await;
+        let last_modified = response
+            .properties(&path)
+            .get(DavProperty::WebDav(WebDavProperty::GetLastModified))
+            .value()
+            .to_string();
+        client
+            .propfind(
+                target,
+                [
+                    DavProperty::WebDav(WebDavProperty::GetETag),
+                    DavProperty::WebDav(WebDavProperty::GetLastModified),
+                ],
+            )
+            .await
+            .properties(&path)
+            .get(DavProperty::WebDav(WebDavProperty::GetLastModified))
+            .with_values([last_modified.as_str()]);
+    }
+
+    client
+        .request("DELETE", &path, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
 }
 
 const EXPAND_REPORT_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
