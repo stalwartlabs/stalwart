@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{builder::EncodedMetadata, json::EncodedJson};
+use super::builder::EncodedMetadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetadataScope {
@@ -27,6 +27,12 @@ pub enum LimitViolation {
     EntrySize { size: usize, max: usize },
     ContainerSize { size: usize, max: usize },
     Entries { count: usize, max: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EntryBound {
+    bound: usize,
+    max_entries: usize,
 }
 
 impl Default for MetadataLimits {
@@ -67,27 +73,44 @@ impl MetadataLimits {
         }
     }
 
-    pub fn check_json(&self, value: &EncodedJson) -> Result<(), LimitViolation> {
-        self.check_depth(value.depth())?;
-        self.check_entry_size(value.len())
+    pub fn entry_bound(&self, previous_entries: usize) -> EntryBound {
+        EntryBound {
+            bound: self.max_entries.max(previous_entries),
+            max_entries: self.max_entries,
+        }
     }
 
-    pub fn check_container(
+    pub fn check_edit(
         &self,
         scope: MetadataScope,
-        container: &EncodedMetadata,
+        previous_len: usize,
+        previous_entries: usize,
+        next: &EncodedMetadata,
     ) -> Result<(), LimitViolation> {
-        if container.entries() > self.max_entries {
+        let count = next.entries();
+        if count > self.max_entries && count > previous_entries {
             return Err(LimitViolation::Entries {
-                count: container.entries(),
+                count,
                 max: self.max_entries,
             });
         }
+        let size = next.len();
         let max = self.max_container_size(scope);
-        if container.len() > max {
-            Err(LimitViolation::ContainerSize {
-                size: container.len(),
-                max,
+        if size > max && size > previous_len {
+            Err(LimitViolation::ContainerSize { size, max })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl EntryBound {
+    pub fn check(self, entries: usize, pending_removals: usize) -> Result<(), LimitViolation> {
+        let count = entries.saturating_sub(pending_removals);
+        if count > self.bound {
+            Err(LimitViolation::Entries {
+                count,
+                max: self.max_entries,
             })
         } else {
             Ok(())

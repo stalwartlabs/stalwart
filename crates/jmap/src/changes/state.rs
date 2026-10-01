@@ -28,23 +28,16 @@ pub trait StateManager: Sync + Send {
     ) -> impl Future<Output = trc::Result<State>> + Send;
 }
 
-pub trait MetadataStateManager: Sync + Send {
-    fn metadata_state(
-        &self,
-        viewer: Option<MetadataViewer>,
-        account_id: u32,
-        collection: Collection,
-        shared: State,
-    ) -> impl Future<Output = trc::Result<State>> + Send;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ViewerChangeId(ChangeId);
 
-    fn assert_metadata_state(
+pub trait MetadataStateManager: Sync + Send {
+    fn viewer_change_id(
         &self,
         viewer: Option<MetadataViewer>,
         account_id: u32,
         collection: Collection,
-        shared: State,
-        if_in_state: &Option<State>,
-    ) -> impl Future<Output = trc::Result<State>> + Send;
+    ) -> impl Future<Output = trc::Result<ViewerChangeId>> + Send;
 }
 
 pub trait JmapCacheState: Sync + Send {
@@ -89,41 +82,37 @@ impl StateManager for Server {
     }
 }
 
-impl MetadataStateManager for Server {
-    async fn metadata_state(
-        &self,
-        viewer: Option<MetadataViewer>,
-        account_id: u32,
-        collection: Collection,
-        shared: State,
-    ) -> trc::Result<State> {
-        match viewer {
-            Some(viewer) => self
-                .metadata_viewer_state(viewer, account_id, collection)
-                .await
-                .caused_by(trc::location!())
-                .map(|state| max_state(shared, state.change_id)),
-            None => Ok(shared),
-        }
+impl ViewerChangeId {
+    pub fn state(self, shared: State) -> State {
+        max_state(shared, self.0)
     }
 
-    async fn assert_metadata_state(
-        &self,
-        viewer: Option<MetadataViewer>,
-        account_id: u32,
-        collection: Collection,
-        shared: State,
-        if_in_state: &Option<State>,
-    ) -> trc::Result<State> {
-        let old_state = self
-            .metadata_state(viewer, account_id, collection, shared)
-            .await?;
+    pub fn assert_state(self, shared: State, if_in_state: &Option<State>) -> trc::Result<State> {
+        let old_state = self.state(shared);
         if let Some(if_in_state) = if_in_state
             && &old_state != if_in_state
         {
             return Err(trc::JmapEvent::StateMismatch.into_err());
         }
         Ok(old_state)
+    }
+}
+
+impl MetadataStateManager for Server {
+    async fn viewer_change_id(
+        &self,
+        viewer: Option<MetadataViewer>,
+        account_id: u32,
+        collection: Collection,
+    ) -> trc::Result<ViewerChangeId> {
+        match viewer {
+            Some(viewer) => self
+                .metadata_viewer_state(viewer, account_id, collection)
+                .await
+                .caused_by(trc::location!())
+                .map(|state| ViewerChangeId(state.change_id)),
+            None => Ok(ViewerChangeId::default()),
+        }
     }
 }
 

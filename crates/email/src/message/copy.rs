@@ -16,10 +16,7 @@ use crate::message::{
 };
 use common::{
     MessageUid, Server,
-    storage::{
-        index::ObjectIndexBuilder,
-        metadata::{PrivateMetadataCommit, PrivateMetadataWrite},
-    },
+    storage::{index::ObjectIndexBuilder, metadata::PrivateMetadataCommit},
 };
 use mail_parser::HeaderForm;
 use registry::{
@@ -44,7 +41,6 @@ use types::{
     collection::{Collection, SyncCollection},
     field::EmailField,
     keyword::Keyword,
-    metadata::{EncodedMetadata, MetadataBuilder, MetadataKinds},
 };
 
 const COPY_FIELDS: [HeaderId; 7] = [
@@ -63,39 +59,6 @@ pub enum CopyMessageError {
     AlreadyExists(u32),
 }
 
-#[derive(Debug, Default)]
-pub enum SharedCopy {
-    #[default]
-    None,
-    Source,
-    Set(EncodedMetadata),
-}
-
-#[derive(Debug, Default)]
-pub struct CopyMetadata {
-    pub shared: SharedCopy,
-    pub private: Option<Box<PrivateMetadataWrite>>,
-}
-
-impl SharedCopy {
-    pub fn from_source(kinds: MetadataKinds) -> Self {
-        if kinds.intersects(MessageData::TRACKED_METADATA) {
-            SharedCopy::Source
-        } else {
-            SharedCopy::None
-        }
-    }
-}
-
-impl CopyMetadata {
-    pub fn from_source(kinds: MetadataKinds) -> Self {
-        CopyMetadata {
-            shared: SharedCopy::from_source(kinds),
-            private: None,
-        }
-    }
-}
-
 pub trait EmailCopy: Sync + Send {
     #[allow(clippy::too_many_arguments)]
     fn copy_message(
@@ -106,7 +69,7 @@ pub trait EmailCopy: Sync + Send {
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
         received_at: u64,
-        containers: CopyMetadata,
+        containers: Option<Box<IngestMetadata>>,
         session_id: u64,
     ) -> impl Future<Output = trc::Result<Result<IngestedEmail, CopyMessageError>>> + Send;
 }
@@ -121,7 +84,7 @@ impl EmailCopy for Server {
         mailboxes: Vec<u32>,
         keywords: Vec<Keyword>,
         received_at: u64,
-        containers: CopyMetadata,
+        mut containers: Option<Box<IngestMetadata>>,
         session_id: u64,
     ) -> trc::Result<Result<IngestedEmail, CopyMessageError>> {
         // Obtain the metadata and sort key rows verbatim
@@ -143,24 +106,20 @@ impl EmailCopy for Server {
             return Ok(Err(CopyMessageError::NotFound));
         };
         let row = MetadataRow::deserialize(&metadata_bytes.0).caused_by(trc::location!())?;
-        let CopyMetadata { shared, private } = containers;
         let metadata = row.unarchive().caused_by(trc::location!())?;
-        let container = match shared {
-            SharedCopy::None => None,
-            SharedCopy::Source => self
-                .metadata_container(from_account_id, Collection::Email, from_message_id)
-                .await
-                .caused_by(trc::location!())?
-                .and_then(|container| MetadataBuilder::from_view(&container.view()).encode()),
-            SharedCopy::Set(container) => Some(container),
+        if let Some(containers) = containers.as_deref_mut() {
+            containers.shared = containers
+                .shared
+                .take()
+                .filter(|container| container.kinds().intersects(MessageData::TRACKED_METADATA));
         }
-        .filter(|container| container.kinds().intersects(MessageData::TRACKED_METADATA));
 
         // Check quota
         let size = u32::try_from(metadata.size()).unwrap_or(u32::MAX);
         let quota_size = u64::from(size)
-            + container
-                .as_ref()
+            + containers
+                .as_deref()
+                .and_then(|containers| containers.shared.as_ref())
                 .map_or(0, |container| container.len() as u64);
         let to_account = self.account(to_account_id).await?;
         let quota_result = match self.has_available_quota(&to_account, quota_size).await {
@@ -286,7 +245,10 @@ impl EmailCopy for Server {
             thread_slot,
             change_id: None,
         };
-        if let Some(container) = &container {
+        if let Some(container) = containers
+            .as_deref()
+            .and_then(|containers| containers.shared.as_ref())
+        {
             data.data.set_metadata_kinds(container.kinds());
         }
         let thread_info = ThreadInfo {
@@ -313,18 +275,17 @@ impl EmailCopy for Server {
             .queue_document_index(SearchIndex::Email, to_account_id, QueueDocumentId::Current);
 
         let mut private_commit = PrivateMetadataCommit::default();
-        IngestMetadata {
-            shared: container,
-            private: private.map(|write| *write),
+        if let Some(containers) = containers {
+            containers
+                .build(
+                    &mut batch,
+                    to_account_id,
+                    tenant_id,
+                    PendingId::Slot(document_slot),
+                    &mut private_commit,
+                )
+                .caused_by(trc::location!())?;
         }
-        .build(
-            &mut batch,
-            to_account_id,
-            tenant_id,
-            PendingId::Slot(document_slot),
-            &mut private_commit,
-        )
-        .caused_by(trc::location!())?;
 
         // Merge threads if necessary
         if !thread_result.merge_ids.is_empty() {

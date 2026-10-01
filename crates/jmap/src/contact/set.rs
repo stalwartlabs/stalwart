@@ -5,7 +5,7 @@
  */
 
 use crate::api::metadata::{
-    MetadataAccess, MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, NewMetadata,
+    MetadataAccess, MetadataPatches, MetadataTarget, MetadataType, MetadataWriter, NewMetadata,
     ObjectMetadata, PreparedMetadata, is_empty_update, reject_uncommitted,
 };
 use crate::api::pending_creates::PendingCreates;
@@ -19,10 +19,9 @@ use common::{
     storage::quota::ObjectQuotaUsage,
 };
 use groupware::{
-    DestroyArchive, PresenceUpdate, SizeWriter,
+    DestroyArchive, SizeWriter,
     cache::GroupwareCache,
     contact::{ContactCard, ContactCardContent},
-    metadata::MetadataCleanup,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -47,7 +46,6 @@ use types::{
     collection::{Collection, SyncCollection, VanishedCollection},
     field::ContactField,
     id::Id,
-    metadata::MetadataKinds,
 };
 
 pub trait ContactCardSet: Sync + Send {
@@ -84,6 +82,8 @@ impl ContactCardSet for Server {
         using: CapabilityIds,
     ) -> trc::Result<SetResponse<contact::ContactCard>> {
         let account_id = request.account_id.document_id();
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let account = self.account(account_id).await.caused_by(trc::location!())?;
         let cache = self
             .fetch_groupware_resources(
@@ -92,18 +92,8 @@ impl ContactCardSet for Server {
                 SyncCollection::AddressBook,
             )
             .await?;
-        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(
-                metadata
-                    .assert_state(
-                        self,
-                        account_id,
-                        cache.get_state(false),
-                        &request.if_in_state,
-                    )
-                    .await?,
-            );
+            .with_state(sampled.assert_state(cache.get_state(false), &request.if_in_state)?);
         let mut metadata_writer = MetadataWriter::new(metadata, account_id);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
@@ -177,25 +167,14 @@ impl ContactCardSet for Server {
         }
 
         // Process updates
-        let mut updates =
-            Vec::with_capacity(request.update.as_ref().map_or(0, |update| update.len()));
-        let mut preload = MetadataPreload::default();
-        for (id, mut object) in request.unwrap_update() {
-            let patches = metadata_writer.extract(MetadataPatches::for_update(), &mut object);
-            if let (MaybeInvalid::Value(id), Ok(Some(patches))) = (&id, &patches) {
-                let document_id = id.document_id();
-                preload.insert(
-                    document_id,
-                    patches,
-                    cache
-                        .item_by_id(document_id)
-                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
-                );
-            }
-            updates.push((id, object, patches));
-        }
-        metadata_writer.preload(self, account_id, preload).await?;
-        'update: for (id, object, metadata_patches) in updates {
+        metadata_writer
+            .preload_updates(self, request.update.as_ref(), |document_id| {
+                cache
+                    .item_by_id(document_id)
+                    .map(|resource| resource.metadata_kinds())
+            })
+            .await?;
+        'update: for (id, mut object) in request.unwrap_update() {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -208,13 +187,14 @@ impl ContactCardSet for Server {
                 response.not_updated.append(id, SetError::will_destroy());
                 continue 'update;
             }
-            let mut metadata_patches = match metadata_patches {
-                Ok(patches) => patches,
-                Err(err) => {
-                    response.not_updated.append(id, err);
-                    continue 'update;
-                }
-            };
+            let mut metadata_patches =
+                match metadata_writer.extract(MetadataPatches::for_update(), &mut object) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    }
+                };
 
             // Obtain contact card
             let document_id = id.document_id();
@@ -249,7 +229,7 @@ impl ContactCardSet for Server {
                     }),
                 }
             } else {
-                OWNER_ACCESS
+                MetadataAccess::FULL
             };
             if object
                 .as_object()
@@ -257,18 +237,17 @@ impl ContactCardSet for Server {
                 && let Some(patches) = metadata_patches.take()
             {
                 match metadata_writer
-                    .prepare(self, patches, metadata_access, Some(document_id))
+                    .write_metadata_only::<ContactCard, _>(
+                        self,
+                        patches,
+                        metadata_access,
+                        &contact_card,
+                        document_id,
+                        &mut batch,
+                    )
                     .await?
                 {
-                    Ok(prepared) => {
-                        if let Some(kinds) = prepared.shared_kinds() {
-                            PresenceUpdate(contact_card)
-                                .write(kinds, account_id, document_id, &mut batch)
-                                .caused_by(trc::location!())?;
-                        }
-                        metadata_writer.write(prepared, document_id, &mut batch)?;
-                        response.updated.append(id, None);
-                    }
+                    Ok(()) => response.updated.append(id, None),
                     Err(err) => response.not_updated.append(id, err),
                 }
                 continue 'update;
@@ -438,7 +417,12 @@ impl ContactCardSet for Server {
 
             let prepared_metadata = match metadata_patches {
                 Some(patches) => match metadata_writer
-                    .prepare(self, patches, metadata_access, Some(document_id))
+                    .prepare_for(
+                        self,
+                        patches,
+                        metadata_access,
+                        MetadataTarget::Update { document_id },
+                    )
                     .await?
                 {
                     Ok(prepared) => Some(prepared),
@@ -486,18 +470,23 @@ impl ContactCardSet for Server {
         }
 
         // Process deletions
-        let cleanup = MetadataCleanup::preload(
-            self,
-            access_token.account_tenant_ids(),
-            account_id,
-            Collection::ContactCard,
-            will_destroy.iter().filter_map(|id| {
-                let document_id = id.document_id();
-                Some((document_id, cache.item_by_id(document_id)?.metadata_kinds()))
-            }),
-        )
-        .await
-        .caused_by(trc::location!())?;
+        let cleanup = self
+            .preload_container_cleanup(
+                Some(access_token.account_tenant_ids()),
+                account_id,
+                Collection::ContactCard,
+                &will_destroy
+                    .iter()
+                    .map(|id| id.document_id())
+                    .filter(|&document_id| {
+                        cache
+                            .item_by_id(document_id)
+                            .is_some_and(|item| !item.metadata_kinds().is_empty())
+                    })
+                    .collect(),
+            )
+            .await
+            .caused_by(trc::location!())?;
         'destroy: for id in will_destroy {
             let document_id = id.document_id();
 
@@ -563,7 +552,7 @@ impl ContactCardSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = match self.commit_batch(batch).await {
+            let assigned_ids = match metadata_writer.commit(self, batch).await {
                 Ok(assigned_ids) => assigned_ids,
                 Err(err) if err.is_assertion_failure() => {
                     reject_uncommitted(
@@ -575,7 +564,6 @@ impl ContactCardSet for Server {
                 }
                 Err(err) => return Err(err.caused_by(trc::location!())),
             };
-            metadata_writer.committed(self, &assigned_ids).await;
 
             created_slots.resolve(&mut response, &assigned_ids);
 
@@ -671,7 +659,7 @@ impl ContactCardSet for Server {
                         .contains(Acl::ReadItems)
                 }),
             },
-            _ => OWNER_ACCESS,
+            _ => MetadataAccess::FULL,
         };
         let prepared_metadata = match metadata_writer
             .prepare_new(self, new_metadata, metadata_access)
@@ -710,11 +698,6 @@ impl ContactCardSet for Server {
         Ok(Ok(document_id))
     }
 }
-
-const OWNER_ACCESS: MetadataAccess = MetadataAccess {
-    may_write_shared: true,
-    may_read: true,
-};
 
 pub(crate) fn too_many_contacts() -> SetError<JSContactProperty<Id>> {
     SetError::over_quota().with_description(concat!(

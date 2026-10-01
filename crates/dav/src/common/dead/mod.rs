@@ -8,17 +8,14 @@ mod containers;
 mod patch;
 
 pub(crate) use containers::{
-    ContainerRequest, ContainerWrites, DeadContainers, container_kinds, read_container,
-    stored_container, stored_entry,
+    ContainerRequest, ContainerWrites, DeadContainers, check_growth, container_kinds, copy_growth,
+    edited_container, read_container, stored_entry_of,
 };
 pub(crate) use patch::{DeadPatch, DisplayName};
 
 use common::storage::metadata::MetadataLog;
 use store::write::PendingId;
-use types::{
-    collection::Collection,
-    metadata::{DavValueView, MetadataKinds, XmlNode},
-};
+use types::{collection::Collection, metadata::MetadataKinds};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DeadTarget {
@@ -59,15 +56,4 @@ impl DeadTarget {
             log: MetadataLog::Container,
         }
     }
-}
-
-pub(crate) fn text_of(value: DavValueView<'_>) -> Option<String> {
-    let value = value.to_value()?;
-    let mut text = String::new();
-    for child in &value.children {
-        if let XmlNode::Text(part) = child {
-            text.push_str(part);
-        }
-    }
-    Some(text)
 }

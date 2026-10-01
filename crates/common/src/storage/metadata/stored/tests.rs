@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use store::write::{
     ArchiveVersion, BatchBuilder, Operation, PendingId, ValueClass, ValueOp,
     assert::AssertValue,
-    metadata::{MetadataClass, StoredMetadata},
+    metadata::{MetadataBuf, MetadataClass, StoredMetadata},
 };
 use types::{collection::Collection, metadata::MetadataBuilder};
 
@@ -75,6 +75,10 @@ fn entries_carry_the_stored_length_and_trailer_hash() {
         assert_eq!(
             entry.hash,
             Some(StoredMetadata::trailer_hash(&bytes).expect("trailer"))
+        );
+        assert_eq!(
+            StoredEntry::from_container(7, &MetadataBuf::read(&bytes).expect("readable")),
+            entry
         );
     }
     assert_eq!(

@@ -4,44 +4,173 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{BatchCursor, add_quota, metadata_key, purge::PrivateKey};
-use crate::{Server, cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation};
+use super::{
+    BatchCursor, MetadataViewerEntry, StoredEntries, StoredEntry, add_quota, metadata_key,
+    purge::PrivateKey,
+};
+use crate::{
+    Server, auth::AccountTenantIds, cache::invalidate::CacheInvalidationBuilder,
+    ipc::CacheInvalidation,
+};
 use store::{
     IterateParams,
-    dispatch::DocumentSet,
-    write::{BatchBuilder, LogCollection, metadata::MetadataClass},
+    roaring::RoaringBitmap,
+    write::{BatchBuilder, LogCollection, assert::AssertValue, metadata::MetadataClass},
 };
 use trc::AddContext;
-use types::collection::{Collection, SyncCollection};
+use types::{
+    collection::{Collection, SyncCollection},
+    metadata::MetadataKinds,
+};
 
-impl Server {
-    pub async fn destroy_metadata<I>(
+#[derive(Debug)]
+pub struct ContainerCleanup {
+    collection: Collection,
+    tenant_id: Option<u32>,
+    entries: StoredEntries,
+}
+
+struct QuotaRefund {
+    tenant_id: Option<u32>,
+    bytes: i64,
+}
+
+impl ContainerCleanup {
+    pub fn empty(collection: Collection) -> Self {
+        ContainerCleanup {
+            collection,
+            tenant_id: None,
+            entries: StoredEntries::default(),
+        }
+    }
+
+    pub fn release_or_assert_absent(
         &self,
         batch: &mut BatchBuilder,
         account_id: u32,
-        tenant_id: Option<u32>,
-        collection: Collection,
-        documents: &I,
-    ) -> trc::Result<()>
-    where
-        I: DocumentSet + Send + Sync,
-    {
-        let shared = self
-            .stored_entries(account_id, collection, MetadataClass::Shared, documents)
-            .await?;
-        if shared.is_empty() {
-            return Ok(());
+        document_id: u32,
+    ) {
+        if !self.release(batch, account_id, document_id) {
+            batch
+                .with_account_id(account_id)
+                .with_collection(self.collection)
+                .with_document(document_id)
+                .assert_value(MetadataClass::Shared, AssertValue::None);
         }
+    }
 
-        let cursor = BatchCursor::save(batch);
+    fn release(&self, batch: &mut BatchBuilder, account_id: u32, document_id: u32) -> bool {
+        let Some(entry) = self.entries.get(document_id) else {
+            return false;
+        };
         batch
             .with_account_id(account_id)
-            .with_collection(collection);
-        for entry in &shared {
-            entry.release(batch, tenant_id);
+            .with_collection(self.collection);
+        entry.release(batch, self.tenant_id);
+        true
+    }
+}
+
+impl Server {
+    pub async fn preload_container_cleanup(
+        &self,
+        changed_by: Option<AccountTenantIds>,
+        account_id: u32,
+        collection: Collection,
+        flagged: &RoaringBitmap,
+    ) -> trc::Result<ContainerCleanup> {
+        if flagged.is_empty() {
+            return Ok(ContainerCleanup::empty(collection));
         }
-        cursor.restore(batch);
+        let entries = self
+            .stored_metadata_entries(account_id, collection, flagged)
+            .await
+            .caused_by(trc::location!())?;
+        self.container_cleanup(changed_by, account_id, collection, entries)
+            .await
+    }
+
+    pub async fn container_cleanup_from(
+        &self,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        collection: Collection,
+        entries: impl IntoIterator<Item = StoredEntry>,
+    ) -> trc::Result<ContainerCleanup> {
+        self.container_cleanup(
+            Some(changed_by),
+            account_id,
+            collection,
+            entries.into_iter().collect(),
+        )
+        .await
+    }
+
+    async fn container_cleanup(
+        &self,
+        changed_by: Option<AccountTenantIds>,
+        account_id: u32,
+        collection: Collection,
+        entries: StoredEntries,
+    ) -> trc::Result<ContainerCleanup> {
+        let tenant_id = if entries.is_empty() {
+            None
+        } else {
+            self.owner_tenant(changed_by, account_id).await?
+        };
+        Ok(ContainerCleanup {
+            collection,
+            tenant_id,
+            entries,
+        })
+    }
+
+    pub async fn release_or_read(
+        &self,
+        cleanup: &ContainerCleanup,
+        batch: &mut BatchBuilder,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        kinds: MetadataKinds,
+    ) -> trc::Result<()> {
+        if cleanup.release(batch, account_id, document_id) || kinds.is_empty() {
+            return Ok(());
+        }
+        let tenant_id = self.owner_tenant(Some(changed_by), account_id).await?;
+        if let Some(entry) = self
+            .stored_entry(
+                account_id,
+                cleanup.collection,
+                MetadataClass::Shared,
+                document_id,
+            )
+            .await
+            .caused_by(trc::location!())?
+        {
+            let cursor = BatchCursor::save(batch);
+            batch
+                .with_account_id(account_id)
+                .with_collection(cleanup.collection);
+            entry.release(batch, tenant_id);
+            cursor.restore(batch);
+        }
         Ok(())
+    }
+
+    async fn owner_tenant(
+        &self,
+        changed_by: Option<AccountTenantIds>,
+        account_id: u32,
+    ) -> trc::Result<Option<u32>> {
+        match changed_by {
+            Some(changed_by) if changed_by.account_id == account_id => Ok(changed_by.tenant_id),
+            _ => self
+                .account(account_id)
+                .await
+                .caused_by(trc::location!())
+                .map(|account| account.id_tenant),
+        }
     }
 
     pub async fn destroy_viewer_metadata(&self, viewer_id: u32) -> trc::Result<()> {
@@ -94,10 +223,11 @@ impl Server {
     }
 
     pub async fn destroy_owner_metadata(&self, owner_id: u32) -> trc::Result<()> {
-        let viewers = self.all_metadata_viewers(owner_id).await?;
+        let mut viewers = self.all_metadata_viewers(owner_id).await?;
         if viewers.is_empty() {
             return Ok(());
         }
+        viewers.sort_unstable_by_key(|link| link.viewer_id);
 
         let mut usage: Vec<(u32, i64)> = Vec::new();
         self.core
@@ -112,7 +242,8 @@ impl Server {
                         u32::MAX,
                         MetadataClass::Private { viewer: u32::MAX },
                     ),
-                ),
+                )
+                .ascending(),
                 |key, value| {
                     let viewer_id = PrivateKey::parse(key)?.viewer_id;
                     let size = value.len() as i64;
@@ -127,29 +258,39 @@ impl Server {
             .add_context(|err| err.caused_by(trc::location!()).account_id(owner_id))?;
 
         let mut batch = BatchBuilder::new();
-        for (viewer_id, total) in usage {
-            if let Some(account) = self.try_account(viewer_id).await? {
-                batch.with_account_id(viewer_id);
-                add_quota(&mut batch, account.id_tenant, -total);
-            }
-        }
-
         let mut invalidations = CacheInvalidationBuilder::default();
-        for entry in &viewers {
-            batch
-                .with_account_id(entry.viewer_id)
-                .with_collection(entry.collection)
-                .clear(MetadataClass::Owner { owner: owner_id });
-            invalidations.invalidate(CacheInvalidation::PrivateMetadata(entry.viewer_id));
+        for links in viewers.chunk_by(|a, b| a.viewer_id == b.viewer_id) {
+            let Some(viewer_id) = links.first().map(|link| link.viewer_id) else {
+                continue;
+            };
+            let bytes = usage
+                .binary_search_by_key(&viewer_id, |(viewer_id, _)| *viewer_id)
+                .ok()
+                .and_then(|position| usage.get(position))
+                .map_or(0, |(_, bytes)| *bytes);
+            let refund = if bytes != 0 {
+                self.try_account(viewer_id)
+                    .await?
+                    .map(|account| QuotaRefund {
+                        tenant_id: account.id_tenant,
+                        bytes,
+                    })
+            } else {
+                None
+            };
+            release_viewer(&mut batch, owner_id, links, refund);
+            invalidations.invalidate(CacheInvalidation::PrivateMetadata(viewer_id));
         }
 
-        self.core
+        let result = self
+            .core
             .storage
             .data
             .write_batch(&mut batch)
             .await
-            .caused_by(trc::location!())?;
-        self.invalidate_caches(invalidations).await
+            .caused_by(trc::location!());
+        self.invalidate_caches(invalidations).await?;
+        result.map(|_| ())
     }
 
     pub async fn metadata_used_quota(&self, account_id: u32) -> trc::Result<i64> {
@@ -190,3 +331,33 @@ impl Server {
         Ok(total)
     }
 }
+
+fn release_viewer(
+    batch: &mut BatchBuilder,
+    owner_id: u32,
+    links: &[MetadataViewerEntry],
+    refund: Option<QuotaRefund>,
+) {
+    let Some(viewer_id) = links.first().map(|link| link.viewer_id) else {
+        return;
+    };
+    batch.with_account_id(viewer_id);
+    if let Some(refund) = refund {
+        add_quota(batch, refund.tenant_id, -refund.bytes);
+    }
+    for link in links {
+        batch
+            .with_collection(link.collection)
+            .clear(MetadataClass::Owner { owner: owner_id });
+    }
+    batch.with_account_id(owner_id);
+    for link in links {
+        batch
+            .with_collection(link.collection)
+            .clear(MetadataClass::Viewer { viewer: viewer_id });
+    }
+    batch.commit_point();
+}
+
+#[cfg(test)]
+mod tests;

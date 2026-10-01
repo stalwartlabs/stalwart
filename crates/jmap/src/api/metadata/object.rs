@@ -9,7 +9,7 @@ use super::{
     MetadataQuery, MetadataSupport, MetadataType, MetadataValues, PreloadedContainers,
     PrivateCandidates, uses_metadata,
 };
-use crate::changes::state::MetadataStateManager;
+use crate::changes::state::{MetadataStateManager, ViewerChangeId};
 use common::{
     Server,
     auth::AccessToken,
@@ -19,9 +19,10 @@ use jmap_proto::{
     error::set::SetError,
     object::metadata::{MetadataFilter, MetadataProperty, MetadataSelection},
     request::{MaybeInvalid, capability::CapabilityIds},
-    types::state::State,
 };
 use jmap_tools::{Element, Value};
+use registry::schema::enums::Permission;
+use std::borrow::Borrow;
 use store::roaring::RoaringBitmap;
 use trc::AddContext;
 use types::{collection::Collection, id::Id, metadata::MetadataKinds};
@@ -31,13 +32,14 @@ use utils::map::vec_map::VecMap;
 pub struct ObjectMetadata {
     object: MetadataType,
     support: Option<MetadataSupport>,
+    caller_id: u32,
     client: MetadataClient,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum MetadataClient {
     Aware { viewer: Option<MetadataViewer> },
-    Unaware { reader_id: u32 },
+    Unaware,
 }
 
 impl ObjectMetadata {
@@ -47,17 +49,18 @@ impl ObjectMetadata {
         using: CapabilityIds,
         object: MetadataType,
     ) -> Self {
+        let viewer = server.metadata_viewer(access_token, Permission::JmapMetadataPrivate);
+        let support = MetadataSupport::new(&server.core.metadata, access_token, object, viewer);
         ObjectMetadata {
             object,
-            support: MetadataSupport::new(&server.core.metadata, access_token, object),
+            support,
+            caller_id: access_token.account_id(),
             client: if uses_metadata(using) {
                 MetadataClient::Aware {
-                    viewer: server.jmap_metadata_viewer(access_token, using, object.data_type()),
+                    viewer: viewer.filter(|_| support.is_some()),
                 }
             } else {
-                MetadataClient::Unaware {
-                    reader_id: access_token.account_id(),
-                }
+                MetadataClient::Unaware
             },
         }
     }
@@ -65,15 +68,19 @@ impl ObjectMetadata {
     pub fn support(&self) -> Option<&MetadataSupport> {
         match self.client {
             MetadataClient::Aware { .. } => self.support.as_ref(),
-            MetadataClient::Unaware { .. } => None,
+            MetadataClient::Unaware => None,
         }
     }
 
     pub fn viewer(&self) -> Option<MetadataViewer> {
         match self.client {
             MetadataClient::Aware { viewer } => viewer,
-            MetadataClient::Unaware { .. } => None,
+            MetadataClient::Unaware => None,
         }
+    }
+
+    pub fn caller_id(&self) -> u32 {
+        self.caller_id
     }
 
     pub fn collection(&self) -> Collection {
@@ -93,32 +100,13 @@ impl ObjectMetadata {
         }
     }
 
-    pub async fn state(
+    pub async fn viewer_change_id(
         &self,
         server: &Server,
         account_id: u32,
-        shared: State,
-    ) -> trc::Result<State> {
+    ) -> trc::Result<ViewerChangeId> {
         server
-            .metadata_state(self.viewer(), account_id, self.collection(), shared)
-            .await
-    }
-
-    pub async fn assert_state(
-        &self,
-        server: &Server,
-        account_id: u32,
-        shared: State,
-        if_in_state: &Option<State>,
-    ) -> trc::Result<State> {
-        server
-            .assert_metadata_state(
-                self.viewer(),
-                account_id,
-                self.collection(),
-                shared,
-                if_in_state,
-            )
+            .viewer_change_id(self.viewer(), account_id, self.collection())
             .await
     }
 
@@ -179,7 +167,8 @@ impl ObjectMetadata {
         preload: MetadataPreload,
     ) -> trc::Result<PreloadedContainers> {
         let collection = self.collection();
-        let shared = MetadataContainers::load(server, account_id, collection, &preload.shared)
+        let shared = server
+            .load_metadata_containers(account_id, collection, &preload.shared)
             .await
             .caused_by(trc::location!())?;
         let private_viewer = if preload.private.is_empty() {
@@ -189,15 +178,18 @@ impl ObjectMetadata {
                 .await?
                 .map(|candidates| candidates.viewer_id)
         };
-        let private = MetadataContainers::load_private(
-            server,
-            account_id,
-            private_viewer,
-            collection,
-            &preload.private,
-        )
-        .await
-        .caused_by(trc::location!())?;
+        let private = match private_viewer {
+            Some(viewer_id) => server
+                .load_private_metadata_containers(
+                    account_id,
+                    viewer_id,
+                    collection,
+                    &preload.private,
+                )
+                .await
+                .caused_by(trc::location!())?,
+            None => MetadataContainers::default(),
+        };
         Ok(PreloadedContainers { shared, private })
     }
 
@@ -224,7 +216,7 @@ impl ObjectMetadata {
                     .await?
                     .map(|candidates| candidates.viewer_id),
                 MetadataClient::Aware { viewer: None } => None,
-                MetadataClient::Unaware { reader_id } => Some(reader_id),
+                MetadataClient::Unaware => Some(self.caller_id),
             }
         } else {
             None
@@ -240,27 +232,31 @@ impl ObjectMetadata {
         MetadataQuery::new(self.support(), filters)
     }
 
-    pub async fn evaluate(
+    pub async fn evaluate<B: Borrow<RoaringBitmap>>(
         &self,
         server: &Server,
         account_id: u32,
         query: &MetadataQuery,
-        shared: impl FnOnce() -> RoaringBitmap,
+        shared: impl FnOnce() -> B,
     ) -> trc::Result<Vec<RoaringBitmap>> {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let shared = if query.has_shared() {
-            shared()
-        } else {
-            RoaringBitmap::new()
-        };
+        let shared = query.has_shared().then(shared);
         let private = if query.has_private() {
             self.private_candidates(server, account_id).await?
         } else {
             None
         };
-        query.evaluate(server, account_id, &shared, private).await
+        let empty = RoaringBitmap::new();
+        query
+            .evaluate(
+                server,
+                account_id,
+                shared.as_ref().map_or(&empty, Borrow::borrow),
+                private,
+            )
+            .await
     }
 }
 

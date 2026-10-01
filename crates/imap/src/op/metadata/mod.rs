@@ -25,7 +25,7 @@ use compact_str::CompactString;
 use email::cache::mailbox::MailboxCacheAccess;
 use imap_proto::{
     Command, ResponseCode,
-    protocol::metadata::{EntryValue, MetadataCode},
+    protocol::metadata::{Depth, Entry, EntryValue, MetadataCode, Scope},
     receiver::Request,
 };
 use registry::schema::enums::Permission;
@@ -182,6 +182,12 @@ fn mailbox_rights(
     }
 }
 
+fn reads_private_container(entries: &[Entry<'_>], depth: Depth) -> bool {
+    entries.iter().any(|entry| {
+        entry.scope == Scope::Private && (depth != Depth::Zero || entry.path != SPECIAL_USE_ENTRY)
+    })
+}
+
 fn special_use_value(role: SpecialUse) -> Option<&'static [u8]> {
     AccountView::special_use_attribute(&role).map(|attribute| attribute.as_bytes())
 }
@@ -207,8 +213,6 @@ fn metadata_error(tag: &str, code: MetadataCode) -> trc::Error {
         .id(CompactString::from(tag))
 }
 
-fn owned_entries<'x>(
-    entries: impl IntoIterator<Item = EntryValue<'x>>,
-) -> Vec<EntryValue<'static>> {
-    entries.into_iter().map(EntryValue::into_owned).collect()
+fn owned_entries(entries: Vec<EntryValue<'_>>) -> Option<Box<[EntryValue<'static>]>> {
+    (!entries.is_empty()).then(|| entries.into_iter().map(EntryValue::into_owned).collect())
 }

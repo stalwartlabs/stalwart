@@ -415,8 +415,8 @@ impl NodePatch {
         }
 
         if let Some(role) = self.role {
-            effects.role = node.role != role;
-            node.role = role;
+            effects.role = node.role() != role;
+            node.set_role(role);
         }
         if let Some(name) = self.name
             && name != node.name

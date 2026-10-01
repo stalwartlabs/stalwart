@@ -6,20 +6,16 @@
 
 use crate::{
     api::metadata::{
-        ContainerTarget, MetadataAccess, MetadataPatches, MetadataType, ObjectMetadata,
+        MetadataAccess, MetadataPatches, MetadataTarget, MetadataType, MetadataWriter, NewMetadata,
+        ObjectMetadata,
     },
     blob::download::BlobDownload,
-    changes::state::{JmapCacheState, MetadataStateManager},
+    changes::state::JmapCacheState,
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
 use common::{
-    MAX_RECEIVED_AT, MessageUid, Server,
-    auth::{AccessToken, AccountCache},
-    ipc::PushNotification,
-    storage::{
-        index::ObjectIndexBuilder,
-        metadata::{MetadataLog, PrivateMetadataCommit},
-    },
+    MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken, ipc::PushNotification,
+    storage::index::ObjectIndexBuilder,
 };
 use email::message::headers::{BuildHeader, ValueToHeader};
 use email::{
@@ -28,7 +24,6 @@ use email::{
     message::{
         delete::EmailDeletion,
         ingest::{EmailIngest, IngestEmail, IngestSource},
-        ingest_metadata::IngestMetadata,
         messagedata::{KeywordDiff, PendingMessageData, merge_keywords},
     },
     presence::update_email_presence,
@@ -53,7 +48,7 @@ use mail_builder::{
 };
 use mail_parser::MessageParser;
 use std::future::Future;
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap};
 use store::{
     ahash::AHashMap,
     roaring::RoaringBitmap,
@@ -88,27 +83,18 @@ impl EmailSet for Server {
     ) -> trc::Result<SetResponse<Email>> {
         // Prepare response
         let account_id = request.account_id.document_id();
+        let mut metadata_writer = MetadataWriter::new(
+            ObjectMetadata::new(self, access_token, using, MetadataType::Email),
+            account_id,
+        );
+        let sampled = metadata_writer
+            .metadata()
+            .viewer_change_id(self, account_id)
+            .await?;
         let cache = self.get_cached_messages(account_id).await?;
-        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
-        let viewer = object_metadata.viewer();
-        let shared_state = cache.get_state(false);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(
-                self.assert_metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::Email,
-                    shared_state.clone(),
-                    &request.if_in_state,
-                )
-                .await?,
-            );
-        let metadata_support = object_metadata.support();
-        let mut owner_account: Option<Arc<AccountCache>> = None;
+            .with_state(sampled.assert_state(cache.get_state(false), &request.if_in_state)?);
         let mut readable_mailbox_ids: Option<RoaringBitmap> = None;
-        let mut private_batch = BatchBuilder::new();
-        let mut private_commit = PrivateMetadataCommit::default();
-        let mut will_update_private = Vec::new();
 
         // Obtain mailboxIds
         let (can_add_mailbox_ids, can_delete_mailbox_ids, can_modify_mailbox_ids) =
@@ -152,7 +138,7 @@ impl EmailSet for Server {
         // Process creates
         'create: for (id, mut object) in request.unwrap_create() {
             let metadata_patches =
-                match object_metadata.extract(MetadataPatches::for_create(), &mut object) {
+                match metadata_writer.extract(MetadataPatches::for_create(), &mut object) {
                     Ok(patches) => patches,
                     Err(err) => {
                         response.not_created.append(id, err);
@@ -776,12 +762,6 @@ impl EmailSet for Server {
 
             let ingest_metadata = match metadata_patches {
                 Some(metadata_patches) => {
-                    let Some(support) = metadata_support else {
-                        response
-                            .not_created
-                            .append(id, metadata_patches.unsupported());
-                        continue 'create;
-                    };
                     let access = MetadataAccess {
                         may_write_shared: can_modify_mailbox_ids
                             .as_ref()
@@ -795,39 +775,14 @@ impl EmailSet for Server {
                                     .contains(*mailbox_id)
                             }),
                     };
-                    let update = match metadata_patches.apply(support, access, None, None) {
-                        Ok(update) => update,
+                    match metadata_writer
+                        .prepare_ingest(self, NewMetadata::Create(metadata_patches), access)
+                        .await?
+                    {
+                        Ok(metadata) => metadata,
                         Err(err) => {
                             response.not_created.append(id, err);
                             continue 'create;
-                        }
-                    };
-                    if update.is_empty() {
-                        None
-                    } else {
-                        let owner = match &owner_account {
-                            Some(owner) => owner.clone(),
-                            None => owner_account
-                                .insert(self.account(account_id).await.caused_by(trc::location!())?)
-                                .clone(),
-                        };
-                        match update
-                            .prepare_detached(
-                                self,
-                                ContainerTarget {
-                                    owner: &owner,
-                                    viewer_id: access_token.account_id(),
-                                    collection: Collection::Email,
-                                    log: MetadataLog::None,
-                                },
-                            )
-                            .await?
-                        {
-                            Ok(detached) => IngestMetadata::new(detached.shared, detached.private),
-                            Err(err) => {
-                                response.not_created.append(id, err);
-                                continue 'create;
-                            }
                         }
                     }
                 }
@@ -877,13 +832,16 @@ impl EmailSet for Server {
             let mut raw_message = Vec::with_capacity((4 * size_attachments / 3) + 1024);
             builder.write_to(&mut raw_message).unwrap_or_default();
 
-            let message = MessageParser::new().parse(&raw_message);
-            if let Some(message) = &message
-                && let Err(err) = self.core.email.limits.validate_header_section(message)
-            {
-                response.not_created.append(id, err.into());
-                continue 'create;
-            }
+            let message = match MessageParser::new().parse(&raw_message) {
+                Some(message) => {
+                    if let Err(err) = self.core.email.limits.validate_header_section(&message) {
+                        response.not_created.append(id, err.into());
+                        continue 'create;
+                    }
+                    Some(message)
+                }
+                None => None,
+            };
 
             // Ingest message
             match self
@@ -923,17 +881,18 @@ impl EmailSet for Server {
         // Process updates
         let mut batch = BatchBuilder::new();
         let mut changed_mailboxes: AHashMap<u32, Vec<u32>> = AHashMap::new();
+        let mut update_mailboxes: Vec<(u32, Option<u32>)> = Vec::new();
         let mut will_update = Vec::with_capacity(request.update.as_ref().map_or(0, |u| u.len()));
-        let mut commit = PrivateMetadataCommit::default();
+        let mut has_shared_updates = false;
         let mut shared_updates_committed = false;
-        let containers = object_metadata
-            .preload_updates(self, account_id, request.update.as_ref(), |document_id| {
+        metadata_writer
+            .preload_updates(self, request.update.as_ref(), |document_id| {
                 cache
                     .email_by_id(&document_id)
                     .map(|email| cache.metadata_kinds(email))
             })
             .await?;
-        'update: for (id, mut object) in request.unwrap_update() {
+        'update: for (id, object) in request.unwrap_update() {
             let id = match id {
                 MaybeInvalid::Value(id) => id,
                 invalid => {
@@ -946,154 +905,128 @@ impl EmailSet for Server {
                 response.not_updated.append(id, SetError::will_destroy());
                 continue 'update;
             }
-            let metadata_patches =
-                match object_metadata.extract(MetadataPatches::for_update(), &mut object) {
-                    Ok(patches) => patches,
-                    Err(err) => {
-                        response.not_updated.append(id, err);
-                        continue 'update;
-                    }
-                };
-
-            // Obtain message data
             let document_id = id.document_id();
-            let Some(data) = cache.message_data(document_id) else {
-                response.not_updated.append(id, SetError::not_found());
-                continue 'update;
-            };
-            let mut new_data = data.clone();
-            let mut has_keyword_replace = false;
+            let (current_kinds, metadata_writes, has_mailbox_changes, train_spam) = {
+                let mut object = object;
+                let metadata_patches =
+                    match metadata_writer.extract(MetadataPatches::for_update(), &mut object) {
+                        Ok(patches) => patches,
+                        Err(err) => {
+                            response.not_updated.append(id, err);
+                            continue 'update;
+                        }
+                    };
 
-            for (property, mut value) in object.into_expanded_object() {
-                if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
-                    response.not_updated.append(id, err);
+                // Obtain message data
+                let Some(data) = cache.message_data(document_id) else {
+                    response.not_updated.append(id, SetError::not_found());
                     continue 'update;
                 };
+                let mut new_data = data.clone();
+                let mut has_keyword_replace = false;
 
-                match (property, value) {
-                    (Key::Property(EmailProperty::MailboxIds), Value::Object(ids)) => {
-                        new_data.set_mailboxes(
-                            ids.into_expanded_boolean_set()
-                                .filter_map(|id| {
-                                    let mailbox_id =
-                                        id.try_into_property()?.try_into_id()?.document_id();
-                                    MessageUid::new(
-                                        mailbox_id,
-                                        data.message_uid(mailbox_id).unwrap_or(0),
-                                    )
-                                    .into()
-                                })
-                                .collect(),
-                        );
-                    }
-                    (Key::Property(EmailProperty::Keywords), Value::Object(keywords_)) => {
-                        has_keyword_replace = true;
-                        new_data.set_keywords(
-                            keywords_
-                                .into_expanded_boolean_set()
-                                .filter_map(|keyword| {
-                                    keyword.try_into_property()?.try_into_keyword()
-                                })
-                                .collect(),
-                        );
-                    }
-                    (Key::Property(EmailProperty::Pointer(pointer)), value) => {
-                        match handle_email_patch(&pointer, value) {
-                            PatchResult::SetKeyword(keyword) => {
-                                new_data.add_keyword(keyword.clone());
+                for (property, mut value) in object.into_expanded_object() {
+                    if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
+                        response.not_updated.append(id, err);
+                        continue 'update;
+                    };
+
+                    match (property, value) {
+                        (Key::Property(EmailProperty::MailboxIds), Value::Object(ids)) => {
+                            new_data.set_mailboxes(
+                                ids.into_expanded_boolean_set()
+                                    .filter_map(|id| {
+                                        let mailbox_id =
+                                            id.try_into_property()?.try_into_id()?.document_id();
+                                        MessageUid::new(
+                                            mailbox_id,
+                                            data.message_uid(mailbox_id).unwrap_or(0),
+                                        )
+                                        .into()
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        (Key::Property(EmailProperty::Keywords), Value::Object(keywords_)) => {
+                            has_keyword_replace = true;
+                            new_data.set_keywords(
+                                keywords_
+                                    .into_expanded_boolean_set()
+                                    .filter_map(|keyword| {
+                                        keyword.try_into_property()?.try_into_keyword()
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        (Key::Property(EmailProperty::Pointer(pointer)), value) => {
+                            match handle_email_patch(&pointer, value) {
+                                PatchResult::SetKeyword(keyword) => {
+                                    new_data.add_keyword(keyword.clone());
+                                }
+                                PatchResult::RemoveKeyword(keyword) => {
+                                    new_data.remove_keyword(keyword);
+                                }
+                                PatchResult::AddMailbox(id) => {
+                                    new_data.add_mailbox(MessageUid::new_unassigned(id));
+                                }
+                                PatchResult::RemoveMailbox(id) => {
+                                    new_data.remove_mailbox(id);
+                                }
+                                PatchResult::Invalid(set_error) => {
+                                    response.not_updated.append(id, set_error);
+                                    continue 'update;
+                                }
                             }
-                            PatchResult::RemoveKeyword(keyword) => {
-                                new_data.remove_keyword(keyword);
-                            }
-                            PatchResult::AddMailbox(id) => {
-                                new_data.add_mailbox(MessageUid::new_unassigned(id));
-                            }
-                            PatchResult::RemoveMailbox(id) => {
-                                new_data.remove_mailbox(id);
-                            }
-                            PatchResult::Invalid(set_error) => {
-                                response.not_updated.append(id, set_error);
+                        }
+                        (Key::Property(EmailProperty::Id), value) => {
+                            if !crate::matches_id(&value, id) {
+                                response.not_updated.append(
+                                    id,
+                                    SetError::invalid_properties()
+                                        .with_property(EmailProperty::Id)
+                                        .with_description("The id property is immutable."),
+                                );
                                 continue 'update;
                             }
                         }
-                    }
-                    (Key::Property(EmailProperty::Id), value) => {
-                        if !crate::matches_id(&value, id) {
-                            response.not_updated.append(
-                                id,
-                                SetError::invalid_properties()
-                                    .with_property(EmailProperty::Id)
-                                    .with_description("The id property is immutable."),
-                            );
+                        (property, _) => {
+                            response.invalid_property_update(id, property.into_owned());
                             continue 'update;
                         }
                     }
-                    (property, _) => {
-                        response.invalid_property_update(id, property.into_owned());
-                        continue 'update;
-                    }
                 }
-            }
 
-            let current_kinds = data.metadata_kinds();
-            let mut shared_kinds = None;
-            let metadata_writes = if let Some(metadata_patches) = metadata_patches {
-                let Some(support) = metadata_support else {
-                    response
-                        .not_updated
-                        .append(id, metadata_patches.unsupported());
-                    continue 'update;
-                };
-                let access = MetadataAccess {
-                    may_write_shared: can_modify_mailbox_ids.as_ref().is_none_or(|ids| {
-                        data.mailboxes
-                            .iter()
-                            .any(|mailbox| ids.contains(mailbox.mailbox_id))
-                    }),
-                    may_read: !access_token.is_shared(account_id)
-                        || data.mailboxes.iter().any(|mailbox| {
-                            readable_mailbox_ids
-                                .get_or_insert_with(|| {
-                                    cache.shared_mailboxes(access_token, Acl::ReadItems)
-                                })
-                                .contains(mailbox.mailbox_id)
+                let current_kinds = data.metadata_kinds();
+                let mut shared_kinds = None;
+                let metadata_writes = if let Some(metadata_patches) = metadata_patches {
+                    let access = MetadataAccess {
+                        may_write_shared: can_modify_mailbox_ids.as_ref().is_none_or(|ids| {
+                            data.mailboxes
+                                .iter()
+                                .any(|mailbox| ids.contains(mailbox.mailbox_id))
                         }),
-                };
-                let update = match metadata_patches.apply(
-                    support,
-                    access,
-                    containers.shared.get(document_id),
-                    containers.private.get(document_id),
-                ) {
-                    Ok(update) => update,
-                    Err(err) => {
-                        response.not_updated.append(id, err);
-                        continue 'update;
-                    }
-                };
-                if update.is_empty() {
-                    None
-                } else {
-                    let owner = match &owner_account {
-                        Some(owner) => owner.clone(),
-                        None => owner_account
-                            .insert(self.account(account_id).await.caused_by(trc::location!())?)
-                            .clone(),
+                        may_read: !access_token.is_shared(account_id)
+                            || data.mailboxes.iter().any(|mailbox| {
+                                readable_mailbox_ids
+                                    .get_or_insert_with(|| {
+                                        cache.shared_mailboxes(access_token, Acl::ReadItems)
+                                    })
+                                    .contains(mailbox.mailbox_id)
+                            }),
                     };
-                    match update
-                        .prepare(
+                    match metadata_writer
+                        .prepare_for(
                             self,
-                            ContainerTarget {
-                                owner: &owner,
-                                viewer_id: access_token.account_id(),
-                                collection: Collection::Email,
-                                log: MetadataLog::Item {
-                                    prefix: Some(PendingId::Assigned(data.thread_id)),
-                                },
+                            metadata_patches,
+                            access,
+                            MetadataTarget::UpdateInThread {
+                                document_id,
+                                thread_id: data.thread_id,
                             },
                         )
                         .await?
                     {
+                        Ok(prepared) if prepared.is_empty() => None,
                         Ok(prepared) => {
                             shared_kinds = prepared.shared_kinds();
                             Some(prepared)
@@ -1103,229 +1036,228 @@ impl EmailSet for Server {
                             continue 'update;
                         }
                     }
-                }
-            } else {
-                None
-            };
+                } else {
+                    None
+                };
 
-            let has_keyword_changes = new_data.has_keyword_changes(&data);
-            let has_mailbox_changes = new_data.has_mailbox_changes(&data);
-            if !has_keyword_changes && !has_mailbox_changes {
-                match metadata_writes {
-                    Some(prepared) if prepared.is_private_only() => {
-                        prepared
-                            .build(document_id, &mut private_batch, &mut private_commit)
-                            .caused_by(trc::location!())?;
-                        private_batch.commit_point();
-                        will_update_private.push(id);
-                    }
-                    Some(prepared) => {
-                        if let Some(presence) = prepared
-                            .build(document_id, &mut batch, &mut commit)
-                            .caused_by(trc::location!())?
-                        {
-                            update_email_presence(
-                                &mut batch,
-                                account_id,
-                                document_id,
-                                current_kinds,
-                                presence,
-                            );
+                let has_keyword_changes = new_data.has_keyword_changes(&data);
+                let has_mailbox_changes = new_data.has_mailbox_changes(&data);
+                if !has_keyword_changes && !has_mailbox_changes {
+                    match metadata_writes {
+                        Some(prepared) => {
+                            has_shared_updates |= !prepared.is_private_only();
+                            if let Some(presence) = metadata_writer
+                                .write(prepared, document_id, &mut batch)
+                                .caused_by(trc::location!())?
+                            {
+                                update_email_presence(
+                                    &mut batch,
+                                    account_id,
+                                    document_id,
+                                    current_kinds,
+                                    presence,
+                                );
+                            }
+                            batch.commit_point();
+                            will_update.push(id);
                         }
-                        batch.commit_point();
-                        will_update.push(id);
+                        None => {
+                            response.updated.append(id, None);
+                        }
                     }
-                    None => {
-                        response.updated.append(id, None);
-                    }
-                }
-                continue 'update;
-            }
-
-            // Validate per-email limits
-            if let Err(err) = new_data.validate_limits(&data, &self.core.email.limits) {
-                response.not_updated.append(id, err.into());
-                continue 'update;
-            }
-
-            // Process keywords
-            let mut train_spam = None;
-            if has_keyword_changes {
-                // Verify permissions on shared accounts
-                if can_modify_mailbox_ids.as_ref().is_some_and(|ids| {
-                    !new_data
-                        .mailboxes
-                        .iter()
-                        .any(|mb| ids.contains(mb.mailbox_id))
-                }) {
-                    response.not_updated.append(
-                        id,
-                        SetError::forbidden()
-                            .with_description("You are not allowed to modify keywords."),
-                    );
                     continue 'update;
                 }
 
-                // Process keyword changes
-                let mut changed_seen = false;
-                for keyword in new_data.added_keywords(&data) {
-                    match keyword {
-                        Keyword::Seen => {
-                            changed_seen = true;
-                        }
-                        Keyword::Junk => {
-                            train_spam = Some(true);
-                        }
-                        Keyword::NotJunk => {
-                            train_spam = Some(false);
-                        }
-                        _ => {}
-                    }
-                }
-                for keyword in new_data.removed_keywords(&data) {
-                    match keyword {
-                        Keyword::Seen => {
-                            changed_seen = true;
-                        }
-                        Keyword::Junk if train_spam.is_none() => {
-                            train_spam = Some(false);
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Set all current mailboxes as changed if the Seen tag changed
-                if changed_seen {
-                    for mailbox_id in new_data.mailboxes.iter() {
-                        changed_mailboxes.insert(mailbox_id.mailbox_id, Vec::new());
-                    }
-                }
-            }
-
-            // Process mailboxes
-            let mut uid_slots = SlotRange::default();
-            if has_mailbox_changes {
-                // Make sure the message is at least in one mailbox
-                if new_data.mailboxes.is_empty() {
-                    response.not_updated.append(
-                        id,
-                        SetError::invalid_properties()
-                            .with_property(EmailProperty::MailboxIds)
-                            .with_description("Message has to belong to at least one mailbox."),
-                    );
+                // Validate per-email limits
+                if let Err(err) = new_data.validate_limits(&data, &self.core.email.limits) {
+                    response.not_updated.append(id, err.into());
                     continue 'update;
                 }
 
-                // Make sure all new mailboxIds are valid
-                for mailbox_id in new_data.added_mailboxes(&data) {
-                    if cache.has_mailbox_id(&mailbox_id.mailbox_id) {
-                        // Verify permissions on shared accounts
-                        if can_add_mailbox_ids
-                            .as_ref()
-                            .is_none_or(|ids| ids.contains(mailbox_id.mailbox_id))
-                        {
-                            if mailbox_id.mailbox_id == JUNK_ID {
+                // Process keywords
+                let mut train_spam = None;
+                update_mailboxes.clear();
+                if has_keyword_changes {
+                    // Verify permissions on shared accounts
+                    if can_modify_mailbox_ids.as_ref().is_some_and(|ids| {
+                        !new_data
+                            .mailboxes
+                            .iter()
+                            .any(|mb| ids.contains(mb.mailbox_id))
+                    }) {
+                        response.not_updated.append(
+                            id,
+                            SetError::forbidden()
+                                .with_description("You are not allowed to modify keywords."),
+                        );
+                        continue 'update;
+                    }
+
+                    // Process keyword changes
+                    let mut changed_seen = false;
+                    for keyword in new_data.added_keywords(&data) {
+                        match keyword {
+                            Keyword::Seen => {
+                                changed_seen = true;
+                            }
+                            Keyword::Junk => {
                                 train_spam = Some(true);
                             }
-
-                            changed_mailboxes.insert(mailbox_id.mailbox_id, Vec::new());
-                        } else {
-                            response.not_updated.append(
-                                id,
-                                SetError::forbidden().with_description(format!(
-                                    "You are not allowed to add messages to mailbox {}.",
-                                    Id::from(mailbox_id.mailbox_id)
-                                )),
-                            );
-                            continue 'update;
+                            Keyword::NotJunk => {
+                                train_spam = Some(false);
+                            }
+                            _ => {}
                         }
-                    } else {
+                    }
+                    for keyword in new_data.removed_keywords(&data) {
+                        match keyword {
+                            Keyword::Seen => {
+                                changed_seen = true;
+                            }
+                            Keyword::Junk if train_spam.is_none() => {
+                                train_spam = Some(false);
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // Set all current mailboxes as changed if the Seen tag changed
+                    if changed_seen {
+                        for mailbox_id in new_data.mailboxes.iter() {
+                            update_mailboxes.push((mailbox_id.mailbox_id, None));
+                        }
+                    }
+                }
+
+                // Process mailboxes
+                let mut uid_slots = SlotRange::default();
+                if has_mailbox_changes {
+                    // Make sure the message is at least in one mailbox
+                    if new_data.mailboxes.is_empty() {
                         response.not_updated.append(
                             id,
                             SetError::invalid_properties()
                                 .with_property(EmailProperty::MailboxIds)
-                                .with_description(format!(
-                                    "mailboxId {} does not exist.",
-                                    Id::from(mailbox_id.mailbox_id)
-                                )),
+                                .with_description("Message has to belong to at least one mailbox."),
                         );
                         continue 'update;
                     }
-                }
 
-                // Add all removed mailboxes to change list
-                for mailbox_id in new_data.removed_mailboxes(&data) {
-                    // Verify permissions on shared accounts
-                    if can_delete_mailbox_ids
-                        .as_ref()
-                        .is_none_or(|ids| ids.contains(mailbox_id.mailbox_id))
-                    {
-                        if mailbox_id.mailbox_id == JUNK_ID
-                            && !new_data
-                                .mailboxes
-                                .iter()
-                                .any(|mb| mb.mailbox_id == TRASH_ID)
-                        {
-                            train_spam = Some(false);
+                    // Make sure all new mailboxIds are valid
+                    for mailbox_id in new_data.added_mailboxes(&data) {
+                        if cache.has_mailbox_id(&mailbox_id.mailbox_id) {
+                            // Verify permissions on shared accounts
+                            if can_add_mailbox_ids
+                                .as_ref()
+                                .is_none_or(|ids| ids.contains(mailbox_id.mailbox_id))
+                            {
+                                if mailbox_id.mailbox_id == JUNK_ID {
+                                    train_spam = Some(true);
+                                }
+
+                                update_mailboxes.push((mailbox_id.mailbox_id, None));
+                            } else {
+                                response.not_updated.append(
+                                    id,
+                                    SetError::forbidden().with_description(format!(
+                                        "You are not allowed to add messages to mailbox {}.",
+                                        Id::from(mailbox_id.mailbox_id)
+                                    )),
+                                );
+                                continue 'update;
+                            }
+                        } else {
+                            response.not_updated.append(
+                                id,
+                                SetError::invalid_properties()
+                                    .with_property(EmailProperty::MailboxIds)
+                                    .with_description(format!(
+                                        "mailboxId {} does not exist.",
+                                        Id::from(mailbox_id.mailbox_id)
+                                    )),
+                            );
+                            continue 'update;
                         }
-
-                        changed_mailboxes
-                            .entry(mailbox_id.mailbox_id)
-                            .or_default()
-                            .push(mailbox_id.uid);
-                    } else {
-                        response.not_updated.append(
-                            id,
-                            SetError::forbidden().with_description(format!(
-                                "You are not allowed to delete messages from mailbox {}.",
-                                mailbox_id.mailbox_id
-                            )),
-                        );
-                        continue 'update;
                     }
+
+                    // Add all removed mailboxes to change list
+                    for mailbox_id in new_data.removed_mailboxes(&data) {
+                        // Verify permissions on shared accounts
+                        if can_delete_mailbox_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(mailbox_id.mailbox_id))
+                        {
+                            if mailbox_id.mailbox_id == JUNK_ID
+                                && !new_data
+                                    .mailboxes
+                                    .iter()
+                                    .any(|mb| mb.mailbox_id == TRASH_ID)
+                            {
+                                train_spam = Some(false);
+                            }
+
+                            update_mailboxes.push((mailbox_id.mailbox_id, Some(mailbox_id.uid)));
+                        } else {
+                            response.not_updated.append(
+                                id,
+                                SetError::forbidden().with_description(format!(
+                                    "You are not allowed to delete messages from mailbox {}.",
+                                    mailbox_id.mailbox_id
+                                )),
+                            );
+                            continue 'update;
+                        }
+                    }
+
+                    // Reserve IMAP UIDs for added mailboxes
+                    uid_slots = batch.reserve_uids(
+                        account_id,
+                        new_data
+                            .mailboxes
+                            .iter()
+                            .filter(|m| m.uid == 0)
+                            .map(|m| m.mailbox_id),
+                    );
                 }
 
-                // Reserve IMAP UIDs for added mailboxes
-                uid_slots = batch.reserve_uids(
-                    account_id,
-                    new_data
-                        .mailboxes
-                        .iter()
-                        .filter(|m| m.uid == 0)
-                        .map(|m| m.mailbox_id),
-                );
-            }
-
-            // Write changes
-            batch
-                .with_account_id(account_id)
-                .with_collection(Collection::Email)
-                .with_document(document_id);
-            if has_mailbox_changes {
-                if let Some(kinds) = shared_kinds {
-                    new_data.set_metadata_kinds(kinds);
-                }
+                // Write changes
                 batch
-                    .custom(ObjectIndexBuilder::new().with_current(data).with_changes(
-                        PendingMessageData {
-                            data: new_data,
-                            uid_slots,
-                            thread_slot: None,
-                            change_id: None,
+                    .with_account_id(account_id)
+                    .with_collection(Collection::Email)
+                    .with_document(document_id);
+                if has_mailbox_changes {
+                    if let Some(kinds) = shared_kinds {
+                        new_data.set_metadata_kinds(kinds);
+                    }
+                    batch
+                        .custom(ObjectIndexBuilder::new().with_current(data).with_changes(
+                            PendingMessageData {
+                                data: new_data,
+                                uid_slots,
+                                thread_slot: None,
+                                change_id: None,
+                            },
+                        ))
+                        .caused_by(trc::location!())?;
+                } else {
+                    merge_keywords(
+                        &mut batch,
+                        data.thread_id,
+                        if has_keyword_replace {
+                            KeywordDiff::replace(new_data.keywords().collect())
+                        } else {
+                            new_data.keyword_diff(&data)
                         },
-                    ))
-                    .caused_by(trc::location!())?;
-            } else {
-                merge_keywords(
-                    &mut batch,
-                    data.thread_id,
-                    if has_keyword_replace {
-                        KeywordDiff::replace(new_data.keywords().collect())
-                    } else {
-                        new_data.keyword_diff(&data)
-                    },
-                );
-            }
+                    );
+                }
+
+                (
+                    current_kinds,
+                    metadata_writes,
+                    has_mailbox_changes,
+                    train_spam,
+                )
+            };
 
             if let Some(train_spam) = train_spam {
                 self.add_account_spam_sample(
@@ -1340,8 +1272,8 @@ impl EmailSet for Server {
             }
 
             if let Some(prepared) = metadata_writes
-                && let Some(presence) = prepared
-                    .build(document_id, &mut batch, &mut commit)
+                && let Some(presence) = metadata_writer
+                    .write(prepared, document_id, &mut batch)
                     .caused_by(trc::location!())?
                 && !has_mailbox_changes
             {
@@ -1349,9 +1281,14 @@ impl EmailSet for Server {
             }
 
             batch.commit_point();
+            for (mailbox_id, uid) in update_mailboxes.drain(..) {
+                changed_mailboxes.entry(mailbox_id).or_default().extend(uid);
+            }
+            has_shared_updates = true;
             will_update.push(id);
         }
 
+        let mut has_private_changes = false;
         if !batch.is_empty() {
             // Log mailbox changes
             for (parent_id, deleted_uids) in changed_mailboxes {
@@ -1364,13 +1301,16 @@ impl EmailSet for Server {
                 }
             }
 
-            match self.commit_batch(batch).await {
+            match metadata_writer.commit(self, batch).await {
                 Ok(assigned_ids) => {
-                    shared_updates_committed = true;
-                    last_change_id = assigned_ids
-                        .last_change_id(account_id, SyncCollection::Email)
-                        .into();
-                    self.private_metadata_committed(commit, &assigned_ids).await;
+                    if has_shared_updates {
+                        shared_updates_committed = true;
+                        last_change_id = assigned_ids
+                            .last_change_id(account_id, SyncCollection::Email)
+                            .into();
+                    } else {
+                        has_private_changes = true;
+                    }
 
                     // Add to updated list
                     for id in will_update {
@@ -1379,33 +1319,6 @@ impl EmailSet for Server {
                 }
                 Err(err) if err.is_assertion_failure() => {
                     for id in will_update {
-                        response.not_updated.append(
-                            id,
-                            SetError::forbidden().with_description(
-                                "Another process modified this message, please try again.",
-                            ),
-                        );
-                    }
-                }
-                Err(err) => {
-                    return Err(err.caused_by(trc::location!()));
-                }
-            }
-        }
-
-        let mut has_private_changes = false;
-        if !private_batch.is_empty() {
-            match self.commit_batch(private_batch).await {
-                Ok(assigned_ids) => {
-                    has_private_changes = true;
-                    self.private_metadata_committed(private_commit, &assigned_ids)
-                        .await;
-                    for id in will_update_private {
-                        response.updated.append(id, None);
-                    }
-                }
-                Err(err) if err.is_assertion_failure() => {
-                    for id in will_update_private {
                         response.not_updated.append(
                             id,
                             SetError::forbidden().with_description(
@@ -1520,14 +1433,11 @@ impl EmailSet for Server {
             .await;
         }
         if last_change_id.is_some() || has_private_changes {
-            response.new_state = self
-                .metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::Email,
-                    last_change_id.map_or(shared_state, State::Exact),
-                )
+            response.new_state = metadata_writer
+                .metadata()
+                .viewer_change_id(self, account_id)
                 .await?
+                .state(last_change_id.map_or_else(|| cache.get_state(false), State::Exact))
                 .into();
         }
 

@@ -7,6 +7,7 @@
 pub mod blob;
 pub mod import_export;
 pub mod lookup;
+pub mod metadata;
 pub mod ops;
 pub mod query;
 pub mod registry;
@@ -27,6 +28,7 @@ pub async fn store_tests() {
     registry::test(&test).await;
     import_export::test(&test).await;
     ops::test(&test).await;
+    metadata::test(&test).await;
     #[cfg(any(feature = "postgres", feature = "mysql"))]
     sql_timeout::test(&test).await;
 

@@ -111,6 +111,10 @@ async fn invalid_patches(ctx: &Ctx<'_>, owner: &Account, parents: &Parents, ty: 
             json!({"privateMetadata/x.example/missing/leaf": 1}),
             SetErrorType::InvalidPatch,
         ),
+        (
+            json!({format!("metadata/x.example{}", "/a".repeat(128)): 1}),
+            SetErrorType::InvalidPatch,
+        ),
     ] {
         ctx.update_err(owner, owner, ty, &id, patch.clone())
             .await

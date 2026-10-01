@@ -548,7 +548,7 @@ async fn create_collections_until_quota(
             created.push(path);
         } else {
             response
-                .with_status(StatusCode::PRECONDITION_FAILED)
+                .with_status(StatusCode::INSUFFICIENT_STORAGE)
                 .with_failed_precondition("D:quota-not-exceeded", "");
             return created;
         }
@@ -569,7 +569,7 @@ async fn put_until_quota(
             created.push(path);
         } else {
             response
-                .with_status(StatusCode::PRECONDITION_FAILED)
+                .with_status(StatusCode::INSUFFICIENT_STORAGE)
                 .with_failed_precondition("D:quota-not-exceeded", "");
             return created;
         }

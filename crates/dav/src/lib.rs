@@ -282,10 +282,7 @@ mod tests {
     fn failed_properties_turn_the_others_into_failed_dependencies() {
         let mut items = PropStatBuilder::default();
         items.insert_ok(DavProperty::WebDav(WebDavProperty::DisplayName));
-        items.insert_with_status(
-            DavProperty::WebDav(WebDavProperty::GetContentType),
-            StatusCode::NO_CONTENT,
-        );
+        items.insert_ok(DavProperty::WebDav(WebDavProperty::GetContentType));
         assert!(!items.has_errors());
         items.insert_precondition_failed(
             DavProperty::WebDav(WebDavProperty::CreationDate),

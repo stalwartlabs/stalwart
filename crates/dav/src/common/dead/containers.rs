@@ -7,7 +7,9 @@
 use common::{
     Server,
     auth::AccountCache,
-    storage::metadata::{MetadataLog, MetadataWrite, StoredContainer, StoredEntry},
+    storage::metadata::{
+        MetadataContainers, MetadataLog, MetadataWrite, StoredContainer, StoredEntry,
+    },
 };
 use std::sync::Arc;
 use store::{
@@ -18,19 +20,19 @@ use store::{
 use trc::AddContext;
 use types::{
     collection::Collection,
-    metadata::{EncodedMetadata, MetadataBuilder, MetadataKinds},
+    metadata::{EncodedMetadata, MetadataKinds},
 };
 
-type ContainerKey = (u32, u8, u32);
+type GroupKey = (u32, Collection);
 
 #[derive(Debug, Default)]
 pub(crate) struct ContainerRequest {
-    groups: AHashMap<(u32, Collection), RoaringBitmap>,
+    groups: AHashMap<GroupKey, RoaringBitmap>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct DeadContainers {
-    containers: AHashMap<ContainerKey, MetadataBuf>,
+    groups: Vec<(GroupKey, MetadataContainers)>,
 }
 
 #[derive(Debug)]
@@ -38,7 +40,6 @@ pub(crate) struct ContainerWrites {
     account_id: u32,
     collection: Collection,
     owner: Option<Arc<AccountCache>>,
-    growth: u64,
 }
 
 impl ContainerRequest {
@@ -54,26 +55,17 @@ impl ContainerRequest {
     }
 
     pub async fn load(self, server: &Server) -> trc::Result<DeadContainers> {
-        let mut containers = AHashMap::new();
-        for ((account_id, collection), documents) in self.groups {
-            let collection_id = u8::from(collection);
-            server
-                .metadata_containers(
-                    account_id,
-                    collection,
-                    &documents,
-                    |document_id, view, stored| {
-                        containers.insert(
-                            (account_id, collection_id, document_id),
-                            MetadataBuf::from_view(&view, stored.size, stored.hash),
-                        );
-                        Ok(true)
-                    },
-                )
+        let mut groups = Vec::new();
+        for (key @ (account_id, collection), documents) in self.groups {
+            let containers = server
+                .load_metadata_containers(account_id, collection, &documents)
                 .await
                 .caused_by(trc::location!())?;
+            if !containers.is_empty() {
+                groups.push((key, containers));
+            }
         }
-        Ok(DeadContainers { containers })
+        Ok(DeadContainers { groups })
     }
 }
 
@@ -84,8 +76,16 @@ impl DeadContainers {
         collection: Collection,
         document_id: u32,
     ) -> Option<&MetadataBuf> {
-        self.containers
-            .get(&(account_id, u8::from(collection), document_id))
+        self.group(account_id, collection)
+            .and_then(|containers| containers.get(document_id))
+    }
+
+    pub fn stored_len(&self) -> u64 {
+        self.groups
+            .iter()
+            .flat_map(|(_, containers)| containers.iter())
+            .map(|(_, container)| u64::from(container.stored_len()))
+            .sum()
     }
 
     pub fn stored_entries(
@@ -93,23 +93,17 @@ impl DeadContainers {
         account_id: u32,
         collection: Collection,
     ) -> impl Iterator<Item = StoredEntry> + '_ {
-        let collection = u8::from(collection);
-        self.containers
-            .iter()
-            .filter(
-                move |((container_account_id, container_collection, _), _)| {
-                    *container_account_id == account_id && *container_collection == collection
-                },
-            )
-            .map(|((_, _, document_id), container)| stored_entry(*document_id, container))
+        self.group(account_id, collection)
+            .into_iter()
+            .flat_map(MetadataContainers::iter)
+            .map(|(document_id, container)| StoredEntry::from_container(document_id, container))
     }
-}
 
-pub(crate) fn stored_entry(document_id: u32, container: &MetadataBuf) -> StoredEntry {
-    StoredEntry {
-        document_id,
-        size: container.stored_len(),
-        hash: Some(container.hash()),
+    fn group(&self, account_id: u32, collection: Collection) -> Option<&MetadataContainers> {
+        self.groups
+            .iter()
+            .find(|(key, _)| *key == (account_id, collection))
+            .map(|(_, containers)| containers)
     }
 }
 
@@ -119,7 +113,6 @@ impl ContainerWrites {
             account_id,
             collection,
             owner: None,
-            growth: 0,
         }
     }
 
@@ -131,13 +124,11 @@ impl ContainerWrites {
         previous: Option<StoredContainer>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
-        self.growth += u64::from(source.stored_len())
-            .saturating_sub(previous.map_or(0, |previous| u64::from(previous.size)));
         self.build(
             server,
             document_id.into(),
             previous,
-            MetadataBuilder::from_view(&source.view()).encode(),
+            EncodedMetadata::from_view(&source.view()),
             batch,
         )
         .await
@@ -154,6 +145,32 @@ impl ContainerWrites {
             .await
     }
 
+    pub async fn release(
+        &mut self,
+        server: &Server,
+        entry: StoredEntry,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<()> {
+        let tenant_id = self.owner(server).await?.id_tenant;
+        batch
+            .with_account_id(self.account_id)
+            .with_collection(self.collection);
+        entry.release(batch, tenant_id);
+        Ok(())
+    }
+
+    async fn owner(&mut self, server: &Server) -> trc::Result<&AccountCache> {
+        match &mut self.owner {
+            Some(owner) => Ok(owner),
+            owner => Ok(owner.insert(
+                server
+                    .account(self.account_id)
+                    .await
+                    .caused_by(trc::location!())?,
+            )),
+        }
+    }
+
     async fn build(
         &mut self,
         server: &Server,
@@ -162,37 +179,38 @@ impl ContainerWrites {
         next: Option<EncodedMetadata>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
-        let owner = match &self.owner {
-            Some(owner) => owner,
-            None => self.owner.insert(
-                server
-                    .account(self.account_id)
-                    .await
-                    .caused_by(trc::location!())?,
-            ),
-        };
+        let tenant_id = self.owner(server).await?.id_tenant;
         MetadataWrite {
             account_id: self.account_id,
-            tenant_id: owner.id_tenant,
+            tenant_id,
             collection: self.collection,
-            document_id,
             previous,
             next,
             log: MetadataLog::None,
         }
-        .build(batch)
+        .build(document_id, batch)
         .caused_by(trc::location!())?;
         Ok(())
     }
+}
 
-    pub async fn finish(self, server: &Server) -> trc::Result<()> {
-        match self.owner {
-            Some(owner) if self.growth > 0 => server
-                .has_available_quota(&owner, self.growth)
-                .await
-                .caused_by(trc::location!()),
-            _ => Ok(()),
-        }
+pub(crate) fn copy_growth(source: &MetadataBuf, previous: Option<&StoredEntry>) -> u64 {
+    u64::from(source.stored_len())
+        .saturating_sub(previous.map_or(0, |previous| u64::from(previous.size)))
+}
+
+pub(crate) async fn check_growth(server: &Server, account_id: u32, growth: u64) -> trc::Result<()> {
+    if growth > 0 {
+        let account = server
+            .account(account_id)
+            .await
+            .caused_by(trc::location!())?;
+        server
+            .has_available_quota(&account, growth)
+            .await
+            .caused_by(trc::location!())
+    } else {
+        Ok(())
     }
 }
 
@@ -212,13 +230,13 @@ pub(crate) async fn read_container(
     }
 }
 
-pub(crate) async fn stored_container(
+pub(crate) async fn stored_entry_of(
     server: &Server,
     account_id: u32,
     collection: Collection,
     document_id: u32,
     kinds: MetadataKinds,
-) -> trc::Result<Option<StoredContainer>> {
+) -> trc::Result<Option<StoredEntry>> {
     if kinds.is_empty() {
         return Ok(None);
     }
@@ -228,26 +246,30 @@ pub(crate) async fn stored_container(
             collection,
             &RoaringBitmap::from_iter([document_id]),
         )
-        .await?
-        .get(document_id)
-        .map(|entry| {
-            entry
-                .hash
-                .map(|hash| StoredContainer {
-                    size: entry.size,
-                    kinds,
-                    hash,
-                })
-                .ok_or_else(|| {
-                    trc::StoreEvent::DataCorruption
-                        .into_err()
-                        .details("Metadata container carries no trailer")
-                        .account_id(account_id)
-                        .document_id(document_id)
-                        .caused_by(trc::location!())
-                })
+        .await
+        .map(|entries| entries.get(document_id).copied())
+}
+
+pub(crate) fn edited_container(
+    entry: StoredEntry,
+    account_id: u32,
+    kinds: MetadataKinds,
+) -> trc::Result<StoredContainer> {
+    entry
+        .hash
+        .map(|hash| StoredContainer {
+            size: entry.size,
+            kinds,
+            hash,
         })
-        .transpose()
+        .ok_or_else(|| {
+            trc::StoreEvent::DataCorruption
+                .into_err()
+                .details("Metadata container carries no trailer")
+                .account_id(account_id)
+                .document_id(entry.document_id)
+                .caused_by(trc::location!())
+        })
 }
 
 pub(crate) fn container_kinds(container: Option<&MetadataBuf>) -> MetadataKinds {

@@ -5,9 +5,10 @@
  */
 
 use super::{
-    DavValueView, EncodedJson, JsonError, JsonKind, LimitViolation, MetadataBuilder, MetadataEdit,
-    MetadataKinds, MetadataLimits, MetadataScope, MetadataView, Namespace, NamespaceError,
-    XmlAttribute, XmlElement, XmlName, XmlNode, XmlValue,
+    DavValueView, EncodedJson, EncodedMetadata, JsonError, JsonKind, JsonView, LimitViolation,
+    MetadataBuilder, MetadataEdit, MetadataKinds, MetadataLimits, MetadataScope, MetadataView,
+    Namespace, NamespaceError, REGISTERED_NAMESPACES, RegisteredNamespace,
+    STORAGE_TRAILER_CAPACITY, XmlAttribute, XmlElement, XmlName, XmlNode, XmlValue,
     codec::{Reader, varint_len, write_varint},
     registry::{known_xml_namespace, known_xml_namespace_count, known_xml_namespace_id},
 };
@@ -223,9 +224,12 @@ fn json_depth_follows_the_draft() {
         max_depth: Some(2),
         ..Default::default()
     };
-    assert_eq!(limits.check_json(&encode(r#"{"x":[{"y":1}]}"#)), Ok(()));
     assert_eq!(
-        limits.check_json(&encode(r#"{"a":{"b":{"c":1}}}"#)),
+        limits.check_depth(encode(r#"{"x":[{"y":1}]}"#).depth()),
+        Ok(())
+    );
+    assert_eq!(
+        limits.check_depth(encode(r#"{"a":{"b":{"c":1}}}"#).depth()),
         Err(LimitViolation::Depth { depth: 3, max: 2 })
     );
     let unlimited = MetadataLimits {
@@ -233,9 +237,50 @@ fn json_depth_follows_the_draft() {
         ..Default::default()
     };
     assert_eq!(
-        unlimited.check_json(&encode(r#"{"a":{"b":{"c":1}}}"#)),
+        unlimited.check_depth(encode(r#"{"a":{"b":{"c":1}}}"#).depth()),
         Ok(())
     );
+}
+
+fn nested_arrays(depth: usize) -> Vec<u8> {
+    let mut bytes = vec![0x00];
+    for _ in 0..depth {
+        let mut body = Vec::with_capacity(bytes.len() + 1);
+        write_varint(&mut body, 1);
+        body.extend_from_slice(&bytes);
+        bytes.clear();
+        bytes.push(0x07);
+        write_varint(&mut bytes, body.len() as u64);
+        bytes.extend_from_slice(&body);
+    }
+    bytes
+}
+
+#[test]
+fn json_decode_depth_is_bounded() {
+    let mut accepted = JsonValue::Null;
+    for _ in 0..128 {
+        accepted = JsonValue::Array(vec![accepted]);
+    }
+    let encoded = EncodedJson::encode(&accepted).expect("128 levels encode");
+    assert_eq!(encoded.as_bytes(), nested_arrays(128).as_slice());
+    assert_eq!(
+        encoded.view().to_value::<Null, Null>(),
+        Some(accepted.clone())
+    );
+    assert_eq!(
+        EncodedJson::encode(&JsonValue::Array(vec![accepted])),
+        Err(JsonError::NestingTooDeep)
+    );
+
+    for depth in [129, 20_000] {
+        let bytes = nested_arrays(depth);
+        let view = JsonView::new(unsafe { Reader::trusted(&bytes) });
+        assert!(
+            view.to_value::<Null, Null>().is_none(),
+            "{depth} levels decode"
+        );
+    }
 }
 
 #[test]
@@ -341,6 +386,21 @@ fn known_xml_namespaces_are_consistent() {
         known_xml_namespace_id("http://calendarserver.org/ns/")
     );
     assert_eq!(known_xml_namespace_id("dav:"), None);
+}
+
+#[test]
+fn registered_namespaces_resolve_by_id_and_name() {
+    assert!(
+        REGISTERED_NAMESPACES.is_sorted_by(|a, b| a.id < b.id),
+        "by_id binary-searches the table"
+    );
+    for namespace in REGISTERED_NAMESPACES {
+        assert_eq!(RegisteredNamespace::by_id(namespace.id), Some(namespace));
+        assert_eq!(
+            RegisteredNamespace::by_name(namespace.name),
+            Some(namespace)
+        );
+    }
 }
 
 fn sample_container() -> Vec<u8> {
@@ -513,10 +573,37 @@ fn encoding_is_unique_and_patchable() {
 
     let mut cleared = MetadataBuilder::from_view(&view);
     cleared.clear_jmap();
-    cleared.clear_dav();
-    cleared.clear_imap();
-    assert!(cleared.is_empty());
-    assert_eq!(cleared.encode(), None);
+    assert_eq!(
+        cleared.kinds(),
+        MetadataKinds::DAV.union(MetadataKinds::IMAP)
+    );
+    assert_eq!(cleared.edit(), MetadataEdit::RemovalOnly);
+
+    let mut jmap_only = MetadataBuilder::new();
+    jmap_only.set_jmap(vendor("a.example"), encode(r#"{"k":1}"#));
+    jmap_only.clear_jmap();
+    assert!(jmap_only.is_empty());
+    assert_eq!(jmap_only.encode(), None);
+}
+
+#[test]
+fn verbatim_copy_matches_a_rebuild() {
+    let bytes = sample_container();
+    let view = MetadataView::new(&bytes).expect("valid");
+    let copied = EncodedMetadata::from_view(&view).expect("non-empty");
+    assert_eq!(
+        Some(&copied),
+        MetadataBuilder::from_view(&view).encode().as_ref()
+    );
+    assert_eq!(copied.as_bytes(), bytes.as_slice());
+    assert_eq!(copied.kinds(), view.kinds());
+    assert_eq!(copied.entries(), view.len());
+    assert!(
+        copied.into_bytes().capacity() >= bytes.len() + STORAGE_TRAILER_CAPACITY,
+        "the storage trailer fits without reallocating"
+    );
+
+    assert_eq!(EncodedMetadata::from_view(&MetadataView::empty()), None);
 }
 
 #[test]
@@ -555,8 +642,8 @@ fn builder_reads_back_its_own_entries() {
             .union(MetadataKinds::IMAP)
     );
     assert_eq!(
-        builder.encoded_len(),
-        builder.encode().map(|encoded| encoded.len()).unwrap_or(0)
+        builder.encode().map(|encoded| encoded.entries()),
+        Some(builder.len())
     );
     let owned = builder.clone().into_owned();
     assert_eq!(owned.encode(), builder.encode());
@@ -663,10 +750,10 @@ fn xml_value_roundtrip() {
     let view = DavValueView::parse(&encoded).expect("valid");
     assert_eq!(view.to_value(), Some(value.clone()));
     assert_eq!(view.lang(), Some("de-CH"));
-    assert!(!view.is_empty());
-    assert!(
+    assert_eq!(
         DavValueView::parse(&XmlValue::default().encode().expect("encodable"))
-            .is_some_and(|view| view.is_empty())
+            .and_then(|view| view.to_value()),
+        Some(XmlValue::default())
     );
 
     let mut invalid_prefix = value;
@@ -1091,6 +1178,119 @@ fn builder_matches_reference_model() {
 }
 
 #[test]
+fn large_builders_match_reference_model() {
+    let vendors: Vec<String> = (0..400).map(|i| format!("v{i:03}.example")).collect();
+    let imap_names: Vec<String> = (0..400).map(|i| format!("/shared/n{i:03}")).collect();
+    let mut lcg = Lcg(0x0b16_b00b);
+    let mut reference = BTreeMap::new();
+    let mut stored: Option<Vec<u8>> = None;
+
+    for _ in 0..6 {
+        let view = stored
+            .as_deref()
+            .map(|bytes| MetadataView::new(bytes).expect("valid stored container"))
+            .unwrap_or_else(MetadataView::empty);
+        let mut builder = MetadataBuilder::from_view(&view);
+        let mut written = false;
+
+        for _ in 0..600 {
+            match lcg.below(5) {
+                0 | 1 => {
+                    let name = lcg.pick(&vendors).as_str();
+                    let text = random_json(&mut lcg, 0);
+                    builder.set_jmap(vendor(name), encode(&text));
+                    let value = ReferenceValue::Json(json(&text).to_string());
+                    written |= reference
+                        .insert(ReferenceKey::Vendor(name.to_string()), value.clone())
+                        != Some(value);
+                }
+                2 => {
+                    let name = lcg.pick(&vendors).as_str();
+                    assert_eq!(
+                        builder.remove_jmap(&vendor(name)),
+                        reference
+                            .remove(&ReferenceKey::Vendor(name.to_string()))
+                            .is_some()
+                    );
+                }
+                3 => {
+                    let name = lcg.pick(&imap_names).clone();
+                    let value: Vec<u8> = (0..lcg.below(8)).map(|_| lcg.next() as u8).collect();
+                    builder.set_imap(Cow::Owned(name.clone()), &value);
+                    let value = ReferenceValue::Imap(value);
+                    written |=
+                        reference.insert(ReferenceKey::Imap(name), value.clone()) != Some(value);
+                }
+                _ => {
+                    let name = lcg.pick(&imap_names).as_str();
+                    assert_eq!(
+                        builder.remove_imap(name),
+                        reference
+                            .remove(&ReferenceKey::Imap(name.to_string()))
+                            .is_some()
+                    );
+                }
+            }
+
+            let name = lcg.pick(&vendors).as_str();
+            assert_eq!(
+                builder
+                    .jmap(&vendor(name))
+                    .and_then(|value| value.to_value::<Null, Null>())
+                    .map(|value| value.to_string()),
+                match reference.get(&ReferenceKey::Vendor(name.to_string())) {
+                    Some(ReferenceValue::Json(text)) => Some(text.clone()),
+                    _ => None,
+                }
+            );
+            let name = lcg.pick(&imap_names).as_str();
+            assert_eq!(
+                builder.imap(name),
+                match reference.get(&ReferenceKey::Imap(name.to_string())) {
+                    Some(ReferenceValue::Imap(value)) => Some(value.as_slice()),
+                    _ => None,
+                }
+            );
+            assert_eq!(builder.len(), reference.len());
+        }
+
+        assert_eq!(
+            builder.edit(),
+            if written {
+                MetadataEdit::Write
+            } else {
+                MetadataEdit::RemovalOnly
+            }
+        );
+        let next = builder.encode().map(|encoded| encoded.into_bytes());
+        match next.as_deref() {
+            Some(bytes) => {
+                let view = MetadataView::new(bytes).expect("encoder output validates");
+                assert_matches_reference(&view, &reference);
+                let rebuilt = MetadataBuilder::from_view(&view)
+                    .encode()
+                    .map(|encoded| encoded.into_bytes());
+                assert_eq!(rebuilt.as_deref(), Some(bytes), "encoding is canonical");
+            }
+            None => assert!(reference.is_empty()),
+        }
+        stored = next;
+    }
+    assert!(
+        reference.len() > 256,
+        "the test reaches the tree representation"
+    );
+
+    let bytes = stored.expect("non-empty container");
+    let view = MetadataView::new(&bytes).expect("valid");
+    let mut builder = MetadataBuilder::from_view(&view);
+    builder.clear_jmap();
+    reference.retain(|key, _| matches!(key, ReferenceKey::Imap(_)));
+    let cleared = builder.encode().expect("imap entries remain").into_bytes();
+    assert_matches_reference(&MetadataView::new(&cleared).expect("valid"), &reference);
+}
+
+#[test]
 fn limits_apply_per_scope() {
     let limits = MetadataLimits {
         max_depth: Some(8),
@@ -1108,21 +1308,48 @@ fn limits_apply_per_scope() {
     let mut builder = MetadataBuilder::new();
     builder.set_imap(Cow::Borrowed("/a"), &[0; 20]);
     let one = builder.encode().expect("non-empty");
-    assert_eq!(limits.check_container(MetadataScope::Shared, &one), Ok(()));
-    assert_eq!(limits.check_container(MetadataScope::Private, &one), Ok(()));
+    assert_eq!(limits.check_edit(MetadataScope::Shared, 0, 0, &one), Ok(()));
+    assert_eq!(
+        limits.check_edit(MetadataScope::Private, 0, 0, &one),
+        Ok(())
+    );
 
     builder.set_imap(Cow::Borrowed("/b"), &[0; 20]);
     let two = builder.encode().expect("non-empty");
-    assert_eq!(limits.check_container(MetadataScope::Shared, &two), Ok(()));
+    assert_eq!(limits.check_edit(MetadataScope::Shared, 0, 0, &two), Ok(()));
     assert!(matches!(
-        limits.check_container(MetadataScope::Private, &two),
+        limits.check_edit(MetadataScope::Private, one.len(), 1, &two),
         Err(LimitViolation::ContainerSize { max: 32, .. })
     ));
 
     builder.set_imap(Cow::Borrowed("/c"), &[]);
     let three = builder.encode().expect("non-empty");
     assert_eq!(
-        limits.check_container(MetadataScope::Shared, &three),
+        limits.check_edit(MetadataScope::Shared, two.len(), 2, &three),
         Err(LimitViolation::Entries { count: 3, max: 2 })
+    );
+    let edit_from = |len, entries| limits.check_edit(MetadataScope::Private, len, entries, &three);
+    assert_eq!(edit_from(three.len(), 3), Ok(()));
+    assert!(matches!(
+        edit_from(three.len() - 1, 3),
+        Err(LimitViolation::ContainerSize { max: 32, .. })
+    ));
+    for (len, entries) in [(three.len(), 2), (0, 0)] {
+        assert_eq!(
+            edit_from(len, entries),
+            Err(LimitViolation::Entries { count: 3, max: 2 })
+        );
+    }
+
+    let bound = limits.entry_bound(0);
+    assert_eq!((bound.check(2, 0), bound.check(3, 1)), (Ok(()), Ok(())));
+    assert_eq!(
+        bound.check(3, 0),
+        Err(LimitViolation::Entries { count: 3, max: 2 })
+    );
+    assert_eq!(limits.entry_bound(4).check(5, 1), Ok(()));
+    assert_eq!(
+        limits.entry_bound(4).check(6, 1),
+        Err(LimitViolation::Entries { count: 5, max: 2 })
     );
 }

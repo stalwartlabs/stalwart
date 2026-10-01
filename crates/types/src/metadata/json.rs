@@ -481,12 +481,13 @@ impl<'x> JsonView<'x> {
 
     pub fn to_value<P: Property, E: Element<Property = P>>(&self) -> Option<Value<'x, P, E>> {
         let mut reader = self.reader;
-        decode(&mut reader)
+        decode(&mut reader, 0)
     }
 }
 
 fn decode<'x, P: Property, E: Element<Property = P>>(
     reader: &mut TrustedReader<'x>,
+    nesting: u32,
 ) -> Option<Value<'x, P, E>> {
     Some(match reader.u8()? {
         NULL => Value::Null,
@@ -497,23 +498,29 @@ fn decode<'x, P: Property, E: Element<Property = P>>(
         FLOAT => Value::Number(f64::from_le_bytes(reader.take(FLOAT_LEN)?.try_into().ok()?).into()),
         STR => Value::Str(Cow::Borrowed(reader.str()?)),
         ARRAY => {
+            if nesting >= MAX_NESTING {
+                return None;
+            }
             let len = reader.len()?;
             let mut body = reader.take_reader(len)?;
             let count = body.len()?;
             let mut items = Vec::with_capacity(count.min(body.remaining().len()));
             for _ in 0..count {
-                items.push(decode(&mut body)?);
+                items.push(decode(&mut body, nesting + 1)?);
             }
             Value::Array(items)
         }
         OBJECT => {
+            if nesting >= MAX_NESTING {
+                return None;
+            }
             let len = reader.len()?;
             let mut body = reader.take_reader(len)?;
             let count = body.len()?;
             let mut object = Map::with_capacity(count.min(body.remaining().len()));
             for _ in 0..count {
                 let key = body.str()?;
-                object.insert_unchecked(Key::Borrowed(key), decode(&mut body)?);
+                object.insert_unchecked(Key::Borrowed(key), decode(&mut body, nesting + 1)?);
             }
             Value::Object(object)
         }

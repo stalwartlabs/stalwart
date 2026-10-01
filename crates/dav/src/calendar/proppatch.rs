@@ -15,18 +15,21 @@ use crate::{
     },
 };
 use calcard::common::timezone::Tz;
-use common::{Server, auth::AccessToken};
+use common::{
+    Server,
+    auth::AccessToken,
+    storage::index::{PresenceFlags, RewritePresence},
+};
 use dav_proto::{
     RequestHeaders, Return,
     schema::{
         Namespace,
         property::{CalDavProperty, DavProperty, DavValue, ResourceType, WebDavProperty},
-        request::{DavPropertyValue, PropertyUpdate},
+        request::{DavPropertyValue, PropertyUpdate, PropertyUpdateOp},
         response::{BaseCondition, CalCondition, MultiStatus, Response},
     },
 };
 use groupware::{
-    PresenceUpdate,
     cache::GroupwareCache,
     calendar::{
         Calendar, CalendarEvent, SupportedComponent, Timezone,
@@ -62,14 +65,14 @@ pub(crate) trait CalendarPropPatchRequestHandler: Sync + Send {
         personal_id: u32,
         calendar: &mut Calendar,
         is_update: bool,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     );
 
     fn apply_event_properties(
         &self,
         event: &mut CalendarEvent,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     );
 }
@@ -175,8 +178,8 @@ impl CalendarPropPatchRequestHandler for Server {
         )
         .await?;
 
-        let dead = DeadPatch::take(&mut request, DisplayName::Live);
-        let has_live_changes = !request.set.is_empty() || !request.remove.is_empty();
+        let dead = DeadPatch::take(&mut request.ops, DisplayName::Live);
+        let has_live_changes = !request.ops.is_empty();
         let mut batch = BatchBuilder::new();
         let mut items = PropStatBuilder::default();
 
@@ -195,22 +198,23 @@ impl CalendarPropPatchRequestHandler for Server {
             }
 
             // Apply live properties
-            if !request.set_first {
-                remove_calendar_properties(
-                    personal_id,
-                    &mut new_calendar,
-                    std::mem::take(&mut request.remove),
-                    &mut items,
-                );
+            for op in request.ops {
+                match op {
+                    PropertyUpdateOp::Set(value) => self.apply_calendar_properties(
+                        personal_id,
+                        &mut new_calendar,
+                        true,
+                        [value],
+                        &mut items,
+                    ),
+                    PropertyUpdateOp::Remove(property) => remove_calendar_properties(
+                        personal_id,
+                        &mut new_calendar,
+                        [property],
+                        &mut items,
+                    ),
+                }
             }
-            self.apply_calendar_properties(
-                personal_id,
-                &mut new_calendar,
-                true,
-                request.set,
-                &mut items,
-            );
-            remove_calendar_properties(personal_id, &mut new_calendar, request.remove, &mut items);
 
             // Apply dead properties
             let mut dead_write = dead
@@ -248,7 +252,9 @@ impl CalendarPropPatchRequestHandler for Server {
                     .await
                     .caused_by(trc::location!())?;
                     if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
-                        write.build(&mut batch).caused_by(trc::location!())?;
+                        write
+                            .build(document_id.into(), &mut batch)
+                            .caused_by(trc::location!())?;
                     }
                     new_calendar
                         .update(
@@ -261,11 +267,18 @@ impl CalendarPropPatchRequestHandler for Server {
                         .caused_by(trc::location!())?;
                 } else if let Some(dead_write) = dead_write.as_mut() {
                     if let Some(write) = dead_write.write.take() {
-                        write.build(&mut batch).caused_by(trc::location!())?;
+                        write
+                            .build(document_id.into(), &mut batch)
+                            .caused_by(trc::location!())?;
                     }
-                    PresenceUpdate(calendar)
-                        .write(dead_write.kinds, account_id, document_id, &mut batch)
-                        .caused_by(trc::location!())?;
+                    Calendar::rewrite_presence(
+                        &calendar,
+                        dead_write.kinds,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
+                    .caused_by(trc::location!())?;
                 }
                 (true, batch.etag().unwrap_or(etag))
             }
@@ -279,15 +292,16 @@ impl CalendarPropPatchRequestHandler for Server {
                 .caused_by(trc::location!())?;
 
             // Apply live properties
-            if !request.set_first {
-                remove_event_properties(
-                    &mut new_event,
-                    std::mem::take(&mut request.remove),
-                    &mut items,
-                );
+            for op in request.ops {
+                match op {
+                    PropertyUpdateOp::Set(value) => {
+                        self.apply_event_properties(&mut new_event, [value], &mut items)
+                    }
+                    PropertyUpdateOp::Remove(property) => {
+                        remove_event_properties(&mut new_event, [property], &mut items)
+                    }
+                }
             }
-            self.apply_event_properties(&mut new_event, request.set, &mut items);
-            remove_event_properties(&mut new_event, request.remove, &mut items);
 
             // Apply dead properties
             let mut dead_write = dead
@@ -312,7 +326,9 @@ impl CalendarPropPatchRequestHandler for Server {
                     .as_mut()
                     .and_then(|dead_write| dead_write.write.take())
                 {
-                    write.build(&mut batch).caused_by(trc::location!())?;
+                    write
+                        .build(document_id.into(), &mut batch)
+                        .caused_by(trc::location!())?;
                 }
                 if has_live_changes {
                     if let Some(dead_write) = &dead_write {
@@ -330,9 +346,14 @@ impl CalendarPropPatchRequestHandler for Server {
                         .caused_by(trc::location!())?
                         .into();
                 } else if let Some(dead_write) = &dead_write {
-                    PresenceUpdate(event)
-                        .write(dead_write.kinds, account_id, document_id, &mut batch)
-                        .caused_by(trc::location!())?;
+                    CalendarEvent::rewrite_presence(
+                        &event,
+                        dead_write.kinds,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
+                    .caused_by(trc::location!())?;
                 }
                 (true, new_etag.unwrap_or(etag))
             }
@@ -364,7 +385,7 @@ impl CalendarPropPatchRequestHandler for Server {
         personal_id: u32,
         calendar: &mut Calendar,
         is_update: bool,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) {
         for property in properties {
@@ -502,7 +523,7 @@ impl CalendarPropPatchRequestHandler for Server {
     fn apply_event_properties(
         &self,
         event: &mut CalendarEvent,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) {
         for property in properties {
@@ -540,14 +561,14 @@ impl CalendarPropPatchRequestHandler for Server {
 
 fn remove_event_properties(
     event: &mut CalendarEvent,
-    properties: Vec<DavProperty>,
+    properties: impl IntoIterator<Item = DavProperty>,
     items: &mut PropStatBuilder,
 ) {
     for property in properties {
         match &property {
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 event.display_name = None;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             _ => {
                 items.insert_error_with_description(
@@ -563,19 +584,19 @@ fn remove_event_properties(
 fn remove_calendar_properties(
     personal_id: u32,
     calendar: &mut Calendar,
-    properties: Vec<DavProperty>,
+    properties: impl IntoIterator<Item = DavProperty>,
     items: &mut PropStatBuilder,
 ) {
     for property in properties {
         match &property {
             DavProperty::CalDav(CalDavProperty::CalendarDescription) => {
                 calendar.preferences_mut(personal_id).description = None;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             DavProperty::CalDav(CalDavProperty::CalendarTimezone)
             | DavProperty::CalDav(CalDavProperty::TimezoneId) => {
                 calendar.preferences_mut(personal_id).time_zone = Timezone::Default;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             _ => {
                 items.insert_error_with_description(

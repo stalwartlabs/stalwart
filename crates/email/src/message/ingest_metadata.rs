@@ -38,12 +38,11 @@ impl IngestMetadata {
                 account_id,
                 tenant_id,
                 collection: Collection::Email,
-                document_id,
                 previous: None,
                 next: Some(container),
                 log: MetadataLog::None,
             }
-            .build(batch)?;
+            .build(document_id, batch)?;
         }
         if let Some(write) = self.private {
             write.build(document_id, batch, commit)?;

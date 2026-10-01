@@ -33,7 +33,7 @@ use jmap_proto::{
 };
 use jmap_tools::{Key, Value};
 use trc::AddContext;
-use types::{collection::SyncCollection, id::Id, metadata::MetadataKinds};
+use types::{collection::SyncCollection, id::Id};
 use utils::map::vec_map::VecMap;
 
 pub trait FileNodeCopy: Sync + Send {
@@ -65,6 +65,8 @@ impl FileNodeCopy for Server {
                 .details("From accountId is equal to fromAccountId"));
         }
 
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -73,15 +75,7 @@ impl FileNodeCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
-        let old_state = metadata
-            .assert_state(
-                self,
-                account_id,
-                cache.get_state(false),
-                &request.if_in_state,
-            )
-            .await?;
+        let old_state = sampled.assert_state(cache.get_state(false), &request.if_in_state)?;
         let mut response = CopyResponse {
             from_account_id: request.from_account_id,
             account_id: request.account_id,
@@ -114,6 +108,7 @@ impl FileNodeCopy for Server {
                 .unwrap_or(false),
         };
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
+        let viewer = metadata.viewer();
         let mut writer =
             FileNodeWriter::new(self, access_token, account_id, &cache, options, metadata)
                 .with_quota()
@@ -128,31 +123,31 @@ impl FileNodeCopy for Server {
                     .is_none_or(|readable| readable.contains(document_id))
         };
 
-        let mut creates = Vec::with_capacity(request.create.len());
         let mut preload = MetadataPreload::default();
-        for (create_id, mut create) in request.create {
-            let source_id = create.take_source_id(FileNodeProperty::Id);
-            if let Ok(source_id) = &source_id
-                && is_readable(source_id.document_id())
+        for document_id in request
+            .create
+            .values()
+            .filter_map(|create| create.source_id(FileNodeProperty::Id))
+            .map(|source_id| source_id.document_id())
+        {
+            if let Some(resource) = from_cache.resources.find_any(document_id)
+                && from_readable
+                    .as_ref()
+                    .is_none_or(|readable| readable.contains(document_id))
             {
-                let document_id = source_id.document_id();
-                preload.insert_source(
-                    document_id,
-                    from_cache
-                        .resources
-                        .find_any(document_id)
-                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
-                );
+                let kinds = resource.metadata_kinds();
+                if viewer.is_some() || !kinds.is_empty() {
+                    preload.insert_source(document_id, kinds);
+                }
             }
-            creates.push((create_id, source_id, create));
         }
         writer
             .metadata
             .preload(self, from_account_id, preload)
             .await?;
 
-        for (create_id, source_id, create) in creates {
-            let source_id = match source_id {
+        for (create_id, mut create) in request.create {
+            let source_id = match create.take_source_id(FileNodeProperty::Id) {
                 Ok(source_id) => source_id,
                 Err(err) => {
                     response.not_created.append(create_id, err);
@@ -209,7 +204,7 @@ impl FileNodeCopy for Server {
         let _ = writer.execute_destroys(Vec::new()).await?;
 
         if !writer.batch.is_empty() {
-            let assigned_ids = match self.commit_batch(writer.batch).await {
+            let assigned_ids = match writer.metadata.commit(self, writer.batch).await {
                 Ok(assigned_ids) => assigned_ids,
                 Err(err) if err.is_assertion_failure() => {
                     for (create_id, _) in created {
@@ -227,7 +222,6 @@ impl FileNodeCopy for Server {
                 }
                 Err(err) => return Err(err.caused_by(trc::location!())),
             };
-            writer.metadata.committed(self, &assigned_ids).await;
 
             for (id, err, slot) in awaiting_existing {
                 response

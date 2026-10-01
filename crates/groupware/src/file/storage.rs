@@ -5,8 +5,12 @@
  */
 
 use super::{ArchivedFileNode, FileNode};
-use crate::{DestroyArchive, metadata::MetadataCleanup};
-use common::{Server, auth::AccountTenantIds, storage::index::ObjectIndexBuilder};
+use crate::DestroyArchive;
+use common::{
+    Server,
+    auth::AccountTenantIds,
+    storage::{index::ObjectIndexBuilder, metadata::ContainerCleanup},
+};
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes, BatchBuilder, PendingId, Slot, now},
@@ -140,14 +144,37 @@ impl DestroyArchive<Archive<&ArchivedFileNode>> {
         batch: &mut BatchBuilder,
         path: String,
     ) -> trc::Result<()> {
-        MetadataCleanup::immediate(Collection::FileNode)
-            .remove(
-                server,
+        self.delete_with_cleanup(
+            server,
+            changed_by,
+            account_id,
+            document_id,
+            batch,
+            path,
+            &ContainerCleanup::empty(Collection::FileNode),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn delete_with_cleanup(
+        self,
+        server: &Server,
+        changed_by: AccountTenantIds,
+        account_id: u32,
+        document_id: u32,
+        batch: &mut BatchBuilder,
+        path: String,
+        cleanup: &ContainerCleanup,
+    ) -> trc::Result<()> {
+        server
+            .release_or_read(
+                cleanup,
+                batch,
                 changed_by,
                 account_id,
                 document_id,
                 self.0.inner.metadata_kinds(),
-                batch,
             )
             .await?;
 
@@ -173,7 +200,7 @@ impl DestroyArchive<Vec<u32>> {
         server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         delete_path: Option<String>,
     ) -> trc::Result<()> {
         // Process deletions
@@ -203,7 +230,7 @@ impl DestroyArchive<Vec<u32>> {
         server: &Server,
         changed_by: AccountTenantIds,
         account_id: u32,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
@@ -224,14 +251,14 @@ impl DestroyArchive<Vec<u32>> {
                 let node = node_
                     .to_unarchived::<FileNode>()
                     .caused_by(trc::location!())?;
-                cleanup
-                    .remove(
-                        server,
+                server
+                    .release_or_read(
+                        cleanup,
+                        batch,
                         changed_by,
                         account_id,
                         document_id,
                         node.inner.metadata_kinds(),
-                        batch,
                     )
                     .await?;
 

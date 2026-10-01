@@ -8,13 +8,15 @@ use super::{Error, RawElement, Token, UnexpectedToken, XmlValueParser, value::kn
 use crate::schema::{Attribute, AttributeValue, Element, NamedElement};
 use quick_xml::{
     NsReader, XmlVersion,
-    events::{Event, attributes::AttrError},
+    events::{BytesRef, Event, attributes::AttrError},
     name::ResolveResult,
 };
+use std::{borrow::Cow, mem};
 
 pub struct Tokenizer<'x> {
     pub(super) xml: NsReader<&'x [u8]>,
     pub(super) last_is_end: bool,
+    content: bool,
 }
 
 impl<'x> Tokenizer<'x> {
@@ -24,6 +26,7 @@ impl<'x> Tokenizer<'x> {
         Self {
             xml,
             last_is_end: false,
+            content: false,
         }
     }
 
@@ -44,6 +47,11 @@ impl<'x> Tokenizer<'x> {
                 Event::End(_) => {
                     return Ok(Token::ElementEnd);
                 }
+                event @ (Event::Text(_) | Event::CData(_) | Event::GeneralRef(_))
+                    if self.content =>
+                {
+                    return Ok(Token::Content(event));
+                }
                 Event::Text(text) if text.iter().any(|ch| !ch.is_ascii_whitespace()) => {
                     return text
                         .xml_content(XmlVersion::Implicit1_0)
@@ -51,24 +59,7 @@ impl<'x> Tokenizer<'x> {
                         .map_err(|err| Error::Xml(Box::new(err.into())));
                 }
                 Event::GeneralRef(entity) => {
-                    let entity_ref: &[u8] = entity.as_ref();
-                    hashify::fnc_map!(entity_ref,
-                        b"lt" => { return Ok(Token::Text("<".into())); },
-                        b"gt" => { return Ok(Token::Text(">".into())); },
-                        b"amp" => { return Ok(Token::Text("&".into())); },
-                        b"apos" => { return Ok(Token::Text("'".into())); },
-                        b"quot" => { return Ok(Token::Text("\"".into())); },
-                        _ => {
-                            if let Ok(Some(gr)) = entity.resolve_char_ref() {
-                                return Ok(Token::Text(gr.to_string().into()));
-                            }
-                        }
-                    );
-
-                    return entity
-                        .xml_content(XmlVersion::Implicit1_0)
-                        .map(Token::Text)
-                        .map_err(|err| Error::Xml(Box::new(err.into())));
+                    return general_ref_text(entity).map(Token::Text);
                 }
                 Event::CData(bytes) => return Ok(Token::Bytes(bytes.into_inner())),
                 Event::Eof => return Ok(Token::Eof),
@@ -183,9 +174,27 @@ impl<'x> Tokenizer<'x> {
         }
     }
 
+    pub(super) fn with_content<T>(
+        &mut self,
+        read: impl FnOnce(&mut Self) -> super::Result<T>,
+    ) -> super::Result<T> {
+        self.content = true;
+        let result = read(self);
+        self.content = false;
+        result
+    }
+
     pub fn collect_string_value(&mut self) -> super::Result<Option<String>> {
-        let mut depth = 1;
-        let mut value: Option<String> = None;
+        if mem::take(&mut self.last_is_end) {
+            return Ok(None);
+        }
+        self.with_content(Tokenizer::collect_string_content)
+    }
+
+    fn collect_string_content(&mut self) -> super::Result<Option<String>> {
+        let mut depth = 1u32;
+        let mut value = String::new();
+        let mut has_content = false;
 
         loop {
             match self.token()? {
@@ -196,25 +205,28 @@ impl<'x> Tokenizer<'x> {
                         break;
                     }
                 }
-                Token::Text(text) => {
-                    if let Some(ref mut v) = value {
-                        v.push_str(&text);
-                    } else {
-                        value = Some(text.into_owned());
-                    }
+                Token::Content(Event::Text(text)) => {
+                    has_content |= text.iter().any(|ch| !ch.is_ascii_whitespace());
+                    append_text(
+                        &mut value,
+                        text.xml_content(XmlVersion::Implicit1_0)
+                            .map_err(|err| Error::Xml(Box::new(err.into())))?,
+                    );
                 }
-                Token::Bytes(bytes) => {
-                    if let Some(ref mut v) = value {
-                        v.push_str(&String::from_utf8_lossy(&bytes));
-                    } else {
-                        value = Some(String::from_utf8_lossy(&bytes).into_owned());
-                    }
+                Token::Content(Event::CData(bytes)) => {
+                    has_content = true;
+                    append_text(&mut value, String::from_utf8_lossy(&bytes));
+                }
+                Token::Content(Event::GeneralRef(entity)) => {
+                    has_content = true;
+                    append_text(&mut value, general_ref_text(entity)?);
                 }
                 Token::Eof => return Err(Token::Eof.into_unexpected()),
+                Token::Content(_) | Token::Text(_) | Token::Bytes(_) => {}
             }
         }
 
-        Ok(value)
+        Ok(has_content.then_some(value))
     }
 
     pub fn parse_value<T: XmlValueParser>(&mut self) -> super::Result<Option<Result<T, String>>> {
@@ -244,6 +256,7 @@ impl<'x> Tokenizer<'x> {
                         result = Some(Err(String::from_utf8_lossy(&bytes).into_owned()));
                     }
                 }
+                Token::Content(_) => {}
                 Token::Eof => return Err(Token::Eof.into_unexpected()),
             }
         }
@@ -284,6 +297,33 @@ impl<'x> Tokenizer<'x> {
         }
         Ok(elements)
     }
+}
+
+pub(super) fn append_text(value: &mut String, piece: Cow<'_, str>) {
+    if value.is_empty() {
+        *value = piece.into_owned();
+    } else {
+        value.push_str(&piece);
+    }
+}
+
+fn general_ref_text(entity: BytesRef<'_>) -> super::Result<Cow<'_, str>> {
+    let entity_ref: &[u8] = entity.as_ref();
+    if let Some(text) = hashify::map!(entity_ref, &'static str,
+        "lt" => "<",
+        "gt" => ">",
+        "amp" => "&",
+        "apos" => "'",
+        "quot" => "\""
+    ) {
+        return Ok(Cow::Borrowed(text));
+    }
+    if let Ok(Some(ch)) = entity.resolve_char_ref() {
+        return Ok(Cow::Owned(ch.to_string()));
+    }
+    entity
+        .xml_content(XmlVersion::Implicit1_0)
+        .map_err(|err| Error::Xml(Box::new(err.into())))
 }
 
 impl RawElement<'_> {
@@ -498,6 +538,7 @@ mod tests {
                         Token::UnknownElement(_) => {
                             //result.push(TestToken::UnknownElement(unknown_element));
                         }
+                        Token::Content(_) => {}
                         Token::Eof => break,
                     },
                     Err(err) => {

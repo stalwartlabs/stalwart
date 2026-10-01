@@ -495,7 +495,10 @@ pub(super) fn push_scheduling_container(builder: &mut ResourceChunkBuilder, docu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{GroupwareResourceRef, storage::dav::PresenceBits};
+    use common::{
+        GroupwareResourceRef,
+        storage::{dav::PresenceBits, index::PresenceFlags},
+    };
     use rkyv::rancor::Error;
     use types::metadata::MetadataKinds;
 

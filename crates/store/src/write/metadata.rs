@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Archive, ArchiveBytes, ValueClass};
+use super::{Archive, ArchiveBytes, ArchiveVersion, ValueClass};
 use crate::{Deserialize, SerializeInfallible, U32_LEN, U64_LEN};
 use types::metadata::{EncodedMetadata, MetadataKinds, MetadataView, STORAGE_TRAILER_CAPACITY};
 
@@ -92,14 +92,17 @@ impl StoredMetadata {
 
     pub fn view<'x>(stored: &'x [u8], scratch: &'x mut Vec<u8>) -> trc::Result<MetadataView<'x>> {
         let contents = Archive::<ArchiveBytes>::deserialize_raw(stored, scratch)?;
-        unsafe { MetadataView::from_trusted(contents) }.ok_or_else(|| {
-            trc::StoreEvent::DataCorruption
-                .into_err()
-                .details("Invalid metadata container header")
-                .ctx(trc::Key::Value, contents)
-                .caused_by(trc::location!())
-        })
+        unsafe { MetadataView::from_trusted(contents) }.ok_or_else(|| invalid_header(contents))
     }
+}
+
+#[cold]
+fn invalid_header(contents: &[u8]) -> trc::Error {
+    trc::StoreEvent::DataCorruption
+        .into_err()
+        .details("Invalid metadata container header")
+        .ctx(trc::Key::Value, contents)
+        .caused_by(trc::location!())
 }
 
 impl MetadataBuf {
@@ -112,11 +115,19 @@ impl MetadataBuf {
     }
 
     pub fn read(stored: &[u8]) -> trc::Result<Self> {
-        let hash = StoredMetadata::trailer_hash(stored)?;
-        let stored_len = u32::try_from(stored.len()).unwrap_or(u32::MAX);
-        let mut scratch = Vec::new();
-        StoredMetadata::view(stored, &mut scratch)
-            .map(|view| Self::from_view(&view, stored_len, hash))
+        let archive = <Archive<ArchiveBytes> as Deserialize>::deserialize(stored)?;
+        match archive.version {
+            ArchiveVersion::Hashed { hash }
+                if unsafe { MetadataView::from_trusted(&archive.inner) }.is_some() =>
+            {
+                Ok(MetadataBuf {
+                    bytes: archive.inner.into_boxed_slice(),
+                    stored_len: u32::try_from(stored.len()).unwrap_or(u32::MAX),
+                    hash,
+                })
+            }
+            _ => Err(invalid_header(&archive.inner)),
+        }
     }
 
     pub fn view(&self) -> MetadataView<'_> {

@@ -70,7 +70,7 @@ impl<T: SessionStream> Session<T> {
                             mailbox_name: "".into(),
                             attributes: vec![Attribute::NoSelect],
                             tags: vec![],
-                            metadata: vec![],
+                            metadata: None,
                         }],
                         status_items: Vec::new(),
                     }),
@@ -218,7 +218,7 @@ impl<T: SessionStream> SessionData<T> {
                                 vec![Attribute::NoSelect]
                             },
                             tags: vec![],
-                            metadata: vec![],
+                            metadata: None,
                         });
                     }
                     added_shared_folder = true;
@@ -232,7 +232,7 @@ impl<T: SessionStream> SessionData<T> {
                             vec![Attribute::NoSelect]
                         },
                         tags: vec![],
-                        metadata: vec![],
+                        metadata: None,
                     });
                 }
             }
@@ -298,7 +298,7 @@ impl<T: SessionStream> SessionData<T> {
                             } else {
                                 vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])]
                             },
-                            metadata: vec![],
+                            metadata: None,
                         });
                     }
                 } else if is_lsub && account.is_subscribed(mailbox_id, self.account_id) {
@@ -319,7 +319,7 @@ impl<T: SessionStream> SessionData<T> {
                         mailbox_name: parent.into(),
                         attributes: vec![Attribute::NoSelect],
                         tags: vec![],
-                        metadata: vec![],
+                        metadata: None,
                     });
                 }
             }

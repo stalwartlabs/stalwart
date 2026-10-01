@@ -80,7 +80,11 @@ impl FileNodeGet for Server {
         )?;
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
         let metadata_get = metadata.get(selection);
+        let metadata_slots = metadata_get.as_ref().map_or(0, |get| {
+            usize::from(get.wants_shared()) + usize::from(get.wants_private())
+        });
         let account_id = request.account_id.document_id();
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -176,10 +180,7 @@ impl FileNodeGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: metadata
-                .state(self, account_id, cache.get_state(false))
-                .await?
-                .into(),
+            state: sampled.state(cache.get_state(false)).into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };
@@ -222,7 +223,7 @@ impl FileNodeGet for Server {
             let is_file = flags.kind() == FILE_KIND_FILE;
             let rights = access.as_ref().map(|access| access.acl(document_id));
 
-            let mut result = Map::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len() + metadata_slots);
             for property in &properties {
                 let value = match property {
                     FileNodeProperty::Id => Value::Element(FileNodeValue::Id(id)),

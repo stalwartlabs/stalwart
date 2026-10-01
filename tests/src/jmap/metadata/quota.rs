@@ -14,9 +14,8 @@ use registry::{
     schema::{
         enums::{Permission, StorageQuota},
         prelude::{ObjectType, Property},
-        structs::{self, Credential, PasswordCredential, PermissionsList, UserAccount},
     },
-    types::{EnumImpl, list::List, map::Map},
+    types::EnumImpl,
 };
 use serde_json::{Value, json};
 
@@ -170,28 +169,15 @@ pub fn entry() -> Value {
 }
 
 pub async fn create_account(ctx: &Ctx<'_>, name: &'static str, secret: &'static str) -> Account {
-    let admin = ctx.account("admin");
-    let (local, domain) = name.split_once('@').expect("email address");
-    let domain_id = admin.find_or_create_domain(domain).await;
-    let id = admin
-        .registry_create_object(structs::Account::User(UserAccount {
-            name: local.to_string(),
-            domain_id,
-            credentials: List::from_iter([Credential::Password(PasswordCredential {
-                secret: secret.to_string(),
-                ..Default::default()
-            })]),
-            permissions: structs::Permissions::Merge(PermissionsList {
-                enabled_permissions: Map::new(vec![
-                    Permission::UnlimitedRequests,
-                    Permission::UnlimitedUploads,
-                ]),
-                disabled_permissions: Default::default(),
-            }),
-            ..Default::default()
-        }))
-        .await;
-    Account::new(name, secret, &[], "Metadata test account", id)
+    ctx.account("admin")
+        .create_user_account(
+            name,
+            secret,
+            "Metadata test account",
+            &[],
+            vec![Permission::UnlimitedRequests, Permission::UnlimitedUploads],
+        )
+        .await
 }
 
 async fn private_charged_to_writer(

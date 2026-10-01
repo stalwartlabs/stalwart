@@ -205,7 +205,9 @@ async fn isolation(
             .await;
         assert_eq!(
             object.get("privateMetadata"),
-            Some(&json!({"p.example": {"who": who}})),
+            (ty != MetaType::Email)
+                .then(|| json!({"p.example": {"who": who}}))
+                .as_ref(),
             "{}: default /get of {who}: {object}",
             ty.name()
         );

@@ -192,7 +192,7 @@ impl<T: SessionStream> SessionData<T> {
                     mailbox_name: mailbox_name.into(),
                     attributes: vec![Attribute::NonExistent],
                     tags: vec![],
-                    metadata: vec![],
+                    metadata: None,
                 }
                 .serialize(&mut buf, is_rev2, is_utf8, false);
             }
@@ -203,7 +203,7 @@ impl<T: SessionStream> SessionData<T> {
                     mailbox_name: mailbox_name.into(),
                     attributes: vec![],
                     tags: vec![],
-                    metadata: vec![],
+                    metadata: None,
                 }
                 .serialize(&mut buf, is_rev2, is_utf8, false);
             }

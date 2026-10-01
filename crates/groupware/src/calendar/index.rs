@@ -66,6 +66,10 @@ impl IndexableObject for Calendar {
         ]
         .into_iter()
     }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        Calendar::metadata_kinds(self)
+    }
 }
 
 impl IndexableObject for &ArchivedCalendar {
@@ -124,6 +128,10 @@ impl IndexableObject for CalendarEvent {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        CalendarEvent::metadata_kinds(self)
     }
 }
 
@@ -822,7 +830,10 @@ mod tests {
         EVENT_SECRET, EventUserData, PREF_USE_DEFAULT_ALERTS, alerts::DefaultAlerts,
     };
     use calcard::common::timezone::Tz;
-    use common::{DavName, storage::index::GroupwareWrite};
+    use common::{
+        DavName,
+        storage::index::{GroupwareWrite, PresenceFlags},
+    };
     use rkyv::rancor::Error;
 
     const KINDS: [MetadataKinds; 4] = [
@@ -1009,6 +1020,7 @@ mod tests {
             let mut changed = event.clone();
             changed.set_metadata_kinds(kinds);
             assert_eq!(changed.metadata_kinds(), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&changed), kinds);
             assert_eq!(changed.flags & EVENT_HASHED_FLAGS, event.flags);
             assert_eq!(changed.meta_hash(), hash);
 
@@ -1042,6 +1054,7 @@ mod tests {
             let mut calendar = Calendar::default();
             calendar.set_metadata_kinds(kinds.union(MetadataKinds::IMAP));
             assert_eq!(calendar.metadata_kinds(), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&calendar), kinds);
             let bytes = rkyv::to_bytes::<Error>(&calendar).expect("the calendar archives");
             let archived =
                 rkyv::access::<ArchivedCalendar, Error>(&bytes).expect("the archive validates");

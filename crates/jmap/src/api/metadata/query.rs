@@ -6,11 +6,11 @@
 
 use super::MetadataSupport;
 use common::Server;
-use dav_proto::schema::collation::unicode_casemap;
 use jmap_proto::object::metadata::{MetadataCondition, MetadataFilter, MetadataRoot};
 use memchr::memmem::Finder;
 use store::roaring::RoaringBitmap;
 use types::{
+    collation::unicode_casemap,
     collection::Collection,
     metadata::{MetadataKinds, MetadataView, Namespace, RegisteredNamespace},
 };
@@ -50,7 +50,7 @@ enum LeafNamespace {
 #[derive(Debug)]
 enum LeafCondition {
     Exists,
-    Contains(Finder<'static>),
+    Contains(Box<Finder<'static>>),
     Equals(Box<str>),
 }
 
@@ -241,7 +241,7 @@ impl QueryLeaf {
             MetadataCondition::TextContains(text) => {
                 scratch.clear();
                 unicode_casemap(text, scratch);
-                LeafCondition::Contains(Finder::new(scratch.as_bytes()).into_owned())
+                LeafCondition::Contains(Box::new(Finder::new(scratch.as_bytes()).into_owned()))
             }
             MetadataCondition::TextEquals(text) => LeafCondition::Equals(text.as_str().into()),
         };

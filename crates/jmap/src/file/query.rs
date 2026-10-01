@@ -66,6 +66,7 @@ impl FileNodeQuery for Server {
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let metadata_query =
             metadata.query(request.filter.iter().filter_map(|filter| match filter {
                 Filter::Property(FileNodeFilter::Metadata(filter)) => Some(filter),
@@ -333,9 +334,7 @@ impl FileNodeQuery for Server {
         let mut response = QueryResponseBuilder::new(
             results.len() as usize,
             self.core.jmap.query_max_results,
-            metadata
-                .state(self, account_id, cache.get_state(false))
-                .await?,
+            sampled.state(cache.get_state(false)),
             &request,
         );
 

@@ -94,7 +94,7 @@ pub struct ListItem {
     pub mailbox_name: CompactString,
     pub attributes: Vec<Attribute>,
     pub tags: Vec<Tag>,
-    pub metadata: Vec<EntryValue<'static>>,
+    pub metadata: Option<Box<[EntryValue<'static>]>>,
 }
 
 impl Arguments {
@@ -217,7 +217,7 @@ impl ListItem {
             mailbox_name: name.into(),
             attributes: Vec::new(),
             tags: Vec::new(),
-            metadata: Vec::new(),
+            metadata: None,
         }
     }
 
@@ -253,8 +253,10 @@ impl ListItem {
             buf.extend_from_slice(b"\r\n");
         }
 
-        if !self.metadata.is_empty() {
-            serialize_entry_values(buf, &self.mailbox_name, &self.metadata, is_rev2 || is_utf8);
+        if let Some(metadata) = self.metadata.as_deref()
+            && !metadata.is_empty()
+        {
+            serialize_entry_values(buf, &self.mailbox_name, metadata, is_rev2 || is_utf8);
         }
     }
 }
@@ -299,20 +301,20 @@ impl ImapResponse for Response {
                     + item.mailbox_name.len() * 2
                     + item.attributes.len() * ATTRIBUTE_LEN
                     + item.tags.len() * TAG_LEN
-                    + if item.metadata.is_empty() {
-                        0
-                    } else {
-                        METADATA_FRAMING_LEN
-                            + item.mailbox_name.len() * 2
-                            + item
-                                .metadata
-                                .iter()
-                                .map(|entry| {
-                                    METADATA_ENTRY_LEN
-                                        + entry.entry.path.len()
-                                        + entry.value.as_ref().map_or(0, |value| value.len())
-                                })
-                                .sum::<usize>()
+                    + match item.metadata.as_deref() {
+                        Some(metadata) if !metadata.is_empty() => {
+                            METADATA_FRAMING_LEN
+                                + item.mailbox_name.len() * 2
+                                + metadata
+                                    .iter()
+                                    .map(|entry| {
+                                        METADATA_ENTRY_LEN
+                                            + entry.entry.path.len()
+                                            + entry.value.as_ref().map_or(0, |value| value.len())
+                                    })
+                                    .sum::<usize>()
+                        }
+                        _ => 0,
                     }
             })
             .sum::<usize>()
@@ -348,7 +350,7 @@ mod tests {
                     mailbox_name: "".into(),
                     attributes: vec![],
                     tags: vec![],
-                    metadata: vec![],
+                    metadata: None,
                 },
                 "* LIST () \"/\" \"\"\r\n",
                 "* LIST () \"/\" \"\"\r\n",
@@ -358,7 +360,7 @@ mod tests {
                     mailbox_name: "中國書店".into(),
                     attributes: vec![Attribute::NoInferiors, Attribute::Drafts],
                     tags: vec![],
-                    metadata: vec![],
+                    metadata: None,
                 },
                 "* LIST (\\NoInferiors \\Drafts) \"/\" \"中國書店\"\r\n",
                 "* LIST (\\NoInferiors \\Drafts) \"/\" \"&Ti1XC2b4Xpc-\"\r\n",
@@ -368,7 +370,7 @@ mod tests {
                     mailbox_name: "☺".into(),
                     attributes: vec![Attribute::Subscribed, Attribute::Remote],
                     tags: vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])],
-                    metadata: vec![],
+                    metadata: None,
                 },
                 concat!(
                     "* LIST (\\Subscribed \\Remote) \"/\" \"☺\" ",
@@ -384,7 +386,7 @@ mod tests {
                     mailbox_name: "foo".into(),
                     attributes: vec![Attribute::HasNoChildren],
                     tags: vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])],
-                    metadata: vec![],
+                    metadata: None,
                 },
                 "* LIST (\\HasNoChildren) \"/\" \"foo\" (\"CHILDINFO\" (\"SUBSCRIBED\"))\r\n",
                 "* LIST (\\HasNoChildren) \"/\" \"foo\" (\"CHILDINFO\" (\"SUBSCRIBED\"))\r\n",
@@ -412,13 +414,13 @@ mod tests {
                     mailbox_name: "INBOX".into(),
                     attributes: vec![Attribute::Subscribed],
                     tags: vec![],
-                    metadata: vec![],
+                    metadata: None,
                 },
                 ListItem {
                     mailbox_name: "foo".into(),
                     attributes: vec![],
                     tags: vec![Tag::ChildInfo(vec![ChildInfo::Subscribed])],
-                    metadata: vec![],
+                    metadata: None,
                 },
             ],
             status_items: vec![
@@ -475,26 +477,26 @@ mod tests {
                     mailbox_name: "INBOX".into(),
                     attributes: vec![],
                     tags: vec![],
-                    metadata: vec![entry(
+                    metadata: Some(Box::new([entry(
                         Scope::Shared,
                         "/vendor/cmu/cyrus-imapd/color",
                         Some(b"#b71c1c"),
-                    )],
+                    )])),
                 },
                 ListItem {
                     mailbox_name: "bar".into(),
                     attributes: vec![Attribute::NonExistent],
                     tags: vec![],
-                    metadata: vec![],
+                    metadata: None,
                 },
                 ListItem {
                     mailbox_name: "Caf\u{e9}".into(),
                     attributes: vec![],
                     tags: vec![],
-                    metadata: vec![
+                    metadata: Some(Box::new([
                         entry(Scope::Shared, "/vendor/cmu/cyrus-imapd/color", None),
                         entry(Scope::Private, "/specialuse", Some(b"\\Drafts")),
-                    ],
+                    ])),
                 },
             ],
             status_items: vec![],

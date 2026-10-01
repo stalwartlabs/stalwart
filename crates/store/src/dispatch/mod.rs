@@ -195,36 +195,68 @@ impl DocumentSet for () {
 
 #[cfg(feature = "test_mode")]
 mod ops {
+    use crate::{IterateParams, Key, Subspace, U32_LEN};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use types::collection::Collection;
 
     static GET_VALUE: AtomicUsize = AtomicUsize::new(0);
     static ITERATE: AtomicUsize = AtomicUsize::new(0);
+    static METADATA: AtomicUsize = AtomicUsize::new(0);
+    static METADATA_GET: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct StoreOps {
         pub get_value: usize,
         pub iterate: usize,
+        pub metadata: usize,
+        pub metadata_get: usize,
     }
 
     impl StoreOps {
-        pub(crate) fn count_get_value() {
+        pub(crate) fn count_get_value<K: Key>(key: K) -> K {
             GET_VALUE.fetch_add(1, Ordering::Relaxed);
+            if is_metadata_key(&key) {
+                METADATA.fetch_add(1, Ordering::Relaxed);
+                METADATA_GET.fetch_add(1, Ordering::Relaxed);
+            }
+            key
         }
 
-        pub(crate) fn count_iterate(ranges: usize) {
-            ITERATE.fetch_add(ranges, Ordering::Relaxed);
+        pub(crate) fn count_iterate<T: Key>(params: IterateParams<T>) -> IterateParams<T> {
+            count_range(&params.begin);
+            params
+        }
+
+        pub(crate) fn count_iterate_many<T: Key>(ranges: &[IterateParams<T>]) {
+            for params in ranges {
+                count_range(&params.begin);
+            }
         }
 
         pub fn take() -> Self {
             StoreOps {
                 get_value: GET_VALUE.swap(0, Ordering::Relaxed),
                 iterate: ITERATE.swap(0, Ordering::Relaxed),
+                metadata: METADATA.swap(0, Ordering::Relaxed),
+                metadata_get: METADATA_GET.swap(0, Ordering::Relaxed),
             }
         }
 
         pub fn total(&self) -> usize {
             self.get_value + self.iterate
         }
+    }
+
+    fn count_range(begin: &impl Key) {
+        ITERATE.fetch_add(1, Ordering::Relaxed);
+        if is_metadata_key(begin) {
+            METADATA.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn is_metadata_key(key: &impl Key) -> bool {
+        key.subspace() == Subspace::Property
+            && key.serialize(0).get(U32_LEN) == Some(&u8::from(Collection::Metadata))
     }
 }
 

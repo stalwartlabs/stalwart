@@ -6,25 +6,19 @@
 
 use crate::{
     api::metadata::{
-        ContainerTarget, MetadataAccess, MetadataPatches, MetadataSupport, MetadataType,
-        ObjectMetadata, PreloadedContainers, PreparedMetadata, is_empty_update, reject_uncommitted,
+        MetadataAccess, MetadataPatches, MetadataTarget, MetadataType, MetadataWriter,
+        ObjectMetadata, PreparedMetadata, is_empty_update, reject_uncommitted,
     },
     blob::download::BlobDownload,
-    changes::state::{MetadataStateManager, StateManager},
+    changes::state::StateManager,
 };
 use common::{
     Server,
     auth::{AccessToken, AccountCache},
-    storage::{
-        index::ObjectIndexBuilder,
-        metadata::{MetadataLog, PrivateMetadataCommit},
-    },
+    storage::index::{ObjectIndexBuilder, PresenceFlags, RewritePresence},
 };
-use email::{
-    presence::update_sieve_presence,
-    sieve::{
-        ArchivedSieveScript, SieveScript, delete::SieveScriptDelete, ingest::SieveScriptIngest,
-    },
+use email::sieve::{
+    ArchivedSieveScript, SieveScript, delete::SieveScriptDelete, ingest::SieveScriptIngest,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -98,13 +92,13 @@ impl SieveScriptSet for Server {
         using: CapabilityIds,
     ) -> trc::Result<SetResponse<Sieve>> {
         let account_id = request.account_id.document_id();
+        let object_metadata =
+            ObjectMetadata::new(self, access_token, using, MetadataType::SieveScript);
+        let sampled = object_metadata.viewer_change_id(self, account_id).await?;
         let sieve_ids = self
             .document_ids(account_id, Collection::SieveScript, SieveField::Name)
             .await?;
         let account = self.account(account_id).await.caused_by(trc::location!())?;
-        let object_metadata =
-            ObjectMetadata::new(self, access_token, using, MetadataType::SieveScript);
-        let viewer = object_metadata.viewer();
         let shared_state = self
             .get_state(account_id, SyncCollection::SieveScript)
             .await?;
@@ -113,27 +107,13 @@ impl SieveScriptSet for Server {
             access_token,
             account_cache: &account,
             response: SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-                .with_state(
-                    self.assert_metadata_state(
-                        viewer,
-                        account_id,
-                        Collection::SieveScript,
-                        shared_state.clone(),
-                        &request.if_in_state,
-                    )
-                    .await?,
-                ),
+                .with_state(sampled.assert_state(shared_state.clone(), &request.if_in_state)?),
         };
-        let metadata_support = object_metadata.support();
-        let containers = object_metadata
-            .preload_updates(self, account_id, request.update.as_ref(), |_| {
-                Some(MetadataKinds::JMAP)
-            })
+        let mut metadata_writer =
+            MetadataWriter::new(object_metadata, account_id).with_owner(account.clone());
+        metadata_writer
+            .preload_updates(self, request.update.as_ref(), |_| Some(MetadataKinds::JMAP))
             .await?;
-        let mut commit = PrivateMetadataCommit::default();
-        let mut private_batch = BatchBuilder::new();
-        let mut private_commit = PrivateMetadataCommit::default();
-        let mut will_update_private = Vec::new();
         let will_destroy = ctx.response.collect_will_destroy(request.unwrap_destroy());
 
         // Validate active script id
@@ -170,12 +150,10 @@ impl SieveScriptSet for Server {
                     Ok(mut result) => {
                         let metadata_writes = match sieve_metadata_writes(
                             self,
+                            &mut metadata_writer,
                             metadata_patches,
-                            &mut result,
-                            &ctx,
-                            metadata_support,
-                            &containers,
-                            None,
+                            result.builder.changes_mut(),
+                            MetadataTarget::Create,
                         )
                         .await?
                         {
@@ -212,8 +190,8 @@ impl SieveScriptSet for Server {
                             .caused_by(trc::location!())?
                             .clear(blob_hold);
                         if let Some(prepared) = metadata_writes {
-                            prepared
-                                .build(slot, &mut batch, &mut commit)
+                            metadata_writer
+                                .write(prepared, slot, &mut batch)
                                 .caused_by(trc::location!())?;
                         }
                         batch.commit_point();
@@ -302,11 +280,60 @@ impl SieveScriptSet for Server {
                     && object
                         .as_object()
                         .is_some_and(|object| is_empty_update::<Sieve>(object, id));
+                let is_activated = matches!(
+                    &request.arguments.on_success_activate_script,
+                    Some(MaybeIdReference::Id(active_id)) if active_id.document_id() == document_id
+                );
+
+                if is_metadata_only {
+                    let metadata_writes = match sieve_metadata_writes(
+                        self,
+                        &mut metadata_writer,
+                        metadata_patches,
+                        None,
+                        MetadataTarget::Update { document_id },
+                    )
+                    .await?
+                    {
+                        Ok(writes) => writes,
+                        Err(err) => {
+                            ctx.response.not_updated.append(id, err);
+                            continue 'update;
+                        }
+                    };
+                    if let Some(prepared) = metadata_writes {
+                        if let Some(presence) = metadata_writer
+                            .write(prepared, document_id, &mut batch)
+                            .caused_by(trc::location!())?
+                        {
+                            SieveScript::rewrite_presence(
+                                &sieve,
+                                presence.after,
+                                account_id,
+                                document_id,
+                                &mut batch,
+                            )
+                            .caused_by(trc::location!())?;
+                        }
+                        batch.commit_point();
+                    }
+                    let result = is_activated.then(|| {
+                        Value::Object(
+                            Map::with_capacity(1).with_key_value(SieveProperty::IsActive, true),
+                        )
+                    });
+                    ctx.response.updated.append(id, result);
+                    continue 'update;
+                }
+                if sieve.inner.name.eq_ignore_ascii_case("vacation") {
+                    ctx.response.not_updated.append(id, vacation_forbidden());
+                    continue 'update;
+                }
 
                 match self
                     .sieve_set_item(
                         object,
-                        (document_id, sieve.clone()).into(),
+                        (document_id, sieve).into(),
                         &ctx,
                         session.session_id,
                     )
@@ -315,12 +342,10 @@ impl SieveScriptSet for Server {
                     Ok(mut result) => {
                         let metadata_writes = match sieve_metadata_writes(
                             self,
+                            &mut metadata_writer,
                             metadata_patches,
-                            &mut result,
-                            &ctx,
-                            metadata_support,
-                            &containers,
-                            Some(document_id),
+                            result.builder.changes_mut(),
+                            MetadataTarget::Update { document_id },
                         )
                         .await?
                         {
@@ -364,43 +389,19 @@ impl SieveScriptSet for Server {
                         }
 
                         // Write record
-                        let mut is_private_only = false;
-                        if !is_metadata_only {
-                            batch
-                                .custom(
-                                    result
-                                        .builder
-                                        .with_changed_by(ctx.access_token.account_tenant_ids()),
-                                )
+                        batch
+                            .custom(
+                                result
+                                    .builder
+                                    .with_changed_by(ctx.access_token.account_tenant_ids()),
+                            )
+                            .caused_by(trc::location!())?;
+                        if let Some(prepared) = metadata_writes {
+                            metadata_writer
+                                .write(prepared, document_id, &mut batch)
                                 .caused_by(trc::location!())?;
-                            if let Some(prepared) = metadata_writes {
-                                prepared
-                                    .build(document_id, &mut batch, &mut commit)
-                                    .caused_by(trc::location!())?;
-                            }
-                            batch.commit_point();
-                        } else if let Some(prepared) = metadata_writes {
-                            is_private_only = prepared.is_private_only();
-                            let (target, target_commit) = if is_private_only {
-                                (&mut private_batch, &mut private_commit)
-                            } else {
-                                (&mut batch, &mut commit)
-                            };
-                            if let Some(presence) = prepared
-                                .build(document_id, target, target_commit)
-                                .caused_by(trc::location!())?
-                            {
-                                update_sieve_presence(
-                                    target,
-                                    account_id,
-                                    document_id,
-                                    &sieve,
-                                    presence,
-                                )
-                                .caused_by(trc::location!())?;
-                            }
-                            target.commit_point();
                         }
+                        batch.commit_point();
 
                         // Update blobId property if needed
                         let mut result = Map::with_capacity(1);
@@ -412,24 +413,19 @@ impl SieveScriptSet for Server {
                         }
 
                         // Add active script property if needed
-                        if let Some(MaybeIdReference::Id(id)) =
-                            &request.arguments.on_success_activate_script
-                            && document_id == id.document_id()
-                        {
+                        if is_activated {
                             result.insert_unchecked(SieveProperty::IsActive, true);
                         }
 
                         // Add result
-                        let result = if !result.is_empty() {
-                            Value::Object(result).into()
-                        } else {
-                            None
-                        };
-                        if is_private_only {
-                            will_update_private.push((id, result));
-                        } else {
-                            ctx.response.updated.append(id, result);
-                        }
+                        ctx.response.updated.append(
+                            id,
+                            if !result.is_empty() {
+                                Value::Object(result).into()
+                            } else {
+                                None
+                            },
+                        );
                     }
                     Err(err) => {
                         ctx.response.not_updated.append(id, err);
@@ -510,9 +506,8 @@ impl SieveScriptSet for Server {
         // Write changes
         let mut shared_change_id = None;
         if !batch.is_empty() {
-            match self.commit_batch(batch).await {
+            match metadata_writer.commit(self, batch).await {
                 Ok(assigned_ids) => {
-                    self.private_metadata_committed(commit, &assigned_ids).await;
                     shared_change_id =
                         assigned_ids.change_id(account_id, SyncCollection::SieveScript);
 
@@ -551,42 +546,11 @@ impl SieveScriptSet for Server {
             }
         }
 
-        let mut has_private_changes = false;
-        if !private_batch.is_empty() {
-            match self.commit_batch(private_batch).await {
-                Ok(assigned_ids) => {
-                    has_private_changes = true;
-                    self.private_metadata_committed(private_commit, &assigned_ids)
-                        .await;
-                    for (id, result) in will_update_private {
-                        ctx.response.updated.append(id, result);
-                    }
-                }
-                Err(err) if err.is_assertion_failure() => {
-                    for (id, _) in will_update_private {
-                        ctx.response.not_updated.append(
-                            id,
-                            SetError::forbidden().with_description(
-                                "Another process modified this script, please try again.",
-                            ),
-                        );
-                    }
-                }
-                Err(err) => {
-                    return Err(err.caused_by(trc::location!()));
-                }
-            }
-        }
-
-        if shared_change_id.is_some() || has_private_changes {
-            ctx.response.new_state = self
-                .metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::SieveScript,
-                    shared_change_id.map_or(shared_state, State::Exact),
-                )
+        if shared_change_id.is_some() {
+            ctx.response.new_state = object_metadata
+                .viewer_change_id(self, account_id)
                 .await?
+                .state(shared_change_id.map_or(shared_state, State::Exact))
                 .into();
         }
 
@@ -601,17 +565,6 @@ impl SieveScriptSet for Server {
         ctx: &SetContext<'_>,
         session_id: u64,
     ) -> trc::Result<Result<SetItemResponse<'x>, SetError<SieveProperty>>> {
-        // Vacation script cannot be modified
-        if update
-            .as_ref()
-            .is_some_and(|(_, obj)| obj.inner.name.eq_ignore_ascii_case("vacation"))
-        {
-            return Ok(Err(SetError::forbidden().with_description(concat!(
-                "The 'vacation' script cannot be modified, ",
-                "use VacationResponse/set instead."
-            ))));
-        }
-
         // Parse properties
         let mut set_item = None;
         let mut changes = update
@@ -773,54 +726,23 @@ impl SieveScriptSet for Server {
 
 async fn sieve_metadata_writes(
     server: &Server,
+    writer: &mut MetadataWriter,
     patches: Option<MetadataPatches>,
-    result: &mut SetItemResponse<'_>,
-    ctx: &SetContext<'_>,
-    support: Option<&MetadataSupport>,
-    containers: &PreloadedContainers,
-    document_id: Option<u32>,
+    script: Option<&mut SieveScript>,
+    target: MetadataTarget,
 ) -> trc::Result<Result<Option<PreparedMetadata>, SetError<SieveProperty>>> {
     let Some(patches) = patches else {
         return Ok(Ok(None));
     };
-    let Some(support) = support else {
-        return Ok(Err(patches.unsupported()));
-    };
-    let access = MetadataAccess {
-        may_write_shared: true,
-        may_read: true,
-    };
-    let update = match patches.apply(
-        support,
-        access,
-        document_id.and_then(|document_id| containers.shared.get(document_id)),
-        document_id.and_then(|document_id| containers.private.get(document_id)),
-    ) {
-        Ok(update) => update,
-        Err(err) => return Ok(Err(err)),
-    };
-    if update.is_empty() {
-        return Ok(Ok(None));
-    }
-    let prepared = match update
-        .prepare(
-            server,
-            ContainerTarget {
-                owner: ctx.account_cache,
-                viewer_id: ctx.access_token.account_id(),
-                collection: Collection::SieveScript,
-                log: match document_id {
-                    Some(_) => MetadataLog::Item { prefix: None },
-                    None => MetadataLog::None,
-                },
-            },
-        )
+    let prepared = match writer
+        .prepare_for(server, patches, MetadataAccess::FULL, target)
         .await?
     {
+        Ok(prepared) if prepared.is_empty() => return Ok(Ok(None)),
         Ok(prepared) => prepared,
         Err(err) => return Ok(Err(err)),
     };
-    if let Some((kinds, script)) = prepared.shared_kinds().zip(result.builder.changes_mut()) {
+    if let Some((kinds, script)) = prepared.shared_kinds().zip(script) {
         script.set_metadata_kinds(kinds);
     }
     Ok(Ok(Some(prepared)))
@@ -830,4 +752,11 @@ pub struct SetItemResponse<'x> {
     builder: ObjectIndexBuilder<Archive<&'x ArchivedSieveScript>, SieveScript>,
     blob_update: Option<Vec<u8>>,
     set_item: Option<bool>,
+}
+
+fn vacation_forbidden() -> SetError<SieveProperty> {
+    SetError::forbidden().with_description(concat!(
+        "The 'vacation' script cannot be modified, ",
+        "use VacationResponse/set instead."
+    ))
 }

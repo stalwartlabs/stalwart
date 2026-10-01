@@ -6,10 +6,12 @@
 
 mod build;
 pub mod object;
+pub mod presence;
 pub mod split;
 pub mod value;
 
 pub use object::*;
+pub use presence::*;
 pub use split::*;
 pub use value::*;
 
@@ -139,3 +141,6 @@ impl<C: CurrentObject, N: SerializableObject> IntoOperations for ObjectIndexBuil
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

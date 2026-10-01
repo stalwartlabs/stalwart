@@ -47,6 +47,8 @@ fn dispatch(request: Request<Command>) {
         Command::GetQuota => request.parse_get_quota().map(|_| ()),
         Command::GetQuotaRoot => request.parse_get_quota_root(is_utf8).map(|_| ()),
         Command::UidBatches => request.parse_uidbatches().map(|_| ()),
+        Command::GetMetadata => request.parse_get_metadata(is_utf8).map(|_| ()),
+        Command::SetMetadata => request.parse_set_metadata(is_utf8).map(|_| ()),
         Command::Expunge(true) => {
             if let Some(token) = request.tokens.into_iter().next() {
                 let _ = imap_proto::parser::parse_sequence_set(&token.unwrap_bytes());

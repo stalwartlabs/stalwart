@@ -10,7 +10,7 @@ use crate::{
         property::{
             ActiveLock, CalDavProperty, DavProperty, DavValue, LockScope, LockType, WebDavProperty,
         },
-        request::{DavPropertyValue, LockInfo, MkCol, PropFind, PropertyUpdate},
+        request::{DavPropertyValue, LockInfo, MkCol, PropFind, PropertyUpdate, PropertyUpdateOp},
     },
 };
 use std::borrow::Cow;
@@ -27,9 +27,19 @@ fn parse_update(props: &str) -> crate::parser::Result<PropertyUpdate> {
     PropertyUpdate::parse(&mut Tokenizer::new(xml.as_bytes()))
 }
 
-fn dead_values(update: PropertyUpdate) -> Vec<(XmlName<'static>, XmlValue<'static>)> {
+fn sets(update: PropertyUpdate) -> Vec<DavPropertyValue> {
     update
-        .set
+        .ops
+        .into_iter()
+        .filter_map(|op| match op {
+            PropertyUpdateOp::Set(value) => Some(value),
+            PropertyUpdateOp::Remove(_) => None,
+        })
+        .collect()
+}
+
+fn dead_values(update: PropertyUpdate) -> Vec<(XmlName<'static>, XmlValue<'static>)> {
+    sets(update)
         .into_iter()
         .map(|property| match (property.property, property.value) {
             (DavProperty::Dead(name), DavValue::Dead(value)) => (name, *value),
@@ -213,6 +223,44 @@ fn xml_lang_in_scope() {
 }
 
 #[test]
+fn wrapper_languages_are_read_only_for_dead_values() {
+    const LIVE: &str = "<D:displayname>Work</D:displayname>";
+    const DEAD: &str = "<x:color xmlns:x=\"urn:x\">red</x:color>";
+    let bodies = [
+        (LIVE.to_string(), false),
+        (DEAD.to_string(), true),
+        (format!("{LIVE}{DEAD}"), true),
+    ];
+    for malformed in [" junk", " xml:lang=\"&bogus;\"", " a=\"1\" b"] {
+        for wrapper in 0..3 {
+            let attribute = |position: usize| if position == wrapper { malformed } else { "" };
+            for (props, has_dead) in &bodies {
+                let set = format!(
+                    "<D:set{}><D:prop{}>{props}</D:prop></D:set>",
+                    attribute(1),
+                    attribute(2)
+                );
+                let update = format!(
+                    "<D:propertyupdate xmlns:D=\"DAV:\"{}>{set}</D:propertyupdate>",
+                    attribute(0)
+                );
+                let mkcol = format!("<D:mkcol xmlns:D=\"DAV:\"{}>{set}</D:mkcol>", attribute(0));
+                assert_eq!(
+                    PropertyUpdate::parse(&mut Tokenizer::new(update.as_bytes())).is_ok(),
+                    !has_dead,
+                    "{update}"
+                );
+                assert_eq!(
+                    MkCol::parse(&mut Tokenizer::new(mkcol.as_bytes())).is_ok(),
+                    !has_dead,
+                    "{mkcol}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn significant_whitespace_and_merged_text() {
     let (name, value) = single(concat!(
         "<x:p xmlns:x=\"urn:x\">  a &amp; b <![CDATA[<c> & ]]>&#x41;&#66;<!-- gone -->d  ",
@@ -300,9 +348,9 @@ fn known_non_live_names_become_dead_with_their_exact_namespace() {
     ))
     .expect("valid");
     let properties = update
-        .set
+        .ops
         .iter()
-        .map(|property| &property.property)
+        .map(PropertyUpdateOp::property)
         .collect::<Vec<_>>();
     assert_eq!(
         properties,
@@ -352,9 +400,9 @@ fn escaped_known_namespaces_resolve_like_plain_ones() {
     ))
     .expect("valid");
     let properties = update
-        .set
+        .ops
         .iter()
-        .map(|property| &property.property)
+        .map(PropertyUpdateOp::property)
         .collect::<Vec<_>>();
     assert_eq!(
         properties,
@@ -403,7 +451,7 @@ fn fuzz_oracle_over_fixtures() {
     let mut checked = 0;
     for input in &inputs {
         if let Ok(update) = PropertyUpdate::parse(&mut Tokenizer::new(input)) {
-            checked += update.set.into_iter().map(check_property).sum::<usize>();
+            checked += sets(update).into_iter().map(check_property).sum::<usize>();
         }
         if let Ok(mkcol) = MkCol::parse(&mut Tokenizer::new(input)) {
             checked += mkcol.props.into_iter().map(check_property).sum::<usize>();
@@ -436,7 +484,7 @@ fn check_property(property: DavPropertyValue) -> usize {
     );
     let reparsed = PropertyUpdate::parse(&mut Tokenizer::new(request.as_bytes()))
         .unwrap_or_else(|err| panic!("written value does not parse: {err} {written}"));
-    match reparsed.set.as_slice() {
+    match sets(reparsed).as_slice() {
         [
             DavPropertyValue {
                 property: DavProperty::Dead(reparsed_name),
@@ -670,4 +718,28 @@ impl Lcg {
         }
         children
     }
+}
+
+#[test]
+fn live_string_values_keep_whitespace_between_references() {
+    let update = parse_update(concat!(
+        "<D:displayname>A &amp; <![CDATA[<B>]]></D:displayname>",
+        "<D:getcontenttype>Work &amp; &quot;Home&quot;</D:getcontenttype>",
+        "<D:getcontentlanguage> \n </D:getcontentlanguage>",
+        "<D:creationdate/>"
+    ))
+    .expect("valid");
+    let values = sets(update)
+        .into_iter()
+        .map(|property| property.value)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        values,
+        [
+            DavValue::String("A & <B>".to_string()),
+            DavValue::String("Work & \"Home\"".to_string()),
+            DavValue::Null,
+            DavValue::Null,
+        ]
+    );
 }

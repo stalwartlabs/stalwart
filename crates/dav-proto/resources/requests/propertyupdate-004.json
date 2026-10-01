@@ -1,0 +1,87 @@
+{
+  "ops": [
+    {
+      "Remove": {
+        "type": "Dead",
+        "data": {
+          "namespace": "http://ns.example.com/z/",
+          "name": "a"
+        }
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://ns.example.com/z/",
+            "name": "a"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "WebDav",
+          "data": {
+            "type": "DisplayName"
+          }
+        },
+        "value": {
+          "String": "first"
+        }
+      }
+    },
+    {
+      "Remove": {
+        "type": "Dead",
+        "data": {
+          "namespace": "http://ns.example.com/z/",
+          "name": "a"
+        }
+      }
+    },
+    {
+      "Remove": {
+        "type": "WebDav",
+        "data": {
+          "type": "DisplayName"
+        }
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://ns.example.com/z/",
+            "name": "b"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "2"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

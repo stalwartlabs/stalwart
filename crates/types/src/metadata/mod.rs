@@ -6,6 +6,7 @@
 
 mod builder;
 mod codec;
+mod entries;
 mod json;
 mod limits;
 mod registry;
@@ -17,7 +18,7 @@ mod tests;
 
 pub use builder::{EncodedMetadata, MetadataBuilder, MetadataEdit, STORAGE_TRAILER_CAPACITY};
 pub use json::{EncodedJson, JsonError, JsonItems, JsonKind, JsonMembers, JsonView};
-pub use limits::{LimitViolation, MetadataLimits, MetadataScope};
+pub use limits::{EntryBound, LimitViolation, MetadataLimits, MetadataScope};
 pub use registry::{
     Namespace, NamespaceError, NamespaceScope, NamespaceUsage, REGISTERED_NAMESPACES,
     RegisteredNamespace,

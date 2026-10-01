@@ -45,8 +45,10 @@ pub async fn test(test: &TestServer) {
         two_namespaces(&client, &resource).await;
         nested_value(&client, &resource).await;
         propname(&client, &resource).await;
+        document_order(&client, &resource).await;
         if kind == DavKind::Calendar {
             calendar_server_source(&client, &resource).await;
+            live_document_order(&client, &resource).await;
         }
         deleted_with_resource(&client, &resource).await;
         resource.delete(&client).await;
@@ -194,6 +196,105 @@ async fn propname(client: &DummyWebDavClient, resource: &DavResource) {
         );
     }
     tree.assert_property_absent(path, NS_A, "color");
+}
+
+fn order_set(namespace: &str, name: &str, value: &str) -> String {
+    format!("<D:set><D:prop><O:{name} xmlns:O=\"{namespace}\">{value}</O:{name}></D:prop></D:set>")
+}
+
+fn order_remove(namespace: &str, name: &str) -> String {
+    format!("<D:remove><D:prop><O:{name} xmlns:O=\"{namespace}\"/></D:prop></D:remove>")
+}
+
+async fn property_value(
+    client: &DummyWebDavClient,
+    path: &str,
+    namespace: &str,
+    name: &str,
+) -> Option<String> {
+    client
+        .propfind_named(path, "0", &format!("<O:{name} xmlns:O=\"{namespace}\"/>"))
+        .await
+        .property(path, namespace, name)
+        .filter(|prop| prop.status == StatusCode::OK)
+        .map(|prop| prop.element.text())
+}
+
+async fn assert_document_order(
+    client: &DummyWebDavClient,
+    path: &str,
+    namespace: &str,
+    name: &str,
+    context: &str,
+) {
+    let set = |value| order_set(namespace, name, value);
+    let remove = || order_remove(namespace, name);
+    for (label, body, expected) in [
+        ("set remove", format!("{}{}", set("1"), remove()), None),
+        ("remove set", format!("{}{}", remove(), set("1")), Some("1")),
+        (
+            "set remove set",
+            format!("{}{}{}", set("1"), remove(), set("2")),
+            Some("2"),
+        ),
+        (
+            "remove set remove",
+            format!("{}{}{}", remove(), set("1"), remove()),
+            None,
+        ),
+        (
+            "set remove set-other",
+            format!(
+                "{}{}{}",
+                set("1"),
+                remove(),
+                order_set(NS_A, "order-other", "x")
+            ),
+            None,
+        ),
+    ] {
+        client
+            .proppatch_xml(path, &remove())
+            .await
+            .with_status(StatusCode::MULTI_STATUS);
+        client
+            .proppatch_xml(path, &body)
+            .await
+            .with_status(StatusCode::MULTI_STATUS);
+        assert_eq!(
+            property_value(client, path, namespace, name)
+                .await
+                .as_deref(),
+            expected,
+            "{context}: RFC 4918 9.2 document order, '{label}'"
+        );
+    }
+    client
+        .proppatch_xml(path, &order_remove(NS_A, "order-other"))
+        .await
+        .with_status(StatusCode::MULTI_STATUS);
+}
+
+async fn document_order(client: &DummyWebDavClient, resource: &DavResource) {
+    assert_document_order(
+        client,
+        &resource.path,
+        NS_A,
+        "order",
+        &format!("{:?} dead property", resource.kind),
+    )
+    .await;
+}
+
+async fn live_document_order(client: &DummyWebDavClient, resource: &DavResource) {
+    assert_document_order(
+        client,
+        &resource.path,
+        "urn:ietf:params:xml:ns:caldav",
+        "calendar-description",
+        "calendar-description",
+    )
+    .await;
 }
 
 async fn calendar_server_source(client: &DummyWebDavClient, resource: &DavResource) {

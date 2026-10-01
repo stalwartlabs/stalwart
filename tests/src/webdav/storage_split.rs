@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::jmap::metadata::performance::min_ops;
 use crate::utils::server::TestServer;
 use crate::utils::webdav::{DeadPropertyName, DummyWebDavClient};
 use crate::webdav::*;
@@ -13,7 +14,6 @@ use groupware::calendar::CalendarEvent;
 use std::time::Duration;
 use store::{
     SerializeInfallible, ValueKey,
-    dispatch::StoreOps,
     write::{Archive, ArchiveBytes, BatchBuilder, Operation, ValueClass},
 };
 use types::{
@@ -213,13 +213,16 @@ async fn dead_property_presence_tracks_the_set(test: &TestServer) {
             .await
             .with_status(StatusCode::CREATED);
 
-        let unflagged = allprop_read_count(&client, path, "0").await;
+        let allprop = async || {
+            client.propfind_allprop(path, "0").await;
+        };
+        let unflagged = min_ops(test, allprop).await;
 
         client
             .patch_and_check(path, [(SPLIT_MARKER, "hello")])
             .await;
 
-        let flagged = allprop_read_count(&client, path, "0").await;
+        let flagged = min_ops(test, allprop).await;
         assert!(
             flagged > unflagged,
             "{path}: reading dead properties cost no extra read ({unflagged} unflagged, {flagged} flagged)"
@@ -243,7 +246,7 @@ async fn dead_property_presence_tracks_the_set(test: &TestServer) {
 
         client.patch_and_check(path, [(SPLIT_MARKER, "")]).await;
 
-        let cleared = allprop_read_count(&client, path, "0").await;
+        let cleared = min_ops(test, allprop).await;
         assert_eq!(
             cleared, unflagged,
             "{path}: removing the last dead property left the presence flag set"
@@ -522,13 +525,16 @@ async fn allprop_propfind_read_count_does_not_scale(test: &TestServer) {
         )
         .await;
 
-    let ops_few = allprop_read_count(&client, calendar_path, "1").await;
+    let allprop = async || {
+        client.propfind_allprop(calendar_path, "1").await;
+    };
+    let ops_few = min_ops(test, allprop).await;
 
     for seq in FEW..MANY {
         put_read_count_event(&client, calendar_path, seq).await;
     }
 
-    let ops_many = allprop_read_count(&client, calendar_path, "1").await;
+    let ops_many = min_ops(test, allprop).await;
 
     assert!(
         ops_many <= ops_few + 8,
@@ -559,25 +565,6 @@ async fn put_read_count_event(client: &DummyWebDavClient, calendar_path: &str, s
         )
         .await
         .with_status(StatusCode::CREATED);
-}
-
-async fn allprop_read_count(client: &DummyWebDavClient, path: &str, depth: &str) -> usize {
-    const ALLPROP: &str = concat!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-        "<D:propfind xmlns:D=\"DAV:\"><D:allprop/></D:propfind>"
-    );
-
-    let mut lowest = usize::MAX;
-    for _ in 0..3 {
-        StoreOps::take();
-        client
-            .request_with_headers("PROPFIND", path, [("depth", depth)], ALLPROP)
-            .await
-            .with_status(StatusCode::MULTI_STATUS);
-        lowest = lowest.min(StoreOps::take().total());
-    }
-
-    lowest
 }
 
 // Test 10: destroying the default calendar clears the principal property, and

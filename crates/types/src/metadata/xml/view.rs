@@ -122,22 +122,27 @@ impl<'x> DavValueView<'x> {
         self.parts()?.lang
     }
 
-    pub fn is_empty(&self) -> bool {
-        let Some(mut parts) = self.parts() else {
-            return true;
-        };
-        let has_attributes = parts.body.len() != Some(0);
-        let has_children = parts.body.len() != Some(0);
-        parts.lang.is_none() && !has_attributes && !has_children
-    }
-
     pub fn to_value(&self) -> Option<XmlValue<'x>> {
         let mut parts = self.parts()?;
         Some(XmlValue {
             lang: parts.lang.map(Cow::Borrowed),
             attributes: decode_attributes(&mut parts.body)?,
-            children: decode_children(&mut parts.body)?,
+            children: decode_children(&mut parts.body, 1)?,
         })
+    }
+
+    pub fn text(&self) -> Option<Cow<'x, str>> {
+        let mut body = self.parts()?.body;
+        if body.len()? == 0 && body.len()? == 1 && body.u8()? == NODE_TEXT {
+            return body.str().map(Cow::Borrowed);
+        }
+        let mut text = String::new();
+        for child in self.to_value()?.children {
+            if let XmlNode::Text(part) = child {
+                text.push_str(&part);
+            }
+        }
+        Some(Cow::Owned(text))
     }
 
     pub fn to_encoded(&self) -> EncodedDavValue {
@@ -189,7 +194,10 @@ fn decode_attributes<'x>(reader: &mut TrustedReader<'x>) -> Option<Vec<XmlAttrib
     Some(attributes)
 }
 
-fn decode_children<'x>(reader: &mut TrustedReader<'x>) -> Option<Vec<XmlNode<'x>>> {
+fn decode_children<'x>(reader: &mut TrustedReader<'x>, nesting: u32) -> Option<Vec<XmlNode<'x>>> {
+    if nesting > MAX_XML_NESTING {
+        return None;
+    }
     let count = reader.len()?;
     let mut children = Vec::with_capacity(count.min(reader.remaining().len()));
     for _ in 0..count {
@@ -206,7 +214,7 @@ fn decode_children<'x>(reader: &mut TrustedReader<'x>) -> Option<Vec<XmlNode<'x>
                     name: XmlName::borrowed(namespace, name),
                     prefix,
                     attributes: decode_attributes(reader)?,
-                    children: decode_children(reader)?,
+                    children: decode_children(reader, nesting + 1)?,
                 })
             }
             _ => return None,

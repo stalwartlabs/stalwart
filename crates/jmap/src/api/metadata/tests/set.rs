@@ -582,6 +582,40 @@ fn withdrawn_namespaces() {
         apply(r#"{"metadata": {"b.example": {}, "a.example": {"k": 1, "list": [1.5, "x"]}}}"#)
             .expect("member order does not matter");
     assert!(result.is_empty());
+    for request in [
+        r#"{"metadata": {"a.example": {"list": [1.5, "x"], "k": 1}, "b.example": {}}}"#,
+        r#"{"metadata": {"a.example": {"list": [1.5, "x"], "k": 1.0}, "b.example": {}}}"#,
+    ] {
+        assert!(
+            apply(request)
+                .expect("the same JSON value is kept")
+                .is_empty(),
+            "{request}"
+        );
+    }
+    let nested = container(r#"{"a.example": {"o": {"x": 1, "y": [{"p": 1, "q": 2}]}}}"#);
+    assert!(
+        update_with(
+            &withdrawn,
+            FULL_ACCESS,
+            r#"{"metadata": {"a.example": {"o": {"y": [{"q": 2, "p": 1}], "x": 1}}}}"#,
+            Some(&nested),
+            None,
+        )
+        .expect("nested members are unordered too")
+        .is_empty()
+    );
+    for request in [
+        r#"{"metadata": {"a.example": {"o": {"y": [{"q": 2, "p": 1}], "x": 2}}}}"#,
+        r#"{"metadata": {"a.example": {"o": {"x": 1, "y": [{"p": 1, "q": 2}], "z": null}}}}"#,
+        r#"{"metadata": {"a.example": {"o": {"x": 1}, "y": [{"p": 1, "q": 2}]}}}"#,
+    ] {
+        assert_error(
+            update_with(&withdrawn, FULL_ACCESS, request, Some(&nested), None),
+            "invalidProperties",
+            "metadata/a.example",
+        );
+    }
 
     for (request, property) in [
         (r#"{"metadata/a.example": {"k": 2}}"#, "metadata/a.example"),
@@ -593,7 +627,7 @@ fn withdrawn_namespaces() {
             "metadata/a.example",
         ),
         (
-            r#"{"metadata": {"a.example": {"list": [1.5, "x"], "k": 1}}}"#,
+            r#"{"metadata": {"a.example": {"list": ["x", 1.5], "k": 1}}}"#,
             "metadata/a.example",
         ),
         (r#"{"metadata": {"z.example": {}}}"#, "metadata/z.example"),
@@ -734,11 +768,9 @@ fn pointer_items_after_the_root_are_opaque() {
 fn preloaded_containers_by_document() {
     let first = container(r#"{"a.example": {"k": 1}}"#);
     let second = container(r#"{"b.example": {"k": 2}}"#);
-    let containers = crate::api::metadata::MetadataContainers::new(vec![
-        (9, second.clone()),
-        (2, first.clone()),
-    ]);
-    assert_eq!(containers.len(), 2);
+    let containers = [(9, second.clone()), (2, first.clone())]
+        .into_iter()
+        .collect::<crate::api::metadata::MetadataContainers>();
     assert_eq!(containers.get(2), Some(&first));
     assert_eq!(containers.get(9), Some(&second));
     assert_eq!(containers.get(5), None);
@@ -910,5 +942,144 @@ fn deep_removal_that_decompresses_the_container_is_removal_only() {
     assert!(next.len() < METADATA_COMPRESS_WATERMARK);
     assert!(
         u32::try_from(next.len() + STORAGE_TRAILER_CAPACITY).expect("small container") > previous
+    );
+}
+
+#[test]
+fn invalid_deep_patches_report_their_own_rule() {
+    let flat = MetadataSupport {
+        limits: types::metadata::MetadataLimits {
+            max_depth: Some(1),
+            ..types::metadata::MetadataLimits::default()
+        },
+        ..support()
+    };
+    let current = container(r#"{"a.example": {"k": 1}}"#);
+    let deep = r#"{"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": 1}}}}}}}}"#;
+
+    for (support, request, expected) in [
+        (
+            support(),
+            r#"{"metadata/a.example/k\u0001": 1}"#.to_string(),
+            "control characters",
+        ),
+        (
+            flat,
+            r#"{"metadata/a.example/k\u0001": 1}"#.to_string(),
+            "control characters",
+        ),
+        (
+            flat,
+            r#"{"metadata/a.example/k": "a\u0001b"}"#.to_string(),
+            "control characters",
+        ),
+        (
+            support(),
+            r#"{"metadata/a.example/k": {"x\u0001": 1}}"#.to_string(),
+            "control characters",
+        ),
+        (
+            flat,
+            r#"{"metadata/a.example/k": {"x\u0001": 1}}"#.to_string(),
+            "depth 2 exceeds the maximum of 1",
+        ),
+        (
+            support(),
+            format!(r#"{{"metadata/a.example/k": {{"x\u0001": {deep}}}}}"#),
+            "depth 10 exceeds the maximum of 8",
+        ),
+        (
+            support(),
+            format!(r#"{{"metadata/a.example/k\u0001": {deep}}}"#),
+            "depth 9 exceeds the maximum of 8",
+        ),
+    ] {
+        let error = update_with(&support, FULL_ACCESS, &request, Some(&current), None)
+            .expect_err("invalid patch");
+        let description = error.description().map(str::to_string);
+        assert!(
+            description
+                .as_deref()
+                .is_some_and(|text| text.contains(expected)),
+            "{request}: {description:?}"
+        );
+        assert_eq!(
+            super::error_json(error),
+            json(r#"{"type": "invalidProperties", "properties": ["metadata/a.example"]}"#),
+            "{request}"
+        );
+    }
+}
+
+#[test]
+fn entry_limit_stops_early_without_changing_the_answer() {
+    let members = (0..1000)
+        .map(|n| format!(r#""n{n:04}.example": {{}}"#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_error(
+        update(&format!(r#"{{"metadata": {{{members}}}}}"#), None),
+        "invalidProperties",
+        "metadata",
+    );
+    let patches = (0..200)
+        .map(|n| format!(r#""metadata/n{n:04}.example": {{}}"#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_error(
+        update(&format!("{{{patches}}}"), None),
+        "invalidProperties",
+        "metadata",
+    );
+
+    let current = container(r#"{"zz.example": {"k": 1}}"#);
+    assert_error(
+        update(
+            &format!(r#"{{{patches}, "metadata/zz.example/missing/x": 1}}"#),
+            Some(&current),
+        ),
+        "invalidPatch",
+        "metadata/zz.example/missing/x",
+    );
+    let deep = r#"{"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": 1}}}}}}}}}"#;
+    assert_error(
+        update(
+            &format!(r#"{{{patches}, "metadata/zz.example": {deep}}}"#),
+            Some(&current),
+        ),
+        "invalidProperties",
+        "metadata/zz.example",
+    );
+
+    let limited = MetadataSupport {
+        limits: types::metadata::MetadataLimits {
+            max_entries: 3,
+            ..types::metadata::MetadataLimits::default()
+        },
+        ..support()
+    };
+    let full = container(r#"{"b.example": {}, "c.example": {}, "z.example": {}}"#);
+    let result = update_with(
+        &limited,
+        FULL_ACCESS,
+        r#"{"metadata/a.example": {}, "metadata/z.example": null}"#,
+        Some(&full),
+        None,
+    )
+    .expect("a removal later in the patch keeps the count at the limit");
+    assert_eq!(
+        shared_json(&result),
+        json(r#"{"a.example": {}, "b.example": {}, "c.example": {}}"#)
+    );
+    assert_error(
+        update_with(
+            &limited,
+            FULL_ACCESS,
+            r#"{"metadata/a.example": {}, "metadata/y.example": null}"#,
+            Some(&full),
+            None,
+        ),
+        "invalidProperties",
+        "metadata",
     );
 }

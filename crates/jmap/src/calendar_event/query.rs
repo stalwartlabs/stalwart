@@ -72,6 +72,7 @@ impl CalendarEventQuery for Server {
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let metadata_query =
             metadata.query(request.filter.iter().filter_map(|filter| match filter {
                 Filter::Property(CalendarEventFilter::Metadata(filter)) => Some(filter),
@@ -443,9 +444,7 @@ impl CalendarEventQuery for Server {
                     .with_mask(mask),
             )
             .await?;
-        let query_state = metadata
-            .state(self, account_id, cache.get_state(false))
-            .await?;
+        let query_state = sampled.state(cache.get_state(false));
 
         // Extract comparators
         let comparators = request
@@ -618,6 +617,7 @@ impl CalendarEventQuery for Server {
         let metadata_query = metadata.query(metadata_filters)?;
 
         let account_id = request.account_id.document_id();
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -646,9 +646,7 @@ impl CalendarEventQuery for Server {
         let mut response = QueryResponseBuilder::new(
             results.len() as usize,
             self.core.jmap.query_max_results,
-            metadata
-                .state(self, account_id, cache.get_state(true))
-                .await?,
+            sampled.state(cache.get_state(true)),
             &request,
         );
 

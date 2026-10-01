@@ -5,7 +5,6 @@
  */
 
 use crate::cache::{MessageCacheFetch, email::MessageCacheAccess};
-use crate::cleanup::FlaggedContainers;
 use crate::message::messagedata::EmailMessageData;
 use crate::submission::EmailSubmission;
 use common::{MessageStoreCache, Server, storage::index::ObjectIndexBuilder};
@@ -74,7 +73,8 @@ impl EmailDeletion for Server {
                     .is_some_and(|message| !cache.metadata_kinds(message).is_empty())
             })
             .collect::<RoaringBitmap>();
-        let containers = FlaggedContainers::load(self, account_id, Collection::Email, &flagged_ids)
+        let containers = self
+            .preload_container_cleanup(None, account_id, Collection::Email, &flagged_ids)
             .await
             .caused_by(trc::location!())?;
         let mut deleted_ids = RoaringBitmap::new();
@@ -92,7 +92,7 @@ impl EmailDeletion for Server {
             }
             thread_ids.insert(metadata.thread_id);
             if !metadata.metadata_kinds().is_empty() {
-                containers.remove(batch, document_id);
+                containers.release_or_assert_absent(batch, account_id, document_id);
             }
             batch
                 .with_document(document_id)

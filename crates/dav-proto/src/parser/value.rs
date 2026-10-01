@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Error, RawElement, Result, Token, tokenizer::Tokenizer};
+use super::{
+    Error, RawElement, Result, Token,
+    tokenizer::{Tokenizer, append_text},
+};
 use crate::schema::Namespace;
 use quick_xml::{
     XmlVersion,
@@ -58,15 +61,17 @@ impl<'x> Tokenizer<'x> {
     }
 
     fn collect_xml_children(&mut self, value: &mut XmlValue<'static>) -> Result<()> {
+        self.with_content(|tokenizer| tokenizer.collect_xml_content(value))
+    }
+
+    fn collect_xml_content(&mut self, value: &mut XmlValue<'static>) -> Result<()> {
         let mut open: Vec<XmlElement<'static>> = Vec::new();
         let mut text = String::new();
 
         loop {
-            let (resolved, event) = self.xml.read_resolved_event()?;
-            let (tag, is_empty) = match event {
-                Event::Start(tag) => (tag, false),
-                Event::Empty(tag) => (tag, true),
-                Event::End(_) => {
+            let raw = match self.token()? {
+                Token::ElementStart { raw, .. } | Token::UnknownElement(raw) => raw,
+                Token::ElementEnd => {
                     flush_text(&mut text, children_of(&mut open, value));
                     match open.pop() {
                         Some(element) => {
@@ -76,27 +81,33 @@ impl<'x> Tokenizer<'x> {
                     }
                     continue;
                 }
-                Event::Text(content) => {
-                    text.push_str(&content.xml_content(XmlVersion::Implicit1_0).map_err(xml)?);
+                Token::Content(Event::Text(content)) => {
+                    append_text(
+                        &mut text,
+                        content.xml_content(XmlVersion::Implicit1_0).map_err(xml)?,
+                    );
                     continue;
                 }
-                Event::CData(content) => {
-                    text.push_str(&content.xml_content(XmlVersion::Implicit1_0).map_err(xml)?);
+                Token::Content(Event::CData(content)) => {
+                    append_text(
+                        &mut text,
+                        content.xml_content(XmlVersion::Implicit1_0).map_err(xml)?,
+                    );
                     continue;
                 }
-                Event::GeneralRef(reference) => {
+                Token::Content(Event::GeneralRef(reference)) => {
                     push_reference(&mut text, &reference)?;
                     continue;
                 }
-                Event::Eof => return Err(Token::Eof.into_unexpected()),
-                Event::Comment(_) | Event::PI(_) | Event::Decl(_) | Event::DocType(_) => continue,
+                Token::Eof => return Err(Token::Eof.into_unexpected()),
+                Token::Content(_) | Token::Text(_) | Token::Bytes(_) => continue,
             };
 
             if open.len() >= XmlValue::MAX_DEPTH {
                 return Err(Error::Value(XmlError::NestingTooDeep));
             }
-            let namespace = resolved_namespace(resolved)?;
-            let (local_name, prefix) = tag.name().decompose();
+            let namespace = raw.namespace.as_deref().map(namespace_uri).transpose()?;
+            let (local_name, prefix) = raw.element.name().decompose();
             let element = XmlElement {
                 name: XmlName {
                     namespace,
@@ -107,16 +118,12 @@ impl<'x> Tokenizer<'x> {
                         utf8(prefix.as_ref()).map(|prefix| Cow::Owned(prefix.to_string()))
                     })
                     .transpose()?,
-                attributes: self.value_attributes(&tag, LangScope::Element)?,
+                attributes: self.value_attributes(&raw.element, LangScope::Element)?,
                 children: Vec::new(),
             };
 
             flush_text(&mut text, children_of(&mut open, value));
-            if is_empty {
-                children_of(&mut open, value).push(XmlNode::Element(element));
-            } else {
-                open.push(element);
-            }
+            open.push(element);
         }
     }
 
@@ -155,6 +162,38 @@ impl<'x> Tokenizer<'x> {
     }
 }
 
+pub(crate) struct InheritedLang<'a, 'x> {
+    scopes: [&'a RawElement<'x>; 3],
+    resolved: Option<Option<String>>,
+}
+
+impl<'a, 'x> InheritedLang<'a, 'x> {
+    pub fn new(
+        prop: &'a RawElement<'x>,
+        set: &'a RawElement<'x>,
+        request: &'a RawElement<'x>,
+    ) -> Self {
+        InheritedLang {
+            scopes: [prop, set, request],
+            resolved: None,
+        }
+    }
+
+    pub fn get(&mut self) -> Result<Option<&str>> {
+        if self.resolved.is_none() {
+            let mut lang = None;
+            for scope in self.scopes {
+                let scope_lang = scope.xml_lang()?;
+                if lang.is_none() {
+                    lang = scope_lang;
+                }
+            }
+            self.resolved = Some(lang);
+        }
+        Ok(self.resolved.as_ref().and_then(Option::as_deref))
+    }
+}
+
 impl RawElement<'_> {
     pub fn dead_name(&self) -> Result<XmlName<'static>> {
         let name = XmlName {
@@ -166,6 +205,9 @@ impl RawElement<'_> {
     }
 
     pub fn xml_lang(&self) -> Result<Option<String>> {
+        if self.element.attributes_raw().trim_ascii_start().is_empty() {
+            return Ok(None);
+        }
         for attribute in unchecked_attributes(&self.element) {
             let attribute = attribute?;
             if attribute.key.as_ref() == XML_LANG {

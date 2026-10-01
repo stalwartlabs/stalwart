@@ -9,7 +9,7 @@ use crate::{
         metadata::{MetadataType, ObjectMetadata},
         query::QueryResponseBuilder,
     },
-    changes::state::{JmapCacheState, MetadataStateManager},
+    changes::state::JmapCacheState,
 };
 use common::{Server, auth::AccessToken};
 use email::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
@@ -48,9 +48,9 @@ impl MailboxQuery for Server {
         let sort_as_tree = request.arguments.sort_as_tree.unwrap_or(false);
         let filter_as_tree = request.arguments.filter_as_tree.unwrap_or(false);
         let mut filters = Vec::with_capacity(request.filter.len());
-        let mailboxes = self.get_cached_messages(account_id).await?;
         let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Mailbox);
-        let viewer = object_metadata.viewer();
+        let sampled = object_metadata.viewer_change_id(self, account_id).await?;
+        let mailboxes = self.get_cached_messages(account_id).await?;
         let readable: RoaringBitmap = if access_token.is_shared(account_id) {
             mailboxes.shared_mailboxes(access_token, Acl::Read)
         } else {
@@ -66,29 +66,21 @@ impl MailboxQuery for Server {
                 Filter::Property(MailboxFilter::Metadata(filter)) => Some(filter),
                 _ => None,
             }))?;
-        let mut metadata_matches = if metadata.is_empty() {
-            Vec::new()
-        } else {
-            let candidates = mailboxes
-                .mailboxes
-                .items
-                .iter()
-                .filter(|mailbox| {
-                    mailbox.metadata_kinds.contains(MetadataKinds::JMAP)
-                        && readable.contains(mailbox.document_id)
-                })
-                .map(|mailbox| mailbox.document_id)
-                .collect::<RoaringBitmap>();
-            let private = if metadata.has_private() {
-                object_metadata.private_candidates(self, account_id).await?
-            } else {
-                None
-            };
-            metadata
-                .evaluate(self, account_id, &candidates, private)
-                .await?
-        }
-        .into_iter();
+        let mut metadata_matches = object_metadata
+            .evaluate(self, account_id, &metadata, || {
+                mailboxes
+                    .mailboxes
+                    .items
+                    .iter()
+                    .filter(|mailbox| {
+                        mailbox.metadata_kinds.contains(MetadataKinds::JMAP)
+                            && readable.contains(mailbox.document_id)
+                    })
+                    .map(|mailbox| mailbox.document_id)
+                    .collect::<RoaringBitmap>()
+            })
+            .await?
+            .into_iter();
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -311,13 +303,7 @@ impl MailboxQuery for Server {
         let mut response = QueryResponseBuilder::new(
             results.results().len() as usize,
             self.core.jmap.query_max_results,
-            self.metadata_state(
-                viewer,
-                account_id,
-                Collection::Mailbox,
-                mailboxes.get_state(true),
-            )
-            .await?,
+            sampled.state(mailboxes.get_state(true)),
             &request,
         );
 

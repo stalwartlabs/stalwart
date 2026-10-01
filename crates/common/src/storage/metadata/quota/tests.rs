@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{has_room_for, quota_outcome};
+use super::{has_room_for, quota_outcome, stored_len};
 use crate::storage::metadata::StoredContainer;
 use std::{borrow::Cow, future::ready, iter};
 use store::write::metadata::{METADATA_COMPRESS_WATERMARK, MetadataBuf, StoredMetadata};
@@ -58,7 +58,7 @@ fn bound(next: &EncodedMetadata) -> u64 {
     (next.len() + STORAGE_TRAILER_CAPACITY) as u64
 }
 
-fn stored_len(next: &EncodedMetadata) -> u64 {
+fn serialized_len(next: &EncodedMetadata) -> u64 {
     StoredMetadata::new(next.clone())
         .expect("serializable")
         .len() as u64
@@ -88,6 +88,20 @@ async fn check_edit(
     (has_room, requests)
 }
 
+#[test]
+fn borrowed_stored_length_matches_the_serialized_container() {
+    for fill in [Fill::Repeated, Fill::Noise] {
+        for len in [BELOW_WATERMARK, AT_WATERMARK, 4 * AT_WATERMARK] {
+            let next = container(len, fill);
+            assert_eq!(
+                stored_len(&next).expect("measurable"),
+                serialized_len(&next),
+                "{len}"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn growth_within_previous_size_needs_no_quota() {
     for next in [
@@ -105,7 +119,7 @@ async fn growth_within_previous_size_needs_no_quota() {
 async fn growth_is_charged_up_to_the_stored_bound() {
     let next = container(BELOW_WATERMARK, Fill::Repeated);
     let bound = bound(&next);
-    assert_eq!(stored_len(&next), bound);
+    assert_eq!(serialized_len(&next), bound);
     assert_eq!(check(None, &next, bound).await, (true, vec![bound]));
     assert_eq!(check(Some(bound - 1), &next, 1).await, (true, vec![1]));
     assert_eq!(check(Some(bound - 1), &next, 0).await, (false, vec![1]));
@@ -122,7 +136,7 @@ async fn small_container_over_quota_is_not_compressed() {
 async fn large_container_over_bound_retries_with_exact_size() {
     let next = container(AT_WATERMARK, Fill::Repeated);
     let bound = bound(&next);
-    let stored = stored_len(&next);
+    let stored = serialized_len(&next);
     assert!(stored < bound);
     assert_eq!(check(None, &next, bound).await, (true, vec![bound]));
     assert_eq!(
@@ -143,7 +157,7 @@ async fn large_container_over_bound_retries_with_exact_size() {
 async fn large_container_within_previous_after_compression_needs_no_quota() {
     let next = container(AT_WATERMARK, Fill::Repeated);
     let bound = bound(&next);
-    for previous in [stored_len(&next), bound - 1] {
+    for previous in [serialized_len(&next), bound - 1] {
         assert_eq!(
             check(Some(previous), &next, 0).await,
             (true, vec![bound - previous])
@@ -155,7 +169,7 @@ async fn large_container_within_previous_after_compression_needs_no_quota() {
 async fn incompressible_container_is_charged_its_bound() {
     let next = container(AT_WATERMARK, Fill::Noise);
     let bound = bound(&next);
-    assert_eq!(stored_len(&next), bound);
+    assert_eq!(serialized_len(&next), bound);
     assert_eq!(check(None, &next, bound).await, (true, vec![bound]));
     assert_eq!(
         check(None, &next, bound - 1).await,
@@ -183,7 +197,7 @@ async fn removal_that_decompresses_the_container_needs_no_quota() {
     assert_eq!(edit, MetadataEdit::RemovalOnly);
     assert!(buf.view().as_bytes().len() >= METADATA_COMPRESS_WATERMARK);
     assert!(next.len() < METADATA_COMPRESS_WATERMARK);
-    assert_eq!(stored_len(&next), bound);
+    assert_eq!(serialized_len(&next), bound);
     assert!(bound > previous);
     assert_eq!(
         check_edit(edit, Some(previous), &next, 0).await,

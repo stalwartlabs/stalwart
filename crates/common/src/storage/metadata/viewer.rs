@@ -8,9 +8,9 @@ use super::{PrivateMetadataChange, PrivateMetadataCommit, metadata_key};
 use crate::{
     Server,
     auth::AccessToken,
+    cache::invalidate::CacheInvalidationBuilder,
     ipc::{BroadcastEvent, CacheInvalidation, PushNotification, ViewerStateChange},
 };
-use jmap_proto::request::capability::{Capability, CapabilityIds};
 use registry::schema::enums::Permission;
 use std::sync::{
     Arc,
@@ -19,7 +19,7 @@ use std::sync::{
 use store::{
     Deserialize, IterateParams, U32_LEN,
     write::{
-        AssignedIds,
+        AssignedIds, BatchBuilder,
         metadata::{MetadataClass, ViewerState},
     },
 };
@@ -38,7 +38,7 @@ pub struct MetadataViewer(u32);
 
 pub struct MetadataViewerCache {
     states: Cache<u32, Arc<ViewerStates>>,
-    epoch: AtomicU64,
+    epochs: [AtomicU64; EPOCH_SHARDS],
 }
 
 #[derive(Debug, Default)]
@@ -55,6 +55,7 @@ struct ViewerStateEntry {
 }
 
 const OWNER_KEY_SUFFIX: usize = U32_LEN + 1;
+const EPOCH_SHARDS: usize = 64;
 pub(super) const CACHE_SLOT_SIZE: usize = 32;
 pub(super) const CACHE_INDEX_SIZE: usize = 8;
 const ARC_COUNTERS_SIZE: usize = 2 * size_of::<usize>();
@@ -75,17 +76,19 @@ impl MetadataViewerCache {
                 size_of::<u32>() as u64 + ViewerStates::footprint(ESTIMATED_ENTRIES),
             )
             .with_name("metadataViewers"),
-            epoch: AtomicU64::new(0),
+            epochs: [const { AtomicU64::new(0) }; EPOCH_SHARDS],
         }
     }
 
     pub fn invalidate(&self, viewer_id: u32) {
-        self.epoch.fetch_add(1, Ordering::AcqRel);
+        self.shard(viewer_id).fetch_add(1, Ordering::AcqRel);
         self.states.remove(&viewer_id);
     }
 
     pub fn clear(&self) {
-        self.epoch.fetch_add(1, Ordering::AcqRel);
+        for epoch in &self.epochs {
+            epoch.fetch_add(1, Ordering::AcqRel);
+        }
         self.states.clear();
     }
 
@@ -93,18 +96,33 @@ impl MetadataViewerCache {
         self.states.get(&viewer_id)
     }
 
-    pub(super) fn epoch(&self) -> u64 {
-        self.epoch.load(Ordering::Acquire)
+    fn shard(&self, viewer_id: u32) -> &AtomicU64 {
+        &self.epochs[viewer_id as usize % EPOCH_SHARDS]
+    }
+
+    pub(super) fn epoch(&self, viewer_id: u32) -> u64 {
+        self.shard(viewer_id).load(Ordering::Acquire)
     }
 
     pub(super) fn insert(&self, viewer_id: u32, states: Arc<ViewerStates>, epoch: u64) {
-        if self.epoch() == epoch {
+        if self.epoch(viewer_id) == epoch {
             self.states.insert(viewer_id, states);
+            self.discard_if_stale(viewer_id, epoch);
+        }
+    }
+
+    fn discard_if_stale(&self, viewer_id: u32, epoch: u64) {
+        if self.epoch(viewer_id) != epoch {
+            self.states.remove(&viewer_id);
         }
     }
 
     pub(super) fn apply(&self, change: &PrivateMetadataChange, change_id: Option<u64>) {
-        self.epoch.fetch_add(1, Ordering::AcqRel);
+        self.shard(change.viewer_id).fetch_add(1, Ordering::AcqRel);
+        let Ok(added) = u32::try_from(change.containers) else {
+            self.states.remove(&change.viewer_id);
+            return;
+        };
         let Some(states) = self.states.peek(&change.viewer_id) else {
             return;
         };
@@ -113,9 +131,7 @@ impl MetadataViewerCache {
                 if let Some(change_id) = change_id {
                     entry.change_id.fetch_max(change_id, Ordering::AcqRel);
                 }
-                if let Ok(added) = u32::try_from(change.containers)
-                    && added > 0
-                {
+                if added > 0 {
                     let _ = entry.containers.fetch_update(
                         Ordering::AcqRel,
                         Ordering::Acquire,
@@ -167,6 +183,18 @@ impl ViewerStates {
                 .collect(),
         }
     }
+
+    fn logged_owners(&self) -> impl Iterator<Item = (u32, SyncCollection)> + '_ {
+        self.entries
+            .iter()
+            .filter(|entry| entry.change_id.load(Ordering::Acquire) > 0)
+            .map(|entry| {
+                (
+                    entry.owner_id,
+                    SyncCollection::from(Collection::from(entry.collection)),
+                )
+            })
+    }
 }
 
 impl ViewerStateEntry {
@@ -194,33 +222,13 @@ impl CacheItemWeight for ViewerStates {
 }
 
 impl Server {
-    pub fn jmap_metadata_aware(
+    pub fn metadata_viewer(
         &self,
         access_token: &AccessToken,
-        using: CapabilityIds,
-        data_type: DataType,
-    ) -> bool {
-        using.contains(Capability::Metadata)
-            && self.core.metadata.data_types.contains(data_type)
-            && access_token.has_permission(Permission::JmapMetadataGet)
-    }
-
-    pub fn jmap_metadata_viewer(
-        &self,
-        access_token: &AccessToken,
-        using: CapabilityIds,
-        data_type: DataType,
+        permission: Permission,
     ) -> Option<MetadataViewer> {
-        (self.core.metadata.private_metadata
-            && self.jmap_metadata_aware(access_token, using, data_type)
-            && access_token.has_permission(Permission::JmapMetadataPrivate))
-        .then(|| MetadataViewer(access_token.account_id()))
-    }
-
-    pub fn imap_metadata_viewer(&self, access_token: &AccessToken) -> Option<MetadataViewer> {
-        (self.core.metadata.private_metadata
-            && access_token.has_permission(Permission::ImapMetadataPrivate))
-        .then(|| MetadataViewer(access_token.account_id()))
+        (self.core.metadata.private_metadata && access_token.has_permission(permission))
+            .then(|| MetadataViewer(access_token.account_id()))
     }
 
     pub async fn metadata_viewer_state(
@@ -243,10 +251,40 @@ impl Server {
             return Ok(states);
         }
 
-        let epoch = cache.epoch();
+        let epoch = cache.epoch(viewer.0);
         let states = Arc::new(self.load_viewer_states(viewer.0).await?);
         cache.insert(viewer.0, states.clone(), epoch);
         Ok(states)
+    }
+
+    pub async fn commit_metadata_batch(
+        &self,
+        batch: BatchBuilder,
+        commit: PrivateMetadataCommit,
+    ) -> trc::Result<AssignedIds> {
+        let is_split = batch.has_commit_points();
+        match self.commit_batch(batch).await {
+            Ok(assigned_ids) => {
+                self.private_metadata_committed(commit, &assigned_ids).await;
+                Ok(assigned_ids)
+            }
+            Err(err) => {
+                if is_split {
+                    self.private_metadata_uncertain(&commit).await;
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn private_metadata_uncertain(&self, commit: &PrivateMetadataCommit) {
+        let mut invalidations = CacheInvalidationBuilder::default();
+        for change in &commit.changes {
+            invalidations.invalidate(CacheInvalidation::PrivateMetadata(change.viewer_id));
+        }
+        if let Err(err) = self.invalidate_caches(invalidations).await {
+            trc::error!(err.caused_by(trc::location!()));
+        }
     }
 
     pub async fn private_metadata_committed(
@@ -340,7 +378,11 @@ impl Server {
             )
             .await
             .add_context(|err| err.caused_by(trc::location!()).account_id(viewer_id))?;
-        Ok(ViewerStates::new(entries))
+        let states = ViewerStates::new(entries);
+        for (owner_id, collection) in states.logged_owners() {
+            self.inner.mark_cache_stale(owner_id, collection);
+        }
+        Ok(states)
     }
 }
 

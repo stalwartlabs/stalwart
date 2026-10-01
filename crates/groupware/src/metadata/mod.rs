@@ -4,87 +4,46 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-mod cleanup;
-
-pub use cleanup::MetadataCleanup;
-
 use crate::{
-    METADATA_KINDS, PresenceUpdate,
-    calendar::{ArchivedCalendar, ArchivedCalendarEvent, Calendar, CalendarEvent},
-    contact::{AddressBook, ArchivedAddressBook, ArchivedContactCard, ContactCard},
+    METADATA_KINDS,
+    calendar::{ArchivedCalendarEvent, Calendar, CalendarEvent},
+    contact::{AddressBook, ArchivedContactCard, ContactCard},
     file::{ArchivedFileNode, FileNode},
 };
 use common::storage::{
     dav::FilePresence,
-    index::{GroupwareWrite, SerializableObject},
+    index::{GroupwareWrite, PresenceFlags, RewritePresence, rewrite_archive},
 };
 use store::write::{Archive, BatchBuilder};
 use trc::AddContext;
-use types::{collection::Collection, field::Field, metadata::MetadataKinds};
+use types::{collection::Collection, metadata::MetadataKinds};
 
-impl PresenceUpdate<Archive<&ArchivedCalendar>> {
-    pub fn write(
-        self,
-        kinds: MetadataKinds,
-        account_id: u32,
-        document_id: u32,
-        batch: &mut BatchBuilder,
-    ) -> trc::Result<()> {
-        let current = self.0;
-        if current.inner.metadata_kinds() == tracked_kinds(kinds.bits()) {
-            return Ok(());
-        }
-        let mut calendar = current
-            .deserialize::<Calendar>()
-            .caused_by(trc::location!())?;
-        calendar.set_metadata_kinds(kinds);
-        rewrite(
-            &current,
-            calendar,
-            Collection::Calendar,
-            account_id,
-            document_id,
-            batch,
-        )
+impl PresenceFlags for Calendar {
+    const COLLECTION: Collection = Collection::Calendar;
+    const TRACKED: MetadataKinds = METADATA_KINDS;
+
+    fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.presence = kinds.bits() & Self::TRACKED.bits();
     }
 }
 
-impl PresenceUpdate<Archive<&ArchivedAddressBook>> {
-    pub fn write(
-        self,
-        kinds: MetadataKinds,
-        account_id: u32,
-        document_id: u32,
-        batch: &mut BatchBuilder,
-    ) -> trc::Result<()> {
-        let current = self.0;
-        if current.inner.metadata_kinds() == tracked_kinds(kinds.bits()) {
-            return Ok(());
-        }
-        let mut book = current
-            .deserialize::<AddressBook>()
-            .caused_by(trc::location!())?;
-        book.set_metadata_kinds(kinds);
-        rewrite(
-            &current,
-            book,
-            Collection::AddressBook,
-            account_id,
-            document_id,
-            batch,
-        )
+impl PresenceFlags for AddressBook {
+    const COLLECTION: Collection = Collection::AddressBook;
+    const TRACKED: MetadataKinds = METADATA_KINDS;
+
+    fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.presence = kinds.bits() & Self::TRACKED.bits();
     }
 }
 
-impl PresenceUpdate<Archive<&ArchivedCalendarEvent>> {
-    pub fn write(
-        self,
+impl RewritePresence for CalendarEvent {
+    fn rewrite_presence(
+        current: &Archive<&ArchivedCalendarEvent>,
         kinds: MetadataKinds,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
-        let current = self.0;
         if current.inner.metadata_kinds() == tracked_kinds(kinds.bits()) {
             return Ok(());
         }
@@ -92,10 +51,9 @@ impl PresenceUpdate<Archive<&ArchivedCalendarEvent>> {
             .deserialize::<CalendarEvent>()
             .caused_by(trc::location!())?;
         event.set_metadata_kinds(kinds);
-        let changes = GroupwareWrite::meta_only(event, current.inner);
-        rewrite(
-            &current,
-            changes,
+        rewrite_archive(
+            current,
+            GroupwareWrite::meta_only(event, current.inner),
             Collection::CalendarEvent,
             account_id,
             document_id,
@@ -104,15 +62,14 @@ impl PresenceUpdate<Archive<&ArchivedCalendarEvent>> {
     }
 }
 
-impl PresenceUpdate<Archive<&ArchivedContactCard>> {
-    pub fn write(
-        self,
+impl RewritePresence for ContactCard {
+    fn rewrite_presence(
+        current: &Archive<&ArchivedContactCard>,
         kinds: MetadataKinds,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
-        let current = self.0;
         if current.inner.metadata_kinds() == tracked_kinds(kinds.bits()) {
             return Ok(());
         }
@@ -120,10 +77,9 @@ impl PresenceUpdate<Archive<&ArchivedContactCard>> {
             .deserialize::<ContactCard>()
             .caused_by(trc::location!())?;
         card.set_metadata_kinds(kinds);
-        let changes = GroupwareWrite::meta_only(card, current.inner);
-        rewrite(
-            &current,
-            changes,
+        rewrite_archive(
+            current,
+            GroupwareWrite::meta_only(card, current.inner),
             Collection::ContactCard,
             account_id,
             document_id,
@@ -132,15 +88,14 @@ impl PresenceUpdate<Archive<&ArchivedContactCard>> {
     }
 }
 
-impl PresenceUpdate<Archive<&ArchivedFileNode>> {
-    pub fn write(
-        self,
+impl FileNode {
+    pub fn rewrite_presence(
+        current: &Archive<&ArchivedFileNode>,
         presence: FilePresence,
         account_id: u32,
         document_id: u32,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
-        let current = self.0;
         if current.inner.presence() == presence {
             return Ok(());
         }
@@ -148,8 +103,8 @@ impl PresenceUpdate<Archive<&ArchivedFileNode>> {
             .deserialize::<FileNode>()
             .caused_by(trc::location!())?;
         node.set_presence(presence);
-        rewrite(
-            &current,
+        rewrite_archive(
+            current,
             node,
             Collection::FileNode,
             account_id,
@@ -161,22 +116,6 @@ impl PresenceUpdate<Archive<&ArchivedFileNode>> {
 
 pub(crate) fn tracked_kinds(bits: u8) -> MetadataKinds {
     MetadataKinds::from_bits(bits & METADATA_KINDS.bits()).unwrap_or(MetadataKinds::NONE)
-}
-
-fn rewrite<A>(
-    current: &Archive<A>,
-    changes: impl SerializableObject,
-    collection: Collection,
-    account_id: u32,
-    document_id: u32,
-    batch: &mut BatchBuilder,
-) -> trc::Result<()> {
-    batch
-        .with_account_id(account_id)
-        .with_collection(collection)
-        .with_document(document_id)
-        .assert_value(Field::ARCHIVE, current);
-    changes.serialize_into(batch, None)
 }
 
 #[cfg(test)]
@@ -246,9 +185,14 @@ mod tests {
         });
         let current = calendar.to_unarchived::<Calendar>().expect("unarchives");
         let mut batch = BatchBuilder::new();
-        PresenceUpdate(current)
-            .write(MetadataKinds::JMAP, ACCOUNT_ID, DOCUMENT_ID, &mut batch)
-            .expect("the rewrite builds");
+        Calendar::rewrite_presence(
+            &current,
+            MetadataKinds::JMAP,
+            ACCOUNT_ID,
+            DOCUMENT_ID,
+            &mut batch,
+        )
+        .expect("the rewrite builds");
         assert_eq!(batch.last_collection(), Some(Collection::Calendar));
 
         let written = written(&batch);
@@ -265,14 +209,14 @@ mod tests {
         calendar.set_metadata_kinds(MetadataKinds::DAV);
         let calendar = stored(calendar);
         let mut batch = BatchBuilder::new();
-        PresenceUpdate(calendar.to_unarchived::<Calendar>().expect("unarchives"))
-            .write(
-                MetadataKinds::DAV.union(MetadataKinds::IMAP),
-                ACCOUNT_ID,
-                DOCUMENT_ID,
-                &mut batch,
-            )
-            .expect("the rewrite builds");
+        Calendar::rewrite_presence(
+            &calendar.to_unarchived::<Calendar>().expect("unarchives"),
+            MetadataKinds::DAV.union(MetadataKinds::IMAP),
+            ACCOUNT_ID,
+            DOCUMENT_ID,
+            &mut batch,
+        )
+        .expect("the rewrite builds");
         assert!(batch.is_empty());
     }
 
@@ -283,9 +227,14 @@ mod tests {
             ..Default::default()
         });
         let mut batch = BatchBuilder::new();
-        PresenceUpdate(book.to_unarchived::<AddressBook>().expect("unarchives"))
-            .write(MetadataKinds::DAV, ACCOUNT_ID, DOCUMENT_ID, &mut batch)
-            .expect("the rewrite builds");
+        AddressBook::rewrite_presence(
+            &book.to_unarchived::<AddressBook>().expect("unarchives"),
+            MetadataKinds::DAV,
+            ACCOUNT_ID,
+            DOCUMENT_ID,
+            &mut batch,
+        )
+        .expect("the rewrite builds");
         assert_eq!(batch.last_collection(), Some(Collection::AddressBook));
 
         let written = written(&batch)
@@ -305,14 +254,14 @@ mod tests {
             ..Default::default()
         });
         let mut batch = BatchBuilder::new();
-        PresenceUpdate(event.to_unarchived::<CalendarEvent>().expect("unarchives"))
-            .write(
-                MetadataKinds::JMAP.union(MetadataKinds::DAV),
-                ACCOUNT_ID,
-                DOCUMENT_ID,
-                &mut batch,
-            )
-            .expect("the rewrite builds");
+        CalendarEvent::rewrite_presence(
+            &event.to_unarchived::<CalendarEvent>().expect("unarchives"),
+            MetadataKinds::JMAP.union(MetadataKinds::DAV),
+            ACCOUNT_ID,
+            DOCUMENT_ID,
+            &mut batch,
+        )
+        .expect("the rewrite builds");
         assert_eq!(batch.last_collection(), Some(Collection::CalendarEvent));
 
         let written = written(&batch)
@@ -340,9 +289,14 @@ mod tests {
         card.set_metadata_kinds(MetadataKinds::DAV);
         let card = stored(card);
         let mut batch = BatchBuilder::new();
-        PresenceUpdate(card.to_unarchived::<ContactCard>().expect("unarchives"))
-            .write(MetadataKinds::NONE, ACCOUNT_ID, DOCUMENT_ID, &mut batch)
-            .expect("the rewrite builds");
+        ContactCard::rewrite_presence(
+            &card.to_unarchived::<ContactCard>().expect("unarchives"),
+            MetadataKinds::NONE,
+            ACCOUNT_ID,
+            DOCUMENT_ID,
+            &mut batch,
+        )
+        .expect("the rewrite builds");
         assert_eq!(batch.last_collection(), Some(Collection::ContactCard));
 
         let written = written(&batch)
@@ -368,9 +322,14 @@ mod tests {
         let node = stored(node);
         let presence = FilePresence::from_kinds(MetadataKinds::DAV).with_dav_display_name();
         let mut batch = BatchBuilder::new();
-        PresenceUpdate(node.to_unarchived::<FileNode>().expect("unarchives"))
-            .write(presence, ACCOUNT_ID, DOCUMENT_ID, &mut batch)
-            .expect("the rewrite builds");
+        FileNode::rewrite_presence(
+            &node.to_unarchived::<FileNode>().expect("unarchives"),
+            presence,
+            ACCOUNT_ID,
+            DOCUMENT_ID,
+            &mut batch,
+        )
+        .expect("the rewrite builds");
         assert_eq!(batch.last_collection(), Some(Collection::FileNode));
         assert_eq!(batch.last_archive_hash(), Some(etag));
 

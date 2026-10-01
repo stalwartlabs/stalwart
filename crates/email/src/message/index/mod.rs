@@ -166,3 +166,6 @@ pub(super) trait IndexMessage {
         data: PendingMessageData,
     ) -> trc::Result<&mut Self>;
 }
+
+#[cfg(test)]
+mod tests;

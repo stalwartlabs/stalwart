@@ -9,7 +9,7 @@ use crate::{
         metadata::{MetadataType, ObjectMetadata},
         query::QueryResponseBuilder,
     },
-    changes::state::{JmapCacheState, MetadataStateManager},
+    changes::state::JmapCacheState,
 };
 use common::{Server, auth::AccessToken};
 use compact_str::ToCompactString;
@@ -35,7 +35,7 @@ use store::{
     write::SearchIndex,
 };
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection, keyword::Keyword};
+use types::{acl::Acl, keyword::Keyword};
 
 pub trait EmailQuery: Sync + Send {
     fn email_query(
@@ -55,12 +55,12 @@ impl EmailQuery for Server {
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
         let mut filters = Vec::with_capacity(request.filter.len());
+        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
+        let sampled = object_metadata.viewer_change_id(self, account_id).await?;
         let cached_messages = self
             .get_cached_messages(account_id)
             .await
             .caused_by(trc::location!())?;
-        let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
-        let viewer = object_metadata.viewer();
         let readable: RoaringBitmap = if access_token.is_shared(account_id) {
             cached_messages.shared_messages(access_token, Acl::ReadItems)
         } else {
@@ -75,25 +75,18 @@ impl EmailQuery for Server {
                 Filter::Property(EmailQueryFilter::Metadata(filter)) => Some(filter),
                 _ => None,
             }))?;
-        let mut metadata_matches = if metadata.is_empty() {
-            Vec::new()
-        } else {
-            let mut candidates = RoaringBitmap::from_iter(
-                cached_messages
-                    .with_metadata()
-                    .map(|item| item.document_id()),
-            );
-            candidates &= &readable;
-            let private = if metadata.has_private() {
-                object_metadata.private_candidates(self, account_id).await?
-            } else {
-                None
-            };
-            metadata
-                .evaluate(self, account_id, &candidates, private)
-                .await?
-        }
-        .into_iter();
+        let mut metadata_matches = object_metadata
+            .evaluate(self, account_id, &metadata, || {
+                let mut candidates = RoaringBitmap::from_iter(
+                    cached_messages
+                        .with_metadata()
+                        .map(|item| item.document_id()),
+                );
+                candidates &= &readable;
+                candidates
+            })
+            .await?
+            .into_iter();
 
         for filter in std::mem::take(&mut request.filter) {
             match filter {
@@ -453,13 +446,7 @@ impl EmailQuery for Server {
         let mut response = QueryResponseBuilder::new(
             total_results,
             self.core.jmap.query_max_results,
-            self.metadata_state(
-                viewer,
-                account_id,
-                Collection::Email,
-                cached_messages.get_state(false),
-            )
-            .await?,
+            sampled.state(cached_messages.get_state(false)),
             &request,
         );
 

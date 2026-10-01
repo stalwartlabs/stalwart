@@ -29,9 +29,14 @@ pub enum PropFind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
 pub struct PropertyUpdate {
-    pub set: Vec<DavPropertyValue>,
-    pub remove: Vec<DavProperty>,
-    pub set_first: bool,
+    pub ops: Vec<PropertyUpdateOp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+pub enum PropertyUpdateOp {
+    Set(DavPropertyValue),
+    Remove(DavProperty),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,7 +282,16 @@ pub struct PropertySearch {
 
 impl PropertyUpdate {
     pub fn has_changes(&self) -> bool {
-        !self.set.is_empty() || !self.remove.is_empty()
+        !self.ops.is_empty()
+    }
+}
+
+impl PropertyUpdateOp {
+    pub fn property(&self) -> &DavProperty {
+        match self {
+            PropertyUpdateOp::Set(value) => &value.property,
+            PropertyUpdateOp::Remove(property) => property,
+        }
     }
 }
 

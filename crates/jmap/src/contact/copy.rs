@@ -74,6 +74,8 @@ impl JmapContactCardCopy for Server {
                 .into_err()
                 .details("From accountId is equal to fromAccountId"));
         }
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -82,15 +84,7 @@ impl JmapContactCardCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
-        let old_state = metadata
-            .assert_state(
-                self,
-                account_id,
-                cache.get_state(false),
-                &request.if_in_state,
-            )
-            .await?;
+        let old_state = sampled.assert_state(cache.get_state(false), &request.if_in_state)?;
         let mut response = CopyResponse {
             from_account_id: request.from_account_id,
             account_id: request.account_id,
@@ -130,43 +124,42 @@ impl JmapContactCardCopy for Server {
             cache.resources.count(false)
         });
         let mut batch = BatchBuilder::new();
+        let viewer = metadata.viewer();
         let mut metadata_writer = MetadataWriter::new(metadata, account_id);
-        let mut creates = Vec::with_capacity(request.create.len());
         let mut preload = MetadataPreload::default();
-        for (create_id, mut create) in request.create {
-            let source_id = create.take_source_id(JSContactProperty::Id);
-            let patches = metadata_writer.extract(MetadataPatches::for_create(), &mut create);
-            if let (Ok(source_id), Ok(_)) = (&source_id, &patches)
-                && from_contact_ids.contains(source_id.document_id())
-            {
-                let document_id = source_id.document_id();
-                preload.insert_source(
-                    document_id,
-                    from_cache
-                        .item_by_id(document_id)
-                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
-                );
+        for document_id in request
+            .create
+            .values()
+            .filter_map(|create| create.source_id(JSContactProperty::Id))
+            .map(|source_id| source_id.document_id())
+            .filter(|document_id| from_contact_ids.contains(*document_id))
+        {
+            let kinds = from_cache
+                .item_by_id(document_id)
+                .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds());
+            if viewer.is_some() || !kinds.is_empty() {
+                preload.insert_source(document_id, kinds);
             }
-            creates.push((create_id, source_id, create, patches));
         }
         metadata_writer
             .preload(self, from_account_id, preload)
             .await?;
 
-        'create: for (create_id, source_id, create, patches) in creates {
+        'create: for (create_id, mut create) in request.create {
             if !quota.has_room(created_slots.len()) {
                 response.not_created.append(create_id, too_many_contacts());
                 continue;
             }
 
-            let source_id = match source_id {
+            let source_id = match create.take_source_id(JSContactProperty::Id) {
                 Ok(source_id) => source_id,
                 Err(err) => {
                     response.not_created.append(create_id, err);
                     continue;
                 }
             };
-            let patches = match patches {
+            let patches = match metadata_writer.extract(MetadataPatches::for_create(), &mut create)
+            {
                 Ok(patches) => patches,
                 Err(err) => {
                     response.not_created.append(create_id, err);
@@ -244,7 +237,7 @@ impl JmapContactCardCopy for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = match self.commit_batch(batch).await {
+            let assigned_ids = match metadata_writer.commit(self, batch).await {
                 Ok(assigned_ids) => assigned_ids,
                 Err(err) if err.is_assertion_failure() => {
                     for (create_id, _) in created_slots {
@@ -259,7 +252,6 @@ impl JmapContactCardCopy for Server {
                 }
                 Err(err) => return Err(err.caused_by(trc::location!())),
             };
-            metadata_writer.committed(self, &assigned_ids).await;
 
             for (create_id, slot) in created_slots {
                 response.created(create_id, assigned_ids.slot(slot));

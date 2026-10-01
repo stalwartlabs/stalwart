@@ -9,7 +9,7 @@ use crate::{
         metadata::{MetadataType, ObjectMetadata},
         query::QueryResponseBuilder,
     },
-    changes::state::{MetadataStateManager, StateManager},
+    changes::state::StateManager,
 };
 use common::{Server, auth::AccessToken};
 use email::sieve::ingest::SieveScriptIngest;
@@ -48,6 +48,9 @@ impl SieveScriptQuery for Server {
         using: CapabilityIds,
     ) -> trc::Result<QueryResponse> {
         let account_id = request.account_id.document_id();
+        let object_metadata =
+            ObjectMetadata::new(self, access_token, using, MetadataType::SieveScript);
+        let sampled = object_metadata.viewer_change_id(self, account_id).await?;
         let mut filters = Vec::with_capacity(request.filter.len());
         let active_script_id = if request
             .filter
@@ -98,27 +101,15 @@ impl SieveScriptQuery for Server {
             .await
             .caused_by(trc::location!())?;
 
-        let object_metadata =
-            ObjectMetadata::new(self, access_token, using, MetadataType::SieveScript);
-        let viewer = object_metadata.viewer();
         let metadata =
             object_metadata.query(request.filter.iter().filter_map(|filter| match filter {
                 Filter::Property(SieveFilter::Metadata(filter)) => Some(filter),
                 _ => None,
             }))?;
-        let mut metadata_matches = if metadata.is_empty() {
-            Vec::new()
-        } else {
-            let private = if metadata.has_private() {
-                object_metadata.private_candidates(self, account_id).await?
-            } else {
-                None
-            };
-            metadata
-                .evaluate(self, account_id, &document_ids, private)
-                .await?
-        }
-        .into_iter();
+        let mut metadata_matches = object_metadata
+            .evaluate(self, account_id, &metadata, || &document_ids)
+            .await?
+            .into_iter();
 
         for cond in std::mem::take(&mut request.filter) {
             match cond {
@@ -205,14 +196,10 @@ impl SieveScriptQuery for Server {
         let mut response = QueryResponseBuilder::new(
             results.len() as usize,
             self.core.jmap.query_max_results,
-            self.metadata_state(
-                viewer,
-                account_id,
-                Collection::SieveScript,
+            sampled.state(
                 self.get_state(account_id, SyncCollection::SieveScript)
                     .await?,
-            )
-            .await?,
+            ),
             &request,
         );
 

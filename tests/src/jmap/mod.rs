@@ -192,24 +192,39 @@ pub async fn jmap_tests() {
     };
 
     if enabled("mail") {
-        mail::get::test(&test).await;
-        mail::set::test(&test).await;
-        mail::parse::test(&test).await;
-        mail::query::test(&test).await;
-        mail::search_snippet::test(&test).await;
-        mail::attachment_search::test(&test).await;
-        mail::changes::test(&test).await;
-        mail::query_changes::test(&test).await;
-        mail::copy::test(&test).await;
-        mail::thread_get::test(&test).await;
-        mail::thread_merge::test(&test).await;
-        mail::mailbox::test(&test).await;
-        mail::acl::test(&test).await;
-        mail::sieve_script::test(&test).await;
-        mail::vacation_response::test(&test).await;
-        mail::submission::test(&test).await;
-        mail::cache::test(&test).await;
-        mail::header_limits::test(&test).await;
+        let only = std::env::var("MAIL_TESTS").ok();
+        macro_rules! mail_tests {
+            ($($name:ident),*) => {
+                $(
+                    if only
+                        .as_deref()
+                        .is_none_or(|tests| tests.split(',').any(|t| t.trim() == stringify!($name)))
+                    {
+                        mail::$name::test(&test).await;
+                    }
+                )*
+            };
+        }
+        mail_tests!(
+            get,
+            set,
+            parse,
+            query,
+            search_snippet,
+            attachment_search,
+            changes,
+            query_changes,
+            copy,
+            thread_get,
+            thread_merge,
+            mailbox,
+            acl,
+            sieve_script,
+            vacation_response,
+            submission,
+            cache,
+            header_limits
+        );
     }
 
     if enabled("core") {

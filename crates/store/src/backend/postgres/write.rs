@@ -54,7 +54,8 @@ impl PostgresStore {
                         | &SqlState::T_R_DEADLOCK_DETECTED
                         | &SqlState::LOCK_NOT_AVAILABLE
                         | &SqlState::QUERY_CANCELED
-                        | &SqlState::IDLE_IN_TRANSACTION_SESSION_TIMEOUT,
+                        | &SqlState::IDLE_IN_TRANSACTION_SESSION_TIMEOUT
+                        | &SqlState::UNIQUE_VIOLATION,
                     ) if retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME => {
                     }
                     Some(&SqlState::UNIQUE_VIOLATION) => {
@@ -124,9 +125,12 @@ impl PostgresStore {
                             let value = set_value.resolve(result)?;
                             let value = &*value;
                             if !matches!(subspace.shape(), Shape::Presence) {
-                                let s = match asserted_values.get(key) {
+                                let s = match asserted_values.get_mut(key) {
                                     Some(true) => trx.prepare_cached(&stmts.update_value).await?,
-                                    Some(false) => trx.prepare_cached(&stmts.insert_value).await?,
+                                    Some(exists) => {
+                                        *exists = true;
+                                        trx.prepare_cached(&stmts.insert_value).await?
+                                    }
                                     None => trx.prepare_cached(&stmts.upsert_value).await?,
                                 };
 
@@ -170,6 +174,10 @@ impl PostgresStore {
                                     };
 
                                     trx.execute(&s, &[&key, &value]).await?;
+
+                                    if let Some(exists) = asserted_values.get_mut(key) {
+                                        *exists = true;
+                                    }
                                 }
                                 MergeResult::Delete if exists => {
                                     let s = trx.prepare_cached(&stmts.delete_key).await?;

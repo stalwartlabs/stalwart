@@ -5,18 +5,24 @@
  */
 
 use crate::{
-    api::auth::JmapAuthorization,
+    api::{
+        auth::JmapAuthorization,
+        metadata::{MetadataType, ObjectMetadata},
+    },
     changes::{
         page::{
-            LogRead, MetadataChanges, PartialProperties, UpdatedProperties, ViewerChange,
-            ViewerChanges, fill_page,
+            Coverage, LogRead, MetadataChanges, PageChange, PartialProperties, UpdatedProperties,
+            ViewerChange, ViewerChanges, fill_page, private_query,
         },
         state::{JmapCacheState, max_state},
     },
     participant_identity::changes::ParticipantIdentityChanges,
 };
 use calcard::{jscalendar::JSCalendarProperty, jscontact::JSContactProperty};
-use common::{Server, auth::AccessToken, storage::metadata::MetadataViewer};
+use common::{
+    GroupwareResources, MessageStoreCache, Server, auth::AccessToken,
+    storage::metadata::MetadataViewer,
+};
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess};
 use groupware::{
     cache::GroupwareCache,
@@ -36,7 +42,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::Property;
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 use store::{
     query::log::{Change, Query},
     roaring::RoaringBitmap,
@@ -47,7 +53,6 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection},
     id::Id,
-    type_state::DataType,
 };
 
 pub trait ChangesLookup: Sync + Send {
@@ -72,6 +77,34 @@ struct ChangesScope {
     collection: SyncCollection,
     viewer: Option<MetadataViewer>,
     read_private: bool,
+}
+
+enum Snapshot {
+    Messages(Arc<MessageStoreCache>),
+    Resources(Arc<GroupwareResources>),
+}
+
+impl Snapshot {
+    fn state(&self, is_container: bool) -> State {
+        match self {
+            Snapshot::Messages(cache) => cache.get_state(is_container),
+            Snapshot::Resources(cache) => cache.get_state(is_container),
+        }
+    }
+
+    fn contains(&self, object: MethodObject, is_container: bool, document_id: u32) -> bool {
+        match (self, object) {
+            (Snapshot::Messages(cache), MethodObject::Mailbox) => {
+                cache.mailbox_by_id(&document_id).is_some()
+            }
+            (Snapshot::Messages(cache), _) => cache.email_by_id(&document_id).is_some(),
+            (Snapshot::Resources(cache), MethodObject::FileNode) => {
+                cache.has_item_id(&document_id) || cache.has_container_id(&document_id)
+            }
+            (Snapshot::Resources(cache), _) if is_container => cache.has_container_id(&document_id),
+            (Snapshot::Resources(cache), _) => cache.has_item_id(&document_id),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -209,9 +242,10 @@ impl ChangesLookup for Server {
         };
         let account_id = request.account_id.document_id();
 
-        let metadata_type = metadata_type(object);
-        let metadata = match metadata_type {
-            Some((data_type, _)) if self.jmap_metadata_aware(access_token, using, data_type) => {
+        let object_metadata = metadata_type(object)
+            .map(|metadata_type| ObjectMetadata::new(self, access_token, using, metadata_type));
+        let metadata = match &object_metadata {
+            Some(object_metadata) if object_metadata.support().is_some() => {
                 if request.ignore_metadata_only_changes == Some(true) {
                     MetadataChanges::Ignored
                 } else {
@@ -220,11 +254,10 @@ impl ChangesLookup for Server {
             }
             _ => MetadataChanges::Unsupported,
         };
-        let viewer = metadata_type
-            .and_then(|(data_type, _)| self.jmap_metadata_viewer(access_token, using, data_type));
-        let viewer_change_id = match (viewer, metadata_type) {
-            (Some(viewer), Some((_, metadata_collection))) => {
-                self.metadata_viewer_state(viewer, account_id, metadata_collection)
+        let viewer = object_metadata.as_ref().and_then(ObjectMetadata::viewer);
+        let viewer_change_id = match (viewer, &object_metadata) {
+            (Some(viewer), Some(object_metadata)) => {
+                self.metadata_viewer_state(viewer, account_id, object_metadata.collection())
                     .await
                     .caused_by(trc::location!())?
                     .change_id
@@ -238,7 +271,8 @@ impl ChangesLookup for Server {
             read_private: viewer.is_some() && metadata == MetadataChanges::Reported,
         };
 
-        let (items_sent, log, covers_latest) = match &request.since_state {
+        let mut snapshot = None;
+        let (items_sent, log, coverage) = match &request.since_state {
             State::Initial => {
                 let log = read_changes(
                     self,
@@ -246,6 +280,7 @@ impl ChangesLookup for Server {
                     Query::All,
                     true,
                     scope.read_private && viewer_change_id > 0,
+                    viewer_change_id,
                 )
                 .await?;
                 if log.is_empty() {
@@ -257,36 +292,36 @@ impl ChangesLookup for Server {
                     });
                 }
 
-                (0, log, true)
+                (0, log, Coverage::Latest { viewer_change_id })
             }
             State::Exact(change_id) => {
-                let last_state = match collection {
+                snapshot = match collection {
                     SyncCollection::Calendar
                     | SyncCollection::AddressBook
-                    | SyncCollection::FileNode => self
-                        .fetch_groupware_resources(
+                    | SyncCollection::FileNode => Some(Snapshot::Resources(
+                        self.fetch_groupware_resources(
                             access_token.account_id(),
                             account_id,
                             collection,
                         )
                         .await
-                        .caused_by(trc::location!())?
-                        .get_state(is_container)
-                        .into(),
-                    SyncCollection::Email => self
-                        .get_cached_messages(account_id)
-                        .await?
-                        .get_state(is_container)
-                        .into(),
+                        .caused_by(trc::location!())?,
+                    )),
+                    SyncCollection::Email => Some(Snapshot::Messages(
+                        self.get_cached_messages(account_id).await?,
+                    )),
                     _ => None,
                 };
 
                 let mut read_shared = true;
-                if let Some(last_state) = last_state {
-                    let shared_change_id = match last_state {
-                        State::Exact(shared_change_id) => shared_change_id,
-                        _ => 0,
-                    };
+                let mut shared_change_id = 0;
+                if let Some(last_state) = snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.state(is_container))
+                {
+                    if let State::Exact(shared) = last_state {
+                        shared_change_id = shared;
+                    }
                     response.new_state = max_state(last_state, viewer_change_id);
 
                     if response.new_state == State::Exact(*change_id) {
@@ -310,9 +345,10 @@ impl ChangesLookup for Server {
                         Query::Since(*change_id),
                         read_shared,
                         scope.read_private && viewer_change_id > *change_id,
+                        viewer_change_id.max(shared_change_id),
                     )
                     .await?,
-                    true,
+                    Coverage::Latest { viewer_change_id },
                 )
             }
             State::Intermediate(intermediate_state) => {
@@ -322,6 +358,7 @@ impl ChangesLookup for Server {
                     Query::RangeInclusive(intermediate_state.from_id, intermediate_state.to_id),
                     true,
                     scope.read_private && viewer_change_id >= intermediate_state.from_id,
+                    viewer_change_id,
                 )
                 .await?;
                 let total = log.total(is_container);
@@ -334,12 +371,13 @@ impl ChangesLookup for Server {
                             Query::Since(intermediate_state.to_id),
                             true,
                             scope.read_private && viewer_change_id >= intermediate_state.to_id,
+                            viewer_change_id,
                         )
                         .await?,
-                        true,
+                        Coverage::Latest { viewer_change_id },
                     )
                 } else {
-                    (intermediate_state.items_sent, log, false)
+                    (intermediate_state.items_sent, log, Coverage::Range)
                 }
             }
         };
@@ -447,21 +485,20 @@ impl ChangesLookup for Server {
         };
 
         let hidden_changes = HiddenChanges::for_object(object);
-        let visible = |change: ViewerChange| {
+        let visible = |change: Change| {
             let Some(allowed) = allowed_ids.as_ref() else {
                 return Some(change);
             };
-            let inner = change.change();
             let id = if is_container {
-                inner.container_id()
+                change.container_id()
             } else {
-                inner.item_id()
+                change.item_id()
             }?;
 
             if allowed.contains(id as u32) {
                 Some(change)
             } else {
-                hidden_changes.rewrite(inner, id).map(ViewerChange::Shared)
+                hidden_changes.rewrite(change, id)
             }
         };
         let partial = if object == MethodObject::Mailbox {
@@ -470,9 +507,19 @@ impl ChangesLookup for Server {
             PartialProperties::Unknown
         };
 
-        let first_change_id = log.first_change_id();
-        let last_change_id = log.last_change_id(is_container);
-        let private_change_id = log.private_change_id(is_container);
+        let exists = |change: &ViewerChange| match (change, &snapshot) {
+            (ViewerChange::Private(change), Some(snapshot)) => {
+                let id = if is_container {
+                    change.container_id()
+                } else {
+                    change.item_id()
+                };
+                id.is_some_and(|id| snapshot.contains(object, is_container, id as u32))
+            }
+            _ => true,
+        };
+
+        let bounds = log.bounds(is_container);
         let page = match log.into_changes(is_container) {
             ViewerChanges::Shared(changes) => fill_page(
                 changes
@@ -481,7 +528,6 @@ impl ChangesLookup for Server {
                         (is_container && change.is_container_change())
                             || (!is_container && change.is_item_change())
                     })
-                    .map(ViewerChange::Shared)
                     .filter_map(visible),
                 items_sent,
                 max_changes,
@@ -490,7 +536,16 @@ impl ChangesLookup for Server {
                 &mut response,
             ),
             ViewerChanges::Merged(changes) => fill_page(
-                changes.into_iter().filter_map(visible),
+                changes.into_iter().filter(exists).filter_map(|change| {
+                    let inner = change.change();
+                    visible(inner).map(|visible| {
+                        if visible == inner {
+                            change
+                        } else {
+                            ViewerChange::Shared(visible)
+                        }
+                    })
+                }),
                 items_sent,
                 max_changes,
                 metadata,
@@ -500,18 +555,11 @@ impl ChangesLookup for Server {
         };
 
         response.has_more_changes = page.has_more;
-        if page.has_more {
-            response.new_state =
-                State::new_intermediate(first_change_id, last_change_id, items_sent + max_changes);
-        } else if response.new_state == State::Initial {
-            response.new_state = State::new_exact(if covers_latest {
-                last_change_id.max(viewer_change_id)
-            } else {
-                last_change_id
-            });
-        } else {
-            response.new_state = max_state(response.new_state, private_change_id);
-        }
+        response.new_state = bounds.new_state(
+            response.new_state,
+            page.has_more.then_some(items_sent + max_changes),
+            coverage,
+        );
 
         Ok(IntermediateChangesResponse {
             response,
@@ -527,6 +575,7 @@ async fn read_changes(
     query: Query,
     read_shared: bool,
     read_private: bool,
+    known_change_id: u64,
 ) -> trc::Result<LogRead> {
     let store = server.store();
     let shared = if read_shared {
@@ -538,8 +587,10 @@ async fn read_changes(
     } else {
         None
     };
-    let private = match scope.viewer {
-        Some(viewer) if read_private => Some(
+    let private = match scope.viewer.filter(|_| read_private).and_then(|viewer| {
+        private_query(query, shared.as_ref(), known_change_id).map(|query| (viewer, query))
+    }) {
+        Some((viewer, query)) => Some(
             store
                 .changes(
                     scope.account_id,
@@ -551,20 +602,20 @@ async fn read_changes(
                 )
                 .await?,
         ),
-        _ => None,
+        None => None,
     };
     Ok(LogRead { shared, private })
 }
 
-fn metadata_type(object: MethodObject) -> Option<(DataType, Collection)> {
+fn metadata_type(object: MethodObject) -> Option<MetadataType> {
     match object {
-        MethodObject::Email => Some((DataType::Email, Collection::Email)),
-        MethodObject::Mailbox => Some((DataType::Mailbox, Collection::Mailbox)),
-        MethodObject::Calendar => Some((DataType::Calendar, Collection::Calendar)),
-        MethodObject::CalendarEvent => Some((DataType::CalendarEvent, Collection::CalendarEvent)),
-        MethodObject::AddressBook => Some((DataType::AddressBook, Collection::AddressBook)),
-        MethodObject::ContactCard => Some((DataType::ContactCard, Collection::ContactCard)),
-        MethodObject::FileNode => Some((DataType::FileNode, Collection::FileNode)),
+        MethodObject::Email => Some(MetadataType::Email),
+        MethodObject::Mailbox => Some(MetadataType::Mailbox),
+        MethodObject::Calendar => Some(MetadataType::Calendar),
+        MethodObject::CalendarEvent => Some(MetadataType::CalendarEvent),
+        MethodObject::AddressBook => Some(MetadataType::AddressBook),
+        MethodObject::ContactCard => Some(MetadataType::ContactCard),
+        MethodObject::FileNode => Some(MetadataType::FileNode),
         _ => None,
     }
 }

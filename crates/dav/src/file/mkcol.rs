@@ -175,7 +175,9 @@ impl FileMkColRequestHandler for Server {
             node.set_presence(dead_write.file_presence);
         }
         if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
-            write.build(&mut batch).caused_by(trc::location!())?;
+            write
+                .build(document_id.into(), &mut batch)
+                .caused_by(trc::location!())?;
         }
         batch
             .with_account_id(account_id)

@@ -7,32 +7,27 @@
 use super::{
     EntryKind, FORMAT_VERSION, MetadataKinds,
     codec::{Reader, bytes_len, varint_len, write_bytes, write_varint},
+    entries::{Entries, Entry},
     json::{EncodedJson, JsonView},
     registry::Namespace,
     view::{MetadataView, RawKey},
     xml::{DavValueView, XmlError, XmlName, XmlValue},
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 pub const STORAGE_TRAILER_CAPACITY: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum EntryKey<'x> {
+pub(super) enum EntryKey<'x> {
     Vendor(Cow<'x, str>),
     Registered(u16),
     Dav(XmlName<'x>),
     Imap(Cow<'x, str>),
 }
 
-#[derive(Debug, Clone)]
-struct Entry<'x> {
-    key: EntryKey<'x>,
-    value: Cow<'x, [u8]>,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct MetadataBuilder<'x> {
-    entries: Vec<Entry<'x>>,
+    entries: Entries<'x>,
     written: bool,
 }
 
@@ -75,6 +70,7 @@ impl<'x> EntryKey<'x> {
         }
     }
 
+    #[inline(always)]
     fn code(&self) -> u64 {
         let value = match self {
             EntryKey::Vendor(name) | EntryKey::Imap(name) => name.len() as u64,
@@ -84,6 +80,7 @@ impl<'x> EntryKey<'x> {
         self.kind().code(value)
     }
 
+    #[inline(always)]
     fn encoded_len(&self) -> usize {
         varint_len(self.code())
             + match self {
@@ -93,6 +90,7 @@ impl<'x> EntryKey<'x> {
             }
     }
 
+    #[inline(always)]
     fn write(&self, out: &mut Vec<u8>) {
         write_varint(out, self.code());
         match self {
@@ -102,7 +100,7 @@ impl<'x> EntryKey<'x> {
         }
     }
 
-    fn into_owned(self) -> EntryKey<'static> {
+    pub(super) fn into_owned(self) -> EntryKey<'static> {
         match self {
             EntryKey::Vendor(name) => EntryKey::Vendor(Cow::Owned(name.into_owned())),
             EntryKey::Registered(id) => EntryKey::Registered(id),
@@ -114,10 +112,7 @@ impl<'x> EntryKey<'x> {
 
 impl<'x> MetadataBuilder<'x> {
     pub fn new() -> Self {
-        MetadataBuilder {
-            entries: Vec::new(),
-            written: false,
-        }
+        MetadataBuilder::default()
     }
 
     pub fn from_view(view: &MetadataView<'x>) -> Self {
@@ -126,12 +121,8 @@ impl<'x> MetadataBuilder<'x> {
             key: EntryKey::from_raw(entry.key),
             value: Cow::Borrowed(entry.value.remaining()),
         }));
-        if !entries.is_sorted_by(|a, b| a.key < b.key) {
-            entries.sort_unstable_by(|a, b| a.key.cmp(&b.key));
-            entries.dedup_by(|a, b| a.key == b.key);
-        }
         MetadataBuilder {
-            entries,
+            entries: Entries::from_list(entries),
             written: false,
         }
     }
@@ -141,7 +132,7 @@ impl<'x> MetadataBuilder<'x> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.len() == 0
     }
 
     pub fn edit(&self) -> MetadataEdit {
@@ -153,54 +144,22 @@ impl<'x> MetadataBuilder<'x> {
     }
 
     pub fn kinds(&self) -> MetadataKinds {
-        self.entries
-            .iter()
-            .fold(MetadataKinds::NONE, |kinds, entry| {
-                kinds.union(entry.key.kind().kinds())
-            })
-    }
-
-    fn find(&self, key: &EntryKey<'_>) -> Result<usize, usize> {
-        self.entries.binary_search_by(|entry| entry.key.cmp(key))
+        match &self.entries {
+            Entries::List(list) => kinds_of(list.iter().map(|entry| &entry.key)),
+            Entries::Tree(tree) => kinds_of(tree.keys()),
+        }
     }
 
     fn value(&self, key: &EntryKey<'_>) -> Option<&[u8]> {
-        self.find(key)
-            .ok()
-            .and_then(|position| self.entries.get(position))
-            .map(|entry| entry.value.as_ref())
+        self.entries.get(key)
     }
 
     fn upsert(&mut self, key: EntryKey<'x>, value: Cow<'x, [u8]>) {
-        match self.find(&key) {
-            Ok(position) => {
-                if let Some(entry) = self.entries.get_mut(position)
-                    && entry.value != value
-                {
-                    entry.value = value;
-                    self.written = true;
-                }
-            }
-            Err(position) => {
-                self.entries.insert(position, Entry { key, value });
-                self.written = true;
-            }
-        }
+        self.written |= self.entries.upsert(key, value);
     }
 
     fn remove_key(&mut self, key: &EntryKey<'_>) -> bool {
-        match self.find(key) {
-            Ok(position) => {
-                self.entries.remove(position);
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    fn clear_kinds(&mut self, kinds: MetadataKinds) {
-        self.entries
-            .retain(|entry| !kinds.intersects(entry.key.kind().kinds()));
+        self.entries.remove(key)
     }
 
     pub fn jmap(&self, namespace: &Namespace<'_>) -> Option<JsonView<'_>> {
@@ -220,7 +179,8 @@ impl<'x> MetadataBuilder<'x> {
     }
 
     pub fn clear_jmap(&mut self) {
-        self.clear_kinds(MetadataKinds::JMAP);
+        self.entries
+            .retain(|key| key.kind().kinds() != MetadataKinds::JMAP);
     }
 
     pub fn dav(&self, name: &XmlName<'_>) -> Option<DavValueView<'_>> {
@@ -246,10 +206,6 @@ impl<'x> MetadataBuilder<'x> {
         )))
     }
 
-    pub fn clear_dav(&mut self) {
-        self.clear_kinds(MetadataKinds::DAV);
-    }
-
     pub fn imap(&self, name: &str) -> Option<&[u8]> {
         self.value(&EntryKey::Imap(Cow::Borrowed(name)))
             .and_then(|value| unsafe { Reader::trusted(value) }.bytes())
@@ -265,57 +221,97 @@ impl<'x> MetadataBuilder<'x> {
         self.remove_key(&EntryKey::Imap(Cow::Borrowed(name)))
     }
 
-    pub fn clear_imap(&mut self) {
-        self.clear_kinds(MetadataKinds::IMAP);
-    }
-
-    pub fn encoded_len(&self) -> usize {
-        2 + varint_len(self.entries.len() as u64)
-            + self
-                .entries
-                .iter()
-                .map(|entry| entry.key.encoded_len() + entry.value.len())
-                .sum::<usize>()
-    }
-
     pub fn encode(&self) -> Option<EncodedMetadata> {
-        if self.entries.is_empty() {
-            return None;
+        match &self.entries {
+            Entries::List(list) => encode_list(list),
+            Entries::Tree(tree) => encode_tree(tree),
         }
-        let len = self.encoded_len();
-        let kinds = self.kinds();
-        let mut bytes = Vec::with_capacity(len + STORAGE_TRAILER_CAPACITY);
-        bytes.push(FORMAT_VERSION);
-        bytes.push(kinds.bits());
-        write_varint(&mut bytes, self.entries.len() as u64);
-        for entry in &self.entries {
-            entry.key.write(&mut bytes);
-            bytes.extend_from_slice(&entry.value);
-        }
-        debug_assert_eq!(bytes.len(), len, "metadata container length mismatch");
-        Some(EncodedMetadata {
-            bytes,
-            kinds,
-            entries: self.entries.len(),
-        })
     }
 
     pub fn into_owned(self) -> MetadataBuilder<'static> {
         MetadataBuilder {
-            entries: self
-                .entries
-                .into_iter()
-                .map(|entry| Entry {
-                    key: entry.key.into_owned(),
-                    value: Cow::Owned(entry.value.into_owned()),
-                })
-                .collect(),
+            entries: self.entries.into_owned(),
             written: self.written,
         }
     }
 }
 
+fn kinds_of<'a, 'x: 'a>(keys: impl Iterator<Item = &'a EntryKey<'x>>) -> MetadataKinds {
+    keys.fold(MetadataKinds::NONE, |kinds, key| {
+        kinds.union(key.kind().kinds())
+    })
+}
+
+fn encode_list(list: &[Entry<'_>]) -> Option<EncodedMetadata> {
+    if list.is_empty() {
+        return None;
+    }
+    let len = 2
+        + varint_len(list.len() as u64)
+        + list
+            .iter()
+            .map(|entry| entry.key.encoded_len() + entry.value.len())
+            .sum::<usize>();
+    let kinds = kinds_of(list.iter().map(|entry| &entry.key));
+    let mut bytes = Vec::with_capacity(len + STORAGE_TRAILER_CAPACITY);
+    bytes.push(FORMAT_VERSION);
+    bytes.push(kinds.bits());
+    write_varint(&mut bytes, list.len() as u64);
+    for entry in list {
+        entry.key.write(&mut bytes);
+        bytes.extend_from_slice(&entry.value);
+    }
+    debug_assert_eq!(bytes.len(), len, "metadata container length mismatch");
+    Some(EncodedMetadata {
+        bytes,
+        kinds,
+        entries: list.len(),
+    })
+}
+
+#[cold]
+fn encode_tree(tree: &BTreeMap<EntryKey<'_>, Cow<'_, [u8]>>) -> Option<EncodedMetadata> {
+    if tree.is_empty() {
+        return None;
+    }
+    let len = 2
+        + varint_len(tree.len() as u64)
+        + tree
+            .iter()
+            .map(|(key, value)| key.encoded_len() + value.len())
+            .sum::<usize>();
+    let kinds = kinds_of(tree.keys());
+    let mut bytes = Vec::with_capacity(len + STORAGE_TRAILER_CAPACITY);
+    bytes.push(FORMAT_VERSION);
+    bytes.push(kinds.bits());
+    write_varint(&mut bytes, tree.len() as u64);
+    for (key, value) in tree {
+        key.write(&mut bytes);
+        bytes.extend_from_slice(value);
+    }
+    debug_assert_eq!(bytes.len(), len, "metadata container length mismatch");
+    Some(EncodedMetadata {
+        bytes,
+        kinds,
+        entries: tree.len(),
+    })
+}
+
 impl EncodedMetadata {
+    pub fn from_view(view: &MetadataView<'_>) -> Option<Self> {
+        if view.is_empty() {
+            return None;
+        }
+        let contents = view.as_bytes();
+        let mut bytes = Vec::with_capacity(contents.len() + STORAGE_TRAILER_CAPACITY);
+        bytes.extend_from_slice(contents);
+        Some(EncodedMetadata {
+            bytes,
+            kinds: view.kinds(),
+            entries: view.len(),
+        })
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }

@@ -6,12 +6,14 @@
 
 use super::{container_with_imap, encode, error_json};
 use crate::api::metadata::{
-    ContainerChange, MetadataPatches, MetadataPreload, PreparedMetadata, filter_containers,
-    is_empty_update, prepared::SharedWrite, reject_uncommitted,
+    MetadataPatches, MetadataPreload, PreparedMetadata, filter_containers, is_empty_update,
+    reject_uncommitted,
 };
 use common::storage::{
     dav::{DISPLAY_NAME_PROPERTY, FilePresence},
-    metadata::{MetadataLog, PrivateMetadataCommit, PrivateMetadataWrite, StoredContainer},
+    metadata::{
+        MetadataLog, MetadataWrite, PrivateMetadataCommit, PrivateMetadataWrite, StoredContainer,
+    },
 };
 use jmap_proto::{
     error::set::SetError,
@@ -23,6 +25,7 @@ use jmap_proto::{
     request::MaybeInvalid,
 };
 use jmap_tools::{Key, Value};
+use std::cell::RefCell;
 use store::{
     roaring::RoaringBitmap,
     write::{BatchBuilder, Operation, PendingId, ValueClass, ValueOp, metadata::MetadataClass},
@@ -30,7 +33,7 @@ use store::{
 use types::{
     collection::Collection,
     id::Id,
-    metadata::{EncodedMetadata, MetadataBuilder, MetadataEdit, MetadataKinds, XmlName, XmlValue},
+    metadata::{EncodedMetadata, MetadataBuilder, MetadataKinds, XmlName, XmlValue},
 };
 use utils::map::vec_map::VecMap;
 
@@ -53,13 +56,14 @@ fn error_type(error: SetError<CalendarProperty>) -> serde_json::Value {
     serde_json::to_value(error).expect("serializable")["type"].clone()
 }
 
-fn shared_write(next: Option<EncodedMetadata>) -> SharedWrite {
-    SharedWrite {
+fn shared_write(next: Option<EncodedMetadata>) -> MetadataWrite {
+    MetadataWrite {
         account_id: 1,
         tenant_id: None,
         collection: Collection::FileNode,
+        previous: None,
+        next,
         log: MetadataLog::Item { prefix: None },
-        change: ContainerChange::new(None, next, MetadataEdit::Write),
     }
 }
 
@@ -126,15 +130,6 @@ fn unsupported_metadata_lists_every_key_as_sent() {
     let error = MetadataPatches::reject_unsupported(&object(sent))
         .expect_err("metadata keys without support");
     assert_eq!(error_json(error), expected);
-
-    let patches = MetadataPatches::for_update()
-        .extract(&mut object(sent))
-        .expect("valid")
-        .expect("metadata present");
-    assert_eq!(
-        error_json(patches.unsupported::<CalendarProperty>()),
-        expected
-    );
 }
 
 #[test]
@@ -196,11 +191,14 @@ fn preload_follows_roots_and_stored_flags() {
             object(r#"{"privateMetadata/x.example": {}}"#),
         ),
     ]);
+    let looked_up = RefCell::new(Vec::new());
     let preload = MetadataPreload::from_updates(Some(&updates), |document_id| {
+        looked_up.borrow_mut().push(document_id);
         (document_id != 9).then_some(MetadataKinds::JMAP)
     });
     assert_eq!(preload.shared.iter().collect::<Vec<_>>(), [5]);
     assert!(preload.private.is_empty());
+    assert_eq!(looked_up.into_inner(), [5, 9]);
 }
 
 #[test]
@@ -242,12 +240,9 @@ fn prepared_file_presence_follows_the_next_container() {
 fn prepared_writes_take_the_document_at_build_time() {
     let previous = container_with_imap(r#"{"a.example": {"k": 1}}"#, &[("/comment", "x")]);
     let prepared = PreparedMetadata {
-        shared: Some(SharedWrite {
-            change: ContainerChange::new(
-                Some(StoredContainer::from(&previous)),
-                encode(r#"{"b.example": {}}"#, &[]),
-                MetadataEdit::Write,
-            ),
+        shared: Some(MetadataWrite {
+            previous: Some(StoredContainer::from(&previous)),
+            next: encode(r#"{"b.example": {}}"#, &[]),
             ..shared_write(None)
         }),
         private: Some(PrivateMetadataWrite {

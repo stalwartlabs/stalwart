@@ -64,7 +64,11 @@ impl AddressBookGet for Server {
         )?;
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::AddressBook);
         let metadata_get = metadata.get(selection);
+        let metadata_slots = metadata_get.as_ref().map_or(0, |get| {
+            usize::from(get.wants_shared()) + usize::from(get.wants_private())
+        });
         let account_id = request.account_id.document_id();
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let personal_id = access_token.personal_id(account_id, Collection::AddressBook);
         let cache = self
             .fetch_groupware_resources(
@@ -120,10 +124,7 @@ impl AddressBookGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: metadata
-                .state(self, account_id, cache.get_state(true))
-                .await?
-                .into(),
+            state: sampled.state(cache.get_state(true)).into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };
@@ -152,7 +153,7 @@ impl AddressBookGet for Server {
             let address_book = _address_book
                 .unarchive::<AddressBook>()
                 .caused_by(trc::location!())?;
-            let mut result = Map::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len() + metadata_slots);
             for property in &properties {
                 match property {
                     AddressBookProperty::Id => {

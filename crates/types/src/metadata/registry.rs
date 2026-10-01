@@ -164,10 +164,6 @@ impl<'x> Namespace<'x> {
             Namespace::Vendor(name) => name,
         }
     }
-
-    pub fn is_vendor(&self) -> bool {
-        matches!(self, Namespace::Vendor(_))
-    }
 }
 
 fn is_registered_name(name: &str) -> bool {

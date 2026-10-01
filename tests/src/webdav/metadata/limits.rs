@@ -11,7 +11,11 @@ use crate::utils::{
     webdav::DummyWebDavClient,
 };
 use hyper::StatusCode;
-use std::fmt::Write;
+use registry::schema::{prelude::Property, structs::Metadata};
+use std::{
+    fmt::Write,
+    time::{Duration, Instant},
+};
 use store::rand::{RngExt, distr::Alphanumeric, rng};
 
 const NS_LIMITS: &str = "urn:example:limits";
@@ -96,8 +100,12 @@ pub async fn test(test: &TestServer) {
         resource.delete(&client).await;
     }
 
+    many_properties(&client).await;
+    over_limit_container(test, &client).await;
+
     let mike = test.account("mike@example.com").webdav_client();
     quota_exhaustion(&mike).await;
+    move_overwrite_at_quota(&mike).await;
     super::cleanup(test, &[&client, &mike]).await;
 }
 
@@ -183,4 +191,320 @@ async fn quota_exhaustion(client: &DummyWebDavClient) {
 fn random_text(len: usize) -> String {
     let mut rng = rng();
     (0..len).map(|_| rng.sample(Alphanumeric) as char).collect()
+}
+
+async fn move_overwrite_at_quota(client: &DummyWebDavClient) {
+    let root = format!("{}/", home(DavKind::Folder, client.name));
+    let folder = format!("{root}meta-quota-move/");
+    client
+        .mkcol("MKCOL", &folder, [], [])
+        .await
+        .with_status(StatusCode::CREATED);
+    let source = format!("{folder}source.txt");
+    let target = format!("{folder}target.txt");
+    for (path, content) in [(&source, "s"), (&target, "t")] {
+        client
+            .request_with_headers("PUT", path, [("content-type", "text/plain")], content)
+            .await
+            .with_status(StatusCode::CREATED);
+    }
+    client
+        .proppatch_xml(
+            &source,
+            &format!(
+                "<D:set><D:prop><L:mark xmlns:L=\"{NS_LIMITS}\">{}</L:mark></D:prop></D:set>",
+                random_text(300)
+            ),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS);
+
+    let filler = format!("{folder}filler.txt");
+    let mut size = client.available_quota(&root).await as usize;
+    while size > 0 {
+        let response = client
+            .request_with_headers(
+                "PUT",
+                &filler,
+                [("content-type", "text/plain")],
+                "f".repeat(size),
+            )
+            .await;
+        if response.status.is_success() {
+            break;
+        }
+        assert_eq!(
+            response.status,
+            StatusCode::INSUFFICIENT_STORAGE,
+            "a PUT over quota must answer 507 (RFC 4331 section 6)"
+        );
+        size -= size.min(16);
+    }
+    assert!(
+        client.available_quota(&root).await < 300,
+        "the quota filler did not fill the quota"
+    );
+
+    client
+        .request_with_headers("MOVE", &source, [("destination", target.as_str())], "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+    let tree = client
+        .propfind_named(&target, "0", &format!("<L:mark xmlns:L=\"{NS_LIMITS}\"/>"))
+        .await;
+    tree.expect_property(&target, NS_LIMITS, "mark")
+        .with_status(StatusCode::OK);
+
+    client
+        .request("DELETE", &folder, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+}
+
+async fn timed_proppatch(
+    client: &DummyWebDavClient,
+    path: &str,
+    body: String,
+) -> (StatusCode, f64) {
+    let start = Instant::now();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(900))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("http client")
+        .request(
+            reqwest::Method::from_bytes(b"PROPPATCH").expect("method"),
+            format!("https://127.0.0.1:8899{path}"),
+        )
+        .header("authorization", client.credentials.as_str())
+        .body(body)
+        .send()
+        .await
+        .expect("PROPPATCH response");
+    let status = response.status();
+    let _ = response.bytes().await;
+    (status, start.elapsed().as_secs_f64())
+}
+
+fn many_body(count: usize, descending: bool, removes: bool) -> String {
+    let mut body = String::with_capacity(count * 32 + 256);
+    body.push_str(concat!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<D:propertyupdate xmlns:D=\"DAV:\" xmlns:L=\"urn:example:limits\">",
+        "<D:set><D:prop>"
+    ));
+    for n in 0..count {
+        let n = if descending { count - n } else { n };
+        let _ = write!(body, "<L:p{n:08}/>");
+    }
+    body.push_str("</D:prop></D:set>");
+    if removes {
+        body.push_str("<D:remove><D:prop>");
+        for n in 0..count {
+            let _ = write!(body, "<L:q{n:08}/>");
+        }
+        body.push_str("</D:prop></D:remove>");
+    }
+    body.push_str("</D:propertyupdate>");
+    body
+}
+
+async fn many_properties(client: &DummyWebDavClient) {
+    const COUNT: usize = 100_000;
+    let folder = format!("{}/meta-many/", home(DavKind::Folder, client.name));
+    client
+        .mkcol("MKCOL", &folder, [], [])
+        .await
+        .with_status(StatusCode::CREATED);
+
+    for removes in [false, true] {
+        let mut elapsed = [0.0; 2];
+        for (descending, seconds) in [false, true].into_iter().zip(elapsed.iter_mut()) {
+            let (status, taken) =
+                timed_proppatch(client, &folder, many_body(COUNT, descending, removes)).await;
+            assert_eq!(status, StatusCode::MULTI_STATUS);
+            *seconds = taken;
+        }
+        let [ascending, descending] = elapsed;
+        assert!(
+            descending < ascending * 3.0 + 2.0,
+            "a PROPPATCH with {COUNT} properties in descending order (removes: {removes}) took {descending:.2}s against {ascending:.2}s ascending"
+        );
+        assert!(
+            dead_names(client, &folder).await.is_empty(),
+            "a PROPPATCH over the entry limit (removes: {removes}) stored properties"
+        );
+    }
+
+    client
+        .request("DELETE", &folder, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+}
+
+async fn set_max_entries(test: &TestServer, max_entries: u64) {
+    let admin = test.account("admin@example.com");
+    admin
+        .registry_update_setting(
+            Metadata {
+                max_entries,
+                ..Default::default()
+            },
+            &[Property::MaxEntries],
+        )
+        .await;
+    admin.reload_settings().await;
+}
+
+fn set_body(names: &[&str]) -> String {
+    let mut body = String::from("<D:set><D:prop>");
+    for name in names {
+        let _ = write!(body, "<L:{name} xmlns:L=\"{NS_LIMITS}\">{name}</L:{name}>");
+    }
+    body.push_str("</D:prop></D:set>");
+    body
+}
+
+fn remove_body(names: &[&str]) -> String {
+    let mut body = String::from("<D:remove><D:prop>");
+    for name in names {
+        let _ = write!(body, "<L:{name} xmlns:L=\"{NS_LIMITS}\"/>");
+    }
+    body.push_str("</D:prop></D:remove>");
+    body
+}
+
+async fn dead_names(client: &DummyWebDavClient, path: &str) -> Vec<String> {
+    let tree = client.propfind_propname(path, "0").await;
+    let mut names = tree
+        .props(path)
+        .filter(|prop| prop.element.namespace.as_deref() == Some(NS_LIMITS))
+        .map(|prop| prop.element.name.clone())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    names
+}
+
+async fn over_limit_container(test: &TestServer, client: &DummyWebDavClient) {
+    let folder = format!("{}/meta-over-limit/", home(DavKind::Folder, client.name));
+    client
+        .mkcol("MKCOL", &folder, [], [])
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .proppatch_xml(
+            &folder,
+            &set_body(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"]),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS);
+
+    set_max_entries(test, 10).await;
+
+    for (body, expected) in [
+        (set_body(&["c"]), StatusCode::OK),
+        (
+            format!("{}{}", remove_body(&["a"]), set_body(&["m"])),
+            StatusCode::OK,
+        ),
+    ] {
+        let response = client
+            .proppatch_xml(&folder, &body)
+            .await
+            .with_status(StatusCode::MULTI_STATUS)
+            .xml_tree();
+        for prop in response.props(&folder) {
+            assert!(
+                prop.status == expected,
+                "an edit that keeps an over-limit container at its size must succeed: {response}"
+            );
+        }
+    }
+    let kept = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"];
+    assert_eq!(dead_names(client, &folder).await, kept);
+
+    let response = client
+        .proppatch_xml(&folder, &set_body(&["b", "n", "o"]))
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .xml_tree();
+    response
+        .expect_property(&folder, NS_LIMITS, "n")
+        .with_status(StatusCode::INSUFFICIENT_STORAGE);
+    for name in ["b", "o"] {
+        response
+            .expect_property(&folder, NS_LIMITS, name)
+            .with_status(if name == "o" {
+                StatusCode::INSUFFICIENT_STORAGE
+            } else {
+                StatusCode::FAILED_DEPENDENCY
+            });
+    }
+    assert_eq!(dead_names(client, &folder).await, kept);
+
+    at_limit_container(client).await;
+
+    set_max_entries(test, Metadata::default().max_entries).await;
+    client
+        .request("DELETE", &folder, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
+}
+
+async fn at_limit_container(client: &DummyWebDavClient) {
+    let folder = format!("{}/meta-at-limit/", home(DavKind::Folder, client.name));
+    client
+        .mkcol("MKCOL", &folder, [], [])
+        .await
+        .with_status(StatusCode::CREATED);
+    client
+        .proppatch_xml(
+            &folder,
+            &set_body(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .xml_tree()
+        .expect_property(&folder, NS_LIMITS, "j")
+        .with_status(StatusCode::OK);
+
+    let response = client
+        .proppatch_xml(
+            &folder,
+            &format!("{}{}", set_body(&["k"]), remove_body(&["a"])),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .xml_tree();
+    for name in ["k", "a"] {
+        response
+            .expect_property(&folder, NS_LIMITS, name)
+            .with_status(StatusCode::OK);
+    }
+    let kept = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
+    assert_eq!(dead_names(client, &folder).await, kept);
+
+    let response = client
+        .proppatch_xml(
+            &folder,
+            &format!("{}{}", set_body(&["l", "m"]), remove_body(&["b"])),
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .xml_tree();
+    for (name, status) in [
+        ("l", StatusCode::FAILED_DEPENDENCY),
+        ("m", StatusCode::INSUFFICIENT_STORAGE),
+        ("b", StatusCode::FAILED_DEPENDENCY),
+    ] {
+        response
+            .expect_property(&folder, NS_LIMITS, name)
+            .with_status(status);
+    }
+    assert_eq!(dead_names(client, &folder).await, kept);
+
+    client
+        .request("DELETE", &folder, "")
+        .await
+        .with_status(StatusCode::NO_CONTENT);
 }

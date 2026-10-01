@@ -6,7 +6,7 @@
 
 use crate::{
     api::metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
-    changes::state::{MetadataStateManager, StateManager},
+    changes::state::StateManager,
 };
 use common::{Server, auth::AccessToken};
 use email::sieve::{SieveScript, ingest::SieveScriptIngest};
@@ -57,11 +57,14 @@ impl SieveScriptGet for Server {
         )?;
         let object_metadata =
             ObjectMetadata::new(self, access_token, using, MetadataType::SieveScript);
-        let viewer = object_metadata.viewer();
         let metadata = object_metadata.get(selection);
+        let metadata_slots = metadata.as_ref().map_or(0, |get| {
+            usize::from(get.wants_shared()) + usize::from(get.wants_private())
+        });
         let mut documents = MetadataDocuments::default();
         let mut listed = Vec::new();
         let account_id = request.account_id.document_id();
+        let sampled = object_metadata.viewer_change_id(self, account_id).await?;
         let script_ids = self
             .document_ids(account_id, Collection::SieveScript, SieveField::Name)
             .await?;
@@ -76,15 +79,11 @@ impl SieveScriptGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: self
-                .metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::SieveScript,
+            state: sampled
+                .state(
                     self.get_state(account_id, SyncCollection::SieveScript)
                         .await?,
                 )
-                .await?
                 .into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
@@ -115,7 +114,7 @@ impl SieveScriptGet for Server {
             let sieve = sieve_
                 .unarchive::<SieveScript>()
                 .caused_by(trc::location!())?;
-            let mut result = Map::with_capacity(properties.len());
+            let mut result = Map::with_capacity(properties.len() + metadata_slots);
             for property in &properties {
                 match property {
                     SieveProperty::Id => {

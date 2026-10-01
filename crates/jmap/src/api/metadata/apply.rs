@@ -6,20 +6,22 @@
 
 use super::{
     MetadataSupport, metadata_scope,
-    patch::{InvalidValue, Patch, PatchKey, PatchValue},
+    patch::{InvalidValue, Patch, PatchKey, PatchValue, value_depth},
     validate::ValidatedPatches,
     violation::{Rule, Violation, Violations, limit_description, namespace_path},
-    write::{ContainerChange, MetadataUpdate},
+    write::MetadataUpdate,
 };
-use common::storage::metadata::StoredContainer;
+use common::storage::metadata::ContainerChange;
 use jmap_proto::{
     error::set::SetError,
     object::metadata::{MetadataProperty, MetadataRoot},
 };
 use jmap_tools::{JsonPointer, JsonPointerHandler, Null, Value};
+use std::mem;
 use store::write::metadata::MetadataBuf;
 use types::metadata::{
-    EncodedJson, JsonError, LimitViolation, MetadataBuilder, MetadataEdit, MetadataView, Namespace,
+    EncodedJson, JsonError, JsonKind, JsonView, LimitViolation, MetadataBuilder, MetadataEdit,
+    MetadataView, Namespace,
 };
 
 struct RootContext<'x> {
@@ -64,11 +66,8 @@ impl RootContext<'_> {
             return None;
         }
 
-        let (keys, values): (Vec<PatchKey>, Vec<PatchValue>) = expand(patches)
-            .into_iter()
-            .map(|patch| (patch.key, patch.value))
-            .unzip();
-        let edit = if values.iter().all(PatchValue::is_removal) {
+        let mut patches = expand(patches);
+        let edit = if patches.iter().all(|patch| patch.value.is_removal()) {
             MetadataEdit::RemovalOnly
         } else {
             MetadataEdit::Write
@@ -78,8 +77,23 @@ impl RootContext<'_> {
             .as_ref()
             .map(MetadataBuilder::from_view)
             .unwrap_or_default();
+        let entry_bound = self
+            .support
+            .limits
+            .entry_bound(view.as_ref().map_or(0, MetadataView::len));
+        let mut removals = patches
+            .iter()
+            .filter(|patch| !patch.key.is_deep() && matches!(patch.value, PatchValue::Remove))
+            .count();
+        let mut is_over_limit = false;
 
-        let mut items = keys.iter().zip(values).peekable();
+        let mut items = patches
+            .iter_mut()
+            .map(|patch| {
+                let value = mem::replace(&mut patch.value, PatchValue::Clear);
+                (&patch.key, value)
+            })
+            .peekable();
         while let Some((key, value)) = items.next() {
             match (key.namespace.as_deref(), value) {
                 (None, PatchValue::Clear) => builder.clear_jmap(),
@@ -93,51 +107,75 @@ impl RootContext<'_> {
                     self.patch_namespace(&mut builder, name, &group, violations);
                 }
                 (Some(name), PatchValue::Remove) => {
+                    removals = removals.saturating_sub(1);
                     if let Ok(namespace) = Namespace::parse(name) {
                         builder.remove_jmap(&namespace);
                     }
                 }
                 (Some(name), PatchValue::Set(value)) => {
-                    self.set_namespace(&mut builder, name, value, view.as_ref(), violations)
+                    if let Some((namespace, value)) =
+                        self.namespace_value(name, value, view.as_ref(), violations)
+                        && !is_over_limit
+                    {
+                        builder.set_jmap(namespace, value);
+                        if let Err(violation) = entry_bound.check(builder.len(), removals) {
+                            is_over_limit = true;
+                            self.report_container(Rule::Entries, violation, violations);
+                        }
+                    }
                 }
                 (_, _) => {}
             }
         }
 
-        self.finish(builder, view, current, edit, violations)
+        if is_over_limit {
+            None
+        } else {
+            self.finish(builder, view, current, edit, violations)
+        }
     }
 
-    fn set_namespace<'x>(
+    fn namespace_value<'x>(
         &self,
-        builder: &mut MetadataBuilder<'x>,
         name: &'x str,
         value: Result<EncodedJson, InvalidValue>,
         stored: Option<&MetadataView<'_>>,
         violations: &mut Violations,
-    ) {
-        let Some(namespace) = self.namespace(name, violations) else {
-            return;
-        };
+    ) -> Option<(Namespace<'x>, EncodedJson)> {
+        let namespace = self.namespace(name, violations)?;
         if self.support.is_supported(&namespace, self.root) {
-            if let Some(value) = self.check_value(name, value, violations) {
-                builder.set_jmap(namespace, value);
-            }
-            return;
+            return self
+                .check_value(name, value, violations)
+                .map(|value| (namespace, value));
         }
 
         match (
             value,
             stored.and_then(|stored| stored.jmap_namespace(&namespace)),
         ) {
-            (Ok(value), Some(stored)) if value.as_bytes() == stored.as_bytes() => {
-                builder.set_jmap(namespace, value);
+            (Ok(value), Some(stored)) if same_json(value.view(), stored) => {
+                let kept = if value.as_bytes() == stored.as_bytes() {
+                    value
+                } else {
+                    stored
+                        .to_value::<Null, Null>()
+                        .and_then(|stored| EncodedJson::encode(&stored).ok())
+                        .unwrap_or(value)
+                };
+                Some((namespace, kept))
             }
-            (_, Some(_)) => self.report_namespace(
-                name,
-                "Withdrawn namespaces can only be removed or kept unchanged.",
-                violations,
-            ),
-            (_, None) => self.report_namespace(name, "Unsupported namespace.", violations),
+            (_, Some(_)) => {
+                self.report_namespace(
+                    name,
+                    "Withdrawn namespaces can only be removed or kept unchanged.",
+                    violations,
+                );
+                None
+            }
+            (_, None) => {
+                self.report_namespace(name, "Unsupported namespace.", violations);
+                None
+            }
         }
     }
 
@@ -183,17 +221,12 @@ impl RootContext<'_> {
                 }
             }
 
-            EncodedJson::encode_namespace(&value)
+            EncodedJson::encode_namespace(&value).map_err(|error| InvalidValue {
+                error,
+                depth: value_depth(&value, 0),
+            })
         };
 
-        let patched = patched.map_err(|error| InvalidValue {
-            error,
-            depth: self
-                .support
-                .limits
-                .max_depth
-                .map_or(0, |max| max.saturating_add(1)),
-        });
         if let Some(value) = self.check_value(name, patched, violations) {
             builder.set_jmap(namespace, value);
         }
@@ -239,46 +272,25 @@ impl RootContext<'_> {
         edit: MetadataEdit,
         violations: &mut Violations,
     ) -> Option<ContainerChange> {
-        let next = builder.encode();
-        let (previous_len, previous_entries) = view
-            .as_ref()
-            .map_or((0, 0), |view| (view.as_bytes().len(), view.len()));
-        match (&next, &view) {
-            (Some(next), Some(view)) if next.as_bytes() == view.as_bytes() => return None,
-            (None, None) => return None,
-            _ => {}
-        }
-
-        if let Some(next) = &next {
-            let limits = &self.support.limits;
-            let max_size = limits.max_container_size(metadata_scope(self.root));
-            if next.len() > max_size && next.len() > previous_len {
-                self.report_container(
-                    Rule::ContainerSize,
-                    LimitViolation::ContainerSize {
-                        size: next.len(),
-                        max: max_size,
-                    },
-                    violations,
-                );
-            }
-            if next.entries() > limits.max_entries && next.entries() > previous_entries {
-                self.report_container(
-                    Rule::Entries,
-                    LimitViolation::Entries {
-                        count: next.entries(),
-                        max: limits.max_entries,
-                    },
-                    violations,
-                );
+        let change = ContainerChange::new(current, builder.encode(), edit)?;
+        if let Some(next) = change.next() {
+            let (previous_len, previous_entries) = view
+                .as_ref()
+                .map_or((0, 0), |view| (view.as_bytes().len(), view.len()));
+            if let Err(violation) = self.support.limits.check_edit(
+                metadata_scope(self.root),
+                previous_len,
+                previous_entries,
+                next,
+            ) {
+                let rule = match violation {
+                    LimitViolation::Entries { .. } => Rule::Entries,
+                    _ => Rule::ContainerSize,
+                };
+                self.report_container(rule, violation, violations);
             }
         }
-
-        Some(ContainerChange::new(
-            current.map(StoredContainer::from),
-            next,
-            edit,
-        ))
+        Some(change)
     }
 
     fn report_namespace(&self, name: &str, description: &'static str, violations: &mut Violations) {
@@ -349,7 +361,50 @@ impl RootContext<'_> {
     }
 }
 
+fn same_json(left: JsonView<'_>, right: JsonView<'_>) -> bool {
+    if left.as_bytes() == right.as_bytes() {
+        return true;
+    }
+    match (left.kind(), right.kind()) {
+        (JsonKind::Object, JsonKind::Object) => {
+            let mut left = left.members().collect::<Vec<_>>();
+            let mut right = right.members().collect::<Vec<_>>();
+            left.len() == right.len() && {
+                left.sort_by_key(|(key, _)| *key);
+                right.sort_by_key(|(key, _)| *key);
+                left.into_iter()
+                    .zip(right)
+                    .all(|((left_key, left), (right_key, right))| {
+                        left_key == right_key && same_json(left, right)
+                    })
+            }
+        }
+        (JsonKind::Array, JsonKind::Array) => {
+            left.len() == right.len()
+                && left
+                    .items()
+                    .zip(right.items())
+                    .all(|(left, right)| same_json(left, right))
+        }
+        (JsonKind::Number, JsonKind::Number) => match (left.as_i64(), right.as_i64()) {
+            (Some(left), Some(right)) => left == right,
+            _ => match (left.as_u64(), right.as_u64()) {
+                (Some(left), Some(right)) => left == right,
+                _ => left.as_f64() == right.as_f64(),
+            },
+        },
+        (JsonKind::String, JsonKind::String) => left.as_str() == right.as_str(),
+        _ => false,
+    }
+}
+
 fn expand(patches: Vec<Patch>) -> Vec<Patch> {
+    if !patches
+        .iter()
+        .any(|patch| matches!(patch.value, PatchValue::Replace(_)))
+    {
+        return patches;
+    }
     let mut expanded = Vec::with_capacity(patches.len());
     for patch in patches {
         match patch.value {

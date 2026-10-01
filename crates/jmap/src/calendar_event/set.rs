@@ -5,8 +5,8 @@
  */
 
 use crate::api::metadata::{
-    MetadataAccess, MetadataPatches, MetadataPreload, MetadataType, MetadataWriter, NewMetadata,
-    ObjectMetadata, PreparedMetadata, is_empty_update, reject_uncommitted,
+    MetadataAccess, MetadataPatches, MetadataPreload, MetadataTarget, MetadataType, MetadataWriter,
+    NewMetadata, ObjectMetadata, PreparedMetadata, is_empty_update, reject_uncommitted,
 };
 use crate::api::pending_creates::PendingCreates;
 use crate::blob::embedded::EmbeddedExport;
@@ -44,7 +44,7 @@ use common::{
 };
 use compact_str::ToCompactString;
 use groupware::{
-    DestroyArchive, PresenceUpdate, SizeWriter,
+    DestroyArchive, SizeWriter,
     cache::GroupwareCache,
     calendar::{
         ArchivedCalendarEvent, CalendarEvent, CalendarEventContent, CalendarEventData, EVENT_DRAFT,
@@ -62,7 +62,6 @@ use groupware::{
         storage::{DirectChange, DirectChangeNotification, NotificationQuota},
         user::{ICalendarUserData, UpdatedPolicy, UserDataSplit, UserDataUpdate, UserDataView},
     },
-    metadata::MetadataCleanup,
     scheduling::{
         ItipError, ItipMessages,
         event_create::{itip_attendee_create, itip_create},
@@ -172,6 +171,8 @@ impl CalendarEventSet for Server {
         using: CapabilityIds,
     ) -> trc::Result<SetResponse<calendar_event::CalendarEvent>> {
         let account_id = request.account_id.document_id();
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -183,18 +184,8 @@ impl CalendarEventSet for Server {
             .account_info(account_id)
             .await
             .caused_by(trc::location!())?;
-        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
-            .with_state(
-                metadata
-                    .assert_state(
-                        self,
-                        account_id,
-                        cache.get_state(false),
-                        &request.if_in_state,
-                    )
-                    .await?,
-            );
+            .with_state(sampled.assert_state(cache.get_state(false), &request.if_in_state)?);
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let is_owner = access_token.is_member(account_id);
         let identities = if is_owner {
@@ -474,22 +465,22 @@ impl CalendarEventSet for Server {
                     &identities,
                     (account_id, document_id),
                     &calendar_event,
+                    &patches,
                 )
                 .await?;
                 match context
                     .metadata
-                    .prepare(self, patches, access, Some(document_id))
+                    .write_metadata_only::<CalendarEvent, _>(
+                        self,
+                        patches,
+                        access,
+                        &calendar_event,
+                        document_id,
+                        &mut batch,
+                    )
                     .await?
                 {
-                    Ok(prepared) => {
-                        if let Some(kinds) = prepared.shared_kinds() {
-                            PresenceUpdate(calendar_event)
-                                .write(kinds, account_id, document_id, &mut batch)
-                                .caused_by(trc::location!())?;
-                        }
-                        context.metadata.write(prepared, document_id, &mut batch)?;
-                        update.succeed(&mut response);
-                    }
+                    Ok(()) => update.succeed(&mut response),
                     Err(err) => update.fail(&mut response, err),
                 }
                 continue 'update;
@@ -1194,7 +1185,12 @@ impl CalendarEventSet for Server {
                     };
                     match context
                         .metadata
-                        .prepare(self, patches, access, Some(document_id))
+                        .prepare_for(
+                            self,
+                            patches,
+                            access,
+                            MetadataTarget::Update { document_id },
+                        )
                         .await?
                     {
                         Ok(prepared) => Some(prepared),
@@ -1324,18 +1320,23 @@ impl CalendarEventSet for Server {
         }
 
         // Process deletions
-        let cleanup = MetadataCleanup::preload(
-            self,
-            access_token.account_tenant_ids(),
-            account_id,
-            Collection::CalendarEvent,
-            destroy_events.iter().filter_map(|id| {
-                let document_id = id.document_id();
-                Some((document_id, cache.item_by_id(document_id)?.metadata_kinds()))
-            }),
-        )
-        .await
-        .caused_by(trc::location!())?;
+        let cleanup = self
+            .preload_container_cleanup(
+                Some(access_token.account_tenant_ids()),
+                account_id,
+                Collection::CalendarEvent,
+                &destroy_events
+                    .iter()
+                    .map(|id| id.document_id())
+                    .filter(|&document_id| {
+                        cache
+                            .item_by_id(document_id)
+                            .is_some_and(|item| !item.metadata_kinds().is_empty())
+                    })
+                    .collect(),
+            )
+            .await
+            .caused_by(trc::location!())?;
         'destroy: for id in destroy_events {
             let document_id = id.document_id();
 
@@ -1495,7 +1496,7 @@ impl CalendarEventSet for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = match self.commit_batch(batch).await {
+            let assigned_ids = match context.metadata.commit(self, batch).await {
                 Ok(assigned_ids) => assigned_ids,
                 Err(err) if err.is_assertion_failure() => {
                     reject_uncommitted(
@@ -1507,7 +1508,6 @@ impl CalendarEventSet for Server {
                 }
                 Err(err) => return Err(err.caused_by(trc::location!())),
             };
-            context.metadata.committed(self, &assigned_ids).await;
 
             created_slots.resolve(&mut response, &assigned_ids);
             for (create_id, slot, mut server_set) in created_server_set {
@@ -2023,12 +2023,10 @@ async fn event_metadata_access(
     identities: &CalendarAddresses,
     (account_id, document_id): (u32, u32),
     event: &Archive<&ArchivedCalendarEvent>,
+    patches: &MetadataPatches,
 ) -> trc::Result<MetadataAccess> {
     if !access_token.is_shared(account_id) {
-        return Ok(MetadataAccess {
-            may_write_shared: true,
-            may_read: true,
-        });
+        return Ok(MetadataAccess::FULL);
     }
     let calendar_ids = || event.inner.names.iter().map(ArchivedDavName::parent_id);
     let may_read = calendar_ids().any(|calendar_id| {
@@ -2037,7 +2035,9 @@ async fn event_metadata_access(
             .contains(Acl::ReadItems)
     });
     let acl = EventAcl::for_calendars(cache, access_token, calendar_ids());
-    let may_write_shared = if acl.may_write(EventOwnership::NotOwner) {
+    let may_write_shared = if !patches.has_shared() {
+        false
+    } else if acl.may_write(EventOwnership::NotOwner) {
         true
     } else if acl.may_write(EventOwnership::Owner) {
         match server

@@ -662,6 +662,10 @@ impl BatchBuilder {
         self
     }
 
+    pub fn has_commit_points(&self) -> bool {
+        !self.commit_points.is_empty()
+    }
+
     #[inline]
     pub fn is_large_batch(&self) -> bool {
         self.batch_size > 5_000_000 || self.batch_ops > 1000
@@ -946,6 +950,23 @@ mod tests {
         batch.commit_point();
         assert!(batch.commit_points.len() == 1 && batch.batch_ops == 0);
         assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn commit_points_are_reported_until_the_batch_is_written() {
+        let mut batch = BatchBuilder::new();
+        batch
+            .with_account_id(1)
+            .with_collection(Collection::FileNode)
+            .with_document(1)
+            .set(ValueClass::Property(0), vec![0u8]);
+        assert!(!batch.has_commit_points());
+        batch.commit_point();
+        assert!(!batch.has_commit_points(), "a small batch is not split");
+        batch.add_commit_point();
+        assert!(batch.has_commit_points());
+        batch.commit_points();
+        assert!(!batch.has_commit_points());
     }
 
     #[test]

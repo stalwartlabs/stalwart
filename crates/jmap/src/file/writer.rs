@@ -23,7 +23,7 @@ use common::{
     },
     storage::dav::{FILE_KIND_SYMLINK, MAX_FILE_NODE_DEPTH},
 };
-use groupware::{DestroyArchive, file::FileNode, metadata::MetadataCleanup};
+use groupware::{DestroyArchive, file::FileNode};
 use jmap_proto::{
     error::set::SetError,
     object::file_node::{self, FileNodeProperty, OnExists},
@@ -346,24 +346,26 @@ impl<'x> FileNodeWriter<'x> {
         let mut kept = AHashSet::new();
         let implicit_destroys = std::mem::take(&mut self.implicit_destroys);
         let cache = self.cache;
-        let cleanup = MetadataCleanup::preload(
-            self.server,
-            self.access_token.account_tenant_ids(),
-            self.account_id,
-            Collection::FileNode,
-            groups
-                .iter()
-                .chain(&implicit_destroys)
-                .flat_map(|group| group.ids.iter())
-                .filter_map(|&document_id| {
-                    Some((
-                        document_id,
-                        cache.resources.find_any(document_id)?.metadata_kinds(),
-                    ))
-                }),
-        )
-        .await
-        .caused_by(trc::location!())?;
+        let cleanup = self
+            .server
+            .preload_container_cleanup(
+                Some(self.access_token.account_tenant_ids()),
+                self.account_id,
+                Collection::FileNode,
+                &groups
+                    .iter()
+                    .chain(&implicit_destroys)
+                    .flat_map(|group| group.ids.iter().copied())
+                    .filter(|&document_id| {
+                        cache
+                            .resources
+                            .find_any(document_id)
+                            .is_some_and(|resource| !resource.metadata_kinds().is_empty())
+                    })
+                    .collect(),
+            )
+            .await
+            .caused_by(trc::location!())?;
         for group in groups.into_iter().rev().chain(implicit_destroys) {
             let root_id = group.id.document_id();
             if group.requires_empty

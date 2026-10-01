@@ -139,6 +139,19 @@ impl Account {
         aliases: &'static [&'static str],
         extra_permissions: Vec<Permission>,
     ) -> Account {
+        self.create_tenant_user_account(name, secret, description, aliases, extra_permissions, None)
+            .await
+    }
+
+    pub async fn create_tenant_user_account(
+        &self,
+        name: &'static str,
+        secret: &'static str,
+        description: &'static str,
+        aliases: &'static [&'static str],
+        extra_permissions: Vec<Permission>,
+        tenant_id: Option<Id>,
+    ) -> Account {
         let mut domains = AHashMap::from_iter(aliases.iter().copied().chain([name]).map(|email| {
             let domain = email.split('@').nth(1).expect("Invalid email address");
             (domain, Id::singleton())
@@ -167,6 +180,7 @@ impl Account {
             .registry_create_object(structs::Account::User(UserAccount {
                 name: account_name,
                 domain_id,
+                member_tenant_id: tenant_id,
                 credentials: List::from_iter([Credential::Password(PasswordCredential {
                     secret: secret.to_string(),
                     ..Default::default()

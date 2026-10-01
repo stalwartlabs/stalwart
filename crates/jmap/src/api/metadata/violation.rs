@@ -22,8 +22,8 @@ pub(super) enum Rule {
     Depth,
     ControlCharacter,
     EntrySize,
-    ContainerSize,
     Entries,
+    ContainerSize,
 }
 
 #[derive(Debug)]

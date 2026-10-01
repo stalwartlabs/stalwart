@@ -12,18 +12,15 @@ use super::{
     fixture::{Ctx, MetaType},
     quota::{ENTRY_SIZE, entry},
 };
-use crate::utils::{account::Account, server::TestServer};
+use crate::utils::server::TestServer;
 use jmap_proto::error::set::SetErrorType;
 use registry::{
     schema::{
         enums::{Permission, TenantStorageQuota},
         prelude::{ObjectType, Property},
-        structs::{
-            self, CertificateManagement, Credential, DkimManagement, DnsManagement, Domain,
-            PasswordCredential, PermissionsList, Tenant, UserAccount,
-        },
+        structs::{CertificateManagement, DkimManagement, DnsManagement, Domain, Tenant},
     },
-    types::{EnumImpl, list::List, map::Map},
+    types::EnumImpl,
 };
 use serde_json::json;
 
@@ -50,32 +47,16 @@ pub async fn test(test: &TestServer) {
             ..Default::default()
         })
         .await;
-    let user_id = admin
-        .registry_create_object(structs::Account::User(UserAccount {
-            name: "member".to_string(),
-            domain_id,
-            member_tenant_id: tenant_id.into(),
-            credentials: List::from_iter([Credential::Password(PasswordCredential {
-                secret: "tenant member secret with extra safety".to_string(),
-                ..Default::default()
-            })]),
-            permissions: structs::Permissions::Merge(PermissionsList {
-                enabled_permissions: Map::new(vec![
-                    Permission::UnlimitedRequests,
-                    Permission::UnlimitedUploads,
-                ]),
-                disabled_permissions: Default::default(),
-            }),
-            ..Default::default()
-        }))
+    let user = admin
+        .create_tenant_user_account(
+            "member@metatenant.org",
+            "tenant member secret with extra safety",
+            "Tenant member",
+            &[],
+            vec![Permission::UnlimitedRequests, Permission::UnlimitedUploads],
+            Some(tenant_id),
+        )
         .await;
-    let user = Account::new(
-        "member@metatenant.org",
-        "tenant member secret with extra safety",
-        &[],
-        "Tenant member",
-        user_id,
-    );
 
     let mut mailboxes = Vec::new();
     for _ in 0..=FILLERS {

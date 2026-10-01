@@ -8,12 +8,15 @@ use super::{
     AddressBook, ArchivedAddressBook, ArchivedContactCard, ArchivedContactCardContent, ContactCard,
     ContactCardContent,
 };
-use crate::{DestroyArchive, metadata::MetadataCleanup};
+use crate::DestroyArchive;
 use calcard::vcard::VCardVersion;
 use common::{
     Server,
     auth::AccountTenantIds,
-    storage::index::{GroupwareWrite, ObjectIndexBuilder, SplitCurrent, SplitUpdate},
+    storage::{
+        index::{GroupwareWrite, ObjectIndexBuilder, SplitCurrent, SplitUpdate},
+        metadata::ContainerCleanup,
+    },
 };
 use store::{
     ValueKey,
@@ -179,7 +182,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
         account_id: u32,
         document_id: u32,
         children_ids: Vec<u32>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         delete_path: Option<String>,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
@@ -240,7 +243,7 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
             account_id,
             document_id,
             delete_path,
-            &MetadataCleanup::immediate(Collection::AddressBook),
+            &ContainerCleanup::empty(Collection::AddressBook),
             batch,
         )
         .await
@@ -254,18 +257,18 @@ impl DestroyArchive<Archive<&ArchivedAddressBook>> {
         account_id: u32,
         document_id: u32,
         delete_path: Option<String>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let book = self.0;
-        cleanup
-            .remove(
-                server,
+        server
+            .release_or_read(
+                cleanup,
+                batch,
                 changed_by,
                 account_id,
                 document_id,
                 book.inner.metadata_kinds(),
-                batch,
             )
             .await?;
 
@@ -310,7 +313,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
             document_id,
             addressbook_id,
             delete_path,
-            &MetadataCleanup::immediate(Collection::ContactCard),
+            &ContainerCleanup::empty(Collection::ContactCard),
             batch,
         )
         .await
@@ -325,7 +328,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
         document_id: u32,
         addressbook_id: u32,
         delete_path: Option<String>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         self.remove(
@@ -350,7 +353,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
         document_id: u32,
         addressbook_id: u32,
         delete_path: Option<String>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let card = self.0;
@@ -378,14 +381,14 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
             } else {
                 // Delete card
                 let content_ = card_content(server, account_id, document_id).await?;
-                cleanup
-                    .remove(
-                        server,
+                server
+                    .release_or_read(
+                        cleanup,
+                        batch,
                         changed_by,
                         account_id,
                         document_id,
                         card.inner.metadata_kinds(),
-                        batch,
                     )
                     .await?;
                 batch
@@ -423,7 +426,7 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
             changed_by,
             account_id,
             document_id,
-            &MetadataCleanup::immediate(Collection::ContactCard),
+            &ContainerCleanup::empty(Collection::ContactCard),
             batch,
         )
         .await
@@ -435,18 +438,18 @@ impl DestroyArchive<Archive<&ArchivedContactCard>> {
         changed_by: AccountTenantIds,
         account_id: u32,
         document_id: u32,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let content_ = card_content(server, account_id, document_id).await?;
-        cleanup
-            .remove(
-                server,
+        server
+            .release_or_read(
+                cleanup,
+                batch,
                 changed_by,
                 account_id,
                 document_id,
                 self.0.inner.metadata_kinds(),
-                batch,
             )
             .await?;
 

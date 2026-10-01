@@ -14,9 +14,10 @@ use crate::{
 };
 use common::{Server, auth::AccessToken};
 use dav_proto::RequestHeaders;
-use groupware::{DestroyArchive, cache::GroupwareCache, metadata::MetadataCleanup};
+use groupware::{DestroyArchive, cache::GroupwareCache};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
+use store::roaring::RoaringBitmap;
 use trc::AddContext;
 use types::{
     acl::Acl,
@@ -87,9 +88,9 @@ impl FileDeleteRequestHandler for Server {
             .unwrap();
         let flagged = ids
             .iter()
-            .map(|a| (a.document_id(), a.resource.metadata_kinds()))
-            .filter(|(_, kinds)| !kinds.is_empty())
-            .collect::<Vec<_>>();
+            .filter(|a| !a.resource.metadata_kinds().is_empty())
+            .map(|a| a.document_id())
+            .collect::<RoaringBitmap>();
         let mut sorted_ids = Vec::with_capacity(ids.len());
         sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
 
@@ -119,15 +120,15 @@ impl FileDeleteRequestHandler for Server {
         )
         .await?;
 
-        let cleanup = MetadataCleanup::preload(
-            self,
-            access_token.account_tenant_ids(),
-            account_id,
-            Collection::FileNode,
-            flagged,
-        )
-        .await
-        .caused_by(trc::location!())?;
+        let cleanup = self
+            .preload_container_cleanup(
+                Some(access_token.account_tenant_ids()),
+                account_id,
+                Collection::FileNode,
+                &flagged,
+            )
+            .await
+            .caused_by(trc::location!())?;
         DestroyArchive(sorted_ids)
             .delete(
                 self,

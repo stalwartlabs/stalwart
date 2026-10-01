@@ -13,18 +13,21 @@ use crate::{
         uri::DavUriResource,
     },
 };
-use common::{Server, auth::AccessToken};
+use common::{
+    Server,
+    auth::AccessToken,
+    storage::index::{PresenceFlags, RewritePresence},
+};
 use dav_proto::{
     RequestHeaders, Return,
     schema::{
         Namespace,
         property::{CardDavProperty, DavProperty, DavValue, ResourceType, WebDavProperty},
-        request::{DavPropertyValue, PropertyUpdate},
+        request::{DavPropertyValue, PropertyUpdate, PropertyUpdateOp},
         response::{BaseCondition, MultiStatus, Response},
     },
 };
 use groupware::{
-    PresenceUpdate,
     cache::GroupwareCache,
     contact::{AddressBook, ContactCard},
 };
@@ -53,14 +56,14 @@ pub(crate) trait CardPropPatchRequestHandler: Sync + Send {
         &self,
         personal_id: u32,
         address_book: &mut AddressBook,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     );
 
     fn apply_card_properties(
         &self,
         card: &mut ContactCard,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     );
 }
@@ -156,8 +159,8 @@ impl CardPropPatchRequestHandler for Server {
         )
         .await?;
 
-        let dead = DeadPatch::take(&mut request, DisplayName::Live);
-        let has_live_changes = !request.set.is_empty() || !request.remove.is_empty();
+        let dead = DeadPatch::take(&mut request.ops, DisplayName::Live);
+        let has_live_changes = !request.ops.is_empty();
         let mut batch = BatchBuilder::new();
         let mut items = PropStatBuilder::default();
 
@@ -172,16 +175,22 @@ impl CardPropPatchRequestHandler for Server {
             let personal_id = access_token.personal_id(account_id, Collection::AddressBook);
 
             // Apply live properties
-            if !request.set_first {
-                remove_addressbook_properties(
-                    personal_id,
-                    &mut new_book,
-                    std::mem::take(&mut request.remove),
-                    &mut items,
-                );
+            for op in request.ops {
+                match op {
+                    PropertyUpdateOp::Set(value) => self.apply_addressbook_properties(
+                        personal_id,
+                        &mut new_book,
+                        [value],
+                        &mut items,
+                    ),
+                    PropertyUpdateOp::Remove(property) => remove_addressbook_properties(
+                        personal_id,
+                        &mut new_book,
+                        [property],
+                        &mut items,
+                    ),
+                }
             }
-            self.apply_addressbook_properties(personal_id, &mut new_book, request.set, &mut items);
-            remove_addressbook_properties(personal_id, &mut new_book, request.remove, &mut items);
 
             // Apply dead properties
             let mut dead_write = dead
@@ -205,7 +214,9 @@ impl CardPropPatchRequestHandler for Server {
                     .as_mut()
                     .and_then(|dead_write| dead_write.write.take())
                 {
-                    write.build(&mut batch).caused_by(trc::location!())?;
+                    write
+                        .build(document_id.into(), &mut batch)
+                        .caused_by(trc::location!())?;
                 }
                 if has_live_changes {
                     if let Some(dead_write) = &dead_write {
@@ -221,9 +232,14 @@ impl CardPropPatchRequestHandler for Server {
                         )
                         .caused_by(trc::location!())?;
                 } else if let Some(dead_write) = &dead_write {
-                    PresenceUpdate(book)
-                        .write(dead_write.kinds, account_id, document_id, &mut batch)
-                        .caused_by(trc::location!())?;
+                    AddressBook::rewrite_presence(
+                        &book,
+                        dead_write.kinds,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
+                    .caused_by(trc::location!())?;
                 }
                 (true, batch.etag().unwrap_or(etag))
             }
@@ -237,15 +253,16 @@ impl CardPropPatchRequestHandler for Server {
                 .caused_by(trc::location!())?;
 
             // Apply live properties
-            if !request.set_first {
-                remove_card_properties(
-                    &mut new_card,
-                    std::mem::take(&mut request.remove),
-                    &mut items,
-                );
+            for op in request.ops {
+                match op {
+                    PropertyUpdateOp::Set(value) => {
+                        self.apply_card_properties(&mut new_card, [value], &mut items)
+                    }
+                    PropertyUpdateOp::Remove(property) => {
+                        remove_card_properties(&mut new_card, [property], &mut items)
+                    }
+                }
             }
-            self.apply_card_properties(&mut new_card, request.set, &mut items);
-            remove_card_properties(&mut new_card, request.remove, &mut items);
 
             // Apply dead properties
             let mut dead_write = dead
@@ -270,7 +287,9 @@ impl CardPropPatchRequestHandler for Server {
                     .as_mut()
                     .and_then(|dead_write| dead_write.write.take())
                 {
-                    write.build(&mut batch).caused_by(trc::location!())?;
+                    write
+                        .build(document_id.into(), &mut batch)
+                        .caused_by(trc::location!())?;
                 }
                 if has_live_changes {
                     if let Some(dead_write) = &dead_write {
@@ -288,9 +307,14 @@ impl CardPropPatchRequestHandler for Server {
                         .caused_by(trc::location!())?
                         .into();
                 } else if let Some(dead_write) = &dead_write {
-                    PresenceUpdate(card)
-                        .write(dead_write.kinds, account_id, document_id, &mut batch)
-                        .caused_by(trc::location!())?;
+                    ContactCard::rewrite_presence(
+                        &card,
+                        dead_write.kinds,
+                        account_id,
+                        document_id,
+                        &mut batch,
+                    )
+                    .caused_by(trc::location!())?;
                 }
                 (true, new_etag.unwrap_or(etag))
             }
@@ -321,7 +345,7 @@ impl CardPropPatchRequestHandler for Server {
         &self,
         personal_id: u32,
         address_book: &mut AddressBook,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) {
         for property in properties {
@@ -390,7 +414,7 @@ impl CardPropPatchRequestHandler for Server {
     fn apply_card_properties(
         &self,
         card: &mut ContactCard,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) {
         for property in properties {
@@ -428,14 +452,14 @@ impl CardPropPatchRequestHandler for Server {
 
 fn remove_card_properties(
     card: &mut ContactCard,
-    properties: Vec<DavProperty>,
+    properties: impl IntoIterator<Item = DavProperty>,
     items: &mut PropStatBuilder,
 ) {
     for property in properties {
         match &property {
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 card.display_name = None;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             _ => {
                 items.insert_error_with_description(
@@ -451,18 +475,18 @@ fn remove_card_properties(
 fn remove_addressbook_properties(
     personal_id: u32,
     book: &mut AddressBook,
-    properties: Vec<DavProperty>,
+    properties: impl IntoIterator<Item = DavProperty>,
     items: &mut PropStatBuilder,
 ) {
     for property in properties {
         match &property {
             DavProperty::CardDav(CardDavProperty::AddressbookDescription) => {
                 book.preferences_mut(personal_id).description = None;
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             DavProperty::WebDav(WebDavProperty::DisplayName) => {
                 book.preferences_mut(personal_id).name.clear();
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             _ => {
                 items.insert_error_with_description(

@@ -14,7 +14,7 @@ use crate::{
         uri::DavUriResource,
     },
 };
-use common::{Server, auth::AccessToken};
+use common::{Server, auth::AccessToken, storage::index::PresenceFlags};
 use dav_proto::{
     RequestHeaders, Return,
     schema::{Namespace, request::MkCol, response::MkColResponse},
@@ -161,7 +161,9 @@ impl CalendarMkColRequestHandler for Server {
             calendar.set_metadata_kinds(dead_write.kinds);
         }
         if let Some(write) = dead_write.and_then(|dead_write| dead_write.write) {
-            write.build(&mut batch).caused_by(trc::location!())?;
+            write
+                .build(document_id.into(), &mut batch)
+                .caused_by(trc::location!())?;
         }
         calendar
             .insert(

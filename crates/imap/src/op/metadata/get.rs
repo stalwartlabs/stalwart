@@ -5,7 +5,7 @@
  */
 
 use super::{
-    READ_RIGHTS, SERVER_DOCUMENT_ID, SPECIAL_USE_ENTRY,
+    READ_RIGHTS, SERVER_DOCUMENT_ID, SPECIAL_USE_ENTRY, reads_private_container,
     select::{EntrySource, PrivateEntries, SelectOptions, select_entries},
     special_use_value,
 };
@@ -15,6 +15,7 @@ use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::metadata::{GetArguments, MetadataCode, Response, Scope},
 };
+use registry::schema::enums::Permission;
 use std::time::Instant;
 use types::{collection::Collection, metadata::MetadataKinds, special_use::SpecialUse};
 
@@ -35,7 +36,9 @@ impl<T: SessionStream> SessionData<T> {
             .refresh_access_token()
             .await
             .imap_ctx(tag, trc::location!())?;
-        let viewer = self.server.imap_metadata_viewer(&access_token);
+        let viewer = self
+            .server
+            .metadata_viewer(&access_token, Permission::ImapMetadataPrivate);
         let has_shared = arguments
             .entries
             .iter()
@@ -76,7 +79,7 @@ impl<T: SessionStream> SessionData<T> {
             };
             let private = match viewer {
                 Some(viewer)
-                    if has_private
+                    if reads_private_container(&arguments.entries, arguments.depth)
                         && self
                             .server
                             .metadata_viewer_state(viewer, mailbox.account_id, Collection::Mailbox)

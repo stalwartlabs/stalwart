@@ -9,7 +9,10 @@ use crate::{
     DavError, DavMethod,
     common::{
         ExtractETag,
-        dead::{ContainerRequest, ContainerWrites, read_container, stored_container},
+        dead::{
+            ContainerRequest, ContainerWrites, copy_growth, edited_container, read_container,
+            stored_entry_of,
+        },
         lock::{LockRequestHandler, ResourceState},
         uri::{DavUriResource, UriResource},
     },
@@ -17,15 +20,15 @@ use crate::{
 };
 use common::{
     DavResourcePath, GroupwareResources, Server,
-    auth::AccessToken,
+    auth::{AccessToken, AccountCache, AccountTenantIds},
     storage::{
         dav::{FilePresence, MAX_FILE_NODE_DEPTH},
         index::ObjectIndexBuilder,
-        metadata::StoredContainer,
+        metadata::{ContainerCleanup, StoredContainer, StoredEntry},
     },
 };
 use dav_proto::{Depth, RequestHeaders};
-use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode, metadata::MetadataCleanup};
+use groupware::{DestroyArchive, cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use registry::schema::enums::StorageQuota;
@@ -279,13 +282,13 @@ impl FileCopyMoveRequestHandler for Server {
         }
 
         // Validate quota
+        let mut quota = None;
         if !is_move || !is_same_account {
             let space_needed = from_resources
                 .subtree(from_resource_name)
                 .map(|a| a.size() as u64)
                 .sum::<u64>();
             let to_account = self.account(to_account_id).await?;
-            self.has_available_quota(&to_account, space_needed).await?;
 
             let files_limit = self.object_quota_limit(&to_account, StorageQuota::MaxFiles);
             let folders_limit = self.object_quota_limit(&to_account, StorageQuota::MaxFolders);
@@ -333,12 +336,14 @@ impl FileCopyMoveRequestHandler for Server {
                     }
                 }
             }
+            quota = Some((to_account, space_needed));
         }
 
         // Delete collection
         let is_overwrite = delete_destination
             .as_ref()
             .is_some_and(|d| d.is_container || from_resource.resource.is_container);
+        let mut overwritten = None;
         if is_overwrite {
             delete_destination = None;
             // Find ids to delete
@@ -347,30 +352,29 @@ impl FileCopyMoveRequestHandler for Server {
                 .collect::<Vec<_>>();
             if !ids.is_empty() {
                 ids.sort_unstable_by_key(|b| std::cmp::Reverse(b.hierarchy_seq()));
-                let cleanup = MetadataCleanup::preload(
-                    self,
-                    access_token.account_tenant_ids(),
-                    to_account_id,
-                    Collection::FileNode,
-                    ids.iter()
-                        .map(|a| (a.document_id(), a.resource.metadata_kinds())),
-                )
-                .await
-                .caused_by(trc::location!())?;
-                let mut sorted_ids = Vec::with_capacity(ids.len());
-                sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
-                DestroyArchive(sorted_ids)
-                    .delete(
-                        self,
-                        access_token.account_tenant_ids(),
+                let cleanup = self
+                    .preload_container_cleanup(
+                        Some(access_token.account_tenant_ids()),
                         to_account_id,
-                        &cleanup,
-                        None,
+                        Collection::FileNode,
+                        &ids.iter()
+                            .filter(|a| !a.resource.metadata_kinds().is_empty())
+                            .map(|a| a.document_id())
+                            .collect(),
                     )
                     .await
                     .caused_by(trc::location!())?;
+                let mut sorted_ids = Vec::with_capacity(ids.len());
+                sorted_ids.extend(ids.into_iter().map(|a| a.document_id()));
+                overwritten = Some(Overwritten {
+                    changed_by: access_token.account_tenant_ids(),
+                    account_id: to_account_id,
+                    ids: sorted_ids,
+                    cleanup,
+                });
             }
         }
+        let transfer = Transfer { quota, overwritten };
 
         match (from_resource.resource.is_container, is_move) {
             (true, true) => {
@@ -383,6 +387,7 @@ impl FileCopyMoveRequestHandler for Server {
                     from_href,
                     destination,
                     headers.depth,
+                    transfer,
                 )
                 .await
             }
@@ -397,6 +402,7 @@ impl FileCopyMoveRequestHandler for Server {
                     destination,
                     headers.depth,
                     false,
+                    transfer,
                 )
                 .await
             }
@@ -409,10 +415,19 @@ impl FileCopyMoveRequestHandler for Server {
                         from_href,
                         existing.document_id,
                         destination,
+                        transfer,
                     )
                     .await
                 } else {
-                    move_item(self, access_token, from_resource, from_href, destination).await
+                    move_item(
+                        self,
+                        access_token,
+                        from_resource,
+                        from_href,
+                        destination,
+                        transfer,
+                    )
+                    .await
                 }
             }
             (false, false) => {
@@ -423,10 +438,11 @@ impl FileCopyMoveRequestHandler for Server {
                         from_resource,
                         existing.document_id,
                         destination,
+                        transfer,
                     )
                     .await
                 } else {
-                    copy_item(self, access_token, from_resource, destination).await
+                    copy_item(self, access_token, from_resource, destination, transfer).await
                 }
             }
         }
@@ -481,6 +497,41 @@ struct ExistingDestination {
     is_container: bool,
 }
 
+struct Transfer {
+    quota: Option<(Arc<AccountCache>, u64)>,
+    overwritten: Option<Overwritten>,
+}
+
+struct Overwritten {
+    changed_by: AccountTenantIds,
+    account_id: u32,
+    ids: Vec<u32>,
+    cleanup: ContainerCleanup,
+}
+
+impl Transfer {
+    async fn prepare(self, server: &Server, growth: u64) -> crate::Result<()> {
+        if let Some((account, bytes)) = &self.quota {
+            server
+                .has_available_quota(account, bytes.saturating_add(growth))
+                .await?;
+        }
+        if let Some(overwritten) = self.overwritten {
+            DestroyArchive(overwritten.ids)
+                .delete(
+                    server,
+                    overwritten.changed_by,
+                    overwritten.account_id,
+                    &overwritten.cleanup,
+                    None,
+                )
+                .await
+                .caused_by(trc::location!())?;
+        }
+        Ok(())
+    }
+}
+
 // Moves a container under an existing container
 #[allow(clippy::too_many_arguments)]
 async fn move_container(
@@ -492,6 +543,7 @@ async fn move_container(
     from_href: String,
     destination: Destination,
     depth: Depth,
+    transfer: Transfer,
 ) -> crate::Result<HttpResponse> {
     let from_account_id = from_resource.account_id;
     let to_account_id = destination.account_id;
@@ -499,6 +551,7 @@ async fn move_container(
     let parent_id = destination.document_id.map(|id| id + 1).unwrap_or(0);
 
     if from_account_id == to_account_id {
+        transfer.prepare(server, 0).await?;
         let node_ = server
             .store()
             .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
@@ -550,6 +603,7 @@ async fn move_container(
             destination,
             depth,
             true,
+            transfer,
         )
         .await
     }
@@ -566,10 +620,11 @@ async fn copy_container(
     mut destination: Destination,
     depth: Depth,
     delete_source: bool,
+    transfer: Transfer,
 ) -> crate::Result<HttpResponse> {
     let infinity_copy = match depth {
         Depth::Zero if !delete_source => {
-            return copy_item(server, access_token, from_resource, destination).await;
+            return copy_item(server, access_token, from_resource, destination, transfer).await;
         }
         Depth::One if !delete_source => false,
         _ => true,
@@ -602,6 +657,7 @@ async fn copy_container(
         .load(server)
         .await
         .caused_by(trc::location!())?;
+    transfer.prepare(server, containers.stored_len()).await?;
     let mut copies = ContainerWrites::new(to_account_id, Collection::FileNode);
     let mut removals = ContainerWrites::new(from_account_id, Collection::FileNode);
 
@@ -671,7 +727,6 @@ async fn copy_container(
             .commit_point();
         id_map.insert(document_id + 1, new_slot);
     }
-    copies.finish(server).await.caused_by(trc::location!())?;
 
     // Delete nodes
     if !delete_files.is_empty() {
@@ -720,6 +775,7 @@ async fn copy_container(
 }
 
 // Overwrites the contents of one file with another, then deletes the original
+#[allow(clippy::too_many_arguments)]
 async fn overwrite_and_delete_item(
     server: &Server,
     access_token: &AccessToken,
@@ -727,6 +783,7 @@ async fn overwrite_and_delete_item(
     from_resource_path: String,
     to_document_id: u32,
     destination: Destination,
+    transfer: Transfer,
 ) -> crate::Result<HttpResponse> {
     let from_account_id = from_resource.account_id;
     let to_account_id = destination.account_id;
@@ -774,7 +831,7 @@ async fn overwrite_and_delete_item(
     source_node.parent_id = dest_node.inner.parent_id.into();
 
     let mut batch = BatchBuilder::new();
-    replace_container(
+    let source = replace_container(
         server,
         from_account_id,
         from_document_id,
@@ -782,6 +839,7 @@ async fn overwrite_and_delete_item(
         to_account_id,
         to_document_id,
         dest_node.inner.metadata_kinds(),
+        transfer,
         &mut batch,
     )
     .await?;
@@ -796,14 +854,24 @@ async fn overwrite_and_delete_item(
         )
         .caused_by(trc::location!())?
         .etag();
+    let cleanup = server
+        .container_cleanup_from(
+            access_token.account_tenant_ids(),
+            from_account_id,
+            Collection::FileNode,
+            source,
+        )
+        .await
+        .caused_by(trc::location!())?;
     DestroyArchive(source_node_)
-        .delete(
+        .delete_with_cleanup(
             server,
             access_token.account_tenant_ids(),
             from_account_id,
             from_document_id,
             &mut batch,
             from_resource_path,
+            &cleanup,
         )
         .await
         .caused_by(trc::location!())?;
@@ -822,6 +890,7 @@ async fn overwrite_item(
     from_resource: UriResource<u32, FileItemId>,
     to_document_id: u32,
     destination: Destination,
+    transfer: Transfer,
 ) -> crate::Result<HttpResponse> {
     let from_account_id = from_resource.account_id;
     let to_account_id = destination.account_id;
@@ -870,6 +939,7 @@ async fn overwrite_item(
         to_account_id,
         to_document_id,
         dest_node.inner.metadata_kinds(),
+        transfer,
         &mut batch,
     )
     .await?;
@@ -899,6 +969,7 @@ async fn move_item(
     from_resource: UriResource<u32, FileItemId>,
     from_resource_path: String,
     destination: Destination,
+    transfer: Transfer,
 ) -> crate::Result<HttpResponse> {
     let from_account_id = from_resource.account_id;
     let to_account_id = destination.account_id;
@@ -927,6 +998,7 @@ async fn move_item(
     let mut batch = BatchBuilder::new();
     let etag = if from_account_id == to_account_id {
         // Destination is in the same account: just update the parent id
+        transfer.prepare(server, 0).await?;
         let etag = new_node
             .update(
                 access_token.account_tenant_ids(),
@@ -944,13 +1016,14 @@ async fn move_item(
         // Destination is in a different account: insert a new node, then delete the old one
         new_node.acls.clear();
         let to_document_id = batch.reserve_document_id(to_account_id, Collection::FileNode);
-        copy_node_container(
+        let source = copy_node_container(
             server,
             from_account_id,
             from_document_id,
             &mut new_node,
             to_account_id,
             to_document_id,
+            transfer,
             &mut batch,
         )
         .await?;
@@ -965,14 +1038,24 @@ async fn move_item(
             )
             .caused_by(trc::location!())?
             .etag();
+        let cleanup = server
+            .container_cleanup_from(
+                access_token.account_tenant_ids(),
+                from_account_id,
+                Collection::FileNode,
+                source,
+            )
+            .await
+            .caused_by(trc::location!())?;
         DestroyArchive(node)
-            .delete(
+            .delete_with_cleanup(
                 server,
                 access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 &mut batch,
                 from_resource_path,
+                &cleanup,
             )
             .await
             .caused_by(trc::location!())?;
@@ -992,6 +1075,7 @@ async fn copy_item(
     access_token: &AccessToken,
     from_resource: UriResource<u32, FileItemId>,
     destination: Destination,
+    transfer: Transfer,
 ) -> crate::Result<HttpResponse> {
     let from_account_id = from_resource.account_id;
     let to_account_id = destination.account_id;
@@ -1024,6 +1108,7 @@ async fn copy_item(
         &mut node,
         to_account_id,
         to_document_id,
+        transfer,
         &mut batch,
     )
     .await?;
@@ -1108,6 +1193,7 @@ fn file_presence(container: Option<&MetadataBuf>) -> FilePresence {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn copy_node_container(
     server: &Server,
     from_account_id: u32,
@@ -1115,8 +1201,9 @@ async fn copy_node_container(
     node: &mut FileNode,
     to_account_id: u32,
     to_document_id: Slot,
+    transfer: Transfer,
     batch: &mut BatchBuilder,
-) -> crate::Result<()> {
+) -> crate::Result<Option<StoredEntry>> {
     let source = read_container(
         server,
         from_account_id,
@@ -1127,15 +1214,23 @@ async fn copy_node_container(
     .await
     .caused_by(trc::location!())?;
     node.set_presence(file_presence(source.as_ref()));
+    transfer
+        .prepare(
+            server,
+            source
+                .as_ref()
+                .map_or(0, |source| copy_growth(source, None)),
+        )
+        .await?;
     if let Some(source) = &source {
-        let mut copies = ContainerWrites::new(to_account_id, Collection::FileNode);
-        copies
+        ContainerWrites::new(to_account_id, Collection::FileNode)
             .copy(server, source, to_document_id, None, batch)
             .await
             .caused_by(trc::location!())?;
-        copies.finish(server).await.caused_by(trc::location!())?;
     }
-    Ok(())
+    Ok(source
+        .as_ref()
+        .map(|source| StoredEntry::from_container(from_document_id, source)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1147,8 +1242,9 @@ async fn replace_container(
     to_account_id: u32,
     to_document_id: u32,
     to_kinds: MetadataKinds,
+    transfer: Transfer,
     batch: &mut BatchBuilder,
-) -> crate::Result<()> {
+) -> crate::Result<Option<StoredEntry>> {
     let source = read_container(
         server,
         from_account_id,
@@ -1158,7 +1254,7 @@ async fn replace_container(
     )
     .await
     .caused_by(trc::location!())?;
-    let previous = stored_container(
+    let previous = stored_entry_of(
         server,
         to_account_id,
         Collection::FileNode,
@@ -1168,20 +1264,32 @@ async fn replace_container(
     .await
     .caused_by(trc::location!())?;
     node.set_presence(file_presence(source.as_ref()));
+    transfer
+        .prepare(
+            server,
+            source
+                .as_ref()
+                .map_or(0, |source| copy_growth(source, previous.as_ref())),
+        )
+        .await?;
 
     let mut writes = ContainerWrites::new(to_account_id, Collection::FileNode);
     match (&source, previous) {
         (Some(source), previous) => {
+            let previous = previous
+                .map(|previous| edited_container(previous, to_account_id, to_kinds))
+                .transpose()?;
             writes
                 .copy(server, source, to_document_id, previous, batch)
                 .await
         }
-        (None, Some(previous)) => writes.clear(server, to_document_id, previous, batch).await,
+        (None, Some(previous)) => writes.release(server, previous, batch).await,
         (None, None) => Ok(()),
     }
     .caused_by(trc::location!())?;
-    writes.finish(server).await.caused_by(trc::location!())?;
-    Ok(())
+    Ok(source
+        .as_ref()
+        .map(|source| StoredEntry::from_container(from_document_id, source)))
 }
 
 impl FromDavResource for Destination {

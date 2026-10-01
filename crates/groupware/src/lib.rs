@@ -128,8 +128,6 @@ impl MetaHasher {
 
 pub struct DestroyArchive<T>(pub T);
 
-pub struct PresenceUpdate<T>(pub T);
-
 impl DavResourceName {
     pub fn parse(service: &str) -> Option<Self> {
         hashify::map!(service.as_bytes(), DavResourceName,

@@ -6,20 +6,7 @@
 
 use jmap_tools::{Element, Property, Value};
 
-#[derive(
-    rkyv::Archive,
-    rkyv::Deserialize,
-    rkyv::Serialize,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Debug,
-    PartialOrd,
-    Ord,
-)]
-#[rkyv(derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum SpecialUse {
     Inbox,
     Trash,
@@ -74,42 +61,38 @@ impl SpecialUse {
             SpecialUse::None => None,
         }
     }
-}
 
-impl ArchivedSpecialUse {
-    pub fn as_str(&self) -> Option<&'static str> {
+    pub const fn id(self) -> u8 {
         match self {
-            ArchivedSpecialUse::Inbox => Some("inbox"),
-            ArchivedSpecialUse::Trash => Some("trash"),
-            ArchivedSpecialUse::Junk => Some("junk"),
-            ArchivedSpecialUse::Drafts => Some("drafts"),
-            ArchivedSpecialUse::Archive => Some("archive"),
-            ArchivedSpecialUse::Sent => Some("sent"),
-            ArchivedSpecialUse::Shared => Some("shared"),
-            ArchivedSpecialUse::Important => Some("important"),
-            ArchivedSpecialUse::Memos => Some("memos"),
-            ArchivedSpecialUse::Scheduled => Some("scheduled"),
-            ArchivedSpecialUse::Snoozed => Some("snoozed"),
-            ArchivedSpecialUse::None => None,
+            SpecialUse::None => 0,
+            SpecialUse::Inbox => 1,
+            SpecialUse::Trash => 2,
+            SpecialUse::Junk => 3,
+            SpecialUse::Drafts => 4,
+            SpecialUse::Archive => 5,
+            SpecialUse::Sent => 6,
+            SpecialUse::Shared => 7,
+            SpecialUse::Important => 8,
+            SpecialUse::Memos => 9,
+            SpecialUse::Scheduled => 10,
+            SpecialUse::Snoozed => 11,
         }
     }
-}
 
-impl From<&ArchivedSpecialUse> for SpecialUse {
-    fn from(value: &ArchivedSpecialUse) -> Self {
-        match value {
-            ArchivedSpecialUse::Inbox => SpecialUse::Inbox,
-            ArchivedSpecialUse::Trash => SpecialUse::Trash,
-            ArchivedSpecialUse::Junk => SpecialUse::Junk,
-            ArchivedSpecialUse::Drafts => SpecialUse::Drafts,
-            ArchivedSpecialUse::Archive => SpecialUse::Archive,
-            ArchivedSpecialUse::Sent => SpecialUse::Sent,
-            ArchivedSpecialUse::Shared => SpecialUse::Shared,
-            ArchivedSpecialUse::Important => SpecialUse::Important,
-            ArchivedSpecialUse::Memos => SpecialUse::Memos,
-            ArchivedSpecialUse::Scheduled => SpecialUse::Scheduled,
-            ArchivedSpecialUse::Snoozed => SpecialUse::Snoozed,
-            ArchivedSpecialUse::None => SpecialUse::None,
+    pub const fn from_id(id: u8) -> Self {
+        match id {
+            1 => SpecialUse::Inbox,
+            2 => SpecialUse::Trash,
+            3 => SpecialUse::Junk,
+            4 => SpecialUse::Drafts,
+            5 => SpecialUse::Archive,
+            6 => SpecialUse::Sent,
+            7 => SpecialUse::Shared,
+            8 => SpecialUse::Important,
+            9 => SpecialUse::Memos,
+            10 => SpecialUse::Scheduled,
+            11 => SpecialUse::Snoozed,
+            _ => SpecialUse::None,
         }
     }
 }

@@ -5,17 +5,20 @@
  */
 
 use super::{
-    READ_RIGHTS, SPECIAL_USE_ENTRY, mailbox_rights, owned_entries,
+    READ_RIGHTS, SPECIAL_USE_ENTRY, mailbox_rights, owned_entries, reads_private_container,
     select::{EntrySource, PrivateEntries, SelectOptions, select_entries},
     special_use_value,
 };
 use crate::{core::SessionData, op::ImapContext};
-use common::{MailboxCache, auth::AccessToken, network::SessionStream};
+use common::{
+    MailboxCache, auth::AccessToken, network::SessionStream, storage::metadata::MetadataContainers,
+};
 use imap_proto::protocol::{
     list::ListItem,
     metadata::{Depth, Entry, Scope},
 };
-use store::{roaring::RoaringBitmap, write::metadata::MetadataBuf};
+use registry::schema::enums::Permission;
+use store::roaring::RoaringBitmap;
 use types::{collection::Collection, metadata::MetadataKinds, special_use::SpecialUse};
 
 #[derive(Debug, Clone, Copy)]
@@ -58,83 +61,66 @@ impl<T: SessionStream> SessionData<T> {
         list_items: &mut [ListItem],
         access_token: &AccessToken,
     ) -> trc::Result<()> {
-        let viewer = self.server.imap_metadata_viewer(access_token);
+        let viewer = self
+            .server
+            .metadata_viewer(access_token, Permission::ImapMetadataPrivate);
         let has_shared = requested.iter().any(|entry| entry.scope == Scope::Shared);
-        let has_private =
-            viewer.is_some() && requested.iter().any(|entry| entry.scope == Scope::Private);
         let options = SelectOptions {
             depth: Depth::Zero,
             max_size: None,
         };
+        let has_private = viewer.is_some() && reads_private_container(requested, options.depth);
 
         for account_targets in targets.chunk_by(|a, b| a.account_id == b.account_id) {
             let Some(account_id) = account_targets.first().map(|target| target.account_id) else {
                 continue;
             };
 
-            let mut shared = Vec::new();
             let flagged = account_targets
                 .iter()
                 .filter(|target| has_shared && target.kinds.contains(MetadataKinds::IMAP))
                 .map(|target| target.mailbox_id)
                 .collect::<RoaringBitmap>();
-            if !flagged.is_empty() {
-                self.server
-                    .metadata_containers(
-                        account_id,
-                        Collection::Mailbox,
-                        &flagged,
-                        |document_id, view, stored| {
-                            shared.push((
-                                document_id,
-                                MetadataBuf::from_view(&view, stored.size, stored.hash),
-                            ));
-                            Ok(true)
-                        },
-                    )
-                    .await
-                    .imap_ctx(tag, trc::location!())?;
-                shared.sort_unstable_by_key(|(document_id, _)| *document_id);
-            }
+            let shared = self
+                .server
+                .load_metadata_containers(account_id, Collection::Mailbox, &flagged)
+                .await
+                .imap_ctx(tag, trc::location!())?;
 
-            let mut private = Vec::new();
-            if let Some(viewer) = viewer.filter(|_| has_private)
-                && self
-                    .server
-                    .metadata_viewer_state(viewer, account_id, Collection::Mailbox)
-                    .await
-                    .imap_ctx(tag, trc::location!())?
-                    .containers
-                    > 0
-            {
-                let listed = account_targets
-                    .iter()
-                    .map(|target| target.mailbox_id)
-                    .collect::<RoaringBitmap>();
-                self.server
-                    .private_metadata_containers(
-                        account_id,
-                        viewer.account_id(),
-                        Collection::Mailbox,
-                        &listed,
-                        |document_id, view, stored| {
-                            private.push((
-                                document_id,
-                                MetadataBuf::from_view(&view, stored.size, stored.hash),
-                            ));
-                            Ok(true)
-                        },
-                    )
-                    .await
-                    .imap_ctx(tag, trc::location!())?;
-                private.sort_unstable_by_key(|(document_id, _)| *document_id);
-            }
+            let private = match viewer.filter(|_| has_private) {
+                Some(viewer)
+                    if self
+                        .server
+                        .metadata_viewer_state(viewer, account_id, Collection::Mailbox)
+                        .await
+                        .imap_ctx(tag, trc::location!())?
+                        .containers
+                        > 0 =>
+                {
+                    let listed = account_targets
+                        .iter()
+                        .map(|target| target.mailbox_id)
+                        .collect::<RoaringBitmap>();
+                    self.server
+                        .load_private_metadata_containers(
+                            account_id,
+                            viewer.account_id(),
+                            Collection::Mailbox,
+                            &listed,
+                        )
+                        .await
+                        .imap_ctx(tag, trc::location!())?
+                }
+                _ => MetadataContainers::default(),
+            };
 
             for target in account_targets {
-                let shared_source = container(&shared, target.mailbox_id)
+                let shared_source = shared
+                    .get(target.mailbox_id)
                     .map(|container| EntrySource::new(container.view().imap()))
                     .unwrap_or_default();
-                let mut private_source = container(&private, target.mailbox_id)
+                let mut private_source = private
+                    .get(target.mailbox_id)
                     .map(|container| EntrySource::new(container.view().imap()))
                     .unwrap_or_default();
                 if let Some(value) = special_use_value(target.role) {
@@ -153,12 +139,4 @@ impl<T: SessionStream> SessionData<T> {
 
         Ok(())
     }
-}
-
-fn container(containers: &[(u32, MetadataBuf)], document_id: u32) -> Option<&MetadataBuf> {
-    containers
-        .binary_search_by_key(&document_id, |(id, _)| *id)
-        .ok()
-        .and_then(|position| containers.get(position))
-        .map(|(_, container)| container)
 }

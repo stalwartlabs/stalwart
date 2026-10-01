@@ -48,6 +48,10 @@ impl IndexableObject for FileNode {
 
         values.into_iter()
     }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        FileNode::metadata_kinds(self)
+    }
 }
 
 impl IndexableObject for &ArchivedFileNode {
@@ -162,8 +166,15 @@ mod tests {
         METADATA_KINDS,
         file::{FileNodeRole, FileProperties},
     };
-    use common::storage::dav::FilePresence;
+    use common::storage::{dav::FilePresence, index::CurrentObject};
     use rkyv::rancor::Error;
+    use store::{
+        Deserialize, Serialize,
+        write::{
+            Archive, ArchiveBytes, Archiver, Operation, ValueClass, ValueOp,
+            metadata::MetadataClass,
+        },
+    };
     use types::{
         acl::{Acl, AclGrant},
         blob_hash::BlobHash,
@@ -218,7 +229,7 @@ mod tests {
             with(file(), |n| file_properties(n).size = 9),
             with(file(), |n| file_properties(n).media_type = None),
             with(file(), |n| file_properties(n).executable = true),
-            with(file(), |n| n.role = Some(FileNodeRole::Documents)),
+            with(file(), |n| n.set_role(Some(FileNodeRole::Documents))),
             with(file(), |n| n.content = FileNodeContent::Directory),
             with(file(), |n| {
                 n.content = FileNodeContent::Symlink("report.txt".to_string())
@@ -268,7 +279,7 @@ mod tests {
             with(file(), |n| n.content = FileNodeContent::Directory),
             with(file(), |n| {
                 n.content = FileNodeContent::Symlink("target".to_string());
-                n.role = Some(FileNodeRole::Trash);
+                n.set_role(Some(FileNodeRole::Trash));
             }),
         ] {
             assert_eq!(archived_etag(&node), node.compute_etag());
@@ -302,10 +313,56 @@ mod tests {
             IndexableObject::metadata_kinds(&archived),
             MetadataKinds::DAV
         );
+        assert_eq!(IndexableObject::metadata_kinds(&node), MetadataKinds::DAV);
 
         let bytes = rkyv::to_bytes::<Error>(&file()).expect("the node archives");
         let archived =
             rkyv::access::<ArchivedFileNode, Error>(&bytes).expect("the archive validates");
         assert!(IndexableObject::metadata_kinds(&archived).is_empty());
+        assert!(IndexableObject::metadata_kinds(&file()).is_empty());
+    }
+
+    #[test]
+    fn deleting_an_owned_node_clears_its_container_only_when_flagged() {
+        for (presence, is_flagged) in [
+            (FilePresence::NONE, false),
+            (FilePresence::NONE.with_dav_display_name(), true),
+            (FilePresence::from_kinds(MetadataKinds::JMAP), true),
+        ] {
+            let node = with(file(), |n| n.set_presence(presence));
+            let bytes = Archiver::new(node)
+                .serialize()
+                .expect("the node serializes");
+            let current = <Archive<ArchiveBytes> as Deserialize>::deserialize(&bytes)
+                .expect("the archive validates")
+                .into_deserialized::<FileNode>()
+                .expect("the node deserializes");
+            let mut batch = BatchBuilder::new();
+            batch
+                .with_account_id(1)
+                .with_collection(Collection::FileNode)
+                .with_document(2);
+            let ops_before = batch.ops().len();
+            current.clear(&mut batch);
+            let clears = batch
+                .ops()
+                .iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Value {
+                            class: ValueClass::Metadata(MetadataClass::Shared),
+                            op: ValueOp::Clear,
+                        }
+                    )
+                })
+                .count();
+            assert_eq!(clears, usize::from(is_flagged), "{presence:?}");
+            assert_eq!(
+                batch.ops().len() - ops_before,
+                1 + usize::from(is_flagged),
+                "{presence:?}"
+            );
+        }
     }
 }

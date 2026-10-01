@@ -47,7 +47,7 @@ pub enum Token {
     Gt,               // >
     Dot,              // .
     Nil,              // NIL
-    NilAtom,
+    NilString(ArgumentBytes),
 }
 
 impl<T: CommandParser> Default for Request<T> {
@@ -200,15 +200,7 @@ impl<T: CommandParser> Receiver<T> {
             if self.current_request_size > self.max_request_size {
                 return Err(self.request_size_error());
             }
-            let token = if !in_quote
-                && self.request.command.tokenize_nil()
-                && !self.request.tokens.is_empty()
-                && self.buf.as_ref().eq_ignore_ascii_case(b"NIL")
-            {
-                Token::NilAtom
-            } else {
-                Token::Argument(ArgumentBytes::from_slice(self.buf.as_ref()))
-            };
+            let token = Token::Argument(ArgumentBytes::from_slice(self.buf.as_ref()));
             self.push_request_token(token);
             self.buf.clear();
         } else if in_quote {
@@ -219,6 +211,9 @@ impl<T: CommandParser> Receiver<T> {
 
     fn push_literal(&mut self) -> Result<(), Error> {
         if !self.buf.is_empty() {
+            if self.request.command.tokenize_nil() && self.is_nil() {
+                return self.push_nil_string();
+            }
             self.current_request_size += self.buf.len();
             if self.current_request_size > self.max_request_size {
                 return Err(self.request_size_error());
@@ -226,6 +221,22 @@ impl<T: CommandParser> Receiver<T> {
             let token = Token::Argument(ArgumentBytes::from_vec(self.buf.take_moved()));
             self.push_request_token(token);
         }
+        Ok(())
+    }
+
+    fn is_nil(&self) -> bool {
+        self.buf.as_ref().eq_ignore_ascii_case(b"NIL")
+    }
+
+    #[cold]
+    fn push_nil_string(&mut self) -> Result<(), Error> {
+        self.current_request_size += self.buf.len();
+        if self.current_request_size > self.max_request_size {
+            return Err(self.request_size_error());
+        }
+        let token = Token::NilString(ArgumentBytes::from_slice(self.buf.as_ref()));
+        self.push_request_token(token);
+        self.buf.clear();
         Ok(())
     }
 
@@ -462,7 +473,11 @@ impl<T: CommandParser> Receiver<T> {
                     *bytes = rest.iter();
                     match ch {
                         b'\"' => {
-                            self.push_argument(true)?;
+                            if self.request.command.tokenize_nil() && self.is_nil() {
+                                self.push_nil_string()?;
+                            } else {
+                                self.push_argument(true)?;
+                            }
                             state = State::Argument { last_ch: b' ' };
                         }
                         b'\\' => {
@@ -722,7 +737,7 @@ impl Token {
 
     pub fn unwrap_bytes(self) -> ArgumentBytes {
         match self {
-            Token::Argument(value) => value,
+            Token::Argument(value) | Token::NilString(value) => value,
             other => ArgumentBytes::from_slice(other.as_bytes()),
         }
     }
@@ -738,7 +753,7 @@ impl Token {
             Token::Lt => bytes.eq(b"<"),
             Token::Dot => bytes.eq(b"."),
             Token::Nil => bytes.is_empty(),
-            Token::NilAtom => bytes.eq_ignore_ascii_case(b"NIL"),
+            Token::NilString(value) => value.eq_ignore_ascii_case(bytes),
         }
     }
 
@@ -801,7 +816,7 @@ impl Token {
             Token::Lt => b"<",
             Token::Dot => b".",
             Token::Nil => b"",
-            Token::NilAtom => b"NIL",
+            Token::NilString(value) => value.as_slice(),
         }
     }
 }
@@ -1628,6 +1643,80 @@ mod tests {
                     whole,
                     "{name} chunk {chunk}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn receiver_marks_nil_strings_only_in_setmetadata() {
+        let arg = |value: &[u8]| Token::Argument(ArgumentBytes::from_slice(value));
+        let nil_string = |value: &[u8]| Token::NilString(ArgumentBytes::from_slice(value));
+        let cases: &[(&str, Vec<Token>)] = &[
+            ("a1 LIST nil NIL\r\n", vec![arg(b"nil"), arg(b"NIL")]),
+            (
+                "a1 LIST \"NIL\" \"nil\"\r\n",
+                vec![arg(b"NIL"), arg(b"nil")],
+            ),
+            (
+                "a1 STATUS NIL (MESSAGES)\r\n",
+                vec![
+                    arg(b"NIL"),
+                    Token::ParenthesisOpen,
+                    arg(b"MESSAGES"),
+                    Token::ParenthesisClose,
+                ],
+            ),
+            ("a1 SELECT {3}\r\nNIL\r\n", vec![arg(b"NIL")]),
+            (
+                "a1 APPEND nil {3+}\r\nNil\r\n",
+                vec![arg(b"nil"), arg(b"Nil")],
+            ),
+            (
+                "a1 GETMETADATA \"NIL\" NIL {3}\r\nnil\r\n",
+                vec![arg(b"NIL"), arg(b"NIL"), arg(b"nil")],
+            ),
+            (
+                concat!(
+                    "a1 SETMETADATA nil (/a NIL /b \"NIL\" /c {3}\r\nnil /d ~{3+}\r\nNil ",
+                    "/e \"\" /f {0}\r\n /g \"nils\")\r\n"
+                ),
+                vec![
+                    arg(b"nil"),
+                    Token::ParenthesisOpen,
+                    arg(b"/a"),
+                    arg(b"NIL"),
+                    arg(b"/b"),
+                    nil_string(b"NIL"),
+                    arg(b"/c"),
+                    nil_string(b"nil"),
+                    arg(b"/d"),
+                    nil_string(b"Nil"),
+                    arg(b"/e"),
+                    Token::Nil,
+                    arg(b"/f"),
+                    Token::Nil,
+                    arg(b"/g"),
+                    arg(b"nils"),
+                    Token::ParenthesisClose,
+                ],
+            ),
+            (
+                "a1 SETMETADATA \"NIL\" (/a nil)\r\n",
+                vec![
+                    nil_string(b"NIL"),
+                    Token::ParenthesisOpen,
+                    arg(b"/a"),
+                    arg(b"nil"),
+                    Token::ParenthesisClose,
+                ],
+            ),
+        ];
+        for (line, tokens) in cases {
+            for chunk in [1usize, 3, 8, 4096] {
+                let (requests, errors) = chunked(line.as_bytes(), chunk);
+                assert!(errors.is_empty(), "{line:?} chunk {chunk}: {errors:?}");
+                assert_eq!(requests.len(), 1, "{line:?} chunk {chunk}");
+                assert_eq!(&requests[0].tokens, tokens, "{line:?} chunk {chunk}");
             }
         }
     }

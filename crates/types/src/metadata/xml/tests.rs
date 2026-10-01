@@ -7,7 +7,7 @@
 use super::{DavValueView, XmlAttribute, XmlElement, XmlError, XmlName, XmlNode, XmlValue};
 use crate::metadata::{
     MetadataBuilder,
-    codec::{write_bytes, write_varint},
+    codec::{Reader, write_bytes, write_varint},
     registry::{XML_NAMESPACE as XML, XMLNS_NAMESPACE as XMLNS},
 };
 use std::borrow::Cow;
@@ -370,4 +370,69 @@ fn prefixed_and_empty_property_writers() {
         .write_empty(&mut out)
         .expect("writable");
     assert_eq!(out, "<x xmlns=\"urn:a&quot;b\"/>");
+}
+
+fn nested_value(depth: usize) -> Vec<u8> {
+    let mut element = vec![0x00];
+    write_bytes(&mut element, b"e");
+    element.extend_from_slice(&[0, 0, 0]);
+    for _ in 1..depth {
+        let mut parent = vec![0x00];
+        write_bytes(&mut parent, b"e");
+        parent.extend_from_slice(&[0, 0, 1, 2]);
+        parent.extend_from_slice(&element);
+        element = parent;
+    }
+    let mut rest = vec![0, 0, 1, 2];
+    rest.extend_from_slice(&element);
+    let mut out = Vec::with_capacity(rest.len() + 4);
+    write_bytes(&mut out, &rest);
+    out
+}
+
+#[test]
+fn trusted_decode_depth_is_bounded() {
+    let max = XmlValue::MAX_DEPTH;
+    for (depth, decodes) in [(max, true), (max + 1, false), (20_000, false)] {
+        let bytes = nested_value(depth);
+        assert_eq!(DavValueView::parse(&bytes).is_some(), decodes, "{depth}");
+        let view = DavValueView::new(unsafe { Reader::trusted(&bytes) });
+        assert_eq!(view.to_value().is_some(), decodes, "{depth}");
+    }
+}
+
+#[test]
+fn text_reads_single_text_values_without_decoding() {
+    for (value, expected) in [
+        (child(XmlNode::Text(Cow::Borrowed("Report"))), "Report"),
+        (XmlValue::default(), ""),
+        (
+            XmlValue {
+                children: vec![
+                    XmlNode::Text(Cow::Borrowed("a ")),
+                    element(Some("urn:x"), "e", None, vec![], vec![]),
+                    XmlNode::Text(Cow::Borrowed("b")),
+                ],
+                ..Default::default()
+            },
+            "a b",
+        ),
+        (
+            XmlValue {
+                attributes: vec![attribute(None, "k", "v")],
+                children: vec![XmlNode::Text(Cow::Borrowed("with attribute"))],
+                ..Default::default()
+            },
+            "with attribute",
+        ),
+    ] {
+        let encoded = value.to_encoded().expect("encodable");
+        let text = encoded.view().text().expect("text");
+        assert_eq!(text, expected);
+        assert_eq!(
+            matches!(text, Cow::Borrowed(_)),
+            value.attributes.is_empty() && value.children.len() == 1,
+            "{expected}"
+        );
+    }
 }

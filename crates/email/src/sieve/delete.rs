@@ -5,7 +5,6 @@
  */
 
 use super::SieveScript;
-use crate::cleanup::FlaggedContainers;
 use common::{Server, auth::AccessToken, storage::index::ObjectIndexBuilder};
 use store::write::BatchBuilder;
 use store::{
@@ -52,15 +51,15 @@ impl SieveScriptDelete for Server {
                 .with_account_id(account_id)
                 .with_collection(Collection::SieveScript);
             if !script.inner.metadata_kinds().is_empty() {
-                FlaggedContainers::load(
-                    self,
+                self.preload_container_cleanup(
+                    None,
                     account_id,
                     Collection::SieveScript,
                     &RoaringBitmap::from_iter([document_id]),
                 )
                 .await
                 .caused_by(trc::location!())?
-                .remove(batch, document_id);
+                .release_or_assert_absent(batch, account_id, document_id);
             }
             batch
                 .with_document(document_id)

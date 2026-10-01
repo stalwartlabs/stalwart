@@ -206,10 +206,19 @@ impl<T: JmapObject> CopyResponse<T> {
 }
 
 pub trait CopySourceId<P: Property> {
+    fn source_id(&self, id_property: P) -> Option<Id>;
+
     fn take_source_id(&mut self, id_property: P) -> Result<Id, SetError<P>>;
 }
 
 impl<P: Property, E: Element<Property = P> + JmapObjectId> CopySourceId<P> for Value<'_, P, E> {
+    fn source_id(&self, id_property: P) -> Option<Id> {
+        self.as_object()
+            .and_then(|object| object.get(&Key::Property(id_property)))
+            .and_then(Value::as_element)
+            .and_then(JmapObjectId::as_id)
+    }
+
     fn take_source_id(&mut self, id_property: P) -> Result<Id, SetError<P>> {
         let key = Key::Property(id_property.clone());
         self.as_object_mut()
@@ -228,5 +237,37 @@ impl<P: Property, E: Element<Property = P> + JmapObjectId> CopySourceId<P> for V
                     .with_property(id_property)
                     .with_description("Missing or invalid \"id\" property.")
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CopySourceId;
+    use crate::object::mailbox::{MailboxProperty, MailboxValue};
+    use jmap_tools::Value;
+    use types::id::Id;
+
+    #[test]
+    fn source_id_peeks_what_take_source_id_removes() {
+        let id = Id::new(7).to_string();
+        for json in [
+            format!(r#"{{"id": "{id}", "name": "a"}}"#),
+            format!(r#"{{"name": "a", "id": "{id}"}}"#),
+            r#"{"name": "a"}"#.to_string(),
+            r##"{"id": "#ref"}"##.to_string(),
+            r#"{"id": 7}"#.to_string(),
+            r#"{"id": null}"#.to_string(),
+            r#""id""#.to_string(),
+        ] {
+            let mut value = Value::<MailboxProperty, MailboxValue>::parse_json(&json)
+                .unwrap_or_else(|err| panic!("{json}: {err}"));
+            let peeked = value.source_id(MailboxProperty::Id);
+            assert_eq!(peeked, value.source_id(MailboxProperty::Id), "{json}");
+            assert_eq!(
+                peeked,
+                value.take_source_id(MailboxProperty::Id).ok(),
+                "{json}"
+            );
+        }
     }
 }

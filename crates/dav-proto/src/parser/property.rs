@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{RawElement, Token, XmlValueParser, tokenizer::Tokenizer};
+use super::{RawElement, Token, XmlValueParser, tokenizer::Tokenizer, value::InheritedLang};
 use crate::schema::{
     Attribute, AttributeValue, Element, NamedElement, Namespace,
     property::{
@@ -294,8 +294,8 @@ impl Tokenizer<'_> {
 impl<'x> Tokenizer<'x> {
     pub(crate) fn collect_property_values(
         &mut self,
-        elements: &mut Vec<DavPropertyValue>,
-        lang: Option<&str>,
+        mut push: impl FnMut(DavPropertyValue),
+        lang: &mut InheritedLang<'_, 'x>,
     ) -> crate::parser::Result<()> {
         loop {
             match self.token()? {
@@ -368,16 +368,16 @@ impl<'x> Tokenizer<'x> {
                                 .unwrap_or(DavValue::Null),
                         };
 
-                        elements.push(DavPropertyValue { property, value });
+                        push(DavPropertyValue { property, value });
                     } else {
-                        elements.push(self.collect_dead_property(&raw, lang)?);
+                        push(self.collect_dead_property(&raw, lang.get()?)?);
                     }
                 }
                 Token::ElementEnd | Token::Eof => {
                     break;
                 }
                 Token::UnknownElement(raw) => {
-                    elements.push(self.collect_dead_property(&raw, lang)?);
+                    push(self.collect_dead_property(&raw, lang.get()?)?);
                 }
                 token => return Err(token.into_unexpected()),
             }

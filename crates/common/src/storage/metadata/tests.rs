@@ -123,12 +123,11 @@ fn shared_writes_assert_the_container_they_replace() {
         account_id: 1,
         tenant_id: Some(7),
         collection: Collection::Mailbox,
-        document_id: PendingId::Assigned(3),
         previous: Some(previous),
         next: Some(next),
         log: MetadataLog::Container,
     }
-    .build(&mut batch)
+    .build(PendingId::Assigned(3), &mut batch)
     .expect("built");
     assert!(!presence.has_changed());
 
@@ -160,12 +159,11 @@ fn shared_writes_assert_the_container_they_replace() {
         account_id: 1,
         tenant_id: None,
         collection: Collection::Email,
-        document_id: PendingId::Assigned(3),
         previous: None,
         next: Some(container("new")),
         log: MetadataLog::Item { prefix: None },
     }
-    .build(&mut batch)
+    .build(PendingId::Assigned(3), &mut batch)
     .expect("built");
     assert!(ops(&batch).contains(&Op::Assert(MetadataClass::Shared, AssertValue::None)));
 
@@ -174,12 +172,11 @@ fn shared_writes_assert_the_container_they_replace() {
         account_id: 1,
         tenant_id: None,
         collection: Collection::Email,
-        document_id: PendingId::Assigned(3),
         previous: Some(previous),
         next: None,
         log: MetadataLog::Item { prefix: None },
     }
-    .build(&mut batch)
+    .build(PendingId::Assigned(3), &mut batch)
     .expect("built");
     let written = ops(&batch);
     assert!(written.contains(&Op::Clear(MetadataClass::Shared)));
@@ -341,11 +338,11 @@ fn viewer_cache_updates_in_place() {
     assert_eq!(states.get(5, Collection::Email), ViewerState::default());
 
     let cache = MetadataViewerCache::new(1 << 20);
-    let epoch = cache.epoch();
+    let epoch = cache.epoch(9);
     cache.insert(9, Arc::new(states), epoch);
 
     cache.apply(&change(1, Collection::Email, 1), Some(12));
-    cache.apply(&change(1, Collection::Email, -1), Some(11));
+    cache.apply(&change(1, Collection::Email, 0), Some(11));
     let current = cache.get(9).expect("cached");
     assert_eq!(
         current.get(1, Collection::Email),
@@ -365,12 +362,12 @@ fn viewer_cache_updates_in_place() {
 #[test]
 fn viewer_cache_rejects_loads_that_raced_a_commit() {
     let cache = MetadataViewerCache::new(1 << 20);
-    let epoch = cache.epoch();
+    let epoch = cache.epoch(9);
     cache.apply(&change(1, Collection::Email, 1), Some(3));
     cache.insert(9, Arc::new(ViewerStates::default()), epoch);
     assert!(cache.get(9).is_none());
 
-    let epoch = cache.epoch();
+    let epoch = cache.epoch(9);
     cache.insert(9, Arc::new(ViewerStates::default()), epoch);
     assert!(cache.get(9).is_some_and(|states| states.is_empty()));
 
@@ -378,6 +375,41 @@ fn viewer_cache_rejects_loads_that_raced_a_commit() {
     assert!(cache.get(9).is_none());
     cache.insert(9, Arc::new(ViewerStates::default()), epoch);
     assert!(cache.get(9).is_none());
+}
+
+#[test]
+fn viewer_cache_reloads_after_a_removal() {
+    let cache = MetadataViewerCache::new(1 << 20);
+    let mut stored = ViewerState::default();
+    let reload = |cache: &MetadataViewerCache, stored: ViewerState| {
+        let epoch = cache.epoch(9);
+        let states = ViewerStates::new([(1, u8::from(Collection::Email), stored)]);
+        cache.insert(9, Arc::new(states), epoch);
+    };
+    reload(&cache, stored);
+
+    for cycle in 1..=100u64 {
+        for (containers, change_id) in [(1, cycle * 2), (-1, cycle * 2 + 1)] {
+            stored = next_viewer_state(Some(&stored.serialize()), Some(change_id), containers)
+                .expect("merged");
+            cache.apply(&change(1, Collection::Email, containers), Some(change_id));
+            match cache.get(9) {
+                Some(states) => assert_eq!(states.get(1, Collection::Email), stored),
+                None => {
+                    assert!(containers < 0, "only a removal drops the entry");
+                    reload(&cache, stored);
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        cache.get(9).expect("cached").get(1, Collection::Email),
+        ViewerState {
+            change_id: 201,
+            containers: 0
+        }
+    );
 }
 
 #[test]

@@ -4,23 +4,28 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+mod change;
 mod cleanup;
+mod containers;
 mod purge;
 mod quota;
 mod read;
 mod stored;
 mod viewer;
 
+pub use change::ContainerChange;
+pub use cleanup::ContainerCleanup;
+pub use containers::MetadataContainers;
 pub use read::MetadataViewerEntry;
 pub use stored::{StoredEntries, StoredEntry};
 pub use viewer::{MetadataViewer, MetadataViewerCache, ViewerStates};
 
 use crate::Server;
 use store::{
-    Deserialize, IterateParams, SerializeInfallible, ValueKey,
+    Deserialize, IterateParams, Key, SerializeInfallible, ValueKey,
     dispatch::{DocumentSet, ScanShape},
     write::{
-        ArchiveVersion, AssignedIds, BatchBuilder, MergeResult, PendingId, ValueClass,
+        AnyKey, ArchiveVersion, AssignedIds, BatchBuilder, MergeResult, PendingId, ValueClass,
         assert::AssertValue,
         metadata::{MetadataBuf, MetadataClass, StoredMetadata, ViewerState},
     },
@@ -56,7 +61,6 @@ pub struct MetadataWrite {
     pub account_id: u32,
     pub tenant_id: Option<u32>,
     pub collection: Collection,
-    pub document_id: PendingId,
     pub previous: Option<StoredContainer>,
     pub next: Option<EncodedMetadata>,
     pub log: MetadataLog,
@@ -211,7 +215,11 @@ fn next_viewer_state(
 }
 
 impl MetadataWrite {
-    pub fn build(self, batch: &mut BatchBuilder) -> trc::Result<MetadataPresence> {
+    pub fn build(
+        self,
+        document_id: PendingId,
+        batch: &mut BatchBuilder,
+    ) -> trc::Result<MetadataPresence> {
         let presence = MetadataPresence::new(self.previous.as_ref(), self.next.as_ref());
         if self.previous.is_none() && self.next.is_none() {
             return Ok(presence);
@@ -224,7 +232,7 @@ impl MetadataWrite {
         batch
             .with_account_id(self.account_id)
             .with_collection(self.collection)
-            .with_pending_document(self.document_id)
+            .with_pending_document(document_id)
             .assert_value(
                 MetadataClass::Shared,
                 StoredContainer::assertion(self.previous.as_ref()),
@@ -253,10 +261,9 @@ impl PrivateMetadataWrite {
         document_id: PendingId,
         batch: &mut BatchBuilder,
         commit: &mut PrivateMetadataCommit,
-    ) -> trc::Result<MetadataPresence> {
-        let presence = MetadataPresence::new(self.previous.as_ref(), self.next.as_ref());
+    ) -> trc::Result<()> {
         if self.previous.is_none() && self.next.is_none() {
-            return Ok(presence);
+            return Ok(());
         }
 
         let stored = self.next.map(StoredMetadata::new).transpose()?;
@@ -330,7 +337,7 @@ impl PrivateMetadataWrite {
         }
 
         cursor.restore(batch);
-        Ok(presence)
+        Ok(())
     }
 }
 
@@ -380,16 +387,24 @@ impl Server {
         I: DocumentSet + Send + Sync,
         CB: for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Send + Sync,
     {
-        let key = |document_id| metadata_key(account_id, collection, document_id, class);
+        let subspace = ValueClass::Metadata(class).subspace(collection);
+        let range = |from_document_id, to_document_id| {
+            let mut end = metadata_key(account_id, collection, to_document_id, class).serialize(0);
+            end.push(u8::MAX);
+            IterateParams::new(
+                AnyKey {
+                    subspace,
+                    key: metadata_key(account_id, collection, from_document_id, class).serialize(0),
+                },
+                AnyKey { subspace, key: end },
+            )
+        };
         let store = &self.core.storage.data;
 
         match documents.scan_shape() {
             ScanShape::Range(from_document_id, to_document_id) => {
                 store
-                    .iterate(
-                        IterateParams::new(key(from_document_id), key(to_document_id)),
-                        cb,
-                    )
+                    .iterate(range(from_document_id, to_document_id), cb)
                     .await
             }
             ScanShape::Ranges(ranges) => {
@@ -398,7 +413,7 @@ impl Server {
                         ranges
                             .into_iter()
                             .map(|(from_document_id, to_document_id)| {
-                                IterateParams::new(key(from_document_id), key(to_document_id))
+                                range(from_document_id, to_document_id)
                             })
                             .collect(),
                         cb,

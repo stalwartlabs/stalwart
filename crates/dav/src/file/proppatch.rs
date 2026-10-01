@@ -20,11 +20,11 @@ use dav_proto::{
     RequestHeaders, Return,
     schema::{
         property::{DavProperty, DavValue, ResourceType, WebDavProperty},
-        request::{DavPropertyValue, PropertyUpdate},
+        request::{DavPropertyValue, PropertyUpdate, PropertyUpdateOp},
         response::{BaseCondition, MultiStatus, Response},
     },
 };
-use groupware::{PresenceUpdate, cache::GroupwareCache, file::FileNode};
+use groupware::{cache::GroupwareCache, file::FileNode};
 use http_proto::HttpResponse;
 use hyper::StatusCode;
 use store::write::BatchBuilder;
@@ -49,7 +49,7 @@ pub(crate) trait FilePropPatchRequestHandler: Sync + Send {
     fn apply_file_properties(
         &self,
         file: &mut FileNode,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     );
 }
@@ -114,12 +114,7 @@ impl FilePropPatchRequestHandler for Server {
         if !access_token.is_member(account_id) {
             let acl = files.file_acl(access_token, document_id);
             let (mut content, mut properties) = (false, false);
-            for property in request
-                .set
-                .iter()
-                .map(|value| &value.property)
-                .chain(request.remove.iter())
-            {
+            for property in request.ops.iter().map(PropertyUpdateOp::property) {
                 if matches!(
                     property,
                     DavProperty::WebDav(WebDavProperty::GetContentType)
@@ -154,19 +149,20 @@ impl FilePropPatchRequestHandler for Server {
         .await?;
 
         // Apply live properties
-        let dead = DeadPatch::take(&mut request, DisplayName::Stored);
-        let has_live_changes = !request.set.is_empty() || !request.remove.is_empty();
+        let dead = DeadPatch::take(&mut request.ops, DisplayName::Stored);
+        let has_live_changes = !request.ops.is_empty();
         let mut new_node = node.deserialize::<FileNode>().caused_by(trc::location!())?;
         let mut items = PropStatBuilder::default();
-        if !request.set_first {
-            remove_file_properties(
-                &mut new_node,
-                std::mem::take(&mut request.remove),
-                &mut items,
-            );
+        for op in request.ops {
+            match op {
+                PropertyUpdateOp::Set(value) => {
+                    self.apply_file_properties(&mut new_node, [value], &mut items)
+                }
+                PropertyUpdateOp::Remove(property) => {
+                    remove_file_properties(&mut new_node, [property], &mut items)
+                }
+            }
         }
-        self.apply_file_properties(&mut new_node, request.set, &mut items);
-        remove_file_properties(&mut new_node, request.remove, &mut items);
 
         // Apply dead properties
         let mut dead_write = dead
@@ -190,7 +186,9 @@ impl FilePropPatchRequestHandler for Server {
                 .as_mut()
                 .and_then(|dead_write| dead_write.write.take())
             {
-                write.build(&mut batch).caused_by(trc::location!())?;
+                write
+                    .build(document_id.into(), &mut batch)
+                    .caused_by(trc::location!())?;
             }
             if has_live_changes {
                 if let Some(dead_write) = &dead_write {
@@ -207,14 +205,14 @@ impl FilePropPatchRequestHandler for Server {
                     )
                     .caused_by(trc::location!())?;
             } else if let Some(dead_write) = &dead_write {
-                PresenceUpdate(node)
-                    .write(
-                        dead_write.file_presence,
-                        account_id,
-                        document_id,
-                        &mut batch,
-                    )
-                    .caused_by(trc::location!())?;
+                FileNode::rewrite_presence(
+                    &node,
+                    dead_write.file_presence,
+                    account_id,
+                    document_id,
+                    &mut batch,
+                )
+                .caused_by(trc::location!())?;
             }
             let etag = batch.etag().unwrap_or(current_etag);
             if !batch.is_empty() {
@@ -240,7 +238,7 @@ impl FilePropPatchRequestHandler for Server {
     fn apply_file_properties(
         &self,
         file: &mut FileNode,
-        properties: Vec<DavPropertyValue>,
+        properties: impl IntoIterator<Item = DavPropertyValue>,
         items: &mut PropStatBuilder,
     ) {
         for property in properties {
@@ -296,7 +294,7 @@ impl FilePropPatchRequestHandler for Server {
 
 fn remove_file_properties(
     node: &mut FileNode,
-    properties: Vec<DavProperty>,
+    properties: impl IntoIterator<Item = DavProperty>,
     items: &mut PropStatBuilder,
 ) {
     for property in properties {
@@ -305,7 +303,7 @@ fn remove_file_properties(
                 if let Some(file) = node.file_mut() {
                     file.media_type = None;
                 }
-                items.insert_with_status(property, StatusCode::NO_CONTENT);
+                items.insert_ok(property);
             }
             _ => {
                 items.insert_error_with_description(

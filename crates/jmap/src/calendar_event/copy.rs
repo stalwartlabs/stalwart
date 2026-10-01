@@ -89,6 +89,8 @@ impl JmapCalendarEventCopy for Server {
                 .into_err()
                 .details("From accountId is equal to fromAccountId"));
         }
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -97,15 +99,7 @@ impl JmapCalendarEventCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::CalendarEvent);
-        let old_state = metadata
-            .assert_state(
-                self,
-                account_id,
-                cache.get_state(false),
-                &request.if_in_state,
-            )
-            .await?;
+        let old_state = sampled.assert_state(cache.get_state(false), &request.if_in_state)?;
         let mut response = CopyResponse {
             from_account_id: request.from_account_id,
             account_id: request.account_id,
@@ -115,6 +109,7 @@ impl JmapCalendarEventCopy for Server {
             not_created: VecMap::new(),
         };
 
+        let from_sampled = metadata.viewer_change_id(self, from_account_id).await?;
         let from_cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -123,14 +118,7 @@ impl JmapCalendarEventCopy for Server {
             )
             .await
             .caused_by(trc::location!())?;
-        metadata
-            .assert_state(
-                self,
-                from_account_id,
-                from_cache.get_state(false),
-                &request.if_from_in_state,
-            )
-            .await?;
+        from_sampled.assert_state(from_cache.get_state(false), &request.if_from_in_state)?;
         let is_from_owner = access_token.is_member(from_account_id);
         let from_personal_id = access_token.personal_id(from_account_id, Collection::Calendar);
         let from_calendar_event_ids = if is_from_owner {
@@ -160,6 +148,7 @@ impl JmapCalendarEventCopy for Server {
         } else {
             CalendarAddresses::default()
         };
+        let viewer = metadata.viewer();
         let mut metadata_writer = MetadataWriter::new(metadata, account_id);
         let mut preload = MetadataPreload::default();
         let mut creates = Vec::with_capacity(request.create.len());
@@ -171,12 +160,12 @@ impl JmapCalendarEventCopy for Server {
                 && from_calendar_event_ids.contains(source_id.document_id())
             {
                 let document_id = source_id.document_id();
-                preload.insert_source(
-                    document_id,
-                    from_cache
-                        .item_by_id(document_id)
-                        .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds()),
-                );
+                let kinds = from_cache
+                    .item_by_id(document_id)
+                    .map_or(MetadataKinds::NONE, |resource| resource.metadata_kinds());
+                if viewer.is_some() || !kinds.is_empty() {
+                    preload.insert_source(document_id, kinds);
+                }
             }
             creates.push((create_id, source_id, create, patches));
         }
@@ -361,7 +350,7 @@ impl JmapCalendarEventCopy for Server {
 
         // Write changes
         if !batch.is_empty() {
-            let assigned_ids = match self.commit_batch(batch).await {
+            let assigned_ids = match context.metadata.commit(self, batch).await {
                 Ok(assigned_ids) => assigned_ids,
                 Err(err) if err.is_assertion_failure() => {
                     for (create_id, _, _) in created_slots {
@@ -376,7 +365,6 @@ impl JmapCalendarEventCopy for Server {
                 }
                 Err(err) => return Err(err.caused_by(trc::location!())),
             };
-            context.metadata.committed(self, &assigned_ids).await;
 
             for (create_id, slot, mut server_set) in created_slots {
                 let document_id = assigned_ids.slot(slot);

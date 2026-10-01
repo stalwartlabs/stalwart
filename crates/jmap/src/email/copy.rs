@@ -6,22 +6,18 @@
 
 use crate::{
     api::metadata::{
-        ContainerTarget, DetachedMetadata, MetadataAccess, MetadataPatches, MetadataPreload,
-        MetadataType, MetadataWriter, ObjectMetadata,
+        MetadataAccess, MetadataPatches, MetadataPreload, MetadataType, MetadataWriter,
+        NewMetadata, ObjectMetadata,
     },
     changes::state::JmapCacheState,
     email::{PatchResult, handle_email_patch, ingested_into_object},
 };
-use common::{
-    MAX_RECEIVED_AT, Server,
-    auth::{AccessToken, AccountCache},
-    storage::metadata::MetadataLog,
-};
+use common::{MAX_RECEIVED_AT, Server, auth::AccessToken, sharing::EffectiveAcl};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess, mailbox::MailboxCacheAccess},
     mailbox::JUNK_ID,
     message::{
-        copy::{CopyMessageError, CopyMetadata, EmailCopy, SharedCopy},
+        copy::{CopyMessageError, EmailCopy},
         ingest::EmailIngest,
     },
 };
@@ -41,13 +37,10 @@ use jmap_proto::{
     },
 };
 use jmap_tools::{Key, Value};
-use std::{future::Future, sync::Arc};
-use store::{
-    roaring::RoaringBitmap,
-    write::{BatchBuilder, now},
-};
+use std::future::Future;
+use store::write::{BatchBuilder, now};
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection, metadata::MetadataKinds};
+use types::{acl::Acl, metadata::MetadataKinds};
 use utils::map::vec_map::VecMap;
 
 pub trait JmapEmailCopy: Sync + Send {
@@ -78,16 +71,10 @@ impl JmapEmailCopy for Server {
                 .into_err()
                 .details("From accountId is equal to fromAccountId"));
         }
-        let cache = self.get_cached_messages(account_id).await?;
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
-        let old_state = metadata
-            .assert_state(
-                self,
-                account_id,
-                cache.get_state(false),
-                &request.if_in_state,
-            )
-            .await?;
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
+        let cache = self.get_cached_messages(account_id).await?;
+        let old_state = sampled.assert_state(cache.get_state(false), &request.if_in_state)?;
         let mut response = CopyResponse {
             from_account_id: request.from_account_id,
             account_id: request.account_id,
@@ -113,9 +100,7 @@ impl JmapEmailCopy for Server {
             None
         };
         let is_shared = access_token.is_shared(account_id);
-        let mut modifiable_mailbox_ids: Option<RoaringBitmap> = None;
-        let mut readable_mailbox_ids: Option<RoaringBitmap> = None;
-        let mut owner_account: Option<Arc<AccountCache>> = None;
+        let viewer = metadata.viewer();
         let on_success_delete = request.on_success_destroy_original.unwrap_or(false);
         let mut destroy_ids = Vec::new();
         let mut train_batch = BatchBuilder::new();
@@ -123,45 +108,43 @@ impl JmapEmailCopy for Server {
         train_batch.with_account_id(from_account_id);
 
         let mut metadata_writer = MetadataWriter::new(metadata, account_id);
-        let mut creates = Vec::with_capacity(request.create.len());
         let mut preload = MetadataPreload::default();
-        for (id, mut create) in request.create {
-            let source_id = create.take_source_id(EmailProperty::Id);
-            let patches = metadata.extract(MetadataPatches::for_create(), &mut create);
-            if let (Ok(source_id), Ok(_)) = (&source_id, &patches)
-                && from_message_ids.contains(source_id.document_id())
-            {
-                let document_id = source_id.document_id();
-                preload.insert_source(
-                    document_id,
-                    from_cache
-                        .email_by_id(&document_id)
-                        .map_or(MetadataKinds::NONE, |email| {
-                            from_cache.metadata_kinds(email)
-                        }),
-                );
+        for document_id in request
+            .create
+            .values()
+            .filter_map(|create| create.source_id(EmailProperty::Id))
+            .map(|source_id| source_id.document_id())
+            .filter(|document_id| from_message_ids.contains(*document_id))
+        {
+            let kinds = from_cache
+                .email_by_id(&document_id)
+                .map_or(MetadataKinds::NONE, |email| {
+                    from_cache.metadata_kinds(email)
+                });
+            if viewer.is_some() || !kinds.is_empty() {
+                preload.insert_source(document_id, kinds);
             }
-            creates.push((id, source_id, create, patches));
         }
         metadata_writer
             .preload(self, from_account_id, preload)
             .await?;
 
-        'create: for (id, source_id, create, patches) in creates {
-            let from_message_id = match source_id {
+        'create: for (id, mut create) in request.create {
+            let from_message_id = match create.take_source_id(EmailProperty::Id) {
                 Ok(source_id) => source_id,
                 Err(err) => {
                     response.not_created.append(id, err);
                     continue 'create;
                 }
             };
-            let metadata_patches = match patches {
-                Ok(patches) => patches,
-                Err(err) => {
-                    response.not_created.append(id, err);
-                    continue 'create;
-                }
-            };
+            let metadata_patches =
+                match metadata.extract(MetadataPatches::for_create(), &mut create) {
+                    Ok(patches) => patches,
+                    Err(err) => {
+                        response.not_created.append(id, err);
+                        continue 'create;
+                    }
+                };
             let mut mailboxes = Vec::new();
             let mut keywords = Vec::new();
             let mut received_at = None;
@@ -279,62 +262,40 @@ impl JmapEmailCopy for Server {
                 continue 'create;
             }
 
-            let access = MetadataAccess {
-                may_write_shared: !is_shared
-                    || mailboxes.iter().any(|mailbox_id| {
-                        modifiable_mailbox_ids
-                            .get_or_insert_with(|| {
-                                cache.shared_mailboxes(access_token, Acl::ModifyItems)
-                            })
-                            .contains(*mailbox_id)
-                    }),
-                may_read: !is_shared
-                    || mailboxes.iter().any(|mailbox_id| {
-                        readable_mailbox_ids
-                            .get_or_insert_with(|| {
-                                cache.shared_mailboxes(access_token, Acl::ReadItems)
-                            })
-                            .contains(*mailbox_id)
-                    }),
+            let access = if is_shared && (metadata_patches.is_some() || viewer.is_some()) {
+                let has_right = |acl: Acl| {
+                    mailboxes.iter().any(|mailbox_id| {
+                        cache.mailbox_by_id(mailbox_id).is_some_and(|mailbox| {
+                            mailbox
+                                .acls
+                                .as_slice()
+                                .effective_acl(access_token)
+                                .contains(acl)
+                        })
+                    })
+                };
+                MetadataAccess {
+                    may_write_shared: has_right(Acl::ModifyItems),
+                    may_read: has_right(Acl::ReadItems),
+                }
+            } else {
+                MetadataAccess::FULL
             };
-            let update = match metadata_writer.copy_update(
-                metadata_patches,
-                from_message_id.document_id(),
-                access,
-            ) {
-                Ok(update) => update,
+            let ingest_metadata = match metadata_writer
+                .prepare_ingest(
+                    self,
+                    NewMetadata::Copy {
+                        patches: metadata_patches,
+                        source_id: from_message_id.document_id(),
+                    },
+                    access,
+                )
+                .await?
+            {
+                Ok(metadata) => metadata,
                 Err(err) => {
                     response.not_created.append(id, err);
                     continue 'create;
-                }
-            };
-            let detached = if update.is_empty() {
-                DetachedMetadata::default()
-            } else {
-                let owner = match &owner_account {
-                    Some(owner) => Arc::clone(owner),
-                    None => Arc::clone(
-                        owner_account
-                            .insert(self.account(account_id).await.caused_by(trc::location!())?),
-                    ),
-                };
-                match update
-                    .prepare_detached(
-                        self,
-                        ContainerTarget {
-                            owner: &owner,
-                            viewer_id: access_token.account_id(),
-                            collection: Collection::Email,
-                            log: MetadataLog::None,
-                        },
-                    )
-                    .await?
-                {
-                    Ok(detached) => detached,
-                    Err(err) => {
-                        response.not_created.append(id, err);
-                        continue 'create;
-                    }
                 }
             };
 
@@ -353,10 +314,7 @@ impl JmapEmailCopy for Server {
                             .map(|v| v.received_at())
                             .unwrap_or_else(now)
                     }),
-                    CopyMetadata {
-                        shared: detached.shared.map_or(SharedCopy::None, SharedCopy::Set),
-                        private: detached.private.map(Box::new),
-                    },
+                    ingest_metadata,
                     session.session_id,
                 )
                 .await?
@@ -379,6 +337,9 @@ impl JmapEmailCopy for Server {
                     response
                         .created
                         .append(id, ingested_into_object(email).into());
+                    if on_success_delete {
+                        destroy_ids.push(MaybeInvalid::Value(from_message_id));
+                    }
                 }
                 Err(err) => {
                     response.not_created.append(
@@ -393,11 +354,6 @@ impl JmapEmailCopy for Server {
                     );
                 }
             }
-
-            // Add to destroy list
-            if on_success_delete {
-                destroy_ids.push(MaybeInvalid::Value(from_message_id));
-            }
         }
 
         if did_train {
@@ -408,13 +364,9 @@ impl JmapEmailCopy for Server {
 
         // Update state
         if !response.created.is_empty() {
-            response.new_state = metadata
-                .state(
-                    self,
-                    account_id,
-                    self.get_cached_messages(account_id).await?.get_state(false),
-                )
-                .await?;
+            let sampled = metadata.viewer_change_id(self, account_id).await?;
+            response.new_state =
+                sampled.state(self.get_cached_messages(account_id).await?.get_state(false));
         }
 
         // Destroy ids

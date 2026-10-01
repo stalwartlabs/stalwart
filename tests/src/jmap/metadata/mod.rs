@@ -12,6 +12,7 @@ pub mod copy;
 pub mod cross_protocol;
 pub mod fixture;
 pub mod get_set;
+pub mod objects;
 pub mod performance;
 pub mod private;
 pub mod private_cleanup;
@@ -68,5 +69,8 @@ pub async fn test(test: &TestServer) {
     }
     if enabled("performance") {
         performance::test(test).await;
+    }
+    if enabled("objects") {
+        objects::test(test).await;
     }
 }

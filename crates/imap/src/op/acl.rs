@@ -458,6 +458,9 @@ impl<T: SessionStream> SessionData<T> {
         arguments: &Arguments,
         validate: bool,
     ) -> trc::Result<(MailboxId, Archive<ArchiveBytes>, AccessToken)> {
+        self.synchronize_mailboxes(false)
+            .await
+            .caused_by(trc::location!())?;
         if let Some(mailbox) = self.get_mailbox_by_name(&arguments.mailbox_name) {
             if let Some(values) = self
                 .server

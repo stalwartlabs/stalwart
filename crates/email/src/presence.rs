@@ -5,16 +5,15 @@
  */
 
 use crate::{
-    mailbox::{ArchivedMailbox, Mailbox},
+    mailbox::{ArchivedMailbox, METADATA_MASK, METADATA_SHIFT, Mailbox},
     message::messagedata::{HAS_JMAP_METADATA, MessageData},
     sieve::{ArchivedSieveScript, SieveScript},
 };
-use common::storage::metadata::MetadataPresence;
+use common::storage::{index::PresenceFlags, metadata::MetadataPresence};
 use store::{
-    Deserialize, Serialize,
-    write::{Archive, Archiver, BatchBuilder, MergeResult},
+    Deserialize,
+    write::{BatchBuilder, MergeResult},
 };
-use trc::AddContext;
 use types::{
     collection::{Collection, SyncCollection},
     field::Field,
@@ -50,38 +49,52 @@ impl MessageData {
 }
 
 impl Mailbox {
-    pub const TRACKED_METADATA: MetadataKinds = MetadataKinds::JMAP.union(MetadataKinds::IMAP);
-
     pub fn metadata_kinds(&self) -> MetadataKinds {
-        tracked_kinds(self.metadata_flags, Self::TRACKED_METADATA)
+        Self::metadata_kinds_of(self.flags)
     }
 
-    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
-        self.metadata_flags = kinds.bits() & Self::TRACKED_METADATA.bits();
+    fn metadata_kinds_of(flags: u16) -> MetadataKinds {
+        tracked_kinds(
+            ((flags & METADATA_MASK) >> METADATA_SHIFT) as u8,
+            Self::TRACKED,
+        )
+    }
+}
+
+impl PresenceFlags for Mailbox {
+    const COLLECTION: Collection = Collection::Mailbox;
+    const TRACKED: MetadataKinds = MetadataKinds::JMAP.union(MetadataKinds::IMAP);
+
+    fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.flags = (self.flags & !METADATA_MASK)
+            | (u16::from(kinds.bits() & Self::TRACKED.bits()) << METADATA_SHIFT);
     }
 }
 
 impl ArchivedMailbox {
     pub fn metadata_kinds(&self) -> MetadataKinds {
-        tracked_kinds(self.metadata_flags, Mailbox::TRACKED_METADATA)
+        Mailbox::metadata_kinds_of(self.flags.to_native())
     }
 }
 
 impl SieveScript {
-    pub const TRACKED_METADATA: MetadataKinds = MetadataKinds::JMAP;
-
     pub fn metadata_kinds(&self) -> MetadataKinds {
-        tracked_kinds(self.metadata_flags, Self::TRACKED_METADATA)
+        tracked_kinds(self.metadata_flags, Self::TRACKED)
     }
+}
 
-    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
-        self.metadata_flags = kinds.bits() & Self::TRACKED_METADATA.bits();
+impl PresenceFlags for SieveScript {
+    const COLLECTION: Collection = Collection::SieveScript;
+    const TRACKED: MetadataKinds = MetadataKinds::JMAP;
+
+    fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
+        self.metadata_flags = kinds.bits() & Self::TRACKED.bits();
     }
 }
 
 impl ArchivedSieveScript {
     pub fn metadata_kinds(&self) -> MetadataKinds {
-        tracked_kinds(self.metadata_flags, SieveScript::TRACKED_METADATA)
+        tracked_kinds(self.metadata_flags, SieveScript::TRACKED)
     }
 }
 
@@ -147,90 +160,19 @@ pub fn update_email_presence(
     }
 }
 
-pub fn update_mailbox_presence(
-    batch: &mut BatchBuilder,
-    account_id: u32,
-    document_id: u32,
-    current: &Archive<&ArchivedMailbox>,
-    presence: MetadataPresence,
-) -> trc::Result<()> {
-    let target = tracked_target(presence, Mailbox::TRACKED_METADATA);
-    if current.inner.metadata_kinds() == target {
-        return Ok(());
-    }
-    let mut mailbox = current
-        .deserialize::<Mailbox>()
-        .caused_by(trc::location!())?;
-    mailbox.set_metadata_kinds(target);
-    let archive = Archiver::new(mailbox)
-        .serialize()
-        .caused_by(trc::location!())?;
-    rewrite_archive(
-        batch,
-        account_id,
-        Collection::Mailbox,
-        document_id,
-        current,
-        archive,
-    );
-    Ok(())
-}
-
-pub fn update_sieve_presence(
-    batch: &mut BatchBuilder,
-    account_id: u32,
-    document_id: u32,
-    current: &Archive<&ArchivedSieveScript>,
-    presence: MetadataPresence,
-) -> trc::Result<()> {
-    let target = tracked_target(presence, SieveScript::TRACKED_METADATA);
-    if current.inner.metadata_kinds() == target {
-        return Ok(());
-    }
-    let mut script = current
-        .deserialize::<SieveScript>()
-        .caused_by(trc::location!())?;
-    script.set_metadata_kinds(target);
-    let archive = Archiver::new(script)
-        .serialize()
-        .caused_by(trc::location!())?;
-    rewrite_archive(
-        batch,
-        account_id,
-        Collection::SieveScript,
-        document_id,
-        current,
-        archive,
-    );
-    Ok(())
-}
-
-fn rewrite_archive<T>(
-    batch: &mut BatchBuilder,
-    account_id: u32,
-    collection: Collection,
-    document_id: u32,
-    current: &Archive<T>,
-    archive: Vec<u8>,
-) {
-    batch
-        .with_account_id(account_id)
-        .with_collection(collection)
-        .with_document(document_id)
-        .assert_value(Field::ARCHIVE, current)
-        .set(Field::ARCHIVE, archive);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use common::{
         MessageUid,
-        storage::index::{CurrentObject, IndexableAndSerializableObject},
+        storage::index::{CurrentObject, IndexableAndSerializableObject, RewritePresence},
     };
-    use store::write::{
-        ArchiveBytes, AssignedIds, ChangeCounter, Operation, ValueClass, ValueOp,
-        metadata::MetadataClass,
+    use store::{
+        Serialize,
+        write::{
+            Archive, ArchiveBytes, Archiver, AssignedIds, ChangeCounter, Operation, ValueClass,
+            ValueOp, metadata::MetadataClass,
+        },
     };
     use types::keyword::{SEEN, UNSUBSCRIBED};
 
@@ -461,8 +403,8 @@ mod tests {
             mailbox.metadata_kinds(),
             MetadataKinds::IMAP.union(MetadataKinds::JMAP)
         );
-        mailbox.metadata_flags = 0xFF;
-        assert_eq!(mailbox.metadata_kinds(), Mailbox::TRACKED_METADATA);
+        mailbox.flags = u16::MAX;
+        assert_eq!(mailbox.metadata_kinds(), Mailbox::TRACKED);
 
         let mut script = SieveScript::default();
         script.set_metadata_kinds(MetadataKinds::IMAP);
@@ -479,28 +421,16 @@ mod tests {
         let current = archive.to_unarchived::<Mailbox>().expect("valid mailbox");
 
         let mut batch = BatchBuilder::new();
-        update_mailbox_presence(
-            &mut batch,
-            1,
-            5,
-            &current,
-            MetadataPresence {
-                before: MetadataKinds::IMAP,
-                after: MetadataKinds::IMAP,
-            },
-        )
-        .expect("no rewrite");
+        Mailbox::rewrite_presence(&current, MetadataKinds::IMAP, 1, 5, &mut batch)
+            .expect("no rewrite");
         assert!(batch.is_empty());
 
-        update_mailbox_presence(
-            &mut batch,
+        Mailbox::rewrite_presence(
+            &current,
+            MetadataKinds::IMAP.union(MetadataKinds::JMAP),
             1,
             5,
-            &current,
-            MetadataPresence {
-                before: MetadataKinds::IMAP,
-                after: MetadataKinds::IMAP.union(MetadataKinds::JMAP),
-            },
+            &mut batch,
         )
         .expect("rewrite");
         assert!(!batch.is_empty());

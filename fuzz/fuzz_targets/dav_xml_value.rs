@@ -10,7 +10,7 @@ use dav_proto::{
     parser::{DavParser, tokenizer::Tokenizer},
     schema::{
         property::{DavProperty, DavValue, LockScope, LockType},
-        request::{DavPropertyValue, LockInfo, MkCol, PropertyUpdate},
+        request::{DavPropertyValue, LockInfo, MkCol, PropertyUpdate, PropertyUpdateOp},
     },
 };
 use libfuzzer_sys::fuzz_target;
@@ -18,7 +18,11 @@ use types::metadata::{DavValueView, XmlName, XmlValue};
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(update) = PropertyUpdate::parse(&mut Tokenizer::new(data)) {
-        update.set.into_iter().for_each(check_property);
+        update.ops.into_iter().for_each(|op| {
+            if let PropertyUpdateOp::Set(property) = op {
+                check_property(property);
+            }
+        });
     }
     if let Ok(mkcol) = MkCol::parse(&mut Tokenizer::new(data)) {
         mkcol.props.into_iter().for_each(check_property);
@@ -48,12 +52,12 @@ fn check_property(property: DavPropertyValue) {
     );
     let reparsed = PropertyUpdate::parse(&mut Tokenizer::new(request.as_bytes()))
         .unwrap_or_else(|err| panic!("written value does not parse: {err} {written}"));
-    match reparsed.set.as_slice() {
+    match reparsed.ops.as_slice() {
         [
-            DavPropertyValue {
+            PropertyUpdateOp::Set(DavPropertyValue {
                 property: DavProperty::Dead(reparsed_name),
                 value: DavValue::Dead(reparsed_value),
-            },
+            }),
         ] => {
             assert_eq!(reparsed_name, &name, "{written}");
             assert_eq!(reparsed_value, &value, "{written}");

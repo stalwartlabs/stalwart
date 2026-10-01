@@ -5,8 +5,9 @@
  */
 
 use crate::{
+    api::metadata::{MetadataType, ObjectMetadata},
     blob::download::BlobDownload,
-    changes::state::{JmapCacheState, MetadataStateManager},
+    changes::state::JmapCacheState,
     email::ingested_into_object,
 };
 use common::{MAX_RECEIVED_AT, Server, auth::AccessToken, ipc::PushNotification};
@@ -27,7 +28,6 @@ use mail_parser::MessageParser;
 use std::future::Future;
 use types::{
     acl::Acl,
-    collection::Collection,
     id::Id,
     keyword::Keyword,
     type_state::{DataType, StateChange},
@@ -54,17 +54,11 @@ impl EmailImport for Server {
     ) -> trc::Result<ImportEmailResponse> {
         // Validate state
         let account_id = request.account_id.document_id();
+        let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self.get_cached_messages(account_id).await?;
-        let viewer = self.jmap_metadata_viewer(access_token, using, DataType::Email);
-        let old_state: State = self
-            .assert_metadata_state(
-                viewer,
-                account_id,
-                Collection::Email,
-                cache.get_state(false),
-                &request.if_in_state,
-            )
-            .await?;
+        let old_state: State =
+            sampled.assert_state(cache.get_state(false), &request.if_in_state)?;
         let can_add_mailbox_ids = if access_token.is_shared(account_id) {
             cache.shared_mailboxes(access_token, Acl::AddItems).into()
         } else {
@@ -262,14 +256,9 @@ impl EmailImport for Server {
             ))
             .await;
 
-            response.new_state = self
-                .metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::Email,
-                    self.get_cached_messages(account_id).await?.get_state(false),
-                )
-                .await?;
+            let sampled = metadata.viewer_change_id(self, account_id).await?;
+            response.new_state =
+                sampled.state(self.get_cached_messages(account_id).await?.get_state(false));
         }
 
         Ok(response)

@@ -29,6 +29,7 @@ pub async fn test(test: &TestServer) {
     let second = ctx.account("bill@example.com");
 
     sharee_account_deletion(&ctx, owner).await;
+    owner_account_deletion(&ctx, first).await;
     purge_frees_private_data(&ctx, owner, first, second).await;
 
     ctx.cleanup(&[owner, first, second]).await;
@@ -152,6 +153,70 @@ async fn sharee_account_deletion(ctx: &Ctx<'_>, owner: &Account) {
         )
         .await;
     }
+}
+
+async fn owner_account_deletion(ctx: &Ctx<'_>, viewer: &Account) {
+    let admin = ctx.account("admin");
+    let owner = create_account(
+        ctx,
+        "meta-owner@example.com",
+        "meta owner secret with extra safety",
+    )
+    .await;
+    let parents = ctx.parents(&owner).await;
+    let before = ctx.used_quota(viewer).await;
+
+    let mut objects = Vec::new();
+    for ty in [MetaType::Mailbox, MetaType::FileNode] {
+        let id = ctx.create_ok(&owner, ty, &parents, 0, json!({})).await;
+        ctx.share(
+            &owner,
+            ty,
+            &share_target(ty, &parents, &id, 0),
+            viewer,
+            Some(Access::Read),
+        )
+        .await;
+        ctx.update_ok(
+            viewer,
+            &owner,
+            ty,
+            &id,
+            json!({"privateMetadata": {"p.example": {"v": random_text(ENTRY_SIZE)}}}),
+        )
+        .await;
+        objects.push((ty, id));
+    }
+    let charged = (ENTRY_SIZE * objects.len()) as i64;
+    assert!(
+        ctx.used_quota(viewer).await - before >= charged,
+        "private metadata not charged to {}",
+        viewer.name()
+    );
+
+    let owner_id = owner.id().document_id();
+    for attempt in 1..=2 {
+        ctx.test
+            .server
+            .destroy_owner_metadata(owner_id)
+            .await
+            .expect("owner metadata destroyed");
+        assert_eq!(
+            ctx.used_quota(viewer).await,
+            before,
+            "attempt {attempt}: destroying the owner must return the private bytes of {} once",
+            viewer.name()
+        );
+    }
+
+    admin.destroy_account(owner).await;
+    ctx.test.wait_for_tasks().await;
+    assert_eq!(
+        ctx.used_quota(viewer).await,
+        before,
+        "the account destroy task returned the private bytes of {} again",
+        viewer.name()
+    );
 }
 
 async fn purge_frees_private_data(

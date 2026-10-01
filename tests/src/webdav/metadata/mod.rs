@@ -14,6 +14,8 @@ pub mod items;
 pub mod limits;
 pub mod lock_owner;
 pub mod performance;
+pub mod sharing;
+pub mod transfer;
 
 pub async fn test(test: &TestServer) {
     let only = std::env::var("DAV_METADATA_TESTS").ok();
@@ -42,6 +44,12 @@ pub async fn test(test: &TestServer) {
     }
     if enabled("performance") {
         performance::test(test).await;
+    }
+    if enabled("sharing") {
+        sharing::test(test).await;
+    }
+    if enabled("transfer") {
+        transfer::test(test).await;
     }
 }
 

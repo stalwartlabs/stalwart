@@ -533,7 +533,7 @@ mod tests {
         jscalendar::{JSCalendarProperty, JSCalendarValue},
         jscontact::{JSContactProperty, JSContactValue},
     };
-    use jmap_tools::{Element, Key, Value};
+    use jmap_tools::{Element, JsonPointer, JsonPointerItem, Key, Property, Value};
     use std::{fmt::Debug, str::FromStr};
     use types::{blob::BlobId, id::Id};
 
@@ -802,6 +802,52 @@ mod tests {
         assert!(namespaces.is_sorted());
         assert!(selection.shared.contains("n19999.example"));
         assert!(!selection.shared.contains("n20000.example"));
+    }
+
+    #[test]
+    fn pointers_above_the_segment_cap_are_invalid() {
+        let over = format!(
+            "metadata/x.example{}",
+            "/a".repeat(JsonPointer::<MailboxProperty>::MAX_SEGMENTS)
+        );
+        let at_cap = format!(
+            "metadata/x.example{}",
+            "/a".repeat(JsonPointer::<MailboxProperty>::MAX_SEGMENTS - 2)
+        );
+
+        for selector in [&over, &at_cap] {
+            let mut list = properties::<MailboxProperty>(&["id", selector]);
+            let error = MetadataSelection::extract(&mut list).expect_err("selector");
+            assert!(
+                error.matches(trc::EventType::Jmap(trc::JmapEvent::InvalidArguments)),
+                "{error:?}"
+            );
+            assert_eq!(list, vec![MailboxProperty::Id]);
+        }
+
+        let json = format!(r#"{{"{over}": 1, "metadata/x.example/a~2": 2}}"#);
+        let value = Value::<MailboxProperty, MailboxValue>::parse_json(&json).expect("valid JSON");
+        let keys = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .collect::<Vec<_>>();
+        let [Key::Property(capped), Key::Property(escaped)] = keys.as_slice() else {
+            panic!("untyped keys {keys:?}");
+        };
+        for (property, invalid) in [(capped, ""), (escaped, "a~2")] {
+            let Some((MetadataRoot::Shared, pointer)) = property.metadata_pointer() else {
+                panic!("not a metadata patch: {property:?}");
+            };
+            assert!(
+                matches!(
+                    pointer.as_slice().last(),
+                    Some(JsonPointerItem::Invalid(text)) if text == invalid
+                ),
+                "{pointer:?}"
+            );
+        }
+        assert_eq!(capped.to_cow(), "metadata/");
     }
 
     #[test]

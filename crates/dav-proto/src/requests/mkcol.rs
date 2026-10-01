@@ -5,7 +5,7 @@
  */
 
 use crate::{
-    parser::{DavParser, Token, tokenizer::Tokenizer},
+    parser::{DavParser, Token, tokenizer::Tokenizer, value::InheritedLang},
     schema::{Element, NamedElement, Namespace, request::MkCol},
 };
 
@@ -15,7 +15,7 @@ impl DavParser for MkCol {
             is_mkcalendar: false,
             props: Vec::new(),
         };
-        let mkcol_lang = match stream.token()? {
+        let request = match stream.token()? {
             Token::ElementStart {
                 name:
                     NamedElement {
@@ -23,7 +23,7 @@ impl DavParser for MkCol {
                         element: Element::Mkcol,
                     },
                 raw,
-            } => raw.xml_lang()?,
+            } => raw,
             Token::ElementStart {
                 name:
                     NamedElement {
@@ -33,7 +33,7 @@ impl DavParser for MkCol {
                 raw,
             } => {
                 mkcol.is_mkcalendar = true;
-                raw.xml_lang()?
+                raw
             }
             Token::Eof => {
                 return Ok(mkcol);
@@ -51,15 +51,11 @@ impl DavParser for MkCol {
                         },
                     raw,
                 } => {
-                    let set_lang = raw.xml_lang()?;
-                    let prop_lang = stream
-                        .expect_named_element_raw(NamedElement::dav(Element::Prop))?
-                        .xml_lang()?;
-                    let lang = prop_lang
-                        .as_deref()
-                        .or(set_lang.as_deref())
-                        .or(mkcol_lang.as_deref());
-                    stream.collect_property_values(&mut mkcol.props, lang)?;
+                    let prop = stream.expect_named_element_raw(NamedElement::dav(Element::Prop))?;
+                    stream.collect_property_values(
+                        |value| mkcol.props.push(value),
+                        &mut InheritedLang::new(&prop, &raw, &request),
+                    )?;
                     stream.expect_element_end()?;
                 }
                 Token::ElementEnd | Token::Eof => {

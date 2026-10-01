@@ -370,17 +370,22 @@ impl PropFindRequestHandler for Server {
                     let demand = DeadDemand::new(&[], false, true, collection_container);
                     let mut paths = paths.into_iter();
                     loop {
-                        let batch = paths.by_ref().take(PROPFIND_BATCH_SIZE).collect::<Vec<_>>();
-                        if batch.is_empty() {
+                        let len = paths.len().min(PROPFIND_BATCH_SIZE);
+                        if len == 0 {
                             break;
                         }
                         let containers = demand
-                            .load(self, access_token, &batch, |item| {
-                                collection_of(item, collection_container, collection_children)
-                            })
+                            .load(
+                                self,
+                                access_token,
+                                paths.as_slice().get(..len).unwrap_or_default(),
+                                |item| {
+                                    collection_of(item, collection_container, collection_children)
+                                },
+                            )
                             .await
                             .caused_by(trc::location!())?;
-                        for item in batch {
+                        for item in paths.by_ref().take(len) {
                             let collection =
                                 collection_of(&item, collection_container, collection_children);
                             let container =
@@ -459,22 +464,21 @@ impl PropFindRequestHandler for Server {
         let mut paths = paths.into_iter();
 
         'outer: loop {
-            let batch = paths.by_ref().take(PROPFIND_BATCH_SIZE).collect::<Vec<_>>();
-            if batch.is_empty() {
+            let len = paths.len().min(PROPFIND_BATCH_SIZE);
+            if len == 0 {
                 break;
             }
+            let batch = paths.as_slice().get(..len).unwrap_or_default();
             let archives = loader
-                .load(self, access_token, &batch)
+                .load(self, access_token, batch)
                 .await
                 .caused_by(trc::location!())?;
             let containers = dead_demand
-                .load(self, access_token, &batch, |item| {
-                    loader.collection_of(item)
-                })
+                .load(self, access_token, batch, |item| loader.collection_of(item))
                 .await
                 .caused_by(trc::location!())?;
 
-            for item in batch {
+            for item in paths.by_ref().take(len) {
                 let account_id = item.account_id;
                 let collection = loader.collection_of(&item);
 

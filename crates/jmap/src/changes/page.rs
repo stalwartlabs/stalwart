@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use jmap_proto::{method::changes::ChangesResponse, object::NullObject};
+use super::state::max_state;
+use jmap_proto::{method::changes::ChangesResponse, object::NullObject, types::state::State};
 use store::{
     ahash::{AHashMap, AHashSet},
-    query::log::{Change, Changes},
+    query::log::{Change, Changes, Query},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,19 @@ pub(crate) struct Page {
     pub updated_properties: Option<UpdatedProperties>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LogBounds {
+    pub first_change_id: u64,
+    pub last_change_id: u64,
+    pub private_change_id: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Coverage {
+    Latest { viewer_change_id: u64 },
+    Range,
+}
+
 impl UpdatedProperties {
     pub const COUNTS: UpdatedProperties = UpdatedProperties(1);
     pub const METADATA: UpdatedProperties = UpdatedProperties(1 << 1);
@@ -81,32 +95,24 @@ impl UpdatedProperties {
     }
 }
 
-impl ViewerChange {
-    pub(crate) fn change(self) -> Change {
-        match self {
-            ViewerChange::Shared(change)
-            | ViewerChange::SharedAndPrivate(change)
-            | ViewerChange::Private(change) => change,
-        }
+pub(crate) trait PageChange: Copy {
+    fn change(self) -> Change;
+    fn is_metadata_only(self) -> bool;
+    fn properties(self, partial: PartialProperties) -> Option<UpdatedProperties>;
+}
+
+impl PageChange for Change {
+    fn change(self) -> Change {
+        self
     }
 
-    pub(crate) fn is_metadata_only(self) -> bool {
-        match self {
-            ViewerChange::Shared(change) | ViewerChange::SharedAndPrivate(change) => {
-                change.is_metadata_only()
-            }
-            ViewerChange::Private(_) => true,
-        }
+    fn is_metadata_only(self) -> bool {
+        Change::is_metadata_only(&self)
     }
 
     fn properties(self, partial: PartialProperties) -> Option<UpdatedProperties> {
-        let (change, private) = match self {
-            ViewerChange::Shared(change) => (change, false),
-            ViewerChange::SharedAndPrivate(change) => (change, true),
-            ViewerChange::Private(_) => return Some(UpdatedProperties::PRIVATE_METADATA),
-        };
-        let shared = match change {
-            Change::UpdateItemMetadata(_) => UpdatedProperties::METADATA,
+        match self {
+            Change::UpdateItemMetadata(_) => Some(UpdatedProperties::METADATA),
             Change::UpdateContainerPartial(_, changed) => {
                 let mut properties = UpdatedProperties::default();
                 if changed.has_properties() {
@@ -120,15 +126,39 @@ impl ViewerChange {
                 if changed.has_metadata() {
                     properties = properties.union(UpdatedProperties::METADATA);
                 }
-                properties
+                Some(properties)
             }
-            _ => return None,
-        };
-        Some(if private {
-            shared.union(UpdatedProperties::PRIVATE_METADATA)
-        } else {
-            shared
-        })
+            _ => None,
+        }
+    }
+}
+
+impl PageChange for ViewerChange {
+    fn change(self) -> Change {
+        match self {
+            ViewerChange::Shared(change)
+            | ViewerChange::SharedAndPrivate(change)
+            | ViewerChange::Private(change) => change,
+        }
+    }
+
+    fn is_metadata_only(self) -> bool {
+        match self {
+            ViewerChange::Shared(change) | ViewerChange::SharedAndPrivate(change) => {
+                Change::is_metadata_only(&change)
+            }
+            ViewerChange::Private(_) => true,
+        }
+    }
+
+    fn properties(self, partial: PartialProperties) -> Option<UpdatedProperties> {
+        match self {
+            ViewerChange::Shared(change) => change.properties(partial),
+            ViewerChange::SharedAndPrivate(change) => change
+                .properties(partial)
+                .map(|shared| shared.union(UpdatedProperties::PRIVATE_METADATA)),
+            ViewerChange::Private(_) => Some(UpdatedProperties::PRIVATE_METADATA),
+        }
     }
 }
 
@@ -171,30 +201,30 @@ impl LogRead {
             .all(|changes| changes.changes.is_empty() && changes.from_change_id == 0)
     }
 
-    pub(crate) fn first_change_id(&self) -> u64 {
-        [self.shared.as_ref(), self.private.as_ref()]
-            .into_iter()
-            .flatten()
-            .map(|changes| changes.from_change_id)
-            .filter(|change_id| *change_id != 0)
-            .min()
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn last_change_id(&self, is_container: bool) -> u64 {
-        [self.shared.as_ref(), self.private.as_ref()]
-            .into_iter()
-            .flatten()
-            .map(|changes| kind_change_id(changes, is_container).unwrap_or(changes.to_change_id))
-            .max()
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn private_change_id(&self, is_container: bool) -> u64 {
-        self.private
-            .as_ref()
-            .and_then(|changes| kind_change_id(changes, is_container))
-            .unwrap_or_default()
+    pub(crate) fn bounds(&self, is_container: bool) -> LogBounds {
+        let logs = || {
+            [self.shared.as_ref(), self.private.as_ref()]
+                .into_iter()
+                .flatten()
+        };
+        LogBounds {
+            first_change_id: logs()
+                .map(|changes| changes.from_change_id)
+                .filter(|change_id| *change_id != 0)
+                .min()
+                .unwrap_or_default(),
+            last_change_id: logs()
+                .map(|changes| {
+                    kind_change_id(changes, is_container).unwrap_or(changes.to_change_id)
+                })
+                .max()
+                .unwrap_or_default(),
+            private_change_id: self
+                .private
+                .as_ref()
+                .and_then(|changes| kind_change_id(changes, is_container))
+                .unwrap_or_default(),
+        }
     }
 
     pub(crate) fn total(&self, is_container: bool) -> usize {
@@ -234,6 +264,47 @@ impl LogRead {
             }
             None => ViewerChanges::Shared(shared),
         }
+    }
+}
+
+impl LogBounds {
+    pub(crate) fn new_state(
+        self,
+        current: State,
+        next_items_sent: Option<usize>,
+        coverage: Coverage,
+    ) -> State {
+        match (next_items_sent, current, coverage) {
+            (Some(items_sent), _, _) => {
+                State::new_intermediate(self.first_change_id, self.last_change_id, items_sent)
+            }
+            (None, State::Initial, Coverage::Latest { viewer_change_id }) => {
+                State::new_exact(self.last_change_id.max(viewer_change_id))
+            }
+            (None, State::Initial, Coverage::Range) => State::new_exact(self.last_change_id),
+            (None, current, _) => max_state(current, self.private_change_id),
+        }
+    }
+}
+
+pub(crate) fn private_query(
+    query: Query,
+    shared: Option<&Changes>,
+    known_change_id: u64,
+) -> Option<Query> {
+    let bound = shared
+        .map_or(0, |changes| changes.to_change_id)
+        .max(known_change_id);
+    match query {
+        Query::All => Some(Query::RangeInclusive(0, bound)),
+        Query::Since(change_id) => change_id
+            .checked_add(1)
+            .filter(|from| *from <= bound)
+            .map(|from| Query::RangeInclusive(from, bound)),
+        Query::SinceInclusive(change_id) => {
+            (change_id <= bound).then_some(Query::RangeInclusive(change_id, bound))
+        }
+        Query::RangeInclusive(..) => Some(query),
     }
 }
 
@@ -291,8 +362,8 @@ pub(crate) fn merge_private(
     merged
 }
 
-pub(crate) fn fill_page(
-    changes: impl Iterator<Item = ViewerChange>,
+pub(crate) fn fill_page<C: PageChange>(
+    changes: impl Iterator<Item = C>,
     items_sent: usize,
     max_changes: usize,
     metadata: MetadataChanges,
@@ -304,8 +375,8 @@ pub(crate) fn fill_page(
         .skip(items_sent)
         .peekable();
     let mask = match metadata {
-        MetadataChanges::Unsupported => UpdatedProperties::COUNTS,
-        MetadataChanges::Ignored | MetadataChanges::Reported => UpdatedProperties(u8::MAX),
+        MetadataChanges::Unsupported | MetadataChanges::Ignored => UpdatedProperties::COUNTS,
+        MetadataChanges::Reported => UpdatedProperties(u8::MAX),
     };
     let mut updated_properties = Some(UpdatedProperties::default());
 
@@ -333,10 +404,7 @@ pub(crate) fn fill_page(
 
     Page {
         has_more: changes.peek().is_some(),
-        updated_properties: updated_properties.filter(|properties| {
-            metadata != MetadataChanges::Ignored
-                && !response.updated.is_empty()
-                && !properties.is_empty()
-        }),
+        updated_properties: updated_properties
+            .filter(|properties| !response.updated.is_empty() && !properties.is_empty()),
     }
 }

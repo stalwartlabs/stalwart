@@ -14,6 +14,11 @@ use common::storage::dav::{FILE_KIND_DIRECTORY, FILE_KIND_FILE, FILE_KIND_SYMLIN
 use std::{fmt::Display, str::FromStr};
 use types::{acl::AclGrant, blob_hash::BlobHash, metadata::MetadataKinds};
 
+const ROLE_SHIFT: u32 = 3;
+const ROLE_MASK: u16 = 0xF << ROLE_SHIFT;
+
+const _: () = assert!(FilePresence::from_bits(u16::MAX).bits() & ROLE_MASK == 0);
+
 #[derive(
     rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Default, Clone, PartialEq, Eq,
 )]
@@ -22,7 +27,6 @@ pub struct FileNode {
     pub parent_id: u32,
     pub name: String,
     pub content: FileNodeContent,
-    pub role: Option<FileNodeRole>,
     pub flags: u16,
     pub etag: u32,
     pub created: i64,
@@ -55,20 +59,7 @@ pub struct FileProperties {
     pub executable: bool,
 }
 
-#[derive(
-    rkyv::Archive,
-    rkyv::Deserialize,
-    rkyv::Serialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
-#[rkyv(derive(Debug, Clone, Copy, PartialEq, Eq))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum FileNodeRole {
     Root = 1,
@@ -137,6 +128,19 @@ impl FileNode {
         self.flags = presence.apply(self.flags);
     }
 
+    pub fn role(&self) -> Option<FileNodeRole> {
+        Self::role_of(self.flags)
+    }
+
+    pub fn set_role(&mut self, role: Option<FileNodeRole>) {
+        self.flags =
+            (self.flags & !ROLE_MASK) | (u16::from(role.map_or(0, FileNodeRole::id)) << ROLE_SHIFT);
+    }
+
+    fn role_of(flags: u16) -> Option<FileNodeRole> {
+        FileNodeRole::from_id(((flags & ROLE_MASK) >> ROLE_SHIFT) as u8)
+    }
+
     pub fn metadata_kinds(&self) -> MetadataKinds {
         self.presence().kinds()
     }
@@ -160,7 +164,7 @@ impl FileNode {
                 hasher.str(target);
             }
         }
-        hasher.u8(self.role.map_or(0, FileNodeRole::id)).finish()
+        hasher.u8(self.role().map_or(0, FileNodeRole::id)).finish()
     }
 }
 
@@ -208,7 +212,7 @@ impl ArchivedFileNode {
 
     #[inline(always)]
     pub fn role(&self) -> Option<FileNodeRole> {
-        self.role.as_ref().map(FileNodeRole::from)
+        FileNode::role_of(self.flags.to_native())
     }
 
     pub fn is_subscribed(&self, account_id: u32) -> bool {
@@ -300,22 +304,6 @@ impl FileNodeRole {
     }
 }
 
-impl From<&ArchivedFileNodeRole> for FileNodeRole {
-    fn from(value: &ArchivedFileNodeRole) -> Self {
-        match value {
-            ArchivedFileNodeRole::Root => FileNodeRole::Root,
-            ArchivedFileNodeRole::Home => FileNodeRole::Home,
-            ArchivedFileNodeRole::Temp => FileNodeRole::Temp,
-            ArchivedFileNodeRole::Trash => FileNodeRole::Trash,
-            ArchivedFileNodeRole::Documents => FileNodeRole::Documents,
-            ArchivedFileNodeRole::Downloads => FileNodeRole::Downloads,
-            ArchivedFileNodeRole::Music => FileNodeRole::Music,
-            ArchivedFileNodeRole::Pictures => FileNodeRole::Pictures,
-            ArchivedFileNodeRole::Videos => FileNodeRole::Videos,
-        }
-    }
-}
-
 impl FromStr for FileNodeRole {
     type Err = ();
 
@@ -327,5 +315,104 @@ impl FromStr for FileNodeRole {
 impl Display for FileNodeRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rkyv::rancor::Error;
+
+    const ROLES: [Option<FileNodeRole>; 10] = [
+        None,
+        Some(FileNodeRole::Root),
+        Some(FileNodeRole::Home),
+        Some(FileNodeRole::Temp),
+        Some(FileNodeRole::Trash),
+        Some(FileNodeRole::Documents),
+        Some(FileNodeRole::Downloads),
+        Some(FileNodeRole::Music),
+        Some(FileNodeRole::Pictures),
+        Some(FileNodeRole::Videos),
+    ];
+
+    fn presence_mask() -> u16 {
+        FilePresence::from_bits(u16::MAX).bits()
+    }
+
+    fn all_presences() -> impl Iterator<Item = FilePresence> {
+        (0..=presence_mask()).map(FilePresence::from_bits)
+    }
+
+    fn archived(node: &FileNode) -> (Option<FileNodeRole>, FilePresence) {
+        let bytes = rkyv::to_bytes::<Error>(node).expect("the node archives");
+        let archived =
+            rkyv::access::<ArchivedFileNode, Error>(&bytes).expect("the archive validates");
+        (archived.role(), archived.presence())
+    }
+
+    #[test]
+    fn every_role_round_trips_with_every_presence_pattern() {
+        assert_eq!(all_presences().count(), 8);
+        assert_eq!(FileNode::default().role(), None);
+
+        for (id, role) in ROLES.into_iter().enumerate() {
+            assert_eq!(usize::from(role.map_or(0, FileNodeRole::id)), id);
+            for presence in all_presences() {
+                let mut node = FileNode::default();
+                node.set_role(role);
+                node.set_presence(presence);
+                assert_eq!((node.role(), node.presence()), (role, presence));
+                assert_eq!(archived(&node), (role, presence));
+
+                let mut reversed = FileNode::default();
+                reversed.set_presence(presence);
+                reversed.set_role(role);
+                assert_eq!(reversed.flags, node.flags);
+            }
+        }
+    }
+
+    #[test]
+    fn role_and_presence_setters_do_not_clobber_each_other() {
+        for start in [0, u16::MAX, 0x5A5A, 0xA5A5] {
+            let mut node = FileNode {
+                flags: start,
+                ..Default::default()
+            };
+            for role in ROLES {
+                let before = node.flags;
+                node.set_role(role);
+                assert_eq!(node.role(), role);
+                assert_eq!(node.flags & !ROLE_MASK, before & !ROLE_MASK);
+            }
+            for presence in all_presences() {
+                let before = node.flags;
+                node.set_presence(presence);
+                assert_eq!(node.presence(), presence);
+                assert_eq!(node.flags & !presence_mask(), before & !presence_mask());
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_role_bits_read_as_no_role() {
+        for id in ROLES.len() as u16..=ROLE_MASK >> ROLE_SHIFT {
+            let node = FileNode {
+                flags: (id << ROLE_SHIFT) | presence_mask(),
+                ..Default::default()
+            };
+            assert_eq!(node.role(), None);
+            assert_eq!(
+                archived(&node),
+                (None, FilePresence::from_bits(presence_mask()))
+            );
+            assert_eq!(node.compute_etag(), FileNode::default().compute_etag());
+        }
+    }
+
+    #[test]
+    fn archived_file_node_size_is_pinned() {
+        assert_eq!(size_of::<ArchivedFileNode>(), 113);
     }
 }

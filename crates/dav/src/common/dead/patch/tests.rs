@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{DeadOp, DeadPatch, DisplayName, text_len};
+use super::{DeadOp, DeadPatch, DisplayName, dead_name, text_len};
 use common::storage::dav::DISPLAY_NAME_PROPERTY;
 use dav_proto::schema::{
     property::{DavProperty, DavValue, WebDavProperty},
-    request::{DavPropertyValue, PropertyUpdate},
+    request::{DavPropertyValue, PropertyUpdateOp},
 };
 use std::borrow::Cow;
 use types::metadata::{XmlName, XmlNode, XmlValue};
@@ -31,22 +31,21 @@ fn display_name() -> DavProperty {
     DavProperty::WebDav(WebDavProperty::DisplayName)
 }
 
-fn update(set_first: bool) -> PropertyUpdate {
-    PropertyUpdate {
-        set: vec![
-            dead_value("a", "1"),
-            DavPropertyValue {
-                property: display_name(),
-                value: DavValue::String("Report".to_string()),
-            },
-            DavPropertyValue {
-                property: DavProperty::WebDav(WebDavProperty::CreationDate),
-                value: DavValue::Timestamp(0),
-            },
-        ],
-        remove: vec![dead("b"), display_name()],
-        set_first,
-    }
+fn ops() -> Vec<PropertyUpdateOp> {
+    vec![
+        PropertyUpdateOp::Remove(dead("b")),
+        PropertyUpdateOp::Set(dead_value("a", "1")),
+        PropertyUpdateOp::Set(DavPropertyValue {
+            property: display_name(),
+            value: DavValue::String("Report".to_string()),
+        }),
+        PropertyUpdateOp::Remove(display_name()),
+        PropertyUpdateOp::Set(DavPropertyValue {
+            property: DavProperty::WebDav(WebDavProperty::CreationDate),
+            value: DavValue::Timestamp(0),
+        }),
+        PropertyUpdateOp::Remove(dead("a")),
+    ]
 }
 
 fn summary(patch: &DeadPatch) -> Vec<(bool, String)> {
@@ -54,62 +53,64 @@ fn summary(patch: &DeadPatch) -> Vec<(bool, String)> {
         .ops
         .iter()
         .map(|op| match op {
-            DeadOp::Set { name, .. } => (true, name.name().to_string()),
-            DeadOp::Remove { name, .. } => (false, name.name().to_string()),
+            DeadOp::Set { property, .. } => (true, dead_name(property).name().to_string()),
+            DeadOp::Remove { property } => (false, dead_name(property).name().to_string()),
         })
         .collect()
 }
 
 #[test]
-fn stored_display_names_join_the_dead_properties_in_order() {
-    let mut request = update(false);
+fn stored_display_names_join_the_dead_properties_in_document_order() {
+    let mut request = ops();
     let patch = DeadPatch::take(&mut request, DisplayName::Stored);
     assert_eq!(
         summary(&patch),
         vec![
             (false, "b".to_string()),
-            (false, "displayname".to_string()),
             (true, "a".to_string()),
             (true, "displayname".to_string()),
+            (false, "displayname".to_string()),
+            (false, "a".to_string()),
         ]
     );
-    assert_eq!(request.set.len(), 1);
-    assert!(request.remove.is_empty());
-    let Some(DeadOp::Set {
-        property,
-        name,
-        value,
-    }) = patch.ops.last()
-    else {
-        panic!("expected the display name set last");
+    assert_eq!(
+        request
+            .iter()
+            .map(PropertyUpdateOp::property)
+            .collect::<Vec<_>>(),
+        vec![&DavProperty::WebDav(WebDavProperty::CreationDate)]
+    );
+    let Some(DeadOp::Set { property, value }) = patch.ops.get(2) else {
+        panic!("expected the display name set third");
     };
     assert_eq!(property, &display_name());
-    assert_eq!(name, &DISPLAY_NAME_PROPERTY);
+    assert_eq!(dead_name(property), DISPLAY_NAME_PROPERTY);
     assert_eq!(text_len(value), "Report".len());
-
-    let mut request = update(true);
-    let patch = DeadPatch::take(&mut request, DisplayName::Stored);
-    assert_eq!(
-        summary(&patch),
-        vec![
-            (true, "a".to_string()),
-            (true, "displayname".to_string()),
-            (false, "b".to_string()),
-            (false, "displayname".to_string()),
-        ]
-    );
 }
 
 #[test]
 fn live_display_names_stay_with_the_object() {
-    let mut request = update(true);
+    let mut request = ops();
     let patch = DeadPatch::take(&mut request, DisplayName::Live);
     assert_eq!(
         summary(&patch),
-        vec![(true, "a".to_string()), (false, "b".to_string())]
+        vec![
+            (false, "b".to_string()),
+            (true, "a".to_string()),
+            (false, "a".to_string())
+        ]
     );
-    assert_eq!(request.set.len(), 2);
-    assert_eq!(request.remove, vec![display_name()]);
+    assert_eq!(
+        request
+            .iter()
+            .map(PropertyUpdateOp::property)
+            .collect::<Vec<_>>(),
+        vec![
+            &display_name(),
+            &display_name(),
+            &DavProperty::WebDav(WebDavProperty::CreationDate)
+        ]
+    );
 
     let mut values = vec![
         dead_value("c", ""),

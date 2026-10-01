@@ -5,8 +5,7 @@
  */
 
 use super::{
-    MetadataMailbox, READ_RIGHTS, SERVER_DOCUMENT_ID, SPECIAL_USE_ENTRY,
-    edit::{ContainerUpdate, edit_container},
+    MetadataMailbox, READ_RIGHTS, SERVER_DOCUMENT_ID, SPECIAL_USE_ENTRY, edit::edit_container,
     mailbox_not_found, metadata_error, special_use_value,
 };
 use crate::{
@@ -14,21 +13,17 @@ use crate::{
     op::{ImapContext, create::attr_to_role},
 };
 use common::{
-    auth::{AccessToken, AccountCache},
+    auth::AccessToken,
     network::SessionStream,
     storage::{
-        index::ObjectIndexBuilder,
+        index::{ObjectIndexBuilder, PresenceFlags, RewritePresence},
         metadata::{
-            MetadataLog, MetadataPresence, MetadataViewer, MetadataWrite, PrivateMetadataCommit,
-            PrivateMetadataWrite, StoredContainer,
+            ContainerChange, MetadataLog, MetadataPresence, MetadataViewer, PrivateMetadataCommit,
         },
     },
 };
 use compact_str::CompactString;
-use email::{
-    mailbox::{Mailbox, role::RoleChange},
-    presence::update_mailbox_presence,
-};
+use email::mailbox::{Mailbox, role::RoleChange};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{
@@ -40,23 +35,18 @@ use registry::schema::enums::Permission;
 use std::time::Instant;
 use store::{
     ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, metadata::MetadataBuf},
+    write::{Archive, ArchiveBytes, AssignedIds, BatchBuilder, metadata::MetadataBuf},
 };
 use types::{
     acl::Acl,
-    collection::Collection,
-    metadata::{EncodedMetadata, MetadataEdit, MetadataScope},
+    collection::{Collection, SyncCollection},
+    metadata::MetadataScope,
     special_use::SpecialUse,
 };
 
 const SHARED_WRITE_RIGHTS: [Acl; 1] = [Acl::ModifyItems];
 const ROLE_RIGHTS: [Acl; 1] = [Acl::Modify];
-
-struct ContainerWrite {
-    previous: Option<StoredContainer>,
-    next: Option<EncodedMetadata>,
-    edit: MetadataEdit,
-}
+const MODIFIED_ELSEWHERE: &str = "Metadata was modified by another process.";
 
 impl<T: SessionStream> SessionData<T> {
     pub async fn set_metadata(
@@ -85,7 +75,7 @@ impl<T: SessionStream> SessionData<T> {
         let viewer = if needs_viewer(&mailbox_name, &entries) {
             Some(
                 self.server
-                    .imap_metadata_viewer(&access_token)
+                    .metadata_viewer(&access_token, Permission::ImapMetadataPrivate)
                     .ok_or_else(|| metadata_error(&tag, MetadataCode::NoPrivate))?,
             )
         } else {
@@ -140,7 +130,7 @@ impl<T: SessionStream> SessionData<T> {
             .metadata_container(account_id, Collection::Principal, SERVER_DOCUMENT_ID)
             .await
             .imap_ctx(tag, trc::location!())?;
-        let Some(write) = self.container_write(
+        let Some(change) = self.container_change(
             tag,
             previous.as_ref(),
             entries.iter().map(entry_value),
@@ -155,24 +145,22 @@ impl<T: SessionStream> SessionData<T> {
             .account(account_id)
             .await
             .imap_ctx(tag, trc::location!())?;
-        self.assert_metadata_quota(tag, &account, &write).await?;
+        if !self
+            .server
+            .has_metadata_quota(&account, &change)
+            .await
+            .imap_ctx(tag, trc::location!())?
+        {
+            return Err(over_quota(tag));
+        }
 
         let mut batch = BatchBuilder::new();
-        MetadataWrite {
-            account_id,
-            tenant_id: account.id_tenant,
-            collection: Collection::Principal,
-            document_id: SERVER_DOCUMENT_ID.into(),
-            previous: write.previous,
-            next: write.next,
-            log: MetadataLog::None,
-        }
-        .build(&mut batch)
-        .imap_ctx(tag, trc::location!())?;
-        self.server
-            .commit_batch(batch)
+        change
+            .into_write(&account, Collection::Principal, MetadataLog::None)
+            .build(SERVER_DOCUMENT_ID.into(), &mut batch)
+            .imap_ctx(tag, trc::location!())?;
+        self.commit_metadata(tag, batch, None, trc::location!())
             .await
-            .imap_ctx(tag, trc::location!())
             .map(|_| ())
     }
 
@@ -222,7 +210,7 @@ impl<T: SessionStream> SessionData<T> {
             } else {
                 None
             };
-            self.container_write(
+            self.container_change(
                 tag,
                 previous.as_ref(),
                 shared_entries,
@@ -253,13 +241,13 @@ impl<T: SessionStream> SessionData<T> {
                 } else {
                     None
                 };
-                self.container_write(
+                self.container_change(
                     tag,
                     previous.as_ref(),
                     private_entries,
                     MetadataScope::Private,
                 )?
-                .map(|write| (viewer, write))
+                .map(|change| (viewer, change))
             }
             _ => None,
         };
@@ -267,49 +255,53 @@ impl<T: SessionStream> SessionData<T> {
         let mut batch = BatchBuilder::new();
         let mut commit = PrivateMetadataCommit::default();
         let mut presence = None;
-        if let Some(write) = shared {
+        if let Some(change) = shared {
             let owner = self
                 .server
                 .account(mailbox.account_id)
                 .await
                 .imap_ctx(tag, trc::location!())?;
-            self.assert_metadata_quota(tag, &owner, &write).await?;
+            if !self
+                .server
+                .has_metadata_quota(&owner, &change)
+                .await
+                .imap_ctx(tag, trc::location!())?
+            {
+                return Err(over_quota(tag));
+            }
             presence = Some(
-                MetadataWrite {
-                    account_id: mailbox.account_id,
-                    tenant_id: owner.id_tenant,
-                    collection: Collection::Mailbox,
-                    document_id: mailbox.mailbox_id.into(),
-                    previous: write.previous,
-                    next: write.next,
-                    log: MetadataLog::Container,
-                }
-                .build(&mut batch)
-                .imap_ctx(tag, trc::location!())?,
+                change
+                    .into_write(&owner, Collection::Mailbox, MetadataLog::Container)
+                    .build(mailbox.mailbox_id.into(), &mut batch)
+                    .imap_ctx(tag, trc::location!())?,
             );
         }
-        if let Some((viewer, write)) = private {
+        if let Some((viewer, change)) = private {
             let account = self
                 .server
                 .account(viewer.account_id())
                 .await
                 .imap_ctx(tag, trc::location!())?;
-            self.assert_metadata_quota(tag, &account, &write).await?;
-            PrivateMetadataWrite {
-                owner_id: mailbox.account_id,
-                viewer_id: viewer.account_id(),
-                viewer_tenant_id: account.id_tenant,
-                collection: Collection::Mailbox,
-                previous: write.previous,
-                next: write.next,
-                log: MetadataLog::Container,
+            if !self
+                .server
+                .has_metadata_quota(&account, &change)
+                .await
+                .imap_ctx(tag, trc::location!())?
+            {
+                return Err(over_quota(tag));
             }
-            .build(mailbox.mailbox_id.into(), &mut batch, &mut commit)
-            .imap_ctx(tag, trc::location!())?;
+            change
+                .into_private_write(
+                    mailbox.account_id,
+                    &account,
+                    Collection::Mailbox,
+                    MetadataLog::Container,
+                )
+                .build(mailbox.mailbox_id.into(), &mut batch, &mut commit)
+                .imap_ctx(tag, trc::location!())?;
         }
 
-        let presence =
-            presence.filter(|presence| presence.has_changed_for(Mailbox::TRACKED_METADATA));
+        let presence = presence.filter(|presence| presence.has_changed_for(Mailbox::TRACKED));
         if role.is_some() || presence.is_some() {
             self.update_mailbox_archive(tag, &mailbox, role, presence, &mut batch)
                 .await?;
@@ -317,16 +309,37 @@ impl<T: SessionStream> SessionData<T> {
 
         if !batch.is_empty() {
             let assigned_ids = self
-                .server
-                .commit_batch(batch)
-                .await
-                .imap_ctx(tag, trc::location!())?;
+                .commit_metadata(tag, batch, Some(mailbox.account_id), trc::location!())
+                .await?;
             self.server
                 .private_metadata_committed(commit, &assigned_ids)
                 .await;
         }
 
         Ok(mailbox.id())
+    }
+
+    async fn commit_metadata(
+        &self,
+        tag: &str,
+        batch: BatchBuilder,
+        cached_account_id: Option<u32>,
+        location: &'static str,
+    ) -> trc::Result<AssignedIds> {
+        match self.server.commit_batch(batch).await {
+            Err(err) if err.is_assertion_failure() => {
+                if let Some(account_id) = cached_account_id {
+                    self.server
+                        .inner
+                        .mark_cache_stale(account_id, SyncCollection::Email);
+                }
+                Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details(MODIFIED_ELSEWHERE)
+                    .id(CompactString::from(tag)))
+            }
+            result => result.imap_ctx(tag, location),
+        }
     }
 
     fn special_use_change(
@@ -337,7 +350,7 @@ impl<T: SessionStream> SessionData<T> {
     ) -> trc::Result<Option<SpecialUse>> {
         mailbox.assert_rights(tag, &ROLE_RIGHTS)?;
         let role = parse_special_use(value)
-            .ok_or_else(|| use_attr_error(tag, "Unsupported special-use attribute.".to_string()))?;
+            .ok_or_else(|| use_attr_error(tag, "Unsupported special-use attribute."))?;
         if role == SpecialUse::None && special_use_value(mailbox.role).is_none() {
             return Ok(None);
         }
@@ -351,54 +364,20 @@ impl<T: SessionStream> SessionData<T> {
         Ok((role != mailbox.role).then_some(role))
     }
 
-    fn container_write<'x>(
+    fn container_change<'x>(
         &self,
         tag: &str,
         previous: Option<&'x MetadataBuf>,
         entries: impl Iterator<Item = (&'x str, Option<&'x [u8]>)> + Clone,
         scope: MetadataScope,
-    ) -> trc::Result<Option<ContainerWrite>> {
-        let (next, edit) = match edit_container(
+    ) -> trc::Result<Option<ContainerChange>> {
+        edit_container(
             previous,
             entries,
             scope,
             &self.server.core.metadata.limits(),
         )
-        .map_err(|code| metadata_error(tag, code))?
-        {
-            ContainerUpdate::Unchanged => return Ok(None),
-            ContainerUpdate::Clear => (None, MetadataEdit::RemovalOnly),
-            ContainerUpdate::Replace(container, edit) => (Some(container), edit),
-        };
-        Ok(Some(ContainerWrite {
-            previous: previous.map(StoredContainer::from),
-            next,
-            edit,
-        }))
-    }
-
-    async fn assert_metadata_quota(
-        &self,
-        tag: &str,
-        account: &AccountCache,
-        write: &ContainerWrite,
-    ) -> trc::Result<()> {
-        match &write.next {
-            Some(next)
-                if !self
-                    .server
-                    .has_metadata_quota(account, write.edit, write.previous.as_ref(), next)
-                    .await
-                    .imap_ctx(tag, trc::location!())? =>
-            {
-                Err(trc::ImapEvent::Error
-                    .into_err()
-                    .details("Quota exceeded.")
-                    .code(ResponseCode::OverQuota)
-                    .id(CompactString::from(tag)))
-            }
-            _ => Ok(()),
-        }
+        .map_err(|code| metadata_error(tag, code))
     }
 
     async fn update_mailbox_archive(
@@ -429,7 +408,7 @@ impl<T: SessionStream> SessionData<T> {
                 let mut changes = current
                     .deserialize::<Mailbox>()
                     .imap_ctx(tag, trc::location!())?;
-                changes.role = role;
+                changes.set_role(role);
                 if let Some(presence) = presence {
                     changes.set_metadata_kinds(presence.after);
                 }
@@ -445,12 +424,12 @@ impl<T: SessionStream> SessionData<T> {
                     .imap_ctx(tag, trc::location!())?;
             }
             (None, Some(presence)) => {
-                update_mailbox_presence(
-                    batch,
+                Mailbox::rewrite_presence(
+                    &current,
+                    presence.after,
                     mailbox.account_id,
                     mailbox.mailbox_id,
-                    &current,
-                    presence,
+                    batch,
                 )
                 .imap_ctx(tag, trc::location!())?;
             }
@@ -472,7 +451,15 @@ fn entry_value<'x>(entry: &'x EntryValue<'_>) -> (&'x str, Option<&'x [u8]>) {
     (entry.entry.path.as_ref(), entry.value.as_deref())
 }
 
-fn use_attr_error(tag: &str, details: String) -> trc::Error {
+fn over_quota(tag: &str) -> trc::Error {
+    trc::ImapEvent::Error
+        .into_err()
+        .details("Quota exceeded.")
+        .code(ResponseCode::OverQuota)
+        .id(CompactString::from(tag))
+}
+
+fn use_attr_error(tag: &str, details: impl Into<trc::Value>) -> trc::Error {
     trc::ImapEvent::Error
         .into_err()
         .details(details)

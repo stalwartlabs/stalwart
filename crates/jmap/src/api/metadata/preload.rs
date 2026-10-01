@@ -38,14 +38,18 @@ impl MetadataPreload {
         let mut preload = MetadataPreload::default();
         for (id, object) in updates.into_iter().flat_map(VecMap::iter) {
             if let MaybeInvalid::Value(id) = id
-                && let Some(kinds) = stored(id.document_id())
                 && let Some(object) = object.as_object()
             {
-                for root in object
+                let mut roots = object
                     .keys()
                     .filter_map(|key| key.as_property().and_then(MetadataProperty::metadata_root))
+                    .peekable();
+                if roots.peek().is_some()
+                    && let Some(kinds) = stored(id.document_id())
                 {
-                    preload.add_root(id.document_id(), root, kinds);
+                    for root in roots {
+                        preload.add_root(id.document_id(), root, kinds);
+                    }
                 }
             }
         }

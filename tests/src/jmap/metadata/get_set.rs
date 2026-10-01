@@ -20,6 +20,7 @@ pub async fn test(test: &TestServer) {
         replace_and_patch(&ctx, owner, &parents, ty).await;
         atomic_updates(&ctx, owner, &parents, ty).await;
     }
+    vacation_script(&ctx, owner).await;
 
     ctx.cleanup(&[owner]).await;
 }
@@ -49,16 +50,17 @@ async fn create_and_read(ctx: &Ctx<'_>, owner: &Account, parents: &Parents, ty: 
     let object = ctx
         .get_one(owner, owner, ty, &id, None, Using::Metadata)
         .await;
+    let by_default = ty != MetaType::Email;
     assert_eq!(
         object.get("metadata"),
-        Some(&shared),
-        "{}: default properties with the capability must include metadata: {object}",
+        by_default.then_some(&shared),
+        "{}: default properties with the capability include metadata for every type but Email: {object}",
         ty.name()
     );
     assert_eq!(
         object.get("privateMetadata"),
-        Some(&private),
-        "{}: default properties with the capability must include privateMetadata: {object}",
+        by_default.then_some(&private),
+        "{}: default properties with the capability include privateMetadata for every type but Email: {object}",
         ty.name()
     );
 
@@ -355,4 +357,121 @@ async fn atomic_updates(ctx: &Ctx<'_>, owner: &Account, parents: &Parents, ty: M
         .await;
 
     ctx.destroy(owner, ty, &[&id]).await;
+}
+
+async fn vacation_script(ctx: &Ctx<'_>, owner: &Account) {
+    let account_id = owner.id_string();
+    let response = owner
+        .jmap_request(
+            &[
+                "urn:ietf:params:jmap:core",
+                "urn:ietf:params:jmap:vacationresponse",
+            ],
+            json!([[
+                "VacationResponse/set",
+                {
+                    "accountId": account_id,
+                    "update": {"singleton": {
+                        "isEnabled": true,
+                        "subject": "Away",
+                        "textBody": "Back soon."
+                    }}
+                },
+                "0"
+            ]]),
+        )
+        .await;
+    assert!(
+        response
+            .pointer("/methodResponses/0/1/updated/singleton")
+            .is_some(),
+        "Vacation response not enabled: {response:?}"
+    );
+    let response = ctx
+        .method(
+            owner,
+            Using::Metadata,
+            "SieveScript/get",
+            json!({"accountId": account_id, "ids": null, "properties": ["id", "name"]}),
+        )
+        .await;
+    let id = response
+        .pointer("/methodResponses/0/1/list")
+        .and_then(Value::as_array)
+        .and_then(|list| {
+            list.iter()
+                .find(|script| script.get("name").and_then(Value::as_str) == Some("vacation"))
+        })
+        .and_then(|script| script.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("No vacation script: {response:?}"))
+        .to_string();
+
+    ctx.update_ok(
+        owner,
+        owner,
+        MetaType::SieveScript,
+        &id,
+        json!({"metadata/x.example": {"note": "kept"}}),
+    )
+    .await;
+    ctx.assert_metadata(
+        owner,
+        owner,
+        MetaType::SieveScript,
+        &id,
+        json!({"x.example": {"note": "kept"}}),
+        json!({}),
+    )
+    .await;
+    for patch in [
+        json!({"name": "renamed"}),
+        json!({"name": "renamed", "metadata/x.example": {"note": "changed"}}),
+    ] {
+        ctx.update_err(owner, owner, MetaType::SieveScript, &id, patch)
+            .await
+            .assert_type(SetErrorType::Forbidden);
+    }
+    ctx.assert_metadata(
+        owner,
+        owner,
+        MetaType::SieveScript,
+        &id,
+        json!({"x.example": {"note": "kept"}}),
+        json!({}),
+    )
+    .await;
+
+    let response = owner
+        .jmap_request(
+            &[
+                "urn:ietf:params:jmap:core",
+                "urn:ietf:params:jmap:vacationresponse",
+                "urn:ietf:params:jmap:sieve",
+            ],
+            json!([
+                [
+                    "VacationResponse/set",
+                    {"accountId": account_id, "update": {"singleton": {"isEnabled": false}}},
+                    "0"
+                ],
+                [
+                    "SieveScript/set",
+                    {"accountId": account_id, "onSuccessDeactivateScript": true},
+                    "1"
+                ],
+                [
+                    "SieveScript/set",
+                    {"accountId": account_id, "destroy": [id]},
+                    "2"
+                ]
+            ]),
+        )
+        .await;
+    assert!(
+        response
+            .pointer("/methodResponses/2/1/destroyed/0")
+            .is_some(),
+        "Vacation script not removed: {response:?}"
+    );
 }

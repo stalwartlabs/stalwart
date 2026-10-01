@@ -100,16 +100,6 @@ impl MetadataPatches {
         self.patches.iter().any(|patch| patch.key.root == root)
     }
 
-    pub fn unsupported<P: MetadataProperty>(&self) -> SetError<P> {
-        SetError::invalid_properties()
-            .with_properties(
-                self.patches
-                    .iter()
-                    .map(|patch| Key::Owned(patch.key.to_path())),
-            )
-            .with_description(UNSUPPORTED)
-    }
-
     pub(super) fn reject_unsupported<P, E>(object: &Value<'_, P, E>) -> Result<(), SetError<P>>
     where
         P: MetadataProperty,
@@ -310,11 +300,11 @@ fn encode<P: Property, E: Element<Property = P>>(
 ) -> Result<EncodedJson, InvalidValue> {
     EncodedJson::encode(value).map_err(|error| InvalidValue {
         error,
-        depth: value_depth(value, 0).max(1),
+        depth: value_depth(value, 0),
     })
 }
 
-fn value_depth<P: Property, E: Element<Property = P>>(
+pub(super) fn value_depth<P: Property, E: Element<Property = P>>(
     value: &Value<'_, P, E>,
     nesting: u32,
 ) -> u32 {

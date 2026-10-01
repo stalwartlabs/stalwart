@@ -18,7 +18,7 @@ impl Store {
         U: Deserialize + 'static,
     {
         #[cfg(feature = "test_mode")]
-        crate::dispatch::StoreOps::count_get_value();
+        let key = crate::dispatch::StoreOps::count_get_value(key);
 
         match self {
             #[cfg(feature = "sqlite")]
@@ -73,7 +73,7 @@ impl Store {
         cb: impl for<'x> FnMut(&'x [u8], &'x [u8]) -> trc::Result<bool> + Sync + Send,
     ) -> trc::Result<()> {
         #[cfg(feature = "test_mode")]
-        crate::dispatch::StoreOps::count_iterate(1);
+        let params = crate::dispatch::StoreOps::count_iterate(params);
 
         let start_time = Instant::now();
         let result = match self {
@@ -125,7 +125,7 @@ impl Store {
         let total = ranges.len();
 
         #[cfg(feature = "test_mode")]
-        crate::dispatch::StoreOps::count_iterate(total);
+        crate::dispatch::StoreOps::count_iterate_many(&ranges);
 
         let result = match self {
             #[cfg(feature = "sqlite")]

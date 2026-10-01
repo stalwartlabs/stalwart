@@ -5,7 +5,6 @@
  */
 
 use super::{dead_properties, dead_property_names};
-use crate::common::dead::text_of;
 use common::storage::dav::DISPLAY_NAME_PROPERTY;
 use dav_proto::schema::property::DavProperty;
 use std::borrow::Cow;
@@ -69,5 +68,5 @@ fn display_names_are_read_back_as_text() {
         .view()
         .dav_property(&DISPLAY_NAME_PROPERTY)
         .expect("stored display name");
-    assert_eq!(text_of(view).as_deref(), Some("Report"));
+    assert_eq!(view.text().as_deref(), Some("Report"));
 }

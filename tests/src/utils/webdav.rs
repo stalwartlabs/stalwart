@@ -425,9 +425,7 @@ impl DummyWebDavClient {
             patch_prop.get(key.lookup_key()).with_status(StatusCode::OK);
         }
         for key in &expect_remove {
-            patch_prop
-                .get(key.lookup_key())
-                .with_status(StatusCode::NO_CONTENT);
+            patch_prop.get(key.lookup_key()).with_status(StatusCode::OK);
         }
 
         let response = self

@@ -669,7 +669,7 @@ impl DavRequestHandler for Server {
 
                 match err_type {
                     EventType::Limit(LimitEvent::Quota | LimitEvent::TenantQuota) => {
-                        HttpResponse::new(StatusCode::PRECONDITION_FAILED)
+                        HttpResponse::new(StatusCode::INSUFFICIENT_STORAGE)
                             .with_xml_body(
                                 ErrorResponse::new(BaseCondition::QuotaNotExceeded)
                                     .with_namespace(match resource {

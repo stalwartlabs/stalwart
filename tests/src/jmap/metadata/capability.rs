@@ -176,7 +176,11 @@ async fn private_disabled(ctx: &Ctx<'_>, owner: &Account, parents: &super::fixtu
             .await;
         assert_eq!(
             object.get("metadata"),
-            Some(&json!({"x.example": {"a": 1}}))
+            (ty != MetaType::Email)
+                .then(|| json!({"x.example": {"a": 1}}))
+                .as_ref(),
+            "{}: {object}",
+            ty.name()
         );
         assert!(
             object.get("privateMetadata").is_none(),

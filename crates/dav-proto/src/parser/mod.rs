@@ -9,7 +9,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use quick_xml::events::BytesStart;
+use quick_xml::events::{BytesStart, Event};
 use tokenizer::Tokenizer;
 
 use crate::schema::{Element, NamedElement, Namespace};
@@ -53,6 +53,7 @@ pub enum Token<'x> {
     Bytes(Cow<'x, [u8]>),
     Text(Cow<'x, str>),
     UnknownElement(RawElement<'x>),
+    Content(Event<'x>),
     Eof,
 }
 
@@ -112,6 +113,7 @@ impl Token<'_> {
             Token::Bytes(bytes) => Token::Bytes(bytes.into_owned().into()),
             Token::Text(text) => Token::Text(text.into_owned().into()),
             Token::UnknownElement(raw) => Token::UnknownElement(raw.into_owned()),
+            Token::Content(event) => Token::Content(event.into_owned()),
             Token::Eof => Token::Eof,
         }
     }

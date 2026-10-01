@@ -1923,7 +1923,6 @@ dependencies = [
  "serde_json",
  "trc",
  "types",
- "unicode-normalization",
 ]
 
 [[package]]
@@ -4181,7 +4180,6 @@ dependencies = [
  "calcard",
  "common",
  "compact_str",
- "dav-proto",
  "directory",
  "email",
  "encodify",
@@ -9278,6 +9276,7 @@ dependencies = [
  "rkyv",
  "serde",
  "trc",
+ "unicode-normalization",
  "utils",
 ]
 

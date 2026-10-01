@@ -10,15 +10,19 @@ use crate::{
     common::{
         ContainerOperation, assert_parent_limit,
         dead::{
-            ContainerRequest, ContainerWrites, DeadContainers, container_kinds, read_container,
-            stored_entry,
+            ContainerRequest, ContainerWrites, DeadContainers, check_growth, container_kinds,
+            copy_growth, read_container,
         },
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
     file::DavFileResource,
 };
-use common::{DavName, GroupwareResources, Server, auth::AccessToken};
+use common::{
+    DavName, GroupwareResources, Server,
+    auth::AccessToken,
+    storage::{index::PresenceFlags, metadata::StoredEntry},
+};
 use dav_proto::{Depth, RequestHeaders};
 use groupware::{
     DestroyArchive,
@@ -33,7 +37,6 @@ use groupware::{
         schedule::{EventAlarmScheduler, EventAlarmUsers},
         storage::{DirectChangeNotification, NotificationQuota},
     },
-    metadata::MetadataCleanup,
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -736,6 +739,15 @@ async fn copy_event(
         )
         .await
         .caused_by(trc::location!())?;
+        check_growth(
+            server,
+            to_account_id,
+            container
+                .as_ref()
+                .map_or(0, |container| copy_growth(container, None)),
+        )
+        .await
+        .caused_by(trc::location!())?;
         new_event.set_metadata_kinds(container_kinds(container.as_ref()));
         if to_document_id.is_none() {
             server.assert_object_quota(
@@ -765,7 +777,6 @@ async fn copy_event(
                 .copy(server, container, to_document_id, None, &mut batch)
                 .await
                 .caused_by(trc::location!())?;
-            copies.finish(server).await.caused_by(trc::location!())?;
         }
         new_event
             .insert(
@@ -1033,19 +1044,28 @@ async fn move_event(
         )
         .await
         .caused_by(trc::location!())?;
-        new_event.set_metadata_kinds(container_kinds(container.as_ref()));
-
-        let source_cleanup = MetadataCleanup::with_entries(
+        check_growth(
             server,
-            access_token.account_tenant_ids(),
-            from_account_id,
-            Collection::CalendarEvent,
+            to_account_id,
             container
                 .as_ref()
-                .map(|container| stored_entry(from_document_id, container)),
+                .map_or(0, |container| copy_growth(container, None)),
         )
         .await
         .caused_by(trc::location!())?;
+        new_event.set_metadata_kinds(container_kinds(container.as_ref()));
+
+        let source_cleanup = server
+            .container_cleanup_from(
+                access_token.account_tenant_ids(),
+                from_account_id,
+                Collection::CalendarEvent,
+                container
+                    .as_ref()
+                    .map(|container| StoredEntry::from_container(from_document_id, container)),
+            )
+            .await
+            .caused_by(trc::location!())?;
         DestroyArchive(event)
             .delete_with_cleanup(
                 server,
@@ -1100,7 +1120,6 @@ async fn move_event(
                 .copy(server, container, to_document_id, None, &mut batch)
                 .await
                 .caused_by(trc::location!())?;
-            copies.finish(server).await.caused_by(trc::location!())?;
         }
         new_event
             .insert(
@@ -1285,14 +1304,24 @@ async fn copy_container(
         DeadContainers::default()
     };
     let mut event_copies = ContainerWrites::new(to_account_id, Collection::CalendarEvent);
-    let source_cleanup = MetadataCleanup::with_entries(
+    let source_cleanup = server
+        .container_cleanup_from(
+            access_token.account_tenant_ids(),
+            from_account_id,
+            Collection::CalendarEvent,
+            event_containers
+                .stored_entries(from_account_id, Collection::CalendarEvent)
+                .filter(|_| remove_source),
+        )
+        .await
+        .caused_by(trc::location!())?;
+    check_growth(
         server,
-        access_token.account_tenant_ids(),
-        from_account_id,
-        Collection::CalendarEvent,
-        event_containers
-            .stored_entries(from_account_id, Collection::CalendarEvent)
-            .filter(|_| remove_source),
+        to_account_id,
+        calendar_container
+            .as_ref()
+            .map_or(0, |container| copy_growth(container, None))
+            + event_containers.stored_len(),
     )
     .await
     .caused_by(trc::location!())?;
@@ -1389,15 +1418,19 @@ async fn copy_container(
             let calendar = calendar_
                 .to_unarchived::<Calendar>()
                 .caused_by(trc::location!())?;
-            let cleanup = MetadataCleanup::preload(
-                server,
-                access_token.account_tenant_ids(),
-                to_account_id,
-                Collection::CalendarEvent,
-                to_children.iter().copied(),
-            )
-            .await
-            .caused_by(trc::location!())?;
+            let cleanup = server
+                .preload_container_cleanup(
+                    Some(access_token.account_tenant_ids()),
+                    to_account_id,
+                    Collection::CalendarEvent,
+                    &to_children
+                        .iter()
+                        .filter(|(_, kinds)| !kinds.is_empty())
+                        .map(|(document_id, _)| *document_id)
+                        .collect(),
+                )
+                .await
+                .caused_by(trc::location!())?;
 
             DestroyArchive(calendar)
                 .delete_with_events(
@@ -1436,7 +1469,6 @@ async fn copy_container(
             .copy(server, container, to_document_id, None, &mut batch)
             .await
             .caused_by(trc::location!())?;
-        copies.finish(server).await.caused_by(trc::location!())?;
     }
     calendar
         .insert(
@@ -1626,19 +1658,27 @@ async fn copy_container(
             .has_available_quota(&to_account, required_space)
             .await?;
     }
-    event_copies
-        .finish(server)
-        .await
-        .caused_by(trc::location!())?;
 
     if remove_source {
+        let calendar_cleanup = server
+            .container_cleanup_from(
+                access_token.account_tenant_ids(),
+                from_account_id,
+                Collection::Calendar,
+                calendar_container
+                    .as_ref()
+                    .map(|container| StoredEntry::from_container(from_document_id, container)),
+            )
+            .await
+            .caused_by(trc::location!())?;
         DestroyArchive(old_calendar)
-            .delete(
+            .delete_with_cleanup(
                 server,
                 access_token.account_tenant_ids(),
                 from_account_id,
                 from_document_id,
                 from_resource_path.into(),
+                &calendar_cleanup,
                 &mut batch,
             )
             .await

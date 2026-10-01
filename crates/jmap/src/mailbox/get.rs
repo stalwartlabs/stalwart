@@ -21,7 +21,7 @@ use crate::{
         acl::JmapRights,
         metadata::{MetadataDocuments, MetadataType, ObjectMetadata, select_properties},
     },
-    changes::state::{JmapCacheState, MetadataStateManager},
+    changes::state::JmapCacheState,
 };
 
 pub trait MailboxGet: Sync + Send {
@@ -59,10 +59,13 @@ impl MailboxGet for Server {
             using,
         )?;
         let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Mailbox);
-        let viewer = object_metadata.viewer();
         let metadata = object_metadata.get(selection);
+        let metadata_slots = metadata.as_ref().map_or(0, |get| {
+            usize::from(get.wants_shared()) + usize::from(get.wants_private())
+        });
         let account_id = request.account_id.document_id();
         let personal_id = access_token.personal_id(account_id, Collection::Mailbox);
+        let sampled = object_metadata.viewer_change_id(self, account_id).await?;
         let cache = self.get_cached_messages(account_id).await?;
         let shared_ids = if access_token.is_shared(account_id) {
             cache.shared_mailboxes(access_token, Acl::Read).into()
@@ -84,15 +87,7 @@ impl MailboxGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: Some(
-                self.metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::Mailbox,
-                    cache.get_state(true),
-                )
-                .await?,
-            ),
+            state: Some(sampled.state(cache.get_state(true))),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };
@@ -134,7 +129,7 @@ impl MailboxGet for Server {
                 continue;
             };
 
-            let mut mailbox = Map::with_capacity(properties.len());
+            let mut mailbox = Map::with_capacity(properties.len() + metadata_slots);
 
             for property in &properties {
                 let value = match property {

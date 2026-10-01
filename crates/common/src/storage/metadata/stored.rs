@@ -14,7 +14,7 @@ use store::{
         ArchiveVersion, BatchBuilder,
         assert::AssertValue,
         key::DeserializeBigEndian,
-        metadata::{MetadataClass, StoredMetadata},
+        metadata::{MetadataBuf, MetadataClass, StoredMetadata},
     },
 };
 use trc::AddContext;
@@ -46,6 +46,14 @@ impl StoredEntry {
             document_id,
             size: u32::try_from(stored.len()).unwrap_or(u32::MAX),
             hash: StoredMetadata::trailer_hash(stored).ok(),
+        }
+    }
+
+    pub fn from_container(document_id: u32, container: &MetadataBuf) -> Self {
+        StoredEntry {
+            document_id,
+            size: container.stored_len(),
+            hash: Some(container.hash()),
         }
     }
 
@@ -126,32 +134,10 @@ impl Server {
         match documents.len() {
             0 => return Ok(entries),
             1 => {
-                let document_id = documents.min();
                 return self
-                    .core
-                    .storage
-                    .data
-                    .get_value::<StoredValue>(metadata_key(
-                        account_id,
-                        u8::from(collection),
-                        document_id,
-                        class,
-                    ))
+                    .stored_entry(account_id, collection, class, documents.min())
                     .await
-                    .map(|value| {
-                        value
-                            .map(|StoredValue(entry)| StoredEntry {
-                                document_id,
-                                ..entry
-                            })
-                            .into_iter()
-                            .collect()
-                    })
-                    .add_context(|err| {
-                        err.caused_by(trc::location!())
-                            .account_id(account_id)
-                            .document_id(document_id)
-                    });
+                    .map(|entry| entry.into_iter().collect());
             }
             _ => {}
         }
@@ -171,6 +157,36 @@ impl Server {
         )
         .await?;
         Ok(entries)
+    }
+
+    pub(super) async fn stored_entry(
+        &self,
+        account_id: u32,
+        collection: Collection,
+        class: MetadataClass,
+        document_id: u32,
+    ) -> trc::Result<Option<StoredEntry>> {
+        self.core
+            .storage
+            .data
+            .get_value::<StoredValue>(metadata_key(
+                account_id,
+                u8::from(collection),
+                document_id,
+                class,
+            ))
+            .await
+            .map(|value| {
+                value.map(|StoredValue(entry)| StoredEntry {
+                    document_id,
+                    ..entry
+                })
+            })
+            .add_context(|err| {
+                err.caused_by(trc::location!())
+                    .account_id(account_id)
+                    .document_id(document_id)
+            })
     }
 }
 

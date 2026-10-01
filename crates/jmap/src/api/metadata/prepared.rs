@@ -4,30 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::write::ContainerChange;
 use common::storage::{
     dav::FilePresence,
-    metadata::{
-        MetadataLog, MetadataPresence, MetadataWrite, PrivateMetadataCommit, PrivateMetadataWrite,
-    },
+    metadata::{MetadataPresence, MetadataWrite, PrivateMetadataCommit, PrivateMetadataWrite},
 };
 use store::write::{BatchBuilder, PendingId};
 use trc::AddContext;
-use types::{collection::Collection, metadata::MetadataKinds};
+use types::metadata::{EncodedMetadata, MetadataKinds};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PreparedMetadata {
-    pub(super) shared: Option<SharedWrite>,
+    pub(super) shared: Option<MetadataWrite>,
     pub(super) private: Option<PrivateMetadataWrite>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SharedWrite {
-    pub account_id: u32,
-    pub tenant_id: Option<u32>,
-    pub collection: Collection,
-    pub log: MetadataLog,
-    pub change: ContainerChange,
 }
 
 impl PreparedMetadata {
@@ -40,12 +28,17 @@ impl PreparedMetadata {
     }
 
     pub fn shared_kinds(&self) -> Option<MetadataKinds> {
-        self.shared.as_ref().map(|write| write.change.kinds())
+        self.shared.as_ref().map(|write| {
+            write
+                .next
+                .as_ref()
+                .map_or(MetadataKinds::NONE, EncodedMetadata::kinds)
+        })
     }
 
     pub fn file_presence(&self) -> Option<FilePresence> {
         self.shared.as_ref().map(|write| {
-            write.change.next().map_or(FilePresence::NONE, |next| {
+            write.next.as_ref().map_or(FilePresence::NONE, |next| {
                 FilePresence::from_view(&next.view())
             })
         })
@@ -60,7 +53,7 @@ impl PreparedMetadata {
         let document_id = document_id.into();
         let presence = self
             .shared
-            .map(|write| write.into_write(document_id).build(batch))
+            .map(|write| write.build(document_id, batch))
             .transpose()
             .caused_by(trc::location!())?;
         if let Some(write) = self.private {
@@ -69,20 +62,5 @@ impl PreparedMetadata {
                 .caused_by(trc::location!())?;
         }
         Ok(presence)
-    }
-}
-
-impl SharedWrite {
-    fn into_write(self, document_id: PendingId) -> MetadataWrite {
-        let (previous, next) = self.change.into_parts();
-        MetadataWrite {
-            account_id: self.account_id,
-            tenant_id: self.tenant_id,
-            collection: self.collection,
-            document_id,
-            previous,
-            next,
-            log: self.log,
-        }
     }
 }

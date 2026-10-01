@@ -1,206 +1,224 @@
 {
-  "set": [
+  "ops": [
     {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop0"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value0"
-            }
-          ]
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop0"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value0"
+              }
+            ]
+          }
         }
       }
     },
     {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop1"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value1"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop2"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value2"
-            }
-          ]
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop1"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value1"
+              }
+            ]
+          }
         }
       }
     },
     {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop3"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value3"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop4"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value4"
-            }
-          ]
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop2"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value2"
+              }
+            ]
+          }
         }
       }
     },
     {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop5"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value5"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop6"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value6"
-            }
-          ]
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop3"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value3"
+              }
+            ]
+          }
         }
       }
     },
     {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop7"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value7"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop8"
-        }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value8"
-            }
-          ]
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop4"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value4"
+              }
+            ]
+          }
         }
       }
     },
     {
-      "property": {
-        "type": "Dead",
-        "data": {
-          "namespace": "http://example.com/neon/litmus/",
-          "name": "prop9"
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop5"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value5"
+              }
+            ]
+          }
         }
-      },
-      "value": {
-        "Dead": {
-          "lang": null,
-          "attributes": [],
-          "children": [
-            {
-              "Text": "value9"
-            }
-          ]
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop6"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value6"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop7"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value7"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop8"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Set": {
+        "property": {
+          "type": "Dead",
+          "data": {
+            "namespace": "http://example.com/neon/litmus/",
+            "name": "prop9"
+          }
+        },
+        "value": {
+          "Dead": {
+            "lang": null,
+            "attributes": [],
+            "children": [
+              {
+                "Text": "value9"
+              }
+            ]
+          }
         }
       }
     }
-  ],
-  "remove": [],
-  "set_first": true
+  ]
 }

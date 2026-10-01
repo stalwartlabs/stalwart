@@ -5,16 +5,18 @@
  */
 
 use super::ImapContext;
-use crate::core::{AccountCaches, MailboxId, SelectedMailbox, Session, SessionData};
+use crate::core::{AccountCaches, MailboxId, Resolved, SelectedMailbox, Session, SessionData};
 use common::{
-    MessageUid, ipc::PushNotification, network::SessionStream, storage::index::ObjectIndexBuilder,
+    MessageStoreCache, MessageUid, ipc::PushNotification, network::SessionStream,
+    storage::index::ObjectIndexBuilder,
 };
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
     mailbox::{JUNK_ID, TRASH_ID},
     message::{
-        copy::{CopyMessageError, CopyMetadata, EmailCopy},
+        copy::{CopyMessageError, EmailCopy},
         ingest::EmailIngest,
+        ingest_metadata::IngestMetadata,
         messagedata::{MessageData, PendingMessageData},
     },
 };
@@ -38,7 +40,7 @@ use types::{
     acl::Acl,
     collection::{Collection, SyncCollection, VanishedCollection},
     keyword::Keyword,
-    metadata::MetadataKinds,
+    metadata::EncodedMetadata,
     type_state::{DataType, StateChange},
 };
 
@@ -470,6 +472,7 @@ impl<T: SessionStream> SessionData<T> {
             };
             let mut train_batch = BatchBuilder::new();
             let mut did_train = false;
+            let mut flagged_containers = None;
             train_batch.with_account_id(src_account_id);
             'next_message: for imap_id in &ids {
                 let id = imap_id.id;
@@ -497,6 +500,20 @@ impl<T: SessionStream> SessionData<T> {
                     error = Some((ResponseCode::Limit, TOO_MANY_KEYWORDS));
                     continue;
                 }
+                let shared = if email.is_some_and(|email| !cache.metadata_kinds(email).is_empty()) {
+                    if flagged_containers.is_none() {
+                        flagged_containers = Some(
+                            self.flagged_containers(src_account_id, &cache, &ids)
+                                .await
+                                .imap_ctx(&arguments.tag, trc::location!())?,
+                        );
+                    }
+                    flagged_containers
+                        .as_mut()
+                        .and_then(|containers| take_container(containers, id))
+                } else {
+                    None
+                };
                 match self
                     .server
                     .copy_message(
@@ -506,9 +523,7 @@ impl<T: SessionStream> SessionData<T> {
                         vec![dest_mailbox_id],
                         keywords,
                         email.map(|email| email.received_at()).unwrap_or_else(now),
-                        CopyMetadata::from_source(
-                            email.map_or(MetadataKinds::NONE, |email| cache.metadata_kinds(email)),
-                        ),
+                        IngestMetadata::new(shared, None),
                         self.session_id,
                     )
                     .await
@@ -852,6 +867,49 @@ impl<T: SessionStream> SessionData<T> {
             Ok(None)
         }
     }
+}
+
+impl<T: SessionStream> SessionData<T> {
+    async fn flagged_containers(
+        &self,
+        account_id: u32,
+        cache: &MessageStoreCache,
+        ids: &[Resolved],
+    ) -> trc::Result<Vec<(u32, Option<EncodedMetadata>)>> {
+        let flagged = ids
+            .iter()
+            .filter(|resolved| {
+                cache
+                    .email_by_id(&resolved.id)
+                    .is_some_and(|email| !cache.metadata_kinds(email).is_empty())
+            })
+            .map(|resolved| resolved.id)
+            .collect::<RoaringBitmap>();
+        let mut containers = Vec::with_capacity(flagged.len() as usize);
+        self.server
+            .metadata_containers(
+                account_id,
+                Collection::Email,
+                &flagged,
+                |document_id, view, _| {
+                    containers.push((document_id, EncodedMetadata::from_view(&view)));
+                    Ok(true)
+                },
+            )
+            .await?;
+        containers.sort_unstable_by_key(|(document_id, _)| *document_id);
+        Ok(containers)
+    }
+}
+
+fn take_container(
+    containers: &mut [(u32, Option<EncodedMetadata>)],
+    document_id: u32,
+) -> Option<EncodedMetadata> {
+    let position = containers
+        .binary_search_by_key(&document_id, |(id, _)| *id)
+        .ok()?;
+    containers.get_mut(position)?.1.take()
 }
 
 async fn retry_after_conflict(

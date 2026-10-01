@@ -18,7 +18,6 @@ use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
     contact::{AddressBook, ContactCard},
-    metadata::MetadataCleanup,
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -125,15 +124,19 @@ impl CardDeleteRequestHandler for Server {
                 .filter(|r| !r.is_container())
                 .map(|r| (r.document_id(), r.resource.metadata_kinds()))
                 .collect::<Vec<_>>();
-            let cleanup = MetadataCleanup::preload(
-                self,
-                access_token.account_tenant_ids(),
-                account_id,
-                Collection::ContactCard,
-                children.iter().copied(),
-            )
-            .await
-            .caused_by(trc::location!())?;
+            let cleanup = self
+                .preload_container_cleanup(
+                    Some(access_token.account_tenant_ids()),
+                    account_id,
+                    Collection::ContactCard,
+                    &children
+                        .iter()
+                        .filter(|(_, kinds)| !kinds.is_empty())
+                        .map(|(document_id, _)| *document_id)
+                        .collect(),
+                )
+                .await
+                .caused_by(trc::location!())?;
             DestroyArchive(book)
                 .delete_with_cards(
                     self,

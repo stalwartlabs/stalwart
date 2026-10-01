@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:Z="http://ns.example.com/z/">
+  <D:remove><D:prop><Z:a/></D:prop></D:remove>
+  <D:set><D:prop><Z:a>1</Z:a><D:displayname>first</D:displayname></D:prop></D:set>
+  <D:remove><D:prop><Z:a/><D:displayname/></D:prop></D:remove>
+  <D:set><D:prop><Z:b>2</Z:b></D:prop></D:set>
+</D:propertyupdate>

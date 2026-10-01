@@ -138,7 +138,7 @@ impl SetArguments {
                 token => Entry::parse(token.as_bytes())?,
             };
             let value = match tokens.next().ok_or("Missing entry value.")? {
-                Token::NilAtom => None,
+                Token::Argument(value) if value.eq_ignore_ascii_case(b"NIL") => None,
                 Token::ParenthesisOpen | Token::ParenthesisClose => {
                     return Err("Missing entry value.".into());
                 }
@@ -468,6 +468,21 @@ mod tests {
                     tag: "a".into(),
                     mailbox_name: "nil".into(),
                     entries: vec![value(entry(Scope::Shared, "/comment"), None)],
+                },
+            ),
+            (
+                concat!(
+                    "a SETMETADATA \"nil\" (/shared/comment {3+}\r\nnil ",
+                    "/private/comment ~{3+}\r\nNIL /shared/vendor/a/b NIL)\r\n"
+                ),
+                SetArguments {
+                    tag: "a".into(),
+                    mailbox_name: "nil".into(),
+                    entries: vec![
+                        value(entry(Scope::Shared, "/comment"), Some(b"nil")),
+                        value(entry(Scope::Shared, "/vendor/a/b"), None),
+                        value(entry(Scope::Private, "/comment"), Some(b"NIL")),
+                    ],
                 },
             ),
             (

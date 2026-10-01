@@ -47,7 +47,8 @@ impl MysqlStore {
 
             match err {
                 CommitError::Mysql(Error::Server(err))
-                    if [ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT].contains(&err.code)
+                    if [ER_LOCK_DEADLOCK, ER_LOCK_WAIT_TIMEOUT, ER_DUP_ENTRY]
+                        .contains(&err.code)
                         && retry_count < MAX_COMMIT_ATTEMPTS
                         && start.elapsed() < MAX_COMMIT_TIME => {}
                 CommitError::Mysql(Error::Server(err)) if err.code == ER_DUP_ENTRY => {
@@ -120,12 +121,13 @@ impl MysqlStore {
                             let value = set_value.resolve(result)?;
                             let value = &*value;
                             if !matches!(subspace.shape(), Shape::Presence) {
-                                let updated = match asserted_values.get(key) {
+                                let updated = match asserted_values.get_mut(key) {
                                     Some(true) => {
                                         let s = trx.prep(&*stmts.update_value).await?;
                                         trx.exec_drop(&s, (value, key)).await
                                     }
-                                    Some(false) => {
+                                    Some(exists) => {
+                                        *exists = true;
                                         let s = trx.prep(&*stmts.insert_value).await?;
                                         trx.exec_drop(&s, (key, value)).await
                                     }
@@ -184,6 +186,10 @@ impl MysqlStore {
                                     if let Err(err) = updated {
                                         trx.rollback().await?;
                                         return Err(err.into());
+                                    }
+
+                                    if let Some(exists) = asserted_values.get_mut(key) {
+                                        *exists = true;
                                     }
                                 }
                                 MergeResult::Delete if exists => {

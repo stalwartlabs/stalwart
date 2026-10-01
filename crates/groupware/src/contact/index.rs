@@ -55,6 +55,10 @@ impl IndexableObject for AddressBook {
         ]
         .into_iter()
     }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        AddressBook::metadata_kinds(self)
+    }
 }
 
 impl IndexableObject for &ArchivedAddressBook {
@@ -113,6 +117,10 @@ impl IndexableObject for ContactCard {
             },
         ]
         .into_iter()
+    }
+
+    fn metadata_kinds(&self) -> MetadataKinds {
+        ContactCard::metadata_kinds(self)
     }
 }
 
@@ -503,7 +511,10 @@ mod tests {
     use super::*;
     use crate::contact::{CARD_META_DAV, CARD_META_JMAP};
     use calcard::vcard::VCard;
-    use common::{DavName, storage::index::GroupwareWrite};
+    use common::{
+        DavName,
+        storage::index::{GroupwareWrite, PresenceFlags},
+    };
     use rkyv::rancor::Error;
 
     const KINDS: [MetadataKinds; 4] = [
@@ -578,6 +589,7 @@ mod tests {
             let mut changed = card.clone();
             changed.set_metadata_kinds(kinds);
             assert_eq!(changed.metadata_kinds(), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&changed), kinds);
             assert_eq!(changed.meta_hash(), hash);
 
             let bytes = rkyv::to_bytes::<Error>(&changed).expect("the card archives");
@@ -609,6 +621,7 @@ mod tests {
             let mut book = AddressBook::default();
             book.set_metadata_kinds(kinds.union(MetadataKinds::IMAP));
             assert_eq!(book.metadata_kinds(), kinds);
+            assert_eq!(IndexableObject::metadata_kinds(&book), kinds);
             let bytes = rkyv::to_bytes::<Error>(&book).expect("the address book archives");
             let archived =
                 rkyv::access::<ArchivedAddressBook, Error>(&bytes).expect("the archive validates");

@@ -5,7 +5,6 @@
  */
 
 mod apply;
-mod containers;
 mod copy;
 mod filter;
 mod get;
@@ -23,7 +22,7 @@ mod writer;
 #[cfg(test)]
 mod tests;
 
-pub use containers::MetadataContainers;
+pub use common::storage::metadata::MetadataContainers;
 pub use filter::{ResourceScope, filter_containers, flagged_documents};
 pub use get::{MetadataDocuments, MetadataGet, MetadataValues};
 pub use object::ObjectMetadata;
@@ -33,10 +32,12 @@ pub use prepared::PreparedMetadata;
 pub use query::{MetadataQuery, PrivateCandidates};
 pub use reject::reject_uncommitted;
 pub use validate::{MetadataAccess, ValidatedPatches};
-pub use write::{ContainerChange, ContainerTarget, DetachedMetadata, MetadataUpdate};
-pub use writer::{MetadataWriter, NewMetadata};
+pub use write::MetadataUpdate;
+pub use writer::{MetadataTarget, MetadataWriter, NewMetadata};
 
-use common::{auth::AccessToken, config::metadata::MetadataConfig};
+use common::{
+    auth::AccessToken, config::metadata::MetadataConfig, storage::metadata::MetadataViewer,
+};
 use jmap_proto::{
     method::get::GetRequest,
     object::{
@@ -107,14 +108,14 @@ impl MetadataSupport {
         config: &MetadataConfig,
         access_token: &AccessToken,
         object: MetadataType,
+        viewer: Option<MetadataViewer>,
     ) -> Option<Self> {
         (config.data_types.contains(object.data_type())
             && access_token.has_permission(Permission::JmapMetadataGet))
         .then(|| MetadataSupport {
             object,
             vendor_namespaces: config.vendor_namespaces,
-            private: config.private_metadata
-                && access_token.has_permission(Permission::JmapMetadataPrivate),
+            private: viewer.is_some(),
             writable: access_token.has_permission(Permission::JmapMetadataSet),
             limits: config.limits(),
             query_max_scan: config.query_max_scan,
@@ -129,10 +130,6 @@ impl MetadataSupport {
         self.private
     }
 
-    pub fn limits(&self) -> &MetadataLimits {
-        &self.limits
-    }
-
     pub fn is_supported(&self, namespace: &Namespace<'_>, root: MetadataRoot) -> bool {
         match namespace {
             Namespace::Registered(namespace) => {
@@ -144,7 +141,7 @@ impl MetadataSupport {
     }
 }
 
-pub fn uses_metadata(using: CapabilityIds) -> bool {
+fn uses_metadata(using: CapabilityIds) -> bool {
     using.contains(Capability::Metadata)
 }
 

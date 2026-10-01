@@ -16,7 +16,6 @@ use crate::{
     common::{
         ArchivedResource,
         acl::{DavAclHandler, Privileges, current_user_privilege_set},
-        dead::text_of,
     },
     principal::{CurrentUserPrincipal, propfind::PrincipalPropFind},
 };
@@ -134,8 +133,7 @@ impl PropFindItemBuilder for Server {
                                 .and_then(|container| {
                                     container.view().dav_property(&DISPLAY_NAME_PROPERTY)
                                 })
-                                .and_then(text_of)
-                                .map(Cow::Owned)
+                                .and_then(|value| value.text())
                         } else {
                             archive
                                 .display_name(personal_id)

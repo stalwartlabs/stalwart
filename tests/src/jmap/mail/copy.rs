@@ -95,6 +95,58 @@ pub async fn test(test: &TestServer) {
             .is_none()
     );
 
+    // A copy that fails must leave the original in place
+    let ac1_email_id = client
+        .email_import(
+            concat!(
+                "From: bill@example.com\r\n",
+                "To: jdoe@example.com\r\n",
+                "Message-ID: <failed-copy@example.com>\r\n",
+                "Subject: Flair\r\n",
+                "\r\n",
+                "Fifteen is the minimum."
+            )
+            .as_bytes()
+            .to_vec(),
+            [&ac1_mailbox_id],
+            None::<Vec<&str>>,
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
+    client.set_default_account_id(Id::new(2).to_string());
+    for is_first_copy in [true, false] {
+        let mut request = client.build();
+        request
+            .copy_email(Id::new(1).to_string())
+            .on_success_destroy_original(!is_first_copy)
+            .create(&ac1_email_id)
+            .mailbox_id(&ac2_mailbox_id, true);
+        let created = request
+            .send()
+            .await
+            .unwrap()
+            .method_response_by_pos(0)
+            .unwrap_copy_email()
+            .unwrap()
+            .created(&ac1_email_id);
+        assert_eq!(
+            created.is_ok(),
+            is_first_copy,
+            "only the first copy of a message may succeed"
+        );
+    }
+    assert!(
+        client
+            .set_default_account_id(Id::new(1).to_string())
+            .email_get(&ac1_email_id, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .is_some(),
+        "a failed copy destroyed the original"
+    );
+
     // Empty store
     account.destroy_all_mailboxes_for_account(1).await;
     account.destroy_all_mailboxes_for_account(2).await;

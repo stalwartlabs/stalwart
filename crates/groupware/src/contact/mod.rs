@@ -66,10 +66,6 @@ impl AddressBook {
         tracked_kinds(self.presence)
     }
 
-    pub fn set_metadata_kinds(&mut self, kinds: MetadataKinds) {
-        self.presence = tracked_kinds(kinds.bits()).bits();
-    }
-
     pub fn preferences(&self, account_id: u32) -> &AddressBookPreferences {
         if self.preferences.len() == 1 {
             &self.preferences[0]

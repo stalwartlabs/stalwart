@@ -58,6 +58,7 @@ impl ContactCardGet for Server {
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::ContactCard);
         let metadata_get = metadata.get(selection);
         let account_id = request.account_id.document_id();
+        let sampled = metadata.viewer_change_id(self, account_id).await?;
         let cache = self
             .fetch_groupware_resources(
                 access_token.account_id(),
@@ -100,10 +101,7 @@ impl ContactCardGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: metadata
-                .state(self, account_id, cache.get_state(false))
-                .await?
-                .into(),
+            state: sampled.state(cache.get_state(false)).into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };

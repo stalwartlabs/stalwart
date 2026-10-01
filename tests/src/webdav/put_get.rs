@@ -312,7 +312,7 @@ pub async fn test(test: &TestServer) {
                 response.with_status(StatusCode::CREATED);
             } else {
                 response
-                    .with_status(StatusCode::PRECONDITION_FAILED)
+                    .with_status(StatusCode::INSUFFICIENT_STORAGE)
                     .with_failed_precondition("D:quota-not-exceeded", "");
                 did_fail = true;
                 break;

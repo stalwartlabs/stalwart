@@ -15,7 +15,13 @@ fuzz_target!(|data: &[u8]| {
         for (namespace, value) in view.jmap() {
             let _ = namespace.name();
             let _ = value.to_value::<Null, Null>();
-            let _ = value.members().count();
+            assert!(view.jmap_namespace(&namespace).is_some());
+            for (key, member) in value.members() {
+                assert!(value.get(key).is_some());
+                let _ = (member.kind(), member.len(), member.is_empty_object());
+                let _ = (member.as_str(), member.as_bool(), member.as_u64());
+                let _ = (member.as_i64(), member.as_f64(), member.items().count());
+            }
         }
         for (name, value) in view.dav() {
             let _ = value.to_value();

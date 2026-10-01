@@ -25,6 +25,7 @@ pub async fn test(test: &TestServer) {
         if ty.has_changes() {
             metadata_only_changes(&ctx, owner, &parents, ty).await;
             paging(&ctx, owner, &parents, ty).await;
+            created_and_destroyed(&ctx, owner, &parents, ty).await;
         } else {
             state_only(&ctx, owner, &parents, ty).await;
         }
@@ -266,6 +267,31 @@ async fn paging(ctx: &Ctx<'_>, owner: &Account, parents: &Parents, ty: MetaType)
     ctx.destroy(owner, ty, &[&a, &b]).await;
 }
 
+async fn created_and_destroyed(ctx: &Ctx<'_>, owner: &Account, parents: &Parents, ty: MetaType) {
+    let since = ctx.state(owner, owner, ty, Using::Metadata).await;
+    let id = ctx.create_ok(owner, ty, parents, 0, json!({})).await;
+    ctx.update_ok(
+        owner,
+        owner,
+        ty,
+        &id,
+        json!({"privateMetadata/p.example": {"n": 1}}),
+    )
+    .await;
+    ctx.destroy(owner, ty, &[&id]).await;
+
+    let response = ctx
+        .changes(owner, owner, ty, &since, json!({}), Using::Metadata)
+        .await;
+    for kind in ["created", "updated"] {
+        assert!(
+            !changes_list(&response, kind).contains(&id),
+            "{}: an object created and destroyed since the old state is listed in {kind}: {response:?}",
+            ty.name()
+        );
+    }
+}
+
 async fn state_only(ctx: &Ctx<'_>, owner: &Account, parents: &Parents, ty: MetaType) {
     let id = ctx.create_ok(owner, ty, parents, 0, json!({})).await;
     let s0 = ctx.state(owner, owner, ty, Using::Metadata).await;
@@ -397,6 +423,12 @@ async fn mailbox_union(ctx: &Ctx<'_>, owner: &Account, parents: &Parents) {
         sorted(&[&mailbox]),
         "{response:?}"
     );
+    let counts = sorted(&COUNT_PROPERTIES);
+    assert_eq!(
+        updated_properties(&response),
+        Some(counts.clone()),
+        "a count-only page must keep the count names when metadata-only changes are ignored: {response:?}"
+    );
 
     let since = ctx
         .state(owner, owner, MetaType::Mailbox, Using::Metadata)
@@ -439,6 +471,11 @@ async fn mailbox_union(ctx: &Ctx<'_>, owner: &Account, parents: &Parents) {
         changes_list(&response, "updated"),
         sorted(&[&mailbox]),
         "a mailbox whose counts also changed must stay: {response:?}"
+    );
+    assert_eq!(
+        updated_properties(&response),
+        Some(counts),
+        "ignored metadata must not be listed next to the counts: {response:?}"
     );
 
     ctx.destroy(owner, MetaType::Mailbox, &[&mailbox, &other])

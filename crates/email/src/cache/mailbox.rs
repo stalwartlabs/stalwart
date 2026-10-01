@@ -131,7 +131,7 @@ fn insert_item(cache: &mut MailboxesCacheBuilder, document_id: u32, mailbox: &Ar
         document_id,
         name: mailbox.name.as_str().into(),
         path: "".into(),
-        role: (&mailbox.role).into(),
+        role: mailbox.role(),
         parent_id: if parent_id > 0 {
             parent_id - 1
         } else {

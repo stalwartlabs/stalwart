@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::fixture::{Access, Ctx, MetaType, Parents, Using, depth_value};
-use crate::utils::{account::Account, jmap::JmapResponse, server::TestServer};
+use super::{
+    fixture::{Access, Ctx, MetaType, Parents, Using, depth_value},
+    private::share_target,
+};
+use crate::utils::{
+    account::Account,
+    jmap::{JmapResponse, JmapUtils},
+    server::TestServer,
+};
 use jmap_proto::error::set::SetErrorType;
 use serde_json::{Value, json};
 
@@ -21,17 +28,9 @@ pub async fn test(test: &TestServer) {
         shared_object(&ctx, owner, sharee, outsider, &parents, ty).await;
     }
     private_event(&ctx, owner, sharee, &parents).await;
+    sharee_mailbox_create(&ctx, owner, sharee, &parents).await;
 
     ctx.cleanup(&[owner, sharee, outsider]).await;
-}
-
-fn share_target<'x>(ty: MetaType, parents: &'x Parents, id: &'x str) -> &'x str {
-    match ty {
-        MetaType::Email => &parents.mailboxes[0],
-        MetaType::CalendarEvent => &parents.calendars[0],
-        MetaType::ContactCard => &parents.address_books[0],
-        _ => id,
-    }
 }
 
 async fn shared_object(
@@ -55,7 +54,7 @@ async fn shared_object(
             }),
         )
         .await;
-    let target = share_target(ty, parents, &id).to_string();
+    let target = share_target(ty, parents, &id, 0);
 
     ctx.share(owner, ty, &target, sharee, Some(Access::Read))
         .await;
@@ -304,4 +303,70 @@ async fn private_event(ctx: &Ctx<'_>, owner: &Account, sharee: &Account, parents
     )
     .await;
     ctx.destroy(owner, MetaType::CalendarEvent, &[&id]).await;
+}
+
+async fn sharee_mailbox_create(
+    ctx: &Ctx<'_>,
+    owner: &Account,
+    sharee: &Account,
+    parents: &Parents,
+) {
+    let parent = parents.mailboxes[0].as_str();
+    let response = ctx
+        .method(
+            owner,
+            Using::Plain,
+            "Mailbox/set",
+            json!({
+                "accountId": owner.id_string(),
+                "update": {parent: {
+                    format!("shareWith/{}", sharee.id_string()):
+                        {"mayReadItems": true, "mayCreateChild": true}
+                }}
+            }),
+        )
+        .await;
+    assert!(
+        response
+            .pointer(&format!("/methodResponses/0/1/updated/{parent}"))
+            .is_some(),
+        "Sharing mailbox {parent} failed: {response:?}"
+    );
+
+    for extra in [
+        json!({"metadata": {"x.example": {"v": 1}}}),
+        json!({"privateMetadata": {"x.example": {"v": 1}}}),
+    ] {
+        ctx.create(
+            sharee,
+            owner,
+            MetaType::Mailbox,
+            parents,
+            0,
+            extra.clone(),
+            Using::Metadata,
+        )
+        .await
+        .not_created(0)
+        .to_set_error()
+        .assert_type(SetErrorType::Forbidden);
+    }
+    let created = ctx
+        .create(
+            sharee,
+            owner,
+            MetaType::Mailbox,
+            parents,
+            0,
+            json!({}),
+            Using::Metadata,
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string();
+
+    ctx.share(owner, MetaType::Mailbox, parent, sharee, None)
+        .await;
+    ctx.destroy(owner, MetaType::Mailbox, &[&created]).await;
 }

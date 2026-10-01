@@ -9,7 +9,6 @@ use crate::core::{Resolved, SavedSearch, SelectedMailbox, Session, SessionData};
 use common::{MessageStoreCache, network::SessionStream, storage::index::ObjectIndexBuilder};
 use email::{
     cache::{MessageCacheFetch, email::MessageCacheAccess},
-    cleanup::FlaggedContainers,
     message::{delete::EmailDeletion, messagedata::EmailMessageData},
 };
 use imap_proto::{
@@ -273,15 +272,16 @@ impl<T: SessionStream> SessionData<T> {
             .iter()
             .filter(|document_id| {
                 cache.email_by_id(document_id).is_some_and(|message| {
-                    matches!(message.mailboxes(), [only] if only.mailbox_id == mailbox_id)
-                        && !cache.metadata_kinds(message).is_empty()
+                    !cache.metadata_kinds(message).is_empty()
+                        && matches!(message.mailboxes(), [only] if only.mailbox_id == mailbox_id)
                 })
             })
             .collect::<RoaringBitmap>();
-        let containers =
-            FlaggedContainers::load(&self.server, account_id, Collection::Email, &flagged_ids)
-                .await
-                .caused_by(trc::location!())?;
+        let containers = self
+            .server
+            .preload_container_cleanup(None, account_id, Collection::Email, &flagged_ids)
+            .await
+            .caused_by(trc::location!())?;
         batch
             .with_account_id(account_id)
             .with_collection(Collection::Email);
@@ -300,7 +300,7 @@ impl<T: SessionStream> SessionData<T> {
                         fully_deleted.insert(document_id);
                         thread_ids.insert(metadata.thread_id);
                         if !metadata.metadata_kinds().is_empty() {
-                            containers.remove(batch, document_id);
+                            containers.release_or_assert_absent(batch, account_id, document_id);
                         }
                         batch
                             .custom(

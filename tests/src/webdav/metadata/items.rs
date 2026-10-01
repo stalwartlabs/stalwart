@@ -139,6 +139,23 @@ async fn untouched_by_proppatch(client: &DummyWebDavClient, resource: &DavResour
     assert_synced(client, kind, &token, path).await;
     assert_eq!(marker(client, path).await.as_deref(), Some("one"));
 
+    let token = sync_token(client, kind).await;
+    client
+        .proppatch_xml(
+            path,
+            "<D:set><D:prop><S:marker xmlns:S=\"urn:example:sync\">one</S:marker></D:prop></D:set>",
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS)
+        .xml_tree()
+        .expect_property(path, NS_SYNC, "marker")
+        .with_status(StatusCode::OK);
+    assert_eq!(
+        sync_token(client, kind).await,
+        token,
+        "{kind:?}: a PROPPATCH that changes nothing wrote the container"
+    );
+
     let (new_body, content_type) = item_body(kind, &format!("{}-v2", path.len()));
     let new_body = match kind {
         DavKind::File => new_body,
@@ -222,6 +239,21 @@ async fn display_name(client: &DummyWebDavClient, resource: &DavResource) {
             .element
             .text(),
         "Custom display name"
+    );
+
+    client
+        .proppatch_xml(
+            path,
+            "<D:set><D:prop><D:displayname>A &amp; <![CDATA[<B>]]></D:displayname></D:prop></D:set>",
+        )
+        .await
+        .with_status(StatusCode::MULTI_STATUS);
+    let tree = client.propfind_named(path, "0", "<D:displayname/>").await;
+    let prop = tree.expect_property(path, "DAV:", "displayname");
+    assert_eq!(
+        (prop.status, prop.element.text()),
+        (StatusCode::OK, "A & <B>".to_string()),
+        "{kind:?}: whitespace between an entity reference and CDATA must be kept"
     );
 
     client

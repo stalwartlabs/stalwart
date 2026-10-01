@@ -25,14 +25,16 @@ use crate::{
         privacy::ICalendarPrivacy,
         schedule::{EventAlarmScheduler, EventAlarmUsers, EventAlarms},
     },
-    metadata::MetadataCleanup,
     scheduling::{ItipMessages, event_cancel::itip_cancel, recipient::RecipientPolicy},
 };
 use calcard::icalendar::ICalendar;
 use common::{
     DavName, GroupwareResources, Server,
     auth::{AccessToken, AccountCache, AccountInfo, AccountTenantIds},
-    storage::index::{GroupwareWrite, ObjectIndexBuilder, SplitCurrent, SplitUpdate},
+    storage::{
+        index::{GroupwareWrite, ObjectIndexBuilder, SplitCurrent, SplitUpdate},
+        metadata::ContainerCleanup,
+    },
 };
 use registry::{
     schema::enums::StorageQuota,
@@ -359,7 +361,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
         account_id: u32,
         document_id: u32,
         children_ids: Vec<u32>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         delete_path: Option<String>,
         send_itip: bool,
         batch: &mut BatchBuilder,
@@ -470,7 +472,7 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
             account_id,
             document_id,
             delete_path,
-            &MetadataCleanup::immediate(Collection::Calendar),
+            &ContainerCleanup::empty(Collection::Calendar),
             batch,
         )
         .await
@@ -484,18 +486,18 @@ impl DestroyArchive<Archive<&ArchivedCalendar>> {
         account_id: u32,
         document_id: u32,
         delete_path: Option<String>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let calendar = self.0;
-        cleanup
-            .remove(
-                server,
+        server
+            .release_or_read(
+                cleanup,
+                batch,
                 changed_by,
                 account_id,
                 document_id,
                 calendar.inner.metadata_kinds(),
-                batch,
             )
             .await?;
 
@@ -543,7 +545,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
             delete_path,
             send_itip,
             &mut DefaultAlertsResolver::default(),
-            &MetadataCleanup::immediate(Collection::CalendarEvent),
+            &ContainerCleanup::empty(Collection::CalendarEvent),
             batch,
         )
         .await
@@ -559,7 +561,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         calendar_id: u32,
         content: Option<Archive<ArchiveBytes>>,
         delete_path: Option<String>,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         self.delete_from_calendar(
@@ -590,7 +592,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         delete_path: Option<String>,
         send_itip: bool,
         resolver: &mut DefaultAlertsResolver,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         if let Some(delete_idx) = self
@@ -671,7 +673,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
             document_id,
             content,
             send_itip,
-            &MetadataCleanup::immediate(Collection::CalendarEvent),
+            &ContainerCleanup::empty(Collection::CalendarEvent),
             batch,
         )
         .await
@@ -686,7 +688,7 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
         document_id: u32,
         content: Option<Archive<ArchiveBytes>>,
         send_itip: bool,
-        cleanup: &MetadataCleanup,
+        cleanup: &ContainerCleanup,
         batch: &mut BatchBuilder,
     ) -> trc::Result<()> {
         let event = self.0;
@@ -727,14 +729,14 @@ impl DestroyArchive<Archive<&ArchivedCalendarEvent>> {
                 .await
                 .caused_by(trc::location!())?;
         }
-        cleanup
-            .remove(
-                server,
+        server
+            .release_or_read(
+                cleanup,
+                batch,
                 account_info.account_tenant_ids(),
                 account_id,
                 document_id,
                 event.inner.metadata_kinds(),
-                batch,
             )
             .await?;
         batch

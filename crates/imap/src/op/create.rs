@@ -124,7 +124,7 @@ impl<T: SessionStream> SessionData<T> {
             if pos == params.path.len() - 1
                 && let Some(mailbox_role) = arguments.mailbox_role.map(attr_to_role)
             {
-                mailbox.role = mailbox_role;
+                mailbox.set_role(mailbox_role);
             }
             let slot = slots.get(pos);
             let builder = ObjectIndexBuilder::<(), _>::new().with_changes(mailbox);

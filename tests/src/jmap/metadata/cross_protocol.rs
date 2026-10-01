@@ -11,9 +11,11 @@ use super::{
 use crate::utils::{
     account::Account,
     imap::{AssertResult, ImapConnection, Type},
+    jmap::JmapUtils,
     server::TestServer,
     webdav::DummyWebDavClient,
 };
+use crate::webdav::metadata::files::{MICROSOFT_NS, PropertySet};
 use dav_proto::{
     Depth,
     schema::property::{DavProperty, WebDavProperty},
@@ -22,25 +24,20 @@ use hyper::StatusCode;
 use imap_proto::ResponseType;
 use serde_json::{Value, json};
 
-const WINDOWS_PROPS: &str = concat!(
-    "<D:set><D:prop>",
-    "<Z:Win32CreationTime xmlns:Z=\"urn:schemas-microsoft-com:\">Mon, 01 Jan 2024 10:00:00 GMT</Z:Win32CreationTime>",
-    "<Z:Win32FileAttributes xmlns:Z=\"urn:schemas-microsoft-com:\">00000020</Z:Win32FileAttributes>",
-    "</D:prop></D:set>"
-);
-
 pub async fn test(test: &TestServer) {
     println!("Running cross-protocol metadata tests...");
     let ctx = Ctx::new(test);
     let owner = ctx.account("jdoe@example.com");
+    let sharee = ctx.account("jane.smith@example.com");
     let client = owner.webdav_client();
 
     dav_entries_are_invisible_to_jmap(&ctx, owner, &client).await;
     jmap_writes_reach_dav_sync(&ctx, owner, &client).await;
     imap_entries_are_invisible_to_jmap(&ctx, owner).await;
     email_presence_moves_modseq(&ctx, owner).await;
+    email_mailbox_changes_reach_qresync(&ctx, owner, sharee).await;
 
-    ctx.cleanup(&[owner]).await;
+    ctx.cleanup(&[owner, sharee]).await;
 }
 
 async fn node_id(ctx: &Ctx<'_>, owner: &Account, filter: Value) -> Vec<String> {
@@ -93,9 +90,10 @@ async fn dav_entries_are_invisible_to_jmap(
     };
 
     let before = min_ops(ctx.test, selected).await;
+    let windows = PropertySet::windows().set_body();
     for path in &paths {
         client
-            .proppatch_xml(path, WINDOWS_PROPS)
+            .proppatch_xml(path, &windows)
             .await
             .with_status(StatusCode::MULTI_STATUS);
     }
@@ -119,13 +117,9 @@ async fn dav_entries_are_invisible_to_jmap(
     .await;
     let tree = client.propfind_allprop(&paths[0], "0").await;
     assert_eq!(
-        tree.expect_property(
-            &paths[0],
-            "urn:schemas-microsoft-com:",
-            "Win32FileAttributes"
-        )
-        .element
-        .text(),
+        tree.expect_property(&paths[0], MICROSOFT_NS, "Win32FileAttributes")
+            .element
+            .text(),
         "00000020",
         "a JMAP metadata write must keep the WebDAV entries of the same container"
     );
@@ -402,4 +396,145 @@ async fn email_presence_moves_modseq(ctx: &Ctx<'_>, owner: &Account) {
     imap.send("LOGOUT").await;
     imap.assert_read(Type::Untagged, ResponseType::Bye).await;
     ctx.destroy(owner, MetaType::Mailbox, &[&mailbox]).await;
+}
+
+async fn email_mailbox_changes_reach_qresync(ctx: &Ctx<'_>, owner: &Account, sharee: &Account) {
+    let names: [String; 3] = std::array::from_fn(|_| ctx.unique(MetaType::Mailbox));
+    let response = ctx
+        .method(
+            owner,
+            Using::Plain,
+            "Mailbox/set",
+            json!({
+                "accountId": owner.id_string(),
+                "create": {
+                    "i0": {"name": names[0]},
+                    "i1": {"name": names[1]},
+                    "i2": {"name": names[2]}
+                }
+            }),
+        )
+        .await;
+    let [a, b, c] = [0, 1, 2].map(|idx| response.created(idx).id().to_string());
+    let create_email = async |mailbox: &str| {
+        ctx.method(
+            owner,
+            Using::Plain,
+            "Email/set",
+            json!({
+                "accountId": owner.id_string(),
+                "create": {"i0": {
+                    "mailboxIds": {mailbox: true},
+                    "subject": "vanished",
+                    "from": [{"email": "metadata@example.com"}],
+                    "bodyValues": {"1": {"value": "vanished"}},
+                    "textBody": [{"partId": "1", "type": "text/plain"}]
+                }}
+            }),
+        )
+        .await
+        .created(0)
+        .id()
+        .to_string()
+    };
+    let email_set = async |caller: &Account, update: Value| {
+        ctx.method(
+            caller,
+            Using::Plain,
+            "Email/set",
+            json!({"accountId": owner.id_string(), "update": update}),
+        )
+        .await
+    };
+
+    let moved = create_email(&a).await;
+    let flagged = create_email(&c).await;
+    email_set(
+        owner,
+        json!({moved.as_str(): {format!("mailboxIds/{b}"): true, format!("mailboxIds/{c}"): true}}),
+    )
+    .await
+    .updated(&moved);
+    let grant = format!("shareWith/{}", sharee.id_string());
+    let response = ctx
+        .method(
+            owner,
+            Using::Plain,
+            "Mailbox/set",
+            json!({
+                "accountId": owner.id_string(),
+                "update": {
+                    a.as_str(): {grant.as_str(): {"mayReadItems": true, "mayRemoveItems": true}},
+                    b.as_str(): {grant.as_str(): {"mayReadItems": true}},
+                    c.as_str(): {grant.as_str(): {"mayReadItems": true, "maySetKeywords": true}}
+                }
+            }),
+        )
+        .await;
+    for mailbox in [&a, &b, &c] {
+        response.updated(mailbox);
+    }
+
+    let mut imap = owner.imap_client().await;
+    imap.send("ENABLE CONDSTORE QRESYNC").await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+    let modseq = highest_modseq(&mut imap, &names[0]).await;
+    let response = email_set(
+        sharee,
+        json!({
+            moved.as_str(): {format!("mailboxIds/{a}"): null, format!("mailboxIds/{b}"): null},
+            flagged.as_str(): {"keywords/$flagged": true}
+        }),
+    )
+    .await;
+    response.not_updated(&moved);
+    response.updated(&flagged);
+    vanished_since(&mut imap, &names[0], &modseq)
+        .await
+        .assert_not_contains("VANISHED");
+
+    let parked = create_email(&a).await;
+    let other = create_email(&b).await;
+    let (first, second, home) = if parked < other {
+        (parked, other, 0)
+    } else {
+        (other, parked, 1)
+    };
+    let home_id = [&a, &b][home];
+    let modseq = highest_modseq(&mut imap, &names[home]).await;
+    let response = email_set(
+        owner,
+        json!({
+            first.as_str(): {"mailboxIds": {c.as_str(): true}},
+            second.as_str(): {format!("mailboxIds/{home_id}"): true}
+        }),
+    )
+    .await;
+    response.updated(&first);
+    response.updated(&second);
+    vanished_since(&mut imap, &names[home], &modseq)
+        .await
+        .assert_count("VANISHED (EARLIER)", 1);
+
+    imap.send("LOGOUT").await;
+    imap.assert_read(Type::Untagged, ResponseType::Bye).await;
+    ctx.destroy(owner, MetaType::Mailbox, &[&a, &b, &c]).await;
+}
+
+async fn highest_modseq(imap: &mut ImapConnection, mailbox: &str) -> String {
+    imap.send(&format!("STATUS \"{mailbox}\" (HIGHESTMODSEQ)"))
+        .await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok)
+        .await
+        .into_highest_modseq()
+}
+
+async fn vanished_since(imap: &mut ImapConnection, mailbox: &str, modseq: &str) -> Vec<String> {
+    imap.send(&format!("SELECT \"{mailbox}\"")).await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok).await;
+    imap.send(&format!(
+        "UID FETCH 1:* (FLAGS) (CHANGEDSINCE {modseq} VANISHED)"
+    ))
+    .await;
+    imap.assert_read(Type::Tagged, ResponseType::Ok).await
 }

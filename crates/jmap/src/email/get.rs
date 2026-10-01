@@ -53,6 +53,7 @@ impl EmailGet for Server {
         using: CapabilityIds,
     ) -> trc::Result<GetResponse<Email>> {
         let (ids, not_found_ids) = request.unwrap_ids(self.core.jmap.get_max_objects)?;
+        let is_default = request.properties.is_none();
         let (properties, selection) = select_properties(
             &mut request,
             &[
@@ -85,7 +86,14 @@ impl EmailGet for Server {
         )?;
         let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Email);
         let viewer = object_metadata.viewer();
-        let metadata = object_metadata.get(selection);
+        let metadata = if is_default {
+            None
+        } else {
+            object_metadata.get(selection)
+        };
+        let metadata_slots = metadata.as_ref().map_or(0, |get| {
+            usize::from(get.wants_shared()) + usize::from(get.wants_private())
+        });
         let body_properties = request
             .arguments
             .body_properties
@@ -141,6 +149,9 @@ impl EmailGet for Server {
         let header_needs = HeaderNeeds::new(&properties, &body_properties);
 
         let account_id = request.account_id.document_id();
+        let sampled = self
+            .viewer_change_id(viewer, account_id, Collection::Email)
+            .await?;
         let cache = self
             .get_cached_messages(account_id)
             .await
@@ -163,15 +174,7 @@ impl EmailGet for Server {
         };
         let mut response = GetResponse {
             account_id: request.account_id.into(),
-            state: self
-                .metadata_state(
-                    viewer,
-                    account_id,
-                    Collection::Email,
-                    cache.get_state(false),
-                )
-                .await?
-                .into(),
+            state: sampled.state(cache.get_state(false)).into(),
             list: Vec::with_capacity(ids.len()),
             not_found: not_found_ids,
         };
@@ -315,7 +318,7 @@ impl EmailGet for Server {
 
             // Prepare response
             let mut email: Map<'_, EmailProperty, EmailValue> =
-                Map::with_capacity(properties.len());
+                Map::with_capacity(properties.len() + metadata_slots);
             for property in &properties {
                 match property {
                     EmailProperty::Id => {

@@ -775,7 +775,7 @@ pub async fn test(test: &TestServer, assisted_discovery: bool) {
                     StatusCode::CREATED => {
                         num_success += 1;
                     }
-                    StatusCode::PRECONDITION_FAILED => {
+                    StatusCode::INSUFFICIENT_STORAGE => {
                         did_fail = true;
                         break;
                     }

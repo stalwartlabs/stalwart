@@ -7,6 +7,7 @@
 pub mod acl;
 pub mod blob;
 pub mod blob_hash;
+pub mod collation;
 pub mod collection;
 pub mod field;
 pub mod id;

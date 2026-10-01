@@ -4,17 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::prepared::{PreparedMetadata, SharedWrite};
+use super::prepared::PreparedMetadata;
 use common::{
     Server,
     auth::AccountCache,
-    storage::metadata::{MetadataLog, PrivateMetadataWrite, StoredContainer},
+    storage::metadata::{ContainerChange, MetadataLog, PrivateMetadataWrite},
 };
+use email::message::ingest_metadata::IngestMetadata;
 use jmap_proto::{error::set::SetError, object::metadata::MetadataProperty};
-use types::{
-    collection::Collection,
-    metadata::{EncodedMetadata, MetadataEdit, MetadataKinds},
-};
+use std::sync::Arc;
+use types::collection::Collection;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MetadataUpdate {
@@ -22,25 +21,12 @@ pub struct MetadataUpdate {
     private: Option<ContainerChange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContainerChange {
-    previous: Option<StoredContainer>,
-    next: Option<EncodedMetadata>,
-    edit: MetadataEdit,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ContainerTarget<'x> {
+pub(super) struct ContainerTarget<'x> {
     pub owner: &'x AccountCache,
     pub viewer_id: u32,
+    pub viewer: &'x mut Option<Arc<AccountCache>>,
     pub collection: Collection,
     pub log: MetadataLog,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct DetachedMetadata {
-    pub shared: Option<EncodedMetadata>,
-    pub private: Option<PrivateMetadataWrite>,
 }
 
 impl MetadataUpdate {
@@ -60,29 +46,22 @@ impl MetadataUpdate {
         self.private.as_ref()
     }
 
-    pub async fn prepare<P: MetadataProperty>(
+    pub(super) async fn prepare<P: MetadataProperty>(
         self,
         server: &Server,
         target: ContainerTarget<'_>,
     ) -> trc::Result<Result<PreparedMetadata, SetError<P>>> {
-        let owner = target.owner;
         let shared = match self.shared {
             Some(change) => {
-                if !change.has_quota(server, owner).await? {
+                if !server.has_metadata_quota(target.owner, &change).await? {
                     return Ok(Err(SetError::over_quota()));
                 }
-                Some(SharedWrite {
-                    account_id: owner.id,
-                    tenant_id: owner.id_tenant,
-                    collection: target.collection,
-                    log: target.log,
-                    change,
-                })
+                Some(change.into_write(target.owner, target.collection, target.log))
             }
             None => None,
         };
         let private = match self.private {
-            Some(change) => match change.into_private_write(server, target).await? {
+            Some(change) => match target.private_write(server, change).await? {
                 Ok(write) => Some(write),
                 Err(err) => return Ok(Err(err)),
             },
@@ -91,99 +70,49 @@ impl MetadataUpdate {
         Ok(Ok(PreparedMetadata { shared, private }))
     }
 
-    pub async fn prepare_detached<P: MetadataProperty>(
+    pub(super) async fn prepare_ingest<P: MetadataProperty>(
         self,
         server: &Server,
         target: ContainerTarget<'_>,
-    ) -> trc::Result<Result<DetachedMetadata, SetError<P>>> {
+    ) -> trc::Result<Result<Option<Box<IngestMetadata>>, SetError<P>>> {
         let private = match self.private {
-            Some(change) => match change.into_private_write(server, target).await? {
+            Some(change) => match target.private_write(server, change).await? {
                 Ok(write) => Some(write),
                 Err(err) => return Ok(Err(err)),
             },
             None => None,
         };
-        Ok(Ok(DetachedMetadata {
-            shared: self.shared.and_then(ContainerChange::into_next),
+        Ok(Ok(IngestMetadata::new(
+            self.shared.and_then(ContainerChange::into_next),
             private,
-        }))
+        )))
     }
 }
 
-impl ContainerChange {
-    pub(super) fn new(
-        previous: Option<StoredContainer>,
-        next: Option<EncodedMetadata>,
-        edit: MetadataEdit,
-    ) -> Self {
-        ContainerChange {
-            previous,
-            next,
-            edit,
-        }
-    }
-
-    pub fn previous(&self) -> Option<&StoredContainer> {
-        self.previous.as_ref()
-    }
-
-    pub fn next(&self) -> Option<&EncodedMetadata> {
-        self.next.as_ref()
-    }
-
-    pub fn into_next(self) -> Option<EncodedMetadata> {
-        self.next
-    }
-
-    pub fn edit(&self) -> MetadataEdit {
-        self.edit
-    }
-
-    pub(super) fn into_parts(self) -> (Option<StoredContainer>, Option<EncodedMetadata>) {
-        (self.previous, self.next)
-    }
-
-    pub fn kinds(&self) -> MetadataKinds {
-        self.next
-            .as_ref()
-            .map_or(MetadataKinds::NONE, EncodedMetadata::kinds)
-    }
-
-    async fn has_quota(&self, server: &Server, account: &AccountCache) -> trc::Result<bool> {
-        match &self.next {
-            Some(next) => {
-                server
-                    .has_metadata_quota(account, self.edit, self.previous.as_ref(), next)
-                    .await
-            }
-            None => Ok(true),
-        }
-    }
-
-    async fn into_private_write<P: MetadataProperty>(
+impl ContainerTarget<'_> {
+    async fn private_write<P: MetadataProperty>(
         self,
         server: &Server,
-        target: ContainerTarget<'_>,
+        change: ContainerChange,
     ) -> trc::Result<Result<PrivateMetadataWrite, SetError<P>>> {
-        let owner = target.owner;
-        let viewer = if target.viewer_id == owner.id {
-            None
+        let owner = self.owner;
+        let viewer: &AccountCache = if self.viewer_id == owner.id {
+            owner
         } else {
-            Some(server.account(target.viewer_id).await?)
+            let viewer = match self.viewer.take() {
+                Some(viewer) => viewer,
+                None => server.account(self.viewer_id).await?,
+            };
+            self.viewer.insert(viewer)
         };
-        let viewer = viewer.as_deref().unwrap_or(owner);
-        if !self.has_quota(server, viewer).await? {
+        if !server.has_metadata_quota(viewer, &change).await? {
             return Ok(Err(SetError::over_quota()));
         }
-        let (previous, next) = self.into_parts();
-        Ok(Ok(PrivateMetadataWrite {
-            owner_id: owner.id,
-            viewer_id: viewer.id,
-            viewer_tenant_id: viewer.id_tenant,
-            collection: target.collection,
-            previous,
-            next,
-            log: target.log,
-        }))
+        Ok(Ok(change.into_private_write(
+            owner.id,
+            viewer,
+            self.collection,
+            self.log,
+        )))
     }
 }

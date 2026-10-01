@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{
-    validate::ValidatedPatches,
-    write::{ContainerChange, MetadataUpdate},
-};
+use super::{validate::ValidatedPatches, write::MetadataUpdate};
+use common::storage::metadata::ContainerChange;
 use jmap_proto::{error::set::SetError, object::metadata::MetadataProperty};
 use store::write::metadata::MetadataBuf;
-use types::metadata::{MetadataBuilder, MetadataEdit};
+use types::metadata::EncodedMetadata;
 
 impl MetadataUpdate {
     pub fn copied(shared: Option<&MetadataBuf>, private: Option<&MetadataBuf>) -> Self {
@@ -38,9 +36,9 @@ fn copied(
 ) -> Option<ContainerChange> {
     match patched {
         Some(change) => change.next().cloned(),
-        None => source.and_then(|source| MetadataBuilder::from_view(&source.view()).encode()),
+        None => source.and_then(|source| EncodedMetadata::from_view(&source.view())),
     }
-    .map(|next| ContainerChange::new(None, Some(next), MetadataEdit::Write))
+    .map(ContainerChange::copied)
 }
 
 #[cfg(test)]
@@ -50,7 +48,7 @@ mod tests {
     use jmap_proto::object::calendar::{CalendarProperty, CalendarValue};
     use jmap_tools::{Key, Null, Value};
     use std::borrow::Cow;
-    use types::metadata::{EncodedJson, MetadataKinds, MetadataLimits, Namespace};
+    use types::metadata::{EncodedJson, MetadataBuilder, MetadataKinds, MetadataLimits, Namespace};
 
     const FULL_ACCESS: MetadataAccess = MetadataAccess {
         may_write_shared: true,
