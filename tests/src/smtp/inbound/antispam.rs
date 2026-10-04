@@ -202,6 +202,12 @@ async fn antispam() {
             Instant::now() + Duration::from_secs(100),
         );
     }
+    // A DNSBL answer with several codes must produce one tag per code
+    test.server.dnsbl_add(
+        "dbl-multi.com.dbl.spamhaus.org",
+        vec!["127.0.1.2".parse().unwrap(), "127.0.1.4".parse().unwrap()],
+        Instant::now() + Duration::from_secs(100),
+    );
     for mx in [
         "domain.org",
         "domain.co.uk",

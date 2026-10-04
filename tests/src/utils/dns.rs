@@ -77,14 +77,12 @@ impl DnsCache for Server {
     fn dnsbl_add(&self, name: &str, value: Vec<Ipv4Addr>, valid_until: std::time::Instant) {
         self.inner.cache.dns_rbl.insert_with_expiry(
             name.into(),
-            Some(Arc::new(IpResolver::new(
+            Some(
                 value
-                    .iter()
-                    .copied()
-                    .next()
-                    .unwrap_or(Ipv4Addr::BROADCAST)
-                    .into(),
-            ))),
+                    .into_iter()
+                    .map(|ip| IpResolver::new(ip.into()))
+                    .collect(),
+            ),
             valid_until,
         );
     }

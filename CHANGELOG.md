@@ -20,7 +20,10 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
   - A rotation moves the active key to retiring even when its successor fails to publish or propagate, so outgoing mail is sent unsigned until a retry publishes the new key. The DNS write failure is also not logged and the task reports success.
   - Keys created while DNS management was manual, or before DKIM was added to the published records, are never rotated after DNS management becomes automatic. Domains already affected start rotating once a `DkimManagement` task is created for them.
   - After switching DNS management from automatic to manual, a due rotation activates a new key that was never published in DNS, so signatures fail verification, and retiring the old key is retried forever.
-- Spam filter: Messages with no text line long enough for a Pyzor digest are checked with the digest of empty input and tagged `PYZOR`.
+- Spam filter:
+  - Messages with no text line long enough for a Pyzor digest are checked with the digest of empty input and tagged `PYZOR`.
+  - DNSBL answers with several return codes, such as a Spamhaus ZEN listing in both SBL and PBL, are scored for only the first code returned.
+  - DNSBL lookups that return "not listed" are cached for 24 hours regardless of the zone's negative TTL.
 - MTA: Queue quotas with an empty `match` expression are never enforced, including the global queue quota created on first start.
 
 ## [0.16.24] - 2026-09-27

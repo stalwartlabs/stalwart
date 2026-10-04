@@ -39,6 +39,14 @@ And my website is https://sem-fresh15.com/offers.html
 Try cheating with a trusted domain user@dkimtrusted.org
 
 <!-- NEXT TEST -->
+expect DBL_SPAM DBL_PHISH
+
+From: user@example.net
+Subject: test
+
+Our website is https://dbl-multi.com/offers.html
+
+<!-- NEXT TEST -->
 expect DBL_MALWARE
 
 From: user@example.net

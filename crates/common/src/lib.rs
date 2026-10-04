@@ -202,7 +202,7 @@ pub struct Caches {
     pub dns_ipv6: CacheWithTtl<Box<str>, RecordSet<Ipv6Addr>>,
     pub dns_tlsa: CacheWithTtl<Box<str>, Arc<Tlsa>>,
     pub dns_mta_sts: CacheWithTtl<Box<str>, Arc<Policy>>,
-    pub dns_rbl: CacheWithTtl<Box<str>, Option<Arc<IpResolver>>>,
+    pub dns_rbl: CacheWithTtl<Box<str>, Option<Arc<[IpResolver]>>>,
 
     pub negative_cache_ttl: Duration,
 }
