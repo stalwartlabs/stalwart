@@ -225,10 +225,22 @@ impl WebApplicationManager {
         let cached = if force_refresh {
             None
         } else {
-            server
+            match server
                 .blob_store()
                 .get_blob(self.blob_key.as_slice(), 0..usize::MAX)
-                .await?
+                .await
+            {
+                Ok(cached) => cached,
+                Err(err) => {
+                    trc::event!(
+                        Resource(trc::ResourceEvent::Error),
+                        Reason = err,
+                        Url = self.url.clone(),
+                        Details = "Failed to read cached application bundle, downloading it again"
+                    );
+                    None
+                }
+            }
         };
         let is_cached = cached.is_some();
         let bundle = match cached {

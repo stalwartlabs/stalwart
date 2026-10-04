@@ -26,6 +26,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
   - DNSBL lookups that return "not listed" are cached for 24 hours regardless of the zone's negative TTL.
 - MTA: Queue quotas with an empty `match` expression are never enforced, including the global queue quota created on first start.
 - RocksDB: The info log (`LOG`, `LOG.old.*`) grows without limit because log rotation and retention are left at RocksDB defaults.
+- WebUI: A blob store read error at startup, such as an S3 authentication failure, stops the web interface from being downloaded.
 
 ## [0.16.24] - 2026-09-27
 
