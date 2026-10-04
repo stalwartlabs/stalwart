@@ -35,7 +35,7 @@ use std::{
     hash::{Hash, RandomState},
     sync::Arc,
 };
-use store::ahash::AHashSet;
+use store::ahash::AHashMap;
 use store::rand::seq::SliceRandom;
 use store::write::{BlobLink, RegistryClass, now};
 use store::{
@@ -90,7 +90,14 @@ struct TrainingTask {
     sample: TrainingSample,
     is_spam: bool,
     is_replay: bool,
-    remove: Option<u64>,
+    remove: SampleRemoval,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SampleRemoval {
+    Keep,
+    Item,
+    ItemAndLink { until: u64 },
 }
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
@@ -197,7 +204,7 @@ impl SpamClassifier for Server {
             object_id,
             item_id: u64::MAX,
         }));
-        let mut seen_samples = AHashSet::new();
+        let mut seen_samples = AHashMap::new();
         let mut spam_count = 0;
         let mut ham_count = 0;
         self.store()
@@ -218,43 +225,57 @@ impl SpamClassifier for Server {
                             .unwrap_or(u32::MAX),
                     };
 
-                    if seen_samples.insert(sample.clone()) {
-                        // Add to reservoir
-                        if !do_remove {
-                            trainer.reservoir.update_reservoir(
-                                &sample,
+                    match seen_samples.entry(sample.clone()) {
+                        Entry::Vacant(entry) => {
+                            entry.insert((!do_remove).then_some(until));
+
+                            // Add to reservoir
+                            if !do_remove {
+                                trainer.reservoir.update_reservoir(
+                                    &sample,
+                                    is_spam,
+                                    config.reservoir_capacity,
+                                );
+                            } else {
+                                trainer.reservoir.update_counts(is_spam);
+                            }
+
+                            samples.push(TrainingTask {
+                                id,
+                                sample,
                                 is_spam,
-                                config.reservoir_capacity,
-                            );
-                        } else {
-                            trainer.reservoir.update_counts(is_spam);
+                                is_replay: false,
+                                remove: if do_remove {
+                                    SampleRemoval::ItemAndLink { until }
+                                } else {
+                                    SampleRemoval::Keep
+                                },
+                            });
+
+                            remove_entries |= do_remove;
+
+                            // Update trainer stats
+                            if is_spam {
+                                spam_count += 1;
+                            } else {
+                                ham_count += 1;
+                            }
                         }
-
-                        samples.push(TrainingTask {
-                            id,
-                            sample,
-                            is_spam,
-                            is_replay: false,
-                            remove: do_remove.then_some(until),
-                        });
-
-                        remove_entries |= do_remove;
-
-                        // Update trainer stats
-                        if is_spam {
-                            spam_count += 1;
-                        } else {
-                            ham_count += 1;
+                        Entry::Occupied(entry) => {
+                            let remove = if *entry.get() == Some(until) {
+                                SampleRemoval::Item
+                            } else {
+                                SampleRemoval::ItemAndLink { until }
+                            };
+                            duplicate_samples.push(TrainingTask {
+                                id,
+                                sample,
+                                is_spam,
+                                is_replay: false,
+                                remove,
+                            });
+                            remove_entries = true;
                         }
-                    } else {
-                        duplicate_samples.push(TrainingTask {
-                            id,
-                            sample,
-                            is_spam,
-                            is_replay: false,
-                            remove: Some(until),
-                        });
-                        remove_entries = true;
                     }
 
                     trainer.last_id = trainer.last_id.max(id);
@@ -313,7 +334,7 @@ impl SpamClassifier for Server {
                         sample: sample.clone(),
                         is_spam: false,
                         is_replay: true,
-                        remove: None,
+                        remove: SampleRemoval::Keep,
                     }),
             );
         } else if ham_count > spam_count {
@@ -327,7 +348,7 @@ impl SpamClassifier for Server {
                         sample: sample.clone(),
                         is_spam: true,
                         is_replay: true,
-                        remove: None,
+                        remove: SampleRemoval::Keep,
                     }),
             );
         }
@@ -882,33 +903,38 @@ async fn delete_samples(
     let object_id = ObjectType::SpamTrainingSample.to_id();
     let mut batch = BatchBuilder::new();
     for sample in samples.into_iter().chain(duplicate_samples) {
-        if let Some(until) = sample.remove {
-            batch
-                .with_account_id(sample.sample.account_id)
-                .clear(BlobOp::Link {
-                    hash: sample.sample.hash,
-                    to: BlobLink::Temporary { until },
-                })
-                .clear(ValueClass::Registry(RegistryClass::Item {
-                    object_id,
-                    item_id: sample.id,
-                }))
-                .clear(ValueClass::Registry(RegistryClass::Index {
-                    index_id: Property::AccountId.to_id(),
-                    object_id,
-                    item_id: sample.id,
-                    key: (sample.sample.account_id as u64).serialize(),
-                }));
+        let until = match sample.remove {
+            SampleRemoval::Keep => continue,
+            SampleRemoval::Item => None,
+            SampleRemoval::ItemAndLink { until } => Some(until),
+        };
+        batch.with_account_id(sample.sample.account_id);
+        if let Some(until) = until {
+            batch.clear(BlobOp::Link {
+                hash: sample.sample.hash,
+                to: BlobLink::Temporary { until },
+            });
+        }
+        batch
+            .clear(ValueClass::Registry(RegistryClass::Item {
+                object_id,
+                item_id: sample.id,
+            }))
+            .clear(ValueClass::Registry(RegistryClass::Index {
+                index_id: Property::AccountId.to_id(),
+                object_id,
+                item_id: sample.id,
+                key: (sample.sample.account_id as u64).serialize(),
+            }));
 
-            if batch.is_large_batch() {
-                server
-                    .store()
-                    .write(batch.build_all())
-                    .await
-                    .caused_by(trc::location!())?;
-                batch = BatchBuilder::new();
-                batch.with_account_id(sample.sample.account_id);
-            }
+        if batch.is_large_batch() {
+            server
+                .store()
+                .write(batch.build_all())
+                .await
+                .caused_by(trc::location!())?;
+            batch = BatchBuilder::new();
+            batch.with_account_id(sample.sample.account_id);
         }
     }
     if !batch.is_empty() {

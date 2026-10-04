@@ -209,6 +209,14 @@ pub async fn test(test: &mut TestServer) {
     assert_eq!(samples.iter().filter(|x| x.1.is_spam).count(), 11);
     assert_eq!(samples.len(), 20);
 
+    // Removing the duplicate sample of a reclassified email should not remove the blob of the kept sample
+    for (id, sample) in &samples {
+        assert!(
+            client.download(&sample.blob_id.to_string()).await.is_ok(),
+            "blob of sample {id} is not accessible"
+        );
+    }
+
     // Adding a training sample without permissions should fail
     assert_eq!(
         account

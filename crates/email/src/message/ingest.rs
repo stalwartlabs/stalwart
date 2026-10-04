@@ -20,7 +20,7 @@ use groupware::{
     scheduling::{ItipError, ItipMessages},
 };
 use mail_parser::{
-    DateTime, Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
+    Header, HeaderName, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
     parsers::fields::thread::thread_name,
 };
 use registry::{
@@ -924,11 +924,7 @@ impl EmailIngest for Server {
         span_id: u64,
     ) {
         if let Some(config) = &self.core.spam.classifier {
-            let mut dt = DateTime::from_timestamp(now() as i64);
-            dt.hour = 0;
-            dt.minute = 0;
-            dt.second = 0;
-            let until = dt.to_timestamp() as u64 + config.hold_samples_for;
+            let until = now() + config.hold_samples_for;
 
             let sample = SpamTrainingSample {
                 account_id: Some(Id::from(account_id)),

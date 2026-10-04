@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
-## [0.16.25] - 2026-10-XX
+## [0.16.25] - 2026-10-04
 
 If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If you are upgrading from v0.15.x and below, please read the [upgrading documentation](https://github.com/stalwartlabs/stalwart/blob/main/UPGRADING/v0_16.md) for more information on how to upgrade from previous versions.
 
@@ -24,6 +24,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
   - Messages with no text line long enough for a Pyzor digest are checked with the digest of empty input and tagged `PYZOR`.
   - DNSBL answers with several return codes, such as a Spamhaus ZEN listing in both SBL and PBL, are scored for only the first code returned.
   - DNSBL lookups that return "not listed" are cached for 24 hours regardless of the zone's negative TTL.
+  - Removing a duplicate training sample of a message reclassified on the same day clears the blob link of the sample that is kept.
 - MTA: Queue quotas with an empty `match` expression are never enforced, including the global queue quota created on first start.
 - RocksDB: The info log (`LOG`, `LOG.old.*`) grows without limit because log rotation and retention are left at RocksDB defaults.
 - WebUI: A blob store read error at startup, such as an S3 authentication failure, stops the web interface from being downloaded.
