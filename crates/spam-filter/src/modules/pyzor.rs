@@ -31,17 +31,9 @@ pub(crate) async fn pyzor_check(
     message: &Message<'_>,
     config: &PyzorConfig,
 ) -> trc::Result<Option<PyzorResponse>> {
-    // Make sure there is at least one text part
-    if !message
-        .parts
-        .iter()
-        .any(|p| matches!(p.body, PartType::Text(_) | PartType::Html(_)))
-    {
+    let Some(request) = message.pyzor_check_message() else {
         return Ok(None);
-    }
-
-    // Hash message
-    let request = message.pyzor_check_message();
+    };
 
     #[cfg(feature = "test_mode")]
     {
@@ -155,15 +147,15 @@ impl PyzorWrite for Sha1 {
 }
 
 trait PyzorDigest<W: PyzorWrite> {
-    fn pyzor_digest(&self, writer: W) -> W;
+    fn pyzor_digest(&self, writer: W) -> Option<W>;
 }
 
 pub trait PyzorCheck {
-    fn pyzor_check_message(&self) -> String;
+    fn pyzor_check_message(&self) -> Option<String>;
 }
 
 impl<W: PyzorWrite> PyzorDigest<W> for Message<'_> {
-    fn pyzor_digest(&self, writer: W) -> W {
+    fn pyzor_digest(&self, writer: W) -> Option<W> {
         let parts = self
             .parts
             .iter()
@@ -179,7 +171,7 @@ impl<W: PyzorWrite> PyzorDigest<W> for Message<'_> {
 }
 
 impl PyzorCheck for Message<'_> {
-    fn pyzor_check_message(&self) -> String {
+    fn pyzor_check_message(&self) -> Option<String> {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
@@ -192,9 +184,9 @@ impl PyzorCheck for Message<'_> {
     }
 }
 
-fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> String {
+fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> Option<String> {
     // Hash message
-    let hash = message.pyzor_digest(Sha1::new()).finalize().hex_encode();
+    let hash = message.pyzor_digest(Sha1::new())?.finalize().hex_encode();
     // Hash key
     let mut hash_key = Sha1::new();
     hash_key.update("anonymous:".as_bytes());
@@ -214,10 +206,10 @@ fn pyzor_create_message(message: &Message<'_>, time: u64, thread: u16) -> String
     sig.update(format!(":{time}:{hash_key}"));
     let sig = sig.finalize().hex_encode();
 
-    format!("{message}\nSig: {sig}\n")
+    Some(format!("{message}\nSig: {sig}\n"))
 }
 
-fn pyzor_digest<'x, I, W>(mut writer: W, lines: I) -> W
+fn pyzor_digest<'x, I, W>(mut writer: W, lines: I) -> Option<W>
 where
     I: Iterator<Item = &'x str>,
     W: PyzorWrite,
@@ -279,6 +271,10 @@ where
         }
     }
 
+    if result.is_empty() {
+        return None;
+    }
+
     if result.len() > ATOMIC_NUM_LINES {
         for (offset, length) in DIGEST_SPEC {
             for i in 0..*length {
@@ -293,7 +289,7 @@ where
         }
     }
 
-    writer
+    Some(writer)
 }
 
 fn html_to_text(input: &str) -> String {
@@ -477,7 +473,8 @@ mod test {
             &MessageParser::new().parse(HTML_TEXT_STYLE_SCRIPT).unwrap(),
             1697468672,
             49005,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             message,
@@ -510,10 +507,9 @@ mod test {
             "http://spammer.com/special-offers?buy=now",
         ] {
             assert_eq!(
-                String::from_utf8(pyzor_digest(
-                    Vec::new(),
-                    format!("Test {strip_me} Test2").lines(),
-                ))
+                String::from_utf8(
+                    pyzor_digest(Vec::new(), format!("Test {strip_me} Test2").lines()).unwrap()
+                )
                 .unwrap(),
                 "TestTest2"
             );
@@ -521,20 +517,26 @@ mod test {
 
         // Test short lines
         assert_eq!(
-            String::from_utf8(pyzor_digest(
-                Vec::new(),
-                concat!("This line is included\n", "not this\n", "This also").lines(),
-            ))
+            String::from_utf8(
+                pyzor_digest(
+                    Vec::new(),
+                    concat!("This line is included\n", "not this\n", "This also").lines(),
+                )
+                .unwrap()
+            )
             .unwrap(),
             "ThislineisincludedThisalso"
         );
 
         // Test atomic
         assert_eq!(
-            String::from_utf8(pyzor_digest(
-                Vec::new(),
-                "All this message\nShould be included\nIn the digest".lines(),
-            ))
+            String::from_utf8(
+                pyzor_digest(
+                    Vec::new(),
+                    "All this message\nShould be included\nIn the digest".lines(),
+                )
+                .unwrap()
+            )
             .unwrap(),
             "AllthismessageShouldbeincludedInthedigest"
         );
@@ -549,7 +551,7 @@ mod test {
             expected += format!("Line{i}testtesttest").as_str();
         }
         assert_eq!(
-            String::from_utf8(pyzor_digest(Vec::new(), text.lines(),)).unwrap(),
+            String::from_utf8(pyzor_digest(Vec::new(), text.lines()).unwrap()).unwrap(),
             expected
         );
 
@@ -581,7 +583,8 @@ mod test {
                     MessageParser::new()
                         .parse(input)
                         .unwrap()
-                        .pyzor_digest(Vec::new(),)
+                        .pyzor_digest(Vec::new())
+                        .unwrap()
                 )
                 .unwrap(),
                 expected,
@@ -594,7 +597,8 @@ mod test {
             MessageParser::new()
                 .parse(HTML_TEXT_STYLE_SCRIPT)
                 .unwrap()
-                .pyzor_digest(Sha1::new(),)
+                .pyzor_digest(Sha1::new())
+                .unwrap()
                 .finalize()
                 .hex_encode(),
             "b2c27325a034c581df0c9ef37e4a0d63208a3e7e",
