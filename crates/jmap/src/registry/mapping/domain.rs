@@ -102,6 +102,10 @@ pub(crate) async fn validate_domain(
     let will_trigger_dkim = matches!(domain.dkim_management, DkimManagement::Automatic(_))
         && old_domain
             .is_none_or(|old| !matches!(old.dkim_management, DkimManagement::Automatic(_)));
+    let will_schedule_dkim = !will_trigger_dkim
+        && matches!(domain.dkim_management, DkimManagement::Automatic(_))
+        && publishes_dkim(domain)
+        && old_domain.is_some_and(|old| !publishes_dkim(old));
     let will_trigger_acme = if let DnsManagement::Automatic(details) = &domain.dns_management
         && old_domain.is_none_or(|old| !matches!(old.dns_management, DnsManagement::Automatic(_)))
     {
@@ -125,11 +129,19 @@ pub(crate) async fn validate_domain(
         }));
         on_success_renew_certificate
     } else {
+        if will_schedule_dkim {
+            tasks.push(Task::DnsManagement(TaskDnsManagement {
+                domain_id: Id::default(),
+                update_records: Map::new(vec![DnsRecordType::Dkim]),
+                on_success_renew_certificate: false,
+                status: TaskStatus::now(),
+            }));
+        }
         false
     };
 
     // Schedule DKIM key rotation task
-    if will_trigger_dkim {
+    if will_trigger_dkim || will_schedule_dkim {
         tasks.push(Task::DkimManagement(TaskDomainManagement {
             domain_id: Id::default(),
             status: TaskStatus::now(),
@@ -174,6 +186,13 @@ pub(crate) async fn validate_domain(
     }
 
     Ok(Ok(response))
+}
+
+fn publishes_dkim(domain: &Domain) -> bool {
+    matches!(
+        &domain.dns_management,
+        DnsManagement::Automatic(details) if details.publish_records.contains(&DnsRecordType::Dkim)
+    )
 }
 
 pub(crate) async fn validate_dns_server(

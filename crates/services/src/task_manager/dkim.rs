@@ -68,12 +68,14 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
             "Domain is not set to automatic DKIM management".to_string(),
         ));
     };
-    let mut create_signatures = dkim.algorithms.into_inner();
-    if create_signatures.is_empty() {
+    let configured = dkim.algorithms.into_inner();
+    if configured.is_empty() {
         return Ok(TaskResult::permanent(
             "No DKIM algorithms configured for domain".to_string(),
         ));
     }
+    let mut create_signatures = configured.clone();
+    let mut active_types: Vec<DkimSignatureType> = Vec::with_capacity(configured.len());
 
     let dns_updater = match domain.dns_management {
         DnsManagement::Automatic(props) if props.publish_records.contains(&DnsRecordType::Dkim) => {
@@ -95,6 +97,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
     let mut retire_signatures = Vec::new();
     let mut retiring_signatures = Vec::new();
     let mut delete_signatures = Vec::new();
+    let mut schedule_signatures = Vec::new();
     let mut next_transition = None;
 
     let signature_ids = server
@@ -123,16 +126,35 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     create_signatures.retain(|algo| algo != &key_algo);
                     publish_signatures.push(key)
                 }
-                DkimRotationStage::Active => retiring_signatures.push(key),
+                DkimRotationStage::Active if dns_updater.is_some() => retiring_signatures.push(key),
+                DkimRotationStage::Active => {
+                    create_signatures.retain(|algo| algo != &key_algo);
+                    active_types.push(key_algo);
+                }
                 DkimRotationStage::Retiring => retire_signatures.push(key),
                 DkimRotationStage::Retired => delete_signatures.push(key),
             }
         } else {
-            if key.object.is_active() {
-                create_signatures.retain(|algo| algo != &key_algo);
+            let transition = key.object.next_transition();
+            match key.object.stage() {
+                DkimRotationStage::Active => {
+                    create_signatures.retain(|algo| algo != &key_algo);
+                    active_types.push(key_algo);
+                    if transition.is_none() && dns_updater.is_some() {
+                        schedule_signatures.push(key);
+                    }
+                }
+                DkimRotationStage::Pending => {
+                    create_signatures.retain(|algo| algo != &key_algo);
+                    if transition.is_none() || dns_updater.is_none() {
+                        publish_signatures.push(key);
+                        continue;
+                    }
+                }
+                DkimRotationStage::Retiring | DkimRotationStage::Retired => {}
             }
 
-            if let Some(transition) = key.object.next_transition()
+            if let Some(transition) = transition
                 && next_transition.is_none_or(|next| transition < next)
             {
                 next_transition = Some(transition);
@@ -142,6 +164,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
 
     let now = now();
     let mut do_refresh = false;
+    let mut temporary_errors = String::new();
 
     for algorithm in create_signatures {
         #[cfg(feature = "test_mode")]
@@ -221,7 +244,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                 ));
             };
             let propagation_target = txt_value.clone();
-            let published = updater
+            let published = match updater
                 .set_rrset(
                     origin,
                     &record.name,
@@ -229,12 +252,43 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     vec![record.record.clone()],
                 )
                 .await
-                .is_ok();
-            let signature_transition = if published
-                && updater
-                    .wait_for_txt_propagation(&record.name, origin, &propagation_target)
-                    .await
             {
+                Ok(_) => {
+                    let propagated = updater
+                        .wait_for_txt_propagation(&record.name, origin, &propagation_target)
+                        .await;
+                    if !propagated {
+                        if !temporary_errors.is_empty() {
+                            temporary_errors.push_str("; ");
+                        }
+                        let _ = write!(
+                            &mut temporary_errors,
+                            "DKIM record {} did not propagate, will retry.",
+                            record.name
+                        );
+                    }
+                    propagated
+                }
+                Err(err) => {
+                    if !temporary_errors.is_empty() {
+                        temporary_errors.push_str("; ");
+                    }
+                    let _ = write!(
+                        &mut temporary_errors,
+                        "Failed to publish DKIM record {}: {err}.",
+                        record.name
+                    );
+                    trc::event!(
+                        Dns(DnsEvent::RecordCreationFailed),
+                        Hostname = record.name.clone(),
+                        Details = origin.clone(),
+                        Type = "TXT",
+                        Reason = err,
+                    );
+                    false
+                }
+            };
+            let signature_transition = if published {
                 trc::event!(
                     Dkim(DkimEvent::SignaturePublished),
                     Id = selector.clone(),
@@ -246,7 +300,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
             } else {
                 // Something went wrong, reschedule.
                 signature.set_stage(DkimRotationStage::Pending);
-                UTCDateTime::from_timestamp((now + 60) as i64) // Retry after 1 minute
+                UTCDateTime::from_timestamp(now as i64)
             };
 
             if next_transition.is_none_or(|next| signature_transition < next) {
@@ -257,12 +311,16 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
         }
 
         // Write key
+        let is_active = signature.is_active();
         match server
             .registry()
             .write(RegistryWrite::insert(&signature.into()))
             .await?
         {
             RegistryWriteResult::Success(_) => {
+                if is_active {
+                    active_types.push(algorithm);
+                }
                 trc::event!(
                     Dkim(DkimEvent::SignatureCreated),
                     Id = selector,
@@ -277,11 +335,35 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
         }
     }
 
+    for signature in schedule_signatures {
+        let record = generate_dkim_dns_record_name(&signature.object, &domain.name);
+        let signature_transition =
+            UTCDateTime::from_timestamp((now + dkim.rotate_after.as_secs()) as i64);
+
+        if next_transition.is_none_or(|next| signature_transition < next) {
+            next_transition = Some(signature_transition);
+        }
+
+        let mut new_signature = signature.object.clone();
+        new_signature.set_next_transition(signature_transition);
+
+        if let SignatureUpdate::Failed(task_result) = update_signature(
+            server,
+            signature,
+            new_signature,
+            &record,
+            &mut temporary_errors,
+        )
+        .await?
+        {
+            return Ok(task_result);
+        }
+    }
+
     // Publish signatures
-    let mut temporary_errors = String::new();
-    for signature in publish_signatures {
-        let record = generate_dkim_dns_record(&signature.object, &domain.name).await?;
-        if let Some((updater, origin)) = &dns_updater {
+    if let Some((updater, origin)) = &dns_updater {
+        for signature in publish_signatures {
+            let record = generate_dkim_dns_record(&signature.object, &domain.name).await?;
             let dns_update::DnsRecord::TXT(txt_value) = &record.record else {
                 return Ok(TaskResult::permanent(
                     "DKIM record must be a TXT record".to_string(),
@@ -311,6 +393,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                         next_transition = Some(signature_transition);
                     }
 
+                    let signature_type = signature.object.object_type();
                     let mut new_signature = signature.object.clone();
 
                     new_signature.set_next_transition(signature_transition);
@@ -323,7 +406,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     );
 
                     // Write key
-                    if let Some(task_result) = update_signature(
+                    match update_signature(
                         server,
                         signature,
                         new_signature,
@@ -332,7 +415,9 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     )
                     .await?
                     {
-                        return Ok(task_result);
+                        SignatureUpdate::Written => active_types.push(signature_type),
+                        SignatureUpdate::Conflict => {}
+                        SignatureUpdate::Failed(task_result) => return Ok(task_result),
                     }
                     do_refresh = true;
                 }
@@ -357,20 +442,52 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     );
                 }
             }
-        } else {
-            if !temporary_errors.is_empty() {
-                temporary_errors.push_str("; ");
+        }
+    } else {
+        for signature in publish_signatures {
+            let signature_type = signature.object.object_type();
+            if active_types.contains(&signature_type) || !configured.contains(&signature_type) {
+                continue;
             }
-            let _ = write!(
+
+            let record = generate_dkim_dns_record_name(&signature.object, &domain.name);
+            let mut new_signature = signature.object.clone();
+            new_signature.set_stage(DkimRotationStage::Active);
+            match &mut new_signature {
+                DkimSignature::Dkim1Ed25519Sha256(sign) | DkimSignature::Dkim1RsaSha256(sign) => {
+                    sign.next_transition_at = None
+                }
+                DkimSignature::Dkim2Ed25519Sha256(sign) | DkimSignature::Dkim2RsaSha256(sign) => {
+                    sign.next_transition_at = None
+                }
+            }
+
+            match update_signature(
+                server,
+                signature,
+                new_signature,
+                &record,
                 &mut temporary_errors,
-                "No DNS server configured, cannot publish DKIM record {}.",
-                record.name
-            );
+            )
+            .await?
+            {
+                SignatureUpdate::Written => {
+                    active_types.push(signature_type);
+                    do_refresh = true;
+                }
+                SignatureUpdate::Conflict => active_types.push(signature_type),
+                SignatureUpdate::Failed(task_result) => return Ok(task_result),
+            }
         }
     }
 
     // Retiring signatures
     for signature in retiring_signatures {
+        let signature_type = signature.object.object_type();
+        if configured.contains(&signature_type) && !active_types.contains(&signature_type) {
+            continue;
+        }
+
         let record = generate_dkim_dns_record_name(&signature.object, &domain.name);
         let signature_transition =
             UTCDateTime::from_timestamp((now + dkim.retire_after.as_secs()) as i64);
@@ -391,7 +508,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
         );
 
         // Write key
-        if let Some(task_result) = update_signature(
+        if let SignatureUpdate::Failed(task_result) = update_signature(
             server,
             signature,
             new_signature,
@@ -406,9 +523,9 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
     }
 
     // Retire signatures
-    for signature in retire_signatures {
-        let record = generate_dkim_dns_record_name(&signature.object, &domain.name);
-        if let Some((updater, origin)) = &dns_updater {
+    if let Some((updater, origin)) = &dns_updater {
+        for signature in retire_signatures {
+            let record = generate_dkim_dns_record_name(&signature.object, &domain.name);
             match updater
                 .set_rrset(origin, &record, dns_update::DnsRecordType::TXT, Vec::new())
                 .await
@@ -433,7 +550,7 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     );
 
                     // Write key
-                    if let Some(task_result) = update_signature(
+                    if let SignatureUpdate::Failed(task_result) = update_signature(
                         server,
                         signature,
                         new_signature,
@@ -458,15 +575,6 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
                     );
                 }
             }
-        } else {
-            if !temporary_errors.is_empty() {
-                temporary_errors.push_str("; ");
-            }
-            let _ = write!(
-                &mut temporary_errors,
-                "No DNS server configured, cannot retire DKIM record {}.",
-                record
-            );
         }
     }
 
@@ -556,13 +664,19 @@ async fn dkim_management(server: &Server, task: &TaskDomainManagement) -> trc::R
     }
 }
 
+enum SignatureUpdate {
+    Written,
+    Conflict,
+    Failed(TaskResult),
+}
+
 async fn update_signature(
     server: &Server,
     signature: RegistryObject<DkimSignature>,
     new_signature: DkimSignature,
     name: &str,
     temporary_errors: &mut String,
-) -> trc::Result<Option<TaskResult>> {
+) -> trc::Result<SignatureUpdate> {
     match server
         .registry()
         .write(RegistryWrite::update(
@@ -575,8 +689,8 @@ async fn update_signature(
         ))
         .await
     {
-        Ok(RegistryWriteResult::Success(_)) => Ok(None),
-        Ok(err) => Ok(Some(TaskResult::permanent(format!(
+        Ok(RegistryWriteResult::Success(_)) => Ok(SignatureUpdate::Written),
+        Ok(err) => Ok(SignatureUpdate::Failed(TaskResult::permanent(format!(
             "Failed to write DKIM signature for record {name}: {err}"
         )))),
         Err(err) => {
@@ -588,7 +702,7 @@ async fn update_signature(
                     temporary_errors,
                     "Failed to write DKIM signature for record {name} due to concurrent modification, will retry.",
                 );
-                Ok(None)
+                Ok(SignatureUpdate::Conflict)
             } else {
                 Err(err)
             }
