@@ -127,8 +127,8 @@ impl HasQueueQuota for Server {
         refs: &mut Vec<Metadata>,
         session_id: u64,
     ) -> bool {
-        if !quota.expr.is_empty()
-            && self
+        if quota.expr.is_empty()
+            || self
                 .eval_if(&quota.expr, envelope, session_id)
                 .await
                 .unwrap_or(false)

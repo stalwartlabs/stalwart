@@ -21,6 +21,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
   - Keys created while DNS management was manual, or before DKIM was added to the published records, are never rotated after DNS management becomes automatic. Domains already affected start rotating once a `DkimManagement` task is created for them.
   - After switching DNS management from automatic to manual, a due rotation activates a new key that was never published in DNS, so signatures fail verification, and retiring the old key is retried forever.
 - Spam filter: Messages with no text line long enough for a Pyzor digest are checked with the digest of empty input and tagged `PYZOR`.
+- MTA: Queue quotas with an empty `match` expression are never enforced, including the global queue quota created on first start.
 
 ## [0.16.24] - 2026-09-27
 
