@@ -4,7 +4,7 @@
 # *****************
 # Base image for planner & builder
 # *****************
-FROM --platform=$BUILDPLATFORM rust:slim-trixie AS base
+FROM --platform=$BUILDPLATFORM rust:1.98.1-slim-trixie AS base
 
 ENV DEBIAN_FRONTEND="noninteractive" \
     BINSTALL_DISABLE_TELEMETRY=true \
