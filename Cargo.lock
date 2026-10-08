@@ -8196,6 +8196,7 @@ dependencies = [
  "http_proto",
  "imap",
  "jmap",
+ "libc",
  "managesieve",
  "migration",
  "pop3",

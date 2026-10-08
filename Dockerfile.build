@@ -4,7 +4,7 @@
 # *****************
 # Base image for planner & builder
 # *****************
-FROM --platform=$BUILDPLATFORM rust:1.98.1-slim-trixie AS base
+FROM --platform=$BUILDPLATFORM rust:slim-trixie AS base
 
 ENV DEBIAN_FRONTEND="noninteractive" \
     BINSTALL_DISABLE_TELEMETRY=true \
@@ -24,25 +24,24 @@ RUN \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' >/etc/apt/apt.conf.d/keep-cache && \
     apt-get update && \
     apt-get install -yq --no-install-recommends ca-certificates curl git jq xz-utils make libclang-19-dev
-# Zig is pinned to 0.13.0. Zig 0.14+ changed how its default target ABI is
-# resolved for `x86_64-linux-gnu`-style triples, and on Stalwart's dep tree
-# (rocksdb, jemalloc, aws-lc-sys, libfdb_c.so, rust-std 1.87+) this surfaces
-# as ld.lld undefined references to pthread_*/stat/pow@GLIBC_2.33+. An
-# explicit glibc suffix (`.2.17`) is NOT a workaround — C deps compiled via
-# zig cc against Zig 0.16 headers still emit @2.33+ symbols even when the
-# linker target is 2.17. Zig 0.13 produces binaries with a max glibc ref of
-# ~2.28 which stays compatible with Debian 11 / RHEL 8. Revisit this pin if
-# Zig upstream stabilizes a backwards-compatible default or if Stalwart drops
-# its hard C deps.
 RUN \
-    ZIG_VERSION=0.13.0 && \
-    curl --retry 5 -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-$(uname -m)-${ZIG_VERSION}.tar.xz" | tar -J -x -C /usr/local && \
-    ln -s "/usr/local/zig-linux-$(uname -m)-${ZIG_VERSION}/zig" /usr/local/bin/zig && \
+    ZIG_VERSION=0.17.0 && \
+    case "$(uname -m)" in \
+        x86_64) ZIG_SHA256=1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026 ;; \
+        aarch64) ZIG_SHA256=9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8 ;; \
+        *) exit 1 ;; \
+    esac && \
+    curl --retry 5 -fsSLo /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-$(uname -m)-linux-${ZIG_VERSION}.tar.xz" && \
+    echo "${ZIG_SHA256}  /tmp/zig.tar.xz" | sha256sum -c - && \
+    tar -J -x -C /usr/local -f /tmp/zig.tar.xz && \
+    rm /tmp/zig.tar.xz && \
+    ln -s "/usr/local/zig-$(uname -m)-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig && \
     zig version
 # Install cargo-binstall
 RUN curl --retry 5 -fL --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 # Install cargo-chef & sccache & cargo-zigbuild
-RUN cargo binstall --no-confirm cargo-chef@0.1.78 sccache@0.17.0 cargo-zigbuild@0.23.2
+RUN cargo binstall --no-confirm cargo-chef@0.1.78 sccache@0.17.0
+RUN cargo install --locked --git https://github.com/rust-cross/cargo-zigbuild --rev d9f7fd32fbac13cc26d23847835f7f23a5ed3a25 cargo-zigbuild
 
 # *****************
 # Planner
@@ -61,6 +60,7 @@ WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
 ARG TARGET
 ARG BUILD_ENV
+ARG GLIBC_VERSION=2.28
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Install toolchain and specify some env variables
 RUN \
@@ -68,6 +68,13 @@ RUN \
     rustup target add ${TARGET} && \
     mkdir -p artifact && \
     touch /env-cargo && \
+    if [[ "${TARGET}" == *-gnu* ]]; then \
+        echo "export BUILD_TARGET=${TARGET}.${GLIBC_VERSION}" >> /env-cargo; \
+        mkdir -p target && \
+        ln -s "${TARGET}" "target/${TARGET}.${GLIBC_VERSION}"; \
+    else \
+        echo "export BUILD_TARGET=${TARGET}" >> /env-cargo; \
+    fi && \
     if [ ! -z "${BUILD_ENV}" ]; then \
         echo "export ${BUILD_ENV}" >> /env-cargo; \
         echo "Setting up ${BUILD_ENV}"; \
@@ -85,15 +92,22 @@ RUN \
                 exit 1; \
                 ;; \
         esac; \
+        target_var="${TARGET^^}"; \
+        echo "export FDB_RUSTFLAGS_VAR=CARGO_TARGET_${target_var//-/_}_RUSTFLAGS" >> /env-cargo; \
     fi
 # Install FoundationDB (pinned to latest 7.4.x; Apple publishes 7.4 as
 # prereleases on GitHub, so the release list is fetched without the
 # prerelease filter and narrowed by tag name).
 ARG FDB_VERSION_RANGE="7.4"
 RUN \
+    --mount=type=secret,id=GITHUB_TOKEN,env=GITHUB_TOKEN \
     source /env-cargo && \
     if [ ! -z "${FDB_ARCH}" ]; then \
-        curl --retry 5 -fLso fdb-client.deb "$(curl --retry 5 -fLs 'https://api.github.com/repos/apple/foundationdb/releases?per_page=100' | jq --arg FDB_ARCH "$FDB_ARCH" --arg RANGE "${FDB_VERSION_RANGE}" -r '[.[] | select(.tag_name | startswith($RANGE + "."))] | sort_by(.tag_name | split(".") | map(tonumber)) | reverse | .[0].assets[] | select(.name | test("foundationdb-clients.*" + $FDB_ARCH + ".deb$")) | .browser_download_url')" && \
+        auth=() && \
+        if [ -n "${GITHUB_TOKEN}" ]; then auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}"); fi && \
+        fdb_url="$(curl --retry 5 -fLs "${auth[@]}" 'https://api.github.com/repos/apple/foundationdb/releases?per_page=100' | jq --arg FDB_ARCH "$FDB_ARCH" --arg RANGE "${FDB_VERSION_RANGE}" -r '[.[] | select(.tag_name | startswith($RANGE + "."))] | sort_by(.tag_name | split(".") | map(tonumber)) | reverse | .[0].assets[] | select(.name | test("foundationdb-clients.*" + $FDB_ARCH + ".deb$")) | .browser_download_url')" && \
+        [ -n "${fdb_url}" ] && \
+        curl --retry 5 -fLso fdb-client.deb "${fdb_url}" && \
         mkdir -p /fdb && \
         dpkg -x fdb-client.deb /fdb && \
         mv /fdb/usr/include/foundationdb /usr/include && \
@@ -108,7 +122,7 @@ RUN \
     --mount=type=cache,target=/usr/local/cargo/git \
     source /env-cargo && \
     if [ ! -z "${FDB_ARCH}" ]; then \
-        RUSTFLAGS="-L /usr/lib" cargo chef cook --recipe-path recipe.json --zigbuild --release --target ${TARGET} -p stalwart --no-default-features --features "foundationdb s3 redis nats enterprise"; \
+        env "${FDB_RUSTFLAGS_VAR}=-L /usr/lib" cargo chef cook --recipe-path recipe.json --zigbuild --release --target ${BUILD_TARGET} -p stalwart --no-default-features --features "foundationdb s3 redis nats enterprise"; \
     fi
 RUN \
     --mount=type=secret,id=ACTIONS_RESULTS_URL,env=ACTIONS_RESULTS_URL \
@@ -116,7 +130,7 @@ RUN \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     source /env-cargo && \
-    cargo chef cook --recipe-path recipe.json --zigbuild --release --target ${TARGET} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
+    cargo chef cook --recipe-path recipe.json --zigbuild --release --target ${BUILD_TARGET} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise"
 # Copy the source code
 COPY . .
 ENV RUSTC_WRAPPER="sccache" \
@@ -129,7 +143,7 @@ RUN \
     --mount=type=cache,target=/usr/local/cargo/git \
     source /env-cargo && \
     if [ ! -z "${FDB_ARCH}" ]; then \
-        RUSTFLAGS="-L /usr/lib" cargo zigbuild --release --target ${TARGET} -p stalwart --no-default-features --features "foundationdb s3 redis nats enterprise" && \
+        env "${FDB_RUSTFLAGS_VAR}=-L /usr/lib" cargo zigbuild --release --target ${BUILD_TARGET} -p stalwart --no-default-features --features "foundationdb s3 redis nats enterprise" && \
         mv /app/target/${TARGET}/release/stalwart /app/artifact/stalwart-foundationdb; \
     fi
 # Build generic version
@@ -139,7 +153,7 @@ RUN \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     source /env-cargo && \
-    cargo zigbuild --release --target ${TARGET} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise" && \
+    cargo zigbuild --release --target ${BUILD_TARGET} -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis azure nats enterprise" && \
     mv /app/target/${TARGET}/release/stalwart /app/artifact/stalwart
 
 # *****************

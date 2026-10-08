@@ -20,6 +20,12 @@ use std::time::Duration;
 use trc::Collector;
 use utils::wait_for_shutdown;
 
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "sse4.2",
+    any(target_os = "linux", target_os = "freebsd")
+))]
+mod cpu;
 #[cfg(feature = "dev_mode")]
 pub mod test_data;
 

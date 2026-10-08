@@ -41,6 +41,9 @@ migration = { path = "../migration" }
 tokio = { version = "1.53", features = ["full"] }
 rustls = { version = "0.23.43", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 
+[target.'cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "freebsd")))'.dependencies]
+libc = "0.2.189"
+
 [target.'cfg(not(any(target_env = "msvc", target_os = "freebsd")))'.dependencies]
 tikv-jemallocator = "0.7"
 
