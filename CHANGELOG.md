@@ -12,6 +12,7 @@ If you are upgrading from v0.16.x, replace the binary (or run `docker pull`). If
 ## Changed
 
 ## Fixed
+- RocksDB: Blob garbage collection rewrites every stored blob on each compaction of the blobs column family, about once per 128MB of new mail.
 
 ## [0.16.25] - 2026-10-05
 
