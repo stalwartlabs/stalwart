@@ -587,14 +587,14 @@ impl MailboxSet for Server {
         if !changes.name.is_empty() {
             // Obtain parent mailbox id
             let lower_name = changes.name.to_lowercase();
-            if update
-                .as_ref()
-                .is_none_or(|(_, m)| m.inner.name != changes.name)
-                && let Some(existing) = cached_mailboxes.mailboxes.items.iter().find(|m| {
-                    m.name.to_lowercase() == lower_name
-                        && m.parent_id().map_or(0, |id| id + 1) == changes.parent_id
-                })
-            {
+            let current_id = update.as_ref().map(|(document_id, _)| *document_id);
+            if update.as_ref().is_none_or(|(_, m)| {
+                m.inner.name != changes.name || m.inner.parent_id != changes.parent_id
+            }) && let Some(existing) = cached_mailboxes.mailboxes.items.iter().find(|m| {
+                Some(m.document_id) != current_id
+                    && m.parent_id().map_or(0, |id| id + 1) == changes.parent_id
+                    && m.name.to_lowercase() == lower_name
+            }) {
                 return Ok(Err(SetError::already_exists()
                     .with_existing_id(Id::from(existing.document_id))
                     .with_description(format!(
