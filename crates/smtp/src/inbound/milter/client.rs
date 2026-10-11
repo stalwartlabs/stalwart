@@ -238,8 +238,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                     }
                 }
             }
+        }
 
-            // Write EndOfHeaders
+        if !self.has_option(SMFIP_NOEOH) {
             self.write(Command::EndOfHeader).await?;
             if !self.has_option(SMFIP_NR_EOH) {
                 return self.read().await?.into_action();

@@ -120,6 +120,66 @@ pub async fn test() {
         }
     );
 
+    // A username claim missing from the JWT is read from userinfo before falling back to email
+    let mut config_userinfo_username = config.clone();
+    config_userinfo_username.claim_username = "login".to_string();
+    config_userinfo_username.username_domain = Some("example.net".to_string());
+    config_userinfo_username.claim_name = None;
+    config_userinfo_username.claim_groups = None;
+    config_userinfo_username.require_scopes = Map::new(vec!["openid".to_string()]);
+
+    let token_userinfo_username = get_token_for_client(
+        "stalwart-userinfo-username",
+        "stalwart-userinfo-username-secret",
+        "john.doe@example.org",
+        "this is an OIDC password",
+        "openid",
+    )
+    .await;
+
+    assert_eq!(
+        OpenIdDirectory::open(config_userinfo_username.clone())
+            .await
+            .unwrap()
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token: token_userinfo_username.clone(),
+            })
+            .await
+            .unwrap(),
+        Account {
+            email: "jdoe@example.net".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: None,
+            description: None,
+        }
+    );
+
+    // An unreachable userinfo endpoint still falls back to the JWT email claim
+    let mut oidc_broken_userinfo = OpenIdDirectory::open(config_userinfo_username)
+        .await
+        .unwrap();
+    if let Directory::OpenId(directory) = &mut oidc_broken_userinfo {
+        directory.discovery.document.userinfo_endpoint = "http://invalid".to_string();
+    }
+    assert_eq!(
+        oidc_broken_userinfo
+            .authenticate(&Credentials::Bearer {
+                username: None,
+                token: token_userinfo_username,
+            })
+            .await
+            .unwrap(),
+        Account {
+            email: "john.doe@example.org".to_string(),
+            email_aliases: vec![],
+            secret: None,
+            groups: None,
+            description: None,
+        }
+    );
+
     // A configured group claim that the provider does not emit must not assert an empty group list
     let mut config_missing_groups = config.clone();
     config_missing_groups.claim_groups = Some("not_a_real_claim".to_string());

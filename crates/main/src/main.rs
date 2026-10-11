@@ -9,19 +9,25 @@
 #![warn(clippy::cast_possible_wrap)]
 #![warn(clippy::cast_sign_loss)]
 
+#[cfg(target_os = "linux")]
+use common::manager::systemd::ServiceState;
 use common::{BuildServer, config::server::ServerProtocol, manager::boot::BootManager};
 use http::HttpSessionManager;
 use imap::core::ImapSessionManager;
 use managesieve::core::ManageSieveSessionManager;
 use pop3::Pop3SessionManager;
-#[cfg(target_os = "linux")]
-use sd_notify;
 use services::{StartServices, broadcast::subscriber::spawn_broadcast_subscriber};
 use smtp::{StartQueueManager, core::SmtpSessionManager};
 use std::time::Duration;
 use trc::Collector;
 use utils::wait_for_shutdown;
 
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "sse4.2",
+    any(target_os = "linux", target_os = "freebsd")
+))]
+mod cpu;
 #[cfg(feature = "dev_mode")]
 pub mod test_data;
 
@@ -118,17 +124,13 @@ async fn main() -> std::io::Result<()> {
     spawn_broadcast_subscriber(init.inner, shutdown_rx);
 
     #[cfg(target_os = "linux")]
-    if (sd_notify::booted().is_ok_and(true)) {
-        let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
-    }
+    ServiceState::Ready.notify();
 
     // Wait for shutdown signal
     wait_for_shutdown().await;
 
     #[cfg(target_os = "linux")]
-    if (sd_notify::booted().is_ok_and(true)) {
-        let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
-    }
+    ServiceState::Stopping.notify();
 
     // Shutdown collector
     Collector::shutdown();

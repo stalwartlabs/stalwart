@@ -11,6 +11,7 @@ use crate::{
     utils::{dns::DnsCache, server::TestServer, smtp::SmtpConnection},
 };
 use chrono::{TimeDelta, Utc};
+use jmap_client::core::response::VacationResponseSetResponse;
 use std::time::Instant;
 
 pub async fn test(test: &TestServer) {
@@ -28,6 +29,42 @@ pub async fn test(test: &TestServer) {
         vec!["127.0.0.1".parse().unwrap()],
         Instant::now() + std::time::Duration::from_secs(10),
     );
+
+    // Enabling with only isEnabled on a fresh account uses the default response
+    let mut request = client.build();
+    request
+        .set_vacation_response()
+        .update("singleton")
+        .is_enabled(true);
+    request
+        .send_single::<VacationResponseSetResponse>()
+        .await
+        .unwrap()
+        .updated("singleton")
+        .unwrap();
+    let mut lmtp = SmtpConnection::connect().await;
+    lmtp.ingest(
+        "michael@remote.org",
+        &["jdoe@example.com"],
+        concat!(
+            "From: michael@remote.org\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: Printer\r\n",
+            "\r\n",
+            "PC load letter? What does that even mean?",
+        ),
+    )
+    .await;
+    lmtp.quit().await;
+    assert_message_delivery(
+        &mut smtp_rx,
+        MockMessage::new(
+            "<jdoe@example.com>",
+            ["<michael@remote.org>"],
+            "@I am away.",
+        ),
+    )
+    .await;
 
     // Let people know that we'll be down in Kokomo
     client

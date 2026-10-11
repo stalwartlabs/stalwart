@@ -75,6 +75,7 @@ impl EmailSubmissionSet for Server {
 
         // Process creates
         let mut success_email_ids = HashMap::new();
+        let mut changed_email_ids = HashMap::new();
         let mut batch = BatchBuilder::new();
         for (id, object) in request.unwrap_create() {
             match self
@@ -222,6 +223,8 @@ impl EmailSubmissionSet for Server {
                         // Update record
                         let mut new_submission = submission.inner.clone();
                         new_submission.undo_status = UndoStatus::Canceled;
+                        let email_id =
+                            Id::from_parts(new_submission.thread_id, new_submission.email_id);
                         batch
                             .with_account_id(account_id)
                             .with_collection(Collection::EmailSubmission)
@@ -233,6 +236,7 @@ impl EmailSubmissionSet for Server {
                             )
                             .caused_by(trc::location!())?
                             .commit_point();
+                        changed_email_ids.insert(id, email_id);
                         response.updated.append(id, None);
                     } else {
                         response.not_updated.append(
@@ -274,19 +278,21 @@ impl EmailSubmissionSet for Server {
                 .await?
             {
                 // Update record
+                let submission = submission
+                    .to_unarchived::<EmailSubmission>()
+                    .caused_by(trc::location!())?;
+                let email_id = Id::from_parts(
+                    u32::from(submission.inner.thread_id),
+                    u32::from(submission.inner.email_id),
+                );
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::EmailSubmission)
                     .with_document(document_id)
-                    .custom(
-                        ObjectIndexBuilder::<_, ()>::new().with_current(
-                            submission
-                                .to_unarchived::<EmailSubmission>()
-                                .caused_by(trc::location!())?,
-                        ),
-                    )
+                    .custom(ObjectIndexBuilder::<_, ()>::new().with_current(submission))
                     .caused_by(trc::location!())?
                     .commit_point();
+                changed_email_ids.insert(id, email_id);
                 response.destroyed.push(id);
             } else {
                 response.not_destroyed.append(id, SetError::not_found());
@@ -304,18 +310,34 @@ impl EmailSubmissionSet for Server {
         }
 
         // On success
-        if (request
+        let resolve_email_id = |id: MaybeIdReference<Id>| match id {
+            MaybeIdReference::Id(id) => changed_email_ids.get(&id).copied(),
+            MaybeIdReference::Reference(id_ref) => success_email_ids.get(&id_ref).copied(),
+            MaybeIdReference::Invalid(_) => None,
+        };
+        let update = request
+            .arguments
+            .on_success_update_email
+            .map(|update| {
+                update
+                    .into_iter()
+                    .filter_map(|(id, value)| {
+                        resolve_email_id(id).map(|id| (MaybeInvalid::Value(id), value))
+                    })
+                    .collect::<VecMap<_, _>>()
+            })
+            .filter(|update| !update.is_empty());
+        let destroy = request
             .arguments
             .on_success_destroy_email
-            .as_ref()
-            .is_some_and(|p| !p.is_empty())
-            || request
-                .arguments
-                .on_success_update_email
-                .as_ref()
-                .is_some_and(|p| !p.is_empty()))
-            && response.has_changes()
-        {
+            .map(|ids| {
+                ids.into_iter()
+                    .filter_map(resolve_email_id)
+                    .map(MaybeInvalid::Value)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|ids| !ids.is_empty());
+        if update.is_some() || destroy.is_some() {
             *next_call = Call {
                 id: String::new(),
                 name: MethodName::new(MethodObject::Email, MethodFunction::Set),
@@ -323,38 +345,8 @@ impl EmailSubmissionSet for Server {
                     account_id: request.account_id,
                     if_in_state: None,
                     create: None,
-                    update: request.arguments.on_success_update_email.map(|update| {
-                        update
-                            .into_iter()
-                            .filter_map(|(id, value)| {
-                                (
-                                    match id {
-                                        MaybeIdReference::Id(id) => MaybeInvalid::Value(id),
-                                        MaybeIdReference::Reference(id_ref) => {
-                                            MaybeInvalid::Value(*(success_email_ids.get(&id_ref)?))
-                                        }
-                                        MaybeIdReference::Invalid(id) => MaybeInvalid::Invalid(id),
-                                    },
-                                    value,
-                                )
-                                    .into()
-                            })
-                            .collect()
-                    }),
-                    destroy: request.arguments.on_success_destroy_email.map(|ids| {
-                        MaybeResultReference::Value(
-                            ids.into_iter()
-                                .filter_map(|id| match id {
-                                    MaybeIdReference::Id(id) => Some(id),
-                                    MaybeIdReference::Reference(id_ref) => {
-                                        success_email_ids.get(&id_ref).copied()
-                                    }
-                                    MaybeIdReference::Invalid(_) => None,
-                                })
-                                .map(MaybeInvalid::Value)
-                                .collect(),
-                        )
-                    }),
+                    update,
+                    destroy: destroy.map(MaybeResultReference::Value),
                     arguments: Default::default(),
                 }))),
             }

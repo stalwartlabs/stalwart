@@ -1,0 +1,2 @@
+[target.'cfg(all(target_arch = "x86_64", not(target_env = "musl")))']
+rustflags = ["-C", "target-cpu=x86-64-v2"]

@@ -5,6 +5,8 @@
  */
 
 use crate::registry::mapping::{RegistrySetResponse, map_bootstrap_error};
+#[cfg(target_os = "linux")]
+use common::manager::systemd::ServiceState;
 use common::{
     Server,
     config::mailstore::spamfilter::SpamFilterAction,
@@ -26,8 +28,6 @@ use registry::{
     },
     types::{EnumImpl, ObjectImpl},
 };
-#[cfg(target_os = "linux")]
-use sd_notify;
 use smtp_proto::{MAIL_BODY_7BIT, MAIL_BODY_8BITMIME, MAIL_BODY_BINARYMIME, MAIL_SMTPUTF8};
 use spam_filter::{
     SpamFilterInput,
@@ -81,11 +81,6 @@ pub(crate) async fn action_set(
             | Action::ReloadTlsCertificates
             | Action::ReloadLookupStores
             | Action::ReloadBlockedIps => {
-                #[cfg(target_os = "linux")]
-                if (sd_notify::booted().is_ok_and(true)) {
-                    let _ = sd_notify::notify(&[sd_notify::NotifyState::Reloading]);
-                }
-
                 let object = match action {
                     Action::ReloadSettings => ObjectType::DataStore,
                     Action::ReloadTlsCertificates => ObjectType::Certificate,
@@ -93,8 +88,13 @@ pub(crate) async fn action_set(
                     Action::ReloadBlockedIps => ObjectType::BlockedIp,
                     _ => unreachable!(),
                 };
+                #[cfg(target_os = "linux")]
+                ServiceState::Reloading.notify();
                 let result =
-                    Box::pin(set.server.reload_registry(RegistryChange::Reload(object))).await?;
+                    Box::pin(set.server.reload_registry(RegistryChange::Reload(object))).await;
+                #[cfg(target_os = "linux")]
+                ServiceState::Ready.notify();
+                let result = result?;
 
                 if !result.has_errors() {
                     set.server
@@ -107,11 +107,6 @@ pub(crate) async fn action_set(
                     set.response
                         .not_created
                         .append(id, map_bootstrap_error(result.errors));
-                }
-
-                #[cfg(target_os = "linux")]
-                if (sd_notify::booted().is_ok_and(true)) {
-                    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
                 }
             }
             Action::InvalidateCaches => {

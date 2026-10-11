@@ -142,7 +142,7 @@ impl VacationResponseSet for Server {
 
             // Parse properties
             let mut is_active = document_id.is_some_and(|id| active_script_id == Some(id));
-            let mut build_script = create_id.is_some();
+            let mut build_script = create_id.is_some() || sieve.blob_hash.is_empty();
             let vacation = sieve.vacation_response.as_mut().unwrap();
 
             for (property, mut value) in changes.into_expanded_object() {

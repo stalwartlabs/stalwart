@@ -510,6 +510,117 @@ pub async fn test(test: &TestServer) {
             .unwrap()
             .is_none()
     );
+
+    // onSuccess actions keyed by an existing submission id act on its own email
+    let mut held = Vec::with_capacity(2);
+    for subject in ["held 1", "held 2"] {
+        let draft_id = client
+            .email_import(
+                format!("From: jdoe@example.com\r\nTo: jane_smith@remote.org\r\nSubject: {subject}\r\n\r\ntest")
+                    .into_bytes(),
+                [&mailbox_id],
+                None::<Vec<&str>>,
+                None,
+            )
+            .await
+            .unwrap()
+            .take_id();
+        let submission_id = client
+            .email_submission_create_envelope(
+                &draft_id,
+                &identity_id,
+                Address::new("jdoe@example.com")
+                    .parameter("HOLDUNTIL", Some(hold_until_date.to_string())),
+                ["jane_smith@remote.org"],
+            )
+            .await
+            .unwrap()
+            .take_id();
+        held.push((submission_id, draft_id));
+    }
+    let [(submission_id_1, draft_id_1), (submission_id_2, draft_id_2)] =
+        <[_; 2]>::try_from(held).unwrap();
+    let mut found_filler = false;
+    for _ in 0..64 {
+        if client
+            .email_get(&submission_id_1, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            found_filler = true;
+            break;
+        }
+        client
+            .email_import(
+                b"From: jdoe@example.com\r\nSubject: filler\r\n\r\ntest".to_vec(),
+                [&mailbox_id_2],
+                None::<Vec<&str>>,
+                None,
+            )
+            .await
+            .unwrap();
+    }
+    assert!(found_filler, "No email shares the submission document id");
+    assert_email_properties(&client, &submission_id_1, &[&mailbox_id_2], &[]).await;
+
+    let mut request = client.build();
+    let set_request = request.set_email_submission();
+    set_request
+        .update(&submission_id_1)
+        .undo_status(UndoStatus::Canceled);
+    set_request
+        .arguments()
+        .on_success_destroy_email_id(&submission_id_1);
+    request.send().await.unwrap().unwrap_method_responses();
+    assert!(
+        client
+            .email_get(&draft_id_1, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_email_properties(&client, &submission_id_1, &[&mailbox_id_2], &[]).await;
+
+    // onSuccessUpdateEmail is skipped for a submission whose update failed
+    let mut request = client.build();
+    let set_request = request.set_email_submission();
+    set_request
+        .update(&submission_id_1)
+        .undo_status(UndoStatus::Canceled);
+    set_request
+        .update(&submission_id_2)
+        .undo_status(UndoStatus::Canceled);
+    set_request
+        .arguments()
+        .on_success_update_email_id(&submission_id_1)
+        .keyword("$draft", true);
+    set_request
+        .arguments()
+        .on_success_update_email_id(&submission_id_2)
+        .keyword("$draft", true)
+        .mailbox_id(&mailbox_id, false)
+        .mailbox_id(&mailbox_id_2, true);
+    request.send().await.unwrap().unwrap_method_responses();
+    assert_email_properties(&client, &submission_id_1, &[&mailbox_id_2], &[]).await;
+    assert_email_properties(&client, &draft_id_2, &[&mailbox_id_2], &["$draft"]).await;
+
+    // onSuccessDestroyEmail keyed by a destroyed submission id
+    let mut request = client.build();
+    let set_request = request.set_email_submission();
+    set_request.destroy([&submission_id_2]);
+    set_request
+        .arguments()
+        .on_success_destroy_email_id(&submission_id_2);
+    request.send().await.unwrap().unwrap_method_responses();
+    assert!(
+        client
+            .email_get(&draft_id_2, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_email_properties(&client, &submission_id_1, &[&mailbox_id_2], &[]).await;
     smtp_settings.lock().do_stop = true;
 
     // Identities are created and destroyed as the account's addresses change

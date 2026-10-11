@@ -1,6 +1,6 @@
 [package]
 name = "spam-filter"
-version = "0.16.25"
+version = "0.16.26"
 edition = "2024"
 
 [dependencies]

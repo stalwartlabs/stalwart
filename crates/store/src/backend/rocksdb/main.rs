@@ -72,9 +72,8 @@ impl RocksDbStore {
         let mut cf_opts = cf_options(CfProfile::Blob, &cache, write_buffer_size);
         cf_opts.set_enable_blob_files(true);
         cf_opts.set_min_blob_size(config.blob_size);
-        cf_opts.set_enable_blob_gc(true);
+        cf_opts.set_enable_blob_gc(false);
         cf_opts.set_blob_gc_age_cutoff(1.0);
-        cf_opts.set_blob_gc_force_threshold(0.5);
         cfs.push(ColumnFamilyDescriptor::new(CF_BLOBS, cf_opts));
 
         // Other cfs

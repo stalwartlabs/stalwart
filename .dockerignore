@@ -6,5 +6,6 @@
 !tests
 !resources
 
+!.cargo
 !Cargo.lock
 !Cargo.toml

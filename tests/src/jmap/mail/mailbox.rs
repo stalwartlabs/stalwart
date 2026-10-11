@@ -229,6 +229,37 @@ pub async fn test(test: &TestServer) {
         "{result:?}",
     );
 
+    // Moving a mailbox under a parent that has a sibling with the same name fails
+    let nested_id = client
+        .mailbox_create("level 2", Some(&id_map["l.1"]), Role::None)
+        .await
+        .unwrap()
+        .take_id();
+    let result = client
+        .mailbox_move(&nested_id, Some(&id_map["inbox"]))
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(Error::Set(SetError {
+                type_: SetErrorType::AlreadyExists,
+                ..
+            }))
+        ),
+        "{result:?}",
+    );
+    client.mailbox_destroy(&nested_id, true).await.unwrap();
+
+    // Changing only the case of a mailbox name succeeds
+    client
+        .mailbox_rename(&id_map["l.2"], "LEVEL 2")
+        .await
+        .unwrap();
+    client
+        .mailbox_rename(&id_map["l.2"], "Level 2")
+        .await
+        .unwrap();
+
     // Circular relationship
     let mut request = client.build();
     request

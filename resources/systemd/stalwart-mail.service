@@ -5,7 +5,7 @@ ConditionPathExists=__PATH__/etc/config.json
 After=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 LimitNOFILE=65536
 KillMode=process
 KillSignal=SIGINT

@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "0.16.25"
+version = "0.16.26"
 edition = "2024"
 build = "build.rs"
 
@@ -84,6 +84,9 @@ quick-xml = "0.41"
 [target.'cfg(unix)'.dependencies]
 privdrop = "0.5.6"
 libc = "0.2.189"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sd-notify = "0.5"
 
 [target.'cfg(windows)'.dependencies]
 socket2 = "0.6"

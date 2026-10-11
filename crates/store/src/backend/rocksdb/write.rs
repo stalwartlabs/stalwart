@@ -6,8 +6,8 @@
 
 use super::{CF_INDEXES, CF_LOGS, CfHandle, RocksDbStore, into_error};
 use crate::{
-    Deserialize, IndexKey, Key, LogKey, SUBSPACE_COUNTER, SUBSPACE_IN_MEMORY_COUNTER,
-    SUBSPACE_QUOTA,
+    Deserialize, IndexKey, Key, LogKey, SUBSPACE_BLOBS, SUBSPACE_COUNTER,
+    SUBSPACE_IN_MEMORY_COUNTER, SUBSPACE_QUOTA,
     backend::deserialize_i64_le,
     write::{
         AssignedIds, Batch, MAX_COMMIT_ATTEMPTS, MAX_COMMIT_TIME, MergeResult, Operation,
@@ -16,14 +16,17 @@ use crate::{
 };
 use rand::RngExt;
 use rocksdb::{
-    BoundColumnFamily, ErrorKind, IteratorMode, OptimisticTransactionDB,
-    OptimisticTransactionOptions, WriteOptions,
+    BottommostLevelCompaction, BoundColumnFamily, CompactOptions, ErrorKind, IteratorMode,
+    OptimisticTransactionDB, OptimisticTransactionOptions, WriteOptions,
 };
 use std::{
     sync::Arc,
     thread::sleep,
     time::{Duration, Instant},
 };
+
+const BLOB_GC_MIN_GARBAGE: u64 = 256 * 1024 * 1024;
+const BLOB_GC_GARBAGE_RATIO: f64 = 0.25;
 
 impl RocksDbStore {
     pub(crate) async fn write(&self, mut batch: Batch<'_>) -> trc::Result<AssignedIds> {
@@ -112,6 +115,28 @@ impl RocksDbStore {
                         txn.rollback().map_err(into_error)?;
                     }
                 }
+            }
+
+            let cf = db.subspace_handle(SUBSPACE_BLOBS);
+            let total = db
+                .property_int_value_cf(&cf, "rocksdb.live-blob-file-size")
+                .map_err(into_error)?
+                .unwrap_or_default();
+            let garbage = db
+                .property_int_value_cf(&cf, "rocksdb.live-blob-file-garbage-size")
+                .map_err(into_error)?
+                .unwrap_or_default();
+
+            if garbage >= BLOB_GC_MIN_GARBAGE
+                && garbage as f64 >= total as f64 * BLOB_GC_GARBAGE_RATIO
+            {
+                db.set_options_cf(&cf, &[("enable_blob_garbage_collection", "true")])
+                    .map_err(into_error)?;
+                let mut opts = CompactOptions::default();
+                opts.set_bottommost_level_compaction(BottommostLevelCompaction::Force);
+                db.compact_range_cf_opt(&cf, None::<&[u8]>, None::<&[u8]>, &opts);
+                db.set_options_cf(&cf, &[("enable_blob_garbage_collection", "false")])
+                    .map_err(into_error)?;
             }
 
             Ok(())
