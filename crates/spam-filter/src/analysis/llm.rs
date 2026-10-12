@@ -33,8 +33,8 @@ impl SpamFilterAnalyzeLlm for Server {
                 return;
             };
             let prompt = format!(
-                "{}\n\nSubject: {}\n\n{}",
-                config.prompt, ctx.output.subject, body
+                "{}\n\nFrom: {}\n\nSubject: {}\n\n{}",
+                config.prompt, ctx.output.from, ctx.output.subject, body
             );
 
             match config

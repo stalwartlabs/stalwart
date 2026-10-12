@@ -19,6 +19,7 @@ use modules::html::HtmlToken;
 use nlp::tokenizers::types::TokenType;
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::fmt::{Display, Formatter, Result};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 use store::ahash::AHashSet;
@@ -217,6 +218,15 @@ impl Email {
 
     pub fn is_valid(&self) -> bool {
         self.domain_part.sld.is_some() && !self.local_part.is_empty()
+    }
+}
+
+impl Display for Recipient {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.name.as_ref() {
+            Some(name) => write!(f, "{name} <{}>", self.email.address),
+            None => f.write_str(&self.email.address),
+        }
     }
 }
 
