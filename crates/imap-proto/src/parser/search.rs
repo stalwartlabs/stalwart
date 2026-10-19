@@ -496,22 +496,38 @@ pub fn parse_filters(
                 || (operator == Filter::Or && filters_len == 2)
                 || (operator == Filter::Not && filters_len == 1))
         {
-            while let Some((mut prev_filters, prev_operator, prev_filters_len)) =
-                filters_stack.pop()
-            {
-                if operator == Filter::And && (prev_operator != Filter::Or || filters_len == 1) {
-                    prev_filters.extend(filters);
-                    filters_len += prev_filters_len;
+            loop {
+                // The completed group becomes one operand of its parent. A
+                // multi-operand AND group needs its own delimiters when the
+                // parent is OR or NOT, otherwise it would be split into
+                // separate operands; AND under AND stays flat.
+                let Some((mut parent_filters, parent_operator, parent_len)) = filters_stack.pop()
+                else {
+                    break;
+                };
+                let flat = operator == Filter::And
+                    && (parent_operator == Filter::And || filters_len == 1);
+                // A flattened group contributes every predicate it emitted, while
+                // a delimited group is one operand. Counting a flattened group as
+                // one would let a later single-operand check unwrap it.
+                let emitted = if flat { filters_len } else { 1 };
+                if flat {
+                    parent_filters.append(&mut filters);
                 } else {
-                    prev_filters.push(operator);
-                    prev_filters.extend(filters);
-                    prev_filters.push(Filter::End);
-                    filters_len = prev_filters_len + 1;
+                    parent_filters.push(operator);
+                    parent_filters.append(&mut filters);
+                    parent_filters.push(Filter::End);
                 }
-                operator = prev_operator;
-                filters = prev_filters;
+                filters = parent_filters;
+                operator = parent_operator;
+                filters_len = parent_len + emitted;
 
-                if operator == Filter::And || (operator == Filter::Or && filters_len < 2) {
+                // OR with two operands and NOT with one are complete, so they
+                // are themselves an operand of the next frame. AND keeps
+                // collecting operands until its closing parenthesis.
+                if !((operator == Filter::Or && filters_len == 2)
+                    || (operator == Filter::Not && filters_len == 1))
+                {
                     break;
                 }
             }
@@ -715,9 +731,11 @@ mod tests {
                         Filter::Seen,
                         Filter::Answered,
                         Filter::Not,
+                        Filter::And,
                         Filter::From("john".into()),
                         Filter::To("jane".into()),
                         Filter::Bcc("bill".into()),
+                        Filter::End,
                         Filter::End,
                         Filter::Sequence(
                             Sequence::List {
@@ -788,10 +806,12 @@ mod tests {
                     result_options: vec![],
                     filter: vec![
                         Filter::Not,
+                        Filter::And,
                         Filter::From("john".into()),
                         Filter::Or,
                         Filter::To("jane".into()),
                         Filter::Cc("bill".into()),
+                        Filter::End,
                         Filter::End,
                         Filter::End,
                         Filter::Or,
@@ -882,6 +902,142 @@ mod tests {
                     .parse_search(ProtocolVersion::Rev2)
                     .expect(&command_str),
                 arguments,
+                "{}",
+                command_str
+            );
+        }
+    }
+
+    #[test]
+    fn parse_search_preserves_boolean_groups() {
+        let mut receiver = Receiver::new();
+
+        for (command, filter) in [
+            (
+                b"A1 SEARCH NOT (FLAGGED)\r\n".to_vec(),
+                vec![Filter::Not, Filter::Flagged, Filter::End],
+            ),
+            (
+                b"A2 SEARCH NOT (FLAGGED DELETED)\r\n".to_vec(),
+                vec![
+                    Filter::Not,
+                    Filter::And,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::End,
+                ],
+            ),
+            (
+                b"A3 SEARCH NOT (OR FLAGGED DELETED)\r\n".to_vec(),
+                vec![
+                    Filter::Not,
+                    Filter::Or,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::End,
+                ],
+            ),
+            (
+                b"A4 SEARCH NOT NOT (FLAGGED DELETED)\r\n".to_vec(),
+                vec![
+                    Filter::Not,
+                    Filter::Not,
+                    Filter::And,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::End,
+                    Filter::End,
+                ],
+            ),
+            (
+                b"A5 SEARCH (OR FLAGGED DELETED) SEEN\r\n".to_vec(),
+                vec![
+                    Filter::Or,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::Seen,
+                ],
+            ),
+            (
+                b"A6 SEARCH OR (FLAGGED DELETED) SEEN\r\n".to_vec(),
+                vec![
+                    Filter::Or,
+                    Filter::And,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::Seen,
+                    Filter::End,
+                ],
+            ),
+            (
+                b"A7 SEARCH (FLAGGED DELETED) (SEEN ANSWERED)\r\n".to_vec(),
+                vec![
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::Seen,
+                    Filter::Answered,
+                ],
+            ),
+            (
+                b"A8 SEARCH NOT (FLAGGED) SEEN\r\n".to_vec(),
+                vec![Filter::Not, Filter::Flagged, Filter::End, Filter::Seen],
+            ),
+            // Redundant parentheses must not turn a multi-term group into a
+            // single operand when it later closes under OR or NOT.
+            (
+                b"A9 SEARCH OR ((FLAGGED DELETED)) SEEN\r\n".to_vec(),
+                vec![
+                    Filter::Or,
+                    Filter::And,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::Seen,
+                    Filter::End,
+                ],
+            ),
+            (
+                b"A10 SEARCH NOT ((FLAGGED DELETED))\r\n".to_vec(),
+                vec![
+                    Filter::Not,
+                    Filter::And,
+                    Filter::Flagged,
+                    Filter::Deleted,
+                    Filter::End,
+                    Filter::End,
+                ],
+            ),
+            // A nested group inside a negated AND followed by a trailing term.
+            (
+                b"A11 SEARCH NOT (FLAGGED OR DELETED SEEN) ANSWERED\r\n".to_vec(),
+                vec![
+                    Filter::Not,
+                    Filter::And,
+                    Filter::Flagged,
+                    Filter::Or,
+                    Filter::Deleted,
+                    Filter::Seen,
+                    Filter::End,
+                    Filter::End,
+                    Filter::End,
+                    Filter::Answered,
+                ],
+            ),
+        ] {
+            let command_str = String::from_utf8_lossy(&command).into_owned();
+            assert_eq!(
+                receiver
+                    .parse(&mut command.iter())
+                    .unwrap()
+                    .parse_search(ProtocolVersion::Rev2)
+                    .expect(&command_str)
+                    .filter,
+                filter,
                 "{}",
                 command_str
             );

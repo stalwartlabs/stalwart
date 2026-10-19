@@ -142,12 +142,17 @@ impl SearchQuery {
 
             // And short-circuit
             if matches!(state.op, SearchFilter::And) && state.bm.as_ref().unwrap().is_empty() {
+                // Skip to this group's own End: a nested group's End must not
+                // close the short-circuited AND.
+                let mut nested = 0usize;
                 while let Some(filter) = filters.peek() {
-                    if matches!(filter, SearchFilter::End) {
-                        break;
-                    } else {
-                        filters.next();
+                    match filter {
+                        SearchFilter::And | SearchFilter::Or | SearchFilter::Not => nested += 1,
+                        SearchFilter::End if nested == 0 => break,
+                        SearchFilter::End => nested -= 1,
+                        _ => {}
                     }
+                    filters.next();
                 }
             }
         }
@@ -224,5 +229,36 @@ impl QueryResults {
         }
 
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::write::SearchIndex;
+
+    #[test]
+    fn and_short_circuit_skips_a_nested_group() {
+        // NOT (empty AND (1 OR 2)) ANSWERED, with ANSWERED empty: the negated
+        // group is true for every message, then the trailing term clears them.
+        // Skipping only to the nested group's End would drop the trailing term.
+        let filters = vec![
+            SearchFilter::Not,
+            SearchFilter::And,
+            SearchFilter::DocumentSet(RoaringBitmap::new()),
+            SearchFilter::Or,
+            SearchFilter::DocumentSet(RoaringBitmap::from_iter([1u32])),
+            SearchFilter::DocumentSet(RoaringBitmap::from_iter([2u32])),
+            SearchFilter::End,
+            SearchFilter::End,
+            SearchFilter::End,
+            SearchFilter::DocumentSet(RoaringBitmap::new()),
+        ];
+        let results = SearchQuery::new(SearchIndex::InMemory)
+            .with_mask(RoaringBitmap::from_iter([1u32, 2, 3]))
+            .with_filters(filters)
+            .filter()
+            .results;
+        assert!(results.is_empty());
     }
 }

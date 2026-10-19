@@ -253,12 +253,17 @@ impl Store {
 
                 // And short circuit
                 if matches!(state.op, SearchFilter::And) && state.bm.as_ref().unwrap().is_empty() {
+                    // Skip to this group's own End: a nested group's End must
+                    // not close the short-circuited AND.
+                    let mut nested = 0usize;
                     while let Some(filter) = filters.peek() {
-                        if matches!(filter, SearchFilter::End) {
-                            break;
-                        } else {
-                            filters.next();
+                        match filter {
+                            SearchFilter::And | SearchFilter::Or | SearchFilter::Not => nested += 1,
+                            SearchFilter::End if nested == 0 => break,
+                            SearchFilter::End => nested -= 1,
+                            _ => {}
                         }
+                        filters.next();
                     }
                 }
             }
@@ -391,12 +396,17 @@ impl Store {
 
             // And short circuit
             if matches!(state.op, SearchFilter::And) && state.bm.as_ref().unwrap().is_empty() {
+                // Skip to this group's own End: a nested group's End must not
+                // close the short-circuited AND.
+                let mut nested = 0usize;
                 while let Some(filter) = filters.peek() {
-                    if matches!(filter, SearchFilter::End) {
-                        break;
-                    } else {
-                        filters.next();
+                    match filter {
+                        SearchFilter::And | SearchFilter::Or | SearchFilter::Not => nested += 1,
+                        SearchFilter::End if nested == 0 => break,
+                        SearchFilter::End => nested -= 1,
+                        _ => {}
                     }
+                    filters.next();
                 }
             }
         }
