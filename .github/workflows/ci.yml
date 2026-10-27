@@ -441,15 +441,8 @@ jobs:
           copyback: true
           # gmake: required by jemalloc-sys on BSD hosts
           # llvm: provides libclang for bindgen (librocksdb-sys)
-          # rust: libsqlite3-sys 0.38 uses cfg_select!, stabilized in Rust
-          # 1.95. The default 'quarterly' pkg repo still ships rust 1.94, so
-          # switch to the 'latest' repo (currently 1.96.1). rustup is not an
-          # option here: aarch64-unknown-freebsd has no rustup toolchains yet.
           prepare: |
             set -e
-            mkdir -p /usr/local/etc/pkg/repos
-            echo 'FreeBSD: { url: "pkg+https://pkg.freebsd.org/${ABI}/latest", mirror_type: "srv" }' > /usr/local/etc/pkg/repos/FreeBSD.conf
-            pkg update -f
             env ASSUME_ALWAYS_YES=yes pkg bootstrap -f
             pkg update -f
             pkg install -y rust gmake llvm rocksdb
