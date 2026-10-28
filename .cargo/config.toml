@@ -1,7 +1,9 @@
 [env]
 RUST_MIN_STACK = "8388608"
-CXXFLAGS_aarch64_unknown_linux_gnu = "-march=armv8-a+crc+crypto -DROCKSDB_AUXV_GETAUXVAL_PRESENT"
-CXXFLAGS_aarch64_unknown_linux_musl = "-march=armv8-a+crc+crypto -DROCKSDB_AUXV_GETAUXVAL_PRESENT"
+CFLAGS_aarch64_unknown_linux_gnu = "-moutline-atomics"
+CFLAGS_aarch64_unknown_linux_musl = "-moutline-atomics"
+CXXFLAGS_aarch64_unknown_linux_gnu = "-march=armv8-a+crc+crypto -moutline-atomics -DROCKSDB_AUXV_GETAUXVAL_PRESENT"
+CXXFLAGS_aarch64_unknown_linux_musl = "-march=armv8-a+crc+crypto -moutline-atomics -DROCKSDB_AUXV_GETAUXVAL_PRESENT"
 
 [target.'cfg(all(target_arch = "x86_64", not(target_env = "musl")))']
 rustflags = ["-C", "target-cpu=x86-64-v2"]

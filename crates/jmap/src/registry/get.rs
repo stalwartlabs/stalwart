@@ -303,7 +303,7 @@ async fn registry_object_get(
             .registry()
             .query::<Vec<Id>>(
                 query
-                    .with_account_opt(is_account_filtered.then_some(get.account_id))
+                    .with_account(get.account_id)
                     .with_limit(server.core.jmap.get_max_objects),
             )
             .await

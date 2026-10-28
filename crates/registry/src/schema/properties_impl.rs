@@ -778,6 +778,7 @@ impl EnumImpl for Property {
             b"claimUsername" => Property::ClaimUsername,
             b"cleartext" => Property::Cleartext,
             b"clientCapacity" => Property::ClientCapacity,
+            b"clientHash" => Property::ClientHash,
             b"clientId" => Property::ClientId,
             b"clientIp" => Property::ClientIp,
             b"clientIpSource" => Property::ClientIpSource,
@@ -1462,6 +1463,7 @@ impl EnumImpl for Property {
             b"require" => Property::Require,
             b"requireTls" => Property::RequireTls,
             b"reservoirCapacity" => Property::ReservoirCapacity,
+            b"resourceAttributes" => Property::ResourceAttributes,
             b"resourceGroup" => Property::ResourceGroup,
             b"resourceUrl" => Property::ResourceUrl,
             b"responseCode" => Property::ResponseCode,
@@ -1517,6 +1519,7 @@ impl EnumImpl for Property {
             b"servers" => Property::Servers,
             b"serviceAccountJson" => Property::ServiceAccountJson,
             b"serviceName" => Property::ServiceName,
+            b"serviceNamespace" => Property::ServiceNamespace,
             b"services" => Property::Services,
             b"sessionTimeout" => Property::SessionTimeout,
             b"sessionToken" => Property::SessionToken,
@@ -1784,6 +1787,7 @@ impl EnumImpl for Property {
             b"claimUsername" => Property::ClaimUsername,
             b"cleartext" => Property::Cleartext,
             b"clientCapacity" => Property::ClientCapacity,
+            b"clientHash" => Property::ClientHash,
             b"clientId" => Property::ClientId,
             b"clientIp" => Property::ClientIp,
             b"clientIpSource" => Property::ClientIpSource,
@@ -2426,6 +2430,7 @@ impl EnumImpl for Property {
             b"require" => Property::Require,
             b"requireTls" => Property::RequireTls,
             b"reservoirCapacity" => Property::ReservoirCapacity,
+            b"resourceAttributes" => Property::ResourceAttributes,
             b"resourceGroup" => Property::ResourceGroup,
             b"resourceUrl" => Property::ResourceUrl,
             b"responseCode" => Property::ResponseCode,
@@ -2480,6 +2485,7 @@ impl EnumImpl for Property {
             b"servers" => Property::Servers,
             b"serviceAccountJson" => Property::ServiceAccountJson,
             b"serviceName" => Property::ServiceName,
+            b"serviceNamespace" => Property::ServiceNamespace,
             b"services" => Property::Services,
             b"sessionTimeout" => Property::SessionTimeout,
             b"sessionToken" => Property::SessionToken,
@@ -2787,6 +2793,7 @@ impl EnumImpl for Property {
             Property::ClaimUsername => "claimUsername",
             Property::Cleartext => "cleartext",
             Property::ClientCapacity => "clientCapacity",
+            Property::ClientHash => "clientHash",
             Property::ClientId => "clientId",
             Property::ClientIp => "clientIp",
             Property::ClientIpSource => "clientIpSource",
@@ -3661,6 +3668,7 @@ impl EnumImpl for Property {
             Property::Require => "require",
             Property::RequireTls => "requireTls",
             Property::ReservoirCapacity => "reservoirCapacity",
+            Property::ResourceAttributes => "resourceAttributes",
             Property::ResourceGroup => "resourceGroup",
             Property::ResourceUrl => "resourceUrl",
             Property::ResponseCode => "responseCode",
@@ -3721,6 +3729,7 @@ impl EnumImpl for Property {
             Property::Servers => "servers",
             Property::ServiceAccountJson => "serviceAccountJson",
             Property::ServiceName => "serviceName",
+            Property::ServiceNamespace => "serviceNamespace",
             Property::Services => "services",
             Property::SessionTimeout => "sessionTimeout",
             Property::SessionToken => "sessionToken",
@@ -4115,6 +4124,7 @@ impl EnumImpl for Property {
             706 => Some(Property::ClaimUsername),
             807 => Some(Property::Cleartext),
             677 => Some(Property::ClientCapacity),
+            1012 => Some(Property::ClientHash),
             132 => Some(Property::ClientId),
             391 => Some(Property::ClientIp),
             479 => Some(Property::ClientIpSource),
@@ -4989,6 +4999,7 @@ impl EnumImpl for Property {
             646 => Some(Property::Require),
             622 => Some(Property::RequireTls),
             875 => Some(Property::ReservoirCapacity),
+            1014 => Some(Property::ResourceAttributes),
             366 => Some(Property::ResourceGroup),
             64 => Some(Property::ResourceUrl),
             250 => Some(Property::ResponseCode),
@@ -5049,6 +5060,7 @@ impl EnumImpl for Property {
             352 => Some(Property::Servers),
             380 => Some(Property::ServiceAccountJson),
             753 => Some(Property::ServiceName),
+            1013 => Some(Property::ServiceNamespace),
             933 => Some(Property::Services),
             550 => Some(Property::SessionTimeout),
             357 => Some(Property::SessionToken),
@@ -5264,7 +5276,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 1012;
+    const COUNT: usize = 1015;
 }
 
 impl serde::Serialize for Property {
@@ -5716,11 +5728,18 @@ impl ObjectType {
                 ),
                 // SPDX-SnippetEnd
             ],
-            ObjectType::OAuthGrant => vec![IndexSchema::new(
-                Property::AccountId,
-                IndexSchemaType::Search,
-                IndexSchemaValueType::Id,
-            )],
+            ObjectType::OAuthGrant => vec![
+                IndexSchema::new(
+                    Property::AccountId,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Id,
+                ),
+                IndexSchema::new(
+                    Property::ClientHash,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Keyword,
+                ),
+            ],
             ObjectType::PublicKey => vec![IndexSchema::new(
                 Property::AccountId,
                 IndexSchemaType::Search,

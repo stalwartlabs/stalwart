@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::scheduling::ItipValue;
+use crate::scheduling::{ItipTimeKind, ItipValue};
 use calcard::{
     common::timezone::Tz,
     icalendar::{ICalendarDay, ICalendarFrequency, ICalendarRecurrenceRule, ICalendarWeekday},
@@ -30,6 +30,8 @@ pub struct TextFormatter {
     pub locale: &'static Locale,
     date_short: DateTimeFormatter<fieldsets::YMDT>,
     date_long: DateTimeFormatter<fieldsets::YMDT>,
+    day_short: DateTimeFormatter<fieldsets::YMD>,
+    day_long: DateTimeFormatter<fieldsets::YMD>,
     weekday_short: DateTimeFormatter<fieldsets::E>,
     weekday: DateTimeFormatter<fieldsets::E>,
     month: DateTimeFormatter<fieldsets::M>,
@@ -74,6 +76,10 @@ impl TextFormatter {
                 fieldsets::YMD::long().with_time_hm(),
             )
             .map_err(failed("Failed to load long date formatter"))?,
+            day_short: DateTimeFormatter::try_new(datetime_prefs, fieldsets::YMD::medium())
+                .map_err(failed("Failed to load short day formatter"))?,
+            day_long: DateTimeFormatter::try_new(datetime_prefs, fieldsets::YMD::long())
+                .map_err(failed("Failed to load long day formatter"))?,
             weekday_short: DateTimeFormatter::try_new(datetime_prefs, fieldsets::E::short())
                 .map_err(failed("Failed to load short weekday formatter"))?,
             weekday: DateTimeFormatter::try_new(datetime_prefs, fieldsets::E::long())
@@ -92,22 +98,25 @@ impl TextFormatter {
             ItipValue::Text(text) => out.push_str(text),
             ItipValue::Time(time) => {
                 let tz = Tz::from_id(time.tz_id).unwrap_or(Tz::UTC);
-                let (weekday, date) = match style {
-                    DateStyle::Short => (&self.weekday_short, &self.date_short),
-                    DateStyle::Long => (&self.weekday, &self.date_long),
+                let (weekday, date, day) = match style {
+                    DateStyle::Short => (&self.weekday_short, &self.date_short, &self.day_short),
+                    DateStyle::Long => (&self.weekday, &self.date_long, &self.day_long),
                 };
                 let local = tz
                     .from_timestamp(Timestamp::from_second(time.start).unwrap_or_default())
                     .naive_local();
-                let _ = write!(
-                    out,
-                    "{}, {}",
-                    weekday.format(&local.date()),
-                    date.format(&local)
-                );
-
-                if let Some(name) = tz.name().filter(|name| !name.is_empty()) {
-                    let _ = write!(out, " ({name})");
+                let local_date = local.date();
+                let _ = write!(out, "{}, ", weekday.format(&local_date));
+                match time.kind {
+                    ItipTimeKind::DateTime => {
+                        let _ = write!(out, "{}", date.format(&local));
+                        if let Some(name) = tz.name().filter(|name| !name.is_empty()) {
+                            let _ = write!(out, " ({name})");
+                        }
+                    }
+                    ItipTimeKind::Date => {
+                        let _ = write!(out, "{}", day.format(&local_date));
+                    }
                 }
             }
             ItipValue::Rrule(rrule) => self.recurrence(out, rrule),

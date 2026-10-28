@@ -26,6 +26,7 @@ use crate::{
 use common::{
     BuildServer, Inner, KV_ACME, Server,
     auth::oauth::{client::RequestOrigin, scope::OAuthScopes},
+    config::telemetry::PrometheusAuth,
     ipc::PushEvent,
     manager::{
         app_client::APP_CLIENT_DOCUMENT,
@@ -72,6 +73,7 @@ use percent_encoding::percent_decode_str;
 use registry::schema::enums::Permission;
 use std::{str::FromStr, sync::Arc};
 use store::dispatch::lookup::KeyValue;
+use telemetry::prometheus::negotiate::negotiate;
 use trc::SecurityEvent;
 use types::{blob::BlobId, id::Id};
 
@@ -693,18 +695,28 @@ impl ParseHttp for Server {
             "metrics" => match path.next().unwrap_or_default() {
                 "prometheus" => {
                     if let Some(prometheus) = &self.core.metrics.prometheus {
-                        if !prometheus.auth.is_authorized(req.authorization_basic()) {
+                        if req.method() != Method::GET {
+                            return Ok(HttpResponse::new(StatusCode::METHOD_NOT_ALLOWED)
+                                .with_header(header::ALLOW, "GET"));
+                        }
+                        if matches!(prometheus.auth, PrometheusAuth::None) {
+                            self.is_http_anonymous_request_allowed(session.remote_ip)
+                                .await?;
+                        } else if !prometheus.auth.is_authorized(req.authorization_basic()) {
                             return Err(trc::AuthEvent::Failed
                                 .into_err()
                                 .details("Invalid or missing credentials.")
                                 .caused_by(trc::location!()));
                         }
 
-                        return Ok(Resource::new(
-                            "text/plain; version=0.0.4",
-                            self.export_prometheus_metrics().await?.into_bytes(),
-                        )
-                        .into_http_response());
+                        let format = negotiate(
+                            req.headers()
+                                .get(header::ACCEPT)
+                                .map(|value| value.as_bytes()),
+                        );
+                        return Ok(HttpResponse::new(StatusCode::OK)
+                            .with_content_type(format.content_type())
+                            .with_binary_body(self.export_prometheus_metrics(prometheus, format)));
                     }
                 }
                 "otel" => {

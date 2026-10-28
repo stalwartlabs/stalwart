@@ -14,6 +14,8 @@ use std::{
     str::FromStr,
 };
 
+pub const JSCONTACT_VERSION: &str = "1.0";
+
 pub mod export;
 pub mod import;
 pub mod parser;

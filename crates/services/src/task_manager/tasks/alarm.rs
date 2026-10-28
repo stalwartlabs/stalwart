@@ -31,7 +31,7 @@ use groupware::{
         schedule::{EventAlarmScheduler, EventAlarmUsers},
     },
     scheduling::{
-        ItipTime, ItipValue,
+        ItipTime, ItipTimeKind, ItipValue,
         format::{DateStyle, TextFormatter, hyperlink},
     },
     strip_mailto_scheme,
@@ -924,6 +924,7 @@ async fn build_template(
         &ItipValue::Time(ItipTime {
             start: alarm.event_start.timestamp(),
             tz_id: alarm.event_start_tz as u16,
+            kind: ItipTimeKind::DateTime,
         }),
         DateStyle::Short,
     );
@@ -931,6 +932,7 @@ async fn build_template(
         &ItipValue::Time(ItipTime {
             start: alarm.event_end.timestamp(),
             tz_id: alarm.event_end_tz as u16,
+            kind: ItipTimeKind::DateTime,
         }),
         DateStyle::Short,
     );

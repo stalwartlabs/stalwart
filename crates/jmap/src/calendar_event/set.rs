@@ -170,6 +170,14 @@ struct PatchTarget {
 const EVENT_METADATA_FLAGS: u16 =
     EVENT_DRAFT | EVENT_INVITE_SELF | EVENT_INVITE_OTHERS | EVENT_HIDE_ATTENDEES;
 
+const DEFAULTED_FLAGS: [JSCalendarProperty<Id>; 5] = [
+    JSCalendarProperty::IsDraft,
+    JSCalendarProperty::UseDefaultAlerts,
+    JSCalendarProperty::MayInviteSelf,
+    JSCalendarProperty::MayInviteOthers,
+    JSCalendarProperty::HideAttendees,
+];
+
 impl CalendarEventSet for Server {
     async fn calendar_event_set(
         &self,
@@ -1623,6 +1631,11 @@ impl CalendarEventSet for Server {
             updates.as_object_and_get(&Key::Property(JSCalendarProperty::Version)),
             Some(Value::Str(_))
         );
+        let omitted_flags = DEFAULTED_FLAGS.map(|property| {
+            updates
+                .as_object_and_get(&Key::Property(property))
+                .is_none()
+        });
         let mut event = CalendarEvent::default();
         let mut content = CalendarEventContent::default();
         let (write, mut js_calendar_group, before) = match source {
@@ -1922,11 +1935,31 @@ impl CalendarEventSet for Server {
             .with_component(content.data.event.main_component())
             .with_origin(is_origin(&content.data.event, account_info.addresses()))
             .server_set(&client_values, before.as_ref());
-        if write == EventWrite::Create && !has_version {
-            server_set.push((
-                JSCalendarProperty::Version,
-                Value::Str(JSCALENDAR_VERSION.into()),
-            ));
+        if write == EventWrite::Create {
+            if !has_version {
+                server_set.push((
+                    JSCalendarProperty::Version,
+                    Value::Str(JSCALENDAR_VERSION.into()),
+                ));
+            }
+            let use_default_alerts = content
+                .preferences(personal_id)
+                .is_some_and(|preferences| preferences.use_default_alerts());
+            server_set.extend(
+                [
+                    event.flags & EVENT_DRAFT != 0,
+                    use_default_alerts,
+                    event.flags & EVENT_INVITE_SELF != 0,
+                    event.flags & EVENT_INVITE_OTHERS != 0,
+                    event.flags & EVENT_HIDE_ATTENDEES != 0,
+                ]
+                .into_iter()
+                .zip(DEFAULTED_FLAGS)
+                .zip(omitted_flags)
+                .filter_map(|((value, property), is_omitted)| {
+                    is_omitted.then_some((property, Value::Bool(value)))
+                }),
+            );
         }
         let imported = ImportedValues {
             participants: is_organizer_assigned,

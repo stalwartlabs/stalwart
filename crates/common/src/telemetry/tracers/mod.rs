@@ -8,7 +8,6 @@
 pub mod journald;
 pub mod log;
 pub mod otel;
-pub mod spans;
 pub mod stdout;
 
 // SPDX-SnippetBegin

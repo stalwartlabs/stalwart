@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.0.1] - 2026-10-28
+
+## Added
+- Telemetry
+  - New OpenTelemetry (OTLP over HTTP and gRPC) and Prometheus exporters replace the `opentelemetry` and `prometheus` crates, with 4x to 14x faster encoding.
+  - Metric names follow the OpenTelemetry and Prometheus conventions (`stalwart.*` in OTLP, `stalwart_*` with unit and `_total` suffixes in Prometheus); dashboards and alerts must be updated.
+  - OpenMetrics output, plus `serviceName`, `serviceNamespace` and `resourceAttributes` settings replacing the `OTEL_*` environment variables.
+  - gRPC exporters support TLS options, authentication and custom headers; histogram buckets and counters are fixed (cumulative, inclusive, 64-bit).
+
+## Changed
+- Encryption at rest: JMAP messages stored with the `$draft` keyword are no longer encrypted on append, so they are submitted as written by the client. The Sent copy of messages submitted over JMAP is stored unencrypted.
+- OAuth: The consent screen is shown after sign-in and is skipped while the client is listed under the account's connected applications with the requested scopes. `prompt=consent` always shows it. All cluster nodes must be upgraded before relying on the new sign-in flow.
+- Registry: Listing connected applications, public keys, masked addresses and archived items returns only the requested account's objects, also for administrators. Administrators reach other accounts through the account id or an explicit `accountId` filter.
+
+## Fixed
+- ACME: DNS-01 challenges for a subdomain are written to the registrable domain's zone instead of the domain's own zone when no zone origin is configured.
+- iTIP
+  - Invitation emails for all-day events show the start as `00:00` with a time zone instead of the date only.
+  - Attendee replies are rejected when the client drops or changes the organizer's `PRIORITY`, for example when accepting an invitation from BusyCal.
+- JMAP
+  - `Mailbox/set` returns only the id of created mailboxes instead of also the server-set and defaulted properties (RFC 8620, section 5.3).
+  - `AddressBook/set`, `ContactCard/set` and `Identity/set` return only the id of created objects, and `Calendar/set` and `CalendarEvent/set` omit some defaulted properties (RFC 8620, section 5.3).
+- Registry
+  - `config.json` is created with the process umask (usually `0644`), so the data store credentials are readable by other local users.
+  - Listing archived items with an `accountId` filter fails with `unsupportedFilter` for users without the `impersonate` permission instead of ignoring the filter like the other account-owned objects.
+- RocksDB:
+  - Updated to 11.8.1 with the upstream fix for spurious compare-and-swap failures in the write group leader ([facebook/rocksdb#15415](https://github.com/facebook/rocksdb/pull/15415)).
+  - `aarch64` release builds crash with `SIGSEGV` under concurrent writes (C and C++ dependencies are now compiled with outline atomics).
+- Spam filter: `FORGED_RCVD_TRAIL` is added for every `Received` header whose reverse DNS name ends with a dot, such as those written by Gmail.
+- WebUI
+  - Saving objects that use schema defaults fails with "Invalid value for object property", for example when enabling the AI classifier.
+  - Object pickers on tenant-scoped objects (for example the ACME provider of a tenant domain) list objects from other tenants, and saving one fails with a generic "references another item that does not exist" error instead of saying the object belongs to another tenant.
+- Multi-tenancy: Tenant administrators given the `impersonate` permission can reach accounts of other tenants. The permission is now never granted to tenant members and cannot be added to a tenant's permissions.
+- Installer: The systemd unit written by `install.sh` uses `Type=simple` instead of `Type=notify`.
+
 ## [1.0.0] - 2026-10-26
 
 This version includes **multiple breaking changes** and a new database layout, so existing v0.16.x deployments cannot be upgraded in place. Please read the [migration documentation](https://stalw.art/docs/migration/upgrade-0-16/) for more information on how to migrate from v0.16.x.

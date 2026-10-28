@@ -36,7 +36,7 @@ use registry::schema::enums::StorageQuota;
 use store::{
     ValueKey,
     ahash::AHashSet,
-    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
+    write::{Archive, ArchiveBytes, BatchBuilder, PendingId, ValueClass},
 };
 use trc::AddContext;
 use types::{
@@ -45,6 +45,55 @@ use types::{
     field::{ContactField, PrincipalField},
     id::Id,
 };
+
+const DEFAULT_NAME: &str = "Address Book";
+
+type CreatedValue = Value<'static, AddressBookProperty, AddressBookValue>;
+
+const DEFAULTED: [AddressBookProperty; 5] = [
+    AddressBookProperty::Name,
+    AddressBookProperty::Description,
+    AddressBookProperty::SortOrder,
+    AddressBookProperty::IsSubscribed,
+    AddressBookProperty::ShareWith,
+];
+
+#[derive(Clone, Copy)]
+struct Omitted([bool; DEFAULTED.len()]);
+
+impl Omitted {
+    fn from_create(object: &Value<'_, AddressBookProperty, AddressBookValue>) -> Self {
+        Omitted(
+            DEFAULTED.map(|property| object.as_object_and_get(&Key::Property(property)).is_none()),
+        )
+    }
+
+    fn server_set(
+        self,
+        is_default: bool,
+    ) -> impl Iterator<Item = (AddressBookProperty, CreatedValue)> {
+        [
+            (AddressBookProperty::Name, Value::Str(DEFAULT_NAME.into())),
+            (AddressBookProperty::Description, Value::Null),
+            (AddressBookProperty::SortOrder, Value::Number(0u64.into())),
+            (AddressBookProperty::IsSubscribed, Value::Bool(false)),
+            (
+                AddressBookProperty::ShareWith,
+                JmapRights::grants_value::<addressbook::AddressBook>(&[]),
+            ),
+        ]
+        .into_iter()
+        .zip(self.0)
+        .filter_map(|(entry, is_omitted)| is_omitted.then_some(entry))
+        .chain([
+            (
+                AddressBookProperty::MyRights,
+                JmapRights::all_rights::<addressbook::AddressBook>(),
+            ),
+            (AddressBookProperty::IsDefault, Value::Bool(is_default)),
+        ])
+    }
+}
 
 pub trait AddressBookSet: Sync + Send {
     fn address_book_set(
@@ -81,6 +130,7 @@ impl AddressBookSet for Server {
         let is_shared = access_token.is_shared(account_id);
         let mut set_default: Option<PendingId> = None;
         let mut created_slots = PendingCreates::new();
+        let mut created_omitted = Vec::new();
 
         // Obtain quota
         let quota = if request.has_creates() && !is_shared {
@@ -123,7 +173,7 @@ impl AddressBookSet for Server {
                     .collect::<String>(),
                 preferences: vec![AddressBookPreferences {
                     account_id,
-                    name: "Address Book".to_string(),
+                    name: DEFAULT_NAME.to_string(),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -138,6 +188,7 @@ impl AddressBookSet for Server {
                         continue 'create;
                     }
                 };
+            let omitted = Omitted::from_create(&object);
             if let Err(err) =
                 update_address_book(None, object, &mut address_book, access_token, account_id)
             {
@@ -215,6 +266,7 @@ impl AddressBookSet for Server {
                 set_default = Some(PendingId::Slot(document_id));
             }
 
+            created_omitted.push((id.clone(), document_id, omitted));
             created_slots.push(id, document_id);
         }
 
@@ -604,7 +656,7 @@ impl AddressBookSet for Server {
                 .with_account_id(account_id)
                 .with_collection(Collection::Principal)
                 .with_document(0);
-            for document_id in destroyed_books {
+            for &document_id in &destroyed_books {
                 batch.clear_if_equals(PrincipalField::DefaultAddressBookId, document_id);
             }
         }
@@ -625,6 +677,36 @@ impl AddressBookSet for Server {
             };
 
             created_slots.resolve(&mut response, &assigned_ids);
+            let default_address_book_id = if created_omitted.is_empty() {
+                None
+            } else {
+                self.store()
+                    .get_value::<u32>(ValueKey {
+                        account_id,
+                        collection: Collection::Principal.into(),
+                        document_id: 0,
+                        class: ValueClass::Property(PrincipalField::DefaultAddressBookId.into()),
+                    })
+                    .await
+                    .caused_by(trc::location!())?
+                    .or_else(|| {
+                        cache
+                            .document_ids(true)
+                            .filter(|id| !destroyed_books.contains(id))
+                            .chain(
+                                created_omitted
+                                    .iter()
+                                    .map(|(_, slot, _)| assigned_ids.slot(*slot)),
+                            )
+                            .min()
+                    })
+            };
+            for (create_id, slot, omitted) in created_omitted {
+                response.add_created_properties(
+                    &create_id,
+                    omitted.server_set(default_address_book_id == Some(assigned_ids.slot(slot))),
+                );
+            }
 
             if let Some(change_id) = assigned_ids.change_id(account_id, SyncCollection::AddressBook)
             {

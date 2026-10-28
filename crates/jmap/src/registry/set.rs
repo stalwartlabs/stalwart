@@ -74,7 +74,10 @@ use utils::{map::vec_map::VecMap, outbound::OutboundPolicy};
 #[cfg(feature = "enterprise")]
 use crate::registry::mapping::principal::{tenant_object_quota, validate_tenant_quota};
 #[cfg(feature = "enterprise")]
-use registry::schema::{prelude::OBJ_FILTER_TENANT, structs::Tenant};
+use registry::schema::{
+    prelude::OBJ_FILTER_TENANT,
+    structs::{Permissions, Tenant},
+};
 // SPDX-SnippetEnd
 
 pub trait RegistrySet: Sync + Send {
@@ -361,6 +364,19 @@ async fn registry_object_set(
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            ObjectInner::Tenant(tenant)
+                if tenant_grants_impersonate(tenant)
+                    && !modification
+                        .as_tenant()
+                        .is_some_and(tenant_grants_impersonate) =>
+            {
+                Err(SetError::invalid_properties()
+                    .with_property(Property::Permissions)
+                    .with_description(
+                        "The impersonate permission is reserved for server administrators",
+                    ))
+            }
             #[cfg(feature = "enterprise")]
             ObjectInner::Tenant(tenant) => match &tenant.logo {
                 Some(logo)
@@ -1088,6 +1104,13 @@ pub(crate) fn map_write_error(err: RegistryWriteResult) -> SetError<Property> {
         RegistryWriteResult::InvalidForeignKey { object_id } => {
             SetError::new(SetErrorType::InvalidForeignKey).with_object_id(object_id)
         }
+        RegistryWriteResult::ForeignKeyOutOfScope { object_id, scope } => {
+            SetError::new(SetErrorType::InvalidForeignKey)
+                .with_description(format!(
+                    "{object_id} is not assigned to the same {scope} as this object."
+                ))
+                .with_object_id(object_id)
+        }
         RegistryWriteResult::PrimaryKeyConflict {
             property,
             existing_id,
@@ -1103,3 +1126,17 @@ pub(crate) fn map_write_error(err: RegistryWriteResult) -> SetError<Property> {
         RegistryWriteResult::Success(_) => unreachable!(),
     }
 }
+
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+fn tenant_grants_impersonate(tenant: &Tenant) -> bool {
+    match &tenant.permissions {
+        Permissions::Merge(list) | Permissions::Replace(list) => {
+            list.enabled_permissions.contains(&Permission::Impersonate)
+        }
+        Permissions::Inherit => false,
+    }
+}
+// SPDX-SnippetEnd

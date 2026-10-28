@@ -1,6 +1,6 @@
 [package]
 name = "store"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 
 [dependencies]
@@ -9,7 +9,7 @@ types = { path = "../types" }
 nlp = { path = "../nlp" }
 trc = { path = "../trc" }
 registry = { path = "../registry" }
-rocksdb = { version = "0.24", optional = true, features = ["multi-threaded-cf"] }
+rocksdb = { version = "0.25", optional = true, features = ["multi-threaded-cf"] }
 foundationdb = { version = "0.11", features = ["embedded-fdb-include", "fdb-7_4"], optional = true }
 rusqlite = { version = "0.41", features = ["bundled"], optional = true }
 s3 = { path = "../s3", optional = true }

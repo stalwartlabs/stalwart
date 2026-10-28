@@ -459,6 +459,7 @@ pub(crate) fn can_attendee_modify_property(
                     | ICalendarProperty::Summary
                     | ICalendarProperty::Description
                     | ICalendarProperty::Comment
+                    | ICalendarProperty::Priority
             )
         }
         ICalendarComponentType::VTodo => matches!(
@@ -470,6 +471,7 @@ pub(crate) fn can_attendee_modify_property(
                 | ICalendarProperty::PercentComplete
                 | ICalendarProperty::Completed
                 | ICalendarProperty::Comment
+                | ICalendarProperty::Priority
         ),
         _ => false,
     }

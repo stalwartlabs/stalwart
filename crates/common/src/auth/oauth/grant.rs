@@ -14,13 +14,14 @@ use crate::{
 use registry::{
     schema::{
         enums::OAuthClientKind,
-        prelude::{Object, ObjectInner, ObjectType},
+        prelude::{Object, ObjectInner, ObjectType, Property},
         structs::OAuthGrant,
     },
     types::{datetime::UTCDateTime, id::ObjectId, ipaddr::IpAddr},
 };
 use std::net::IpAddr as StdIpAddr;
 use store::{
+    blake3,
     registry::{
         RegistryQuery,
         write::{RegistryWrite, RegistryWriteResult},
@@ -114,6 +115,10 @@ impl TokenScope {
             },
         }
     }
+}
+
+fn client_id_hash(client_id: &str) -> String {
+    blake3::hash(client_id.as_bytes()).to_hex().to_string()
 }
 
 fn prune_selection(last_used: &[i64], now: i64, idle_timeout: i64) -> Vec<bool> {
@@ -231,6 +236,7 @@ impl Server {
         let grant = OAuthGrant {
             account_id: Id::from(new.account_id),
             client_id: new.client_id.to_string(),
+            client_hash: client_id_hash(new.client_id),
             client_name: new
                 .client_name
                 .filter(|name| !name.is_empty())
@@ -301,6 +307,38 @@ impl Server {
         }
 
         Ok(())
+    }
+
+    pub async fn has_oauth_grant(
+        &self,
+        account_id: u32,
+        client_id: &str,
+        client_kind: OAuthClientKind,
+        scopes: OAuthScopes,
+    ) -> trc::Result<bool> {
+        let idle_since =
+            (now() as i64).saturating_sub(self.core.oauth.oauth_expiry_refresh_token as i64);
+        for id in self
+            .registry()
+            .query::<Vec<Id>>(
+                RegistryQuery::new(ObjectType::OAuthGrant)
+                    .with_account(account_id)
+                    .equal(Property::ClientHash, client_id_hash(client_id)),
+            )
+            .await
+            .caused_by(trc::location!())?
+        {
+            if self.oauth_grant(id.id()).await?.is_some_and(|stored| {
+                let grant = &stored.grant;
+                grant.client_id == client_id
+                    && grant.client_kind == client_kind
+                    && grant.last_used_at.timestamp() > idle_since
+                    && OAuthScopes::from_registry(grant.scopes.iter()).contains(scopes)
+            }) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub async fn revoke_oauth_grants(
@@ -412,6 +450,9 @@ impl Server {
             updated.generation = stored_generation;
             updated.pending = true;
             updated.last_used_at = now;
+            if updated.client_hash.is_empty() {
+                updated.client_hash = client_id_hash(&updated.client_id);
+            }
             let old_object =
                 Object::with_revision(ObjectInner::OAuthGrant(stored.grant), stored.revision);
             let new_object = Object::new(ObjectInner::OAuthGrant(updated));

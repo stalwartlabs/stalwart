@@ -8,8 +8,8 @@ use super::{
     DeviceAuthResponse, ErrorType, FormData, MAX_POST_LEN, OAuthCode, PkceCodeChallenge,
     TokenResponse,
     authorize::{
-        AuthorizationError, granted_scope, is_resource_path, issuer, resource_origin, scope_labels,
-        validate_authorization,
+        Authorization, AuthorizationError, granted_scope, is_resource_path, issuer,
+        resource_origin, scope_labels, validate_authorization,
     },
     logout::END_SESSION_PATH,
     request_origin,
@@ -37,7 +37,7 @@ use hyper::{StatusCode, body::Bytes};
 use registry::schema::enums::OAuthGrantType;
 use std::{borrow::Cow, future::Future};
 use store::{
-    Serialize,
+    Serialize, blake3,
     dispatch::lookup::KeyValue,
     write::{Archive, Archiver},
 };
@@ -150,6 +150,12 @@ pub enum LoginRequest {
         #[serde(default)]
         consent: Option<bool>,
     },
+    #[serde(rename_all = "camelCase")]
+    AuthConsent {
+        token: String,
+        query: String,
+        consent: bool,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -169,6 +175,9 @@ pub enum LoginResponse {
     Verified,
     Denied,
     MfaRequired,
+    ConsentRequired {
+        token: String,
+    },
     Expired,
     Failure,
 }
@@ -183,7 +192,6 @@ pub struct ClientInfo {
     pub scopes: Vec<&'static str>,
     pub verified: bool,
     pub consent_required: bool,
-    pub deny_location: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize, PartialEq, Eq)]
@@ -254,95 +262,26 @@ impl OAuthApiHandler for Server {
                 query,
                 consent,
             } => {
-                let issuer = issuer(self, origin);
-                let authorization = match validate_authorization(
-                    self,
-                    &query,
-                    &ResolveContext {
-                        mode: ResolveMode::Authorize,
-                        origin: Some(origin),
-                        remote_ip: session.remote_ip,
-                    },
-                    &issuer,
-                )
-                .await?
-                {
-                    Ok(authorization) => authorization,
-                    Err(AuthorizationError::Invalid { error, description }) => {
-                        return Ok(JsonResponse::new(LoginResponse::Invalid {
-                            error,
-                            description: description.into(),
-                        })
-                        .no_cache()
-                        .into_http_response());
-                    }
-                    Err(AuthorizationError::Redirect { location }) => {
-                        return Ok(JsonResponse::new(LoginResponse::Redirect { location })
-                            .no_cache()
-                            .into_http_response());
-                    }
-                };
-
-                if authorization.client.requires_consent() && consent != Some(true) {
-                    LoginResponse::Redirect {
-                        location: authorization.error_location(ErrorType::AccessDenied, &issuer),
-                    }
-                } else {
-                    match authenticate_login(
-                        self,
-                        session,
-                        &authorization.client,
+                self.authorize_code(
+                    session,
+                    origin,
+                    LoginCredentials {
                         account_name,
                         account_secret,
                         mfa_token,
-                    )
+                    },
+                    &query,
+                    consent,
+                )
+                .await?
+            }
+            LoginRequest::AuthConsent {
+                token,
+                query,
+                consent,
+            } => {
+                self.confirm_consent(session, origin, &token, &query, consent)
                     .await?
-                    {
-                        // SPDX-SnippetBegin
-                        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                        // SPDX-License-Identifier: LicenseRef-SEL
-                        #[cfg(feature = "enterprise")]
-                        Ok(login) if !authorization.client.allows_tenant(login.tenant_id) => {
-                            LoginResponse::Redirect {
-                                location: authorization
-                                    .error_location(ErrorType::AccessDenied, &issuer),
-                            }
-                        }
-                        // SPDX-SnippetEnd
-                        Ok(login) => {
-                            let client_code = rng()
-                                .sample_iter(Alphanumeric)
-                                .take(DEVICE_CODE_LEN)
-                                .map(char::from)
-                                .collect::<String>();
-                            let location = authorization.code_location(&client_code, &issuer);
-
-                            let value = Archiver::new(OAuthCode {
-                                status: OAuthStatus::Authorized,
-                                account_id: login.account_id,
-                                credential_version: login.credential_version,
-                                client_id: authorization.client_id,
-                                nonce: authorization.nonce,
-                                params: authorization.redirect_uri,
-                                code_challenge: authorization.code_challenge,
-                                scope: authorization.scope,
-                            })
-                            .untrusted()
-                            .serialize()
-                            .caused_by(trc::location!())?;
-
-                            self.in_memory_store()
-                                .key_set(
-                                    KeyValue::with_prefix(KV_OAUTH, client_code.as_bytes(), value)
-                                        .expires(self.core.oauth.oauth_expiry_auth_code),
-                                )
-                                .await?;
-
-                            LoginResponse::Authenticated { location }
-                        }
-                        Err(response) => response,
-                    }
-                }
             }
             LoginRequest::AuthDevice {
                 account_name,
@@ -409,9 +348,6 @@ impl OAuthApiHandler for Server {
                         scopes: authorization.scope_labels(),
                         verified: client.is_verified(),
                         consent_required: client.requires_consent(),
-                        deny_location: Some(
-                            authorization.error_location(ErrorType::AccessDenied, &issuer),
-                        ),
                     })
                 }
                 Err(AuthorizationError::Invalid { error, description }) => {
@@ -645,7 +581,6 @@ async fn device_client_info(
             scopes: scope_labels(&client, oauth.scope.as_ref().map(|scope| scope.as_str())),
             verified: client.is_verified(),
             consent_required: true,
-            deny_location: None,
         })),
         _ => Ok(None),
     }
@@ -715,6 +650,305 @@ async fn authenticate_login(
             trc::error!(err.span_id(session.session_id));
             Ok(Err(response))
         }
+    }
+}
+
+struct LoginCredentials {
+    account_name: String,
+    account_secret: String,
+    mfa_token: Option<String>,
+}
+
+trait ConsentHandler: Sync + Send {
+    fn validate_login_query(
+        &self,
+        session: &HttpSessionData,
+        origin: RequestOrigin<'_>,
+        query: &str,
+        issuer: &str,
+    ) -> impl Future<Output = trc::Result<Result<Authorization, LoginResponse>>> + Send;
+
+    fn authorize_code(
+        &self,
+        session: &HttpSessionData,
+        origin: RequestOrigin<'_>,
+        credentials: LoginCredentials,
+        query: &str,
+        consent: Option<bool>,
+    ) -> impl Future<Output = trc::Result<LoginResponse>> + Send;
+
+    fn request_consent(
+        &self,
+        authorization: Authorization,
+        login: &LoginAccount,
+        query: &str,
+    ) -> impl Future<Output = trc::Result<LoginResponse>> + Send;
+
+    fn confirm_consent(
+        &self,
+        session: &HttpSessionData,
+        origin: RequestOrigin<'_>,
+        token: &str,
+        query: &str,
+        consent: bool,
+    ) -> impl Future<Output = trc::Result<LoginResponse>> + Send;
+
+    fn take_pending_consent(
+        &self,
+        token: &str,
+        query: &str,
+    ) -> impl Future<Output = trc::Result<Option<(u32, u64)>>> + Send;
+
+    fn issue_auth_code(
+        &self,
+        authorization: Authorization,
+        account_id: u32,
+        credential_version: u64,
+        issuer: &str,
+    ) -> impl Future<Output = trc::Result<LoginResponse>> + Send;
+}
+
+impl ConsentHandler for Server {
+    async fn validate_login_query(
+        &self,
+        session: &HttpSessionData,
+        origin: RequestOrigin<'_>,
+        query: &str,
+        issuer: &str,
+    ) -> trc::Result<Result<Authorization, LoginResponse>> {
+        validate_authorization(
+            self,
+            query,
+            &ResolveContext {
+                mode: ResolveMode::Authorize,
+                origin: Some(origin),
+                remote_ip: session.remote_ip,
+            },
+            issuer,
+        )
+        .await
+        .map(|result| {
+            result.map_err(|err| match err {
+                AuthorizationError::Invalid { error, description } => LoginResponse::Invalid {
+                    error,
+                    description: description.into(),
+                },
+                AuthorizationError::Redirect { location } => LoginResponse::Redirect { location },
+            })
+        })
+    }
+
+    async fn authorize_code(
+        &self,
+        session: &HttpSessionData,
+        origin: RequestOrigin<'_>,
+        credentials: LoginCredentials,
+        query: &str,
+        consent: Option<bool>,
+    ) -> trc::Result<LoginResponse> {
+        let issuer = issuer(self, origin);
+        let authorization = match self
+            .validate_login_query(session, origin, query, &issuer)
+            .await?
+        {
+            Ok(authorization) => authorization,
+            Err(response) => return Ok(response),
+        };
+        let login = match authenticate_login(
+            self,
+            session,
+            &authorization.client,
+            credentials.account_name,
+            credentials.account_secret,
+            credentials.mfa_token,
+        )
+        .await?
+        {
+            Ok(login) => login,
+            Err(response) => return Ok(response),
+        };
+
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if !authorization.client.allows_tenant(login.tenant_id) {
+            return Ok(LoginResponse::Redirect {
+                location: authorization.error_location(ErrorType::AccessDenied, &issuer),
+            });
+        }
+        // SPDX-SnippetEnd
+
+        match consent {
+            Some(true) => {}
+            Some(false) => {
+                return Ok(LoginResponse::Redirect {
+                    location: authorization.error_location(ErrorType::AccessDenied, &issuer),
+                });
+            }
+            None if !authorization.client.requires_consent() => {}
+            None if !authorization.prompt_consent
+                && self
+                    .has_oauth_grant(
+                        login.account_id,
+                        &authorization.client_id,
+                        authorization.client.kind(),
+                        authorization.consent_scopes(),
+                    )
+                    .await? => {}
+            None => {
+                return self.request_consent(authorization, &login, query).await;
+            }
+        }
+
+        self.issue_auth_code(
+            authorization,
+            login.account_id,
+            login.credential_version,
+            &issuer,
+        )
+        .await
+    }
+
+    async fn request_consent(
+        &self,
+        authorization: Authorization,
+        login: &LoginAccount,
+        query: &str,
+    ) -> trc::Result<LoginResponse> {
+        let token = rng()
+            .sample_iter(Alphanumeric)
+            .take(DEVICE_CODE_LEN)
+            .map(char::from)
+            .collect::<String>();
+        let value = Archiver::new(OAuthCode {
+            status: OAuthStatus::ConsentPending,
+            account_id: login.account_id,
+            credential_version: login.credential_version,
+            client_id: authorization.client_id,
+            nonce: None,
+            params: query_digest(query).to_hex().to_string(),
+            code_challenge: PkceCodeChallenge::None,
+            scope: None,
+        })
+        .untrusted()
+        .serialize()
+        .caused_by(trc::location!())?;
+
+        self.in_memory_store()
+            .key_set(
+                KeyValue::with_prefix(KV_OAUTH, token.as_bytes(), value)
+                    .expires(self.core.oauth.oauth_expiry_auth_code),
+            )
+            .await?;
+
+        Ok(LoginResponse::ConsentRequired { token })
+    }
+
+    async fn confirm_consent(
+        &self,
+        session: &HttpSessionData,
+        origin: RequestOrigin<'_>,
+        token: &str,
+        query: &str,
+        consent: bool,
+    ) -> trc::Result<LoginResponse> {
+        let Some((account_id, credential_version)) =
+            self.take_pending_consent(token, query).await?
+        else {
+            return Ok(LoginResponse::Invalid {
+                error: ErrorType::InvalidRequest,
+                description: "The sign-in has expired. Please start again from the application."
+                    .into(),
+            });
+        };
+        let issuer = issuer(self, origin);
+        let authorization = match self
+            .validate_login_query(session, origin, query, &issuer)
+            .await?
+        {
+            Ok(authorization) => authorization,
+            Err(response) => return Ok(response),
+        };
+
+        if consent {
+            self.issue_auth_code(authorization, account_id, credential_version, &issuer)
+                .await
+        } else {
+            Ok(LoginResponse::Redirect {
+                location: authorization.error_location(ErrorType::AccessDenied, &issuer),
+            })
+        }
+    }
+
+    async fn take_pending_consent(
+        &self,
+        token: &str,
+        query: &str,
+    ) -> trc::Result<Option<(u32, u64)>> {
+        if token.len() != DEVICE_CODE_LEN || !token.bytes().all(|ch| ch.is_ascii_alphanumeric()) {
+            return Ok(None);
+        }
+        let key = KeyValue::<()>::build_key(KV_OAUTH, token.as_bytes());
+        let Some(stored) = self
+            .in_memory_store()
+            .key_get::<Archive<ArchiveBytes>>(key.as_slice())
+            .await?
+        else {
+            return Ok(None);
+        };
+        let pending = stored
+            .unarchive::<OAuthCode>()
+            .caused_by(trc::location!())?;
+        if pending.status != OAuthStatus::ConsentPending
+            || pending.params != query_digest(query).to_hex().as_str()
+            || !self.in_memory_store().key_delete(key.as_slice()).await?
+        {
+            return Ok(None);
+        }
+
+        Ok(Some((
+            pending.account_id.into(),
+            pending.credential_version.into(),
+        )))
+    }
+
+    async fn issue_auth_code(
+        &self,
+        authorization: Authorization,
+        account_id: u32,
+        credential_version: u64,
+        issuer: &str,
+    ) -> trc::Result<LoginResponse> {
+        let client_code = rng()
+            .sample_iter(Alphanumeric)
+            .take(DEVICE_CODE_LEN)
+            .map(char::from)
+            .collect::<String>();
+        let location = authorization.code_location(&client_code, issuer);
+
+        let value = Archiver::new(OAuthCode {
+            status: OAuthStatus::Authorized,
+            account_id,
+            credential_version,
+            client_id: authorization.client_id,
+            nonce: authorization.nonce,
+            params: authorization.redirect_uri,
+            code_challenge: authorization.code_challenge,
+            scope: authorization.scope,
+        })
+        .untrusted()
+        .serialize()
+        .caused_by(trc::location!())?;
+
+        self.in_memory_store()
+            .key_set(
+                KeyValue::with_prefix(KV_OAUTH, client_code.as_bytes(), value)
+                    .expires(self.core.oauth.oauth_expiry_auth_code),
+            )
+            .await?;
+
+        Ok(LoginResponse::Authenticated { location })
     }
 }
 
@@ -833,6 +1067,10 @@ async fn approve_device(
         .await?;
 
     Ok(response)
+}
+
+fn query_digest(query: &str) -> blake3::Hash {
+    blake3::hash(query.as_bytes())
 }
 
 fn is_user_code(code: &str) -> bool {

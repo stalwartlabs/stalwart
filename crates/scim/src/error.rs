@@ -227,6 +227,12 @@ impl IntoScimError for RegistryWriteResult {
                     object_id.object().as_str()
                 ))
             }
+            RegistryWriteResult::ForeignKeyOutOfScope { object_id, scope } => {
+                ScimError::invalid_value(format!(
+                    "The referenced {} is not assigned to the same {scope}.",
+                    object_id.object().as_str()
+                ))
+            }
             RegistryWriteResult::ValidationError { errors } => {
                 let mut detail = String::with_capacity(64);
                 for error in &errors {

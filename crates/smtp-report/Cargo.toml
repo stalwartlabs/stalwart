@@ -1,7 +1,7 @@
 [package]
 name = "smtp-report"
 description = "DMARC aggregate, ARF and TLS-RPT report generation and parsing"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false

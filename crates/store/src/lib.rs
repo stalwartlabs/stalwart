@@ -453,6 +453,7 @@ pub struct RegistryStoreInner {
     pub(crate) env_hostname: String,
     pub(crate) env_public_url: Option<String>,
     pub(crate) id_generator: SnowflakeIdGenerator,
+    pub(crate) process_nonce: [u8; 16],
 }
 
 #[cfg(feature = "sqlite")]

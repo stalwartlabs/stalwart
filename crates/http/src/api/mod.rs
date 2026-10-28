@@ -431,3 +431,8 @@ impl UnauthorizedResponse for HttpResponse {
         .with_text_body(serde_json::to_string(&RequestError::unauthorized()).unwrap_or_default())
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/http/src/api/tests.rs"]
+mod tests;

@@ -12,10 +12,7 @@ use std::{
 };
 
 use crate::task_manager::reconcile::insert_task_if_absent;
-use common::{
-    BuildServer, Inner, LONG_1D_SLUMBER,
-    config::{mailstore::spamfilter, telemetry::OtelMetrics},
-};
+use common::{BuildServer, Inner, LONG_1D_SLUMBER, config::mailstore::spamfilter};
 use registry::{
     schema::{
         enums::{TaskSpamFilterMaintenanceType, TaskStoreMaintenanceType, TaskType},
@@ -129,7 +126,6 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
 
             // OTEL Push Metrics
             if let Some(otel) = &server.core.metrics.otel {
-                OtelMetrics::enable_errors();
                 queue.schedule(Instant::now() + otel.interval, Event::OtelMetrics);
             }
 

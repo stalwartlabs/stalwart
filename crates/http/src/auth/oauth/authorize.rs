@@ -33,6 +33,7 @@ pub struct Authorization {
     pub nonce: Option<String>,
     pub scope: Option<String>,
     pub code_challenge: PkceCodeChallenge,
+    pub prompt_consent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,7 @@ enum Param {
     CodeChallenge,
     CodeChallengeMethod,
     Resource,
+    Prompt,
 }
 
 #[derive(Default)]
@@ -69,6 +71,7 @@ struct AuthorizationQuery<'x> {
     nonce: Option<Cow<'x, str>>,
     code_challenge: Option<Cow<'x, str>>,
     code_challenge_method: Option<Cow<'x, str>>,
+    prompt: Option<Cow<'x, str>>,
     resources: Vec<Cow<'x, str>>,
     duplicates: u16,
     too_many_resources: bool,
@@ -88,6 +91,7 @@ impl Param {
             "code_challenge" => Param::CodeChallenge,
             "code_challenge_method" => Param::CodeChallengeMethod,
             "resource" => Param::Resource,
+            "prompt" => Param::Prompt,
         )
         .copied()
     }
@@ -121,6 +125,7 @@ impl<'x> AuthorizationQuery<'x> {
                 Param::Nonce => &mut parsed.nonce,
                 Param::CodeChallenge => &mut parsed.code_challenge,
                 Param::CodeChallengeMethod => &mut parsed.code_challenge_method,
+                Param::Prompt => &mut parsed.prompt,
             };
             if slot.is_some() {
                 parsed.duplicates |= param.bit();
@@ -279,6 +284,11 @@ pub async fn validate_authorization(
         nonce: query.nonce.map(Cow::into_owned),
         scope,
         code_challenge,
+        prompt_consent: query.prompt.as_deref().is_some_and(|prompt| {
+            prompt
+                .split_ascii_whitespace()
+                .any(|value| value == "consent")
+        }),
         client,
     }))
 }
@@ -293,6 +303,14 @@ impl Authorization {
             &self.redirect_uri,
             [("code", code), ("state", &self.state), ("iss", issuer)],
         )
+    }
+
+    pub fn consent_scopes(&self) -> OAuthScopes {
+        if self.client.allowed_scopes().is_some() {
+            OAuthScopes::parse(self.scope.as_deref().unwrap_or_default()).interoperable()
+        } else {
+            OAuthScopes::NONE
+        }
     }
 
     pub fn scope_labels(&self) -> Vec<&'static str> {

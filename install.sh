@@ -318,7 +318,7 @@ Conflicts=postfix.service sendmail.service exim4.service
 After=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 LimitNOFILE=65536
 KillMode=process
 KillSignal=SIGINT

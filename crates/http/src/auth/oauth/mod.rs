@@ -35,6 +35,7 @@ pub enum OAuthStatus {
     TokenIssued,
     Pending,
     Denied,
+    ConsentPending,
 }
 
 const MAX_POST_LEN: usize = 2048;

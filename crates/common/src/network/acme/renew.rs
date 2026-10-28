@@ -126,7 +126,7 @@ impl Server {
                 match self.build_dns_updater(props.dns_server_id).await? {
                     Ok(updater) => Some(AcmeDnsParameters {
                         updater,
-                        origin: props.origin.clone(),
+                        zone: props.origin.clone().unwrap_or_else(|| domain.name.clone()),
                     }),
                     Err(err) => {
                         return Err(AcmeError::Invalid(format!(

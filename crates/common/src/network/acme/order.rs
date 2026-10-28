@@ -321,11 +321,7 @@ impl AcmeRequestBuilder {
                         };
                         let domain = domain.strip_prefix("*.").unwrap_or(&domain);
 
-                        let zone = dns_parameters
-                            .origin
-                            .as_deref()
-                            .or_else(|| psl::domain_str(domain))
-                            .unwrap_or(domain);
+                        let zone = challenge_zone(&dns_parameters.zone, domain);
 
                         let proof = self.dns_proof(challenge)?;
                         let challenge_name = format!("_acme-challenge.{}", domain);
@@ -545,6 +541,21 @@ impl ParsedCert {
                     ),
                 }
             })
+    }
+}
+
+fn challenge_zone<'x>(zone: &'x str, domain: &'x str) -> &'x str {
+    let in_zone = domain
+        .len()
+        .checked_sub(zone.len())
+        .and_then(|split| domain.split_at_checked(split))
+        .is_some_and(|(prefix, suffix)| {
+            suffix.eq_ignore_ascii_case(zone) && (prefix.is_empty() || prefix.ends_with('.'))
+        });
+    if in_zone {
+        zone
+    } else {
+        psl::domain_str(domain).unwrap_or(domain)
     }
 }
 

@@ -7,7 +7,8 @@
 use crate::calendar::expand::SECONDS_PER_DAY;
 use crate::scheduling::{
     Attendee, Email, InstanceId, ItipDateTime, ItipEntry, ItipEntryValue, ItipError, ItipField,
-    ItipParticipant, ItipSnapshot, ItipSnapshots, ItipTime, ItipValue, Organizer, RecurrenceId,
+    ItipParticipant, ItipSnapshot, ItipSnapshots, ItipTime, ItipTimeKind, ItipValue, Organizer,
+    RecurrenceId,
 };
 use ahash::AHashMap;
 use calcard::icalendar::{
@@ -281,6 +282,7 @@ pub fn itip_snapshot<'x, 'y>(
                             sched_comp.recurrence_time = Some(ItipTime {
                                 start,
                                 tz_id: tz.as_id(),
+                                kind: ItipTimeKind::of(date),
                             });
                             instance_id = InstanceId::Recurrence(RecurrenceId {
                                 entry_id: entry_id as u16,
@@ -451,7 +453,7 @@ impl<'x> ItipSnapshots<'x> {
                         .and_then(ItipSnapshot::start_time)
                         .map(|master_start| ItipTime {
                             start: recurrence_id.date,
-                            tz_id: master_start.tz_id,
+                            ..master_start
                         })
                 }),
         }
@@ -659,6 +661,7 @@ impl<'x> ItipSnapshot<'x> {
                 (ICalendarProperty::Dtstart, ItipEntryValue::DateTime(start)) => Some(ItipTime {
                     start: start.timestamp,
                     tz_id: start.tz_code,
+                    kind: ItipTimeKind::of(start.date),
                 }),
                 _ => None,
             })
@@ -706,6 +709,7 @@ impl ItipEntryValue<'_> {
             ItipEntryValue::DateTime(date) => Some(ItipValue::Time(ItipTime {
                 start: date.timestamp,
                 tz_id: date.tz_code,
+                kind: ItipTimeKind::of(date.date),
             })),
             ItipEntryValue::RRule(rule) => Some(ItipValue::Rrule(Box::new((*rule).clone()))),
             ItipEntryValue::Text(value) => Some(ItipValue::Text(value.to_string())),

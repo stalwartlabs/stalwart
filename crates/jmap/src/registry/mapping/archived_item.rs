@@ -243,12 +243,9 @@ pub(crate) async fn archived_item_get(
     let ids = if let Some(ids) = get.ids.take() {
         ids
     } else {
-        let query = if !get.is_account_filtered {
-            RegistryQuery::new(get.object_type).greater_than_or_equal(Property::AccountId, 0u64)
-        } else {
-            RegistryQuery::new(get.object_type).with_account(get.account_id)
-        }
-        .with_limit(get.server.core.jmap.get_max_objects);
+        let query = RegistryQuery::new(get.object_type)
+            .with_account(get.account_id)
+            .with_limit(get.server.core.jmap.get_max_objects);
 
         get.server.registry().query::<Vec<Id>>(query).await?
     };
@@ -299,15 +296,14 @@ pub(crate) async fn archived_item_query(
                     false
                 }
             }
+            Property::AccountId => true,
             _ => false,
         })?;
 
     let query = if let Some(account_id) = account_id {
         RegistryQuery::new(req.object_type).with_account(account_id.document_id())
-    } else if !can_impersonate {
-        RegistryQuery::new(req.object_type).with_account(req.request.account_id.document_id())
     } else {
-        RegistryQuery::new(req.object_type).greater_than_or_equal(Property::AccountId, 0u64)
+        RegistryQuery::new(req.object_type).with_account(req.request.account_id.document_id())
     };
 
     let params = req

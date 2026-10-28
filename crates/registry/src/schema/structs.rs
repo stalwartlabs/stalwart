@@ -3813,6 +3813,12 @@ pub struct Metrics {
     pub metrics: Map<trc::MetricType>,
     #[serde(rename = "metricsPolicy")]
     pub metrics_policy: EventPolicy,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
+    #[serde(rename = "serviceNamespace")]
+    pub service_namespace: Option<String>,
+    #[serde(rename = "resourceAttributes")]
+    pub resource_attributes: VecMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3829,6 +3835,12 @@ pub struct MetricsOtelGrpc {
     pub url: Option<String>,
     pub interval: Duration,
     pub timeout: Duration,
+    #[serde(rename = "allowInvalidCerts")]
+    pub allow_invalid_certs: bool,
+    #[serde(rename = "httpAuth")]
+    pub http_auth: HttpAuth,
+    #[serde(rename = "httpHeaders")]
+    pub http_headers: VecMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4407,6 +4419,8 @@ pub struct OAuthGrant {
     pub account_id: Id,
     #[serde(rename = "clientId")]
     pub client_id: String,
+    #[serde(rename = "clientHash")]
+    pub client_hash: String,
     #[serde(rename = "clientName")]
     pub client_name: Option<String>,
     #[serde(rename = "clientKind")]
@@ -6485,6 +6499,8 @@ pub struct TracerLog {
 #[serde(default)]
 pub struct TracerOtelGrpc {
     pub url: Option<String>,
+    #[serde(rename = "allowInvalidCerts")]
+    pub allow_invalid_certs: bool,
     #[serde(rename = "enableLogExporter")]
     pub enable_log_exporter: bool,
     #[serde(rename = "enableSpanExporter")]

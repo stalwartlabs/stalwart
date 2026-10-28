@@ -5,7 +5,6 @@
  */
 
 use super::{StoredIdentities, get::IdentityGet};
-use crate::api::pending_creates::PendingCreates;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
@@ -29,6 +28,41 @@ use types::{
     id::Id,
 };
 use utils::sanitize_email;
+
+type CreatedValue = Value<'static, IdentityProperty, IdentityValue>;
+
+const DEFAULTED: [IdentityProperty; 5] = [
+    IdentityProperty::Name,
+    IdentityProperty::ReplyTo,
+    IdentityProperty::Bcc,
+    IdentityProperty::TextSignature,
+    IdentityProperty::HtmlSignature,
+];
+
+#[derive(Clone, Copy)]
+struct Omitted([bool; DEFAULTED.len()]);
+
+impl Omitted {
+    fn from_create(object: &Value<'_, IdentityProperty, IdentityValue>) -> Self {
+        Omitted(
+            DEFAULTED.map(|property| object.as_object_and_get(&Key::Property(property)).is_none()),
+        )
+    }
+
+    fn server_set(self) -> impl Iterator<Item = (IdentityProperty, CreatedValue)> {
+        [
+            (IdentityProperty::Name, Value::Str("".into())),
+            (IdentityProperty::ReplyTo, Value::Null),
+            (IdentityProperty::Bcc, Value::Null),
+            (IdentityProperty::TextSignature, Value::Str("".into())),
+            (IdentityProperty::HtmlSignature, Value::Str("".into())),
+        ]
+        .into_iter()
+        .zip(self.0)
+        .filter_map(|(entry, is_omitted)| is_omitted.then_some(entry))
+        .chain([(IdentityProperty::MayDelete, Value::Bool(true))])
+    }
+}
 
 pub trait IdentitySet: Sync + Send {
     fn identity_set(
@@ -58,9 +92,10 @@ impl IdentitySet for Server {
 
         // Process creates
         let mut batch = BatchBuilder::new();
-        let mut pending_creates = PendingCreates::new();
+        let mut pending_creates = Vec::new();
         'create: for (id, object) in request.unwrap_create() {
             let mut identity = Identity::default();
+            let omitted = Omitted::from_create(&object);
 
             for (property, mut value) in object.into_expanded_object() {
                 if let Err(err) = response
@@ -128,7 +163,7 @@ impl IdentitySet for Server {
                 .caused_by(trc::location!())?
                 .commit_point();
             identity_count += 1;
-            pending_creates.push(id, slot);
+            pending_creates.push((id, slot, omitted));
         }
 
         // Process updates
@@ -233,7 +268,9 @@ impl IdentitySet for Server {
                 State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::Identity))
                     .into();
 
-            pending_creates.resolve(&mut response, &assigned_ids);
+            for (id, slot, omitted) in pending_creates {
+                response.created_with_properties(id, assigned_ids.slot(slot), omitted.server_set());
+            }
         }
 
         Ok(response)

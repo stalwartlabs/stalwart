@@ -1,7 +1,7 @@
 [package]
 name = "jmap-tools"
 description = "JMAP object parser with JSON Pointer querying and patching support"
-version = "0.1.9"
+version = "1.0.1"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false

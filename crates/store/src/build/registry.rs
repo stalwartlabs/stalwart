@@ -104,6 +104,11 @@ impl RegistryStore {
     }
 
     #[inline(always)]
+    pub fn process_nonce(&self) -> [u8; 16] {
+        self.0.process_nonce
+    }
+
+    #[inline(always)]
     pub fn is_recovery_mode(&self) -> bool {
         self.0.env_recovery_mode
     }

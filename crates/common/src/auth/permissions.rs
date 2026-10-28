@@ -96,6 +96,7 @@ impl Server {
                     }
 
                     permissions.restrict(&tenant_permissions);
+                    permissions.disabled.set(Permission::Impersonate as usize);
                 } else {
                     // Enterprise edition downgrade, remove any tenant administrator permissions
                     permissions.restrict(&PermissionsGroup::user());

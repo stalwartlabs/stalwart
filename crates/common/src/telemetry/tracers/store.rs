@@ -8,13 +8,7 @@
  *
  */
 
-use crate::{
-    config::telemetry::StoreTracer,
-    telemetry::tracers::{
-        TraceEvents,
-        spans::{SpanTracker, report_discarded_spans, tracks_span},
-    },
-};
+use crate::{config::telemetry::StoreTracer, telemetry::tracers::TraceEvents};
 use registry::{
     schema::structs::{
         Trace, TraceKeyValue, TraceValue, TraceValueIpAddr, TraceValueList, TraceValueString,
@@ -28,6 +22,7 @@ use store::{
     search::{IndexDocument, SearchField, SearchFilter, SearchQuery, TracingSearchField},
     write::{BatchBuilder, SearchIndex, TelemetryClass, ValueClass},
 };
+use telemetry::exporter::spans::{SpanTracker, report_discarded_spans, tracks_span};
 use trc::{
     AddContext, AuthEvent, EventType, Key, MessageIngestEvent, OutgoingReportEvent, QueueEvent,
     Value, ipc::subscriber::SubscriberBuilder,

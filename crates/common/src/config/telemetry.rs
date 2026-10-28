@@ -10,17 +10,10 @@ use ahash::{AHashMap, AHashSet};
 use aws_lc_rs::constant_time::verify_slices_are_equal;
 use encodify::base64::STANDARD;
 use hyper::HeaderMap;
-use opentelemetry::{InstrumentationScope, KeyValue};
-use opentelemetry_otlp::{
-    LogExporter, MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig, WithTonicConfig,
-    tonic_types::metadata::MetadataMap,
-};
-use opentelemetry_sdk::{Resource, metrics::Temporality};
-use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use registry::schema::{
     enums::{EventPolicy, LogRotateFrequency},
     prelude::ObjectType,
-    structs::{self, EventTracingLevel, MetricsPrometheus, Tracer, WebHook},
+    structs::{self, EventTracingLevel, HttpAuth, MetricsPrometheus, Tracer, WebHook},
 };
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -30,15 +23,27 @@ use registry::schema::structs::Search;
 // SPDX-SnippetEnd
 use serde::Serialize;
 use std::{
-    collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, atomic::AtomicUsize},
     time::Duration,
 };
 use store::registry::bootstrap::Bootstrap;
+use telemetry::{
+    exporter::{
+        DEFAULT_MAX_PENDING_BYTES, DEFAULT_MAX_REQUEST_BYTES, OtlpConfig, OtlpTracer,
+        metrics::OtlpMetricsExporter,
+    },
+    otlp::resource::{ProcessIdentity, Resource},
+    transport::{
+        endpoint::{Endpoint, Transport},
+        sender::is_reserved_header,
+    },
+};
 use trc::{EventType, Level, MetricType, TelemetryEvent, ipc::subscriber::Interests};
-use utils::http::http_client_builder;
+use utils::{http::shared_tls_config, map::vec_map::VecMap};
+
+const DEFAULT_GRPC_URL: &str = "http://localhost:4317";
 
 #[derive(Debug)]
 pub struct TelemetrySubscriber {
@@ -65,19 +70,10 @@ pub enum TelemetrySubscriberType {
     // SPDX-SnippetEnd
 }
 
-#[derive(Debug)]
-pub struct OtelTracer {
-    pub span_exporter: SpanExporter,
-    pub span_exporter_enable: bool,
-    pub log_exporter: LogExporter,
-    pub log_exporter_enable: bool,
-    pub throttle: Duration,
-}
+pub type OtelTracer = OtlpTracer;
 
 pub struct OtelMetrics {
-    pub resource: Resource,
-    pub instrumentation: InstrumentationScope,
-    pub exporter: MetricExporter,
+    pub exporter: tokio::sync::Mutex<OtlpMetricsExporter>,
     pub interval: Duration,
 }
 
@@ -153,6 +149,7 @@ pub struct Metrics {
 #[derive(Debug, Clone)]
 pub struct PrometheusMetrics {
     pub auth: PrometheusAuth,
+    pub size_hint: Arc<AtomicUsize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,13 +187,14 @@ impl PrometheusAuth {
 
 impl Telemetry {
     pub async fn parse(bp: &mut Bootstrap, storage: &Storage, index_tx: IndexQueueNotify) -> Self {
+        let metrics = bp.setting_infallible::<structs::Metrics>().await;
+        let resource = OtlpResource::new(bp, &metrics);
         let mut telemetry = Telemetry {
-            tracers: Tracers::parse(bp, storage, index_tx).await,
+            tracers: Tracers::parse(bp, storage, index_tx, &resource).await,
             metrics: Interests::default(),
         };
 
         // Parse metrics
-        let metrics = bp.setting_infallible::<structs::Metrics>().await;
         apply_metrics(metrics.metrics, metrics.metrics_policy, |metric_type| {
             let event_id = metric_type.event_id();
             if event_id != usize::MAX {
@@ -229,21 +227,107 @@ fn sink_fingerprint<T: Serialize>(value: &T) -> u64 {
     hasher.finish()
 }
 
-fn tracer_sink_fingerprint(tracer: &Tracer) -> u64 {
+fn tracer_sink_fingerprint(tracer: &Tracer, resource: &OtlpResource) -> u64 {
     let mut tracer = tracer.clone();
-    match &mut tracer {
-        Tracer::Log(t) => strip_interests!(t, level),
-        Tracer::Stdout(t) => strip_interests!(t, level),
-        Tracer::Journal(t) => strip_interests!(t, level),
-        Tracer::OtelHttp(t) => strip_interests!(t, level),
-        Tracer::OtelGrpc(t) => strip_interests!(t, level),
+    let resource_fingerprint = match &mut tracer {
+        Tracer::Log(t) => {
+            strip_interests!(t, level);
+            0
+        }
+        Tracer::Stdout(t) => {
+            strip_interests!(t, level);
+            0
+        }
+        Tracer::Journal(t) => {
+            strip_interests!(t, level);
+            0
+        }
+        Tracer::OtelHttp(t) => {
+            strip_interests!(t, level);
+            resource.fingerprint
+        }
+        Tracer::OtelGrpc(t) => {
+            strip_interests!(t, level);
+            resource.fingerprint
+        }
+    };
+    sink_fingerprint(&tracer) ^ resource_fingerprint
+}
+
+pub struct OtlpResource {
+    resource: Resource,
+    fingerprint: u64,
+}
+
+impl OtlpResource {
+    fn new(bp: &Bootstrap, metrics: &structs::Metrics) -> Self {
+        Self {
+            resource: Resource::new(
+                &ProcessIdentity::new(bp.registry.process_nonce()),
+                &metrics.service_name,
+                metrics.service_namespace.as_deref(),
+                metrics
+                    .resource_attributes
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str())),
+            ),
+            fingerprint: sink_fingerprint(&(
+                &metrics.service_name,
+                &metrics.service_namespace,
+                &metrics.resource_attributes,
+            )),
+        }
     }
-    sink_fingerprint(&tracer)
+}
+
+struct OtlpSettings {
+    transport: Transport,
+    url: Option<String>,
+    http_auth: HttpAuth,
+    http_headers: VecMap<String, String>,
+    allow_invalid_certs: bool,
+    timeout: Duration,
+}
+
+impl OtlpSettings {
+    async fn build(self) -> Result<OtlpConfig, String> {
+        let url = self.url.as_deref().unwrap_or(DEFAULT_GRPC_URL);
+        let endpoint = Endpoint::parse(url).map_err(|err| err.to_string())?;
+        let header_map = self
+            .http_auth
+            .build_headers(self.http_headers, None)
+            .await
+            .map_err(|err| format!("Failed to build OpenTelemetry headers: {err}"))?;
+        let mut headers = Vec::with_capacity(header_map.len());
+        let mut name = None;
+        for (next_name, value) in header_map {
+            if next_name.is_some() {
+                name = next_name;
+            }
+            if let Some(name) = name.as_ref().filter(|name| !is_reserved_header(name)) {
+                headers.push((name.clone(), value));
+            }
+        }
+        Ok(OtlpConfig {
+            endpoint,
+            transport: self.transport,
+            headers: headers.into(),
+            tls: Arc::new(shared_tls_config(self.allow_invalid_certs)),
+            timeout: self.timeout,
+            max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
+            max_pending_bytes: DEFAULT_MAX_PENDING_BYTES,
+        })
+    }
 }
 
 impl Tracers {
     #[cfg_attr(not(feature = "enterprise"), allow(unused_variables))]
-    pub async fn parse(bp: &mut Bootstrap, storage: &Storage, index_tx: IndexQueueNotify) -> Self {
+    pub async fn parse(
+        bp: &mut Bootstrap,
+        storage: &Storage,
+        index_tx: IndexQueueNotify,
+        resource: &OtlpResource,
+    ) -> Self {
         let mut custom_levels = AHashMap::new();
         let mut tracers: Vec<TelemetrySubscriber> = Vec::new();
         let mut global_interests = Interests::default();
@@ -258,7 +342,7 @@ impl Tracers {
             for tracer in bp.list_infallible::<Tracer>().await {
                 let id = tracer.id;
                 let tracer = tracer.object;
-                let sink = tracer_sink_fingerprint(&tracer);
+                let sink = tracer_sink_fingerprint(&tracer, resource);
                 let level;
                 let lossy;
                 let events;
@@ -351,81 +435,26 @@ impl Tracers {
                         events_policy = tracer.events_policy;
                         enable = tracer.enable;
 
-                        let headers = match tracer
-                            .http_auth
-                            .build_headers(tracer.http_headers, None)
-                            .await
+                        match (OtlpSettings {
+                            transport: Transport::Http,
+                            url: Some(tracer.url),
+                            http_auth: tracer.http_auth,
+                            http_headers: tracer.http_headers,
+                            allow_invalid_certs: tracer.allow_invalid_certs,
+                            timeout: tracer.timeout.into_inner(),
+                        })
+                        .build()
+                        .await
                         {
-                            Ok(headers) => headers
-                                .into_iter()
-                                .filter_map(|(k, v)| {
-                                    k.and_then(|k| {
-                                        Some((k.to_string(), v.to_str().ok()?.to_string()))
-                                    })
-                                })
-                                .collect::<HashMap<String, String>>(),
+                            Ok(otlp) => TelemetrySubscriberType::OtelTracer(OtlpTracer {
+                                otlp,
+                                resource: resource.resource.clone(),
+                                throttle: tracer.throttle.into_inner(),
+                                export_logs: tracer.enable_log_exporter,
+                                export_spans: tracer.enable_span_exporter,
+                            }),
                             Err(err) => {
-                                bp.build_error(
-                                    id,
-                                    format!("Failed to build OpenTelemetry HTTP headers: {err}"),
-                                );
-                                continue;
-                            }
-                        };
-
-                        let mut span_exporter = SpanExporter::builder()
-                            .with_http()
-                            .with_endpoint(tracer.url.clone())
-                            .with_timeout(tracer.timeout.into_inner());
-                        let mut log_exporter = LogExporter::builder()
-                            .with_http()
-                            .with_endpoint(tracer.url)
-                            .with_timeout(tracer.timeout.into_inner());
-                        if !headers.is_empty() {
-                            span_exporter = span_exporter.with_headers(headers.clone());
-                            log_exporter = log_exporter.with_headers(headers);
-                        }
-                        if tracer.allow_invalid_certs {
-                            match http_client_builder(true)
-                                .timeout(tracer.timeout.into_inner())
-                                .build()
-                            {
-                                Ok(client) => {
-                                    span_exporter = span_exporter.with_http_client(client.clone());
-                                    log_exporter = log_exporter.with_http_client(client);
-                                }
-                                Err(err) => {
-                                    bp.build_error(
-                                        id,
-                                        format!("Failed to build OpenTelemetry HTTP client: {err}"),
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
-
-                        match (span_exporter.build(), log_exporter.build()) {
-                            (Ok(span_exporter), Ok(log_exporter)) => {
-                                TelemetrySubscriberType::OtelTracer(OtelTracer {
-                                    span_exporter,
-                                    log_exporter,
-                                    throttle: tracer.throttle.into_inner(),
-                                    span_exporter_enable: tracer.enable_span_exporter,
-                                    log_exporter_enable: tracer.enable_log_exporter,
-                                })
-                            }
-                            (Err(err), _) => {
-                                bp.build_error(
-                                    id,
-                                    format!("Failed to build OpenTelemetry span exporter: {err}"),
-                                );
-                                continue;
-                            }
-                            (_, Err(err)) => {
-                                bp.build_error(
-                                    id,
-                                    format!("Failed to build OpenTelemetry log exporter: {err}"),
-                                );
+                                bp.build_error(id, err);
                                 continue;
                             }
                         }
@@ -437,58 +466,26 @@ impl Tracers {
                         events_policy = tracer.events_policy;
                         enable = tracer.enable;
 
-                        let metadata = match tracer
-                            .http_auth
-                            .build_headers(tracer.http_headers, None)
-                            .await
+                        match (OtlpSettings {
+                            transport: Transport::Grpc,
+                            url: tracer.url,
+                            http_auth: tracer.http_auth,
+                            http_headers: tracer.http_headers,
+                            allow_invalid_certs: tracer.allow_invalid_certs,
+                            timeout: tracer.timeout.into_inner(),
+                        })
+                        .build()
+                        .await
                         {
-                            Ok(headers) => MetadataMap::from_headers(headers),
+                            Ok(otlp) => TelemetrySubscriberType::OtelTracer(OtlpTracer {
+                                otlp,
+                                resource: resource.resource.clone(),
+                                throttle: tracer.throttle.into_inner(),
+                                export_logs: tracer.enable_log_exporter,
+                                export_spans: tracer.enable_span_exporter,
+                            }),
                             Err(err) => {
-                                bp.build_error(
-                                    id,
-                                    format!("Failed to build OpenTelemetry gRPC metadata: {err}"),
-                                );
-                                continue;
-                            }
-                        };
-
-                        let mut span_exporter = SpanExporter::builder()
-                            .with_tonic()
-                            .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                            .with_timeout(tracer.timeout.into_inner())
-                            .with_metadata(metadata.clone());
-                        let mut log_exporter = LogExporter::builder()
-                            .with_tonic()
-                            .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                            .with_timeout(tracer.timeout.into_inner())
-                            .with_metadata(metadata);
-                        if let Some(endpoint) = tracer.url {
-                            span_exporter = span_exporter.with_endpoint(endpoint.clone());
-                            log_exporter = log_exporter.with_endpoint(endpoint);
-                        }
-
-                        match (span_exporter.build(), log_exporter.build()) {
-                            (Ok(span_exporter), Ok(log_exporter)) => {
-                                TelemetrySubscriberType::OtelTracer(OtelTracer {
-                                    span_exporter,
-                                    log_exporter,
-                                    throttle: tracer.throttle.into_inner(),
-                                    span_exporter_enable: tracer.enable_span_exporter,
-                                    log_exporter_enable: tracer.enable_log_exporter,
-                                })
-                            }
-                            (Err(err), _) => {
-                                bp.build_error(
-                                    id,
-                                    format!("Failed to build OpenTelemetry span exporter: {err}"),
-                                );
-                                continue;
-                            }
-                            (_, Err(err)) => {
-                                bp.build_error(
-                                    id,
-                                    format!("Failed to build OpenTelemetry log exporter: {err}"),
-                                );
+                                bp.build_error(id, err);
                                 continue;
                             }
                         }
@@ -726,13 +723,7 @@ impl Tracers {
 impl Metrics {
     pub async fn parse(bp: &mut Bootstrap) -> Self {
         let metrics = bp.setting_infallible::<structs::Metrics>().await;
-        let resource = Resource::builder()
-            .with_service_name("stalwart")
-            .with_attribute(KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")))
-            .build();
-        let instrumentation = InstrumentationScope::builder("stalwart")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .build();
+        let resource = OtlpResource::new(bp, &metrics).resource;
 
         Metrics {
             prometheus: match metrics.prometheus {
@@ -747,7 +738,10 @@ impl Metrics {
                         }
                     };
                     match auth {
-                        Ok(auth) => Some(PrometheusMetrics { auth }),
+                        Ok(auth) => Some(PrometheusMetrics {
+                            auth,
+                            size_hint: Arc::new(AtomicUsize::new(0)),
+                        }),
                         Err(err) => {
                             bp.build_error(
                                 ObjectType::Metrics.singleton(),
@@ -759,94 +753,55 @@ impl Metrics {
                 }
                 MetricsPrometheus::Disabled => None,
             },
-            otel: match metrics.open_telemetry {
-                structs::MetricsOtel::Http(otel) => 'otel: {
-                    let headers = match otel.http_auth.build_headers(otel.http_headers, None).await
-                    {
-                        Ok(headers) => headers
-                            .into_iter()
-                            .filter_map(|(k, v)| {
-                                k.and_then(|k| Some((k.to_string(), v.to_str().ok()?.to_string())))
-                            })
-                            .collect::<HashMap<String, String>>(),
-                        Err(err) => {
-                            bp.build_error(
-                                ObjectType::Metrics.singleton(),
-                                format!("Failed to build OpenTelemetry HTTP headers: {err}"),
-                            );
-                            Default::default()
-                        }
-                    };
-
-                    let mut exporter = MetricExporter::builder()
-                        .with_temporality(Temporality::Delta)
-                        .with_http()
-                        .with_endpoint(otel.url)
-                        .with_timeout(otel.timeout.into_inner());
-                    if !headers.is_empty() {
-                        exporter = exporter.with_headers(headers);
-                    }
-                    if otel.allow_invalid_certs {
-                        match http_client_builder(true)
-                            .timeout(otel.timeout.into_inner())
-                            .build()
-                        {
-                            Ok(client) => {
-                                exporter = exporter.with_http_client(client);
-                            }
+            otel: {
+                let settings = match metrics.open_telemetry {
+                    structs::MetricsOtel::Http(otel) => Some((
+                        OtlpSettings {
+                            transport: Transport::Http,
+                            url: Some(otel.url),
+                            http_auth: otel.http_auth,
+                            http_headers: otel.http_headers,
+                            allow_invalid_certs: otel.allow_invalid_certs,
+                            timeout: otel.timeout.into_inner(),
+                        },
+                        otel.interval.into_inner(),
+                    )),
+                    structs::MetricsOtel::Grpc(otel) => Some((
+                        OtlpSettings {
+                            transport: Transport::Grpc,
+                            url: otel.url,
+                            http_auth: otel.http_auth,
+                            http_headers: otel.http_headers,
+                            allow_invalid_certs: otel.allow_invalid_certs,
+                            timeout: otel.timeout.into_inner(),
+                        },
+                        otel.interval.into_inner(),
+                    )),
+                    structs::MetricsOtel::Disabled => None,
+                };
+                match settings {
+                    Some((settings, interval)) => {
+                        match settings.build().await.and_then(|config| {
+                            OtlpMetricsExporter::new(config, resource)
+                                .map_err(|err| err.to_string())
+                        }) {
+                            Ok(exporter) => Some(Arc::new(OtelMetrics {
+                                exporter: tokio::sync::Mutex::new(exporter),
+                                interval,
+                            })),
                             Err(err) => {
                                 bp.build_error(
                                     ObjectType::Metrics.singleton(),
-                                    format!("Failed to build OpenTelemetry HTTP client: {err}"),
+                                    format!(
+                                        "Failed to build OpenTelemetry metrics exporter: {err}"
+                                    ),
                                 );
-                                break 'otel None;
+                                None
                             }
                         }
                     }
-
-                    match exporter.build() {
-                        Ok(exporter) => Some(Arc::new(OtelMetrics {
-                            exporter,
-                            interval: otel.interval.into_inner(),
-                            resource,
-                            instrumentation,
-                        })),
-                        Err(err) => {
-                            bp.build_error(
-                                ObjectType::Metrics.singleton(),
-                                format!("Failed to build OpenTelemetry metrics exporter: {err}"),
-                            );
-                            None
-                        }
-                    }
+                    None => None,
                 }
-                structs::MetricsOtel::Grpc(otel) => {
-                    let mut exporter = MetricExporter::builder()
-                        .with_temporality(Temporality::Delta)
-                        .with_tonic()
-                        .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                        .with_timeout(otel.timeout.into_inner());
-                    if let Some(endpoint) = otel.url {
-                        exporter = exporter.with_endpoint(endpoint);
-                    }
-
-                    match exporter.build() {
-                        Ok(exporter) => Some(Arc::new(OtelMetrics {
-                            exporter,
-                            interval: otel.interval.into_inner(),
-                            resource,
-                            instrumentation,
-                        })),
-                        Err(err) => {
-                            bp.build_error(
-                                ObjectType::Metrics.singleton(),
-                                format!("Failed to build OpenTelemetry metrics exporter: {err}"),
-                            );
-                            None
-                        }
-                    }
-                }
-                structs::MetricsOtel::Disabled => None,
             },
             log_path: bp
                 .list_infallible::<Tracer>()

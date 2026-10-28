@@ -6,7 +6,7 @@
 
 use std::sync::atomic::Ordering;
 
-use atomics::{array::AtomicU32Array, gauge::AtomicGauge, histogram::AtomicHistogram};
+use atomics::{array::AtomicU64Array, gauge::AtomicGauge, histogram::AtomicHistogram};
 use event::UNCOUNTED_EVENTS;
 use ipc::{
     collector::{Collector, GlobalInterests},
@@ -17,7 +17,7 @@ use crate::*;
 
 pub(crate) static METRIC_INTERESTS: GlobalInterests = GlobalInterests::new();
 
-static EVENT_COUNTERS: AtomicU32Array<TOTAL_EVENT_COUNT> = AtomicU32Array::new();
+static EVENT_COUNTERS: AtomicU64Array<TOTAL_EVENT_COUNT> = AtomicU64Array::new();
 static CONNECTION_METRICS: [ConnectionMetrics; TOTAL_CONN_TYPES] = init_conn_metrics();
 
 static MESSAGE_INGESTION_TIME: AtomicHistogram<12> =
@@ -106,7 +106,7 @@ pub struct ConnectionMetrics {
 
 pub struct EventCounter {
     id: EventType,
-    value: u32,
+    value: u64,
 }
 
 impl Collector {
@@ -399,7 +399,7 @@ impl Collector {
     }
 
     #[inline(always)]
-    pub fn read_metric_counter(metric_id: usize) -> u32 {
+    pub fn read_metric_counter(metric_id: usize) -> u64 {
         EVENT_COUNTERS.get(metric_id)
     }
 
@@ -504,7 +504,7 @@ impl Collector {
         }
     }
 
-    pub fn update_event_counter(event_type: EventType, value: u32) {
+    pub fn update_event_counter(event_type: EventType, value: u64) {
         EVENT_COUNTERS.add(event_type.into(), value);
     }
 
@@ -542,7 +542,7 @@ impl EventCounter {
     }
 
     pub fn value(&self) -> u64 {
-        self.value as u64
+        self.value
     }
 }
 

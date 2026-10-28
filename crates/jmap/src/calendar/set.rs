@@ -1354,6 +1354,13 @@ impl CalendarServerSet for Calendar {
                 CalendarProperty::MyRights,
                 JmapRights::all_rights::<calendar::Calendar>(),
             ),
+            (CalendarProperty::Description, Value::Null),
+            (CalendarProperty::Color, Value::Null),
+            (CalendarProperty::TimeZone, Value::Null),
+            (
+                CalendarProperty::ShareWith,
+                JmapRights::grants_value::<calendar::Calendar>(&[]),
+            ),
         ]
         .into_iter()
         .filter(|(property, _)| !client_properties.contains(property))

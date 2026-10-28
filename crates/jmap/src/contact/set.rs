@@ -12,7 +12,9 @@ use crate::api::pending_creates::PendingCreates;
 use crate::blob::embedded::EmbeddedExport;
 use crate::changes::state::JmapCacheState;
 use crate::contact::{CreatedUids, assert_is_unique_uid};
-use calcard::jscontact::{JSContact, JSContactProperty, JSContactValue};
+use calcard::jscontact::{
+    JSCONTACT_VERSION, JSContact, JSContactProperty, JSContactType, JSContactValue,
+};
 use common::{
     DavName, GroupwareResources, Server,
     auth::AccessToken,
@@ -136,6 +138,7 @@ impl ContactCardSet for Server {
         // Process creates
         let mut batch = BatchBuilder::new();
         let mut created_slots = PendingCreates::new();
+        let mut created_server_set = Vec::new();
         let mut created_uids = CreatedUids::default();
         'create: for (id, mut object) in request.unwrap_create() {
             if !quota.has_room(created_slots.len()) {
@@ -150,6 +153,12 @@ impl ContactCardSet for Server {
                         continue 'create;
                     }
                 };
+            let omits_type = object
+                .as_object_and_get(&Key::Property(JSContactProperty::Type))
+                .is_none();
+            let omits_version = object
+                .as_object_and_get(&Key::Property(JSContactProperty::Version))
+                .is_none();
 
             match self
                 .create_contact_card(
@@ -168,6 +177,9 @@ impl ContactCardSet for Server {
                 .await?
             {
                 Ok(document_id) => {
+                    if omits_type || omits_version {
+                        created_server_set.push((id.clone(), omits_type, omits_version));
+                    }
                     created_slots.push(id, document_id);
                 }
                 Err(err) => {
@@ -587,6 +599,23 @@ impl ContactCardSet for Server {
             };
 
             created_slots.resolve(&mut response, &assigned_ids);
+            for (create_id, omits_type, omits_version) in created_server_set {
+                response.add_created_properties(
+                    &create_id,
+                    [
+                        omits_type.then_some((
+                            JSContactProperty::Type,
+                            Value::Element(JSContactValue::Type(JSContactType::Card)),
+                        )),
+                        omits_version.then_some((
+                            JSContactProperty::Version,
+                            Value::Str(JSCONTACT_VERSION.into()),
+                        )),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+            }
 
             response.new_state =
                 State::Exact(assigned_ids.last_change_id(account_id, SyncCollection::AddressBook))

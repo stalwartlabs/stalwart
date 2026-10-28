@@ -397,6 +397,9 @@ impl TokenHandler for Server {
             }
             ArchivedOAuthStatus::Denied => Ok(TokenResponse::error(ErrorType::AccessDenied)),
             ArchivedOAuthStatus::TokenIssued => Ok(TokenResponse::error(ErrorType::ExpiredToken)),
+            ArchivedOAuthStatus::ConsentPending => {
+                Ok(TokenResponse::error(ErrorType::InvalidGrant))
+            }
         }
     }
 

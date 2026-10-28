@@ -15,7 +15,8 @@ use crate::{
         },
     },
     jscontact::{
-        JSContact, JSContactId, JSContactKind, JSContactProperty, JSContactType, JSContactValue,
+        JSCONTACT_VERSION, JSContact, JSContactId, JSContactKind, JSContactProperty, JSContactType,
+        JSContactValue,
         import::{
             CardProperties, EntryState, ExtractedParams, Localization, Member, PropIdKey, PropIds,
             State, VCardConvertedProperty, VCardParams,
@@ -51,7 +52,10 @@ where
             JSContactProperty::Type,
             Value::Element(JSContactValue::Type(JSContactType::Card)),
         );
-        entries.insert(JSContactProperty::Version, Value::Str("1.0".into()));
+        entries.insert(
+            JSContactProperty::Version,
+            Value::Str(JSCONTACT_VERSION.into()),
+        );
 
         let mut default_language = None;
         let mut language_counts: OrderedMap<LanguageTag<'_>, usize> = OrderedMap::default();

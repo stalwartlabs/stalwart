@@ -51,6 +51,10 @@ pub enum RegistryWriteResult {
     InvalidForeignKey {
         object_id: ObjectId,
     },
+    ForeignKeyOutOfScope {
+        object_id: ObjectId,
+        scope: ForeignKeyScope,
+    },
     PrimaryKeyConflict {
         property: Property,
         existing_id: ObjectId,
@@ -59,6 +63,12 @@ pub enum RegistryWriteResult {
         errors: Vec<ValidationError>,
     },
     NotSupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForeignKeyScope {
+    Tenant,
+    Account,
 }
 
 pub enum RegistryWrite<'x> {
@@ -274,8 +284,9 @@ impl RegistryStore {
                             .await
                             .caused_by(trc::location!())?
                     {
-                        return Ok(RegistryWriteResult::InvalidForeignKey {
+                        return Ok(RegistryWriteResult::ForeignKeyOutOfScope {
                             object_id: *foreign_id,
+                            scope: ForeignKeyScope::Tenant,
                         });
                     }
                     // SPDX-SnippetEnd
@@ -296,8 +307,9 @@ impl RegistryStore {
                             .await
                             .caused_by(trc::location!())?
                     {
-                        return Ok(RegistryWriteResult::InvalidForeignKey {
+                        return Ok(RegistryWriteResult::ForeignKeyOutOfScope {
                             object_id: *foreign_id,
+                            scope: ForeignKeyScope::Account,
                         });
                     }
                 }
@@ -683,6 +695,15 @@ impl<'x> RegistryWrite<'x> {
     }
 }
 
+impl Display for ForeignKeyScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ForeignKeyScope::Tenant => "tenant",
+            ForeignKeyScope::Account => "account",
+        })
+    }
+}
+
 impl Display for RegistryWriteResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -702,6 +723,9 @@ impl Display for RegistryWriteResult {
             RegistryWriteResult::NotFound { object_id } => write!(f, "Not found: {}", object_id),
             RegistryWriteResult::InvalidForeignKey { object_id } => {
                 write!(f, "Invalid foreign key: {}", object_id)
+            }
+            RegistryWriteResult::ForeignKeyOutOfScope { object_id, scope } => {
+                write!(f, "{object_id} is not in the same {scope} as this object")
             }
             RegistryWriteResult::PrimaryKeyConflict {
                 property,

@@ -394,10 +394,7 @@ impl Dispatcher {
     fn report_dropped(&mut self, dropped: u64, timestamp: u64) {
         let event_id = EVENTS_DROPPED.to_id() as usize;
         if Collector::is_metric(event_id) {
-            Collector::update_event_counter(
-                EVENTS_DROPPED,
-                u32::try_from(dropped).unwrap_or(u32::MAX),
-            );
+            Collector::update_event_counter(EVENTS_DROPPED, dropped);
         }
         if Collector::has_interest(event_id) {
             self.dispatch(

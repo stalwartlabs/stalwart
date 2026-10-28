@@ -223,13 +223,26 @@ impl<T: JmapObject> SetResponse<T> {
     }
 
     pub fn created(&mut self, id: String, document_id: impl Into<T::Id>) {
-        self.created.insert(
-            id,
-            Value::Object(Map::from(vec![(
-                Key::Property(T::ID_PROPERTY),
-                Value::Element(document_id.into().into()),
-            )])),
+        self.created_with_properties(id, document_id, []);
+    }
+
+    pub fn created_with_properties(
+        &mut self,
+        id: String,
+        document_id: impl Into<T::Id>,
+        properties: impl IntoIterator<Item = (T::Property, Value<'static, T::Property, T::Element>)>,
+    ) {
+        let properties = properties.into_iter();
+        let (lower, upper) = properties.size_hint();
+        let mut object = Map::with_capacity(upper.unwrap_or(lower) + 1);
+        object.insert_unchecked(
+            Key::Property(T::ID_PROPERTY),
+            Value::Element(document_id.into().into()),
         );
+        for (property, value) in properties {
+            object.insert(property, value);
+        }
+        self.created.insert(id, Value::Object(object));
     }
 
     pub fn invalid_property_create(

@@ -5213,6 +5213,1272 @@ impl EventType {
         }
     }
 
+    pub fn otel_metric_name(&self) -> &'static str {
+        match self {
+            EventType::Acme(AcmeEvent::AuthError) => "stalwart.acme.auth_error",
+            EventType::Acme(AcmeEvent::AuthTooManyAttempts) => {
+                "stalwart.acme.auth_too_many_attempts"
+            }
+            EventType::Acme(AcmeEvent::OrderCompleted) => "stalwart.acme.order_completed",
+            EventType::Acme(AcmeEvent::OrderInvalid) => "stalwart.acme.order_invalid",
+            EventType::Acme(AcmeEvent::ClientMissingSni) => "stalwart.acme.client_missing_sni",
+            EventType::Acme(AcmeEvent::TlsAlpnError) => "stalwart.acme.tls_alpn_error",
+            EventType::Acme(AcmeEvent::TokenNotFound) => "stalwart.acme.token_not_found",
+            EventType::Acme(AcmeEvent::Error) => "stalwart.acme.error",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::ApiError) => "stalwart.ai.api_error",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::Request) => "stalwart.ai.request",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::SpamVerdict) => "stalwart.ai.spam_verdict",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::SpamSkipped) => "stalwart.ai.spam_skipped",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::BreakerOpen) => "stalwart.ai.breaker_open",
+            // SPDX-SnippetEnd
+            EventType::Arc(ArcEvent::ChainInvalid) => "stalwart.arc.chain_invalid",
+            EventType::Arc(ArcEvent::SignatureInvalid) => "stalwart.arc.signature_invalid",
+            EventType::Arc(ArcEvent::HashMismatch) => "stalwart.arc.hash_mismatch",
+            EventType::Auth(AuthEvent::Success) => "stalwart.auth.success",
+            EventType::Auth(AuthEvent::Failed) => "stalwart.auth.failed",
+            EventType::Auth(AuthEvent::TooManyAttempts) => "stalwart.auth.too_many_attempts",
+            EventType::Auth(AuthEvent::Error) => "stalwart.auth.error",
+            EventType::Cache(CacheEvent::Miss) => "stalwart.cache.miss",
+            EventType::Cache(CacheEvent::Hit) => "stalwart.cache.hit",
+            EventType::Cache(CacheEvent::Stale) => "stalwart.cache.stale",
+            EventType::Cache(CacheEvent::EntryTooLarge) => "stalwart.cache.entry_too_large",
+            EventType::Cache(CacheEvent::SwapHit) => "stalwart.cache.swap_hit",
+            EventType::Cache(CacheEvent::SwapMiss) => "stalwart.cache.swap_miss",
+            EventType::Cache(CacheEvent::SwapWrite) => "stalwart.cache.swap_write",
+            EventType::Cache(CacheEvent::SwapError) => "stalwart.cache.swap_error",
+            EventType::Calendar(CalendarEvent::AlarmSent) => "stalwart.calendar.alarm_sent",
+            EventType::Calendar(CalendarEvent::AlarmFailed) => "stalwart.calendar.alarm_failed",
+            EventType::Calendar(CalendarEvent::ItipMessageSent) => {
+                "stalwart.calendar.itip_message_sent"
+            }
+            EventType::Calendar(CalendarEvent::ItipMessageReceived) => {
+                "stalwart.calendar.itip_message_received"
+            }
+            EventType::Calendar(CalendarEvent::ItipMessageError) => {
+                "stalwart.calendar.itip_message_error"
+            }
+            EventType::Cluster(ClusterEvent::SubscriberError) => {
+                "stalwart.cluster.subscriber_error"
+            }
+            EventType::Cluster(ClusterEvent::SubscriberDisconnected) => {
+                "stalwart.cluster.subscriber_disconnected"
+            }
+            EventType::Cluster(ClusterEvent::PublisherError) => "stalwart.cluster.publisher_error",
+            EventType::Dane(DaneEvent::AuthenticationSuccess) => {
+                "stalwart.dane.authentication_success"
+            }
+            EventType::Dane(DaneEvent::AuthenticationFailure) => {
+                "stalwart.dane.authentication_failure"
+            }
+            EventType::Dane(DaneEvent::NoCertificatesFound) => {
+                "stalwart.dane.no_certificates_found"
+            }
+            EventType::Dane(DaneEvent::CertificateParseError) => {
+                "stalwart.dane.certificate_parse_error"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordFetchError) => {
+                "stalwart.dane.tlsa_record_fetch_error"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordNotFound) => "stalwart.dane.tlsa_record_not_found",
+            EventType::Dane(DaneEvent::TlsaRecordNotDnssecSigned) => {
+                "stalwart.dane.tlsa_record_not_dnssec_signed"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordInvalid) => "stalwart.dane.tlsa_record_invalid",
+            EventType::Dane(DaneEvent::BogusDnssecRecord) => "stalwart.dane.bogus_dnssec_record",
+            EventType::Delivery(DeliveryEvent::AttemptStart) => "stalwart.delivery.attempt_start",
+            EventType::Delivery(DeliveryEvent::AttemptEnd) => "stalwart.delivery.attempt_end",
+            EventType::Delivery(DeliveryEvent::Completed) => "stalwart.delivery.completed",
+            EventType::Delivery(DeliveryEvent::MxLookupFailed) => {
+                "stalwart.delivery.mx_lookup_failed"
+            }
+            EventType::Delivery(DeliveryEvent::IpLookupFailed) => {
+                "stalwart.delivery.ip_lookup_failed"
+            }
+            EventType::Delivery(DeliveryEvent::NullMx) => "stalwart.delivery.null_mx",
+            EventType::Delivery(DeliveryEvent::GreetingFailed) => {
+                "stalwart.delivery.greeting_failed"
+            }
+            EventType::Delivery(DeliveryEvent::EhloRejected) => "stalwart.delivery.ehlo_rejected",
+            EventType::Delivery(DeliveryEvent::AuthFailed) => "stalwart.delivery.auth_failed",
+            EventType::Delivery(DeliveryEvent::MailFromRejected) => {
+                "stalwart.delivery.mail_from_rejected"
+            }
+            EventType::Delivery(DeliveryEvent::Delivered) => "stalwart.delivery.delivered",
+            EventType::Delivery(DeliveryEvent::RcptToRejected) => {
+                "stalwart.delivery.rcpt_to_rejected"
+            }
+            EventType::Delivery(DeliveryEvent::RcptToFailed) => "stalwart.delivery.rcpt_to_failed",
+            EventType::Delivery(DeliveryEvent::MessageRejected) => {
+                "stalwart.delivery.message_rejected"
+            }
+            EventType::Delivery(DeliveryEvent::StartTlsUnavailable) => {
+                "stalwart.delivery.start_tls_unavailable"
+            }
+            EventType::Delivery(DeliveryEvent::StartTlsError) => {
+                "stalwart.delivery.start_tls_error"
+            }
+            EventType::Delivery(DeliveryEvent::StartTlsDisabled) => {
+                "stalwart.delivery.start_tls_disabled"
+            }
+            EventType::Delivery(DeliveryEvent::ImplicitTlsError) => {
+                "stalwart.delivery.implicit_tls_error"
+            }
+            EventType::Delivery(DeliveryEvent::ConcurrencyLimitExceeded) => {
+                "stalwart.delivery.concurrency_limit_exceeded"
+            }
+            EventType::Delivery(DeliveryEvent::RateLimitExceeded) => {
+                "stalwart.delivery.rate_limit_exceeded"
+            }
+            EventType::Delivery(DeliveryEvent::DoubleBounce) => "stalwart.delivery.double_bounce",
+            EventType::Delivery(DeliveryEvent::DsnSuccess) => "stalwart.delivery.dsn_success",
+            EventType::Delivery(DeliveryEvent::DsnTempFail) => "stalwart.delivery.dsn_temp_fail",
+            EventType::Delivery(DeliveryEvent::DsnPermFail) => "stalwart.delivery.dsn_perm_fail",
+            EventType::Dkim(DkimEvent::Pass) => "stalwart.dkim.pass",
+            EventType::Dkim(DkimEvent::Neutral) => "stalwart.dkim.neutral",
+            EventType::Dkim(DkimEvent::Fail) => "stalwart.dkim.fail",
+            EventType::Dkim(DkimEvent::PermError) => "stalwart.dkim.perm_error",
+            EventType::Dkim(DkimEvent::TempError) => "stalwart.dkim.temp_error",
+            EventType::Dkim(DkimEvent::None) => "stalwart.dkim.none",
+            EventType::Dkim(DkimEvent::SignatureInvalid) => "stalwart.dkim.signature_invalid",
+            EventType::Dkim(DkimEvent::PublicKeyError) => "stalwart.dkim.public_key_error",
+            EventType::Dkim(DkimEvent::VerificationFailed) => "stalwart.dkim.verification_failed",
+            EventType::Dkim(DkimEvent::HashMismatch) => "stalwart.dkim.hash_mismatch",
+            EventType::Dkim(DkimEvent::SignerNotFound) => "stalwart.dkim.signer_not_found",
+            EventType::Dkim2(Dkim2Event::InstanceInvalid) => "stalwart.dkim2.instance_invalid",
+            EventType::Dkim2(Dkim2Event::SignatureInvalid) => "stalwart.dkim2.signature_invalid",
+            EventType::Dkim2(Dkim2Event::ChainInvalid) => "stalwart.dkim2.chain_invalid",
+            EventType::Dkim2(Dkim2Event::TimestampInvalid) => "stalwart.dkim2.timestamp_invalid",
+            EventType::Dkim2(Dkim2Event::EnvelopeMismatch) => "stalwart.dkim2.envelope_mismatch",
+            EventType::Dkim2(Dkim2Event::CustodyBroken) => "stalwart.dkim2.custody_broken",
+            EventType::Dkim2(Dkim2Event::PublicKeyError) => "stalwart.dkim2.public_key_error",
+            EventType::Dkim2(Dkim2Event::VerificationFailed) => {
+                "stalwart.dkim2.verification_failed"
+            }
+            EventType::Dkim2(Dkim2Event::HashMismatch) => "stalwart.dkim2.hash_mismatch",
+            EventType::Dkim2(Dkim2Event::RecipeError) => "stalwart.dkim2.recipe_error",
+            EventType::Dkim2(Dkim2Event::SigningFailed) => "stalwart.dkim2.signing_failed",
+            EventType::Dmarc(DmarcEvent::Pass) => "stalwart.dmarc.pass",
+            EventType::Dmarc(DmarcEvent::Fail) => "stalwart.dmarc.fail",
+            EventType::Dmarc(DmarcEvent::PermError) => "stalwart.dmarc.perm_error",
+            EventType::Dmarc(DmarcEvent::TempError) => "stalwart.dmarc.temp_error",
+            EventType::Dmarc(DmarcEvent::None) => "stalwart.dmarc.none",
+            EventType::Dns(DnsEvent::RecordCreationFailed) => "stalwart.dns.record_creation_failed",
+            EventType::Dns(DnsEvent::RecordDeletionFailed) => "stalwart.dns.record_deletion_failed",
+            EventType::Dns(DnsEvent::RecordLookupFailed) => "stalwart.dns.record_lookup_failed",
+            EventType::Dns(DnsEvent::RecordPropagationTimeout) => {
+                "stalwart.dns.record_propagation_timeout"
+            }
+            EventType::Eval(EvalEvent::Error) => "stalwart.eval.error",
+            EventType::Eval(EvalEvent::DirectoryNotFound) => "stalwart.eval.directory_not_found",
+            EventType::Eval(EvalEvent::StoreNotFound) => "stalwart.eval.store_not_found",
+            EventType::Http(HttpEvent::ConnectionStart) => "stalwart.http.connection_start",
+            EventType::Http(HttpEvent::Error) => "stalwart.http.error",
+            EventType::Http(HttpEvent::RequestBody) => "stalwart.http.request_body",
+            EventType::Http(HttpEvent::ResponseBody) => "stalwart.http.response_body",
+            EventType::Http(HttpEvent::XForwardedMissing) => "stalwart.http.x_forwarded_missing",
+            EventType::Http(HttpEvent::XForwardedInvalid) => "stalwart.http.x_forwarded_invalid",
+            EventType::Imap(ImapEvent::ConnectionStart) => "stalwart.imap.connection_start",
+            EventType::Imap(ImapEvent::ConnectionEnd) => "stalwart.imap.connection_end",
+            EventType::IncomingReport(IncomingReportEvent::DmarcReport) => {
+                "stalwart.incoming_report.dmarc_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::DmarcReportWithWarnings) => {
+                "stalwart.incoming_report.dmarc_report_with_warnings"
+            }
+            EventType::IncomingReport(IncomingReportEvent::TlsReport) => {
+                "stalwart.incoming_report.tls_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::TlsReportWithWarnings) => {
+                "stalwart.incoming_report.tls_report_with_warnings"
+            }
+            EventType::IncomingReport(IncomingReportEvent::AbuseReport) => {
+                "stalwart.incoming_report.abuse_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::AuthFailureReport) => {
+                "stalwart.incoming_report.auth_failure_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::FraudReport) => {
+                "stalwart.incoming_report.fraud_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::NotSpamReport) => {
+                "stalwart.incoming_report.not_spam_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::VirusReport) => {
+                "stalwart.incoming_report.virus_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::OtherReport) => {
+                "stalwart.incoming_report.other_report"
+            }
+            EventType::IncomingReport(IncomingReportEvent::MessageParseFailed) => {
+                "stalwart.incoming_report.message_parse_failed"
+            }
+            EventType::IncomingReport(IncomingReportEvent::DmarcParseFailed) => {
+                "stalwart.incoming_report.dmarc_parse_failed"
+            }
+            EventType::IncomingReport(IncomingReportEvent::TlsRpcParseFailed) => {
+                "stalwart.incoming_report.tls_rpc_parse_failed"
+            }
+            EventType::IncomingReport(IncomingReportEvent::ArfParseFailed) => {
+                "stalwart.incoming_report.arf_parse_failed"
+            }
+            EventType::IncomingReport(IncomingReportEvent::DecompressError) => {
+                "stalwart.incoming_report.decompress_error"
+            }
+            EventType::Iprev(IprevEvent::Pass) => "stalwart.iprev.pass",
+            EventType::Iprev(IprevEvent::Fail) => "stalwart.iprev.fail",
+            EventType::Iprev(IprevEvent::PermError) => "stalwart.iprev.perm_error",
+            EventType::Iprev(IprevEvent::TempError) => "stalwart.iprev.temp_error",
+            EventType::Iprev(IprevEvent::None) => "stalwart.iprev.none",
+            EventType::Jmap(JmapEvent::MethodCall) => "stalwart.jmap.method_call",
+            EventType::Jmap(JmapEvent::InvalidArguments) => "stalwart.jmap.invalid_arguments",
+            EventType::Jmap(JmapEvent::RequestTooLarge) => "stalwart.jmap.request_too_large",
+            EventType::Jmap(JmapEvent::UnsupportedFilter) => "stalwart.jmap.unsupported_filter",
+            EventType::Jmap(JmapEvent::UnsupportedSort) => "stalwart.jmap.unsupported_sort",
+            EventType::Jmap(JmapEvent::UnknownMethod) => "stalwart.jmap.unknown_method",
+            EventType::Jmap(JmapEvent::Forbidden) => "stalwart.jmap.forbidden",
+            EventType::Jmap(JmapEvent::NotJson) => "stalwart.jmap.not_json",
+            EventType::Jmap(JmapEvent::NotRequest) => "stalwart.jmap.not_request",
+            EventType::Jmap(JmapEvent::WebsocketStart) => "stalwart.jmap.websocket_start",
+            EventType::Jmap(JmapEvent::WebsocketError) => "stalwart.jmap.websocket_error",
+            EventType::Limit(LimitEvent::SizeRequest) => "stalwart.limit.size_request",
+            EventType::Limit(LimitEvent::SizeUpload) => "stalwart.limit.size_upload",
+            EventType::Limit(LimitEvent::CallsIn) => "stalwart.limit.calls_in",
+            EventType::Limit(LimitEvent::ConcurrentRequest) => "stalwart.limit.concurrent_request",
+            EventType::Limit(LimitEvent::ConcurrentUpload) => "stalwart.limit.concurrent_upload",
+            EventType::Limit(LimitEvent::ConcurrentConnection) => {
+                "stalwart.limit.concurrent_connection"
+            }
+            EventType::Limit(LimitEvent::Quota) => "stalwart.limit.quota",
+            EventType::Limit(LimitEvent::BlobQuota) => "stalwart.limit.blob_quota",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            EventType::Limit(LimitEvent::TenantQuota) => "stalwart.limit.tenant_quota",
+            // SPDX-SnippetEnd
+            EventType::Limit(LimitEvent::TooManyRequests) => "stalwart.limit.too_many_requests",
+            EventType::Limit(LimitEvent::MemoryBudget) => "stalwart.limit.memory_budget",
+            EventType::MailAuth(MailAuthEvent::ParseError) => "stalwart.mail_auth.parse_error",
+            EventType::MailAuth(MailAuthEvent::MissingParameters) => {
+                "stalwart.mail_auth.missing_parameters"
+            }
+            EventType::MailAuth(MailAuthEvent::NoHeadersFound) => {
+                "stalwart.mail_auth.no_headers_found"
+            }
+            EventType::MailAuth(MailAuthEvent::Crypto) => "stalwart.mail_auth.crypto",
+            EventType::MailAuth(MailAuthEvent::Io) => "stalwart.mail_auth.io",
+            EventType::MailAuth(MailAuthEvent::Base64) => "stalwart.mail_auth.base64",
+            EventType::MailAuth(MailAuthEvent::DnsError) => "stalwart.mail_auth.dns_error",
+            EventType::MailAuth(MailAuthEvent::DnsRecordNotFound) => {
+                "stalwart.mail_auth.dns_record_not_found"
+            }
+            EventType::MailAuth(MailAuthEvent::DnsInvalidRecordType) => {
+                "stalwart.mail_auth.dns_invalid_record_type"
+            }
+            EventType::MailAuth(MailAuthEvent::PolicyNotAligned) => {
+                "stalwart.mail_auth.policy_not_aligned"
+            }
+            EventType::ManageSieve(ManageSieveEvent::ConnectionStart) => {
+                "stalwart.manage_sieve.connection_start"
+            }
+            EventType::ManageSieve(ManageSieveEvent::ConnectionEnd) => {
+                "stalwart.manage_sieve.connection_end"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Ham) => "stalwart.message_ingest.ham",
+            EventType::MessageIngest(MessageIngestEvent::Spam) => "stalwart.message_ingest.spam",
+            EventType::MessageIngest(MessageIngestEvent::ImapAppend) => {
+                "stalwart.message_ingest.imap_append"
+            }
+            EventType::MessageIngest(MessageIngestEvent::JmapAppend) => {
+                "stalwart.message_ingest.jmap_append"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Duplicate) => {
+                "stalwart.message_ingest.duplicate"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Error) => "stalwart.message_ingest.error",
+            EventType::Milter(MilterEvent::ActionAccept) => "stalwart.milter.action_accept",
+            EventType::Milter(MilterEvent::ActionDiscard) => "stalwart.milter.action_discard",
+            EventType::Milter(MilterEvent::ActionReject) => "stalwart.milter.action_reject",
+            EventType::Milter(MilterEvent::ActionTempFail) => "stalwart.milter.action_temp_fail",
+            EventType::Milter(MilterEvent::ActionReplyCode) => "stalwart.milter.action_reply_code",
+            EventType::Milter(MilterEvent::ActionConnectionFailure) => {
+                "stalwart.milter.action_connection_failure"
+            }
+            EventType::Milter(MilterEvent::ActionShutdown) => "stalwart.milter.action_shutdown",
+            EventType::MtaHook(MtaHookEvent::ActionAccept) => "stalwart.mta_hook.action_accept",
+            EventType::MtaHook(MtaHookEvent::ActionDiscard) => "stalwart.mta_hook.action_discard",
+            EventType::MtaHook(MtaHookEvent::ActionReject) => "stalwart.mta_hook.action_reject",
+            EventType::MtaHook(MtaHookEvent::ActionQuarantine) => {
+                "stalwart.mta_hook.action_quarantine"
+            }
+            EventType::MtaHook(MtaHookEvent::Error) => "stalwart.mta_hook.error",
+            EventType::MtaSts(MtaStsEvent::Authorized) => "stalwart.mta_sts.authorized",
+            EventType::MtaSts(MtaStsEvent::NotAuthorized) => "stalwart.mta_sts.not_authorized",
+            EventType::MtaSts(MtaStsEvent::InvalidPolicy) => "stalwart.mta_sts.invalid_policy",
+            EventType::Network(NetworkEvent::Timeout) => "stalwart.network.timeout",
+            EventType::OutgoingReport(OutgoingReportEvent::SpfReport) => {
+                "stalwart.outgoing_report.spf_report"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::SpfRateLimited) => {
+                "stalwart.outgoing_report.spf_rate_limited"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DkimReport) => {
+                "stalwart.outgoing_report.dkim_report"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DkimRateLimited) => {
+                "stalwart.outgoing_report.dkim_rate_limited"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DmarcReport) => {
+                "stalwart.outgoing_report.dmarc_report"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DmarcRateLimited) => {
+                "stalwart.outgoing_report.dmarc_rate_limited"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DmarcAggregateReport) => {
+                "stalwart.outgoing_report.dmarc_aggregate_report"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::TlsAggregate) => {
+                "stalwart.outgoing_report.tls_aggregate"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::HttpSubmission) => {
+                "stalwart.outgoing_report.http_submission"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::UnauthorizedReportingAddress) => {
+                "stalwart.outgoing_report.unauthorized_reporting_address"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::ReportingAddressValidationError) => {
+                "stalwart.outgoing_report.reporting_address_validation_error"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::NotFound) => {
+                "stalwart.outgoing_report.not_found"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::SubmissionError) => {
+                "stalwart.outgoing_report.submission_error"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::NoRecipientsFound) => {
+                "stalwart.outgoing_report.no_recipients_found"
+            }
+            EventType::Pop3(Pop3Event::ConnectionStart) => "stalwart.pop3.connection_start",
+            EventType::Pop3(Pop3Event::ConnectionEnd) => "stalwart.pop3.connection_end",
+            EventType::PushSubscription(PushSubscriptionEvent::Success) => {
+                "stalwart.push_subscription.success"
+            }
+            EventType::PushSubscription(PushSubscriptionEvent::Error) => {
+                "stalwart.push_subscription.error"
+            }
+            EventType::PushSubscription(PushSubscriptionEvent::NotFound) => {
+                "stalwart.push_subscription.not_found"
+            }
+            EventType::Queue(QueueEvent::MessageQueued) => "stalwart.queue.message_queued",
+            EventType::Queue(QueueEvent::AuthenticatedMessageQueued) => {
+                "stalwart.queue.authenticated_message_queued"
+            }
+            EventType::Queue(QueueEvent::ReportQueued) => "stalwart.queue.report_queued",
+            EventType::Queue(QueueEvent::DsnQueued) => "stalwart.queue.dsn_queued",
+            EventType::Queue(QueueEvent::AutogeneratedQueued) => {
+                "stalwart.queue.autogenerated_queued"
+            }
+            EventType::Queue(QueueEvent::Rescheduled) => "stalwart.queue.rescheduled",
+            EventType::Queue(QueueEvent::BlobNotFound) => "stalwart.queue.blob_not_found",
+            EventType::Queue(QueueEvent::RateLimitExceeded) => "stalwart.queue.rate_limit_exceeded",
+            EventType::Queue(QueueEvent::ConcurrencyLimitExceeded) => {
+                "stalwart.queue.concurrency_limit_exceeded"
+            }
+            EventType::Queue(QueueEvent::QuotaExceeded) => "stalwart.queue.quota_exceeded",
+            EventType::Queue(QueueEvent::BackPressure) => "stalwart.queue.back_pressure",
+            EventType::Resource(ResourceEvent::NotFound) => "stalwart.resource.not_found",
+            EventType::Resource(ResourceEvent::BadParameters) => "stalwart.resource.bad_parameters",
+            EventType::Resource(ResourceEvent::Error) => "stalwart.resource.error",
+            EventType::SearchIndex(SearchIndexEvent::PartitionRetry) => {
+                "stalwart.search_index.partition_retry"
+            }
+            EventType::SearchIndex(SearchIndexEvent::BatchIndexed) => {
+                "stalwart.search_index.batch_indexed"
+            }
+            EventType::SearchIndex(SearchIndexEvent::DocumentTruncated) => {
+                "stalwart.search_index.document_truncated"
+            }
+            EventType::Security(SecurityEvent::AuthenticationBan) => {
+                "stalwart.security.authentication_ban"
+            }
+            EventType::Security(SecurityEvent::AbuseBan) => "stalwart.security.abuse_ban",
+            EventType::Security(SecurityEvent::ScanBan) => "stalwart.security.scan_ban",
+            EventType::Security(SecurityEvent::LoiterBan) => "stalwart.security.loiter_ban",
+            EventType::Security(SecurityEvent::IpBlocked) => "stalwart.security.ip_blocked",
+            EventType::Security(SecurityEvent::Unauthorized) => "stalwart.security.unauthorized",
+            EventType::Server(ServerEvent::ThreadError) => "stalwart.server.thread_error",
+            EventType::Sieve(SieveEvent::ActionAccept) => "stalwart.sieve.action_accept",
+            EventType::Sieve(SieveEvent::ActionAcceptReplace) => {
+                "stalwart.sieve.action_accept_replace"
+            }
+            EventType::Sieve(SieveEvent::ActionDiscard) => "stalwart.sieve.action_discard",
+            EventType::Sieve(SieveEvent::ActionReject) => "stalwart.sieve.action_reject",
+            EventType::Sieve(SieveEvent::SendMessage) => "stalwart.sieve.send_message",
+            EventType::Sieve(SieveEvent::MessageTooLarge) => "stalwart.sieve.message_too_large",
+            EventType::Sieve(SieveEvent::RuntimeError) => "stalwart.sieve.runtime_error",
+            EventType::Sieve(SieveEvent::UnexpectedError) => "stalwart.sieve.unexpected_error",
+            EventType::Sieve(SieveEvent::NotSupported) => "stalwart.sieve.not_supported",
+            EventType::Sieve(SieveEvent::QuotaExceeded) => "stalwart.sieve.quota_exceeded",
+            EventType::Smtp(SmtpEvent::ConnectionStart) => "stalwart.smtp.connection_start",
+            EventType::Smtp(SmtpEvent::ConnectionEnd) => "stalwart.smtp.connection_end",
+            EventType::Smtp(SmtpEvent::Error) => "stalwart.smtp.error",
+            EventType::Smtp(SmtpEvent::ConcurrencyLimitExceeded) => {
+                "stalwart.smtp.concurrency_limit_exceeded"
+            }
+            EventType::Smtp(SmtpEvent::TransferLimitExceeded) => {
+                "stalwart.smtp.transfer_limit_exceeded"
+            }
+            EventType::Smtp(SmtpEvent::RateLimitExceeded) => "stalwart.smtp.rate_limit_exceeded",
+            EventType::Smtp(SmtpEvent::TimeLimitExceeded) => "stalwart.smtp.time_limit_exceeded",
+            EventType::Smtp(SmtpEvent::MessageParseFailed) => "stalwart.smtp.message_parse_failed",
+            EventType::Smtp(SmtpEvent::MessageTooLarge) => "stalwart.smtp.message_too_large",
+            EventType::Smtp(SmtpEvent::LoopDetected) => "stalwart.smtp.loop_detected",
+            EventType::Smtp(SmtpEvent::MultipleFromDomains) => {
+                "stalwart.smtp.multiple_from_domains"
+            }
+            EventType::Smtp(SmtpEvent::DkimPass) => "stalwart.smtp.dkim_pass",
+            EventType::Smtp(SmtpEvent::DkimFail) => "stalwart.smtp.dkim_fail",
+            EventType::Smtp(SmtpEvent::Dkim2Pass) => "stalwart.smtp.dkim2_pass",
+            EventType::Smtp(SmtpEvent::Dkim2Fail) => "stalwart.smtp.dkim2_fail",
+            EventType::Smtp(SmtpEvent::Dkim2DsnRejected) => "stalwart.smtp.dkim2_dsn_rejected",
+            EventType::Smtp(SmtpEvent::ArcPass) => "stalwart.smtp.arc_pass",
+            EventType::Smtp(SmtpEvent::ArcFail) => "stalwart.smtp.arc_fail",
+            EventType::Smtp(SmtpEvent::SpfEhloPass) => "stalwart.smtp.spf_ehlo_pass",
+            EventType::Smtp(SmtpEvent::SpfEhloFail) => "stalwart.smtp.spf_ehlo_fail",
+            EventType::Smtp(SmtpEvent::SpfFromPass) => "stalwart.smtp.spf_from_pass",
+            EventType::Smtp(SmtpEvent::SpfFromFail) => "stalwart.smtp.spf_from_fail",
+            EventType::Smtp(SmtpEvent::DmarcPass) => "stalwart.smtp.dmarc_pass",
+            EventType::Smtp(SmtpEvent::DmarcFail) => "stalwart.smtp.dmarc_fail",
+            EventType::Smtp(SmtpEvent::IprevPass) => "stalwart.smtp.iprev_pass",
+            EventType::Smtp(SmtpEvent::IprevFail) => "stalwart.smtp.iprev_fail",
+            EventType::Smtp(SmtpEvent::TooManyMessages) => "stalwart.smtp.too_many_messages",
+            EventType::Smtp(SmtpEvent::InvalidEhlo) => "stalwart.smtp.invalid_ehlo",
+            EventType::Smtp(SmtpEvent::DidNotSayEhlo) => "stalwart.smtp.did_not_say_ehlo",
+            EventType::Smtp(SmtpEvent::MailFromUnauthenticated) => {
+                "stalwart.smtp.mail_from_unauthenticated"
+            }
+            EventType::Smtp(SmtpEvent::MailFromUnauthorized) => {
+                "stalwart.smtp.mail_from_unauthorized"
+            }
+            EventType::Smtp(SmtpEvent::MailFromMissing) => "stalwart.smtp.mail_from_missing",
+            EventType::Smtp(SmtpEvent::MultipleMailFrom) => "stalwart.smtp.multiple_mail_from",
+            EventType::Smtp(SmtpEvent::MailboxDoesNotExist) => {
+                "stalwart.smtp.mailbox_does_not_exist"
+            }
+            EventType::Smtp(SmtpEvent::RelayNotAllowed) => "stalwart.smtp.relay_not_allowed",
+            EventType::Smtp(SmtpEvent::RcptToDuplicate) => "stalwart.smtp.rcpt_to_duplicate",
+            EventType::Smtp(SmtpEvent::RcptToMissing) => "stalwart.smtp.rcpt_to_missing",
+            EventType::Smtp(SmtpEvent::TooManyRecipients) => "stalwart.smtp.too_many_recipients",
+            EventType::Smtp(SmtpEvent::TooManyInvalidRcpt) => "stalwart.smtp.too_many_invalid_rcpt",
+            EventType::Smtp(SmtpEvent::AuthMechanismNotSupported) => {
+                "stalwart.smtp.auth_mechanism_not_supported"
+            }
+            EventType::Smtp(SmtpEvent::AuthExchangeTooLong) => {
+                "stalwart.smtp.auth_exchange_too_long"
+            }
+            EventType::Smtp(SmtpEvent::CommandNotImplemented) => {
+                "stalwart.smtp.command_not_implemented"
+            }
+            EventType::Smtp(SmtpEvent::InvalidCommand) => "stalwart.smtp.invalid_command",
+            EventType::Smtp(SmtpEvent::SyntaxError) => "stalwart.smtp.syntax_error",
+            EventType::Smtp(SmtpEvent::RequestTooLarge) => "stalwart.smtp.request_too_large",
+            EventType::Spam(SpamEvent::PyzorError) => "stalwart.spam.pyzor_error",
+            EventType::Spam(SpamEvent::DnsblError) => "stalwart.spam.dnsbl_error",
+            EventType::Spam(SpamEvent::TrainCompleted) => "stalwart.spam.train_completed",
+            EventType::Spam(SpamEvent::TrainSampleAdded) => "stalwart.spam.train_sample_added",
+            EventType::Spam(SpamEvent::Classify) => "stalwart.spam.classify",
+            EventType::Spam(SpamEvent::ModelNotReady) => "stalwart.spam.model_not_ready",
+            EventType::Spf(SpfEvent::Pass) => "stalwart.spf.pass",
+            EventType::Spf(SpfEvent::Fail) => "stalwart.spf.fail",
+            EventType::Spf(SpfEvent::SoftFail) => "stalwart.spf.soft_fail",
+            EventType::Spf(SpfEvent::Neutral) => "stalwart.spf.neutral",
+            EventType::Spf(SpfEvent::TempError) => "stalwart.spf.temp_error",
+            EventType::Spf(SpfEvent::PermError) => "stalwart.spf.perm_error",
+            EventType::Spf(SpfEvent::None) => "stalwart.spf.none",
+            EventType::Store(StoreEvent::AssertValueFailed) => "stalwart.store.assert_value_failed",
+            EventType::Store(StoreEvent::FoundationdbError) => "stalwart.store.foundationdb_error",
+            EventType::Store(StoreEvent::MysqlError) => "stalwart.store.mysql_error",
+            EventType::Store(StoreEvent::PostgresqlError) => "stalwart.store.postgresql_error",
+            EventType::Store(StoreEvent::RocksdbError) => "stalwart.store.rocksdb_error",
+            EventType::Store(StoreEvent::SqliteError) => "stalwart.store.sqlite_error",
+            EventType::Store(StoreEvent::LdapError) => "stalwart.store.ldap_error",
+            EventType::Store(StoreEvent::ElasticsearchError) => {
+                "stalwart.store.elasticsearch_error"
+            }
+            EventType::Store(StoreEvent::RedisError) => "stalwart.store.redis_error",
+            EventType::Store(StoreEvent::S3Error) => "stalwart.store.s3_error",
+            EventType::Store(StoreEvent::AzureError) => "stalwart.store.azure_error",
+            EventType::Store(StoreEvent::FilesystemError) => "stalwart.store.filesystem_error",
+            EventType::Store(StoreEvent::PoolError) => "stalwart.store.pool_error",
+            EventType::Store(StoreEvent::DataCorruption) => "stalwart.store.data_corruption",
+            EventType::Store(StoreEvent::DecompressError) => "stalwart.store.decompress_error",
+            EventType::Store(StoreEvent::DeserializeError) => "stalwart.store.deserialize_error",
+            EventType::Store(StoreEvent::NotFound) => "stalwart.store.not_found",
+            EventType::Store(StoreEvent::NotConfigured) => "stalwart.store.not_configured",
+            EventType::Store(StoreEvent::NotSupported) => "stalwart.store.not_supported",
+            EventType::Store(StoreEvent::UnexpectedError) => "stalwart.store.unexpected_error",
+            EventType::Store(StoreEvent::CryptoError) => "stalwart.store.crypto_error",
+            EventType::Store(StoreEvent::HttpStoreError) => "stalwart.store.http_store_error",
+            EventType::Store(StoreEvent::BlobMissingMarker) => "stalwart.store.blob_missing_marker",
+            EventType::Store(StoreEvent::DataWrite) => "stalwart.store.data_write",
+            EventType::Store(StoreEvent::DataIterate) => "stalwart.store.data_iterate",
+            EventType::Store(StoreEvent::BlobRead) => "stalwart.store.blob_read",
+            EventType::Store(StoreEvent::BlobWrite) => "stalwart.store.blob_write",
+            EventType::Store(StoreEvent::BlobDelete) => "stalwart.store.blob_delete",
+            EventType::TaskManager(TaskManagerEvent::TaskFailed) => {
+                "stalwart.task_manager.task_failed"
+            }
+            EventType::TaskManager(TaskManagerEvent::TaskRetry) => {
+                "stalwart.task_manager.task_retry"
+            }
+            EventType::TaskManager(TaskManagerEvent::TaskStalled) => {
+                "stalwart.task_manager.task_stalled"
+            }
+            EventType::TaskManager(TaskManagerEvent::TaskExpired) => {
+                "stalwart.task_manager.task_expired"
+            }
+            EventType::TaskManager(TaskManagerEvent::BlobNotFound) => {
+                "stalwart.task_manager.blob_not_found"
+            }
+            EventType::TaskManager(TaskManagerEvent::MetadataNotFound) => {
+                "stalwart.task_manager.metadata_not_found"
+            }
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            EventType::Telemetry(TelemetryEvent::AlertEvent) => "stalwart.telemetry.alert_event",
+            #[cfg(feature = "enterprise")]
+            EventType::Telemetry(TelemetryEvent::AlertMessage) => {
+                "stalwart.telemetry.alert_message"
+            }
+            // SPDX-SnippetEnd
+            EventType::Telemetry(TelemetryEvent::LogError) => "stalwart.telemetry.log_error",
+            EventType::Telemetry(TelemetryEvent::WebhookError) => {
+                "stalwart.telemetry.webhook_error"
+            }
+            EventType::Telemetry(TelemetryEvent::OtelExporterError) => {
+                "stalwart.telemetry.otel_exporter_error"
+            }
+            EventType::Telemetry(TelemetryEvent::OtelMetricsExporterError) => {
+                "stalwart.telemetry.otel_metrics_exporter_error"
+            }
+            EventType::Telemetry(TelemetryEvent::PrometheusExporterError) => {
+                "stalwart.telemetry.prometheus_exporter_error"
+            }
+            EventType::Telemetry(TelemetryEvent::JournalError) => {
+                "stalwart.telemetry.journal_error"
+            }
+            EventType::Telemetry(TelemetryEvent::EventsDropped) => {
+                "stalwart.telemetry.events_dropped"
+            }
+            EventType::Tls(TlsEvent::HandshakeError) => "stalwart.tls.handshake_error",
+            _ => "",
+        }
+    }
+
+    pub fn prom_metric_name(&self) -> &'static str {
+        match self {
+            EventType::Acme(AcmeEvent::AuthError) => "stalwart_acme_auth_error_total",
+            EventType::Acme(AcmeEvent::AuthTooManyAttempts) => {
+                "stalwart_acme_auth_too_many_attempts_total"
+            }
+            EventType::Acme(AcmeEvent::OrderCompleted) => "stalwart_acme_order_completed_total",
+            EventType::Acme(AcmeEvent::OrderInvalid) => "stalwart_acme_order_invalid_total",
+            EventType::Acme(AcmeEvent::ClientMissingSni) => {
+                "stalwart_acme_client_missing_sni_total"
+            }
+            EventType::Acme(AcmeEvent::TlsAlpnError) => "stalwart_acme_tls_alpn_error_total",
+            EventType::Acme(AcmeEvent::TokenNotFound) => "stalwart_acme_token_not_found_total",
+            EventType::Acme(AcmeEvent::Error) => "stalwart_acme_error_total",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::ApiError) => "stalwart_ai_api_error_total",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::Request) => "stalwart_ai_request_total",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::SpamVerdict) => "stalwart_ai_spam_verdict_total",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::SpamSkipped) => "stalwart_ai_spam_skipped_total",
+            #[cfg(feature = "enterprise")]
+            EventType::Ai(AiEvent::BreakerOpen) => "stalwart_ai_breaker_open_total",
+            // SPDX-SnippetEnd
+            EventType::Arc(ArcEvent::ChainInvalid) => "stalwart_arc_chain_invalid_total",
+            EventType::Arc(ArcEvent::SignatureInvalid) => "stalwart_arc_signature_invalid_total",
+            EventType::Arc(ArcEvent::HashMismatch) => "stalwart_arc_hash_mismatch_total",
+            EventType::Auth(AuthEvent::Success) => "stalwart_auth_success_total",
+            EventType::Auth(AuthEvent::Failed) => "stalwart_auth_failed_total",
+            EventType::Auth(AuthEvent::TooManyAttempts) => "stalwart_auth_too_many_attempts_total",
+            EventType::Auth(AuthEvent::Error) => "stalwart_auth_error_total",
+            EventType::Cache(CacheEvent::Miss) => "stalwart_cache_miss_total",
+            EventType::Cache(CacheEvent::Hit) => "stalwart_cache_hit_total",
+            EventType::Cache(CacheEvent::Stale) => "stalwart_cache_stale_total",
+            EventType::Cache(CacheEvent::EntryTooLarge) => "stalwart_cache_entry_too_large_total",
+            EventType::Cache(CacheEvent::SwapHit) => "stalwart_cache_swap_hit_total",
+            EventType::Cache(CacheEvent::SwapMiss) => "stalwart_cache_swap_miss_total",
+            EventType::Cache(CacheEvent::SwapWrite) => "stalwart_cache_swap_write_total",
+            EventType::Cache(CacheEvent::SwapError) => "stalwart_cache_swap_error_total",
+            EventType::Calendar(CalendarEvent::AlarmSent) => "stalwart_calendar_alarm_sent_total",
+            EventType::Calendar(CalendarEvent::AlarmFailed) => {
+                "stalwart_calendar_alarm_failed_total"
+            }
+            EventType::Calendar(CalendarEvent::ItipMessageSent) => {
+                "stalwart_calendar_itip_message_sent_total"
+            }
+            EventType::Calendar(CalendarEvent::ItipMessageReceived) => {
+                "stalwart_calendar_itip_message_received_total"
+            }
+            EventType::Calendar(CalendarEvent::ItipMessageError) => {
+                "stalwart_calendar_itip_message_error_total"
+            }
+            EventType::Cluster(ClusterEvent::SubscriberError) => {
+                "stalwart_cluster_subscriber_error_total"
+            }
+            EventType::Cluster(ClusterEvent::SubscriberDisconnected) => {
+                "stalwart_cluster_subscriber_disconnected_total"
+            }
+            EventType::Cluster(ClusterEvent::PublisherError) => {
+                "stalwart_cluster_publisher_error_total"
+            }
+            EventType::Dane(DaneEvent::AuthenticationSuccess) => {
+                "stalwart_dane_authentication_success_total"
+            }
+            EventType::Dane(DaneEvent::AuthenticationFailure) => {
+                "stalwart_dane_authentication_failure_total"
+            }
+            EventType::Dane(DaneEvent::NoCertificatesFound) => {
+                "stalwart_dane_no_certificates_found_total"
+            }
+            EventType::Dane(DaneEvent::CertificateParseError) => {
+                "stalwart_dane_certificate_parse_error_total"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordFetchError) => {
+                "stalwart_dane_tlsa_record_fetch_error_total"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordNotFound) => {
+                "stalwart_dane_tlsa_record_not_found_total"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordNotDnssecSigned) => {
+                "stalwart_dane_tlsa_record_not_dnssec_signed_total"
+            }
+            EventType::Dane(DaneEvent::TlsaRecordInvalid) => {
+                "stalwart_dane_tlsa_record_invalid_total"
+            }
+            EventType::Dane(DaneEvent::BogusDnssecRecord) => {
+                "stalwart_dane_bogus_dnssec_record_total"
+            }
+            EventType::Delivery(DeliveryEvent::AttemptStart) => {
+                "stalwart_delivery_attempt_start_total"
+            }
+            EventType::Delivery(DeliveryEvent::AttemptEnd) => "stalwart_delivery_attempt_end_total",
+            EventType::Delivery(DeliveryEvent::Completed) => "stalwart_delivery_completed_total",
+            EventType::Delivery(DeliveryEvent::MxLookupFailed) => {
+                "stalwart_delivery_mx_lookup_failed_total"
+            }
+            EventType::Delivery(DeliveryEvent::IpLookupFailed) => {
+                "stalwart_delivery_ip_lookup_failed_total"
+            }
+            EventType::Delivery(DeliveryEvent::NullMx) => "stalwart_delivery_null_mx_total",
+            EventType::Delivery(DeliveryEvent::GreetingFailed) => {
+                "stalwart_delivery_greeting_failed_total"
+            }
+            EventType::Delivery(DeliveryEvent::EhloRejected) => {
+                "stalwart_delivery_ehlo_rejected_total"
+            }
+            EventType::Delivery(DeliveryEvent::AuthFailed) => "stalwart_delivery_auth_failed_total",
+            EventType::Delivery(DeliveryEvent::MailFromRejected) => {
+                "stalwart_delivery_mail_from_rejected_total"
+            }
+            EventType::Delivery(DeliveryEvent::Delivered) => "stalwart_delivery_delivered_total",
+            EventType::Delivery(DeliveryEvent::RcptToRejected) => {
+                "stalwart_delivery_rcpt_to_rejected_total"
+            }
+            EventType::Delivery(DeliveryEvent::RcptToFailed) => {
+                "stalwart_delivery_rcpt_to_failed_total"
+            }
+            EventType::Delivery(DeliveryEvent::MessageRejected) => {
+                "stalwart_delivery_message_rejected_total"
+            }
+            EventType::Delivery(DeliveryEvent::StartTlsUnavailable) => {
+                "stalwart_delivery_start_tls_unavailable_total"
+            }
+            EventType::Delivery(DeliveryEvent::StartTlsError) => {
+                "stalwart_delivery_start_tls_error_total"
+            }
+            EventType::Delivery(DeliveryEvent::StartTlsDisabled) => {
+                "stalwart_delivery_start_tls_disabled_total"
+            }
+            EventType::Delivery(DeliveryEvent::ImplicitTlsError) => {
+                "stalwart_delivery_implicit_tls_error_total"
+            }
+            EventType::Delivery(DeliveryEvent::ConcurrencyLimitExceeded) => {
+                "stalwart_delivery_concurrency_limit_exceeded_total"
+            }
+            EventType::Delivery(DeliveryEvent::RateLimitExceeded) => {
+                "stalwart_delivery_rate_limit_exceeded_total"
+            }
+            EventType::Delivery(DeliveryEvent::DoubleBounce) => {
+                "stalwart_delivery_double_bounce_total"
+            }
+            EventType::Delivery(DeliveryEvent::DsnSuccess) => "stalwart_delivery_dsn_success_total",
+            EventType::Delivery(DeliveryEvent::DsnTempFail) => {
+                "stalwart_delivery_dsn_temp_fail_total"
+            }
+            EventType::Delivery(DeliveryEvent::DsnPermFail) => {
+                "stalwart_delivery_dsn_perm_fail_total"
+            }
+            EventType::Dkim(DkimEvent::Pass) => "stalwart_dkim_pass_total",
+            EventType::Dkim(DkimEvent::Neutral) => "stalwart_dkim_neutral_total",
+            EventType::Dkim(DkimEvent::Fail) => "stalwart_dkim_fail_total",
+            EventType::Dkim(DkimEvent::PermError) => "stalwart_dkim_perm_error_total",
+            EventType::Dkim(DkimEvent::TempError) => "stalwart_dkim_temp_error_total",
+            EventType::Dkim(DkimEvent::None) => "stalwart_dkim_none_total",
+            EventType::Dkim(DkimEvent::SignatureInvalid) => "stalwart_dkim_signature_invalid_total",
+            EventType::Dkim(DkimEvent::PublicKeyError) => "stalwart_dkim_public_key_error_total",
+            EventType::Dkim(DkimEvent::VerificationFailed) => {
+                "stalwart_dkim_verification_failed_total"
+            }
+            EventType::Dkim(DkimEvent::HashMismatch) => "stalwart_dkim_hash_mismatch_total",
+            EventType::Dkim(DkimEvent::SignerNotFound) => "stalwart_dkim_signer_not_found_total",
+            EventType::Dkim2(Dkim2Event::InstanceInvalid) => {
+                "stalwart_dkim2_instance_invalid_total"
+            }
+            EventType::Dkim2(Dkim2Event::SignatureInvalid) => {
+                "stalwart_dkim2_signature_invalid_total"
+            }
+            EventType::Dkim2(Dkim2Event::ChainInvalid) => "stalwart_dkim2_chain_invalid_total",
+            EventType::Dkim2(Dkim2Event::TimestampInvalid) => {
+                "stalwart_dkim2_timestamp_invalid_total"
+            }
+            EventType::Dkim2(Dkim2Event::EnvelopeMismatch) => {
+                "stalwart_dkim2_envelope_mismatch_total"
+            }
+            EventType::Dkim2(Dkim2Event::CustodyBroken) => "stalwart_dkim2_custody_broken_total",
+            EventType::Dkim2(Dkim2Event::PublicKeyError) => "stalwart_dkim2_public_key_error_total",
+            EventType::Dkim2(Dkim2Event::VerificationFailed) => {
+                "stalwart_dkim2_verification_failed_total"
+            }
+            EventType::Dkim2(Dkim2Event::HashMismatch) => "stalwart_dkim2_hash_mismatch_total",
+            EventType::Dkim2(Dkim2Event::RecipeError) => "stalwart_dkim2_recipe_error_total",
+            EventType::Dkim2(Dkim2Event::SigningFailed) => "stalwart_dkim2_signing_failed_total",
+            EventType::Dmarc(DmarcEvent::Pass) => "stalwart_dmarc_pass_total",
+            EventType::Dmarc(DmarcEvent::Fail) => "stalwart_dmarc_fail_total",
+            EventType::Dmarc(DmarcEvent::PermError) => "stalwart_dmarc_perm_error_total",
+            EventType::Dmarc(DmarcEvent::TempError) => "stalwart_dmarc_temp_error_total",
+            EventType::Dmarc(DmarcEvent::None) => "stalwart_dmarc_none_total",
+            EventType::Dns(DnsEvent::RecordCreationFailed) => {
+                "stalwart_dns_record_creation_failed_total"
+            }
+            EventType::Dns(DnsEvent::RecordDeletionFailed) => {
+                "stalwart_dns_record_deletion_failed_total"
+            }
+            EventType::Dns(DnsEvent::RecordLookupFailed) => {
+                "stalwart_dns_record_lookup_failed_total"
+            }
+            EventType::Dns(DnsEvent::RecordPropagationTimeout) => {
+                "stalwart_dns_record_propagation_timeout_total"
+            }
+            EventType::Eval(EvalEvent::Error) => "stalwart_eval_error_total",
+            EventType::Eval(EvalEvent::DirectoryNotFound) => {
+                "stalwart_eval_directory_not_found_total"
+            }
+            EventType::Eval(EvalEvent::StoreNotFound) => "stalwart_eval_store_not_found_total",
+            EventType::Http(HttpEvent::ConnectionStart) => "stalwart_http_connection_start_total",
+            EventType::Http(HttpEvent::Error) => "stalwart_http_error_total",
+            EventType::Http(HttpEvent::RequestBody) => "stalwart_http_request_body_total",
+            EventType::Http(HttpEvent::ResponseBody) => "stalwart_http_response_body_total",
+            EventType::Http(HttpEvent::XForwardedMissing) => {
+                "stalwart_http_x_forwarded_missing_total"
+            }
+            EventType::Http(HttpEvent::XForwardedInvalid) => {
+                "stalwart_http_x_forwarded_invalid_total"
+            }
+            EventType::Imap(ImapEvent::ConnectionStart) => "stalwart_imap_connection_start_total",
+            EventType::Imap(ImapEvent::ConnectionEnd) => "stalwart_imap_connection_end_total",
+            EventType::IncomingReport(IncomingReportEvent::DmarcReport) => {
+                "stalwart_incoming_report_dmarc_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::DmarcReportWithWarnings) => {
+                "stalwart_incoming_report_dmarc_report_with_warnings_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::TlsReport) => {
+                "stalwart_incoming_report_tls_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::TlsReportWithWarnings) => {
+                "stalwart_incoming_report_tls_report_with_warnings_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::AbuseReport) => {
+                "stalwart_incoming_report_abuse_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::AuthFailureReport) => {
+                "stalwart_incoming_report_auth_failure_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::FraudReport) => {
+                "stalwart_incoming_report_fraud_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::NotSpamReport) => {
+                "stalwart_incoming_report_not_spam_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::VirusReport) => {
+                "stalwart_incoming_report_virus_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::OtherReport) => {
+                "stalwart_incoming_report_other_report_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::MessageParseFailed) => {
+                "stalwart_incoming_report_message_parse_failed_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::DmarcParseFailed) => {
+                "stalwart_incoming_report_dmarc_parse_failed_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::TlsRpcParseFailed) => {
+                "stalwart_incoming_report_tls_rpc_parse_failed_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::ArfParseFailed) => {
+                "stalwart_incoming_report_arf_parse_failed_total"
+            }
+            EventType::IncomingReport(IncomingReportEvent::DecompressError) => {
+                "stalwart_incoming_report_decompress_error_total"
+            }
+            EventType::Iprev(IprevEvent::Pass) => "stalwart_iprev_pass_total",
+            EventType::Iprev(IprevEvent::Fail) => "stalwart_iprev_fail_total",
+            EventType::Iprev(IprevEvent::PermError) => "stalwart_iprev_perm_error_total",
+            EventType::Iprev(IprevEvent::TempError) => "stalwart_iprev_temp_error_total",
+            EventType::Iprev(IprevEvent::None) => "stalwart_iprev_none_total",
+            EventType::Jmap(JmapEvent::MethodCall) => "stalwart_jmap_method_call_total",
+            EventType::Jmap(JmapEvent::InvalidArguments) => "stalwart_jmap_invalid_arguments_total",
+            EventType::Jmap(JmapEvent::RequestTooLarge) => "stalwart_jmap_request_too_large_total",
+            EventType::Jmap(JmapEvent::UnsupportedFilter) => {
+                "stalwart_jmap_unsupported_filter_total"
+            }
+            EventType::Jmap(JmapEvent::UnsupportedSort) => "stalwart_jmap_unsupported_sort_total",
+            EventType::Jmap(JmapEvent::UnknownMethod) => "stalwart_jmap_unknown_method_total",
+            EventType::Jmap(JmapEvent::Forbidden) => "stalwart_jmap_forbidden_total",
+            EventType::Jmap(JmapEvent::NotJson) => "stalwart_jmap_not_json_total",
+            EventType::Jmap(JmapEvent::NotRequest) => "stalwart_jmap_not_request_total",
+            EventType::Jmap(JmapEvent::WebsocketStart) => "stalwart_jmap_websocket_start_total",
+            EventType::Jmap(JmapEvent::WebsocketError) => "stalwart_jmap_websocket_error_total",
+            EventType::Limit(LimitEvent::SizeRequest) => "stalwart_limit_size_request_total",
+            EventType::Limit(LimitEvent::SizeUpload) => "stalwart_limit_size_upload_total",
+            EventType::Limit(LimitEvent::CallsIn) => "stalwart_limit_calls_in_total",
+            EventType::Limit(LimitEvent::ConcurrentRequest) => {
+                "stalwart_limit_concurrent_request_total"
+            }
+            EventType::Limit(LimitEvent::ConcurrentUpload) => {
+                "stalwart_limit_concurrent_upload_total"
+            }
+            EventType::Limit(LimitEvent::ConcurrentConnection) => {
+                "stalwart_limit_concurrent_connection_total"
+            }
+            EventType::Limit(LimitEvent::Quota) => "stalwart_limit_quota_total",
+            EventType::Limit(LimitEvent::BlobQuota) => "stalwart_limit_blob_quota_total",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            EventType::Limit(LimitEvent::TenantQuota) => "stalwart_limit_tenant_quota_total",
+            // SPDX-SnippetEnd
+            EventType::Limit(LimitEvent::TooManyRequests) => {
+                "stalwart_limit_too_many_requests_total"
+            }
+            EventType::Limit(LimitEvent::MemoryBudget) => "stalwart_limit_memory_budget_total",
+            EventType::MailAuth(MailAuthEvent::ParseError) => {
+                "stalwart_mail_auth_parse_error_total"
+            }
+            EventType::MailAuth(MailAuthEvent::MissingParameters) => {
+                "stalwart_mail_auth_missing_parameters_total"
+            }
+            EventType::MailAuth(MailAuthEvent::NoHeadersFound) => {
+                "stalwart_mail_auth_no_headers_found_total"
+            }
+            EventType::MailAuth(MailAuthEvent::Crypto) => "stalwart_mail_auth_crypto_total",
+            EventType::MailAuth(MailAuthEvent::Io) => "stalwart_mail_auth_io_total",
+            EventType::MailAuth(MailAuthEvent::Base64) => "stalwart_mail_auth_base64_total",
+            EventType::MailAuth(MailAuthEvent::DnsError) => "stalwart_mail_auth_dns_error_total",
+            EventType::MailAuth(MailAuthEvent::DnsRecordNotFound) => {
+                "stalwart_mail_auth_dns_record_not_found_total"
+            }
+            EventType::MailAuth(MailAuthEvent::DnsInvalidRecordType) => {
+                "stalwart_mail_auth_dns_invalid_record_type_total"
+            }
+            EventType::MailAuth(MailAuthEvent::PolicyNotAligned) => {
+                "stalwart_mail_auth_policy_not_aligned_total"
+            }
+            EventType::ManageSieve(ManageSieveEvent::ConnectionStart) => {
+                "stalwart_manage_sieve_connection_start_total"
+            }
+            EventType::ManageSieve(ManageSieveEvent::ConnectionEnd) => {
+                "stalwart_manage_sieve_connection_end_total"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Ham) => {
+                "stalwart_message_ingest_ham_total"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Spam) => {
+                "stalwart_message_ingest_spam_total"
+            }
+            EventType::MessageIngest(MessageIngestEvent::ImapAppend) => {
+                "stalwart_message_ingest_imap_append_total"
+            }
+            EventType::MessageIngest(MessageIngestEvent::JmapAppend) => {
+                "stalwart_message_ingest_jmap_append_total"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Duplicate) => {
+                "stalwart_message_ingest_duplicate_total"
+            }
+            EventType::MessageIngest(MessageIngestEvent::Error) => {
+                "stalwart_message_ingest_error_total"
+            }
+            EventType::Milter(MilterEvent::ActionAccept) => "stalwart_milter_action_accept_total",
+            EventType::Milter(MilterEvent::ActionDiscard) => "stalwart_milter_action_discard_total",
+            EventType::Milter(MilterEvent::ActionReject) => "stalwart_milter_action_reject_total",
+            EventType::Milter(MilterEvent::ActionTempFail) => {
+                "stalwart_milter_action_temp_fail_total"
+            }
+            EventType::Milter(MilterEvent::ActionReplyCode) => {
+                "stalwart_milter_action_reply_code_total"
+            }
+            EventType::Milter(MilterEvent::ActionConnectionFailure) => {
+                "stalwart_milter_action_connection_failure_total"
+            }
+            EventType::Milter(MilterEvent::ActionShutdown) => {
+                "stalwart_milter_action_shutdown_total"
+            }
+            EventType::MtaHook(MtaHookEvent::ActionAccept) => {
+                "stalwart_mta_hook_action_accept_total"
+            }
+            EventType::MtaHook(MtaHookEvent::ActionDiscard) => {
+                "stalwart_mta_hook_action_discard_total"
+            }
+            EventType::MtaHook(MtaHookEvent::ActionReject) => {
+                "stalwart_mta_hook_action_reject_total"
+            }
+            EventType::MtaHook(MtaHookEvent::ActionQuarantine) => {
+                "stalwart_mta_hook_action_quarantine_total"
+            }
+            EventType::MtaHook(MtaHookEvent::Error) => "stalwart_mta_hook_error_total",
+            EventType::MtaSts(MtaStsEvent::Authorized) => "stalwart_mta_sts_authorized_total",
+            EventType::MtaSts(MtaStsEvent::NotAuthorized) => {
+                "stalwart_mta_sts_not_authorized_total"
+            }
+            EventType::MtaSts(MtaStsEvent::InvalidPolicy) => {
+                "stalwart_mta_sts_invalid_policy_total"
+            }
+            EventType::Network(NetworkEvent::Timeout) => "stalwart_network_timeout_total",
+            EventType::OutgoingReport(OutgoingReportEvent::SpfReport) => {
+                "stalwart_outgoing_report_spf_report_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::SpfRateLimited) => {
+                "stalwart_outgoing_report_spf_rate_limited_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DkimReport) => {
+                "stalwart_outgoing_report_dkim_report_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DkimRateLimited) => {
+                "stalwart_outgoing_report_dkim_rate_limited_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DmarcReport) => {
+                "stalwart_outgoing_report_dmarc_report_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DmarcRateLimited) => {
+                "stalwart_outgoing_report_dmarc_rate_limited_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::DmarcAggregateReport) => {
+                "stalwart_outgoing_report_dmarc_aggregate_report_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::TlsAggregate) => {
+                "stalwart_outgoing_report_tls_aggregate_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::HttpSubmission) => {
+                "stalwart_outgoing_report_http_submission_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::UnauthorizedReportingAddress) => {
+                "stalwart_outgoing_report_unauthorized_reporting_address_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::ReportingAddressValidationError) => {
+                "stalwart_outgoing_report_reporting_address_validation_error_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::NotFound) => {
+                "stalwart_outgoing_report_not_found_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::SubmissionError) => {
+                "stalwart_outgoing_report_submission_error_total"
+            }
+            EventType::OutgoingReport(OutgoingReportEvent::NoRecipientsFound) => {
+                "stalwart_outgoing_report_no_recipients_found_total"
+            }
+            EventType::Pop3(Pop3Event::ConnectionStart) => "stalwart_pop3_connection_start_total",
+            EventType::Pop3(Pop3Event::ConnectionEnd) => "stalwart_pop3_connection_end_total",
+            EventType::PushSubscription(PushSubscriptionEvent::Success) => {
+                "stalwart_push_subscription_success_total"
+            }
+            EventType::PushSubscription(PushSubscriptionEvent::Error) => {
+                "stalwart_push_subscription_error_total"
+            }
+            EventType::PushSubscription(PushSubscriptionEvent::NotFound) => {
+                "stalwart_push_subscription_not_found_total"
+            }
+            EventType::Queue(QueueEvent::MessageQueued) => "stalwart_queue_message_queued_total",
+            EventType::Queue(QueueEvent::AuthenticatedMessageQueued) => {
+                "stalwart_queue_authenticated_message_queued_total"
+            }
+            EventType::Queue(QueueEvent::ReportQueued) => "stalwart_queue_report_queued_total",
+            EventType::Queue(QueueEvent::DsnQueued) => "stalwart_queue_dsn_queued_total",
+            EventType::Queue(QueueEvent::AutogeneratedQueued) => {
+                "stalwart_queue_autogenerated_queued_total"
+            }
+            EventType::Queue(QueueEvent::Rescheduled) => "stalwart_queue_rescheduled_total",
+            EventType::Queue(QueueEvent::BlobNotFound) => "stalwart_queue_blob_not_found_total",
+            EventType::Queue(QueueEvent::RateLimitExceeded) => {
+                "stalwart_queue_rate_limit_exceeded_total"
+            }
+            EventType::Queue(QueueEvent::ConcurrencyLimitExceeded) => {
+                "stalwart_queue_concurrency_limit_exceeded_total"
+            }
+            EventType::Queue(QueueEvent::QuotaExceeded) => "stalwart_queue_quota_exceeded_total",
+            EventType::Queue(QueueEvent::BackPressure) => "stalwart_queue_back_pressure_total",
+            EventType::Resource(ResourceEvent::NotFound) => "stalwart_resource_not_found_total",
+            EventType::Resource(ResourceEvent::BadParameters) => {
+                "stalwart_resource_bad_parameters_total"
+            }
+            EventType::Resource(ResourceEvent::Error) => "stalwart_resource_error_total",
+            EventType::SearchIndex(SearchIndexEvent::PartitionRetry) => {
+                "stalwart_search_index_partition_retry_total"
+            }
+            EventType::SearchIndex(SearchIndexEvent::BatchIndexed) => {
+                "stalwart_search_index_batch_indexed_total"
+            }
+            EventType::SearchIndex(SearchIndexEvent::DocumentTruncated) => {
+                "stalwart_search_index_document_truncated_total"
+            }
+            EventType::Security(SecurityEvent::AuthenticationBan) => {
+                "stalwart_security_authentication_ban_total"
+            }
+            EventType::Security(SecurityEvent::AbuseBan) => "stalwart_security_abuse_ban_total",
+            EventType::Security(SecurityEvent::ScanBan) => "stalwart_security_scan_ban_total",
+            EventType::Security(SecurityEvent::LoiterBan) => "stalwart_security_loiter_ban_total",
+            EventType::Security(SecurityEvent::IpBlocked) => "stalwart_security_ip_blocked_total",
+            EventType::Security(SecurityEvent::Unauthorized) => {
+                "stalwart_security_unauthorized_total"
+            }
+            EventType::Server(ServerEvent::ThreadError) => "stalwart_server_thread_error_total",
+            EventType::Sieve(SieveEvent::ActionAccept) => "stalwart_sieve_action_accept_total",
+            EventType::Sieve(SieveEvent::ActionAcceptReplace) => {
+                "stalwart_sieve_action_accept_replace_total"
+            }
+            EventType::Sieve(SieveEvent::ActionDiscard) => "stalwart_sieve_action_discard_total",
+            EventType::Sieve(SieveEvent::ActionReject) => "stalwart_sieve_action_reject_total",
+            EventType::Sieve(SieveEvent::SendMessage) => "stalwart_sieve_send_message_total",
+            EventType::Sieve(SieveEvent::MessageTooLarge) => {
+                "stalwart_sieve_message_too_large_total"
+            }
+            EventType::Sieve(SieveEvent::RuntimeError) => "stalwart_sieve_runtime_error_total",
+            EventType::Sieve(SieveEvent::UnexpectedError) => {
+                "stalwart_sieve_unexpected_error_total"
+            }
+            EventType::Sieve(SieveEvent::NotSupported) => "stalwart_sieve_not_supported_total",
+            EventType::Sieve(SieveEvent::QuotaExceeded) => "stalwart_sieve_quota_exceeded_total",
+            EventType::Smtp(SmtpEvent::ConnectionStart) => "stalwart_smtp_connection_start_total",
+            EventType::Smtp(SmtpEvent::ConnectionEnd) => "stalwart_smtp_connection_end_total",
+            EventType::Smtp(SmtpEvent::Error) => "stalwart_smtp_error_total",
+            EventType::Smtp(SmtpEvent::ConcurrencyLimitExceeded) => {
+                "stalwart_smtp_concurrency_limit_exceeded_total"
+            }
+            EventType::Smtp(SmtpEvent::TransferLimitExceeded) => {
+                "stalwart_smtp_transfer_limit_exceeded_total"
+            }
+            EventType::Smtp(SmtpEvent::RateLimitExceeded) => {
+                "stalwart_smtp_rate_limit_exceeded_total"
+            }
+            EventType::Smtp(SmtpEvent::TimeLimitExceeded) => {
+                "stalwart_smtp_time_limit_exceeded_total"
+            }
+            EventType::Smtp(SmtpEvent::MessageParseFailed) => {
+                "stalwart_smtp_message_parse_failed_total"
+            }
+            EventType::Smtp(SmtpEvent::MessageTooLarge) => "stalwart_smtp_message_too_large_total",
+            EventType::Smtp(SmtpEvent::LoopDetected) => "stalwart_smtp_loop_detected_total",
+            EventType::Smtp(SmtpEvent::MultipleFromDomains) => {
+                "stalwart_smtp_multiple_from_domains_total"
+            }
+            EventType::Smtp(SmtpEvent::DkimPass) => "stalwart_smtp_dkim_pass_total",
+            EventType::Smtp(SmtpEvent::DkimFail) => "stalwart_smtp_dkim_fail_total",
+            EventType::Smtp(SmtpEvent::Dkim2Pass) => "stalwart_smtp_dkim2_pass_total",
+            EventType::Smtp(SmtpEvent::Dkim2Fail) => "stalwart_smtp_dkim2_fail_total",
+            EventType::Smtp(SmtpEvent::Dkim2DsnRejected) => {
+                "stalwart_smtp_dkim2_dsn_rejected_total"
+            }
+            EventType::Smtp(SmtpEvent::ArcPass) => "stalwart_smtp_arc_pass_total",
+            EventType::Smtp(SmtpEvent::ArcFail) => "stalwart_smtp_arc_fail_total",
+            EventType::Smtp(SmtpEvent::SpfEhloPass) => "stalwart_smtp_spf_ehlo_pass_total",
+            EventType::Smtp(SmtpEvent::SpfEhloFail) => "stalwart_smtp_spf_ehlo_fail_total",
+            EventType::Smtp(SmtpEvent::SpfFromPass) => "stalwart_smtp_spf_from_pass_total",
+            EventType::Smtp(SmtpEvent::SpfFromFail) => "stalwart_smtp_spf_from_fail_total",
+            EventType::Smtp(SmtpEvent::DmarcPass) => "stalwart_smtp_dmarc_pass_total",
+            EventType::Smtp(SmtpEvent::DmarcFail) => "stalwart_smtp_dmarc_fail_total",
+            EventType::Smtp(SmtpEvent::IprevPass) => "stalwart_smtp_iprev_pass_total",
+            EventType::Smtp(SmtpEvent::IprevFail) => "stalwart_smtp_iprev_fail_total",
+            EventType::Smtp(SmtpEvent::TooManyMessages) => "stalwart_smtp_too_many_messages_total",
+            EventType::Smtp(SmtpEvent::InvalidEhlo) => "stalwart_smtp_invalid_ehlo_total",
+            EventType::Smtp(SmtpEvent::DidNotSayEhlo) => "stalwart_smtp_did_not_say_ehlo_total",
+            EventType::Smtp(SmtpEvent::MailFromUnauthenticated) => {
+                "stalwart_smtp_mail_from_unauthenticated_total"
+            }
+            EventType::Smtp(SmtpEvent::MailFromUnauthorized) => {
+                "stalwart_smtp_mail_from_unauthorized_total"
+            }
+            EventType::Smtp(SmtpEvent::MailFromMissing) => "stalwart_smtp_mail_from_missing_total",
+            EventType::Smtp(SmtpEvent::MultipleMailFrom) => {
+                "stalwart_smtp_multiple_mail_from_total"
+            }
+            EventType::Smtp(SmtpEvent::MailboxDoesNotExist) => {
+                "stalwart_smtp_mailbox_does_not_exist_total"
+            }
+            EventType::Smtp(SmtpEvent::RelayNotAllowed) => "stalwart_smtp_relay_not_allowed_total",
+            EventType::Smtp(SmtpEvent::RcptToDuplicate) => "stalwart_smtp_rcpt_to_duplicate_total",
+            EventType::Smtp(SmtpEvent::RcptToMissing) => "stalwart_smtp_rcpt_to_missing_total",
+            EventType::Smtp(SmtpEvent::TooManyRecipients) => {
+                "stalwart_smtp_too_many_recipients_total"
+            }
+            EventType::Smtp(SmtpEvent::TooManyInvalidRcpt) => {
+                "stalwart_smtp_too_many_invalid_rcpt_total"
+            }
+            EventType::Smtp(SmtpEvent::AuthMechanismNotSupported) => {
+                "stalwart_smtp_auth_mechanism_not_supported_total"
+            }
+            EventType::Smtp(SmtpEvent::AuthExchangeTooLong) => {
+                "stalwart_smtp_auth_exchange_too_long_total"
+            }
+            EventType::Smtp(SmtpEvent::CommandNotImplemented) => {
+                "stalwart_smtp_command_not_implemented_total"
+            }
+            EventType::Smtp(SmtpEvent::InvalidCommand) => "stalwart_smtp_invalid_command_total",
+            EventType::Smtp(SmtpEvent::SyntaxError) => "stalwart_smtp_syntax_error_total",
+            EventType::Smtp(SmtpEvent::RequestTooLarge) => "stalwart_smtp_request_too_large_total",
+            EventType::Spam(SpamEvent::PyzorError) => "stalwart_spam_pyzor_error_total",
+            EventType::Spam(SpamEvent::DnsblError) => "stalwart_spam_dnsbl_error_total",
+            EventType::Spam(SpamEvent::TrainCompleted) => "stalwart_spam_train_completed_total",
+            EventType::Spam(SpamEvent::TrainSampleAdded) => {
+                "stalwart_spam_train_sample_added_total"
+            }
+            EventType::Spam(SpamEvent::Classify) => "stalwart_spam_classify_total",
+            EventType::Spam(SpamEvent::ModelNotReady) => "stalwart_spam_model_not_ready_total",
+            EventType::Spf(SpfEvent::Pass) => "stalwart_spf_pass_total",
+            EventType::Spf(SpfEvent::Fail) => "stalwart_spf_fail_total",
+            EventType::Spf(SpfEvent::SoftFail) => "stalwart_spf_soft_fail_total",
+            EventType::Spf(SpfEvent::Neutral) => "stalwart_spf_neutral_total",
+            EventType::Spf(SpfEvent::TempError) => "stalwart_spf_temp_error_total",
+            EventType::Spf(SpfEvent::PermError) => "stalwart_spf_perm_error_total",
+            EventType::Spf(SpfEvent::None) => "stalwart_spf_none_total",
+            EventType::Store(StoreEvent::AssertValueFailed) => {
+                "stalwart_store_assert_value_failed_total"
+            }
+            EventType::Store(StoreEvent::FoundationdbError) => {
+                "stalwart_store_foundationdb_error_total"
+            }
+            EventType::Store(StoreEvent::MysqlError) => "stalwart_store_mysql_error_total",
+            EventType::Store(StoreEvent::PostgresqlError) => {
+                "stalwart_store_postgresql_error_total"
+            }
+            EventType::Store(StoreEvent::RocksdbError) => "stalwart_store_rocksdb_error_total",
+            EventType::Store(StoreEvent::SqliteError) => "stalwart_store_sqlite_error_total",
+            EventType::Store(StoreEvent::LdapError) => "stalwart_store_ldap_error_total",
+            EventType::Store(StoreEvent::ElasticsearchError) => {
+                "stalwart_store_elasticsearch_error_total"
+            }
+            EventType::Store(StoreEvent::RedisError) => "stalwart_store_redis_error_total",
+            EventType::Store(StoreEvent::S3Error) => "stalwart_store_s3_error_total",
+            EventType::Store(StoreEvent::AzureError) => "stalwart_store_azure_error_total",
+            EventType::Store(StoreEvent::FilesystemError) => {
+                "stalwart_store_filesystem_error_total"
+            }
+            EventType::Store(StoreEvent::PoolError) => "stalwart_store_pool_error_total",
+            EventType::Store(StoreEvent::DataCorruption) => "stalwart_store_data_corruption_total",
+            EventType::Store(StoreEvent::DecompressError) => {
+                "stalwart_store_decompress_error_total"
+            }
+            EventType::Store(StoreEvent::DeserializeError) => {
+                "stalwart_store_deserialize_error_total"
+            }
+            EventType::Store(StoreEvent::NotFound) => "stalwart_store_not_found_total",
+            EventType::Store(StoreEvent::NotConfigured) => "stalwart_store_not_configured_total",
+            EventType::Store(StoreEvent::NotSupported) => "stalwart_store_not_supported_total",
+            EventType::Store(StoreEvent::UnexpectedError) => {
+                "stalwart_store_unexpected_error_total"
+            }
+            EventType::Store(StoreEvent::CryptoError) => "stalwart_store_crypto_error_total",
+            EventType::Store(StoreEvent::HttpStoreError) => "stalwart_store_http_store_error_total",
+            EventType::Store(StoreEvent::BlobMissingMarker) => {
+                "stalwart_store_blob_missing_marker_total"
+            }
+            EventType::Store(StoreEvent::DataWrite) => "stalwart_store_data_write_total",
+            EventType::Store(StoreEvent::DataIterate) => "stalwart_store_data_iterate_total",
+            EventType::Store(StoreEvent::BlobRead) => "stalwart_store_blob_read_total",
+            EventType::Store(StoreEvent::BlobWrite) => "stalwart_store_blob_write_total",
+            EventType::Store(StoreEvent::BlobDelete) => "stalwart_store_blob_delete_total",
+            EventType::TaskManager(TaskManagerEvent::TaskFailed) => {
+                "stalwart_task_manager_task_failed_total"
+            }
+            EventType::TaskManager(TaskManagerEvent::TaskRetry) => {
+                "stalwart_task_manager_task_retry_total"
+            }
+            EventType::TaskManager(TaskManagerEvent::TaskStalled) => {
+                "stalwart_task_manager_task_stalled_total"
+            }
+            EventType::TaskManager(TaskManagerEvent::TaskExpired) => {
+                "stalwart_task_manager_task_expired_total"
+            }
+            EventType::TaskManager(TaskManagerEvent::BlobNotFound) => {
+                "stalwart_task_manager_blob_not_found_total"
+            }
+            EventType::TaskManager(TaskManagerEvent::MetadataNotFound) => {
+                "stalwart_task_manager_metadata_not_found_total"
+            }
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            EventType::Telemetry(TelemetryEvent::AlertEvent) => {
+                "stalwart_telemetry_alert_event_total"
+            }
+            #[cfg(feature = "enterprise")]
+            EventType::Telemetry(TelemetryEvent::AlertMessage) => {
+                "stalwart_telemetry_alert_message_total"
+            }
+            // SPDX-SnippetEnd
+            EventType::Telemetry(TelemetryEvent::LogError) => "stalwart_telemetry_log_error_total",
+            EventType::Telemetry(TelemetryEvent::WebhookError) => {
+                "stalwart_telemetry_webhook_error_total"
+            }
+            EventType::Telemetry(TelemetryEvent::OtelExporterError) => {
+                "stalwart_telemetry_otel_exporter_error_total"
+            }
+            EventType::Telemetry(TelemetryEvent::OtelMetricsExporterError) => {
+                "stalwart_telemetry_otel_metrics_exporter_error_total"
+            }
+            EventType::Telemetry(TelemetryEvent::PrometheusExporterError) => {
+                "stalwart_telemetry_prometheus_exporter_error_total"
+            }
+            EventType::Telemetry(TelemetryEvent::JournalError) => {
+                "stalwart_telemetry_journal_error_total"
+            }
+            EventType::Telemetry(TelemetryEvent::EventsDropped) => {
+                "stalwart_telemetry_events_dropped_total"
+            }
+            EventType::Tls(TlsEvent::HandshakeError) => "stalwart_tls_handshake_error_total",
+            _ => "",
+        }
+    }
+
     pub const fn variants() -> &'static [Self] {
         &[
             EventType::Acme(AcmeEvent::AuthStart),
@@ -9182,6 +10448,250 @@ impl MetricType {
             MetricType::AiInputTokens | MetricType::AiOutputTokens => "tokens",
             // SPDX-SnippetEnd
             MetricType::UserCount => "users",
+        }
+    }
+
+    pub fn otel_name(&self) -> &'static str {
+        match self {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::AiRequestTime => "stalwart.ai.request_time",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiInputTokens => "stalwart.ai.input_tokens",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiOutputTokens => "stalwart.ai.output_tokens",
+            // SPDX-SnippetEnd
+            MetricType::CacheMessagesSize => "stalwart.cache.messages_size",
+            MetricType::CacheMessagesLargeSize => "stalwart.cache.messages_large_size",
+            MetricType::CacheSize => "stalwart.cache.size",
+            MetricType::CacheSwapPending => "stalwart.cache.swap_pending",
+            MetricType::DeliveryTotalTime => "stalwart.delivery.total_time",
+            MetricType::DeliveryAttemptTime => "stalwart.delivery.attempt_time",
+            MetricType::DeliveryActiveConnections => "stalwart.delivery.active_connections",
+            MetricType::DnsLookupTime => "stalwart.dns.lookup_time",
+            MetricType::DomainCount => "stalwart.domains",
+            MetricType::HttpRequestTime => "stalwart.http.request_time",
+            MetricType::HttpActiveConnections => "stalwart.http.active_connections",
+            MetricType::ImapRequestTime => "stalwart.imap.request_time",
+            MetricType::ImapActiveConnections => "stalwart.imap.active_connections",
+            MetricType::MessageSize => "stalwart.message.size",
+            MetricType::MessageAuthenticatedSize => "stalwart.message.authenticated_size",
+            MetricType::MessageIngestTime => "stalwart.message_ingest.time",
+            MetricType::OutgoingReportSize => "stalwart.outgoing_report.size",
+            MetricType::Pop3RequestTime => "stalwart.pop3.request_time",
+            MetricType::Pop3ActiveConnections => "stalwart.pop3.active_connections",
+            MetricType::QueueCount => "stalwart.queue.messages",
+            MetricType::SearchIndexIndexTime => "stalwart.search_index.index_time",
+            MetricType::SearchIndexPendingEmail => "stalwart.search_index.pending_email",
+            MetricType::SearchIndexPendingCalendar => "stalwart.search_index.pending_calendar",
+            MetricType::SearchIndexPendingContacts => "stalwart.search_index.pending_contacts",
+            MetricType::SearchIndexPendingFile => "stalwart.search_index.pending_file",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::SearchIndexPendingTracing => "stalwart.search_index.pending_tracing",
+            // SPDX-SnippetEnd
+            MetricType::ServerMemory => "stalwart.server.memory",
+            MetricType::ServerBufferedMemorySmtp => "stalwart.server.buffered_memory_smtp",
+            MetricType::ServerBufferedMemoryRead => "stalwart.server.buffered_memory_read",
+            MetricType::SieveRequestTime => "stalwart.sieve.request_time",
+            MetricType::SieveActiveConnections => "stalwart.sieve.active_connections",
+            MetricType::SmtpRequestTime => "stalwart.smtp.request_time",
+            MetricType::SmtpActiveConnections => "stalwart.smtp.active_connections",
+            MetricType::StoreDataReadTime => "stalwart.store.data_read_time",
+            MetricType::StoreDataWriteTime => "stalwart.store.data_write_time",
+            MetricType::StoreBlobReadTime => "stalwart.store.blob_read_time",
+            MetricType::StoreBlobWriteTime => "stalwart.store.blob_write_time",
+            MetricType::TaskManagerPending => "stalwart.task_manager.pending",
+            MetricType::TaskManagerDue => "stalwart.task_manager.due",
+            MetricType::UserCount => "stalwart.users",
+            _ => "",
+        }
+    }
+
+    pub fn otel_unit(&self) -> &'static str {
+        match self {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::AiRequestTime => "s",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiInputTokens => "{token}",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiOutputTokens => "{token}",
+            // SPDX-SnippetEnd
+            MetricType::CacheMessagesSize => "By",
+            MetricType::CacheMessagesLargeSize => "By",
+            MetricType::CacheSize => "By",
+            MetricType::CacheSwapPending => "{snapshot}",
+            MetricType::DeliveryTotalTime => "s",
+            MetricType::DeliveryAttemptTime => "s",
+            MetricType::DeliveryActiveConnections => "{connection}",
+            MetricType::DnsLookupTime => "s",
+            MetricType::DomainCount => "{domain}",
+            MetricType::HttpRequestTime => "s",
+            MetricType::HttpActiveConnections => "{connection}",
+            MetricType::ImapRequestTime => "s",
+            MetricType::ImapActiveConnections => "{connection}",
+            MetricType::MessageSize => "By",
+            MetricType::MessageAuthenticatedSize => "By",
+            MetricType::MessageIngestTime => "s",
+            MetricType::OutgoingReportSize => "By",
+            MetricType::Pop3RequestTime => "s",
+            MetricType::Pop3ActiveConnections => "{connection}",
+            MetricType::QueueCount => "{message}",
+            MetricType::SearchIndexIndexTime => "s",
+            MetricType::SearchIndexPendingEmail => "{document}",
+            MetricType::SearchIndexPendingCalendar => "{document}",
+            MetricType::SearchIndexPendingContacts => "{document}",
+            MetricType::SearchIndexPendingFile => "{document}",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::SearchIndexPendingTracing => "{document}",
+            // SPDX-SnippetEnd
+            MetricType::ServerMemory => "By",
+            MetricType::ServerBufferedMemorySmtp => "By",
+            MetricType::ServerBufferedMemoryRead => "By",
+            MetricType::SieveRequestTime => "s",
+            MetricType::SieveActiveConnections => "{connection}",
+            MetricType::SmtpRequestTime => "s",
+            MetricType::SmtpActiveConnections => "{connection}",
+            MetricType::StoreDataReadTime => "s",
+            MetricType::StoreDataWriteTime => "s",
+            MetricType::StoreBlobReadTime => "s",
+            MetricType::StoreBlobWriteTime => "s",
+            MetricType::TaskManagerPending => "{task}",
+            MetricType::TaskManagerDue => "{task}",
+            MetricType::UserCount => "{user}",
+            _ => "",
+        }
+    }
+
+    pub fn prom_name(&self) -> &'static str {
+        match self {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::AiRequestTime => "stalwart_ai_request_time_seconds",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiInputTokens => "stalwart_ai_input_tokens",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiOutputTokens => "stalwart_ai_output_tokens",
+            // SPDX-SnippetEnd
+            MetricType::CacheMessagesSize => "stalwart_cache_messages_size_bytes",
+            MetricType::CacheMessagesLargeSize => "stalwart_cache_messages_large_size_bytes",
+            MetricType::CacheSize => "stalwart_cache_size_bytes",
+            MetricType::CacheSwapPending => "stalwart_cache_swap_pending",
+            MetricType::DeliveryTotalTime => "stalwart_delivery_total_time_seconds",
+            MetricType::DeliveryAttemptTime => "stalwart_delivery_attempt_time_seconds",
+            MetricType::DeliveryActiveConnections => "stalwart_delivery_active_connections",
+            MetricType::DnsLookupTime => "stalwart_dns_lookup_time_seconds",
+            MetricType::DomainCount => "stalwart_domains",
+            MetricType::HttpRequestTime => "stalwart_http_request_time_seconds",
+            MetricType::HttpActiveConnections => "stalwart_http_active_connections",
+            MetricType::ImapRequestTime => "stalwart_imap_request_time_seconds",
+            MetricType::ImapActiveConnections => "stalwart_imap_active_connections",
+            MetricType::MessageSize => "stalwart_message_size_bytes",
+            MetricType::MessageAuthenticatedSize => "stalwart_message_authenticated_size_bytes",
+            MetricType::MessageIngestTime => "stalwart_message_ingest_time_seconds",
+            MetricType::OutgoingReportSize => "stalwart_outgoing_report_size_bytes",
+            MetricType::Pop3RequestTime => "stalwart_pop3_request_time_seconds",
+            MetricType::Pop3ActiveConnections => "stalwart_pop3_active_connections",
+            MetricType::QueueCount => "stalwart_queue_messages",
+            MetricType::SearchIndexIndexTime => "stalwart_search_index_index_time_seconds",
+            MetricType::SearchIndexPendingEmail => "stalwart_search_index_pending_email",
+            MetricType::SearchIndexPendingCalendar => "stalwart_search_index_pending_calendar",
+            MetricType::SearchIndexPendingContacts => "stalwart_search_index_pending_contacts",
+            MetricType::SearchIndexPendingFile => "stalwart_search_index_pending_file",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::SearchIndexPendingTracing => "stalwart_search_index_pending_tracing",
+            // SPDX-SnippetEnd
+            MetricType::ServerMemory => "stalwart_server_memory_bytes",
+            MetricType::ServerBufferedMemorySmtp => "stalwart_server_buffered_memory_smtp_bytes",
+            MetricType::ServerBufferedMemoryRead => "stalwart_server_buffered_memory_read_bytes",
+            MetricType::SieveRequestTime => "stalwart_sieve_request_time_seconds",
+            MetricType::SieveActiveConnections => "stalwart_sieve_active_connections",
+            MetricType::SmtpRequestTime => "stalwart_smtp_request_time_seconds",
+            MetricType::SmtpActiveConnections => "stalwart_smtp_active_connections",
+            MetricType::StoreDataReadTime => "stalwart_store_data_read_time_seconds",
+            MetricType::StoreDataWriteTime => "stalwart_store_data_write_time_seconds",
+            MetricType::StoreBlobReadTime => "stalwart_store_blob_read_time_seconds",
+            MetricType::StoreBlobWriteTime => "stalwart_store_blob_write_time_seconds",
+            MetricType::TaskManagerPending => "stalwart_task_manager_pending",
+            MetricType::TaskManagerDue => "stalwart_task_manager_due",
+            MetricType::UserCount => "stalwart_users",
+            _ => "",
+        }
+    }
+
+    pub fn prom_unit(&self) -> &'static str {
+        match self {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::AiRequestTime => "seconds",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiInputTokens => "",
+            #[cfg(feature = "enterprise")]
+            MetricType::AiOutputTokens => "",
+            // SPDX-SnippetEnd
+            MetricType::CacheMessagesSize => "bytes",
+            MetricType::CacheMessagesLargeSize => "bytes",
+            MetricType::CacheSize => "bytes",
+            MetricType::CacheSwapPending => "",
+            MetricType::DeliveryTotalTime => "seconds",
+            MetricType::DeliveryAttemptTime => "seconds",
+            MetricType::DeliveryActiveConnections => "",
+            MetricType::DnsLookupTime => "seconds",
+            MetricType::DomainCount => "",
+            MetricType::HttpRequestTime => "seconds",
+            MetricType::HttpActiveConnections => "",
+            MetricType::ImapRequestTime => "seconds",
+            MetricType::ImapActiveConnections => "",
+            MetricType::MessageSize => "bytes",
+            MetricType::MessageAuthenticatedSize => "bytes",
+            MetricType::MessageIngestTime => "seconds",
+            MetricType::OutgoingReportSize => "bytes",
+            MetricType::Pop3RequestTime => "seconds",
+            MetricType::Pop3ActiveConnections => "",
+            MetricType::QueueCount => "",
+            MetricType::SearchIndexIndexTime => "seconds",
+            MetricType::SearchIndexPendingEmail => "",
+            MetricType::SearchIndexPendingCalendar => "",
+            MetricType::SearchIndexPendingContacts => "",
+            MetricType::SearchIndexPendingFile => "",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            MetricType::SearchIndexPendingTracing => "",
+            // SPDX-SnippetEnd
+            MetricType::ServerMemory => "bytes",
+            MetricType::ServerBufferedMemorySmtp => "bytes",
+            MetricType::ServerBufferedMemoryRead => "bytes",
+            MetricType::SieveRequestTime => "seconds",
+            MetricType::SieveActiveConnections => "",
+            MetricType::SmtpRequestTime => "seconds",
+            MetricType::SmtpActiveConnections => "",
+            MetricType::StoreDataReadTime => "seconds",
+            MetricType::StoreDataWriteTime => "seconds",
+            MetricType::StoreBlobReadTime => "seconds",
+            MetricType::StoreBlobWriteTime => "seconds",
+            MetricType::TaskManagerPending => "",
+            MetricType::TaskManagerDue => "",
+            MetricType::UserCount => "",
+            _ => "",
         }
     }
 

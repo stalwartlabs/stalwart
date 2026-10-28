@@ -134,7 +134,7 @@ pub trait MetricsStore: Sync + Send {
 
 #[derive(Default)]
 pub struct MetricsHistory {
-    events: AHashMap<MetricType, u32>,
+    events: AHashMap<MetricType, u64>,
     histograms: AHashMap<MetricType, HistogramHistory>,
     id_generator: SnowflakeIdGenerator,
 }
@@ -178,7 +178,7 @@ impl MetricsStore for Store {
                         batch.set(
                             ValueClass::Telemetry(TelemetryClass::Metric(metric_id)),
                             Metric::Counter(MetricCount {
-                                count: diff as u64,
+                                count: diff,
                                 metric: event,
                                 node_id,
                             })

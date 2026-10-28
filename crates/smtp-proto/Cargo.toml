@@ -1,7 +1,7 @@
 [package]
 name = "smtp-proto"
 description = "SMTP protocol parser"
-version = "0.2.5"
+version = "1.0.1"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false

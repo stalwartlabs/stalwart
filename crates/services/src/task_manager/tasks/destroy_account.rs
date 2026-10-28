@@ -14,7 +14,7 @@ use registry::{
         prelude::{ObjectType, Property},
         structs::{Task, TaskAccountMaintenance, TaskDestroyAccount, TaskStatus},
     },
-    types::EnumImpl,
+    types::{EnumImpl, id::ObjectId},
 };
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -26,7 +26,10 @@ use store::{Deserialize, IterateParams, U64_LEN};
 // SPDX-SnippetEnd
 use store::{
     SerializeInfallible, ValueKey,
-    registry::RegistryQuery,
+    registry::{
+        RegistryQuery,
+        write::{RegistryWrite, RegistryWriteResult},
+    },
     search::SearchQuery,
     write::{
         Archive, ArchiveBytes, BatchBuilder, BlobLink, BlobOp, RegistryClass, SearchIndex,
@@ -111,6 +114,26 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         let object_id = object.to_id();
 
         for id in ids {
+            if object == ObjectType::OAuthGrant {
+                match server
+                    .registry()
+                    .write(RegistryWrite::delete(ObjectId::new(object, id)))
+                    .await
+                {
+                    Ok(RegistryWriteResult::Success(_)) => continue,
+                    Ok(_) => {}
+                    Err(err) => {
+                        trc::error!(
+                            err.caused_by(trc::location!())
+                                .account_id(account_id)
+                                .id(id.id())
+                                .details(
+                                    "Failed to delete OAuth grant, clearing its account index only"
+                                )
+                        );
+                    }
+                }
+            }
             batch
                 .clear(ValueClass::Registry(RegistryClass::Item {
                     object_id,

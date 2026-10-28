@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 build = "build.rs"
 
@@ -9,6 +9,7 @@ utils = { path = "../utils" }
 nlp = { path = "../nlp" }
 store = { path = "../store" }
 trc = { path = "../trc" }
+telemetry = { path = "../telemetry" }
 directory = { path = "../directory" }
 coordinator = { path = "../coordinator" }
 types = { path = "../types" }
@@ -43,11 +44,6 @@ x509-parser = "0.18"
 pem = "4.0"
 jiff = "0.2.38"
 hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
-opentelemetry = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
-opentelemetry_sdk = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
-opentelemetry-otlp = { git = "https://github.com/stalwartlabs/opentelemetry-rust", default-features = false, features = ["reqwest-client", "http-proto", "trace", "metrics", "logs", "internal-logs", "grpc-tonic", "tls-aws-lc", "tls-roots", "reqwest-rustls"] }
-opentelemetry-semantic-conventions = { git = "https://github.com/stalwartlabs/opentelemetry-rust" }
-prometheus = { version = "0.14", default-features = false }
 imagesize = "0.15"
 sha1 = "0.11"
 sha2 = "0.11"
@@ -102,7 +98,7 @@ dns-update = { version = "0.6", features = ["test_provider"] }
 
 [features]
 dev_mode = []
-enterprise = ["store/enterprise", "utils/enterprise", "trc/enterprise", "directory/enterprise", "coordinator/enterprise", "registry/enterprise", "jmap_proto/enterprise"]
+enterprise = ["store/enterprise", "utils/enterprise", "trc/enterprise", "telemetry/enterprise", "directory/enterprise", "coordinator/enterprise", "registry/enterprise", "jmap_proto/enterprise"]
 foundation = []
 redis = ["store/redis"]
 

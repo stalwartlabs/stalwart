@@ -43,7 +43,10 @@ impl SpamFilterAnalyzeReceived for Server {
                         ctx.result.add_tag("RCVD_HELO_USER");
                     } else if let (Some(Host::Name(helo_domain)), Some(ip_rev)) =
                         (helo_domain, ip_rev)
-                        && !eq_lowercase_str(helo_domain, ip_rev)
+                        && !eq_lowercase_str(
+                            helo_domain.strip_suffix('.').unwrap_or(helo_domain),
+                            ip_rev.strip_suffix('.').unwrap_or(ip_rev),
+                        )
                     {
                         // HELO domain does not match PTR record
                         ctx.result.add_tag("FORGED_RCVD_TRAIL");

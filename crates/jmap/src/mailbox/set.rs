@@ -75,6 +75,69 @@ pub struct SetContext<'x> {
     counters: AHashMap<u32, MailboxCounters>,
 }
 
+#[derive(Clone, Copy)]
+struct Omitted {
+    parent_id: bool,
+    role: bool,
+    sort_order: bool,
+    is_subscribed: bool,
+}
+
+type CreatedValue = Value<'static, MailboxProperty, MailboxValue>;
+
+impl Omitted {
+    fn from_create(object: &Map<'_, MailboxProperty, MailboxValue>) -> Self {
+        let mut omitted = Omitted {
+            parent_id: true,
+            role: true,
+            sort_order: true,
+            is_subscribed: true,
+        };
+        for key in object.keys() {
+            match key {
+                Key::Property(MailboxProperty::ParentId) => omitted.parent_id = false,
+                Key::Property(MailboxProperty::Role) => omitted.role = false,
+                Key::Property(MailboxProperty::SortOrder) => omitted.sort_order = false,
+                Key::Property(MailboxProperty::IsSubscribed) => omitted.is_subscribed = false,
+                _ => {}
+            }
+        }
+        omitted
+    }
+
+    fn server_set(
+        self,
+        my_rights: CreatedValue,
+    ) -> impl Iterator<Item = (MailboxProperty, CreatedValue)> {
+        [
+            (MailboxProperty::TotalEmails, Value::Number(0u64.into())),
+            (MailboxProperty::UnreadEmails, Value::Number(0u64.into())),
+            (MailboxProperty::TotalThreads, Value::Number(0u64.into())),
+            (MailboxProperty::UnreadThreads, Value::Number(0u64.into())),
+            (MailboxProperty::MyRights, my_rights),
+        ]
+        .into_iter()
+        .chain(
+            [
+                (self.parent_id, MailboxProperty::ParentId, Value::Null),
+                (self.role, MailboxProperty::Role, Value::Null),
+                (
+                    self.sort_order,
+                    MailboxProperty::SortOrder,
+                    Value::Number(0u64.into()),
+                ),
+                (
+                    self.is_subscribed,
+                    MailboxProperty::IsSubscribed,
+                    Value::Bool(false),
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(is_omitted, property, value)| is_omitted.then_some((property, value))),
+        )
+    }
+}
+
 pub trait MailboxSet: Sync + Send {
     fn mailbox_set(
         &self,
@@ -175,6 +238,7 @@ impl MailboxSet for Server {
         // Process creates
         let mut batch = BatchBuilder::new();
         let mut pending_creates: AHashMap<String, Slot> = AHashMap::new();
+        let mut created = Vec::new();
         'create: for (id, mut object) in request.unwrap_create() {
             let metadata_patches =
                 match object_metadata.extract(MetadataPatches::for_create(), &mut object) {
@@ -203,6 +267,7 @@ impl MailboxSet for Server {
                 continue 'create;
             }
 
+            let omitted = Omitted::from_create(&object);
             match self
                 .mailbox_set_item(
                     object,
@@ -213,6 +278,18 @@ impl MailboxSet for Server {
                 .await?
             {
                 Ok((mut builder, parent)) => {
+                    let my_rights = if ctx.is_shared {
+                        JmapRights::rights::<mailbox::Mailbox>(
+                            builder
+                                .changes()
+                                .map(|mailbox| {
+                                    mailbox.acls.as_slice().effective_acl(ctx.access_token)
+                                })
+                                .unwrap_or_default(),
+                        )
+                    } else {
+                        JmapRights::all_rights::<mailbox::Mailbox>()
+                    };
                     let metadata_writes = if let Some(metadata_patches) = metadata_patches {
                         let access = if ctx.is_shared {
                             MetadataAccess {
@@ -265,7 +342,8 @@ impl MailboxSet for Server {
                     }
                     batch.commit_point();
 
-                    pending_creates.insert(id, slot);
+                    pending_creates.insert(id.clone(), slot);
+                    created.push((id, slot, omitted, my_rights));
                 }
                 Err(err) => {
                     ctx.response.not_created.append(id, err);
@@ -283,10 +361,14 @@ impl MailboxSet for Server {
                 .last_change_id(account_id, SyncCollection::Email)
                 .into();
 
-            for (id, slot) in pending_creates {
+            for (id, slot, omitted, my_rights) in created {
                 let document_id = assigned_ids.slot(slot);
                 ctx.mailbox_ids.insert(document_id);
-                ctx.response.created(id, document_id);
+                ctx.response.created_with_properties(
+                    id,
+                    document_id,
+                    omitted.server_set(my_rights),
+                );
             }
         }
 

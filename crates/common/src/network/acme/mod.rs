@@ -153,7 +153,7 @@ pub enum AuthStatus {
 
 pub struct AcmeDnsParameters {
     pub updater: DnsUpdater,
-    pub origin: Option<String>,
+    pub zone: String,
 }
 
 #[derive(Clone, Debug, serde::Serialize, Deserialize)]

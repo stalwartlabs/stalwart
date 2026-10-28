@@ -20,7 +20,7 @@ const PRESSURE_MAX_HOLD: u64 = 60 * 60;
 type SpanEvents = Vec<Arc<Event<EventDetails>>>;
 
 #[derive(Default)]
-pub(crate) struct SpanTracker {
+pub struct SpanTracker {
     spans: AHashMap<u64, SpanEvents>,
     tracked_events: usize,
     discarded_events: usize,
@@ -98,14 +98,14 @@ impl SpanTracker {
     }
 }
 
-pub(crate) fn tracks_span(interests: &SharedInterests, span: &Event<EventDetails>) -> bool {
+pub fn tracks_span(interests: &SharedInterests, span: &Event<EventDetails>) -> bool {
     span.inner
         .typ
         .span_end()
         .is_some_and(|span_end| interests.get(span_end.to_id() as usize))
 }
 
-pub(crate) fn report_discarded_spans(events: usize, spans: usize) {
+pub fn report_discarded_spans(events: usize, spans: usize) {
     if events > 0 {
         trc::event!(
             Telemetry(TelemetryEvent::EventsDropped),
@@ -124,5 +124,5 @@ pub(crate) fn report_discarded_spans(events: usize, spans: usize) {
 
 #[cfg(all(test, stalwart_tests))]
 #[rustfmt::skip]
-#[path = "../../../../../../stalwart-tests/unit/common/src/telemetry/tracers/spans/tests.rs"]
+#[path = "../../../../../stalwart-tests/unit/telemetry/src/exporter/spans/tests.rs"]
 mod tests;

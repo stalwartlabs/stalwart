@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::scheduling::{ItipTime, itip::itip_date_entry};
+use crate::scheduling::{ItipTime, ItipTimeKind, itip::itip_date_entry};
 use calcard::{
     common::{
         PartialDateTime,
@@ -96,10 +96,12 @@ impl<'x> Series<'x> {
             .values
             .first()
             .and_then(|value| value.as_partial_date_time())
-            .and_then(|date| date.to_date_time_with_tz(tz))
-            .map(|date| ItipTime {
-                start: date.timestamp(),
-                tz_id: tz.as_id(),
+            .and_then(|date| {
+                date.to_date_time_with_tz(tz).map(|start| ItipTime {
+                    start: start.timestamp(),
+                    tz_id: tz.as_id(),
+                    kind: ItipTimeKind::of(date),
+                })
             })
     }
 

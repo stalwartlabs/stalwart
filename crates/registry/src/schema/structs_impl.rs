@@ -42726,6 +42726,21 @@ impl ObjectImpl for Metrics {
         value.validate(errors);
         let value = &self.prometheus;
         value.validate(errors);
+        let value = &self.service_name;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::ServiceName));
+        }
+        if let Some(value) = &self.service_namespace {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ServiceNamespace));
+            }
+        }
+        let value = &self.resource_attributes;
+        for value in value.values() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ResourceAttributes));
+            }
+        }
         errors.len() == neb
     }
 
@@ -42745,11 +42760,20 @@ impl ObjectImpl for Metrics {
 
 impl Pickle for Metrics {
     fn pickle(&self, out: &mut Vec<u8>) {
-        let block = crate::pickle::begin_block(out, 4, 0, 0);
+        let mut bitmap = 0u64;
+        if self.service_namespace.is_some() {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 7, 1, bitmap);
         self.open_telemetry.pickle(out);
         self.prometheus.pickle(out);
         self.metrics.pickle(out);
         self.metrics_policy.pickle(out);
+        self.service_name.pickle(out);
+        if let Some(value) = &self.service_namespace {
+            value.pickle(out);
+        }
+        self.resource_attributes.pickle(out);
         crate::pickle::end_block(out, block);
     }
 
@@ -42778,12 +42802,34 @@ impl Pickle for Metrics {
         } else {
             EventPolicy::Exclude
         };
+        let field4: String = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            "stalwart".to_string()
+        };
+        let field5: Option<String> = if block.has(5) {
+            if block.flag(0) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field6: VecMap<String, String> = if block.has(6) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
         stream.close_block(block);
         Some(Self {
             open_telemetry: field0,
             prometheus: field1,
             metrics: field2,
             metrics_policy: field3,
+            service_name: field4,
+            service_namespace: field5,
+            resource_attributes: field6,
         })
     }
 }
@@ -42795,6 +42841,9 @@ impl Default for Metrics {
             prometheus: Default::default(),
             metrics: Default::default(),
             metrics_policy: EventPolicy::Exclude,
+            service_name: "stalwart".to_string(),
+            service_namespace: Default::default(),
+            resource_attributes: Default::default(),
         }
     }
 }
@@ -42805,7 +42854,7 @@ impl IntoValue for Metrics {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(6);
+        let mut map = jmap_tools::Map::with_capacity(9);
         map.insert_unchecked(
             Property::OpenTelemetry,
             self.open_telemetry.into_value_with(opts),
@@ -42815,6 +42864,18 @@ impl IntoValue for Metrics {
         map.insert_unchecked(
             Property::MetricsPolicy,
             self.metrics_policy.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::ServiceName,
+            self.service_name.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::ServiceNamespace,
+            self.service_namespace.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::ResourceAttributes,
+            self.resource_attributes.into_value_with(opts),
         );
         JmapValue::Object(map)
     }
@@ -42831,6 +42892,15 @@ impl RegistryJsonPropertyPatch for Metrics {
             Some(Property::Prometheus) => self.prometheus.patch(pointer, value),
             Some(Property::Metrics) => self.metrics.patch(pointer, value),
             Some(Property::MetricsPolicy) => self.metrics_policy.patch(pointer, value),
+            Some(Property::ServiceName) => self
+                .service_name
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::ServiceNamespace) => self
+                .service_namespace
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::ResourceAttributes) => self
+                .resource_attributes
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -42854,8 +42924,10 @@ impl MetricsOtel {
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
-        if let MetricsOtel::Http(inner) = self {
-            inner.validate_inline_secrets(errors);
+        match self {
+            MetricsOtel::Http(inner) => inner.validate_inline_secrets(errors),
+            MetricsOtel::Grpc(inner) => inner.validate_inline_secrets(errors),
+            _ => {}
         }
     }
 
@@ -42964,8 +43036,26 @@ impl MetricsOtelGrpc {
                 errors.push(ValidationError::required(Property::Url));
             }
         }
+        let value = &self.http_auth;
+        value.validate(errors);
+        let value = &self.http_headers;
+        for value in value.values() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::HttpHeaders));
+            }
+        }
         errors.len() == neb
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        self.http_auth.validate_inline_secrets(errors);
+    }
+
+    // SPDX-SnippetEnd
 }
 
 impl Pickle for MetricsOtelGrpc {
@@ -42974,12 +43064,17 @@ impl Pickle for MetricsOtelGrpc {
         if self.url.is_some() {
             bitmap |= 1 << 0;
         }
-        let block = crate::pickle::begin_block(out, 3, 1, bitmap);
+        if self.allow_invalid_certs {
+            bitmap |= 1 << 1;
+        }
+        let block = crate::pickle::begin_block(out, 6, 2, bitmap);
         if let Some(value) = &self.url {
             value.pickle(out);
         }
         self.interval.pickle(out);
         self.timeout.pickle(out);
+        self.http_auth.pickle(out);
+        self.http_headers.pickle(out);
         crate::pickle::end_block(out, block);
     }
 
@@ -43004,11 +43099,25 @@ impl Pickle for MetricsOtelGrpc {
         } else {
             Duration::from_millis(10000)
         };
+        let field3: bool = if block.has(3) { block.flag(1) } else { false };
+        let field4: HttpAuth = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field5: VecMap<String, String> = if block.has(5) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
         stream.close_block(block);
         Some(Self {
             url: field0,
             interval: field1,
             timeout: field2,
+            allow_invalid_certs: field3,
+            http_auth: field4,
+            http_headers: field5,
         })
     }
 }
@@ -43019,6 +43128,9 @@ impl Default for MetricsOtelGrpc {
             url: Default::default(),
             interval: Duration::from_millis(60000),
             timeout: Duration::from_millis(10000),
+            allow_invalid_certs: false,
+            http_auth: Default::default(),
+            http_headers: Default::default(),
         }
     }
 }
@@ -43029,10 +43141,19 @@ impl IntoValue for MetricsOtelGrpc {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(5);
+        let mut map = jmap_tools::Map::with_capacity(8);
         map.insert_unchecked(Property::Url, self.url.into_value_with(opts));
         map.insert_unchecked(Property::Interval, self.interval.into_value_with(opts));
         map.insert_unchecked(Property::Timeout, self.timeout.into_value_with(opts));
+        map.insert_unchecked(
+            Property::AllowInvalidCerts,
+            self.allow_invalid_certs.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::HttpAuth, self.http_auth.into_value_with(opts));
+        map.insert_unchecked(
+            Property::HttpHeaders,
+            self.http_headers.into_value_with(opts),
+        );
         JmapValue::Object(map)
     }
 }
@@ -43049,6 +43170,11 @@ impl RegistryJsonPropertyPatch for MetricsOtelGrpc {
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::Interval) => self.interval.patch(pointer, value),
             Some(Property::Timeout) => self.timeout.patch(pointer, value),
+            Some(Property::AllowInvalidCerts) => self.allow_invalid_certs.patch(pointer, value),
+            Some(Property::HttpAuth) => self.http_auth.patch(pointer, value),
+            Some(Property::HttpHeaders) => self
+                .http_headers
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -50652,6 +50778,10 @@ impl ObjectImpl for OAuthGrant {
         if value.is_empty() {
             errors.push(ValidationError::required(Property::ClientId));
         }
+        let value = &self.client_hash;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::ClientHash));
+        }
         if let Some(value) = &self.client_name {
             if value.is_empty() {
                 errors.push(ValidationError::required(Property::ClientName));
@@ -50676,6 +50806,7 @@ impl ObjectImpl for OAuthGrant {
     fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
         i.foreign_key(ObjectType::Account, self.account_id.into(), None);
         i.search(Property::AccountId, &self.account_id);
+        i.search(Property::ClientHash, &self.client_hash);
     }
 }
 
@@ -50691,7 +50822,7 @@ impl Pickle for OAuthGrant {
         if self.pending {
             bitmap |= 1 << 2;
         }
-        let block = crate::pickle::begin_block(out, 10, 3, bitmap);
+        let block = crate::pickle::begin_block(out, 11, 3, bitmap);
         self.account_id.pickle(out);
         self.client_id.pickle(out);
         if let Some(value) = &self.client_name {
@@ -50705,6 +50836,7 @@ impl Pickle for OAuthGrant {
         self.created_at.pickle(out);
         self.last_used_at.pickle(out);
         self.generation.pickle(out);
+        self.client_hash.pickle(out);
         crate::pickle::end_block(out, block);
     }
 
@@ -50767,6 +50899,11 @@ impl Pickle for OAuthGrant {
             0u64
         };
         let field9: bool = if block.has(9) { block.flag(2) } else { false };
+        let field10: String = if block.has(10) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
         stream.close_block(block);
         Some(Self {
             account_id: field0,
@@ -50779,6 +50916,7 @@ impl Pickle for OAuthGrant {
             last_used_at: field7,
             generation: field8,
             pending: field9,
+            client_hash: field10,
         })
     }
 }
@@ -50788,6 +50926,7 @@ impl Default for OAuthGrant {
         Self {
             account_id: Default::default(),
             client_id: Default::default(),
+            client_hash: Default::default(),
             client_name: Default::default(),
             client_kind: Default::default(),
             scopes: Default::default(),
@@ -50806,9 +50945,10 @@ impl IntoValue for OAuthGrant {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(12);
+        let mut map = jmap_tools::Map::with_capacity(13);
         map.insert_unchecked(Property::AccountId, self.account_id.into_value_with(opts));
         map.insert_unchecked(Property::ClientId, self.client_id.into_value_with(opts));
+        map.insert_unchecked(Property::ClientHash, self.client_hash.into_value_with(opts));
         map.insert_unchecked(Property::ClientName, self.client_name.into_value_with(opts));
         map.insert_unchecked(Property::ClientKind, self.client_kind.into_value_with(opts));
         map.insert_unchecked(Property::Scopes, self.scopes.into_value_with(opts));
@@ -50835,6 +50975,7 @@ impl RegistryJsonPropertyPatch for OAuthGrant {
                 .account_id
                 .patch(pointer.assert_read_only()?.assert_can_set_account()?, value),
             Some(Property::ClientId) => pointer.assert_server_set(),
+            Some(Property::ClientHash) => pointer.assert_server_set(),
             Some(Property::ClientName) => pointer.assert_server_set(),
             Some(Property::ClientKind) => pointer.assert_server_set(),
             Some(Property::Scopes) => pointer.assert_server_set(),
@@ -74031,7 +74172,10 @@ impl Pickle for TracerOtelGrpc {
         if self.lossy {
             bitmap |= 1 << 4;
         }
-        let block = crate::pickle::begin_block(out, 12, 5, bitmap);
+        if self.allow_invalid_certs {
+            bitmap |= 1 << 5;
+        }
+        let block = crate::pickle::begin_block(out, 13, 6, bitmap);
         if let Some(value) = &self.url {
             value.pickle(out);
         }
@@ -74095,6 +74239,7 @@ impl Pickle for TracerOtelGrpc {
         } else {
             EventPolicy::Exclude
         };
+        let field12: bool = if block.has(12) { block.flag(5) } else { false };
         stream.close_block(block);
         Some(Self {
             url: field0,
@@ -74109,6 +74254,7 @@ impl Pickle for TracerOtelGrpc {
             lossy: field9,
             events: field10,
             events_policy: field11,
+            allow_invalid_certs: field12,
         })
     }
 }
@@ -74117,6 +74263,7 @@ impl Default for TracerOtelGrpc {
     fn default() -> Self {
         Self {
             url: Default::default(),
+            allow_invalid_certs: false,
             enable_log_exporter: true,
             enable_span_exporter: true,
             throttle: Duration::from_millis(1000),
@@ -74138,8 +74285,12 @@ impl IntoValue for TracerOtelGrpc {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(14);
+        let mut map = jmap_tools::Map::with_capacity(15);
         map.insert_unchecked(Property::Url, self.url.into_value_with(opts));
+        map.insert_unchecked(
+            Property::AllowInvalidCerts,
+            self.allow_invalid_certs.into_value_with(opts),
+        );
         map.insert_unchecked(
             Property::EnableLogExporter,
             self.enable_log_exporter.into_value_with(opts),
@@ -74177,6 +74328,7 @@ impl RegistryJsonPropertyPatch for TracerOtelGrpc {
             Some(Property::Url) => self
                 .url
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::AllowInvalidCerts) => self.allow_invalid_certs.patch(pointer, value),
             Some(Property::EnableLogExporter) => self.enable_log_exporter.patch(pointer, value),
             Some(Property::EnableSpanExporter) => self.enable_span_exporter.patch(pointer, value),
             Some(Property::Throttle) => self.throttle.patch(pointer, value),

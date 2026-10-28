@@ -6,8 +6,15 @@
 
 use crate::{RegistryStore, RegistryStoreInner, Store};
 use registry::schema::structs::DataStore;
-use std::{net::IpAddr, path::PathBuf};
+use std::{io, net::IpAddr, path::PathBuf};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use utils::snowflake::SnowflakeIdGenerator;
+
+#[cfg(unix)]
+use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+
+#[cfg(unix)]
+const DATA_STORE_FILE_MODE: u32 = 0o600;
 
 pub(crate) enum RegistryInit {
     Ok(DataStore),
@@ -34,6 +41,7 @@ impl RegistryStoreInner {
             local_path,
             store: Store::None,
             id_generator: SnowflakeIdGenerator::new(),
+            process_nonce: rand::random(),
             node_id: 0,
             env_recovery_mode: std::env::var("STALWART_RECOVERY_MODE")
                 .ok()
@@ -96,13 +104,32 @@ impl RegistryStore {
                 .caused_by(trc::location!())
                 .reason(err)
         })?;
-        tokio::fs::write(&self.0.local_path, json_text)
+        let write_error = |err: io::Error| {
+            trc::EventType::Registry(trc::RegistryEvent::LocalWriteError)
+                .into_err()
+                .caused_by(trc::location!())
+                .reason(err)
+        };
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(DATA_STORE_FILE_MODE);
+        let mut file = options
+            .open(&self.0.local_path)
             .await
-            .map_err(|err| {
-                trc::EventType::Registry(trc::RegistryEvent::LocalWriteError)
-                    .into_err()
-                    .caused_by(trc::location!())
-                    .reason(err)
-            })
+            .map_err(write_error)?;
+        #[cfg(unix)]
+        let _ = file
+            .set_permissions(Permissions::from_mode(DATA_STORE_FILE_MODE))
+            .await;
+        file.write_all(json_text.as_bytes())
+            .await
+            .map_err(write_error)?;
+        file.flush().await.map_err(write_error)
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/store/src/registry/local/tests.rs"]
+mod tests;

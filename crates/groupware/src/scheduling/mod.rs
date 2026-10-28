@@ -198,6 +198,27 @@ pub enum ItipValue {
 pub struct ItipTime {
     pub start: i64,
     pub tz_id: u16,
+    #[serde(default)]
+    pub kind: ItipTimeKind,
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+pub enum ItipTimeKind {
+    #[default]
+    DateTime,
+    Date,
+}
+
+impl ItipTimeKind {
+    pub fn of(date: &PartialDateTime) -> Self {
+        if date.has_time() {
+            ItipTimeKind::DateTime
+        } else {
+            ItipTimeKind::Date
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -296,7 +296,7 @@
         .client-host {
             font-size: .75rem;
             color: var(--muted);
-            word-break: break-all;
+            overflow-wrap: anywhere;
         }
 
         .badge {
@@ -369,7 +369,7 @@
             font-size: .75rem;
             color: var(--muted);
             margin-top: .75rem;
-            word-break: break-all;
+            overflow-wrap: anywhere;
         }
 
         .app-header {
@@ -505,13 +505,13 @@
             var query = url.search.charAt(0) === '?' ? url.search.slice(1) : url.search;
             var loginHint = params.get('login_hint');
             var clientInfo = null;
-            var consentGiven = false;
             var deviceCode = null;
             var stage = 'login';
             var inMfa = false;
             var lastCreds = null;
             var allowHandler = null;
             var denyHandler = null;
+            var leaving = false;
 
             if (loginHint) $('username').value = loginHint;
 
@@ -531,6 +531,7 @@
                 } else if (!isSafeLocation(location)) {
                     showFatal('The application redirect address is not allowed.');
                 } else {
+                    leaving = true;
                     window.location.assign(location);
                 }
             }
@@ -785,6 +786,9 @@
                     case 'mfaRequired':
                         enterMfaMode();
                         return;
+                    case 'consentRequired':
+                        requestConsent(resp.token);
+                        return;
                     case 'expired':
                         if (inMfa) leaveMfaMode();
                         showError('Your password has expired. Change it in the account portal, then sign in again.');
@@ -818,10 +822,37 @@
                         accountSecret: creds.account_secret,
                         query: query
                     };
-                    if (consentGiven) r.consent = true;
                 }
                 if (otpValue) r.mfaToken = otpValue;
                 return r;
+            }
+
+            function requestConsent(token) {
+                if (typeof token !== 'string' || !token || !clientInfo) {
+                    showFatal(FAILURE);
+                    return;
+                }
+                inMfa = false;
+                lastCreds = null;
+                $('password').value = '';
+                $('otp').value = '';
+                hide($('field-otp'));
+                var decide = function (allow) {
+                    postConsent({ type: 'authConsent', token: token, query: query, consent: allow });
+                };
+                renderConsent(clientInfo, function () { decide(true); }, function () { decide(false); });
+            }
+
+            function postConsent(body) {
+                var allow = $('allow-btn');
+                var deny = $('deny-btn');
+                allow.disabled = true;
+                deny.disabled = true;
+                postLogin(body).then(function () {
+                    if (leaving) return;
+                    allow.disabled = false;
+                    deny.disabled = false;
+                });
             }
 
             function normalizeCode(value) {
@@ -846,7 +877,6 @@
                     deviceCode = code;
                     clientInfo = info;
                     renderConsent(info, function () {
-                        consentGiven = true;
                         showLoginForm();
                     }, function () {
                         postLogin({ type: 'authDevice', code: deviceCode, consent: false });
@@ -898,16 +928,7 @@
                         return;
                     }
                     clientInfo = info;
-                    if (info.consentRequired) {
-                        renderConsent(info, function () {
-                            consentGiven = true;
-                            showLoginForm();
-                        }, function () {
-                            navigate(info.denyLocation);
-                        });
-                    } else {
-                        showLoginForm();
-                    }
+                    showLoginForm();
                 }).catch(function (err) {
                     console.log('Client lookup failed:', err);
                     showFatal(FAILURE);
