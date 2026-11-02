@@ -23,6 +23,7 @@ use store::{
 use trc::AddContext;
 use types::{
     acl::Acl,
+    id::Id,
     keyword::{DRAFT, Keyword, SEEN},
     metadata::MetadataKinds,
 };
@@ -406,6 +407,8 @@ impl MessageAccess {
 pub trait MessageCacheAccess {
     fn email_by_id(&self, id: &u32) -> Option<MessageRef<'_>>;
 
+    fn email_by_jmap_id(&self, id: Id) -> Option<MessageRef<'_>>;
+
     fn has_email_id(&self, id: &u32) -> bool;
 
     fn custom_keywords(&self, message: MessageRef<'_>) -> &[CompactString];
@@ -612,6 +615,12 @@ impl MessageCacheAccess for MessageStoreCache {
 
     fn email_by_id(&self, id: &u32) -> Option<MessageRef<'_>> {
         self.emails.by_id(*id)
+    }
+
+    fn email_by_jmap_id(&self, id: Id) -> Option<MessageRef<'_>> {
+        self.emails
+            .by_id(id.document_id())
+            .filter(|message| message.thread_id() == id.prefix_id())
     }
 
     fn has_email_id(&self, id: &u32) -> bool {

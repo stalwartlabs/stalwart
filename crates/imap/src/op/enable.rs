@@ -43,7 +43,9 @@ impl<T: SessionStream> Session<T> {
                 }
                 Capability::Utf8Accept => !replace(&mut self.is_utf8, true),
                 Capability::ObjectIdPlus => !replace(&mut self.is_objectid, true),
-                Capability::UidOnly => !replace(&mut self.is_uidonly, true),
+                Capability::UidOnly => {
+                    self.client.allows_uid_only() && !replace(&mut self.is_uidonly, true)
+                }
                 _ => false,
             };
             if newly_enabled {

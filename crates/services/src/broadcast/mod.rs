@@ -211,6 +211,9 @@ impl<T: AsRef<[BroadcastEvent]>> BroadcastBatch<T> {
                                 continue;
                             }
                             CacheInvalidation::ActiveSieveScript(id) => (15u8, *id),
+                            CacheInvalidation::ExternalPublicKey(address_hash) => {
+                                (16u8, *address_hash)
+                            }
                         };
 
                         serialized.push(marker);
@@ -389,6 +392,7 @@ impl BroadcastBatch<&[u8]> {
                                 grant_id: self.messages.read_leb128::<u64>().ok_or(())?,
                             },
                             15 => CacheInvalidation::ActiveSieveScript(id),
+                            16 => CacheInvalidation::ExternalPublicKey(id),
                             _ => return Err(()),
                         });
                     }

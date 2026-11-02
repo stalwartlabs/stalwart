@@ -1,6 +1,6 @@
 [package]
 name = "registry"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 
 [dependencies]
@@ -11,7 +11,7 @@ serde = { version = "1.0", features = ["derive"]}
 hashify = "0.3"
 ahash = { version = "0.8" }
 jmap-tools = { path = "../jmap-tools" }
-mail-auth = { version = "0.14" }
+mail-auth = { version = "0.15.1" }
 smtp-report = { path = "../smtp-report" }
 tokio = { version = "1.54", features = ["fs"] }
 lz4_flex = { version = "0.14", features = ["alloc"], default-features = false }

@@ -27,6 +27,7 @@ pub mod bootstrap;
 pub mod cluster;
 pub mod dkim;
 pub mod domain;
+pub mod external_public_key;
 pub mod index_queue;
 pub mod log;
 pub mod oauth_client;

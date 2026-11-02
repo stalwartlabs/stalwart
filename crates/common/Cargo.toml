@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 build = "build.rs"
 
@@ -14,11 +14,12 @@ directory = { path = "../directory" }
 coordinator = { path = "../coordinator" }
 types = { path = "../types" }
 registry = { path = "../registry" }
+crypto = { path = "../crypto" }
 jmap_proto = { path = "../jmap-proto" }
 sieve-rs = { path = "../sieve", features = ["serde"] }
 mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.14", features = ["generate", "arc"] }
+mail-auth = { version = "0.15.1", features = ["generate", "arc"] }
 smtp-report = { path = "../smtp-report" }
 smtp-proto = { path = "../smtp-proto", features = ["rkyv"] }
 dns-update = { version = "0.6" }
@@ -31,7 +32,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["std", "aw
 rustls-pemfile = "2.2"
 rustls-pki-types = { version = "1" }
 aws-lc-rs = { version = "1" }
-tokio = { version = "1.54", features = ["net", "macros", "sync", "time"] }
+tokio = { version = "1.54", features = ["net", "macros", "sync", "time", "rt-multi-thread"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 socket2 = { version = "0.6", features = ["all"] }
 futures = "0.3"
@@ -67,15 +68,13 @@ p384 = { version = "0.14", features = ["ecdh"] }
 hashify = "0.3"
 rkyv.workspace = true
 tinyvec = { version = "1.13.3", features = ["alloc"] }
+smallvec = "1.16"
 compact_str = { version = "0.10.0", features = ["rkyv", "serde"] }
 bytes = "1"
 lz4_flex = { version = "0.14", features = ["frame"], default-features = false }
 hickory-proto = "0.26.3"
 nohash-hasher = "0.2.0"
 quick_cache = "0.7"
-rasn = "0.29"
-rasn-pkix = "0.29"
-sequoia-openpgp = { version = "2.4", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 zxcvbn = "3.1.1"
 pkcs8 = { version = "0.11.0", features = ["alloc", "std"] }
 quick-xml = "0.42"

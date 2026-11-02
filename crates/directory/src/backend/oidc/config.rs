@@ -67,7 +67,11 @@ impl OpenIdDirectory {
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
         // SPDX-License-Identifier: LicenseRef-SEL
         #[cfg(feature = "enterprise")]
-        let outbound_policy = OutboundPolicy::for_tenant(config.member_tenant_id);
+        let outbound_policy = if config.trusted_provider {
+            OutboundPolicy::Trusted
+        } else {
+            OutboundPolicy::for_tenant(config.member_tenant_id)
+        };
         // SPDX-SnippetEnd
         #[cfg(not(feature = "enterprise"))]
         let outbound_policy = OutboundPolicy::Trusted;

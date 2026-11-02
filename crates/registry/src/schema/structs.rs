@@ -353,6 +353,8 @@ pub struct Application {
     pub unpack_directory: Option<String>,
     #[serde(rename = "oauthClientId")]
     pub oauth_client_id: Option<String>,
+    #[serde(rename = "oauthScopes")]
+    pub oauth_scopes: Map<String>,
 }
 
 // SPDX-SnippetBegin
@@ -842,6 +844,8 @@ pub struct Cache {
     pub directory_recipients: u64,
     #[serde(rename = "directoryRecipientsTtl")]
     pub directory_recipients_ttl: Duration,
+    #[serde(rename = "externalPublicKeys")]
+    pub external_public_keys: u64,
     pub swap: CacheSwap,
 }
 
@@ -1279,7 +1283,7 @@ pub enum DkimSignature {
     Dkim1RsaSha256(Dkim1Signature),
     Dkim2Ed25519Sha256(Dkim2Signature),
     Dkim2RsaSha256(Dkim2Signature),
-    Dkim2MlDsa44Ed25519Sha512(Dkim2Signature),
+    Dkim2MlDsa44(Dkim2Signature),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3042,10 +3046,6 @@ pub struct Email {
     pub max_mailbox_depth: u64,
     #[serde(rename = "maxMailboxNameLength")]
     pub max_mailbox_name_length: u64,
-    #[serde(rename = "encryptOnAppend")]
-    pub encrypt_on_append: bool,
-    #[serde(rename = "encryptAtRest")]
-    pub encrypt_at_rest: bool,
     #[serde(rename = "compressionAlgorithm")]
     pub compression_algorithm: CompressionAlgo,
     #[serde(rename = "defaultFolders")]
@@ -3099,13 +3099,45 @@ pub struct EmailFolder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Encryption {
+    #[serde(rename = "atRestEnable")]
+    pub at_rest_enable: bool,
+    #[serde(rename = "gatewayEnable")]
+    pub gateway_enable: bool,
+    #[serde(rename = "gatewayOutbound")]
+    pub gateway_outbound: Expression,
+    #[serde(rename = "gatewayMinTrust")]
+    pub gateway_min_trust: Expression,
+    #[serde(rename = "gatewayMethods")]
+    pub gateway_methods: Map<PublicKeyKind>,
+    #[serde(rename = "gatewayHeaderProtection")]
+    pub gateway_header_protection: HeaderProtection,
+    #[serde(rename = "gatewayEncryptSigned")]
+    pub gateway_encrypt_signed: bool,
+    #[serde(rename = "harvestKeys")]
+    pub harvest_keys: Expression,
+    #[serde(rename = "hkpServers")]
+    pub hkp_servers: Map<String>,
+    #[serde(rename = "discoveryProxy")]
+    pub discovery_proxy: Option<String>,
+    #[serde(rename = "sourceTimeout")]
+    pub source_timeout: Duration,
+    #[serde(rename = "keyRefreshInterval")]
+    pub key_refresh_interval: Duration,
+    #[serde(rename = "negativeCacheTtl")]
+    pub negative_cache_ttl: Duration,
+    #[serde(rename = "useBundledRoots")]
+    pub use_bundled_roots: bool,
+    #[serde(rename = "maxCrlSize")]
+    pub max_crl_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "@type")]
 pub enum EncryptionAtRest {
     Disabled,
-    Aes128(EncryptionSettings),
-    Aes256(EncryptionSettings),
-    Aes256Gcm(EncryptionSettings),
-    ChaCha20Poly1305(EncryptionSettings),
+    Enabled(EncryptionSettings),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3113,6 +3145,8 @@ pub enum EncryptionAtRest {
 pub struct EncryptionSettings {
     #[serde(rename = "publicKey")]
     pub public_key: Id,
+    #[serde(rename = "headerProtection")]
+    pub header_protection: HeaderProtection,
     #[serde(rename = "encryptOnAppend")]
     pub encrypt_on_append: bool,
     #[serde(rename = "allowSpamTraining")]
@@ -3156,6 +3190,54 @@ pub struct ExpressionMatch {
     #[serde(rename = "if")]
     pub if_: String,
     pub then: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalPublicKey {
+    #[serde(rename = "emailAddress")]
+    pub email_address: String,
+    pub key: Option<String>,
+    pub description: Option<String>,
+    pub status: ExternalPublicKeyStatus,
+    pub pinned: bool,
+    #[serde(rename = "authenticatedEncryption")]
+    pub authenticated_encryption: bool,
+    pub source: KeySource,
+    pub trust: KeyTrust,
+    pub kind: Option<PublicKeyKind>,
+    #[serde(rename = "keyType")]
+    pub key_type: Option<String>,
+    pub fingerprint: Option<String>,
+    pub capabilities: Map<PublicKeyCapability>,
+    #[serde(rename = "smimeCiphers")]
+    pub smime_ciphers: Map<SmimeCipher>,
+    #[serde(rename = "smimeOaep")]
+    pub smime_oaep: bool,
+    #[serde(rename = "smimeSignedAt")]
+    pub smime_signed_at: Option<UTCDateTime>,
+    #[serde(rename = "firstSeen")]
+    pub first_seen: UTCDateTime,
+    #[serde(rename = "lastSeen")]
+    pub last_seen: UTCDateTime,
+    #[serde(rename = "lastChecked")]
+    pub last_checked: Option<UTCDateTime>,
+    #[serde(rename = "nextCheckAt")]
+    pub next_check_at: Option<UTCDateTime>,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: Option<UTCDateTime>,
+    #[serde(rename = "nextKey")]
+    pub next_key: Option<String>,
+    #[serde(rename = "nextKeyType")]
+    pub next_key_type: Option<String>,
+    #[serde(rename = "nextFingerprint")]
+    pub next_fingerprint: Option<String>,
+    #[serde(rename = "nextCapabilities")]
+    pub next_capabilities: Map<PublicKeyCapability>,
+    #[serde(rename = "nextExpiresAt")]
+    pub next_expires_at: Option<UTCDateTime>,
+    #[serde(rename = "blockedFingerprints")]
+    pub blocked_fingerprints: Map<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3550,6 +3632,22 @@ pub struct KafkaCoordinator {
     pub use_tls: bool,
     #[serde(rename = "allowInvalidCerts")]
     pub allow_invalid_certs: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum KeySource {
+    Manual,
+    Automatic(KeySourceAutomatic),
+    HarvestedSmime,
+    HarvestedPgp,
+    Autocrypt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeySourceAutomatic {
+    pub method: KeyDiscoverySource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4477,6 +4575,13 @@ pub struct OidcDirectory {
     pub allow_id_token_claims: bool,
     #[serde(rename = "lenientIssuerMatch")]
     pub lenient_issuer_match: bool,
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    #[serde(rename = "trustedProvider")]
+    pub trusted_provider: bool,
+    // SPDX-SnippetEnd
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4597,6 +4702,10 @@ pub struct PublicKey {
     pub account_id: Id,
     pub key: String,
     pub description: String,
+    #[serde(rename = "strictKeyWrapEncoding")]
+    pub strict_key_wrap_encoding: bool,
+    #[serde(rename = "authenticatedEncryption")]
+    pub authenticated_encryption: bool,
     #[serde(rename = "createdAt")]
     pub created_at: UTCDateTime,
     #[serde(rename = "expiresAt")]
@@ -5292,6 +5401,17 @@ pub struct SieveUserScript {
     pub contents: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SmimeTrustAnchor {
+    pub description: String,
+    pub certificate: String,
+    pub enable: bool,
+    pub subject: String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: UTCDateTime,
+}
+
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
 // SPDX-License-Identifier: LicenseRef-SEL
@@ -5919,6 +6039,7 @@ pub enum Task {
     ShareRevokeCleanup(TaskShareRevokeCleanup),
     DmarcReportWindow(TaskReportWindow),
     TlsReportWindow(TaskReportWindow),
+    ExternalPublicKeyMaintenance(TaskExternalPublicKeyMaintenance),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6039,6 +6160,12 @@ pub struct TaskDnsManagement {
 pub struct TaskDomainManagement {
     #[serde(rename = "domainId")]
     pub domain_id: Id,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskExternalPublicKeyMaintenance {
     pub status: TaskStatus,
 }
 

@@ -8,7 +8,7 @@ use super::client::SmtpClient;
 use crate::outbound::DeliveryResult;
 use crate::outbound::client::{BoxResponse, from_error_status, from_mail_send_error};
 use crate::outbound::error::ClientError;
-use crate::queue::{Error, MessageWrapper, Recipient, Status};
+use crate::queue::{Error, MessageWrapper, Recipient, RecipientBlob, Status};
 use crate::queue::{ErrorDetails, HostResponse, UnexpectedResponse};
 use common::Server;
 use common::config::smtp::queue::ConnectionStrategy;
@@ -39,6 +39,7 @@ pub struct SessionParams<'x> {
     pub conn_strategy: &'x ConnectionStrategy,
     pub session_id: u64,
     pub message_blob: &'x OnceCell<Vec<u8>>,
+    pub recipient_blob: Option<&'x RecipientBlob>,
 }
 
 impl MessageWrapper {
@@ -108,29 +109,12 @@ impl MessageWrapper {
                 Hostname = CompactString::from(params.hostname),
                 Elapsed = time.elapsed(),
             );
-
-            // Refresh capabilities
-            // Disabled as some SMTP servers deauthenticate after EHLO
-            /*capabilities = match say_helo(&mut smtp_client, &params).await {
-                Ok(capabilities) => capabilities,
-                Err(status) => {
-                    trc::event!(
-
-                        context = "ehlo",
-                        event = "rejected",
-                        mx = &params.hostname,
-                        reason = %status,
-                    );
-                    smtp_client.quit().await;
-                    return status;
-                }
-            };*/
         }
 
         // MAIL FROM
         let time = Instant::now();
         smtp_client.timeout = params.conn_strategy.timeout_mail;
-        let mut commands = self.build_mail_from(&capabilities);
+        let mut commands = self.build_mail_from(&capabilities, params.recipient_blob);
         let mail_from_len = commands.len();
         let max_batch = if capabilities.has_capability(EXT_PIPELINING) {
             MAX_PIPELINED_RCPTS
@@ -465,11 +449,16 @@ impl MessageWrapper {
         smtp_client.quit().await;
     }
 
-    fn build_mail_from(&self, capabilities: &EhloResponse<String>) -> String {
+    fn build_mail_from(
+        &self,
+        capabilities: &EhloResponse<String>,
+        blob: Option<&RecipientBlob>,
+    ) -> String {
         let mut mail_from = String::with_capacity(self.message.return_path.len() + 60);
         let _ = write!(mail_from, "MAIL FROM:<{}>", self.message.return_path);
         if capabilities.has_capability(EXT_SIZE) {
-            let _ = write!(mail_from, " SIZE={}", self.message.size);
+            let size = blob.map_or(self.message.size, |blob| blob.size);
+            let _ = write!(mail_from, " SIZE={size}");
         }
         if self.has_flag(MAIL_REQUIRETLS) & capabilities.has_capability(EXT_REQUIRE_TLS) {
             mail_from.push_str(" REQUIRETLS");

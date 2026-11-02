@@ -7,6 +7,7 @@
 use crate::{
     Inner, Server,
     auth::{EmailAddressRef, EmailCache},
+    gateway::resolver::KeyCacheKey,
     ipc::{BroadcastEvent, CacheInvalidation, PushNotification},
 };
 use ahash::AHashSet;
@@ -231,6 +232,23 @@ impl CacheInvalidationBuilder {
                 }
             }
 
+            (ObjectInner::PublicKey(current), ObjectInner::PublicKey(new))
+                if current.key != new.key
+                    || current.strict_key_wrap_encoding != new.strict_key_wrap_encoding
+                    || current.authenticated_encryption != new.authenticated_encryption =>
+            {
+                self.invalidate(CacheInvalidation::Account(new.account_id.document_id()));
+            }
+
+            (ObjectInner::ExternalPublicKey(current), ObjectInner::ExternalPublicKey(new)) => {
+                self.invalidate(CacheInvalidation::ExternalPublicKey(
+                    KeyCacheKey::address_hash(&current.email_address),
+                ));
+                self.invalidate(CacheInvalidation::ExternalPublicKey(
+                    KeyCacheKey::address_hash(&new.email_address),
+                ));
+            }
+
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -287,6 +305,11 @@ impl CacheInvalidationBuilder {
         let grant_id = id.id();
         let id = id.document_id();
         match &object.inner {
+            ObjectInner::ExternalPublicKey(key) => {
+                self.invalidate(CacheInvalidation::ExternalPublicKey(
+                    KeyCacheKey::address_hash(&key.email_address),
+                ));
+            }
             ObjectInner::OAuthGrant(grant) => {
                 self.invalidate(CacheInvalidation::OAuthGrant {
                     account_id: grant.account_id.document_id(),
@@ -329,6 +352,11 @@ impl CacheInvalidationBuilder {
 
     pub fn process_create(&mut self, object: &Object) {
         match &object.inner {
+            ObjectInner::ExternalPublicKey(key) => {
+                self.invalidate(CacheInvalidation::ExternalPublicKey(
+                    KeyCacheKey::address_hash(&key.email_address),
+                ));
+            }
             ObjectInner::Domain(_) => {
                 self.invalidate(CacheInvalidation::DomainNegative);
             }
@@ -626,6 +654,11 @@ impl Server {
                 }
                 CacheInvalidation::DomainNegative => {
                     cache.domain_names_negative.clear();
+                }
+                CacheInvalidation::ExternalPublicKey(address_hash) => {
+                    cache
+                        .external_public_keys
+                        .retain(|key| KeyCacheKey::address_hash(&key.address) != *address_hash);
                 }
                 CacheInvalidation::PrivateMetadata(id) => {
                     cache.metadata_viewers.invalidate(*id);

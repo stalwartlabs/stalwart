@@ -12,7 +12,9 @@ use registry::{
     schema::{
         enums::TaskAccountMaintenanceType,
         prelude::{ObjectType, Property},
-        structs::{Task, TaskAccountMaintenance, TaskDestroyAccount, TaskStatus},
+        structs::{
+            SpamTrainingSample, Task, TaskAccountMaintenance, TaskDestroyAccount, TaskStatus,
+        },
     },
     types::{EnumImpl, id::ObjectId},
 };
@@ -21,11 +23,9 @@ use registry::{
 // SPDX-License-Identifier: LicenseRef-SEL
 #[cfg(feature = "enterprise")]
 use registry::schema::structs::ArchivedItem;
-#[cfg(feature = "enterprise")]
-use store::{Deserialize, IterateParams, U64_LEN};
 // SPDX-SnippetEnd
 use store::{
-    SerializeInfallible, ValueKey,
+    Deserialize, IterateParams, SerializeInfallible, U64_LEN, ValueKey,
     registry::{
         RegistryQuery,
         write::{RegistryWrite, RegistryWriteResult},
@@ -168,61 +168,25 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
-    {
-        let object_id = ObjectType::ArchivedItem.to_id();
-        let ids = server
-            .registry()
-            .query::<Vec<Id>>(RegistryQuery::new(ObjectType::ArchivedItem).with_account(account_id))
-            .await?;
-        let mut batch = BatchBuilder::new();
-        batch.with_account_id(account_id);
-        let account_key = (account_id as u64).serialize();
-        server
-            .store()
-            .iterate_many(
-                ids.iter()
-                    .map(|id| {
-                        let key = ValueKey::from(ValueClass::Registry(RegistryClass::Item {
-                            object_id,
-                            item_id: id.id(),
-                        }));
-                        IterateParams::new(key.clone(), key)
-                    })
-                    .collect(),
-                |key, value| {
-                    let item_id = key
-                        .last_chunk::<U64_LEN>()
-                        .map(|item_id| u64::from_be_bytes(*item_id))
-                        .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?;
-                    let item = ArchivedItem::deserialize(value)?;
-                    let until = item.archived_until().timestamp() as u64;
-
-                    batch
-                        .clear(BlobOp::Link {
-                            hash: item.into_blob_id().hash,
-                            to: BlobLink::Temporary { until },
-                        })
-                        .clear(ValueClass::Registry(RegistryClass::Index {
-                            index_id: Property::AccountId.to_id(),
-                            object_id,
-                            item_id,
-                            key: account_key.clone(),
-                        }))
-                        .clear(ValueClass::Registry(RegistryClass::Item {
-                            object_id,
-                            item_id,
-                        }))
-                        .bulk_commit_point();
-                    Ok(true)
-                },
-            )
-            .await
-            .caused_by(trc::location!())?;
-        if !batch.is_empty() {
-            server.store().write_batch(&mut batch).await?;
-        }
-    }
+    destroy_temporary_items(server, account_id, ObjectType::ArchivedItem, |value| {
+        let item = ArchivedItem::deserialize(value)?;
+        let until = item.archived_until().timestamp() as u64;
+        Ok((item.into_blob_id().hash, until))
+    })
+    .await?;
     // SPDX-SnippetEnd
+
+    // Remove spam training samples
+    destroy_temporary_items(
+        server,
+        account_id,
+        ObjectType::SpamTrainingSample,
+        |value| {
+            let sample = SpamTrainingSample::deserialize(value)?;
+            Ok((sample.blob_id.hash, sample.expires_at.timestamp() as u64))
+        },
+    )
+    .await?;
 
     // Remove search index
     for index in [
@@ -279,6 +243,68 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         .caused_by(trc::location!())?;
 
     Ok(Outcome::done())
+}
+
+async fn destroy_temporary_items(
+    server: &Server,
+    account_id: u32,
+    object: ObjectType,
+    blob_link: impl Fn(&[u8]) -> trc::Result<(BlobHash, u64)> + Sync + Send,
+) -> trc::Result<()> {
+    let object_id = object.to_id();
+    let ids = server
+        .registry()
+        .query::<Vec<Id>>(RegistryQuery::new(object).with_account(account_id))
+        .await?;
+    let account_key = (account_id as u64).serialize();
+    for ids in ids.chunks(DESTROY_WINDOW) {
+        let mut batch = BatchBuilder::new();
+        batch.with_account_id(account_id);
+        server
+            .store()
+            .iterate_many(
+                ids.iter()
+                    .map(|id| {
+                        let key = ValueKey::from(ValueClass::Registry(RegistryClass::Item {
+                            object_id,
+                            item_id: id.id(),
+                        }));
+                        IterateParams::new(key.clone(), key)
+                    })
+                    .collect(),
+                |key, value| {
+                    let item_id = key
+                        .last_chunk::<U64_LEN>()
+                        .map(|item_id| u64::from_be_bytes(*item_id))
+                        .ok_or_else(|| trc::Error::corrupted_key(key, None, trc::location!()))?;
+                    let (hash, until) = blob_link(value)?;
+
+                    batch
+                        .clear(BlobOp::Link {
+                            hash,
+                            to: BlobLink::Temporary { until },
+                        })
+                        .clear(ValueClass::Registry(RegistryClass::Index {
+                            index_id: Property::AccountId.to_id(),
+                            object_id,
+                            item_id,
+                            key: account_key.clone(),
+                        }))
+                        .clear(ValueClass::Registry(RegistryClass::Item {
+                            object_id,
+                            item_id,
+                        }))
+                        .bulk_commit_point();
+                    Ok(true)
+                },
+            )
+            .await
+            .caused_by(trc::location!())?;
+        if !batch.is_empty() {
+            server.store().write_batch(&mut batch).await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn destroy_account_blobs(server: &Server, account_id: u32) -> trc::Result<()> {

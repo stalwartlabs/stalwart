@@ -2184,6 +2184,7 @@ impl EnumImpl for DeliveryErrorType {
             b"rateLimited" => DeliveryErrorType::RateLimited,
             b"concurrencyLimited" => DeliveryErrorType::ConcurrencyLimited,
             b"io" => DeliveryErrorType::Io,
+            b"encryptionError" => DeliveryErrorType::EncryptionError,
         }
         .copied()
     }
@@ -2199,6 +2200,7 @@ impl EnumImpl for DeliveryErrorType {
             DeliveryErrorType::RateLimited => "rateLimited",
             DeliveryErrorType::ConcurrencyLimited => "concurrencyLimited",
             DeliveryErrorType::Io => "io",
+            DeliveryErrorType::EncryptionError => "encryptionError",
         }
     }
 
@@ -2217,11 +2219,12 @@ impl EnumImpl for DeliveryErrorType {
             6 => Some(DeliveryErrorType::RateLimited),
             7 => Some(DeliveryErrorType::ConcurrencyLimited),
             8 => Some(DeliveryErrorType::Io),
+            9 => Some(DeliveryErrorType::EncryptionError),
             _ => None,
         }
     }
 
-    const COUNT: usize = 9;
+    const COUNT: usize = 10;
 }
 
 impl serde::Serialize for DeliveryErrorType {
@@ -2753,7 +2756,7 @@ impl EnumImpl for DkimSignatureType {
             b"Dkim1RsaSha256" => DkimSignatureType::Dkim1RsaSha256,
             b"Dkim2Ed25519Sha256" => DkimSignatureType::Dkim2Ed25519Sha256,
             b"Dkim2RsaSha256" => DkimSignatureType::Dkim2RsaSha256,
-            b"Dkim2MlDsa44Ed25519Sha512" => DkimSignatureType::Dkim2MlDsa44Ed25519Sha512,
+            b"Dkim2MlDsa44" => DkimSignatureType::Dkim2MlDsa44,
         }
         .copied()
     }
@@ -2764,7 +2767,7 @@ impl EnumImpl for DkimSignatureType {
             DkimSignatureType::Dkim1RsaSha256 => "Dkim1RsaSha256",
             DkimSignatureType::Dkim2Ed25519Sha256 => "Dkim2Ed25519Sha256",
             DkimSignatureType::Dkim2RsaSha256 => "Dkim2RsaSha256",
-            DkimSignatureType::Dkim2MlDsa44Ed25519Sha512 => "Dkim2MlDsa44Ed25519Sha512",
+            DkimSignatureType::Dkim2MlDsa44 => "Dkim2MlDsa44",
         }
     }
 
@@ -2778,7 +2781,7 @@ impl EnumImpl for DkimSignatureType {
             1 => Some(DkimSignatureType::Dkim1RsaSha256),
             2 => Some(DkimSignatureType::Dkim2Ed25519Sha256),
             3 => Some(DkimSignatureType::Dkim2RsaSha256),
-            4 => Some(DkimSignatureType::Dkim2MlDsa44Ed25519Sha512),
+            4 => Some(DkimSignatureType::Dkim2MlDsa44),
             _ => None,
         }
     }
@@ -4052,10 +4055,7 @@ impl EnumImpl for EncryptionAtRestType {
             value.as_bytes(),
             EncryptionAtRestType,
             b"Disabled" => EncryptionAtRestType::Disabled,
-            b"Aes128" => EncryptionAtRestType::Aes128,
-            b"Aes256" => EncryptionAtRestType::Aes256,
-            b"Aes256Gcm" => EncryptionAtRestType::Aes256Gcm,
-            b"ChaCha20Poly1305" => EncryptionAtRestType::ChaCha20Poly1305,
+            b"Enabled" => EncryptionAtRestType::Enabled,
         }
         .copied()
     }
@@ -4063,10 +4063,7 @@ impl EnumImpl for EncryptionAtRestType {
     fn as_str(&self) -> &'static str {
         match self {
             EncryptionAtRestType::Disabled => "Disabled",
-            EncryptionAtRestType::Aes128 => "Aes128",
-            EncryptionAtRestType::Aes256 => "Aes256",
-            EncryptionAtRestType::Aes256Gcm => "Aes256Gcm",
-            EncryptionAtRestType::ChaCha20Poly1305 => "ChaCha20Poly1305",
+            EncryptionAtRestType::Enabled => "Enabled",
         }
     }
 
@@ -4077,15 +4074,13 @@ impl EnumImpl for EncryptionAtRestType {
     fn from_id(id: u16) -> Option<Self> {
         match id {
             0 => Some(EncryptionAtRestType::Disabled),
-            1 => Some(EncryptionAtRestType::Aes128),
-            2 => Some(EncryptionAtRestType::Aes256),
-            3 => Some(EncryptionAtRestType::Aes256Gcm),
-            4 => Some(EncryptionAtRestType::ChaCha20Poly1305),
+            5 => Some(EncryptionAtRestType::Enabled),
+            1..=4 => Some(EncryptionAtRestType::Disabled),
             _ => None,
         }
     }
 
-    const COUNT: usize = 5;
+    const COUNT: usize = 6;
 }
 
 impl serde::Serialize for EncryptionAtRestType {
@@ -4177,6 +4172,13 @@ impl EnumImpl for ExpressionConstant {
             b"mixer" => ExpressionConstant::Mixer,
             b"stanag4406" => ExpressionConstant::Stanag4406,
             b"nsep" => ExpressionConstant::Nsep,
+            b"opportunistic" => ExpressionConstant::Opportunistic,
+            b"required" => ExpressionConstant::Required,
+            b"manual" => ExpressionConstant::Manual,
+            b"verified" => ExpressionConstant::Verified,
+            b"discovered" => ExpressionConstant::Discovered,
+            b"harvested" => ExpressionConstant::Harvested,
+            b"unverified" => ExpressionConstant::Unverified,
         }
         .copied()
     }
@@ -4196,6 +4198,13 @@ impl EnumImpl for ExpressionConstant {
             ExpressionConstant::Mixer => "mixer",
             ExpressionConstant::Stanag4406 => "stanag4406",
             ExpressionConstant::Nsep => "nsep",
+            ExpressionConstant::Opportunistic => "opportunistic",
+            ExpressionConstant::Required => "required",
+            ExpressionConstant::Manual => "manual",
+            ExpressionConstant::Verified => "verified",
+            ExpressionConstant::Discovered => "discovered",
+            ExpressionConstant::Harvested => "harvested",
+            ExpressionConstant::Unverified => "unverified",
         }
     }
 
@@ -4218,11 +4227,18 @@ impl EnumImpl for ExpressionConstant {
             10 => Some(ExpressionConstant::Mixer),
             11 => Some(ExpressionConstant::Stanag4406),
             12 => Some(ExpressionConstant::Nsep),
+            13 => Some(ExpressionConstant::Opportunistic),
+            14 => Some(ExpressionConstant::Required),
+            15 => Some(ExpressionConstant::Manual),
+            16 => Some(ExpressionConstant::Verified),
+            17 => Some(ExpressionConstant::Discovered),
+            18 => Some(ExpressionConstant::Harvested),
+            19 => Some(ExpressionConstant::Unverified),
             _ => None,
         }
     }
 
-    const COUNT: usize = 13;
+    const COUNT: usize = 20;
 }
 
 impl serde::Serialize for ExpressionConstant {
@@ -4343,6 +4359,7 @@ impl EnumImpl for ExpressionVariable {
             b"spam_score" => ExpressionVariable::SpamScore,
             b"spam_probability" => ExpressionVariable::SpamProbability,
             b"spam_threshold" => ExpressionVariable::SpamThreshold,
+            b"is_signed" => ExpressionVariable::IsSigned,
         }
         .copied()
     }
@@ -4443,6 +4460,7 @@ impl EnumImpl for ExpressionVariable {
             ExpressionVariable::SpamScore => "spam_score",
             ExpressionVariable::SpamProbability => "spam_probability",
             ExpressionVariable::SpamThreshold => "spam_threshold",
+            ExpressionVariable::IsSigned => "is_signed",
         }
     }
 
@@ -4546,11 +4564,12 @@ impl EnumImpl for ExpressionVariable {
             91 => Some(ExpressionVariable::SpamScore),
             92 => Some(ExpressionVariable::SpamProbability),
             93 => Some(ExpressionVariable::SpamThreshold),
+            94 => Some(ExpressionVariable::IsSigned),
             _ => None,
         }
     }
 
-    const COUNT: usize = 94;
+    const COUNT: usize = 95;
 }
 
 impl serde::Serialize for ExpressionVariable {
@@ -4563,6 +4582,64 @@ impl serde::Serialize for ExpressionVariable {
 }
 
 impl<'de> serde::Deserialize<'de> for ExpressionVariable {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for ExternalPublicKeyStatus {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            ExternalPublicKeyStatus,
+            b"active" => ExternalPublicKeyStatus::Active,
+            b"disabled" => ExternalPublicKeyStatus::Disabled,
+            b"pendingApproval" => ExternalPublicKeyStatus::PendingApproval,
+            b"rejected" => ExternalPublicKeyStatus::Rejected,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            ExternalPublicKeyStatus::Active => "active",
+            ExternalPublicKeyStatus::Disabled => "disabled",
+            ExternalPublicKeyStatus::PendingApproval => "pendingApproval",
+            ExternalPublicKeyStatus::Rejected => "rejected",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(ExternalPublicKeyStatus::Active),
+            1 => Some(ExternalPublicKeyStatus::Disabled),
+            2 => Some(ExternalPublicKeyStatus::PendingApproval),
+            3 => Some(ExternalPublicKeyStatus::Rejected),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for ExternalPublicKeyStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExternalPublicKeyStatus {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -4621,6 +4698,61 @@ impl serde::Serialize for FailureReportingOption {
 }
 
 impl<'de> serde::Deserialize<'de> for FailureReportingOption {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for HeaderProtection {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            HeaderProtection,
+            b"none" => HeaderProtection::None,
+            b"noConfidentiality" => HeaderProtection::NoConfidentiality,
+            b"baseline" => HeaderProtection::Baseline,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            HeaderProtection::None => "none",
+            HeaderProtection::NoConfidentiality => "noConfidentiality",
+            HeaderProtection::Baseline => "baseline",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(HeaderProtection::None),
+            1 => Some(HeaderProtection::NoConfidentiality),
+            2 => Some(HeaderProtection::Baseline),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for HeaderProtection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for HeaderProtection {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -5203,6 +5335,186 @@ impl serde::Serialize for JwtSignatureAlgorithm {
 }
 
 impl<'de> serde::Deserialize<'de> for JwtSignatureAlgorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for KeyDiscoverySource {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            KeyDiscoverySource,
+            b"dnssec" => KeyDiscoverySource::Dnssec,
+            b"wkd" => KeyDiscoverySource::Wkd,
+            b"vks" => KeyDiscoverySource::Vks,
+            b"hkp" => KeyDiscoverySource::Hkp,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            KeyDiscoverySource::Dnssec => "dnssec",
+            KeyDiscoverySource::Wkd => "wkd",
+            KeyDiscoverySource::Vks => "vks",
+            KeyDiscoverySource::Hkp => "hkp",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(KeyDiscoverySource::Dnssec),
+            1 => Some(KeyDiscoverySource::Wkd),
+            2 => Some(KeyDiscoverySource::Vks),
+            3 => Some(KeyDiscoverySource::Hkp),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for KeyDiscoverySource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KeyDiscoverySource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for KeySourceType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            KeySourceType,
+            b"Manual" => KeySourceType::Manual,
+            b"Automatic" => KeySourceType::Automatic,
+            b"HarvestedSmime" => KeySourceType::HarvestedSmime,
+            b"HarvestedPgp" => KeySourceType::HarvestedPgp,
+            b"Autocrypt" => KeySourceType::Autocrypt,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            KeySourceType::Manual => "Manual",
+            KeySourceType::Automatic => "Automatic",
+            KeySourceType::HarvestedSmime => "HarvestedSmime",
+            KeySourceType::HarvestedPgp => "HarvestedPgp",
+            KeySourceType::Autocrypt => "Autocrypt",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(KeySourceType::Manual),
+            1 => Some(KeySourceType::Automatic),
+            2 => Some(KeySourceType::HarvestedSmime),
+            3 => Some(KeySourceType::HarvestedPgp),
+            4 => Some(KeySourceType::Autocrypt),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 5;
+}
+
+impl serde::Serialize for KeySourceType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KeySourceType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for KeyTrust {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            KeyTrust,
+            b"manual" => KeyTrust::Manual,
+            b"verified" => KeyTrust::Verified,
+            b"discovered" => KeyTrust::Discovered,
+            b"harvested" => KeyTrust::Harvested,
+            b"unverified" => KeyTrust::Unverified,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            KeyTrust::Manual => "manual",
+            KeyTrust::Verified => "verified",
+            KeyTrust::Discovered => "discovered",
+            KeyTrust::Harvested => "harvested",
+            KeyTrust::Unverified => "unverified",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(KeyTrust::Manual),
+            1 => Some(KeyTrust::Verified),
+            2 => Some(KeyTrust::Discovered),
+            3 => Some(KeyTrust::Harvested),
+            4 => Some(KeyTrust::Unverified),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 5;
+}
+
+impl serde::Serialize for KeyTrust {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KeyTrust {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -8480,6 +8792,8 @@ impl EnumImpl for Permission {
             b"sysDsnReportSettingsUpdate" => Permission::SysDsnReportSettingsUpdate,
             b"sysEmailGet" => Permission::SysEmailGet,
             b"sysEmailUpdate" => Permission::SysEmailUpdate,
+            b"sysEncryptionGet" => Permission::SysEncryptionGet,
+            b"sysEncryptionUpdate" => Permission::SysEncryptionUpdate,
             b"sysEnterpriseGet" => Permission::SysEnterpriseGet,
             b"sysEnterpriseUpdate" => Permission::SysEnterpriseUpdate,
             b"sysEventTracingLevelGet" => Permission::SysEventTracingLevelGet,
@@ -8487,6 +8801,11 @@ impl EnumImpl for Permission {
             b"sysEventTracingLevelUpdate" => Permission::SysEventTracingLevelUpdate,
             b"sysEventTracingLevelDestroy" => Permission::SysEventTracingLevelDestroy,
             b"sysEventTracingLevelQuery" => Permission::SysEventTracingLevelQuery,
+            b"sysExternalPublicKeyGet" => Permission::SysExternalPublicKeyGet,
+            b"sysExternalPublicKeyCreate" => Permission::SysExternalPublicKeyCreate,
+            b"sysExternalPublicKeyUpdate" => Permission::SysExternalPublicKeyUpdate,
+            b"sysExternalPublicKeyDestroy" => Permission::SysExternalPublicKeyDestroy,
+            b"sysExternalPublicKeyQuery" => Permission::SysExternalPublicKeyQuery,
             b"sysFileStorageGet" => Permission::SysFileStorageGet,
             b"sysFileStorageUpdate" => Permission::SysFileStorageUpdate,
             b"sysHttpGet" => Permission::SysHttpGet,
@@ -8662,6 +8981,11 @@ impl EnumImpl for Permission {
             b"sysSieveUserScriptUpdate" => Permission::SysSieveUserScriptUpdate,
             b"sysSieveUserScriptDestroy" => Permission::SysSieveUserScriptDestroy,
             b"sysSieveUserScriptQuery" => Permission::SysSieveUserScriptQuery,
+            b"sysSmimeTrustAnchorGet" => Permission::SysSmimeTrustAnchorGet,
+            b"sysSmimeTrustAnchorCreate" => Permission::SysSmimeTrustAnchorCreate,
+            b"sysSmimeTrustAnchorUpdate" => Permission::SysSmimeTrustAnchorUpdate,
+            b"sysSmimeTrustAnchorDestroy" => Permission::SysSmimeTrustAnchorDestroy,
+            b"sysSmimeTrustAnchorQuery" => Permission::SysSmimeTrustAnchorQuery,
             b"sysSpamAiGet" => Permission::SysSpamAiGet,
             b"sysSpamAiUpdate" => Permission::SysSpamAiUpdate,
             b"sysSpamClassifierGet" => Permission::SysSpamClassifierGet,
@@ -8723,6 +9047,7 @@ impl EnumImpl for Permission {
             b"taskShareRevokeCleanup" => Permission::TaskShareRevokeCleanup,
             b"taskDmarcReportWindow" => Permission::TaskDmarcReportWindow,
             b"taskTlsReportWindow" => Permission::TaskTlsReportWindow,
+            b"taskExternalPublicKeyMaintenance" => Permission::TaskExternalPublicKeyMaintenance,
             b"sysTaskGet" => Permission::SysTaskGet,
             b"sysTaskCreate" => Permission::SysTaskCreate,
             b"sysTaskUpdate" => Permission::SysTaskUpdate,
@@ -9115,11 +9440,18 @@ impl EnumImpl for Permission {
             b"sysDsnReportSettingsUpdate" => Permission::SysDsnReportSettingsUpdate,
             b"sysEmailGet" => Permission::SysEmailGet,
             b"sysEmailUpdate" => Permission::SysEmailUpdate,
+            b"sysEncryptionGet" => Permission::SysEncryptionGet,
+            b"sysEncryptionUpdate" => Permission::SysEncryptionUpdate,
             b"sysEventTracingLevelGet" => Permission::SysEventTracingLevelGet,
             b"sysEventTracingLevelCreate" => Permission::SysEventTracingLevelCreate,
             b"sysEventTracingLevelUpdate" => Permission::SysEventTracingLevelUpdate,
             b"sysEventTracingLevelDestroy" => Permission::SysEventTracingLevelDestroy,
             b"sysEventTracingLevelQuery" => Permission::SysEventTracingLevelQuery,
+            b"sysExternalPublicKeyGet" => Permission::SysExternalPublicKeyGet,
+            b"sysExternalPublicKeyCreate" => Permission::SysExternalPublicKeyCreate,
+            b"sysExternalPublicKeyUpdate" => Permission::SysExternalPublicKeyUpdate,
+            b"sysExternalPublicKeyDestroy" => Permission::SysExternalPublicKeyDestroy,
+            b"sysExternalPublicKeyQuery" => Permission::SysExternalPublicKeyQuery,
             b"sysFileStorageGet" => Permission::SysFileStorageGet,
             b"sysFileStorageUpdate" => Permission::SysFileStorageUpdate,
             b"sysHttpGet" => Permission::SysHttpGet,
@@ -9286,6 +9618,11 @@ impl EnumImpl for Permission {
             b"sysSieveUserScriptUpdate" => Permission::SysSieveUserScriptUpdate,
             b"sysSieveUserScriptDestroy" => Permission::SysSieveUserScriptDestroy,
             b"sysSieveUserScriptQuery" => Permission::SysSieveUserScriptQuery,
+            b"sysSmimeTrustAnchorGet" => Permission::SysSmimeTrustAnchorGet,
+            b"sysSmimeTrustAnchorCreate" => Permission::SysSmimeTrustAnchorCreate,
+            b"sysSmimeTrustAnchorUpdate" => Permission::SysSmimeTrustAnchorUpdate,
+            b"sysSmimeTrustAnchorDestroy" => Permission::SysSmimeTrustAnchorDestroy,
+            b"sysSmimeTrustAnchorQuery" => Permission::SysSmimeTrustAnchorQuery,
             b"sysSpamClassifierGet" => Permission::SysSpamClassifierGet,
             b"sysSpamClassifierUpdate" => Permission::SysSpamClassifierUpdate,
             b"sysSpamDnsblServerGet" => Permission::SysSpamDnsblServerGet,
@@ -9343,6 +9680,7 @@ impl EnumImpl for Permission {
             b"taskShareRevokeCleanup" => Permission::TaskShareRevokeCleanup,
             b"taskDmarcReportWindow" => Permission::TaskDmarcReportWindow,
             b"taskTlsReportWindow" => Permission::TaskTlsReportWindow,
+            b"taskExternalPublicKeyMaintenance" => Permission::TaskExternalPublicKeyMaintenance,
             b"sysTaskGet" => Permission::SysTaskGet,
             b"sysTaskCreate" => Permission::SysTaskCreate,
             b"sysTaskUpdate" => Permission::SysTaskUpdate,
@@ -9788,6 +10126,8 @@ impl EnumImpl for Permission {
             Permission::SysDsnReportSettingsUpdate => "sysDsnReportSettingsUpdate",
             Permission::SysEmailGet => "sysEmailGet",
             Permission::SysEmailUpdate => "sysEmailUpdate",
+            Permission::SysEncryptionGet => "sysEncryptionGet",
+            Permission::SysEncryptionUpdate => "sysEncryptionUpdate",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -9801,6 +10141,11 @@ impl EnumImpl for Permission {
             Permission::SysEventTracingLevelUpdate => "sysEventTracingLevelUpdate",
             Permission::SysEventTracingLevelDestroy => "sysEventTracingLevelDestroy",
             Permission::SysEventTracingLevelQuery => "sysEventTracingLevelQuery",
+            Permission::SysExternalPublicKeyGet => "sysExternalPublicKeyGet",
+            Permission::SysExternalPublicKeyCreate => "sysExternalPublicKeyCreate",
+            Permission::SysExternalPublicKeyUpdate => "sysExternalPublicKeyUpdate",
+            Permission::SysExternalPublicKeyDestroy => "sysExternalPublicKeyDestroy",
+            Permission::SysExternalPublicKeyQuery => "sysExternalPublicKeyQuery",
             Permission::SysFileStorageGet => "sysFileStorageGet",
             Permission::SysFileStorageUpdate => "sysFileStorageUpdate",
             Permission::SysHttpGet => "sysHttpGet",
@@ -9997,6 +10342,11 @@ impl EnumImpl for Permission {
             Permission::SysSieveUserScriptUpdate => "sysSieveUserScriptUpdate",
             Permission::SysSieveUserScriptDestroy => "sysSieveUserScriptDestroy",
             Permission::SysSieveUserScriptQuery => "sysSieveUserScriptQuery",
+            Permission::SysSmimeTrustAnchorGet => "sysSmimeTrustAnchorGet",
+            Permission::SysSmimeTrustAnchorCreate => "sysSmimeTrustAnchorCreate",
+            Permission::SysSmimeTrustAnchorUpdate => "sysSmimeTrustAnchorUpdate",
+            Permission::SysSmimeTrustAnchorDestroy => "sysSmimeTrustAnchorDestroy",
+            Permission::SysSmimeTrustAnchorQuery => "sysSmimeTrustAnchorQuery",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -10074,6 +10424,7 @@ impl EnumImpl for Permission {
             Permission::TaskShareRevokeCleanup => "taskShareRevokeCleanup",
             Permission::TaskDmarcReportWindow => "taskDmarcReportWindow",
             Permission::TaskTlsReportWindow => "taskTlsReportWindow",
+            Permission::TaskExternalPublicKeyMaintenance => "taskExternalPublicKeyMaintenance",
             Permission::SysTaskGet => "sysTaskGet",
             Permission::SysTaskCreate => "sysTaskCreate",
             Permission::SysTaskUpdate => "sysTaskUpdate",
@@ -10542,6 +10893,8 @@ impl EnumImpl for Permission {
             360 => Some(Permission::SysDsnReportSettingsUpdate),
             361 => Some(Permission::SysEmailGet),
             362 => Some(Permission::SysEmailUpdate),
+            643 => Some(Permission::SysEncryptionGet),
+            644 => Some(Permission::SysEncryptionUpdate),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -10555,6 +10908,11 @@ impl EnumImpl for Permission {
             367 => Some(Permission::SysEventTracingLevelUpdate),
             368 => Some(Permission::SysEventTracingLevelDestroy),
             369 => Some(Permission::SysEventTracingLevelQuery),
+            645 => Some(Permission::SysExternalPublicKeyGet),
+            646 => Some(Permission::SysExternalPublicKeyCreate),
+            647 => Some(Permission::SysExternalPublicKeyUpdate),
+            648 => Some(Permission::SysExternalPublicKeyDestroy),
+            649 => Some(Permission::SysExternalPublicKeyQuery),
             370 => Some(Permission::SysFileStorageGet),
             371 => Some(Permission::SysFileStorageUpdate),
             372 => Some(Permission::SysHttpGet),
@@ -10751,6 +11109,11 @@ impl EnumImpl for Permission {
             542 => Some(Permission::SysSieveUserScriptUpdate),
             543 => Some(Permission::SysSieveUserScriptDestroy),
             544 => Some(Permission::SysSieveUserScriptQuery),
+            650 => Some(Permission::SysSmimeTrustAnchorGet),
+            651 => Some(Permission::SysSmimeTrustAnchorCreate),
+            652 => Some(Permission::SysSmimeTrustAnchorUpdate),
+            653 => Some(Permission::SysSmimeTrustAnchorDestroy),
+            654 => Some(Permission::SysSmimeTrustAnchorQuery),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -10828,6 +11191,7 @@ impl EnumImpl for Permission {
             603 => Some(Permission::TaskShareRevokeCleanup),
             604 => Some(Permission::TaskDmarcReportWindow),
             605 => Some(Permission::TaskTlsReportWindow),
+            655 => Some(Permission::TaskExternalPublicKeyMaintenance),
             606 => Some(Permission::SysTaskGet),
             607 => Some(Permission::SysTaskCreate),
             608 => Some(Permission::SysTaskUpdate),
@@ -10890,7 +11254,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 643;
+    const COUNT: usize = 656;
 }
 
 impl Permission {
@@ -11640,6 +12004,19 @@ impl Permission {
         Permission::SysWebHookUpdate,
         Permission::SysWebHookDestroy,
         Permission::SysWebHookQuery,
+        Permission::SysEncryptionGet,
+        Permission::SysEncryptionUpdate,
+        Permission::SysExternalPublicKeyGet,
+        Permission::SysExternalPublicKeyCreate,
+        Permission::SysExternalPublicKeyUpdate,
+        Permission::SysExternalPublicKeyDestroy,
+        Permission::SysExternalPublicKeyQuery,
+        Permission::SysSmimeTrustAnchorGet,
+        Permission::SysSmimeTrustAnchorCreate,
+        Permission::SysSmimeTrustAnchorUpdate,
+        Permission::SysSmimeTrustAnchorDestroy,
+        Permission::SysSmimeTrustAnchorQuery,
+        Permission::TaskExternalPublicKeyMaintenance,
     ];
 }
 
@@ -11888,6 +12265,174 @@ impl serde::Serialize for ProviderInfo {
 }
 
 impl<'de> serde::Deserialize<'de> for ProviderInfo {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for PublicKeyCapability {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            PublicKeyCapability,
+            b"aead" => PublicKeyCapability::Aead,
+            b"postQuantum" => PublicKeyCapability::PostQuantum,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            PublicKeyCapability::Aead => "aead",
+            PublicKeyCapability::PostQuantum => "postQuantum",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(PublicKeyCapability::Aead),
+            1 => Some(PublicKeyCapability::PostQuantum),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for PublicKeyCapability {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicKeyCapability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for PublicKeyKind {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            PublicKeyKind,
+            b"openPgp" => PublicKeyKind::OpenPgp,
+            b"smime" => PublicKeyKind::Smime,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            PublicKeyKind::OpenPgp => "openPgp",
+            PublicKeyKind::Smime => "smime",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(PublicKeyKind::OpenPgp),
+            1 => Some(PublicKeyKind::Smime),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for PublicKeyKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicKeyKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for PublicKeyWarning {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            PublicKeyWarning,
+            b"weakRsa" => PublicKeyWarning::WeakRsa,
+            b"noKnownDecryptor" => PublicKeyWarning::NoKnownDecryptor,
+            b"postQuantumOnly" => PublicKeyWarning::PostQuantumOnly,
+            b"expiresSoon" => PublicKeyWarning::ExpiresSoon,
+            b"addressMismatch" => PublicKeyWarning::AddressMismatch,
+            b"unusable" => PublicKeyWarning::Unusable,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            PublicKeyWarning::WeakRsa => "weakRsa",
+            PublicKeyWarning::NoKnownDecryptor => "noKnownDecryptor",
+            PublicKeyWarning::PostQuantumOnly => "postQuantumOnly",
+            PublicKeyWarning::ExpiresSoon => "expiresSoon",
+            PublicKeyWarning::AddressMismatch => "addressMismatch",
+            PublicKeyWarning::Unusable => "unusable",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(PublicKeyWarning::WeakRsa),
+            1 => Some(PublicKeyWarning::NoKnownDecryptor),
+            2 => Some(PublicKeyWarning::PostQuantumOnly),
+            3 => Some(PublicKeyWarning::ExpiresSoon),
+            4 => Some(PublicKeyWarning::AddressMismatch),
+            5 => Some(PublicKeyWarning::Unusable),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 6;
+}
+
+impl serde::Serialize for PublicKeyWarning {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicKeyWarning {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -13425,6 +13970,73 @@ impl serde::Serialize for Sig0Algorithm {
 }
 
 impl<'de> serde::Deserialize<'de> for Sig0Algorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for SmimeCipher {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            SmimeCipher,
+            b"aes128Cbc" => SmimeCipher::Aes128Cbc,
+            b"aes192Cbc" => SmimeCipher::Aes192Cbc,
+            b"aes256Cbc" => SmimeCipher::Aes256Cbc,
+            b"aes128Gcm" => SmimeCipher::Aes128Gcm,
+            b"aes192Gcm" => SmimeCipher::Aes192Gcm,
+            b"aes256Gcm" => SmimeCipher::Aes256Gcm,
+            b"chaCha20Poly1305" => SmimeCipher::ChaCha20Poly1305,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            SmimeCipher::Aes128Cbc => "aes128Cbc",
+            SmimeCipher::Aes192Cbc => "aes192Cbc",
+            SmimeCipher::Aes256Cbc => "aes256Cbc",
+            SmimeCipher::Aes128Gcm => "aes128Gcm",
+            SmimeCipher::Aes192Gcm => "aes192Gcm",
+            SmimeCipher::Aes256Gcm => "aes256Gcm",
+            SmimeCipher::ChaCha20Poly1305 => "chaCha20Poly1305",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(SmimeCipher::Aes128Cbc),
+            1 => Some(SmimeCipher::Aes192Cbc),
+            2 => Some(SmimeCipher::Aes256Cbc),
+            3 => Some(SmimeCipher::Aes128Gcm),
+            4 => Some(SmimeCipher::Aes192Gcm),
+            5 => Some(SmimeCipher::Aes256Gcm),
+            6 => Some(SmimeCipher::ChaCha20Poly1305),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 7;
+}
+
+impl serde::Serialize for SmimeCipher {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SmimeCipher {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -14980,6 +15592,7 @@ impl EnumImpl for TaskType {
             b"ShareRevokeCleanup" => TaskType::ShareRevokeCleanup,
             b"DmarcReportWindow" => TaskType::DmarcReportWindow,
             b"TlsReportWindow" => TaskType::TlsReportWindow,
+            b"ExternalPublicKeyMaintenance" => TaskType::ExternalPublicKeyMaintenance,
         }
         .copied()
     }
@@ -15006,6 +15619,7 @@ impl EnumImpl for TaskType {
             b"ShareRevokeCleanup" => TaskType::ShareRevokeCleanup,
             b"DmarcReportWindow" => TaskType::DmarcReportWindow,
             b"TlsReportWindow" => TaskType::TlsReportWindow,
+            b"ExternalPublicKeyMaintenance" => TaskType::ExternalPublicKeyMaintenance,
         }
         .copied()
     }
@@ -15040,6 +15654,7 @@ impl EnumImpl for TaskType {
             TaskType::ShareRevokeCleanup => "ShareRevokeCleanup",
             TaskType::DmarcReportWindow => "DmarcReportWindow",
             TaskType::TlsReportWindow => "TlsReportWindow",
+            TaskType::ExternalPublicKeyMaintenance => "ExternalPublicKeyMaintenance",
         }
     }
 
@@ -15077,11 +15692,12 @@ impl EnumImpl for TaskType {
             15 => Some(TaskType::ShareRevokeCleanup),
             16 => Some(TaskType::DmarcReportWindow),
             17 => Some(TaskType::TlsReportWindow),
+            18 => Some(TaskType::ExternalPublicKeyMaintenance),
             _ => None,
         }
     }
 
-    const COUNT: usize = 18;
+    const COUNT: usize = 19;
 }
 
 impl TaskType {
@@ -15114,6 +15730,7 @@ impl TaskType {
         TaskType::ShareRevokeCleanup,
         TaskType::DmarcReportWindow,
         TaskType::TlsReportWindow,
+        TaskType::ExternalPublicKeyMaintenance,
     ];
 }
 

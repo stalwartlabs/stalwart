@@ -725,6 +725,11 @@ impl AccessToken {
     }
 
     #[inline(always)]
+    pub fn is_secondary_credential(&self) -> bool {
+        self.scope_idx > 0
+    }
+
+    #[inline(always)]
     pub fn credential_id(&self) -> Option<u32> {
         self.inner
             .scopes

@@ -23,6 +23,7 @@ use nlp::tokenizers::types::TokenType;
 use std::hash::{Hash, Hasher};
 use std::{borrow::Cow, future::Future, sync::Arc};
 use store::ahash::AHashSet;
+use utils::error_chain;
 
 const HTTPS_SCHEME: &str = "https://";
 
@@ -461,7 +462,7 @@ async fn http_get_header(
         .map_err(|err| {
             trc::SieveEvent::RuntimeError
                 .into_err()
-                .reason(err)
+                .reason(error_chain(&err))
                 .details("Failed to send request")
         })
         .map(|response| {

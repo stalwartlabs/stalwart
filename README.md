@@ -88,8 +88,17 @@ Key features:
   - Automatic account configuration and discovery with [PACC](https://datatracker.ietf.org/doc/draft-ietf-mailmaint-pacc/), [autoconfig](https://datatracker.ietf.org/doc/draft-ietf-mailmaint-autoconfig/) and [autodiscover](https://learn.microsoft.com/en-us/exchange/architecture/client-access/autodiscover?view=exchserver-2019). 
   - Multi-tenancy support with domain and tenant isolation.
   - Disk quotas per user and tenant.
+- **Encryption** with **OpenPGP** and **S/MIME**:
+  - Encryption at rest of each user's mailbox with their own OpenPGP key or S/MIME certificate.
+  - Encryption gateway that encrypts outgoing mail for remote recipients, with opportunistic or required policies and no software needed on the sender's side.
+  - Recipient key discovery from Web Key Directory, keys.openpgp.org, HKP keyservers and DNSSEC-validated OPENPGPKEY and SMIMEA records.
+  - Key harvesting from S/MIME signatures and Autocrypt headers of authenticated incoming mail.
+  - S/MIME certificate validation with bundled root certificates, custom trust anchors and revocation lists.
+  - Post-quantum encryption with ML-KEM for both OpenPGP ([RFC 9980](https://www.rfc-editor.org/rfc/rfc9980)) and S/MIME ([RFC 9936](https://www.rfc-editor.org/rfc/rfc9936)).
+  - OpenPGP v4 and v6 keys with RSA, ECDH (NIST P-256, P-384, P-521, Curve25519), X25519 and X448, and AES-OCB or AES-GCM authenticated encryption ([RFC 9580](https://www.rfc-editor.org/rfc/rfc9580)).
+  - S/MIME with RSA (PKCS #1 v1.5 and RSA-OAEP), ECDH (NIST P-256, P-384, P-521), X25519 and X448 certificates, and AES-CBC or AES-GCM content encryption.
+  - [Header protection](https://www.rfc-editor.org/rfc/rfc9788) with Subject hiding.
 - **Secure and robust**:
-  - Encryption at rest with **S/MIME** or **OpenPGP**.
   - Automatic TLS certificate provisioning with [ACME](https://datatracker.ietf.org/doc/html/rfc8555) using `TLS-ALPN-01`, `DNS-01`, `DNS-PERSIST-01` or `HTTP-01` challenges.
   - Automated blocking of IP addresses that attack, abuse or scan the server for exploits.
   - SSRF protection for outbound requests.

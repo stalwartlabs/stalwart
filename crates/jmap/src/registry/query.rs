@@ -25,7 +25,7 @@ use jmap_proto::{
 };
 use registry::{
     schema::{
-        enums::{AccountType, Permission},
+        enums::{AccountType, ExternalPublicKeyStatus, Permission},
         prelude::{ObjectType, Property},
     },
     types::{
@@ -226,6 +226,13 @@ impl RegistryQuery for Server {
                                     && object_type == ObjectType::Account) =>
                             {
                                 AccountType::parse(&value)
+                                    .map(|id| RegistryFilterValue::from(id.to_id()))
+                            }
+                            (IndexSchemaValueType::Enum, serde_json::Value::String(value))
+                                if (property == Property::Status
+                                    && object_type == ObjectType::ExternalPublicKey) =>
+                            {
+                                ExternalPublicKeyStatus::parse(&value)
                                     .map(|id| RegistryFilterValue::from(id.to_id()))
                             }
                             (IndexSchemaValueType::Boolean, serde_json::Value::Bool(value)) => {

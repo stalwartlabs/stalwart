@@ -9,8 +9,8 @@ use crate::registry::{
     mapping::{
         RegistryGetResponse, account::account_get, bootstrap::bootstrap_get,
         cluster::cluster_node_get, index_queue::index_queue_status_get, log::log_get,
-        queued_message::queued_message_get, report::report_get, spam_sample::spam_sample_get,
-        task::task_get,
+        public_key::PublicKeyManagement, queued_message::queued_message_get, report::report_get,
+        spam_sample::spam_sample_get, task::task_get,
     },
 };
 use common::{Server, auth::AccessToken, network::dkim::generate_dkim_public_key};
@@ -128,6 +128,8 @@ impl RegistryGet for Server {
             | ObjectType::CalendarAlarm
             | ObjectType::CalendarScheduling
             | ObjectType::Certificate
+            | ObjectType::ExternalPublicKey
+            | ObjectType::SmimeTrustAnchor
             | ObjectType::Coordinator
             | ObjectType::DataRetention
             | ObjectType::DataStore
@@ -137,6 +139,7 @@ impl RegistryGet for Server {
             | ObjectType::DnsResolver
             | ObjectType::DnsServer
             | ObjectType::Email
+            | ObjectType::Encryption
             | ObjectType::EventTracingLevel
             | ObjectType::FileStorage
             | ObjectType::Http
@@ -395,6 +398,11 @@ async fn registry_object_get(
                 extra_properties.append(Property::UsedDiskQuota, JmapValue::Number(quota.into()));
             }
             // SPDX-SnippetEnd
+            ObjectInner::PublicKey(obj) => {
+                server
+                    .public_key_properties(obj, &get.properties, &mut extra_properties)
+                    .await?;
+            }
             ObjectInner::Domain(obj)
                 if get.properties.is_empty() || get.properties.contains(&Property::DnsZoneFile) =>
             {

@@ -12,11 +12,18 @@ use std::{
 };
 
 use crate::task_manager::reconcile::insert_task_if_absent;
-use common::{BuildServer, Inner, LONG_1D_SLUMBER, config::mailstore::spamfilter};
+use common::{
+    BuildServer, Inner, LONG_1D_SLUMBER,
+    config::mailstore::spamfilter,
+    gateway::store::{ExternalPublicKeyStore, KEY_CHECK_INTERVAL},
+};
 use registry::{
     schema::{
         enums::{TaskSpamFilterMaintenanceType, TaskStoreMaintenanceType, TaskType},
-        structs::{Task, TaskSpamFilterMaintenance, TaskStatus, TaskStoreMaintenance},
+        structs::{
+            Task, TaskExternalPublicKeyMaintenance, TaskSpamFilterMaintenance, TaskStatus,
+            TaskStoreMaintenance,
+        },
     },
     types::EnumImpl,
 };
@@ -43,6 +50,7 @@ enum Event {
     OtelMetrics,
     CalculateMetrics,
     TrainSpamClassifier,
+    CheckExternalPublicKeys,
     RenewNodeIdLease,
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -123,6 +131,12 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
                     Event::TrainSpamClassifier,
                 );
             }
+
+            // Refresh external keys
+            queue.schedule(
+                Instant::now() + KEY_CHECK_INTERVAL,
+                Event::CheckExternalPublicKeys,
+            );
 
             // OTEL Push Metrics
             if let Some(otel) = &server.core.metrics.otel {
@@ -456,6 +470,30 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
                             );
                         });
                     }
+                    Event::CheckExternalPublicKeys => {
+                        queue.schedule(
+                            Instant::now() + KEY_CHECK_INTERVAL,
+                            Event::CheckExternalPublicKeys,
+                        );
+
+                        if server.core.email.gateway.is_some()
+                            && let Some(tasks) = tasks.as_mut()
+                        {
+                            match server.has_due_external_public_keys(now()).await {
+                                Ok(true) => {
+                                    tasks.push(Task::ExternalPublicKeyMaintenance(
+                                        TaskExternalPublicKeyMaintenance {
+                                            status: TaskStatus::now(),
+                                        },
+                                    ));
+                                }
+                                Ok(false) => {}
+                                Err(err) => {
+                                    trc::error!(err.caused_by(trc::location!()));
+                                }
+                            }
+                        }
+                    }
                     Event::TrainSpamClassifier => {
                         if let Some(train_interval) = server
                             .core
@@ -707,6 +745,7 @@ impl Event {
             Event::OtelMetrics => "otelMetrics",
             Event::CalculateMetrics => "calculateMetrics",
             Event::TrainSpamClassifier => "trainSpamClassifier",
+            Event::CheckExternalPublicKeys => "checkExternalPublicKeys",
             Event::RenewNodeIdLease => "renewNodeIdLease",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <info@stalwartlabs.com>

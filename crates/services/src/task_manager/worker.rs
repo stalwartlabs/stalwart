@@ -14,6 +14,7 @@ use crate::task_manager::{
         destroy_account::DestroyAccountTask,
         dkim::DkimManagementTask,
         dns::DnsManagementTask,
+        external_public_keys::ExternalPublicKeyMaintenance,
         grantee_cleanup::GranteeCleanupTask,
         imip::SendImipTask,
         maintenance::MaintenanceTask,
@@ -367,5 +368,8 @@ async fn execute(server: &Server, task: &Task, server_instance: Arc<ServerInstan
         Task::DkimManagement(task) => server.dkim_management(task).await,
         Task::DnsManagement(task) => server.dns_management(task).await,
         Task::ShareRevokeCleanup(task) => server.share_revoke_cleanup(task).await,
+        Task::ExternalPublicKeyMaintenance(task) => {
+            server.external_public_key_maintenance(task).await
+        }
     }
 }

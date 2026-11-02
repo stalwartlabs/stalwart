@@ -1,0 +1,21 @@
+[package]
+name = "crypto"
+description = "OpenPGP and S/MIME encryption, key validation and signature verification"
+version = "1.0.2"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-SEL"
+publish = false
+
+[dependencies]
+aes = "0.9.3"
+aws-lc-rs = "1.18.2"
+ed448-goldilocks = "0.9"
+encodify = "1.0"
+hashify = "0.3"
+mail-parser = { version = "1.0", features = ["full_encoding"] }
+memchr = "2"
+shake = { version = "0.1", default-features = false }
+zeroize = "1.9"
+
+[lints]
+workspace = true

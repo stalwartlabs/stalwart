@@ -247,7 +247,8 @@ impl From<mail_auth::Error> for Error {
                         .into_err()
                         .details(err.to_compact_string())
                 }
-                mail_auth::crypto::CryptoError::IncompatibleAlgorithms => {
+                mail_auth::crypto::CryptoError::IncompatibleAlgorithms
+                | mail_auth::crypto::CryptoError::MalformedPublicKey => {
                     EventType::Dkim(DkimEvent::PublicKeyError)
                         .into_err()
                         .details(err.to_compact_string())
@@ -300,18 +301,18 @@ impl From<mail_auth::Error> for Error {
                 | Dkim2Error::InstanceTagMissing { .. }
                 | Dkim2Error::InstanceNotSigned(_)
                 | Dkim2Error::InstanceDuplicateHash(_)
-                | Dkim2Error::NoValidHash(_) => Dkim2Event::InstanceInvalid,
+                | Dkim2Error::UnknownHash { .. } => Dkim2Event::InstanceInvalid,
                 Dkim2Error::SignatureMissing(_)
                 | Dkim2Error::SignatureSyntax(_)
                 | Dkim2Error::SignatureTagMissing { .. }
                 | Dkim2Error::SignatureTagUnexpected { .. }
                 | Dkim2Error::DuplicateSelector(_)
                 | Dkim2Error::TooManySelectors(_)
-                | Dkim2Error::NoValidAlgorithm(_) => Dkim2Event::SignatureInvalid,
+                | Dkim2Error::UnknownAlgorithm { .. } => Dkim2Event::SignatureInvalid,
                 Dkim2Error::SequenceGap(_)
                 | Dkim2Error::SequenceOverflow
                 | Dkim2Error::ChainTooLong
-                | Dkim2Error::NotValidlySigned => Dkim2Event::ChainInvalid,
+                | Dkim2Error::NotFullyVerified => Dkim2Event::ChainInvalid,
                 Dkim2Error::SignatureExpired(_) | Dkim2Error::SignatureFromFuture(_) => {
                     Dkim2Event::TimestampInvalid
                 }
@@ -327,14 +328,18 @@ impl From<mail_auth::Error> for Error {
                 | Dkim2Error::PublicKeyMissing { .. }
                 | Dkim2Error::PublicKeyMultiple { .. }
                 | Dkim2Error::PublicKeySyntax { .. }
+                | Dkim2Error::PublicKeyMalformed { .. }
                 | Dkim2Error::PublicKeyAlgorithmMismatch { .. }
                 | Dkim2Error::PublicKeyRevoked { .. } => Dkim2Event::PublicKeyError,
-                Dkim2Error::IncorrectSignature { .. }
-                | Dkim2Error::PartialSignatureFailure { .. } => Dkim2Event::VerificationFailed,
-                Dkim2Error::HeaderHashMismatch { .. } | Dkim2Error::BodyHashMismatch { .. } => {
-                    Dkim2Event::HashMismatch
+                Dkim2Error::IncorrectSignature { .. } | Dkim2Error::NoSignatureGroupPassed(_) => {
+                    Dkim2Event::VerificationFailed
                 }
+                Dkim2Error::HeaderHashMismatch { .. }
+                | Dkim2Error::BodyHashMismatch { .. }
+                | Dkim2Error::NoHashGroupPassed(_) => Dkim2Event::HashMismatch,
                 Dkim2Error::InvalidJson(_)
+                | Dkim2Error::InvalidRecipe { .. }
+                | Dkim2Error::NullBodyRecipe(_)
                 | Dkim2Error::RecipeSyntax
                 | Dkim2Error::HeaderNotRepresentable
                 | Dkim2Error::BodyUnreconstructable => Dkim2Event::RecipeError,

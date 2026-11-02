@@ -5,8 +5,11 @@
  */
 
 use crate::{
-    schema::prelude::{ObjectType, Property},
-    types::{id::ObjectId, ipmask::IpAddrOrMask},
+    schema::{
+        enums::{ExternalPublicKeyStatus, PublicKeyKind},
+        prelude::{ObjectType, Property},
+    },
+    types::{EnumImpl, datetime::UTCDateTime, id::ObjectId, ipmask::IpAddrOrMask},
 };
 use ahash::AHashSet;
 use std::borrow::Cow;
@@ -222,6 +225,24 @@ impl<'x> From<&'x IpAddrOrMask> for IndexValue<'x> {
 
 impl<'x> From<&'x trc::EventType> for IndexValue<'x> {
     fn from(value: &'x trc::EventType) -> Self {
+        IndexValue::U16(value.to_id())
+    }
+}
+
+impl From<&UTCDateTime> for IndexValue<'_> {
+    fn from(value: &UTCDateTime) -> Self {
+        IndexValue::U64(value.timestamp() as u64)
+    }
+}
+
+impl From<&ExternalPublicKeyStatus> for IndexValue<'_> {
+    fn from(value: &ExternalPublicKeyStatus) -> Self {
+        IndexValue::U16(value.to_id())
+    }
+}
+
+impl From<&PublicKeyKind> for IndexValue<'_> {
+    fn from(value: &PublicKeyKind) -> Self {
         IndexValue::U16(value.to_id())
     }
 }

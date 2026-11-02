@@ -43,6 +43,7 @@ const MAX_APP_SIZE: usize = 100 * 1024 * 1024;
 const INDEX_PAGE: &str = "index.html";
 const BASE_HREF: &str = "<base href=\"/\"";
 const OAUTH_CLIENT_ID: &str = "<meta name=\"oauth-client-id\" content=\"\"";
+const OAUTH_SCOPES: &str = "<meta name=\"oauth-scopes\" content=\"\"";
 const APP_MANIFEST: &str = "stalwart-app.json";
 const MAX_APP_MANIFEST_SIZE: u64 = 4 * 1024;
 
@@ -56,7 +57,13 @@ struct AppManifest<'x> {
 
 enum IndexEdit<'x> {
     BaseHref(&'x str),
-    OAuthClientId(&'x str),
+    Meta(&'x str),
+}
+
+#[derive(Default, Clone)]
+struct IndexMeta {
+    client_id: Option<String>,
+    scopes: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +96,7 @@ pub struct WebApplicationManager {
     expiry: u64,
     blob_key: BlobHash,
     oauth_client_id: Option<String>,
+    index_meta: IndexMeta,
 }
 
 #[derive(Default, Clone)]
@@ -342,6 +350,10 @@ impl WebApplicationManager {
             url: app.object.resource_url,
             description: app.object.description,
             expiry: app.object.auto_update_interval.as_secs(),
+            index_meta: IndexMeta::new(
+                app.object.oauth_client_id.as_deref(),
+                scope_list(app.object.oauth_scopes.iter()).as_deref(),
+            ),
             oauth_client_id: app.object.oauth_client_id,
             prefixes: app
                 .object
@@ -359,7 +371,7 @@ impl WebApplicationManager {
         force_refresh: bool,
         sweep_orphans: bool,
     ) -> trc::Result<AppRoutes> {
-        let cached = if force_refresh {
+        let mut cached = if force_refresh {
             None
         } else {
             match server
@@ -379,25 +391,24 @@ impl WebApplicationManager {
                 }
             }
         };
-        let is_cached = cached.is_some();
-        let bundle = match cached {
-            Some(bundle) => bundle,
-            None => self.fetch().await?,
-        };
-
         let staging = TempDir::new(self.base_path.join(format!("{:x}-{generation:x}", now())));
         staging.create().await.map_err(unpack_error)?;
 
-        let url = self.url.clone();
-        let bundle_path = staging.path.clone();
         let max_prefix_len = self
             .prefixes
             .iter()
             .map(String::len)
             .max()
             .unwrap_or_default();
-        let (resources, index, oauth_client, bundle) =
-            tokio::task::spawn_blocking(move || -> trc::Result<_> {
+        let (resources, index, oauth_client, bundle, is_cached) = loop {
+            let is_cached = cached.is_some();
+            let bundle = match cached.take() {
+                Some(bundle) => bundle,
+                None => self.fetch().await?,
+            };
+            let url = self.url.clone();
+            let bundle_path = staging.path.clone();
+            match tokio::task::spawn_blocking(move || -> trc::Result<_> {
                 let mut archive = ZipArchive::new(Cursor::new(bundle)).map_err(|err| {
                     trc::ResourceEvent::Error
                         .caused_by(trc::location!())
@@ -495,7 +506,21 @@ impl WebApplicationManager {
                     .caused_by(trc::location!())
                     .reason(err)
                     .details("Bundle unpack task panicked")
-            })??;
+            })? {
+                Ok((resources, index, oauth_client, bundle)) => {
+                    break (resources, index, oauth_client, bundle, is_cached);
+                }
+                Err(err) if is_cached => {
+                    trc::event!(
+                        Resource(trc::ResourceEvent::Error),
+                        Reason = err,
+                        Url = self.url.clone(),
+                        Details = "Cached application bundle is invalid, downloading it again"
+                    );
+                }
+                Err(err) => return Err(err),
+            }
+        };
 
         if !is_cached && let Err(err) = self.cache(server, &bundle).await {
             trc::event!(
@@ -519,7 +544,7 @@ impl WebApplicationManager {
         Ok(AppRoutes {
             resources,
             index_pages: index
-                .map(|index| index_pages(&index, &self.prefixes, self.oauth_client_id.as_deref()))
+                .map(|index| index_pages(&index, &self.prefixes, &self.index_meta))
                 .unwrap_or_default(),
             oauth_client,
             _bundle_dir: staging,
@@ -736,18 +761,13 @@ impl Default for WebApplications {
     }
 }
 
-fn index_pages(
-    index: &[u8],
-    prefixes: &[String],
-    oauth_client_id: Option<&str>,
-) -> AHashMap<String, Bytes> {
-    let client_id_meta = oauth_client_id.map(oauth_client_id_meta);
+fn index_pages(index: &[u8], prefixes: &[String], meta: &IndexMeta) -> AHashMap<String, Bytes> {
     let html = std::str::from_utf8(index).ok();
     prefixes
         .iter()
         .map(|prefix| {
             let page = match html {
-                Some(html) => rewrite_index(html, prefix, client_id_meta.as_deref()),
+                Some(html) => rewrite_index(html, prefix, meta),
                 None => index.to_vec(),
             };
             (prefix.clone(), Bytes::from(page))
@@ -755,14 +775,12 @@ fn index_pages(
         .collect()
 }
 
-fn rewrite_index(html: &str, prefix: &str, oauth_client_id_meta: Option<&str>) -> Vec<u8> {
+fn rewrite_index(html: &str, prefix: &str, meta: &IndexMeta) -> Vec<u8> {
     let mut edits = [
         html.find(BASE_HREF)
             .map(|at| (at, BASE_HREF.len(), IndexEdit::BaseHref(prefix))),
-        oauth_client_id_meta.and_then(|meta| {
-            html.find(OAUTH_CLIENT_ID)
-                .map(|at| (at, OAUTH_CLIENT_ID.len(), IndexEdit::OAuthClientId(meta)))
-        }),
+        meta_edit(html, OAUTH_CLIENT_ID, meta.client_id.as_deref()),
+        meta_edit(html, OAUTH_SCOPES, meta.scopes.as_deref()),
     ];
 
     if edits.iter().all(Option::is_none) {
@@ -770,8 +788,7 @@ fn rewrite_index(html: &str, prefix: &str, oauth_client_id_meta: Option<&str>) -
     }
     edits.sort_unstable_by_key(|edit| edit.as_ref().map_or(usize::MAX, |(at, _, _)| *at));
 
-    let mut out =
-        String::with_capacity(html.len() + prefix.len() + oauth_client_id_meta.map_or(0, str::len));
+    let mut out = String::with_capacity(html.len() + prefix.len() + meta.len());
     let mut pos = 0;
 
     for (at, len, edit) in edits.into_iter().flatten() {
@@ -782,7 +799,7 @@ fn rewrite_index(html: &str, prefix: &str, oauth_client_id_meta: Option<&str>) -
                 out.push_str(prefix);
                 out.push_str("/\"");
             }
-            IndexEdit::OAuthClientId(meta) => out.push_str(meta),
+            IndexEdit::Meta(tag) => out.push_str(tag),
         }
         pos = at + len;
     }
@@ -790,10 +807,35 @@ fn rewrite_index(html: &str, prefix: &str, oauth_client_id_meta: Option<&str>) -
     out.into_bytes()
 }
 
-fn oauth_client_id_meta(client_id: &str) -> String {
-    let mut meta = String::with_capacity(OAUTH_CLIENT_ID.len() + client_id.len());
-    meta.push_str("<meta name=\"oauth-client-id\" content=\"");
-    for ch in client_id.chars() {
+fn meta_edit<'x>(
+    html: &str,
+    placeholder: &'static str,
+    tag: Option<&'x str>,
+) -> Option<(usize, usize, IndexEdit<'x>)> {
+    tag.and_then(|tag| {
+        html.find(placeholder)
+            .map(|at| (at, placeholder.len(), IndexEdit::Meta(tag)))
+    })
+}
+
+impl IndexMeta {
+    fn new(client_id: Option<&str>, scopes: Option<&str>) -> Self {
+        Self {
+            client_id: client_id.map(|client_id| meta_tag(OAUTH_CLIENT_ID, client_id)),
+            scopes: scopes.map(|scopes| meta_tag(OAUTH_SCOPES, scopes)),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.client_id.as_ref().map_or(0, String::len) + self.scopes.as_ref().map_or(0, String::len)
+    }
+}
+
+fn meta_tag(placeholder: &str, content: &str) -> String {
+    let open = placeholder.strip_suffix('"').unwrap_or(placeholder);
+    let mut meta = String::with_capacity(placeholder.len() + content.len());
+    meta.push_str(open);
+    for ch in content.chars() {
         match ch {
             '&' => meta.push_str("&amp;"),
             '"' => meta.push_str("&quot;"),
@@ -804,6 +846,24 @@ fn oauth_client_id_meta(client_id: &str) -> String {
     }
     meta.push('"');
     meta
+}
+
+fn scope_list<'x>(scopes: impl Iterator<Item = &'x String>) -> Option<String> {
+    let mut list = String::new();
+    for scope in scopes.filter(|scope| is_scope_token(scope)) {
+        if !list.is_empty() {
+            list.push(' ');
+        }
+        list.push_str(scope);
+    }
+    (!list.is_empty()).then_some(list)
+}
+
+fn is_scope_token(scope: &str) -> bool {
+    !scope.is_empty()
+        && scope
+            .bytes()
+            .all(|byte| matches!(byte, 0x21 | 0x23..=0x5B | 0x5D..=0x7E))
 }
 
 #[cfg(all(test, stalwart_tests))]

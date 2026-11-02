@@ -1,6 +1,6 @@
 [package]
 name = "utils"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 
 [dependencies]
@@ -11,7 +11,7 @@ rustls-platform-verifier = "0.7"
 tokio = { version = "1.54", features = ["net", "macros", "signal", "rt-multi-thread"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
 serde = { version = "1.0", features = ["derive"]}
-mail-auth = { version = "0.14" }
+mail-auth = { version = "0.15.1" }
 ahash = { version = "0.8", features = ["serde"] }
 jiff = "0.2.38"
 aws-lc-rs = { version = "1" }

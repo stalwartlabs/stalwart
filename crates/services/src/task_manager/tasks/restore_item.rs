@@ -56,7 +56,7 @@ async fn restore_item(server: &Server, task: &TaskRestoreArchivedItem) -> trc::R
             match server
                 .email_ingest(IngestEmail {
                     raw_message: &bytes,
-                    message: MessageParser::new().parse(&bytes),
+                    message: MessageParser::new().parse(&bytes).as_ref(),
                     blob_hash: Some(&task.blob_id.hash),
                     access_token: &access_token.build(),
                     mailbox_ids: vec![INBOX_ID],

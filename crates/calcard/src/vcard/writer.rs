@@ -368,7 +368,7 @@ impl PartialDateTime {
                 }
                 (None, Some(month), None) => {
                     buf.push_ascii(b"--")?;
-                    buf.push_u64(month.into())?;
+                    buf.push_2_digits(month)?;
                 }
                 _ => {}
             }
@@ -477,7 +477,7 @@ impl PartialDateTime {
                 }
                 (None, Some(month), None) => {
                     buf.push_ascii(b"--")?;
-                    buf.push_u64(month.into())?;
+                    buf.push_2_digits(month)?;
                 }
                 _ => {}
             }

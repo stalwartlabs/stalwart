@@ -9,14 +9,13 @@ use crate::{
     registry::{
         mapping::{
             RegistryGetResponse, RegistryQueryResponse, RegistrySetResponse,
-            principal::build_set_error,
+            principal::build_set_error, public_key::PublicKeyManagement,
         },
         query::RegistryQueryFilters,
         set::map_write_error,
     },
 };
 use common::{
-    Server,
     auth::{
         AccessToken, Permissions,
         credential::{ApiKey, AppPassword},
@@ -24,7 +23,6 @@ use common::{
     },
     cache::invalidate::CacheInvalidationBuilder,
     ipc::CacheInvalidation,
-    storage::encryption::{EncryptionMethod, parse_public_key},
 };
 use compact_str::{CompactString, format_compact};
 use directory::core::secret::{SecretVerificationResult, hash_secret, verify_mfa_secret_hash};
@@ -38,8 +36,8 @@ use registry::{
         enums::{CredentialType, StorageQuota},
         prelude::{MASKED_PASSWORD, Object, ObjectInner, ObjectType, Property},
         structs::{
-            Account, AccountPassword, AccountSettings, Credential, CredentialPermissions,
-            EncryptionAtRest, OtpAuth, PublicKey, SecondaryCredential,
+            Account, AccountPassword, AccountSettings, Credential, CredentialPermissions, OtpAuth,
+            SecondaryCredential,
         },
     },
     types::{datetime::UTCDateTime, id::ObjectId},
@@ -113,18 +111,13 @@ pub(crate) async fn account_set(
                 }
 
                 if account.encryption_at_rest != old_account.encryption_at_rest
-                    && let Some(algorithm) =
-                        unsupported_pgp_algorithm(set.server, &account.encryption_at_rest).await?
+                    && let Err(err) = set
+                        .server
+                        .validate_encryption_at_rest(Some(item_id), &account.encryption_at_rest)
+                        .await?
                 {
                     account = old_account.clone();
-                    set.response.not_updated.append(
-                        id,
-                        SetError::invalid_properties()
-                            .with_property(Property::EncryptionAtRest)
-                            .with_description(format!(
-                                "{algorithm} is only supported for S/MIME encryption, but the selected public key is an OpenPGP key."
-                            )),
-                    );
+                    set.response.not_updated.append(id, err);
                     break 'outer;
                 }
 
@@ -937,32 +930,6 @@ pub(crate) async fn credential_query(
     }
 
     Ok(response)
-}
-
-async fn unsupported_pgp_algorithm(
-    server: &Server,
-    encryption_at_rest: &EncryptionAtRest,
-) -> trc::Result<Option<&'static str>> {
-    let (settings, algorithm) = match encryption_at_rest {
-        EncryptionAtRest::Aes256Gcm(settings) => (settings, "AES-256-GCM"),
-        EncryptionAtRest::ChaCha20Poly1305(settings) => (settings, "ChaCha20-Poly1305"),
-        _ => return Ok(None),
-    };
-
-    if let Some(public_key) = server
-        .registry()
-        .object::<PublicKey>(settings.public_key)
-        .await
-        .caused_by(trc::location!())?
-        && matches!(
-            parse_public_key(&public_key),
-            Ok(Some(params)) if params.method == EncryptionMethod::PGP
-        )
-    {
-        Ok(Some(algorithm))
-    } else {
-        Ok(None)
-    }
 }
 
 pub(crate) fn validate_credential_permissions(

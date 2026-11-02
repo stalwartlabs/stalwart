@@ -23,6 +23,7 @@ use std::{
     time::Duration,
 };
 use store::registry::write::RegistryWriteResult;
+use utils::error_chain;
 
 pub type AcmeResult<T> = Result<T, AcmeError>;
 
@@ -277,7 +278,7 @@ impl Display for Problem {
 impl Display for AcmeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AcmeError::Http(err) => write!(f, "HTTP error: {}", err),
+            AcmeError::Http(err) => write!(f, "HTTP error: {}", error_chain(err)),
             AcmeError::HttpStatus(status) => write!(f, "HTTP error: {}", status),
             AcmeError::Json(err) => write!(f, "JSON error: {}", err),
             AcmeError::Dns(err) => write!(f, "DNS error: {}", err),

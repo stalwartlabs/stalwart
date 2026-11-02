@@ -1,6 +1,6 @@
 [package]
 name = "jmap"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 
 [dependencies]
@@ -19,11 +19,12 @@ spam-filter = { path = "../spam-filter" }
 email = { path = "../email" }
 groupware = { path = "../groupware" }
 registry = { path = "../registry" }
+crypto = { path = "../crypto" }
 calcard = { path = "../calcard" }
 smtp-proto = { path = "../smtp-proto" }
 mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.14", features = ["generate", "arc"] }
+mail-auth = { version = "0.15.1", features = ["generate", "arc"] }
 sieve-rs = { path = "../sieve" }
 jmap-tools = { path = "../jmap-tools", features = ["rkyv"] }
 serde = { version = "1.0", features = ["derive"]}

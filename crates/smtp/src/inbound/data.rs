@@ -10,6 +10,7 @@ use crate::{
     inbound::{dkim::DkimSign, milter::Modification, session::INSUFFICIENT_STORAGE},
     queue::{
         self, Message, MessageSource, MessageWrapper, Metadata, QueueEnvelope, RCPT_SPAM_MASK,
+        dsn::PropagateDsn,
         quota::HasQueueQuota,
         rcpt_spam_flag,
         spool::{QueueOutcome, QueueParams},
@@ -283,7 +284,8 @@ impl<T: SessionStream> Session<T> {
                 && !auth_message.dkim2_signatures().is_empty()
                 && let Some(dsn) =
                     parse_dkim2_dsn(&parsed_message, &auth_message, raw_message.as_slice())
-                && let Err(failure) = self
+            {
+                match self
                     .server
                     .core
                     .smtp
@@ -297,32 +299,64 @@ impl<T: SessionStream> Session<T> {
                         },
                     )
                     .await
-                && (matches!(
-                    failure,
-                    Dkim2DsnFailure::DsnChainFailed
-                        | Dkim2DsnFailure::ReturnedChainFailed
-                        | Dkim2DsnFailure::NotAligned
-                ) || (failure == Dkim2DsnFailure::TempError && dkim.is_strict()))
-            {
-                trc::event!(
-                    Smtp(SmtpEvent::Dkim2DsnRejected),
-                    SpanId = self.data.session_id,
-                    From = CompactString::from(&mail_from.address),
-                    To = self
-                        .data
-                        .rcpt_to
-                        .iter()
-                        .map(|rcpt| trc::Value::from(CompactString::from(&rcpt.address)))
-                        .collect::<Vec<_>>(),
-                    Details = failure.to_compact_string(),
-                );
+                {
+                    Err(failure)
+                        if matches!(
+                            failure,
+                            Dkim2DsnFailure::DsnChainFailed
+                                | Dkim2DsnFailure::ReturnedChainFailed
+                                | Dkim2DsnFailure::NotAligned
+                        ) || (failure == Dkim2DsnFailure::TempError && dkim.is_strict()) =>
+                    {
+                        trc::event!(
+                            Smtp(SmtpEvent::Dkim2DsnRejected),
+                            SpanId = self.data.session_id,
+                            From = CompactString::from(&mail_from.address),
+                            To = self
+                                .data
+                                .rcpt_to
+                                .iter()
+                                .map(|rcpt| trc::Value::from(CompactString::from(&rcpt.address)))
+                                .collect::<Vec<_>>(),
+                            Details = failure.to_compact_string(),
+                        );
 
-                self.data.messages_sent += 1;
-                return if failure == Dkim2DsnFailure::TempError {
-                    (b"451 4.7.5 Unable to verify DKIM2 DSN, try again later.\r\n"[..]).into()
-                } else {
-                    (b"550 5.7.1 DSN rejected due to DKIM2 verification failure.\r\n"[..]).into()
-                };
+                        self.data.messages_sent += 1;
+                        return if failure == Dkim2DsnFailure::TempError {
+                            (b"451 4.7.5 Unable to verify DKIM2 DSN, try again later.\r\n"[..])
+                                .into()
+                        } else {
+                            (b"550 5.7.1 DSN rejected due to DKIM2 verification failure.\r\n"[..])
+                                .into()
+                        };
+                    }
+                    Ok(_) if self.data.rcpt_to.len() == 1 => {
+                        if let Some(outcome) = self
+                            .server
+                            .propagate_dkim2_dsn(
+                                &parsed_message,
+                                dsn.returned.as_ref(),
+                                self.data.session_id,
+                            )
+                            .await
+                        {
+                            return match outcome {
+                                QueueOutcome::Queued => {
+                                    self.data.messages_sent += 1;
+                                    (b"250 2.0.0 DSN forwarded to the previous hop.\r\n"[..]).into()
+                                }
+                                QueueOutcome::QuotaExceeded => {
+                                    (b"452 4.3.1 Mail system full, try again later.\r\n"[..]).into()
+                                }
+                                QueueOutcome::Failed => {
+                                    (b"451 4.3.5 Unable to forward DSN, try again later.\r\n"[..])
+                                        .into()
+                                }
+                            };
+                        }
+                    }
+                    _ => {}
+                }
             }
 
             let time = Instant::now();

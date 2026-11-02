@@ -165,6 +165,8 @@ impl EventType {
             b"dkim2.hash-mismatch" => EventType::Dkim2(Dkim2Event::HashMismatch),
             b"dkim2.recipe-error" => EventType::Dkim2(Dkim2Event::RecipeError),
             b"dkim2.signing-failed" => EventType::Dkim2(Dkim2Event::SigningFailed),
+            b"dkim2.dsn-not-aligned" => EventType::Dkim2(Dkim2Event::DsnNotAligned),
+            b"dkim2.dsn-propagated" => EventType::Dkim2(Dkim2Event::DsnPropagated),
             b"dmarc.pass" => EventType::Dmarc(DmarcEvent::Pass),
             b"dmarc.fail" => EventType::Dmarc(DmarcEvent::Fail),
             b"dmarc.perm-error" => EventType::Dmarc(DmarcEvent::PermError),
@@ -177,6 +179,17 @@ impl EventType {
             b"dns.record-lookup-failed" => EventType::Dns(DnsEvent::RecordLookupFailed),
             b"dns.record-propagated" => EventType::Dns(DnsEvent::RecordPropagated),
             b"dns.record-propagation-timeout" => EventType::Dns(DnsEvent::RecordPropagationTimeout),
+            b"encryption.encryption-skipped" => EventType::Encryption(EncryptionEvent::EncryptionSkipped),
+            b"encryption.at-rest-encrypted" => EventType::Encryption(EncryptionEvent::AtRestEncrypted),
+            b"encryption.gateway-encrypted" => EventType::Encryption(EncryptionEvent::GatewayEncrypted),
+            b"encryption.gateway-plaintext" => EventType::Encryption(EncryptionEvent::GatewayPlaintext),
+            b"encryption.gateway-bounced" => EventType::Encryption(EncryptionEvent::GatewayBounced),
+            b"encryption.key-lookup" => EventType::Encryption(EncryptionEvent::KeyLookup),
+            b"encryption.key-harvested" => EventType::Encryption(EncryptionEvent::KeyHarvested),
+            b"encryption.key-change" => EventType::Encryption(EncryptionEvent::KeyChange),
+            b"encryption.crl-fetch-failed" => EventType::Encryption(EncryptionEvent::CrlFetchFailed),
+            b"encryption.dnssec-bogus" => EventType::Encryption(EncryptionEvent::DnssecBogus),
+            b"encryption.key-unusable" => EventType::Encryption(EncryptionEvent::KeyUnusable),
             b"eval.result" => EventType::Eval(EvalEvent::Result),
             b"eval.error" => EventType::Eval(EvalEvent::Error),
             b"eval.directory-not-found" => EventType::Eval(EvalEvent::DirectoryNotFound),
@@ -824,6 +837,8 @@ impl EventType {
             b"dkim2.hash-mismatch" => EventType::Dkim2(Dkim2Event::HashMismatch),
             b"dkim2.recipe-error" => EventType::Dkim2(Dkim2Event::RecipeError),
             b"dkim2.signing-failed" => EventType::Dkim2(Dkim2Event::SigningFailed),
+            b"dkim2.dsn-not-aligned" => EventType::Dkim2(Dkim2Event::DsnNotAligned),
+            b"dkim2.dsn-propagated" => EventType::Dkim2(Dkim2Event::DsnPropagated),
             b"dmarc.pass" => EventType::Dmarc(DmarcEvent::Pass),
             b"dmarc.fail" => EventType::Dmarc(DmarcEvent::Fail),
             b"dmarc.perm-error" => EventType::Dmarc(DmarcEvent::PermError),
@@ -836,6 +851,17 @@ impl EventType {
             b"dns.record-lookup-failed" => EventType::Dns(DnsEvent::RecordLookupFailed),
             b"dns.record-propagated" => EventType::Dns(DnsEvent::RecordPropagated),
             b"dns.record-propagation-timeout" => EventType::Dns(DnsEvent::RecordPropagationTimeout),
+            b"encryption.encryption-skipped" => EventType::Encryption(EncryptionEvent::EncryptionSkipped),
+            b"encryption.at-rest-encrypted" => EventType::Encryption(EncryptionEvent::AtRestEncrypted),
+            b"encryption.gateway-encrypted" => EventType::Encryption(EncryptionEvent::GatewayEncrypted),
+            b"encryption.gateway-plaintext" => EventType::Encryption(EncryptionEvent::GatewayPlaintext),
+            b"encryption.gateway-bounced" => EventType::Encryption(EncryptionEvent::GatewayBounced),
+            b"encryption.key-lookup" => EventType::Encryption(EncryptionEvent::KeyLookup),
+            b"encryption.key-harvested" => EventType::Encryption(EncryptionEvent::KeyHarvested),
+            b"encryption.key-change" => EventType::Encryption(EncryptionEvent::KeyChange),
+            b"encryption.crl-fetch-failed" => EventType::Encryption(EncryptionEvent::CrlFetchFailed),
+            b"encryption.dnssec-bogus" => EventType::Encryption(EncryptionEvent::DnssecBogus),
+            b"encryption.key-unusable" => EventType::Encryption(EncryptionEvent::KeyUnusable),
             b"eval.result" => EventType::Eval(EvalEvent::Result),
             b"eval.error" => EventType::Eval(EvalEvent::Error),
             b"eval.directory-not-found" => EventType::Eval(EvalEvent::DirectoryNotFound),
@@ -1496,6 +1522,8 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::HashMismatch) => "dkim2.hash-mismatch",
             EventType::Dkim2(Dkim2Event::RecipeError) => "dkim2.recipe-error",
             EventType::Dkim2(Dkim2Event::SigningFailed) => "dkim2.signing-failed",
+            EventType::Dkim2(Dkim2Event::DsnNotAligned) => "dkim2.dsn-not-aligned",
+            EventType::Dkim2(Dkim2Event::DsnPropagated) => "dkim2.dsn-propagated",
             EventType::Dmarc(DmarcEvent::Pass) => "dmarc.pass",
             EventType::Dmarc(DmarcEvent::Fail) => "dmarc.fail",
             EventType::Dmarc(DmarcEvent::PermError) => "dmarc.perm-error",
@@ -1508,6 +1536,25 @@ impl EventType {
             EventType::Dns(DnsEvent::RecordLookupFailed) => "dns.record-lookup-failed",
             EventType::Dns(DnsEvent::RecordPropagated) => "dns.record-propagated",
             EventType::Dns(DnsEvent::RecordPropagationTimeout) => "dns.record-propagation-timeout",
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped) => {
+                "encryption.encryption-skipped"
+            }
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted) => {
+                "encryption.at-rest-encrypted"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted) => {
+                "encryption.gateway-encrypted"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext) => {
+                "encryption.gateway-plaintext"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayBounced) => "encryption.gateway-bounced",
+            EventType::Encryption(EncryptionEvent::KeyLookup) => "encryption.key-lookup",
+            EventType::Encryption(EncryptionEvent::KeyHarvested) => "encryption.key-harvested",
+            EventType::Encryption(EncryptionEvent::KeyChange) => "encryption.key-change",
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed) => "encryption.crl-fetch-failed",
+            EventType::Encryption(EncryptionEvent::DnssecBogus) => "encryption.dnssec-bogus",
+            EventType::Encryption(EncryptionEvent::KeyUnusable) => "encryption.key-unusable",
             EventType::Eval(EvalEvent::Result) => "eval.result",
             EventType::Eval(EvalEvent::Error) => "eval.error",
             EventType::Eval(EvalEvent::DirectoryNotFound) => "eval.directory-not-found",
@@ -2333,6 +2380,8 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::HashMismatch) => 641,
             EventType::Dkim2(Dkim2Event::RecipeError) => 642,
             EventType::Dkim2(Dkim2Event::SigningFailed) => 650,
+            EventType::Dkim2(Dkim2Event::DsnNotAligned) => 666,
+            EventType::Dkim2(Dkim2Event::DsnPropagated) => 667,
             EventType::Dmarc(DmarcEvent::Pass) => 118,
             EventType::Dmarc(DmarcEvent::Fail) => 116,
             EventType::Dmarc(DmarcEvent::PermError) => 119,
@@ -2345,6 +2394,17 @@ impl EventType {
             EventType::Dns(DnsEvent::RecordLookupFailed) => 11,
             EventType::Dns(DnsEvent::RecordPropagated) => 13,
             EventType::Dns(DnsEvent::RecordPropagationTimeout) => 14,
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped) => 655,
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted) => 658,
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted) => 656,
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext) => 657,
+            EventType::Encryption(EncryptionEvent::GatewayBounced) => 659,
+            EventType::Encryption(EncryptionEvent::KeyLookup) => 660,
+            EventType::Encryption(EncryptionEvent::KeyHarvested) => 661,
+            EventType::Encryption(EncryptionEvent::KeyChange) => 662,
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed) => 663,
+            EventType::Encryption(EncryptionEvent::DnssecBogus) => 664,
+            EventType::Encryption(EncryptionEvent::KeyUnusable) => 665,
             EventType::Eval(EvalEvent::Result) => 123,
             EventType::Eval(EvalEvent::Error) => 122,
             EventType::Eval(EvalEvent::DirectoryNotFound) => 121,
@@ -3040,6 +3100,8 @@ impl EventType {
             641 => Some(EventType::Dkim2(Dkim2Event::HashMismatch)),
             642 => Some(EventType::Dkim2(Dkim2Event::RecipeError)),
             650 => Some(EventType::Dkim2(Dkim2Event::SigningFailed)),
+            666 => Some(EventType::Dkim2(Dkim2Event::DsnNotAligned)),
+            667 => Some(EventType::Dkim2(Dkim2Event::DsnPropagated)),
             118 => Some(EventType::Dmarc(DmarcEvent::Pass)),
             116 => Some(EventType::Dmarc(DmarcEvent::Fail)),
             119 => Some(EventType::Dmarc(DmarcEvent::PermError)),
@@ -3052,6 +3114,17 @@ impl EventType {
             11 => Some(EventType::Dns(DnsEvent::RecordLookupFailed)),
             13 => Some(EventType::Dns(DnsEvent::RecordPropagated)),
             14 => Some(EventType::Dns(DnsEvent::RecordPropagationTimeout)),
+            655 => Some(EventType::Encryption(EncryptionEvent::EncryptionSkipped)),
+            658 => Some(EventType::Encryption(EncryptionEvent::AtRestEncrypted)),
+            656 => Some(EventType::Encryption(EncryptionEvent::GatewayEncrypted)),
+            657 => Some(EventType::Encryption(EncryptionEvent::GatewayPlaintext)),
+            659 => Some(EventType::Encryption(EncryptionEvent::GatewayBounced)),
+            660 => Some(EventType::Encryption(EncryptionEvent::KeyLookup)),
+            661 => Some(EventType::Encryption(EncryptionEvent::KeyHarvested)),
+            662 => Some(EventType::Encryption(EncryptionEvent::KeyChange)),
+            663 => Some(EventType::Encryption(EncryptionEvent::CrlFetchFailed)),
+            664 => Some(EventType::Encryption(EncryptionEvent::DnssecBogus)),
+            665 => Some(EventType::Encryption(EncryptionEvent::KeyUnusable)),
             123 => Some(EventType::Eval(EvalEvent::Result)),
             122 => Some(EventType::Eval(EvalEvent::Error)),
             121 => Some(EventType::Eval(EvalEvent::DirectoryNotFound)),
@@ -3746,8 +3819,15 @@ impl EventType {
             EventType::Dkim(DkimEvent::SignatureRetiring) => Level::Info,
             EventType::Dkim(DkimEvent::SignatureRetired) => Level::Info,
             EventType::Dkim(DkimEvent::SignatureDeleted) => Level::Info,
+            EventType::Dkim2(Dkim2Event::DsnNotAligned) => Level::Info,
+            EventType::Dkim2(Dkim2Event::DsnPropagated) => Level::Info,
             EventType::Dns(DnsEvent::RecordCreated) => Level::Info,
             EventType::Dns(DnsEvent::RecordPropagated) => Level::Info,
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped) => Level::Info,
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted) => Level::Info,
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted) => Level::Info,
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext) => Level::Info,
+            EventType::Encryption(EncryptionEvent::KeyHarvested) => Level::Info,
             EventType::IncomingReport(IncomingReportEvent::DmarcReport) => Level::Info,
             EventType::IncomingReport(IncomingReportEvent::TlsReport) => Level::Info,
             EventType::IncomingReport(IncomingReportEvent::AbuseReport) => Level::Info,
@@ -3929,6 +4009,7 @@ impl EventType {
             EventType::Cluster(ClusterEvent::MessageSkipped) => Level::Trace,
             EventType::Delivery(DeliveryEvent::RawInput) => Level::Trace,
             EventType::Delivery(DeliveryEvent::RawOutput) => Level::Trace,
+            EventType::Encryption(EncryptionEvent::KeyUnusable) => Level::Trace,
             EventType::Eval(EvalEvent::Result) => Level::Trace,
             EventType::Http(HttpEvent::RequestBody) => Level::Trace,
             EventType::Http(HttpEvent::ResponseBody) => Level::Trace,
@@ -3978,6 +4059,10 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::SigningFailed) => Level::Warn,
             EventType::Dns(DnsEvent::RecordCreationFailed) => Level::Warn,
             EventType::Dns(DnsEvent::RecordPropagationTimeout) => Level::Warn,
+            EventType::Encryption(EncryptionEvent::GatewayBounced) => Level::Warn,
+            EventType::Encryption(EncryptionEvent::KeyChange) => Level::Warn,
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed) => Level::Warn,
+            EventType::Encryption(EncryptionEvent::DnssecBogus) => Level::Warn,
             EventType::Eval(EvalEvent::DirectoryNotFound) => Level::Warn,
             EventType::Http(HttpEvent::XForwardedMissing) => Level::Warn,
             EventType::Http(HttpEvent::XForwardedInvalid) => Level::Warn,
@@ -4222,6 +4307,8 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::HashMismatch) => "DKIM2 hash mismatch",
             EventType::Dkim2(Dkim2Event::RecipeError) => "DKIM2 recipe error",
             EventType::Dkim2(Dkim2Event::SigningFailed) => "DKIM2 signing failed",
+            EventType::Dkim2(Dkim2Event::DsnNotAligned) => "DKIM2 DSN signer not aligned",
+            EventType::Dkim2(Dkim2Event::DsnPropagated) => "DKIM2 DSN propagated",
             EventType::Dmarc(DmarcEvent::Pass) => "DMARC check passed",
             EventType::Dmarc(DmarcEvent::Fail) => "DMARC check failed",
             EventType::Dmarc(DmarcEvent::PermError) => "DMARC permanent error",
@@ -4234,6 +4321,17 @@ impl EventType {
             EventType::Dns(DnsEvent::RecordLookupFailed) => "DNS record lookup failed",
             EventType::Dns(DnsEvent::RecordPropagated) => "DNS record propagated",
             EventType::Dns(DnsEvent::RecordPropagationTimeout) => "DNS record propagation timeout",
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped) => "Encryption skipped",
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted) => "Message encrypted at rest",
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted) => "Gateway encrypted message",
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext) => "Gateway sent plaintext",
+            EventType::Encryption(EncryptionEvent::GatewayBounced) => "Gateway bounced message",
+            EventType::Encryption(EncryptionEvent::KeyLookup) => "Key lookup",
+            EventType::Encryption(EncryptionEvent::KeyHarvested) => "Key harvested",
+            EventType::Encryption(EncryptionEvent::KeyChange) => "Key change pending approval",
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed) => "CRL download failed",
+            EventType::Encryption(EncryptionEvent::DnssecBogus) => "DNSSEC validation failed",
+            EventType::Encryption(EncryptionEvent::KeyUnusable) => "Encryption key unusable",
             EventType::Eval(EvalEvent::Result) => "Expression evaluation result",
             EventType::Eval(EvalEvent::Error) => "Expression evaluation error",
             EventType::Eval(EvalEvent::DirectoryNotFound) => {
@@ -5365,6 +5463,8 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::HashMismatch) => "stalwart.dkim2.hash_mismatch",
             EventType::Dkim2(Dkim2Event::RecipeError) => "stalwart.dkim2.recipe_error",
             EventType::Dkim2(Dkim2Event::SigningFailed) => "stalwart.dkim2.signing_failed",
+            EventType::Dkim2(Dkim2Event::DsnNotAligned) => "stalwart.dkim2.dsn_not_aligned",
+            EventType::Dkim2(Dkim2Event::DsnPropagated) => "stalwart.dkim2.dsn_propagated",
             EventType::Dmarc(DmarcEvent::Pass) => "stalwart.dmarc.pass",
             EventType::Dmarc(DmarcEvent::Fail) => "stalwart.dmarc.fail",
             EventType::Dmarc(DmarcEvent::PermError) => "stalwart.dmarc.perm_error",
@@ -5375,6 +5475,32 @@ impl EventType {
             EventType::Dns(DnsEvent::RecordLookupFailed) => "stalwart.dns.record_lookup_failed",
             EventType::Dns(DnsEvent::RecordPropagationTimeout) => {
                 "stalwart.dns.record_propagation_timeout"
+            }
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped) => {
+                "stalwart.encryption.encryption_skipped"
+            }
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted) => {
+                "stalwart.encryption.at_rest_encrypted"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted) => {
+                "stalwart.encryption.gateway_encrypted"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext) => {
+                "stalwart.encryption.gateway_plaintext"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayBounced) => {
+                "stalwart.encryption.gateway_bounced"
+            }
+            EventType::Encryption(EncryptionEvent::KeyLookup) => "stalwart.encryption.key_lookup",
+            EventType::Encryption(EncryptionEvent::KeyHarvested) => {
+                "stalwart.encryption.key_harvested"
+            }
+            EventType::Encryption(EncryptionEvent::KeyChange) => "stalwart.encryption.key_change",
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed) => {
+                "stalwart.encryption.crl_fetch_failed"
+            }
+            EventType::Encryption(EncryptionEvent::DnssecBogus) => {
+                "stalwart.encryption.dnssec_bogus"
             }
             EventType::Eval(EvalEvent::Error) => "stalwart.eval.error",
             EventType::Eval(EvalEvent::DirectoryNotFound) => "stalwart.eval.directory_not_found",
@@ -5971,6 +6097,8 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::HashMismatch) => "stalwart_dkim2_hash_mismatch_total",
             EventType::Dkim2(Dkim2Event::RecipeError) => "stalwart_dkim2_recipe_error_total",
             EventType::Dkim2(Dkim2Event::SigningFailed) => "stalwart_dkim2_signing_failed_total",
+            EventType::Dkim2(Dkim2Event::DsnNotAligned) => "stalwart_dkim2_dsn_not_aligned_total",
+            EventType::Dkim2(Dkim2Event::DsnPropagated) => "stalwart_dkim2_dsn_propagated_total",
             EventType::Dmarc(DmarcEvent::Pass) => "stalwart_dmarc_pass_total",
             EventType::Dmarc(DmarcEvent::Fail) => "stalwart_dmarc_fail_total",
             EventType::Dmarc(DmarcEvent::PermError) => "stalwart_dmarc_perm_error_total",
@@ -5987,6 +6115,36 @@ impl EventType {
             }
             EventType::Dns(DnsEvent::RecordPropagationTimeout) => {
                 "stalwart_dns_record_propagation_timeout_total"
+            }
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped) => {
+                "stalwart_encryption_encryption_skipped_total"
+            }
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted) => {
+                "stalwart_encryption_at_rest_encrypted_total"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted) => {
+                "stalwart_encryption_gateway_encrypted_total"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext) => {
+                "stalwart_encryption_gateway_plaintext_total"
+            }
+            EventType::Encryption(EncryptionEvent::GatewayBounced) => {
+                "stalwart_encryption_gateway_bounced_total"
+            }
+            EventType::Encryption(EncryptionEvent::KeyLookup) => {
+                "stalwart_encryption_key_lookup_total"
+            }
+            EventType::Encryption(EncryptionEvent::KeyHarvested) => {
+                "stalwart_encryption_key_harvested_total"
+            }
+            EventType::Encryption(EncryptionEvent::KeyChange) => {
+                "stalwart_encryption_key_change_total"
+            }
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed) => {
+                "stalwart_encryption_crl_fetch_failed_total"
+            }
+            EventType::Encryption(EncryptionEvent::DnssecBogus) => {
+                "stalwart_encryption_dnssec_bogus_total"
             }
             EventType::Eval(EvalEvent::Error) => "stalwart_eval_error_total",
             EventType::Eval(EvalEvent::DirectoryNotFound) => {
@@ -6638,6 +6796,8 @@ impl EventType {
             EventType::Dkim2(Dkim2Event::HashMismatch),
             EventType::Dkim2(Dkim2Event::RecipeError),
             EventType::Dkim2(Dkim2Event::SigningFailed),
+            EventType::Dkim2(Dkim2Event::DsnNotAligned),
+            EventType::Dkim2(Dkim2Event::DsnPropagated),
             EventType::Dmarc(DmarcEvent::Pass),
             EventType::Dmarc(DmarcEvent::Fail),
             EventType::Dmarc(DmarcEvent::PermError),
@@ -6650,6 +6810,17 @@ impl EventType {
             EventType::Dns(DnsEvent::RecordLookupFailed),
             EventType::Dns(DnsEvent::RecordPropagated),
             EventType::Dns(DnsEvent::RecordPropagationTimeout),
+            EventType::Encryption(EncryptionEvent::EncryptionSkipped),
+            EventType::Encryption(EncryptionEvent::AtRestEncrypted),
+            EventType::Encryption(EncryptionEvent::GatewayEncrypted),
+            EventType::Encryption(EncryptionEvent::GatewayPlaintext),
+            EventType::Encryption(EncryptionEvent::GatewayBounced),
+            EventType::Encryption(EncryptionEvent::KeyLookup),
+            EventType::Encryption(EncryptionEvent::KeyHarvested),
+            EventType::Encryption(EncryptionEvent::KeyChange),
+            EventType::Encryption(EncryptionEvent::CrlFetchFailed),
+            EventType::Encryption(EncryptionEvent::DnssecBogus),
+            EventType::Encryption(EncryptionEvent::KeyUnusable),
             EventType::Eval(EvalEvent::Result),
             EventType::Eval(EvalEvent::Error),
             EventType::Eval(EvalEvent::DirectoryNotFound),
@@ -7297,6 +7468,8 @@ impl MetricType {
             b"dkim2.hash-mismatch" => MetricType::Dkim2HashMismatch,
             b"dkim2.recipe-error" => MetricType::Dkim2RecipeError,
             b"dkim2.signing-failed" => MetricType::Dkim2SigningFailed,
+            b"dkim2.dsn-not-aligned" => MetricType::Dkim2DsnNotAligned,
+            b"dkim2.dsn-propagated" => MetricType::Dkim2DsnPropagated,
             b"dmarc.pass" => MetricType::DmarcPass,
             b"dmarc.fail" => MetricType::DmarcFail,
             b"dmarc.perm-error" => MetricType::DmarcPermError,
@@ -7308,6 +7481,17 @@ impl MetricType {
             b"dns.record-lookup-failed" => MetricType::DnsRecordLookupFailed,
             b"dns.record-propagation-timeout" => MetricType::DnsRecordPropagationTimeout,
             b"domain.count" => MetricType::DomainCount,
+            b"encryption.key-lookup-time" => MetricType::EncryptionKeyLookupTime,
+            b"encryption.encryption-skipped" => MetricType::EncryptionEncryptionSkipped,
+            b"encryption.at-rest-encrypted" => MetricType::EncryptionAtRestEncrypted,
+            b"encryption.gateway-encrypted" => MetricType::EncryptionGatewayEncrypted,
+            b"encryption.gateway-plaintext" => MetricType::EncryptionGatewayPlaintext,
+            b"encryption.gateway-bounced" => MetricType::EncryptionGatewayBounced,
+            b"encryption.key-lookup" => MetricType::EncryptionKeyLookup,
+            b"encryption.key-harvested" => MetricType::EncryptionKeyHarvested,
+            b"encryption.key-change" => MetricType::EncryptionKeyChange,
+            b"encryption.crl-fetch-failed" => MetricType::EncryptionCrlFetchFailed,
+            b"encryption.dnssec-bogus" => MetricType::EncryptionDnssecBogus,
             b"eval.error" => MetricType::EvalError,
             b"eval.directory-not-found" => MetricType::EvalDirectoryNotFound,
             b"eval.store-not-found" => MetricType::EvalStoreNotFound,
@@ -7684,6 +7868,8 @@ impl MetricType {
             b"dkim2.hash-mismatch" => MetricType::Dkim2HashMismatch,
             b"dkim2.recipe-error" => MetricType::Dkim2RecipeError,
             b"dkim2.signing-failed" => MetricType::Dkim2SigningFailed,
+            b"dkim2.dsn-not-aligned" => MetricType::Dkim2DsnNotAligned,
+            b"dkim2.dsn-propagated" => MetricType::Dkim2DsnPropagated,
             b"dmarc.pass" => MetricType::DmarcPass,
             b"dmarc.fail" => MetricType::DmarcFail,
             b"dmarc.perm-error" => MetricType::DmarcPermError,
@@ -7695,6 +7881,17 @@ impl MetricType {
             b"dns.record-lookup-failed" => MetricType::DnsRecordLookupFailed,
             b"dns.record-propagation-timeout" => MetricType::DnsRecordPropagationTimeout,
             b"domain.count" => MetricType::DomainCount,
+            b"encryption.key-lookup-time" => MetricType::EncryptionKeyLookupTime,
+            b"encryption.encryption-skipped" => MetricType::EncryptionEncryptionSkipped,
+            b"encryption.at-rest-encrypted" => MetricType::EncryptionAtRestEncrypted,
+            b"encryption.gateway-encrypted" => MetricType::EncryptionGatewayEncrypted,
+            b"encryption.gateway-plaintext" => MetricType::EncryptionGatewayPlaintext,
+            b"encryption.gateway-bounced" => MetricType::EncryptionGatewayBounced,
+            b"encryption.key-lookup" => MetricType::EncryptionKeyLookup,
+            b"encryption.key-harvested" => MetricType::EncryptionKeyHarvested,
+            b"encryption.key-change" => MetricType::EncryptionKeyChange,
+            b"encryption.crl-fetch-failed" => MetricType::EncryptionCrlFetchFailed,
+            b"encryption.dnssec-bogus" => MetricType::EncryptionDnssecBogus,
             b"eval.error" => MetricType::EvalError,
             b"eval.directory-not-found" => MetricType::EvalDirectoryNotFound,
             b"eval.store-not-found" => MetricType::EvalStoreNotFound,
@@ -8083,6 +8280,8 @@ impl MetricType {
             MetricType::Dkim2HashMismatch => "dkim2.hash-mismatch",
             MetricType::Dkim2RecipeError => "dkim2.recipe-error",
             MetricType::Dkim2SigningFailed => "dkim2.signing-failed",
+            MetricType::Dkim2DsnNotAligned => "dkim2.dsn-not-aligned",
+            MetricType::Dkim2DsnPropagated => "dkim2.dsn-propagated",
             MetricType::DmarcPass => "dmarc.pass",
             MetricType::DmarcFail => "dmarc.fail",
             MetricType::DmarcPermError => "dmarc.perm-error",
@@ -8094,6 +8293,17 @@ impl MetricType {
             MetricType::DnsRecordLookupFailed => "dns.record-lookup-failed",
             MetricType::DnsRecordPropagationTimeout => "dns.record-propagation-timeout",
             MetricType::DomainCount => "domain.count",
+            MetricType::EncryptionKeyLookupTime => "encryption.key-lookup-time",
+            MetricType::EncryptionEncryptionSkipped => "encryption.encryption-skipped",
+            MetricType::EncryptionAtRestEncrypted => "encryption.at-rest-encrypted",
+            MetricType::EncryptionGatewayEncrypted => "encryption.gateway-encrypted",
+            MetricType::EncryptionGatewayPlaintext => "encryption.gateway-plaintext",
+            MetricType::EncryptionGatewayBounced => "encryption.gateway-bounced",
+            MetricType::EncryptionKeyLookup => "encryption.key-lookup",
+            MetricType::EncryptionKeyHarvested => "encryption.key-harvested",
+            MetricType::EncryptionKeyChange => "encryption.key-change",
+            MetricType::EncryptionCrlFetchFailed => "encryption.crl-fetch-failed",
+            MetricType::EncryptionDnssecBogus => "encryption.dnssec-bogus",
             MetricType::EvalError => "eval.error",
             MetricType::EvalDirectoryNotFound => "eval.directory-not-found",
             MetricType::EvalStoreNotFound => "eval.store-not-found",
@@ -8513,6 +8723,8 @@ impl MetricType {
             MetricType::Dkim2HashMismatch => 373,
             MetricType::Dkim2RecipeError => 374,
             MetricType::Dkim2SigningFailed => 382,
+            MetricType::Dkim2DsnNotAligned => 392,
+            MetricType::Dkim2DsnPropagated => 393,
             MetricType::DmarcPass => 90,
             MetricType::DmarcFail => 91,
             MetricType::DmarcPermError => 92,
@@ -8524,6 +8736,17 @@ impl MetricType {
             MetricType::DnsRecordLookupFailed => 37,
             MetricType::DnsRecordPropagationTimeout => 38,
             MetricType::DomainCount => 26,
+            MetricType::EncryptionKeyLookupTime => 397,
+            MetricType::EncryptionEncryptionSkipped => 385,
+            MetricType::EncryptionAtRestEncrypted => 388,
+            MetricType::EncryptionGatewayEncrypted => 386,
+            MetricType::EncryptionGatewayPlaintext => 387,
+            MetricType::EncryptionGatewayBounced => 389,
+            MetricType::EncryptionKeyLookup => 390,
+            MetricType::EncryptionKeyHarvested => 391,
+            MetricType::EncryptionKeyChange => 394,
+            MetricType::EncryptionCrlFetchFailed => 395,
+            MetricType::EncryptionDnssecBogus => 396,
             MetricType::EvalError => 95,
             MetricType::EvalDirectoryNotFound => 96,
             MetricType::EvalStoreNotFound => 97,
@@ -8931,6 +9154,8 @@ impl MetricType {
             373 => Some(MetricType::Dkim2HashMismatch),
             374 => Some(MetricType::Dkim2RecipeError),
             382 => Some(MetricType::Dkim2SigningFailed),
+            392 => Some(MetricType::Dkim2DsnNotAligned),
+            393 => Some(MetricType::Dkim2DsnPropagated),
             90 => Some(MetricType::DmarcPass),
             91 => Some(MetricType::DmarcFail),
             92 => Some(MetricType::DmarcPermError),
@@ -8942,6 +9167,17 @@ impl MetricType {
             37 => Some(MetricType::DnsRecordLookupFailed),
             38 => Some(MetricType::DnsRecordPropagationTimeout),
             26 => Some(MetricType::DomainCount),
+            397 => Some(MetricType::EncryptionKeyLookupTime),
+            385 => Some(MetricType::EncryptionEncryptionSkipped),
+            388 => Some(MetricType::EncryptionAtRestEncrypted),
+            386 => Some(MetricType::EncryptionGatewayEncrypted),
+            387 => Some(MetricType::EncryptionGatewayPlaintext),
+            389 => Some(MetricType::EncryptionGatewayBounced),
+            390 => Some(MetricType::EncryptionKeyLookup),
+            391 => Some(MetricType::EncryptionKeyHarvested),
+            394 => Some(MetricType::EncryptionKeyChange),
+            395 => Some(MetricType::EncryptionCrlFetchFailed),
+            396 => Some(MetricType::EncryptionDnssecBogus),
             95 => Some(MetricType::EvalError),
             96 => Some(MetricType::EvalDirectoryNotFound),
             97 => Some(MetricType::EvalStoreNotFound),
@@ -9337,6 +9573,8 @@ impl MetricType {
             MetricType::Dkim2HashMismatch => 641,
             MetricType::Dkim2RecipeError => 642,
             MetricType::Dkim2SigningFailed => 650,
+            MetricType::Dkim2DsnNotAligned => 666,
+            MetricType::Dkim2DsnPropagated => 667,
             MetricType::DmarcPass => 118,
             MetricType::DmarcFail => 116,
             MetricType::DmarcPermError => 119,
@@ -9346,6 +9584,16 @@ impl MetricType {
             MetricType::DnsRecordDeletionFailed => 10,
             MetricType::DnsRecordLookupFailed => 11,
             MetricType::DnsRecordPropagationTimeout => 14,
+            MetricType::EncryptionEncryptionSkipped => 655,
+            MetricType::EncryptionAtRestEncrypted => 658,
+            MetricType::EncryptionGatewayEncrypted => 656,
+            MetricType::EncryptionGatewayPlaintext => 657,
+            MetricType::EncryptionGatewayBounced => 659,
+            MetricType::EncryptionKeyLookup => 660,
+            MetricType::EncryptionKeyHarvested => 661,
+            MetricType::EncryptionKeyChange => 662,
+            MetricType::EncryptionCrlFetchFailed => 663,
+            MetricType::EncryptionDnssecBogus => 664,
             MetricType::EvalError => 122,
             MetricType::EvalDirectoryNotFound => 121,
             MetricType::EvalStoreNotFound => 124,
@@ -9724,6 +9972,8 @@ impl MetricType {
             MetricType::Dkim2HashMismatch => "DKIM2 hash mismatch",
             MetricType::Dkim2RecipeError => "DKIM2 recipe error",
             MetricType::Dkim2SigningFailed => "DKIM2 signing failed",
+            MetricType::Dkim2DsnNotAligned => "DKIM2 DSN signer not aligned",
+            MetricType::Dkim2DsnPropagated => "DKIM2 DSN propagated",
             MetricType::DmarcPass => "DMARC check passed",
             MetricType::DmarcFail => "DMARC check failed",
             MetricType::DmarcPermError => "DMARC permanent error",
@@ -9735,6 +9985,17 @@ impl MetricType {
             MetricType::DnsRecordLookupFailed => "DNS record lookup failed",
             MetricType::DnsRecordPropagationTimeout => "DNS record propagation timeout",
             MetricType::DomainCount => "Total number of domains",
+            MetricType::EncryptionKeyLookupTime => "Recipient key discovery lookup time",
+            MetricType::EncryptionEncryptionSkipped => "Encryption skipped",
+            MetricType::EncryptionAtRestEncrypted => "Message encrypted at rest",
+            MetricType::EncryptionGatewayEncrypted => "Gateway encrypted message",
+            MetricType::EncryptionGatewayPlaintext => "Gateway sent plaintext",
+            MetricType::EncryptionGatewayBounced => "Gateway bounced message",
+            MetricType::EncryptionKeyLookup => "Key lookup",
+            MetricType::EncryptionKeyHarvested => "Key harvested",
+            MetricType::EncryptionKeyChange => "Key change pending approval",
+            MetricType::EncryptionCrlFetchFailed => "CRL download failed",
+            MetricType::EncryptionDnssecBogus => "DNSSEC validation failed",
             MetricType::EvalError => "Expression evaluation error",
             MetricType::EvalDirectoryNotFound => "Directory not found while evaluating expression",
             MetricType::EvalStoreNotFound => "Store not found while evaluating expression",
@@ -10146,6 +10407,8 @@ impl MetricType {
             | MetricType::Dkim2HashMismatch
             | MetricType::Dkim2RecipeError
             | MetricType::Dkim2SigningFailed
+            | MetricType::Dkim2DsnNotAligned
+            | MetricType::Dkim2DsnPropagated
             | MetricType::DmarcPass
             | MetricType::DmarcFail
             | MetricType::DmarcPermError
@@ -10155,6 +10418,16 @@ impl MetricType {
             | MetricType::DnsRecordDeletionFailed
             | MetricType::DnsRecordLookupFailed
             | MetricType::DnsRecordPropagationTimeout
+            | MetricType::EncryptionEncryptionSkipped
+            | MetricType::EncryptionAtRestEncrypted
+            | MetricType::EncryptionGatewayEncrypted
+            | MetricType::EncryptionGatewayPlaintext
+            | MetricType::EncryptionGatewayBounced
+            | MetricType::EncryptionKeyLookup
+            | MetricType::EncryptionKeyHarvested
+            | MetricType::EncryptionKeyChange
+            | MetricType::EncryptionCrlFetchFailed
+            | MetricType::EncryptionDnssecBogus
             | MetricType::EvalError
             | MetricType::EvalDirectoryNotFound
             | MetricType::EvalStoreNotFound
@@ -10422,6 +10695,7 @@ impl MetricType {
             MetricType::DeliveryTotalTime
             | MetricType::DeliveryAttemptTime
             | MetricType::DnsLookupTime
+            | MetricType::EncryptionKeyLookupTime
             | MetricType::HttpRequestTime
             | MetricType::ImapRequestTime
             | MetricType::MessageIngestTime
@@ -10472,6 +10746,7 @@ impl MetricType {
             MetricType::DeliveryActiveConnections => "stalwart.delivery.active_connections",
             MetricType::DnsLookupTime => "stalwart.dns.lookup_time",
             MetricType::DomainCount => "stalwart.domains",
+            MetricType::EncryptionKeyLookupTime => "stalwart.encryption.key_lookup_time",
             MetricType::HttpRequestTime => "stalwart.http.request_time",
             MetricType::HttpActiveConnections => "stalwart.http.active_connections",
             MetricType::ImapRequestTime => "stalwart.imap.request_time",
@@ -10533,6 +10808,7 @@ impl MetricType {
             MetricType::DeliveryActiveConnections => "{connection}",
             MetricType::DnsLookupTime => "s",
             MetricType::DomainCount => "{domain}",
+            MetricType::EncryptionKeyLookupTime => "s",
             MetricType::HttpRequestTime => "s",
             MetricType::HttpActiveConnections => "{connection}",
             MetricType::ImapRequestTime => "s",
@@ -10594,6 +10870,7 @@ impl MetricType {
             MetricType::DeliveryActiveConnections => "stalwart_delivery_active_connections",
             MetricType::DnsLookupTime => "stalwart_dns_lookup_time_seconds",
             MetricType::DomainCount => "stalwart_domains",
+            MetricType::EncryptionKeyLookupTime => "stalwart_encryption_key_lookup_time_seconds",
             MetricType::HttpRequestTime => "stalwart_http_request_time_seconds",
             MetricType::HttpActiveConnections => "stalwart_http_active_connections",
             MetricType::ImapRequestTime => "stalwart_imap_request_time_seconds",
@@ -10655,6 +10932,7 @@ impl MetricType {
             MetricType::DeliveryActiveConnections => "",
             MetricType::DnsLookupTime => "seconds",
             MetricType::DomainCount => "",
+            MetricType::EncryptionKeyLookupTime => "seconds",
             MetricType::HttpRequestTime => "seconds",
             MetricType::HttpActiveConnections => "",
             MetricType::ImapRequestTime => "seconds",
@@ -10810,6 +11088,8 @@ impl MetricType {
             MetricType::Dkim2HashMismatch,
             MetricType::Dkim2RecipeError,
             MetricType::Dkim2SigningFailed,
+            MetricType::Dkim2DsnNotAligned,
+            MetricType::Dkim2DsnPropagated,
             MetricType::DmarcPass,
             MetricType::DmarcFail,
             MetricType::DmarcPermError,
@@ -10821,6 +11101,17 @@ impl MetricType {
             MetricType::DnsRecordLookupFailed,
             MetricType::DnsRecordPropagationTimeout,
             MetricType::DomainCount,
+            MetricType::EncryptionKeyLookupTime,
+            MetricType::EncryptionEncryptionSkipped,
+            MetricType::EncryptionAtRestEncrypted,
+            MetricType::EncryptionGatewayEncrypted,
+            MetricType::EncryptionGatewayPlaintext,
+            MetricType::EncryptionGatewayBounced,
+            MetricType::EncryptionKeyLookup,
+            MetricType::EncryptionKeyHarvested,
+            MetricType::EncryptionKeyChange,
+            MetricType::EncryptionCrlFetchFailed,
+            MetricType::EncryptionDnssecBogus,
             MetricType::EvalError,
             MetricType::EvalDirectoryNotFound,
             MetricType::EvalStoreNotFound,
@@ -11219,6 +11510,7 @@ impl Key {
             b"probability" => Key::Probability,
             b"confidence" => Key::Confidence,
             b"tier" => Key::Tier,
+            b"fingerprint" => Key::Fingerprint,
         }
         .copied()
     }
@@ -11316,6 +11608,7 @@ impl Key {
             b"cipher" => Key::Cipher,
             b"resourceUid" => Key::ResourceUid,
             b"script" => Key::Script,
+            b"fingerprint" => Key::Fingerprint,
         }
         .copied()
     }
@@ -11431,6 +11724,7 @@ impl Key {
             #[cfg(feature = "enterprise")]
             Key::Tier => "tier",
             // SPDX-SnippetEnd
+            Key::Fingerprint => "fingerprint",
         }
     }
 
@@ -11549,11 +11843,12 @@ impl Key {
             #[cfg(feature = "enterprise")]
             95 => Some(Key::Tier),
             // SPDX-SnippetEnd
+            96 => Some(Key::Fingerprint),
             _ => None,
         }
     }
 
-    pub const COUNT: usize = 96;
+    pub const COUNT: usize = 97;
 }
 
 impl serde::Serialize for Key {

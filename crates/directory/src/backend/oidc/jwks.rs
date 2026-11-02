@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 use trc::AuthEvent;
-use utils::outbound::OutboundClient;
+use utils::{error_chain, outbound::OutboundClient};
 
 const JWKS_DEFAULT_MAX_AGE: Duration = Duration::from_secs(3600);
 const JWKS_MIN_MAX_AGE: Duration = Duration::from_secs(300);
@@ -162,7 +162,7 @@ pub(crate) async fn fetch_jwks(
         .map_err(|err| OidcError::Config(format!("Invalid JWKS URL: {err}")))?
         .send()
         .await
-        .map_err(|e| OidcError::Network(format!("JWKS fetch failed: {e}")))?
+        .map_err(|e| OidcError::Network(format!("JWKS fetch failed: {}", error_chain(&e))))?
         .error_for_status()
         .map_err(|e| OidcError::Provider(format!("JWKS HTTP error: {e}")))?;
     let max_age = cache_max_age(response.headers());

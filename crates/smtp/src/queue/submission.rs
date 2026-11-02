@@ -105,6 +105,7 @@ fn format_error(err: &ErrorDetails) -> String {
         | Error::ConnectionError(details)
         | Error::TlsError(details)
         | Error::DaneError(details)
+        | Error::EncryptionError(details)
         | Error::MtaStsError(details) => details.to_string(),
         Error::RateLimited => "Rate limited".into(),
         Error::ConcurrencyLimited => "Concurrency limited".into(),
@@ -123,6 +124,7 @@ fn format_archived_error(err: &ArchivedErrorDetails) -> String {
         | ArchivedError::ConnectionError(details)
         | ArchivedError::TlsError(details)
         | ArchivedError::DaneError(details)
+        | ArchivedError::EncryptionError(details)
         | ArchivedError::MtaStsError(details) => details.to_string(),
         ArchivedError::RateLimited => "Rate limited".into(),
         ArchivedError::ConcurrencyLimited => "Concurrency limited".into(),

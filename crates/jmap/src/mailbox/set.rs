@@ -736,7 +736,7 @@ impl MailboxSet for Server {
             match (&property, value) {
                 (Key::Property(MailboxProperty::Name), Value::Str(value)) => {
                     let value = value.trim();
-                    if !value.is_empty() && value.len() < self.core.email.mailbox_name_max_len {
+                    if !value.is_empty() && !self.core.email.is_mailbox_name_too_long(value) {
                         changes.name = value.into();
                     } else {
                         return Ok(Err(SetError::invalid_properties()

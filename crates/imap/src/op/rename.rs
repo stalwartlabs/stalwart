@@ -7,11 +7,12 @@
 use crate::core::{MailboxId, Session, SessionData};
 use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
 use compact_str::format_compact;
+use email::cache::mailbox::MailboxCacheAccess;
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::rename::Arguments, receiver::Request,
 };
 use registry::schema::enums::{Permission, StorageQuota};
-use std::time::Instant;
+use std::{iter::successors, time::Instant};
 use store::{
     ValueKey,
     write::{Archive, ArchiveBytes, BatchBuilder},
@@ -138,6 +139,27 @@ impl<T: SessionStream> SessionData<T> {
                 .details("You are not allowed to rename this mailbox.")
                 .code(ResponseCode::NoPerm)
                 .id(arguments.tag));
+        }
+
+        if let Some(parent_mailbox_id) = params.parent_mailbox_id {
+            let cache = caches
+                .fetch(&self.server, params.account_id)
+                .await
+                .imap_ctx(&arguments.tag, trc::location!())?;
+            if successors(Some(parent_mailbox_id), |id| {
+                cache
+                    .mailbox_by_id(id)
+                    .and_then(|mailbox| mailbox.parent_id())
+            })
+            .take(cache.mailboxes.items.len() + 1)
+            .any(|ancestor_id| ancestor_id == mailbox_id)
+            {
+                return Err(trc::ImapEvent::Error
+                    .into_err()
+                    .details("Mailbox cannot be moved under itself.")
+                    .code(ResponseCode::Cannot)
+                    .id(arguments.tag));
+            }
         }
 
         // Get new mailbox name from path

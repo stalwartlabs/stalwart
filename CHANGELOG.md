@@ -2,6 +2,64 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.0.2] - 2026-11-02
+
+**Encryption at rest must be re-enabled after upgrading.** The algorithm is now chosen from each user's key, so the per-account cipher choice of earlier versions (AES-128, AES-256, AES-256-GCM, ChaCha20-Poly1305) no longer exists, and accounts that had encryption at rest enabled are set to `Disabled` on upgrade. Until a user (or an administrator) selects their public key again under the account's encryption settings, new messages for that account are stored unencrypted. Registered public keys and messages already encrypted are not affected. The server-wide settings also moved: `Email.encryptAtRest` is replaced by `atRestEnable` in the new `Encryption` settings (enabled by default, so servers that had disabled it must disable it again), and `Email.encryptOnAppend` by the per-account `encryptOnAppend` setting. See the [encryption at rest documentation](https://stalw.art/docs/encryption/at-rest) for details.
+
+## Added
+- Encryption:
+  - OpenPGP ([RFC 9580](https://www.rfc-editor.org/rfc/rfc9580)): v4 and v6 keys; RSA (2048 to 8192 bits), ECDH on NIST P-256, P-384 and P-521, legacy Curve25519, X25519 and X448 encryption keys; SEIPD v1 and SEIPD v2 with AES-OCB or AES-GCM, selected from the key's features and preferences.
+  - Post-quantum OpenPGP ([RFC 9980](https://www.rfc-editor.org/rfc/rfc9980)): ML-KEM-768+X25519 and ML-KEM-1024+X448 keys, with AES-256.
+  - S/MIME ([RFC 8551](https://www.rfc-editor.org/rfc/rfc8551)): RSA with PKCS #1 v1.5 or RSA-OAEP, ECDH on NIST P-256, P-384 and P-521, X25519 and X448 ([RFC 8418](https://www.rfc-editor.org/rfc/rfc8418)) and post-quantum ML-KEM-512, ML-KEM-768 and ML-KEM-1024 ([RFC 9936](https://www.rfc-editor.org/rfc/rfc9936)) certificates; CMS EnvelopedData with AES-256-CBC and AuthEnvelopedData with AES-256-GCM ([RFC 5083](https://www.rfc-editor.org/rfc/rfc5083)).
+  - Header protection ([RFC 9788](https://www.rfc-editor.org/rfc/rfc9788)) for encrypted messages, including Subject hiding and legacy display for messages sent through the gateway.
+  - Public keys: per-key `authenticatedEncryption` (AES-GCM with RSA-OAEP) and `strictKeyWrapEncoding` (RFC 5753 encoding instead of the Outlook-compatible one) switches, and server-computed `keyType`, `fingerprints`, `capabilities` and `warnings` (expiring soon, weak RSA, address mismatch, post-quantum only, no known decryptor, unusable).
+  - Encryption gateway: encrypts outgoing messages for remote recipients with their OpenPGP keys or S/MIME certificates, with a per-recipient `gatewayOutbound` policy (`disable`, `opportunistic` or `required`), a minimum key trust level, a separate encrypted copy per recipient with its own DKIM and DKIM2 signatures, and `5.7.5` bounces when encryption is required but not possible.
+  - External public keys: superuser-managed keys of remote recipients, entered manually or kept up to date from Web Key Directory (WKD), keys.openpgp.org (VKS), HKP keyservers or DNSSEC-validated OPENPGPKEY ([RFC 7929](https://www.rfc-editor.org/rfc/rfc7929)) and SMIMEA ([RFC 8162](https://www.rfc-editor.org/rfc/rfc8162)) records, with trust levels, pinning, approval of key changes, blocked keys and revocation handling. No lookups are made for unknown recipients.
+  - Key harvesting: S/MIME certificates (with their advertised capabilities) and Autocrypt keys are learned from DMARC-authenticated incoming mail, controlled by the `harvestKeys` expression.
+  - S/MIME certificate trust: bundled Mozilla email root certificates, custom trust anchors (`SmimeTrustAnchor`), intermediate certificate retrieval through Authority Information Access and daily certificate revocation list checks.
+  - New `encryption.*` telemetry events and metrics, including the `encryption.key-lookup-time` histogram.
+- DKIM2:
+  - DSNs are signed with a domain that matches a recipient in the `rt=` of the reported message, as required by spec-08 section 16.2. When no hosted domain matches, the DSN is signed with DKIM only.
+  - DSNs about forwarded messages are propagated to the previous hop in the DKIM2 chain, with the forwarding destination removed and the returned headers restored to how the message arrived (spec-08 section 16.3). This applies to inbound DKIM2 DSNs and to DSNs generated for messages Stalwart forwarded, such as failed Sieve redirects.
+  - New `dkim2.dsn-not-aligned` and `dkim2.dsn-propagated` telemetry events.
+- OAuth: `Application` objects have an `oauthScopes` list of extra scopes that the WebUI requests at sign-in, for external identity providers that release a claim only with a scope of its own.
+- OIDC directories: superuser-only `trustedProvider` setting lets a tenant-owned directory reach an identity provider on a private network.
+
+## Changed
+- DKIM2: The post-quantum composite `ML-DSA-44` and `Ed25519` algorithm with `SHA-512` is replaced by pure `ML-DSA-44` (as per [draft-ietf-dkim-dkim2-spec-08](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-08)).
+- vCard and iCalendar: `QUOTED-PRINTABLE` values without a `CHARSET` parameter are decoded as UTF-8 when valid, otherwise as Windows-1252, instead of ISO-8859-1.
+
+## Fixed
+- DKIM: Relaxed body canonicalization ignores whitespace-only lines at the end of the body (RFC 6376, section 3.4.4), which produced a `bh=` that other implementations rejected.
+- iTIP: A full `REQUEST` with an older `SEQUENCE` no longer removes a newer override from the attendee's copy (RFC 5546, section 2.1.5).
+- Applications: A cached application bundle that failed the manifest check (such as the WebUI 1.x bundle left by v0.16 in a shared blob store) was never replaced, so `/admin` and `/account` returned 404; it is now downloaded again.
+- HTTP: Error responses sent before the request body is read (such as a `401`) include `Connection: close`, instead of the connection being closed without notice.
+- HTTP: A response with an invalid header value, such as a JMAP download whose `accept` parameter contains a line break, returns `500` instead of aborting the connection.
+- IMAP
+  - `RENAME` refuses to move a mailbox into its own subtree (such as `A` to `A/B/C`) with `NO [CANNOT]`, instead of creating a parent loop.
+  - Single-level mailbox names are checked against `maxMailboxNameLength`, which only applied to names containing `/`.
+  - Client quirks are detected from the `ID` command, and `UIDONLY` is not enabled for Microsoft's sync service (`Microsoft Office 365`), which left the new Outlook without folders or mail.
+- Mailboxes: IMAP, JMAP and Sieve `fileinto` accept names of up to `maxMailboxNameLength` octets (RFC 8621, section 1.6.1); JMAP `Mailbox/set` rejected names of exactly that length.
+- JMAP
+  - Messages added with IMAP `APPEND`/`MULTIAPPEND` or `Email/import` send an `EmailPush` with their id, so push subscribers no longer get an empty notification.
+  - `Email/queryChanges` with `collapseThreads` reports the previous representative of a thread as removed when a newer email joins the thread, and adds it back when that email is destroyed.
+  - `Email/set` places inline attachments that have a `cid` (image, audio or video, disposition not `attachment`) in `multipart/related` with the HTML body instead of `multipart/mixed`, so clients display them in the message body and `Email/get` returns them in `attachments`.
+  - `Email/get`, `Email/set`, `Email/copy` and `SearchSnippet/get` return `notFound` for an Email id destroyed by a thread merge instead of resolving it with the stale `threadId`.
+  - The upload endpoint rejects uploads to accounts the caller is not a member of and to account ids that do not exist, as `Blob/upload` already did.
+- OAuth: Scope values the server does not know, such as the OpenID Connect `email` and `profile` scopes, are ignored at the authorization endpoint instead of failing with `invalid_scope` (OpenID Connect Core, section 3.1.2.1).
+- OAuth: App passwords and API keys are refused at interactive sign-in (WebUI login and device code approval), which issued a session with the account's full permissions and skipped two-factor authentication.
+- Milter
+  - `SMFIC_BODY` carries only the message body instead of the whole message, so milters no longer receive the headers twice.
+  - Header names and values that are not valid UTF-8 are sent to the milter as raw bytes instead of empty strings.
+- Search indexing
+  - An email whose blob is missing is logged and skipped instead of failing its whole index partition and being retried forever.
+  - Tracing spans queued for indexing are discarded when no tracing store is configured (for example after the enterprise license expires) instead of failing with `store.not-configured` forever.
+- Calendar: events whose owner participant has no calendar address are treated as owned when checking the `mayWriteOwn` right.
+- vCard: yearless `--MM-DD` dates keep their day when uploaded, and month-only dates are written zero-padded (`--03`).
+- Spam filter: `MIXED_CHARSET` only compares the scripts of letters, so single-script text containing characters such as U+202F no longer triggers it.
+- Telemetry: Outbound HTTP errors log their cause, such as a refused non-public address, instead of only `error sending request`.
+- Accounts: `DestroyAccount` removes the account's spam training samples, whose message bodies otherwise stayed in the blob store for up to `holdSamplesFor`.
+
 ## [1.0.1] - 2026-10-28
 
 ## Added

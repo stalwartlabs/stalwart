@@ -109,7 +109,7 @@ impl MailboxFnc for Server {
         if !create_paths.is_empty() {
             if create_paths
                 .iter()
-                .any(|name| name.len() > self.core.email.mailbox_name_max_len)
+                .any(|name| self.core.email.is_mailbox_name_too_long(name))
             {
                 return Ok(None);
             }

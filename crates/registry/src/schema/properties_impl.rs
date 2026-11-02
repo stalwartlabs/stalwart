@@ -57,8 +57,10 @@ impl EnumImpl for ObjectType {
             b"Domain" => ObjectType::Domain,
             b"DsnReportSettings" => ObjectType::DsnReportSettings,
             b"Email" => ObjectType::Email,
+            b"Encryption" => ObjectType::Encryption,
             b"Enterprise" => ObjectType::Enterprise,
             b"EventTracingLevel" => ObjectType::EventTracingLevel,
+            b"ExternalPublicKey" => ObjectType::ExternalPublicKey,
             b"FileStorage" => ObjectType::FileStorage,
             b"Http" => ObjectType::Http,
             b"HttpForm" => ObjectType::HttpForm,
@@ -113,6 +115,7 @@ impl EnumImpl for ObjectType {
             b"SieveSystemScript" => ObjectType::SieveSystemScript,
             b"SieveUserInterpreter" => ObjectType::SieveUserInterpreter,
             b"SieveUserScript" => ObjectType::SieveUserScript,
+            b"SmimeTrustAnchor" => ObjectType::SmimeTrustAnchor,
             b"SpamAi" => ObjectType::SpamAi,
             b"SpamClassifier" => ObjectType::SpamClassifier,
             b"SpamDnsblServer" => ObjectType::SpamDnsblServer,
@@ -184,7 +187,9 @@ impl EnumImpl for ObjectType {
             b"Domain" => ObjectType::Domain,
             b"DsnReportSettings" => ObjectType::DsnReportSettings,
             b"Email" => ObjectType::Email,
+            b"Encryption" => ObjectType::Encryption,
             b"EventTracingLevel" => ObjectType::EventTracingLevel,
+            b"ExternalPublicKey" => ObjectType::ExternalPublicKey,
             b"FileStorage" => ObjectType::FileStorage,
             b"Http" => ObjectType::Http,
             b"HttpForm" => ObjectType::HttpForm,
@@ -236,6 +241,7 @@ impl EnumImpl for ObjectType {
             b"SieveSystemScript" => ObjectType::SieveSystemScript,
             b"SieveUserInterpreter" => ObjectType::SieveUserInterpreter,
             b"SieveUserScript" => ObjectType::SieveUserScript,
+            b"SmimeTrustAnchor" => ObjectType::SmimeTrustAnchor,
             b"SpamClassifier" => ObjectType::SpamClassifier,
             b"SpamDnsblServer" => ObjectType::SpamDnsblServer,
             b"SpamDnsblSettings" => ObjectType::SpamDnsblSettings,
@@ -313,6 +319,7 @@ impl EnumImpl for ObjectType {
             ObjectType::Domain => "Domain",
             ObjectType::DsnReportSettings => "DsnReportSettings",
             ObjectType::Email => "Email",
+            ObjectType::Encryption => "Encryption",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -320,6 +327,7 @@ impl EnumImpl for ObjectType {
             ObjectType::Enterprise => "Enterprise",
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => "EventTracingLevel",
+            ObjectType::ExternalPublicKey => "ExternalPublicKey",
             ObjectType::FileStorage => "FileStorage",
             ObjectType::Http => "Http",
             ObjectType::HttpForm => "HttpForm",
@@ -389,6 +397,7 @@ impl EnumImpl for ObjectType {
             ObjectType::SieveSystemScript => "SieveSystemScript",
             ObjectType::SieveUserInterpreter => "SieveUserInterpreter",
             ObjectType::SieveUserScript => "SieveUserScript",
+            ObjectType::SmimeTrustAnchor => "SmimeTrustAnchor",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -493,6 +502,7 @@ impl EnumImpl for ObjectType {
             37 => Some(ObjectType::Domain),
             38 => Some(ObjectType::DsnReportSettings),
             39 => Some(ObjectType::Email),
+            120 => Some(ObjectType::Encryption),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -500,6 +510,7 @@ impl EnumImpl for ObjectType {
             40 => Some(ObjectType::Enterprise),
             // SPDX-SnippetEnd
             41 => Some(ObjectType::EventTracingLevel),
+            121 => Some(ObjectType::ExternalPublicKey),
             42 => Some(ObjectType::FileStorage),
             43 => Some(ObjectType::Http),
             44 => Some(ObjectType::HttpForm),
@@ -569,6 +580,7 @@ impl EnumImpl for ObjectType {
             93 => Some(ObjectType::SieveSystemScript),
             94 => Some(ObjectType::SieveUserInterpreter),
             95 => Some(ObjectType::SieveUserScript),
+            122 => Some(ObjectType::SmimeTrustAnchor),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -617,7 +629,7 @@ impl EnumImpl for ObjectType {
         }
     }
 
-    const COUNT: usize = 120;
+    const COUNT: usize = 123;
 }
 
 impl serde::Serialize for ObjectType {
@@ -719,6 +731,7 @@ impl EnumImpl for Property {
             b"archivedUntil" => Property::ArchivedUntil,
             b"arrivalDate" => Property::ArrivalDate,
             b"asnUrls" => Property::AsnUrls,
+            b"atRestEnable" => Property::AtRestEnable,
             b"attemptNumber" => Property::AttemptNumber,
             b"attempts" => Property::Attempts,
             b"attrClass" => Property::AttrClass,
@@ -738,6 +751,7 @@ impl EnumImpl for Property {
             b"authSecret" => Property::AuthSecret,
             b"authUsername" => Property::AuthUsername,
             b"authenticatedAs" => Property::AuthenticatedAs,
+            b"authenticatedEncryption" => Property::AuthenticatedEncryption,
             b"authenticatedTimeout" => Property::AuthenticatedTimeout,
             b"authenticationResults" => Property::AuthenticationResults,
             b"autoAddInvitations" => Property::AutoAddInvitations,
@@ -755,6 +769,7 @@ impl EnumImpl for Property {
             b"blobSize" => Property::BlobSize,
             b"blobStore" => Property::BlobStore,
             b"blockCount" => Property::BlockCount,
+            b"blockedFingerprints" => Property::BlockedFingerprints,
             b"body" => Property::Body,
             b"breakerCooldown" => Property::BreakerCooldown,
             b"breakerThreshold" => Property::BreakerThreshold,
@@ -766,6 +781,7 @@ impl EnumImpl for Property {
             b"caaIdentities" => Property::CaaIdentities,
             b"cacheSize" => Property::CacheSize,
             b"canonicalization" => Property::Canonicalization,
+            b"capabilities" => Property::Capabilities,
             b"catchAllAddress" => Property::CatchAllAddress,
             b"categories" => Property::Categories,
             b"certificate" => Property::Certificate,
@@ -867,6 +883,7 @@ impl EnumImpl for Property {
             b"disableCapabilities" => Property::DisableCapabilities,
             b"disabledPermissions" => Property::DisabledPermissions,
             b"discardAfter" => Property::DiscardAfter,
+            b"discoveryProxy" => Property::DiscoveryProxy,
             b"disposition" => Property::Disposition,
             b"dkim2Pass" => Property::Dkim2Pass,
             b"dkim2Result" => Property::Dkim2Result,
@@ -977,6 +994,7 @@ impl EnumImpl for Property {
             b"extension" => Property::Extension,
             b"extensions" => Property::Extensions,
             b"externalId" => Property::ExternalId,
+            b"externalPublicKeys" => Property::ExternalPublicKeys,
             b"extraContactInfo" => Property::ExtraContactInfo,
             b"extraParameters" => Property::ExtraParameters,
             b"factor" => Property::Factor,
@@ -1005,8 +1023,10 @@ impl EnumImpl for Property {
             b"filterMemberOf" => Property::FilterMemberOf,
             b"filterRecipient" => Property::FilterRecipient,
             b"fingerprint" => Property::Fingerprint,
+            b"fingerprints" => Property::Fingerprints,
             b"firstFailedAt" => Property::FirstFailedAt,
             b"firstParty" => Property::FirstParty,
+            b"firstSeen" => Property::FirstSeen,
             b"flags" => Property::Flags,
             b"flagsAction" => Property::FlagsAction,
             b"flagsProtocol" => Property::FlagsProtocol,
@@ -1020,6 +1040,12 @@ impl EnumImpl for Property {
             b"fromAddress" => Property::FromAddress,
             b"fromName" => Property::FromName,
             b"futureRelease" => Property::FutureRelease,
+            b"gatewayEnable" => Property::GatewayEnable,
+            b"gatewayEncryptSigned" => Property::GatewayEncryptSigned,
+            b"gatewayHeaderProtection" => Property::GatewayHeaderProtection,
+            b"gatewayMethods" => Property::GatewayMethods,
+            b"gatewayMinTrust" => Property::GatewayMinTrust,
+            b"gatewayOutbound" => Property::GatewayOutbound,
             b"generateDkimKeys" => Property::GenerateDkimKeys,
             b"generation" => Property::Generation,
             b"generator" => Property::Generator,
@@ -1031,8 +1057,11 @@ impl EnumImpl for Property {
             b"groupId" => Property::GroupId,
             b"groupwareLarge" => Property::GroupwareLarge,
             b"groupwareLargeTtl" => Property::GroupwareLargeTtl,
+            b"harvestKeys" => Property::HarvestKeys,
             b"headerFrom" => Property::HeaderFrom,
+            b"headerProtection" => Property::HeaderProtection,
             b"headers" => Property::Headers,
+            b"hkpServers" => Property::HkpServers,
             b"holdMetricsFor" => Property::HoldMetricsFor,
             b"holdMtaReportsFor" => Property::HoldMtaReportsFor,
             b"holdSamplesFor" => Property::HoldSamplesFor,
@@ -1116,10 +1145,15 @@ impl EnumImpl for Property {
             b"key" => Property::Key,
             b"keyName" => Property::KeyName,
             b"keyPrefix" => Property::KeyPrefix,
+            b"keyRefreshInterval" => Property::KeyRefreshInterval,
+            b"keyType" => Property::KeyType,
             b"keyValues" => Property::KeyValues,
+            b"kind" => Property::Kind,
             b"l1Ratio" => Property::L1Ratio,
             b"l2Ratio" => Property::L2Ratio,
+            b"lastChecked" => Property::LastChecked,
             b"lastRenewal" => Property::LastRenewal,
+            b"lastSeen" => Property::LastSeen,
             b"lastUsedAt" => Property::LastUsedAt,
             b"learn" => Property::Learn,
             b"learnHamFromCard" => Property::LearnHamFromCard,
@@ -1179,6 +1213,7 @@ impl EnumImpl for Property {
             b"maxConnections" => Property::MaxConnections,
             b"maxContacts" => Property::MaxContacts,
             b"maxCpuCycles" => Property::MaxCpuCycles,
+            b"maxCrlSize" => Property::MaxCrlSize,
             b"maxDelay" => Property::MaxDelay,
             b"maxDepth" => Property::MaxDepth,
             b"maxDuration" => Property::MaxDuration,
@@ -1281,6 +1316,7 @@ impl EnumImpl for Property {
             b"messages" => Property::Messages,
             b"messagesLarge" => Property::MessagesLarge,
             b"messagesLargeTtl" => Property::MessagesLargeTtl,
+            b"method" => Property::Method,
             b"metric" => Property::Metric,
             b"metrics" => Property::Metrics,
             b"metricsCollectionInterval" => Property::MetricsCollectionInterval,
@@ -1306,7 +1342,14 @@ impl EnumImpl for Property {
             b"mxHosts" => Property::MxHosts,
             b"name" => Property::Name,
             b"namespace" => Property::Namespace,
+            b"negativeCacheTtl" => Property::NegativeCacheTtl,
             b"negativeTtl" => Property::NegativeTtl,
+            b"nextCapabilities" => Property::NextCapabilities,
+            b"nextCheckAt" => Property::NextCheckAt,
+            b"nextExpiresAt" => Property::NextExpiresAt,
+            b"nextFingerprint" => Property::NextFingerprint,
+            b"nextKey" => Property::NextKey,
+            b"nextKeyType" => Property::NextKeyType,
             b"nextNotify" => Property::NextNotify,
             b"nextRetry" => Property::NextRetry,
             b"nextTransitionAt" => Property::NextTransitionAt,
@@ -1323,6 +1366,7 @@ impl EnumImpl for Property {
             b"numReplicas" => Property::NumReplicas,
             b"numShards" => Property::NumShards,
             b"oauthClientId" => Property::OauthClientId,
+            b"oauthScopes" => Property::OauthScopes,
             b"objectType" => Property::ObjectType,
             b"onSuccessRenewCertificate" => Property::OnSuccessRenewCertificate,
             b"opaqueTokenValidation" => Property::OpaqueTokenValidation,
@@ -1356,6 +1400,7 @@ impl EnumImpl for Property {
             b"period" => Property::Period,
             b"permissions" => Property::Permissions,
             b"pingInterval" => Property::PingInterval,
+            b"pinned" => Property::Pinned,
             b"pipelining" => Property::Pipelining,
             b"policies" => Property::Policies,
             b"policyAdkim" => Property::PolicyAdkim,
@@ -1532,6 +1577,9 @@ impl EnumImpl for Property {
             b"skipAudienceValidation" => Property::SkipAudienceValidation,
             b"skipDeploy" => Property::SkipDeploy,
             b"skipFirst" => Property::SkipFirst,
+            b"smimeCiphers" => Property::SmimeCiphers,
+            b"smimeOaep" => Property::SmimeOaep,
+            b"smimeSignedAt" => Property::SmimeSignedAt,
             b"smtpGreeting" => Property::SmtpGreeting,
             b"socketBacklog" => Property::SocketBacklog,
             b"socketNoDelay" => Property::SocketNoDelay,
@@ -1541,8 +1589,10 @@ impl EnumImpl for Property {
             b"socketSendBufferSize" => Property::SocketSendBufferSize,
             b"socketTosV4" => Property::SocketTosV4,
             b"socketTtl" => Property::SocketTtl,
+            b"source" => Property::Source,
             b"sourceIp" => Property::SourceIp,
             b"sourcePort" => Property::SourcePort,
+            b"sourceTimeout" => Property::SourceTimeout,
             b"spamFilterRulesUrl" => Property::SpamFilterRulesUrl,
             b"spamLookup" => Property::SpamLookup,
             b"spfDns" => Property::SpfDns,
@@ -1562,6 +1612,7 @@ impl EnumImpl for Property {
             b"store" => Property::Store,
             b"stores" => Property::Stores,
             b"strategy" => Property::Strategy,
+            b"strictKeyWrapEncoding" => Property::StrictKeyWrapEncoding,
             b"subAddressing" => Property::SubAddressing,
             b"subAuthId" => Property::SubAuthId,
             b"subject" => Property::Subject,
@@ -1615,8 +1666,10 @@ impl EnumImpl for Property {
             b"transactionTimeout" => Property::TransactionTimeout,
             b"transferLimit" => Property::TransferLimit,
             b"trimQuotes" => Property::TrimQuotes,
+            b"trust" => Property::Trust,
             b"trustContacts" => Property::TrustContacts,
             b"trustReplies" => Property::TrustReplies,
+            b"trustedProvider" => Property::TrustedProvider,
             b"tsigAlgorithm" => Property::TsigAlgorithm,
             b"ttl" => Property::Ttl,
             b"uncertainBelow" => Property::UncertainBelow,
@@ -1630,6 +1683,7 @@ impl EnumImpl for Property {
             b"urlLimit" => Property::UrlLimit,
             b"urlPrefix" => Property::UrlPrefix,
             b"urls" => Property::Urls,
+            b"useBundledRoots" => Property::UseBundledRoots,
             b"usePermissiveCors" => Property::UsePermissiveCors,
             b"useTls" => Property::UseTls,
             b"usedDiskQuota" => Property::UsedDiskQuota,
@@ -1734,6 +1788,7 @@ impl EnumImpl for Property {
             b"arcVerify" => Property::ArcVerify,
             b"arrivalDate" => Property::ArrivalDate,
             b"asnUrls" => Property::AsnUrls,
+            b"atRestEnable" => Property::AtRestEnable,
             b"attemptNumber" => Property::AttemptNumber,
             b"attempts" => Property::Attempts,
             b"attrClass" => Property::AttrClass,
@@ -1753,6 +1808,7 @@ impl EnumImpl for Property {
             b"authSecret" => Property::AuthSecret,
             b"authUsername" => Property::AuthUsername,
             b"authenticatedAs" => Property::AuthenticatedAs,
+            b"authenticatedEncryption" => Property::AuthenticatedEncryption,
             b"authenticatedTimeout" => Property::AuthenticatedTimeout,
             b"authenticationResults" => Property::AuthenticationResults,
             b"autoAddInvitations" => Property::AutoAddInvitations,
@@ -1770,12 +1826,14 @@ impl EnumImpl for Property {
             b"blobSize" => Property::BlobSize,
             b"blobStore" => Property::BlobStore,
             b"blockCount" => Property::BlockCount,
+            b"blockedFingerprints" => Property::BlockedFingerprints,
             b"bucket" => Property::Bucket,
             b"bufferSize" => Property::BufferSize,
             b"buffered" => Property::Buffered,
             b"caaIdentities" => Property::CaaIdentities,
             b"cacheSize" => Property::CacheSize,
             b"canonicalization" => Property::Canonicalization,
+            b"capabilities" => Property::Capabilities,
             b"catchAllAddress" => Property::CatchAllAddress,
             b"certificate" => Property::Certificate,
             b"certificateManagement" => Property::CertificateManagement,
@@ -1873,6 +1931,7 @@ impl EnumImpl for Property {
             b"disableCapabilities" => Property::DisableCapabilities,
             b"disabledPermissions" => Property::DisabledPermissions,
             b"discardAfter" => Property::DiscardAfter,
+            b"discoveryProxy" => Property::DiscoveryProxy,
             b"disposition" => Property::Disposition,
             b"dkim2Pass" => Property::Dkim2Pass,
             b"dkim2Result" => Property::Dkim2Result,
@@ -1973,6 +2032,7 @@ impl EnumImpl for Property {
             b"expungeTrashAfter" => Property::ExpungeTrashAfter,
             b"extension" => Property::Extension,
             b"extensions" => Property::Extensions,
+            b"externalPublicKeys" => Property::ExternalPublicKeys,
             b"extraContactInfo" => Property::ExtraContactInfo,
             b"factor" => Property::Factor,
             b"failOnTimeout" => Property::FailOnTimeout,
@@ -2000,8 +2060,10 @@ impl EnumImpl for Property {
             b"filterMemberOf" => Property::FilterMemberOf,
             b"filterRecipient" => Property::FilterRecipient,
             b"fingerprint" => Property::Fingerprint,
+            b"fingerprints" => Property::Fingerprints,
             b"firstFailedAt" => Property::FirstFailedAt,
             b"firstParty" => Property::FirstParty,
+            b"firstSeen" => Property::FirstSeen,
             b"flags" => Property::Flags,
             b"flagsAction" => Property::FlagsAction,
             b"flagsProtocol" => Property::FlagsProtocol,
@@ -2014,6 +2076,12 @@ impl EnumImpl for Property {
             b"fromAddress" => Property::FromAddress,
             b"fromName" => Property::FromName,
             b"futureRelease" => Property::FutureRelease,
+            b"gatewayEnable" => Property::GatewayEnable,
+            b"gatewayEncryptSigned" => Property::GatewayEncryptSigned,
+            b"gatewayHeaderProtection" => Property::GatewayHeaderProtection,
+            b"gatewayMethods" => Property::GatewayMethods,
+            b"gatewayMinTrust" => Property::GatewayMinTrust,
+            b"gatewayOutbound" => Property::GatewayOutbound,
             b"generateDkimKeys" => Property::GenerateDkimKeys,
             b"generation" => Property::Generation,
             b"generator" => Property::Generator,
@@ -2025,8 +2093,11 @@ impl EnumImpl for Property {
             b"groupId" => Property::GroupId,
             b"groupwareLarge" => Property::GroupwareLarge,
             b"groupwareLargeTtl" => Property::GroupwareLargeTtl,
+            b"harvestKeys" => Property::HarvestKeys,
             b"headerFrom" => Property::HeaderFrom,
+            b"headerProtection" => Property::HeaderProtection,
             b"headers" => Property::Headers,
+            b"hkpServers" => Property::HkpServers,
             b"holdMtaReportsFor" => Property::HoldMtaReportsFor,
             b"holdSamplesFor" => Property::HoldSamplesFor,
             b"host" => Property::Host,
@@ -2100,9 +2171,14 @@ impl EnumImpl for Property {
             b"key" => Property::Key,
             b"keyName" => Property::KeyName,
             b"keyPrefix" => Property::KeyPrefix,
+            b"keyRefreshInterval" => Property::KeyRefreshInterval,
+            b"keyType" => Property::KeyType,
+            b"kind" => Property::Kind,
             b"l1Ratio" => Property::L1Ratio,
             b"l2Ratio" => Property::L2Ratio,
+            b"lastChecked" => Property::LastChecked,
             b"lastRenewal" => Property::LastRenewal,
+            b"lastSeen" => Property::LastSeen,
             b"lastUsedAt" => Property::LastUsedAt,
             b"learnHamFromCard" => Property::LearnHamFromCard,
             b"learnHamFromReply" => Property::LearnHamFromReply,
@@ -2158,6 +2234,7 @@ impl EnumImpl for Property {
             b"maxConnections" => Property::MaxConnections,
             b"maxContacts" => Property::MaxContacts,
             b"maxCpuCycles" => Property::MaxCpuCycles,
+            b"maxCrlSize" => Property::MaxCrlSize,
             b"maxDelay" => Property::MaxDelay,
             b"maxDepth" => Property::MaxDepth,
             b"maxDuration" => Property::MaxDuration,
@@ -2255,6 +2332,7 @@ impl EnumImpl for Property {
             b"messages" => Property::Messages,
             b"messagesLarge" => Property::MessagesLarge,
             b"messagesLargeTtl" => Property::MessagesLargeTtl,
+            b"method" => Property::Method,
             b"metrics" => Property::Metrics,
             b"metricsPolicy" => Property::MetricsPolicy,
             b"minAccountSize" => Property::MinAccountSize,
@@ -2276,7 +2354,14 @@ impl EnumImpl for Property {
             b"mxHosts" => Property::MxHosts,
             b"name" => Property::Name,
             b"namespace" => Property::Namespace,
+            b"negativeCacheTtl" => Property::NegativeCacheTtl,
             b"negativeTtl" => Property::NegativeTtl,
+            b"nextCapabilities" => Property::NextCapabilities,
+            b"nextCheckAt" => Property::NextCheckAt,
+            b"nextExpiresAt" => Property::NextExpiresAt,
+            b"nextFingerprint" => Property::NextFingerprint,
+            b"nextKey" => Property::NextKey,
+            b"nextKeyType" => Property::NextKeyType,
             b"nextNotify" => Property::NextNotify,
             b"nextRetry" => Property::NextRetry,
             b"nextTransitionAt" => Property::NextTransitionAt,
@@ -2293,6 +2378,7 @@ impl EnumImpl for Property {
             b"numReplicas" => Property::NumReplicas,
             b"numShards" => Property::NumShards,
             b"oauthClientId" => Property::OauthClientId,
+            b"oauthScopes" => Property::OauthScopes,
             b"objectType" => Property::ObjectType,
             b"onSuccessRenewCertificate" => Property::OnSuccessRenewCertificate,
             b"opaqueTokenValidation" => Property::OpaqueTokenValidation,
@@ -2326,6 +2412,7 @@ impl EnumImpl for Property {
             b"period" => Property::Period,
             b"permissions" => Property::Permissions,
             b"pingInterval" => Property::PingInterval,
+            b"pinned" => Property::Pinned,
             b"pipelining" => Property::Pipelining,
             b"policies" => Property::Policies,
             b"policyAdkim" => Property::PolicyAdkim,
@@ -2497,6 +2584,9 @@ impl EnumImpl for Property {
             b"skipAudienceValidation" => Property::SkipAudienceValidation,
             b"skipDeploy" => Property::SkipDeploy,
             b"skipFirst" => Property::SkipFirst,
+            b"smimeCiphers" => Property::SmimeCiphers,
+            b"smimeOaep" => Property::SmimeOaep,
+            b"smimeSignedAt" => Property::SmimeSignedAt,
             b"smtpGreeting" => Property::SmtpGreeting,
             b"socketBacklog" => Property::SocketBacklog,
             b"socketNoDelay" => Property::SocketNoDelay,
@@ -2506,8 +2596,10 @@ impl EnumImpl for Property {
             b"socketSendBufferSize" => Property::SocketSendBufferSize,
             b"socketTosV4" => Property::SocketTosV4,
             b"socketTtl" => Property::SocketTtl,
+            b"source" => Property::Source,
             b"sourceIp" => Property::SourceIp,
             b"sourcePort" => Property::SourcePort,
+            b"sourceTimeout" => Property::SourceTimeout,
             b"spamFilterRulesUrl" => Property::SpamFilterRulesUrl,
             b"spamLookup" => Property::SpamLookup,
             b"spfDns" => Property::SpfDns,
@@ -2525,6 +2617,7 @@ impl EnumImpl for Property {
             b"storageAccount" => Property::StorageAccount,
             b"store" => Property::Store,
             b"strategy" => Property::Strategy,
+            b"strictKeyWrapEncoding" => Property::StrictKeyWrapEncoding,
             b"subAddressing" => Property::SubAddressing,
             b"subAuthId" => Property::SubAuthId,
             b"subject" => Property::Subject,
@@ -2571,6 +2664,7 @@ impl EnumImpl for Property {
             b"transactionRetryLimit" => Property::TransactionRetryLimit,
             b"transactionTimeout" => Property::TransactionTimeout,
             b"transferLimit" => Property::TransferLimit,
+            b"trust" => Property::Trust,
             b"trustContacts" => Property::TrustContacts,
             b"trustReplies" => Property::TrustReplies,
             b"tsigAlgorithm" => Property::TsigAlgorithm,
@@ -2584,6 +2678,7 @@ impl EnumImpl for Property {
             b"urlLimit" => Property::UrlLimit,
             b"urlPrefix" => Property::UrlPrefix,
             b"urls" => Property::Urls,
+            b"useBundledRoots" => Property::UseBundledRoots,
             b"usePermissiveCors" => Property::UsePermissiveCors,
             b"useTls" => Property::UseTls,
             b"usedDiskQuota" => Property::UsedDiskQuota,
@@ -2716,6 +2811,7 @@ impl EnumImpl for Property {
             // SPDX-SnippetEnd
             Property::ArrivalDate => "arrivalDate",
             Property::AsnUrls => "asnUrls",
+            Property::AtRestEnable => "atRestEnable",
             Property::AttemptNumber => "attemptNumber",
             Property::Attempts => "attempts",
             Property::AttrClass => "attrClass",
@@ -2735,6 +2831,7 @@ impl EnumImpl for Property {
             Property::AuthSecret => "authSecret",
             Property::AuthUsername => "authUsername",
             Property::AuthenticatedAs => "authenticatedAs",
+            Property::AuthenticatedEncryption => "authenticatedEncryption",
             Property::AuthenticatedTimeout => "authenticatedTimeout",
             Property::AuthenticationResults => "authenticationResults",
             Property::AutoAddInvitations => "autoAddInvitations",
@@ -2752,6 +2849,7 @@ impl EnumImpl for Property {
             Property::BlobSize => "blobSize",
             Property::BlobStore => "blobStore",
             Property::BlockCount => "blockCount",
+            Property::BlockedFingerprints => "blockedFingerprints",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -2776,6 +2874,7 @@ impl EnumImpl for Property {
             Property::CaaIdentities => "caaIdentities",
             Property::CacheSize => "cacheSize",
             Property::Canonicalization => "canonicalization",
+            Property::Capabilities => "capabilities",
             Property::CatchAllAddress => "catchAllAddress",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -2897,6 +2996,7 @@ impl EnumImpl for Property {
             Property::DisableCapabilities => "disableCapabilities",
             Property::DisabledPermissions => "disabledPermissions",
             Property::DiscardAfter => "discardAfter",
+            Property::DiscoveryProxy => "discoveryProxy",
             Property::Disposition => "disposition",
             Property::Dkim2Pass => "dkim2Pass",
             Property::Dkim2Result => "dkim2Result",
@@ -3045,6 +3145,7 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             Property::ExternalId => "externalId",
             // SPDX-SnippetEnd
+            Property::ExternalPublicKeys => "externalPublicKeys",
             Property::ExtraContactInfo => "extraContactInfo",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -3078,8 +3179,10 @@ impl EnumImpl for Property {
             Property::FilterMemberOf => "filterMemberOf",
             Property::FilterRecipient => "filterRecipient",
             Property::Fingerprint => "fingerprint",
+            Property::Fingerprints => "fingerprints",
             Property::FirstFailedAt => "firstFailedAt",
             Property::FirstParty => "firstParty",
+            Property::FirstSeen => "firstSeen",
             Property::Flags => "flags",
             Property::FlagsAction => "flagsAction",
             Property::FlagsProtocol => "flagsProtocol",
@@ -3098,6 +3201,12 @@ impl EnumImpl for Property {
             Property::FromAddress => "fromAddress",
             Property::FromName => "fromName",
             Property::FutureRelease => "futureRelease",
+            Property::GatewayEnable => "gatewayEnable",
+            Property::GatewayEncryptSigned => "gatewayEncryptSigned",
+            Property::GatewayHeaderProtection => "gatewayHeaderProtection",
+            Property::GatewayMethods => "gatewayMethods",
+            Property::GatewayMinTrust => "gatewayMinTrust",
+            Property::GatewayOutbound => "gatewayOutbound",
             Property::GenerateDkimKeys => "generateDkimKeys",
             Property::Generation => "generation",
             Property::Generator => "generator",
@@ -3109,8 +3218,11 @@ impl EnumImpl for Property {
             Property::GroupId => "groupId",
             Property::GroupwareLarge => "groupwareLarge",
             Property::GroupwareLargeTtl => "groupwareLargeTtl",
+            Property::HarvestKeys => "harvestKeys",
             Property::HeaderFrom => "headerFrom",
+            Property::HeaderProtection => "headerProtection",
             Property::Headers => "headers",
+            Property::HkpServers => "hkpServers",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -3236,15 +3348,20 @@ impl EnumImpl for Property {
             Property::Key => "key",
             Property::KeyName => "keyName",
             Property::KeyPrefix => "keyPrefix",
+            Property::KeyRefreshInterval => "keyRefreshInterval",
+            Property::KeyType => "keyType",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             Property::KeyValues => "keyValues",
             // SPDX-SnippetEnd
+            Property::Kind => "kind",
             Property::L1Ratio => "l1Ratio",
             Property::L2Ratio => "l2Ratio",
+            Property::LastChecked => "lastChecked",
             Property::LastRenewal => "lastRenewal",
+            Property::LastSeen => "lastSeen",
             Property::LastUsedAt => "lastUsedAt",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -3324,6 +3441,7 @@ impl EnumImpl for Property {
             Property::MaxConnections => "maxConnections",
             Property::MaxContacts => "maxContacts",
             Property::MaxCpuCycles => "maxCpuCycles",
+            Property::MaxCrlSize => "maxCrlSize",
             Property::MaxDelay => "maxDelay",
             Property::MaxDepth => "maxDepth",
             Property::MaxDuration => "maxDuration",
@@ -3451,6 +3569,7 @@ impl EnumImpl for Property {
             Property::Messages => "messages",
             Property::MessagesLarge => "messagesLarge",
             Property::MessagesLargeTtl => "messagesLargeTtl",
+            Property::Method => "method",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -3496,7 +3615,14 @@ impl EnumImpl for Property {
             Property::MxHosts => "mxHosts",
             Property::Name => "name",
             Property::Namespace => "namespace",
+            Property::NegativeCacheTtl => "negativeCacheTtl",
             Property::NegativeTtl => "negativeTtl",
+            Property::NextCapabilities => "nextCapabilities",
+            Property::NextCheckAt => "nextCheckAt",
+            Property::NextExpiresAt => "nextExpiresAt",
+            Property::NextFingerprint => "nextFingerprint",
+            Property::NextKey => "nextKey",
+            Property::NextKeyType => "nextKeyType",
             Property::NextNotify => "nextNotify",
             Property::NextRetry => "nextRetry",
             Property::NextTransitionAt => "nextTransitionAt",
@@ -3513,6 +3639,7 @@ impl EnumImpl for Property {
             Property::NumReplicas => "numReplicas",
             Property::NumShards => "numShards",
             Property::OauthClientId => "oauthClientId",
+            Property::OauthScopes => "oauthScopes",
             Property::ObjectType => "objectType",
             Property::OnSuccessRenewCertificate => "onSuccessRenewCertificate",
             Property::OpaqueTokenValidation => "opaqueTokenValidation",
@@ -3546,6 +3673,7 @@ impl EnumImpl for Property {
             Property::Period => "period",
             Property::Permissions => "permissions",
             Property::PingInterval => "pingInterval",
+            Property::Pinned => "pinned",
             Property::Pipelining => "pipelining",
             Property::Policies => "policies",
             Property::PolicyAdkim => "policyAdkim",
@@ -3747,6 +3875,9 @@ impl EnumImpl for Property {
             Property::SkipAudienceValidation => "skipAudienceValidation",
             Property::SkipDeploy => "skipDeploy",
             Property::SkipFirst => "skipFirst",
+            Property::SmimeCiphers => "smimeCiphers",
+            Property::SmimeOaep => "smimeOaep",
+            Property::SmimeSignedAt => "smimeSignedAt",
             Property::SmtpGreeting => "smtpGreeting",
             Property::SocketBacklog => "socketBacklog",
             Property::SocketNoDelay => "socketNoDelay",
@@ -3756,8 +3887,10 @@ impl EnumImpl for Property {
             Property::SocketSendBufferSize => "socketSendBufferSize",
             Property::SocketTosV4 => "socketTosV4",
             Property::SocketTtl => "socketTtl",
+            Property::Source => "source",
             Property::SourceIp => "sourceIp",
             Property::SourcePort => "sourcePort",
+            Property::SourceTimeout => "sourceTimeout",
             Property::SpamFilterRulesUrl => "spamFilterRulesUrl",
             Property::SpamLookup => "spamLookup",
             Property::SpfDns => "spfDns",
@@ -3787,6 +3920,7 @@ impl EnumImpl for Property {
             Property::Stores => "stores",
             // SPDX-SnippetEnd
             Property::Strategy => "strategy",
+            Property::StrictKeyWrapEncoding => "strictKeyWrapEncoding",
             Property::SubAddressing => "subAddressing",
             Property::SubAuthId => "subAuthId",
             Property::Subject => "subject",
@@ -3871,8 +4005,15 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             Property::TrimQuotes => "trimQuotes",
             // SPDX-SnippetEnd
+            Property::Trust => "trust",
             Property::TrustContacts => "trustContacts",
             Property::TrustReplies => "trustReplies",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            Property::TrustedProvider => "trustedProvider",
+            // SPDX-SnippetEnd
             Property::TsigAlgorithm => "tsigAlgorithm",
             Property::Ttl => "ttl",
             // SPDX-SnippetBegin
@@ -3896,6 +4037,7 @@ impl EnumImpl for Property {
             Property::UrlLimit => "urlLimit",
             Property::UrlPrefix => "urlPrefix",
             Property::Urls => "urls",
+            Property::UseBundledRoots => "useBundledRoots",
             Property::UsePermissiveCors => "usePermissiveCors",
             Property::UseTls => "useTls",
             Property::UsedDiskQuota => "usedDiskQuota",
@@ -4047,6 +4189,7 @@ impl EnumImpl for Property {
             // SPDX-SnippetEnd
             82 => Some(Property::ArrivalDate),
             116 => Some(Property::AsnUrls),
+            1017 => Some(Property::AtRestEnable),
             971 => Some(Property::AttemptNumber),
             348 => Some(Property::Attempts),
             559 => Some(Property::AttrClass),
@@ -4066,6 +4209,7 @@ impl EnumImpl for Property {
             597 => Some(Property::AuthSecret),
             598 => Some(Property::AuthUsername),
             882 => Some(Property::AuthenticatedAs),
+            1034 => Some(Property::AuthenticatedEncryption),
             507 => Some(Property::AuthenticatedTimeout),
             83 => Some(Property::AuthenticationResults),
             209 => Some(Property::AutoAddInvitations),
@@ -4083,6 +4227,7 @@ impl EnumImpl for Property {
             763 => Some(Property::BlobSize),
             153 => Some(Property::BlobStore),
             901 => Some(Property::BlockCount),
+            1052 => Some(Property::BlockedFingerprints),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -4107,6 +4252,7 @@ impl EnumImpl for Property {
             19 => Some(Property::CaaIdentities),
             766 => Some(Property::CacheSize),
             254 => Some(Property::Canonicalization),
+            1039 => Some(Property::Capabilities),
             417 => Some(Property::CatchAllAddress),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -4228,6 +4374,7 @@ impl EnumImpl for Property {
             823 => Some(Property::DisableCapabilities),
             732 => Some(Property::DisabledPermissions),
             1010 => Some(Property::DiscardAfter),
+            1026 => Some(Property::DiscoveryProxy),
             890 => Some(Property::Disposition),
             336 => Some(Property::Dkim2Pass),
             335 => Some(Property::Dkim2Result),
@@ -4376,6 +4523,7 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             472 => Some(Property::ExternalId),
             // SPDX-SnippetEnd
+            1016 => Some(Property::ExternalPublicKeys),
             283 => Some(Property::ExtraContactInfo),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -4409,8 +4557,10 @@ impl EnumImpl for Property {
             558 => Some(Property::FilterMemberOf),
             557 => Some(Property::FilterRecipient),
             395 => Some(Property::Fingerprint),
+            1055 => Some(Property::Fingerprints),
             972 => Some(Property::FirstFailedAt),
             697 => Some(Property::FirstParty),
+            1043 => Some(Property::FirstSeen),
             263 => Some(Property::Flags),
             632 => Some(Property::FlagsAction),
             633 => Some(Property::FlagsProtocol),
@@ -4429,6 +4579,12 @@ impl EnumImpl for Property {
             53 => Some(Property::FromAddress),
             54 => Some(Property::FromName),
             618 => Some(Property::FutureRelease),
+            1018 => Some(Property::GatewayEnable),
+            1023 => Some(Property::GatewayEncryptSigned),
+            1022 => Some(Property::GatewayHeaderProtection),
+            1021 => Some(Property::GatewayMethods),
+            1020 => Some(Property::GatewayMinTrust),
+            1019 => Some(Property::GatewayOutbound),
             151 => Some(Property::GenerateDkimKeys),
             703 => Some(Property::Generation),
             298 => Some(Property::Generator),
@@ -4440,8 +4596,11 @@ impl EnumImpl for Property {
             548 => Some(Property::GroupId),
             175 => Some(Property::GroupwareLarge),
             176 => Some(Property::GroupwareLargeTtl),
+            1024 => Some(Property::HarvestKeys),
             308 => Some(Property::HeaderFrom),
+            1032 => Some(Property::HeaderProtection),
             107 => Some(Property::Headers),
+            1025 => Some(Property::HkpServers),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -4567,15 +4726,20 @@ impl EnumImpl for Property {
             375 => Some(Property::Key),
             406 => Some(Property::KeyName),
             141 => Some(Property::KeyPrefix),
+            1028 => Some(Property::KeyRefreshInterval),
+            1038 => Some(Property::KeyType),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             994 => Some(Property::KeyValues),
             // SPDX-SnippetEnd
+            1037 => Some(Property::Kind),
             467 => Some(Property::L1Ratio),
             468 => Some(Property::L2Ratio),
+            1045 => Some(Property::LastChecked),
             224 => Some(Property::LastRenewal),
+            1044 => Some(Property::LastSeen),
             702 => Some(Property::LastUsedAt),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -4655,6 +4819,7 @@ impl EnumImpl for Property {
             694 => Some(Property::MaxConnections),
             28 => Some(Property::MaxContacts),
             815 => Some(Property::MaxCpuCycles),
+            1031 => Some(Property::MaxCrlSize),
             964 => Some(Property::MaxDelay),
             585 => Some(Property::MaxDepth),
             627 => Some(Property::MaxDuration),
@@ -4782,6 +4947,7 @@ impl EnumImpl for Property {
             172 => Some(Property::Messages),
             173 => Some(Property::MessagesLarge),
             174 => Some(Property::MessagesLargeTtl),
+            1053 => Some(Property::Method),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -4827,7 +4993,14 @@ impl EnumImpl for Property {
             663 => Some(Property::MxHosts),
             36 => Some(Property::Name),
             492 => Some(Property::Namespace),
+            1029 => Some(Property::NegativeCacheTtl),
             187 => Some(Property::NegativeTtl),
+            1050 => Some(Property::NextCapabilities),
+            1046 => Some(Property::NextCheckAt),
+            1051 => Some(Property::NextExpiresAt),
+            1049 => Some(Property::NextFingerprint),
+            1047 => Some(Property::NextKey),
+            1048 => Some(Property::NextKeyType),
             736 => Some(Property::NextNotify),
             517 => Some(Property::NextRetry),
             261 => Some(Property::NextTransitionAt),
@@ -4844,6 +5017,7 @@ impl EnumImpl for Property {
             422 => Some(Property::NumReplicas),
             423 => Some(Property::NumShards),
             68 => Some(Property::OauthClientId),
+            1015 => Some(Property::OauthScopes),
             967 => Some(Property::ObjectType),
             955 => Some(Property::OnSuccessRenewCertificate),
             711 => Some(Property::OpaqueTokenValidation),
@@ -4877,6 +5051,7 @@ impl EnumImpl for Property {
             748 => Some(Property::Period),
             62 => Some(Property::Permissions),
             676 => Some(Property::PingInterval),
+            1033 => Some(Property::Pinned),
             621 => Some(Property::Pipelining),
             987 => Some(Property::Policies),
             290 => Some(Property::PolicyAdkim),
@@ -5078,6 +5253,9 @@ impl EnumImpl for Property {
             716 => Some(Property::SkipAudienceValidation),
             369 => Some(Property::SkipDeploy),
             500 => Some(Property::SkipFirst),
+            1040 => Some(Property::SmimeCiphers),
+            1041 => Some(Property::SmimeOaep),
+            1042 => Some(Property::SmimeSignedAt),
             647 => Some(Property::SmtpGreeting),
             683 => Some(Property::SocketBacklog),
             684 => Some(Property::SocketNoDelay),
@@ -5087,8 +5265,10 @@ impl EnumImpl for Property {
             688 => Some(Property::SocketSendBufferSize),
             689 => Some(Property::SocketTosV4),
             690 => Some(Property::SocketTtl),
+            1035 => Some(Property::Source),
             91 => Some(Property::SourceIp),
             92 => Some(Property::SourcePort),
+            1027 => Some(Property::SourceTimeout),
             910 => Some(Property::SpamFilterRulesUrl),
             166 => Some(Property::SpamLookup),
             104 => Some(Property::SpfDns),
@@ -5118,6 +5298,7 @@ impl EnumImpl for Property {
             808 => Some(Property::Stores),
             // SPDX-SnippetEnd
             956 => Some(Property::Strategy),
+            1054 => Some(Property::StrictKeyWrapEncoding),
             418 => Some(Property::SubAddressing),
             371 => Some(Property::SubAuthId),
             55 => Some(Property::Subject),
@@ -5202,8 +5383,15 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             856 => Some(Property::TrimQuotes),
             // SPDX-SnippetEnd
+            1036 => Some(Property::Trust),
             904 => Some(Property::TrustContacts),
             909 => Some(Property::TrustReplies),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            1056 => Some(Property::TrustedProvider),
+            // SPDX-SnippetEnd
             407 => Some(Property::TsigAlgorithm),
             359 => Some(Property::Ttl),
             // SPDX-SnippetBegin
@@ -5227,6 +5415,7 @@ impl EnumImpl for Property {
             895 => Some(Property::UrlLimit),
             65 => Some(Property::UrlPrefix),
             749 => Some(Property::Urls),
+            1030 => Some(Property::UseBundledRoots),
             477 => Some(Property::UsePermissiveCors),
             353 => Some(Property::UseTls),
             471 => Some(Property::UsedDiskQuota),
@@ -5276,7 +5465,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 1015;
+    const COUNT: usize = 1057;
 }
 
 impl serde::Serialize for Property {
@@ -5352,6 +5541,7 @@ impl ObjectType {
             ObjectType::Domain => Domain::FLAGS,
             ObjectType::DsnReportSettings => DsnReportSettings::FLAGS,
             ObjectType::Email => Email::FLAGS,
+            ObjectType::Encryption => Encryption::FLAGS,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -5359,6 +5549,7 @@ impl ObjectType {
             ObjectType::Enterprise => Enterprise::FLAGS,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => EventTracingLevel::FLAGS,
+            ObjectType::ExternalPublicKey => ExternalPublicKey::FLAGS,
             ObjectType::FileStorage => FileStorage::FLAGS,
             ObjectType::Http => Http::FLAGS,
             ObjectType::HttpForm => HttpForm::FLAGS,
@@ -5428,6 +5619,7 @@ impl ObjectType {
             ObjectType::SieveSystemScript => SieveSystemScript::FLAGS,
             ObjectType::SieveUserInterpreter => SieveUserInterpreter::FLAGS,
             ObjectType::SieveUserScript => SieveUserScript::FLAGS,
+            ObjectType::SmimeTrustAnchor => SmimeTrustAnchor::FLAGS,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -5637,6 +5829,38 @@ impl ObjectType {
                     Property::Name,
                     IndexSchemaType::Unique,
                     IndexSchemaValueType::Keyword,
+                ),
+            ],
+            ObjectType::ExternalPublicKey => vec![
+                IndexSchema::new(
+                    Property::EmailAddress,
+                    IndexSchemaType::Unique,
+                    IndexSchemaValueType::Keyword,
+                ),
+                IndexSchema::new(
+                    Property::ExpiresAt,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Keyword,
+                ),
+                IndexSchema::new(
+                    Property::Fingerprint,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Keyword,
+                ),
+                IndexSchema::new(
+                    Property::Kind,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Enum,
+                ),
+                IndexSchema::new(
+                    Property::NextCheckAt,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Keyword,
+                ),
+                IndexSchema::new(
+                    Property::Status,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Enum,
                 ),
             ],
             ObjectType::MailingList => vec![
@@ -5864,6 +6088,7 @@ impl ObjectType {
             ObjectType::Domain => Permission::SysDomainGet,
             ObjectType::DsnReportSettings => Permission::SysDsnReportSettingsGet,
             ObjectType::Email => Permission::SysEmailGet,
+            ObjectType::Encryption => Permission::SysEncryptionGet,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -5871,6 +6096,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseGet,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelGet,
+            ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyGet,
             ObjectType::FileStorage => Permission::SysFileStorageGet,
             ObjectType::Http => Permission::SysHttpGet,
             ObjectType::HttpForm => Permission::SysHttpFormGet,
@@ -5940,6 +6166,7 @@ impl ObjectType {
             ObjectType::SieveSystemScript => Permission::SysSieveSystemScriptGet,
             ObjectType::SieveUserInterpreter => Permission::SysSieveUserInterpreterGet,
             ObjectType::SieveUserScript => Permission::SysSieveUserScriptGet,
+            ObjectType::SmimeTrustAnchor => Permission::SysSmimeTrustAnchorGet,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6021,6 +6248,7 @@ impl ObjectType {
             ObjectType::DnsServer => Permission::SysDnsServerQuery,
             ObjectType::Domain => Permission::SysDomainQuery,
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelQuery,
+            ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyQuery,
             ObjectType::HttpLookup => Permission::SysHttpLookupQuery,
             ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusQuery,
             ObjectType::Log => Permission::SysLogQuery,
@@ -6057,6 +6285,7 @@ impl ObjectType {
             ObjectType::Role => Permission::SysRoleQuery,
             ObjectType::SieveSystemScript => Permission::SysSieveSystemScriptQuery,
             ObjectType::SieveUserScript => Permission::SysSieveUserScriptQuery,
+            ObjectType::SmimeTrustAnchor => Permission::SysSmimeTrustAnchorQuery,
             ObjectType::SpamDnsblServer => Permission::SysSpamDnsblServerQuery,
             ObjectType::SpamFileExtension => Permission::SysSpamFileExtensionQuery,
             ObjectType::SpamRule => Permission::SysSpamRuleQuery,
@@ -6137,6 +6366,7 @@ impl ObjectType {
             ObjectType::Domain => Permission::SysDomainCreate,
             ObjectType::DsnReportSettings => Permission::SysDsnReportSettingsUpdate,
             ObjectType::Email => Permission::SysEmailUpdate,
+            ObjectType::Encryption => Permission::SysEncryptionUpdate,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6144,6 +6374,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseUpdate,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelCreate,
+            ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyCreate,
             ObjectType::FileStorage => Permission::SysFileStorageUpdate,
             ObjectType::Http => Permission::SysHttpUpdate,
             ObjectType::HttpForm => Permission::SysHttpFormUpdate,
@@ -6213,6 +6444,7 @@ impl ObjectType {
             ObjectType::SieveSystemScript => Permission::SysSieveSystemScriptCreate,
             ObjectType::SieveUserInterpreter => Permission::SysSieveUserInterpreterUpdate,
             ObjectType::SieveUserScript => Permission::SysSieveUserScriptCreate,
+            ObjectType::SmimeTrustAnchor => Permission::SysSmimeTrustAnchorCreate,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6313,6 +6545,7 @@ impl ObjectType {
             ObjectType::Domain => Permission::SysDomainUpdate,
             ObjectType::DsnReportSettings => Permission::SysDsnReportSettingsUpdate,
             ObjectType::Email => Permission::SysEmailUpdate,
+            ObjectType::Encryption => Permission::SysEncryptionUpdate,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6320,6 +6553,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseUpdate,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelUpdate,
+            ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyUpdate,
             ObjectType::FileStorage => Permission::SysFileStorageUpdate,
             ObjectType::Http => Permission::SysHttpUpdate,
             ObjectType::HttpForm => Permission::SysHttpFormUpdate,
@@ -6389,6 +6623,7 @@ impl ObjectType {
             ObjectType::SieveSystemScript => Permission::SysSieveSystemScriptUpdate,
             ObjectType::SieveUserInterpreter => Permission::SysSieveUserInterpreterUpdate,
             ObjectType::SieveUserScript => Permission::SysSieveUserScriptUpdate,
+            ObjectType::SmimeTrustAnchor => Permission::SysSmimeTrustAnchorUpdate,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6489,6 +6724,7 @@ impl ObjectType {
             ObjectType::Domain => Permission::SysDomainDestroy,
             ObjectType::DsnReportSettings => Permission::SysDsnReportSettingsUpdate,
             ObjectType::Email => Permission::SysEmailUpdate,
+            ObjectType::Encryption => Permission::SysEncryptionUpdate,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6496,6 +6732,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseUpdate,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelDestroy,
+            ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyDestroy,
             ObjectType::FileStorage => Permission::SysFileStorageUpdate,
             ObjectType::Http => Permission::SysHttpUpdate,
             ObjectType::HttpForm => Permission::SysHttpFormUpdate,
@@ -6565,6 +6802,7 @@ impl ObjectType {
             ObjectType::SieveSystemScript => Permission::SysSieveSystemScriptDestroy,
             ObjectType::SieveUserInterpreter => Permission::SysSieveUserInterpreterUpdate,
             ObjectType::SieveUserScript => Permission::SysSieveUserScriptDestroy,
+            ObjectType::SmimeTrustAnchor => Permission::SysSmimeTrustAnchorDestroy,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6636,7 +6874,7 @@ impl ObjectInner {
                 DkimSignature::Dkim1RsaSha256(obj) => obj.member_tenant_id,
                 DkimSignature::Dkim2Ed25519Sha256(obj) => obj.member_tenant_id,
                 DkimSignature::Dkim2RsaSha256(obj) => obj.member_tenant_id,
-                DkimSignature::Dkim2MlDsa44Ed25519Sha512(obj) => obj.member_tenant_id,
+                DkimSignature::Dkim2MlDsa44(obj) => obj.member_tenant_id,
             },
             ObjectInner::DmarcExternalReport(obj) => obj.member_tenant_id,
             ObjectInner::DnsServer(inner) => match inner.as_ref() {
@@ -6739,7 +6977,7 @@ impl ObjectInner {
                 DkimSignature::Dkim1RsaSha256(obj) => obj.member_tenant_id = Some(id),
                 DkimSignature::Dkim2Ed25519Sha256(obj) => obj.member_tenant_id = Some(id),
                 DkimSignature::Dkim2RsaSha256(obj) => obj.member_tenant_id = Some(id),
-                DkimSignature::Dkim2MlDsa44Ed25519Sha512(obj) => obj.member_tenant_id = Some(id),
+                DkimSignature::Dkim2MlDsa44(obj) => obj.member_tenant_id = Some(id),
             },
             ObjectInner::DmarcExternalReport(obj) => obj.member_tenant_id = Some(id),
             ObjectInner::DnsServer(inner) => match inner.as_mut() {
@@ -6955,6 +7193,7 @@ impl ObjectInner {
             ObjectInner::Domain(obj) => obj.to_pickled_vec(),
             ObjectInner::DsnReportSettings(obj) => obj.to_pickled_vec(),
             ObjectInner::Email(obj) => obj.to_pickled_vec(),
+            ObjectInner::Encryption(obj) => obj.to_pickled_vec(),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -6962,6 +7201,7 @@ impl ObjectInner {
             ObjectInner::Enterprise(obj) => obj.to_pickled_vec(),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.to_pickled_vec(),
+            ObjectInner::ExternalPublicKey(obj) => obj.to_pickled_vec(),
             ObjectInner::FileStorage(obj) => obj.to_pickled_vec(),
             ObjectInner::Http(obj) => obj.to_pickled_vec(),
             ObjectInner::HttpForm(obj) => obj.to_pickled_vec(),
@@ -7031,6 +7271,7 @@ impl ObjectInner {
             ObjectInner::SieveSystemScript(obj) => obj.to_pickled_vec(),
             ObjectInner::SieveUserInterpreter(obj) => obj.to_pickled_vec(),
             ObjectInner::SieveUserScript(obj) => obj.to_pickled_vec(),
+            ObjectInner::SmimeTrustAnchor(obj) => obj.to_pickled_vec(),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -7196,6 +7437,9 @@ impl ObjectInner {
             ObjectType::Email => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::Email(Box::new(obj)))
             }
+            ObjectType::Encryption => {
+                Pickle::unpickle(stream).map(|obj| ObjectInner::Encryption(Box::new(obj)))
+            }
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -7206,6 +7450,9 @@ impl ObjectInner {
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::EventTracingLevel(Box::new(obj)))
+            }
+            ObjectType::ExternalPublicKey => {
+                Pickle::unpickle(stream).map(|obj| ObjectInner::ExternalPublicKey(Box::new(obj)))
             }
             ObjectType::FileStorage => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::FileStorage(Box::new(obj)))
@@ -7375,6 +7622,9 @@ impl ObjectInner {
             }
             ObjectType::SieveUserScript => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::SieveUserScript(Box::new(obj)))
+            }
+            ObjectType::SmimeTrustAnchor => {
+                Pickle::unpickle(stream).map(|obj| ObjectInner::SmimeTrustAnchor(Box::new(obj)))
             }
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -7577,6 +7827,8 @@ impl ObjectInner {
             ObjectType::Email => {
                 Email::deserialize(deserializer).map(|obj| ObjectInner::Email(Box::new(obj)))
             }
+            ObjectType::Encryption => Encryption::deserialize(deserializer)
+                .map(|obj| ObjectInner::Encryption(Box::new(obj))),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -7586,6 +7838,8 @@ impl ObjectInner {
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => EventTracingLevel::deserialize(deserializer)
                 .map(|obj| ObjectInner::EventTracingLevel(Box::new(obj))),
+            ObjectType::ExternalPublicKey => ExternalPublicKey::deserialize(deserializer)
+                .map(|obj| ObjectInner::ExternalPublicKey(Box::new(obj))),
             ObjectType::FileStorage => FileStorage::deserialize(deserializer)
                 .map(|obj| ObjectInner::FileStorage(Box::new(obj))),
             ObjectType::Http => {
@@ -7724,6 +7978,8 @@ impl ObjectInner {
                 .map(|obj| ObjectInner::SieveUserInterpreter(Box::new(obj))),
             ObjectType::SieveUserScript => SieveUserScript::deserialize(deserializer)
                 .map(|obj| ObjectInner::SieveUserScript(Box::new(obj))),
+            ObjectType::SmimeTrustAnchor => SmimeTrustAnchor::deserialize(deserializer)
+                .map(|obj| ObjectInner::SmimeTrustAnchor(Box::new(obj))),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -7815,6 +8071,7 @@ impl ObjectInner {
             ObjectInner::DkimReportSettings(obj) => Some(obj.expression_ctxs()),
             ObjectInner::DmarcReportSettings(obj) => Some(obj.expression_ctxs()),
             ObjectInner::DsnReportSettings(obj) => Some(obj.expression_ctxs()),
+            ObjectInner::Encryption(obj) => Some(obj.expression_ctxs()),
             ObjectInner::Http(obj) => Some(obj.expression_ctxs()),
             ObjectInner::MtaExtensions(obj) => Some(obj.expression_ctxs()),
             ObjectInner::MtaHook(obj) => Some(obj.expression_ctxs()),
@@ -7903,6 +8160,7 @@ impl Object {
             ObjectInner::Domain(_) => Domain::FLAGS,
             ObjectInner::DsnReportSettings(_) => DsnReportSettings::FLAGS,
             ObjectInner::Email(_) => Email::FLAGS,
+            ObjectInner::Encryption(_) => Encryption::FLAGS,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -7910,6 +8168,7 @@ impl Object {
             ObjectInner::Enterprise(_) => Enterprise::FLAGS,
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(_) => EventTracingLevel::FLAGS,
+            ObjectInner::ExternalPublicKey(_) => ExternalPublicKey::FLAGS,
             ObjectInner::FileStorage(_) => FileStorage::FLAGS,
             ObjectInner::Http(_) => Http::FLAGS,
             ObjectInner::HttpForm(_) => HttpForm::FLAGS,
@@ -7979,6 +8238,7 @@ impl Object {
             ObjectInner::SieveSystemScript(_) => SieveSystemScript::FLAGS,
             ObjectInner::SieveUserInterpreter(_) => SieveUserInterpreter::FLAGS,
             ObjectInner::SieveUserScript(_) => SieveUserScript::FLAGS,
+            ObjectInner::SmimeTrustAnchor(_) => SmimeTrustAnchor::FLAGS,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8079,6 +8339,7 @@ impl Object {
             ObjectInner::Domain(_) => ObjectType::Domain,
             ObjectInner::DsnReportSettings(_) => ObjectType::DsnReportSettings,
             ObjectInner::Email(_) => ObjectType::Email,
+            ObjectInner::Encryption(_) => ObjectType::Encryption,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8086,6 +8347,7 @@ impl Object {
             ObjectInner::Enterprise(_) => ObjectType::Enterprise,
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(_) => ObjectType::EventTracingLevel,
+            ObjectInner::ExternalPublicKey(_) => ObjectType::ExternalPublicKey,
             ObjectInner::FileStorage(_) => ObjectType::FileStorage,
             ObjectInner::Http(_) => ObjectType::Http,
             ObjectInner::HttpForm(_) => ObjectType::HttpForm,
@@ -8155,6 +8417,7 @@ impl Object {
             ObjectInner::SieveSystemScript(_) => ObjectType::SieveSystemScript,
             ObjectInner::SieveUserInterpreter(_) => ObjectType::SieveUserInterpreter,
             ObjectInner::SieveUserScript(_) => ObjectType::SieveUserScript,
+            ObjectInner::SmimeTrustAnchor(_) => ObjectType::SmimeTrustAnchor,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8307,6 +8570,7 @@ impl Object {
             ObjectInner::Domain(obj) => obj.validate(errors),
             ObjectInner::DsnReportSettings(obj) => obj.validate(errors),
             ObjectInner::Email(obj) => obj.validate(errors),
+            ObjectInner::Encryption(obj) => obj.validate(errors),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8314,6 +8578,7 @@ impl Object {
             ObjectInner::Enterprise(obj) => obj.validate(errors),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.validate(errors),
+            ObjectInner::ExternalPublicKey(obj) => obj.validate(errors),
             ObjectInner::FileStorage(obj) => obj.validate(errors),
             ObjectInner::Http(obj) => obj.validate(errors),
             ObjectInner::HttpForm(obj) => obj.validate(errors),
@@ -8383,6 +8648,7 @@ impl Object {
             ObjectInner::SieveSystemScript(obj) => obj.validate(errors),
             ObjectInner::SieveUserInterpreter(obj) => obj.validate(errors),
             ObjectInner::SieveUserScript(obj) => obj.validate(errors),
+            ObjectInner::SmimeTrustAnchor(obj) => obj.validate(errors),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8519,6 +8785,7 @@ impl Object {
             ObjectInner::Domain(obj) => obj.index(i),
             ObjectInner::DsnReportSettings(obj) => obj.index(i),
             ObjectInner::Email(obj) => obj.index(i),
+            ObjectInner::Encryption(obj) => obj.index(i),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8526,6 +8793,7 @@ impl Object {
             ObjectInner::Enterprise(obj) => obj.index(i),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.index(i),
+            ObjectInner::ExternalPublicKey(obj) => obj.index(i),
             ObjectInner::FileStorage(obj) => obj.index(i),
             ObjectInner::Http(obj) => obj.index(i),
             ObjectInner::HttpForm(obj) => obj.index(i),
@@ -8595,6 +8863,7 @@ impl Object {
             ObjectInner::SieveSystemScript(obj) => obj.index(i),
             ObjectInner::SieveUserInterpreter(obj) => obj.index(i),
             ObjectInner::SieveUserScript(obj) => obj.index(i),
+            ObjectInner::SmimeTrustAnchor(obj) => obj.index(i),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8699,6 +8968,7 @@ impl Object {
             ObjectInner::Domain(obj) => obj.patch(pointer, value),
             ObjectInner::DsnReportSettings(obj) => obj.patch(pointer, value),
             ObjectInner::Email(obj) => obj.patch(pointer, value),
+            ObjectInner::Encryption(obj) => obj.patch(pointer, value),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8706,6 +8976,7 @@ impl Object {
             ObjectInner::Enterprise(obj) => obj.patch(pointer, value),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.patch(pointer, value),
+            ObjectInner::ExternalPublicKey(obj) => obj.patch(pointer, value),
             ObjectInner::FileStorage(obj) => obj.patch(pointer, value),
             ObjectInner::Http(obj) => obj.patch(pointer, value),
             ObjectInner::HttpForm(obj) => obj.patch(pointer, value),
@@ -8775,6 +9046,7 @@ impl Object {
             ObjectInner::SieveSystemScript(obj) => obj.patch(pointer, value),
             ObjectInner::SieveUserInterpreter(obj) => obj.patch(pointer, value),
             ObjectInner::SieveUserScript(obj) => obj.patch(pointer, value),
+            ObjectInner::SmimeTrustAnchor(obj) => obj.patch(pointer, value),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8881,6 +9153,7 @@ impl IntoValue for Object {
             ObjectInner::Domain(obj) => (*obj).into_value_with(opts),
             ObjectInner::DsnReportSettings(obj) => (*obj).into_value_with(opts),
             ObjectInner::Email(obj) => (*obj).into_value_with(opts),
+            ObjectInner::Encryption(obj) => (*obj).into_value_with(opts),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -8888,6 +9161,7 @@ impl IntoValue for Object {
             ObjectInner::Enterprise(obj) => (*obj).into_value_with(opts),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => (*obj).into_value_with(opts),
+            ObjectInner::ExternalPublicKey(obj) => (*obj).into_value_with(opts),
             ObjectInner::FileStorage(obj) => (*obj).into_value_with(opts),
             ObjectInner::Http(obj) => (*obj).into_value_with(opts),
             ObjectInner::HttpForm(obj) => (*obj).into_value_with(opts),
@@ -8957,6 +9231,7 @@ impl IntoValue for Object {
             ObjectInner::SieveSystemScript(obj) => (*obj).into_value_with(opts),
             ObjectInner::SieveUserInterpreter(obj) => (*obj).into_value_with(opts),
             ObjectInner::SieveUserScript(obj) => (*obj).into_value_with(opts),
+            ObjectInner::SmimeTrustAnchor(obj) => (*obj).into_value_with(opts),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -9059,6 +9334,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::Domain => ObjectInner::Domain(Box::default()),
             ObjectType::DsnReportSettings => ObjectInner::DsnReportSettings(Box::default()),
             ObjectType::Email => ObjectInner::Email(Box::default()),
+            ObjectType::Encryption => ObjectInner::Encryption(Box::default()),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -9066,6 +9342,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::Enterprise => ObjectInner::Enterprise(Box::default()),
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => ObjectInner::EventTracingLevel(Box::default()),
+            ObjectType::ExternalPublicKey => ObjectInner::ExternalPublicKey(Box::default()),
             ObjectType::FileStorage => ObjectInner::FileStorage(Box::default()),
             ObjectType::Http => ObjectInner::Http(Box::default()),
             ObjectType::HttpForm => ObjectInner::HttpForm(Box::default()),
@@ -9137,6 +9414,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::SieveSystemScript => ObjectInner::SieveSystemScript(Box::default()),
             ObjectType::SieveUserInterpreter => ObjectInner::SieveUserInterpreter(Box::default()),
             ObjectType::SieveUserScript => ObjectInner::SieveUserScript(Box::default()),
+            ObjectType::SmimeTrustAnchor => ObjectInner::SmimeTrustAnchor(Box::default()),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -9799,6 +10077,21 @@ impl From<Object> for Email {
     }
 }
 
+impl From<Encryption> for ObjectInner {
+    fn from(value: Encryption) -> Self {
+        ObjectInner::Encryption(Box::new(value))
+    }
+}
+
+impl From<Object> for Encryption {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::Encryption(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
 // SPDX-License-Identifier: LicenseRef-SEL
@@ -9830,6 +10123,21 @@ impl From<Object> for EventTracingLevel {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::EventTracingLevel(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<ExternalPublicKey> for ObjectInner {
+    fn from(value: ExternalPublicKey) -> Self {
+        ObjectInner::ExternalPublicKey(Box::new(value))
+    }
+}
+
+impl From<Object> for ExternalPublicKey {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::ExternalPublicKey(obj) => *obj,
             _ => unreachable!(),
         }
     }
@@ -10658,6 +10966,21 @@ impl From<Object> for SieveUserScript {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::SieveUserScript(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<SmimeTrustAnchor> for ObjectInner {
+    fn from(value: SmimeTrustAnchor) -> Self {
+        ObjectInner::SmimeTrustAnchor(Box::new(value))
+    }
+}
+
+impl From<Object> for SmimeTrustAnchor {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::SmimeTrustAnchor(obj) => *obj,
             _ => unreachable!(),
         }
     }

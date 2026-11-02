@@ -9,8 +9,9 @@ use super::{
     Recipient, Schedule, eval_strategy,
 };
 use crate::inbound::dkim::{DkimSign, SignedMessage};
-use crate::queue::MessageWrapper;
+use crate::queue::encrypt::{OutboundEncryption, QueueEncryption};
 use crate::queue::quota::QuotaReservation;
+use crate::queue::{FROM_DKIM2_SIGNED, MessageWrapper};
 use ahash::{AHashMap, AHashSet};
 use common::config::smtp::auth::DkimSigners;
 use common::config::smtp::queue::{ArchivedQueueExpiry, QueueName};
@@ -397,11 +398,14 @@ pub(crate) struct QueueParams<'x, 'y> {
     pub raw_message: &'x [u8],
     pub raw_headers: Option<&'x [u8]>,
     pub metadata: Vec<Metadata>,
+    pub encrypted_recipients: Vec<u64>,
+    pub dkim2_signed: bool,
     pub quotas: Vec<QuotaReservation>,
     pub original_raw_message: Option<&'x [u8]>,
     pub original_authenticated_message: Option<&'x AuthenticatedMessage<'x>>,
     pub dkim2_verified: Option<&'x Dkim2Output<'x>>,
     pub exploded: bool,
+    pub dkim1_only: bool,
     pub dkim_signers: Option<Arc<DkimSigners>>,
     pub session_id: u64,
     pub server: &'y Server,
@@ -411,11 +415,40 @@ pub(crate) struct QueueParams<'x, 'y> {
 impl MessageWrapper {
     #[must_use]
     pub(crate) async fn queue<'x, 'y>(mut self, mut params: QueueParams<'x, 'y>) -> QueueOutcome {
+        // Encrypt and sign the copies of recipients with a known key
+        let mut encryption = if params.server.core.email.gateway_outbound_enabled() {
+            match Box::pin(params.server.encrypt_recipients(&self, &params)).await {
+                Ok(encryption) => {
+                    params.encrypted_recipients =
+                        encryption.blobs.iter().map(|blob| blob.rcpt_idx).collect();
+                    encryption
+                }
+                Err(err) => {
+                    trc::error!(
+                        err.details("Failed to prepare encrypted copies.")
+                            .span_id(params.session_id)
+                            .caused_by(trc::location!())
+                    );
+                    return QueueOutcome::Failed;
+                }
+            }
+        } else {
+            QueueEncryption::default()
+        };
+
         // Add DKIM signatures
         let SignedMessage {
             headers: dkim_headers,
+            dkim2_signed,
             stripped_message,
-        } = params.server.sign_message(&mut self, &mut params).await;
+        } = if encryption.covers(self.message.recipients.len()) && !params.signs_dkim2() {
+            SignedMessage::default()
+        } else {
+            params.server.sign_message(&mut self, &mut params).await
+        };
+        if dkim2_signed || encryption.dkim2_signed {
+            self.message.flags |= FROM_DKIM2_SIGNED;
+        }
 
         // Fetch params
         let QueueParams {
@@ -459,6 +492,15 @@ impl MessageWrapper {
             self.message.size = message.len() as u64;
         }
         metadata.extend(quotas.iter().map(QuotaReservation::metadata));
+        let reserved_until = encryption.reserved_until;
+        if !encryption.blobs.is_empty() {
+            metadata.extend(
+                encryption
+                    .blobs
+                    .into_iter()
+                    .map(|blob| Metadata::Blob(Box::new(blob))),
+            );
+        }
         self.message.metadata = metadata.into_boxed_slice();
 
         // Reserve and write blob
@@ -474,6 +516,7 @@ impl MessageWrapper {
             },
             BlobLinkValue::new(blob_size),
         );
+        encryption.pending.link(&mut batch, reserved_until);
         if let Err(err) = server.store().write_batch(&mut batch).await {
             trc::error!(
                 err.details("Failed to write to store.")
@@ -483,7 +526,7 @@ impl MessageWrapper {
 
             return QueueOutcome::Failed;
         }
-        if let Err(err) = server
+        let blobs_written = match server
             .blob_store()
             .put_blob(
                 self.message.blob_hash.as_slice(),
@@ -492,6 +535,10 @@ impl MessageWrapper {
             )
             .await
         {
+            Ok(()) => encryption.pending.put(server).await,
+            Err(err) => Err(err),
+        };
+        if let Err(err) = blobs_written {
             trc::error!(
                 err.details("Failed to write blob.")
                     .span_id(session_id)
@@ -512,8 +559,9 @@ impl MessageWrapper {
         let mut batch = BatchBuilder::new();
 
         // Reserve quotas
+        let queued_bytes = self.message.queued_bytes();
         for quota in &quotas {
-            quota.reserve(&mut batch, self.message.size);
+            quota.reserve(&mut batch, queued_bytes);
         }
 
         let mut events = QueuedEvents::new();
@@ -524,6 +572,9 @@ impl MessageWrapper {
                 due,
                 queue_id: self.queue_id,
             });
+        }
+        if !encryption.rejected.is_empty() {
+            self.reject_recipients(&encryption.rejected);
         }
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -598,6 +649,28 @@ impl MessageWrapper {
         };
         self.message = archiver.into_inner();
 
+        for blob in self.message.recipient_blobs() {
+            batch
+                .clear(BlobOp::Link {
+                    hash: blob.hash.clone(),
+                    to: BlobLink::Temporary {
+                        until: reserved_until,
+                    },
+                })
+                .set(
+                    BlobOp::Link {
+                        hash: blob.hash.clone(),
+                        to: BlobLink::Id { id: self.queue_id },
+                    },
+                    BlobLinkValue::new(blob.size as usize),
+                )
+                .set(
+                    BlobOp::Commit {
+                        hash: blob.hash.clone(),
+                    },
+                    vec![],
+                );
+        }
         batch
             .clear(BlobOp::Link {
                 hash: self.message.blob_hash.clone(),
@@ -818,7 +891,7 @@ impl MessageWrapper {
                                 | Metadata::QueueSize { id, .. } => {
                                     released_quotas.binary_search(id).is_err()
                                 }
-                                Metadata::Headers { .. } | Metadata::Submission { .. } => true,
+                                _ => true,
                             });
                             cur_message.metadata = metadata.into_boxed_slice();
                         }
@@ -886,6 +959,7 @@ impl MessageWrapper {
         // SPDX-SnippetEnd
 
         // Release all quotas
+        let queued_bytes = self.message.queued_bytes();
         for metadata in &self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
@@ -894,8 +968,14 @@ impl MessageWrapper {
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
                         ValueClass::Queue(QueueClass::QuotaSize((*key).into())),
-                        -(self.message.size as i64),
+                        -(queued_bytes as i64),
                     );
+                }
+                Metadata::Blob(blob) => {
+                    batch.clear(BlobOp::Link {
+                        hash: blob.hash.clone(),
+                        to: BlobLink::Id { id: self.queue_id },
+                    });
                 }
                 Metadata::Headers { .. } | Metadata::Submission { .. } => {}
             }
@@ -993,7 +1073,7 @@ impl MessageWrapper {
                             Metadata::QueueCount { id, .. } | Metadata::QueueSize { id, .. } => {
                                 released_quotas.binary_search(id).is_err()
                             }
-                            Metadata::Headers { .. } | Metadata::Submission { .. } => true,
+                            _ => true,
                         });
                         cur_message.metadata = metadata.into_boxed_slice();
                     }
@@ -1041,6 +1121,7 @@ impl MessageWrapper {
         // SPDX-SnippetEnd
 
         self.write_delivery_results(batch);
+        let queued_bytes = self.message.queued_bytes();
         for metadata in self.message.metadata {
             match metadata {
                 Metadata::QueueCount { key, .. } => {
@@ -1049,8 +1130,14 @@ impl MessageWrapper {
                 Metadata::QueueSize { key, .. } => {
                     batch.add(
                         ValueClass::Queue(QueueClass::QuotaSize(key.into())),
-                        -(self.message.size as i64),
+                        -(queued_bytes as i64),
                     );
+                }
+                Metadata::Blob(blob) => {
+                    batch.clear(BlobOp::Link {
+                        hash: blob.hash.clone(),
+                        to: BlobLink::Id { id: self.queue_id },
+                    });
                 }
                 Metadata::Headers { .. } | Metadata::Submission { .. } => {}
             }
@@ -1166,9 +1253,20 @@ impl<'x, 'y> QueueParams<'x, 'y> {
             original_authenticated_message: None,
             dkim2_verified: None,
             exploded: false,
+            dkim1_only: false,
             metadata: Vec::new(),
+            encrypted_recipients: Vec::new(),
+            dkim2_signed: false,
             quotas: Vec::new(),
         }
+    }
+
+    fn signs_dkim2(&self) -> bool {
+        !self.dkim1_only
+            && self
+                .dkim_signers
+                .as_ref()
+                .is_some_and(|signers| signers.dkim2.is_some())
     }
 
     pub fn with_train_spam(mut self, train_spam: Option<(bool, String)>) -> Self {
@@ -1201,6 +1299,11 @@ impl<'x, 'y> QueueParams<'x, 'y> {
 
     pub fn with_dkim_signers(mut self, dkim_signers: Option<Arc<DkimSigners>>) -> Self {
         self.dkim_signers = dkim_signers;
+        self
+    }
+
+    pub fn with_dkim1_only(mut self) -> Self {
+        self.dkim1_only = true;
         self
     }
 

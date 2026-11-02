@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 use utils::{
-    HttpLimitResponse,
+    HttpLimitResponse, error_chain,
     outbound::{OutboundClient, OutboundError, OutboundPolicy, Redirects},
 };
 
@@ -116,7 +116,7 @@ impl From<LogoLoadError> for trc::Error {
             LogoLoadError::Download(err) => trc::ResourceEvent::DownloadExternal
                 .into_err()
                 .details("Failed to download logo")
-                .reason(err),
+                .reason(error_chain(&err)),
         }
     }
 }

@@ -44,9 +44,11 @@ use http_proto::{
     JsonProblemResponse, ToHttpResponse, form_urlencoded, request::fetch_body,
 };
 use hyper::{
-    Method, StatusCode, body,
+    Method, StatusCode,
+    body::{self, Body},
     header::{
-        self, CONTENT_ENCODING, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, X_FRAME_OPTIONS,
+        self, CONNECTION, CONTENT_ENCODING, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST,
+        HeaderValue, X_FRAME_OPTIONS,
     },
     server::conn::http1,
     service::service_fn,
@@ -55,6 +57,7 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use jmap::{
     api::{
         ToJmapHttpResponse,
+        auth::JmapAuthorization,
         event_source::EventSourceHandler,
         request::RequestHandler,
         session::{SessionHandler, allowed_capabilities},
@@ -86,6 +89,26 @@ static LOGIN_PAGE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../resources/html-templates/login.html.min.gz"
 ));
+
+const UI_CSS: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../resources/html-templates/ui.css.min.gz"
+));
+
+const UI_JS: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../resources/html-templates/ui.js.min.gz"
+));
+
+const UI_ASSET_PREFIX: &str = concat!(
+    "ui-",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../resources/html-templates/ui.hash"
+    ))
+);
+
+const _: () = assert!(UI_ASSET_PREFIX.len() == "ui-".len() + 12);
 
 pub trait ParseHttp: Sync + Send {
     fn parse_http_request(
@@ -219,6 +242,8 @@ impl ParseHttp for Server {
                             access_token.assert_allows_oauth_scopes(OAuthScopes::INTEROPERABLE)?;
 
                         if let Some(account_id) = path.next().and_then(|p| Id::from_str(p).ok()) {
+                            access_token.assert_is_member(account_id)?;
+
                             return match fetch_body(
                                 &mut req,
                                 if !access_token.has_permission(Permission::UnlimitedUploads) {
@@ -793,7 +818,23 @@ impl ParseHttp for Server {
             }
             external => {
                 if path.next().is_none() {
-                    if !external.is_empty() {
+                    if let Some((content_type, body)) = external
+                        .strip_prefix(UI_ASSET_PREFIX)
+                        .and_then(|extension| {
+                            hashify::map!(
+                                extension.as_bytes(),
+                                (&'static str, &'static [u8]),
+                                ".css" => ("text/css; charset=utf-8", UI_CSS),
+                                ".js" => ("text/javascript; charset=utf-8", UI_JS),
+                            )
+                        })
+                    {
+                        return Ok(HttpResponse::new(StatusCode::OK)
+                            .with_content_type(*content_type)
+                            .with_header(CONTENT_ENCODING, "gzip")
+                            .with_immutable_cache()
+                            .with_binary_body(*body));
+                    } else if !external.is_empty() {
                         if !self.inner.data.applications.has_prefix(external)
                             && ban_scanned_path(self, req.uri().path(), &session).await?
                         {
@@ -881,123 +922,120 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
 
                 async move {
                     let server = inner.build_server();
+                    let has_body = !req.body().is_end_stream();
 
-                    // Obtain remote IP
-                    let remote_ip = match server
-                        .core
-                        .network
-                        .http
-                        .remote_ip_source
-                        .resolve(req.headers())
-                    {
-                        ClientIp::Peer => {
-                            trc::event!(
-                                Http(trc::HttpEvent::RequestUrl),
-                                SpanId = session.session_id,
-                                Url = req.uri().to_compact_string(),
-                            );
+                    let response = 'response: {
+                        // Obtain remote IP
+                        let remote_ip = match server
+                            .core
+                            .network
+                            .http
+                            .remote_ip_source
+                            .resolve(req.headers())
+                        {
+                            ClientIp::Peer => {
+                                trc::event!(
+                                    Http(trc::HttpEvent::RequestUrl),
+                                    SpanId = session.session_id,
+                                    Url = req.uri().to_compact_string(),
+                                );
 
-                            session.remote_ip
-                        }
-                        ClientIp::Forwarded(forwarded_for) => {
-                            trc::event!(
-                                Http(trc::HttpEvent::RequestUrl),
-                                SpanId = session.session_id,
-                                RemoteIp = forwarded_for,
-                                Url = req.uri().to_compact_string(),
-                            );
+                                session.remote_ip
+                            }
+                            ClientIp::Forwarded(forwarded_for) => {
+                                trc::event!(
+                                    Http(trc::HttpEvent::RequestUrl),
+                                    SpanId = session.session_id,
+                                    RemoteIp = forwarded_for,
+                                    Url = req.uri().to_compact_string(),
+                                );
 
-                            forwarded_for
-                        }
-                        ClientIp::Missing if session.remote_ip.is_loopback() => {
-                            trc::event!(
-                                Http(trc::HttpEvent::RequestUrl),
-                                SpanId = session.session_id,
-                                Url = req.uri().to_compact_string(),
-                            );
+                                forwarded_for
+                            }
+                            ClientIp::Missing if session.remote_ip.is_loopback() => {
+                                trc::event!(
+                                    Http(trc::HttpEvent::RequestUrl),
+                                    SpanId = session.session_id,
+                                    Url = req.uri().to_compact_string(),
+                                );
 
-                            session.remote_ip
-                        }
-                        ClientIp::Missing => {
+                                session.remote_ip
+                            }
+                            ClientIp::Missing => {
+                                trc::event!(
+                                    Http(trc::HttpEvent::XForwardedMissing),
+                                    SpanId = session.session_id,
+                                );
+                                session.remote_ip
+                            }
+                            ClientIp::Invalid => {
+                                trc::event!(
+                                    Http(trc::HttpEvent::XForwardedInvalid),
+                                    ListenerId = instance.id.clone(),
+                                    RemoteIp = session.remote_ip,
+                                    SpanId = session.session_id,
+                                );
+
+                                break 'response JsonProblemResponse(StatusCode::BAD_REQUEST)
+                                    .into_http_response();
+                            }
+                        };
+
+                        // Check if the remote IP has been blocked
+                        if server.is_ip_blocked(remote_ip) {
                             trc::event!(
-                                Http(trc::HttpEvent::XForwardedMissing),
-                                SpanId = session.session_id,
-                            );
-                            session.remote_ip
-                        }
-                        ClientIp::Invalid => {
-                            trc::event!(
-                                Http(trc::HttpEvent::XForwardedInvalid),
+                                Security(trc::SecurityEvent::IpBlocked),
                                 ListenerId = instance.id.clone(),
-                                RemoteIp = session.remote_ip,
+                                RemoteIp = remote_ip,
                                 SpanId = session.session_id,
                             );
 
-                            return Ok::<_, hyper::Error>(
-                                JsonProblemResponse(StatusCode::BAD_REQUEST)
-                                    .into_http_response()
-                                    .build(),
-                            );
+                            break 'response JsonProblemResponse(StatusCode::FORBIDDEN)
+                                .into_http_response();
                         }
-                    };
 
-                    // Check if the remote IP has been blocked
-                    if server.is_ip_blocked(remote_ip) {
-                        trc::event!(
-                            Security(trc::SecurityEvent::IpBlocked),
-                            ListenerId = instance.id.clone(),
-                            RemoteIp = remote_ip,
-                            SpanId = session.session_id,
-                        );
-
-                        return Ok::<_, hyper::Error>(
-                            JsonProblemResponse(StatusCode::FORBIDDEN)
-                                .into_http_response()
-                                .build(),
-                        );
-                    }
-
-                    // Parse HTTP request
-                    let challenge_uri = req.uri().clone();
-                    let challenge_host = req.headers().get(HOST).cloned();
-                    let response = match server
-                        .parse_http_request(
-                            req,
-                            HttpSessionData {
-                                instance,
-                                local_ip: session.local_ip,
-                                local_port: session.local_port,
-                                remote_ip,
-                                remote_port: session.remote_port,
-                                is_tls,
-                                session_id: session.session_id,
-                            },
-                        )
-                        .await
-                    {
-                        Ok(response) => response,
-                        Err(err) => {
-                            let response =
-                                err.into_http_response(AuthChallenge::BearerAndBasic, || {
-                                    resource_metadata_url(
-                                        &server,
-                                        RequestOrigin {
-                                            is_tls,
-                                            authority: challenge_host
-                                                .as_ref()
-                                                .and_then(|host| host.to_str().ok())
-                                                .or_else(|| {
-                                                    challenge_uri
-                                                        .authority()
-                                                        .map(|authority| authority.as_str())
-                                                })
-                                                .unwrap_or_default(),
-                                        },
-                                        challenge_uri.path(),
-                                    )
-                                });
-                            trc::error!(err.span_id(session.session_id));
-                            response
+                        // Parse HTTP request
+                        let challenge_uri = req.uri().clone();
+                        let challenge_host = req.headers().get(HOST).cloned();
+                        match server
+                            .parse_http_request(
+                                req,
+                                HttpSessionData {
+                                    instance,
+                                    local_ip: session.local_ip,
+                                    local_port: session.local_port,
+                                    remote_ip,
+                                    remote_port: session.remote_port,
+                                    is_tls,
+                                    session_id: session.session_id,
+                                },
+                            )
+                            .await
+                        {
+                            Ok(response) => response,
+                            Err(err) => {
+                                let response =
+                                    err.into_http_response(AuthChallenge::BearerAndBasic, || {
+                                        resource_metadata_url(
+                                            &server,
+                                            RequestOrigin {
+                                                is_tls,
+                                                authority: challenge_host
+                                                    .as_ref()
+                                                    .and_then(|host| host.to_str().ok())
+                                                    .or_else(|| {
+                                                        challenge_uri
+                                                            .authority()
+                                                            .map(|authority| authority.as_str())
+                                                    })
+                                                    .unwrap_or_default(),
+                                            },
+                                            challenge_uri.path(),
+                                        )
+                                    });
+                                trc::error!(err.span_id(session.session_id));
+                                response
+                            }
                         }
                     };
 
@@ -1026,6 +1064,12 @@ async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionDat
                         for (header, value) in &server.core.network.http.response_headers {
                             headers.insert(header.clone(), value.clone());
                         }
+                    }
+
+                    if has_body && !response.status().is_success() {
+                        response
+                            .headers_mut()
+                            .insert(CONNECTION, HeaderValue::from_static("close"));
                     }
 
                     Ok::<_, hyper::Error>(response)

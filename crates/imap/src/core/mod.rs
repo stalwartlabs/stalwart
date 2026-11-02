@@ -14,7 +14,7 @@ use common::{
 use email::cache::MessageCacheFetch;
 use imap_proto::{
     Command,
-    protocol::{MailboxObjectId, ObjectId, ProtocolVersion, list::Attribute},
+    protocol::{MailboxObjectId, ObjectId, ProtocolVersion, id::ClientId, list::Attribute},
     receiver::Receiver,
 };
 use std::{
@@ -63,6 +63,7 @@ pub struct Session<T: SessionStream> {
     pub is_utf8: bool,
     pub is_objectid: bool,
     pub is_uidonly: bool,
+    pub client: ClientId,
     pub stream_rx: ReadHalf<T>,
     pub stream_tx: Arc<tokio::sync::Mutex<WriteHalf<T>>>,
     pub in_flight: InFlight,

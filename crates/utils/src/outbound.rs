@@ -5,7 +5,7 @@
  */
 
 use reqwest::{
-    Client, ClientBuilder, Method, RequestBuilder, Url,
+    Client, ClientBuilder, Method, Proxy, RequestBuilder, Url,
     dns::{Addrs, Name, Resolve, Resolving},
     redirect::{Action, Attempt, Policy},
 };
@@ -19,6 +19,7 @@ use url::Host;
 pub enum OutboundPolicy {
     Trusted,
     PublicOnly,
+    PublicSignedData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,9 @@ impl Default for OutboundClient {
 #[derive(Debug, Clone, Copy, Default)]
 struct PublicResolver;
 
+#[cfg(all(stalwart_tests, not(test)))]
+pub static TEST_HTTPS_ORIGIN: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
 impl OutboundPolicy {
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -87,7 +91,7 @@ impl OutboundPolicy {
     pub fn check_url(self, url: &Url) -> Result<(), OutboundError> {
         if self == OutboundPolicy::Trusted {
             Ok(())
-        } else if url.scheme() != "https" {
+        } else if !self.permits_scheme(url.scheme()) {
             Err(OutboundError::InsecureScheme)
         } else if !url.username().is_empty() || url.password().is_some() {
             Err(OutboundError::Credentials)
@@ -98,6 +102,14 @@ impl OutboundPolicy {
                 Some(Host::Ipv6(ip)) => self.check_ip(IpAddr::V6(ip)),
                 None => Err(OutboundError::MissingHost),
             }
+        }
+    }
+
+    fn permits_scheme(self, scheme: &str) -> bool {
+        match self {
+            OutboundPolicy::Trusted => true,
+            OutboundPolicy::PublicOnly => scheme == "https",
+            OutboundPolicy::PublicSignedData => matches!(scheme, "https" | "http"),
         }
     }
 
@@ -167,9 +179,29 @@ impl OutboundClient {
         let builder = builder.redirect(redirects.into_policy(policy));
         let builder = match policy {
             OutboundPolicy::Trusted => builder,
-            OutboundPolicy::PublicOnly => builder.no_proxy().dns_resolver(PublicResolver),
+            OutboundPolicy::PublicOnly | OutboundPolicy::PublicSignedData => {
+                builder.no_proxy().dns_resolver(PublicResolver)
+            }
         };
+        Self::build(builder, policy)
+    }
 
+    pub fn with_proxy(
+        builder: ClientBuilder,
+        policy: OutboundPolicy,
+        redirects: Redirects,
+        proxy: Proxy,
+    ) -> Self {
+        Self::build(
+            builder
+                .redirect(redirects.into_policy(policy))
+                .no_proxy()
+                .proxy(proxy),
+            policy,
+        )
+    }
+
+    fn build(builder: ClientBuilder, policy: OutboundPolicy) -> Self {
         let client = builder
             .build()
             .map_err(|err| {
@@ -185,6 +217,20 @@ impl OutboundClient {
     }
 
     pub fn request(&self, method: Method, url: &str) -> Result<RequestBuilder, OutboundError> {
+        #[cfg(all(stalwart_tests, not(test)))]
+        if let Ok(origin) = TEST_HTTPS_ORIGIN.read()
+            && let Some(origin) = origin.as_deref()
+            && self
+                .policy
+                .parse_url(url)
+                .is_ok_and(|url| url.host_str() != Some("localhost"))
+            && let Some(path) = url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))
+        {
+            return self.request_url(method, Url::parse(&format!("{origin}/{path}")).unwrap());
+        }
+
         self.request_url(method, self.policy.parse_url(url)?)
     }
 
@@ -223,7 +269,7 @@ impl OutboundError {
     pub fn as_str(&self) -> &'static str {
         match self {
             OutboundError::InvalidUrl => "Invalid URL",
-            OutboundError::InsecureScheme => "URL must use the https scheme",
+            OutboundError::InsecureScheme => "URL scheme is not permitted",
             OutboundError::Credentials => "URL must not contain credentials",
             OutboundError::MissingHost => "URL must contain a host",
             OutboundError::NonPublicHost => "Host is not a public domain name",

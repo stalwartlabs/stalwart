@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::crypto::{EncryptMessage, EncryptMessageError};
 use crate::{
     mailbox::{INBOX_ID, JUNK_ID, TRASH_ID},
     message::{
-        crypto::EncryptionFlags,
         delivery::SenderAuthentication,
         index::IndexMessage,
         ingest_metadata::IngestMetadata,
@@ -18,10 +16,12 @@ use crate::{
     },
 };
 use common::{
-    MAX_RECEIVED_AT, MessageUid, Server, auth::AccessToken,
-    storage::metadata::PrivateMetadataCommit,
+    MAX_RECEIVED_AT, MessageUid, Server,
+    auth::AccessToken,
+    storage::{encryption::EncryptFailure, metadata::PrivateMetadataCommit},
 };
 use compact_str::{CompactString, ToCompactString};
+use crypto::Protection;
 use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError},
     scheduling::{ItipError, ItipMessages},
@@ -87,6 +87,7 @@ pub struct PendingEmail {
     thread_recheck: Option<PendingThread>,
     private_commit: PrivateMetadataCommit,
     event: MessageIngestEvent,
+    encrypted: bool,
     mailbox_ids: Vec<u32>,
     message_id: Option<String>,
     session_id: u64,
@@ -96,7 +97,7 @@ pub struct PendingEmail {
 pub struct IngestEmail<'x> {
     pub raw_message: &'x [u8],
     pub blob_hash: Option<&'x BlobHash>,
-    pub message: Option<Message<'x>>,
+    pub message: Option<&'x Message<'x>>,
     pub access_token: &'x AccessToken,
     pub mailbox_ids: Vec<u32>,
     pub keywords: Vec<Keyword>,
@@ -181,13 +182,22 @@ pub struct SpamSample {
     from: String,
     subject: String,
     is_spam: bool,
+    encrypted: bool,
 }
 
 impl SpamSample {
     pub fn from_metadata(bytes: &[u8], is_spam: bool) -> trc::Result<Self> {
         let structure = MetadataStructure::deserialize(bytes)?;
         let metadata = structure.unarchive().caused_by(trc::location!())?;
-        let envelope = metadata.root().envelope();
+        let root = metadata.root();
+        let envelope = root.envelope();
+        let encrypted = root.root_part().content_type().is_some_and(|ct| {
+            crypto::is_encrypted_media(
+                ct.ctype(),
+                ct.subtype().unwrap_or_default(),
+                ct.attribute("smime-type"),
+            )
+        });
         Ok(SpamSample {
             hash: metadata.blob_hash(),
             size: metadata.blob_size() as u64,
@@ -199,6 +209,7 @@ impl SpamSample {
                 .to_string(),
             subject: thread_name(envelope.subject().unwrap_or_default()).to_string(),
             is_spam,
+            encrypted,
         })
     }
 }
@@ -317,14 +328,14 @@ impl EmailIngest for Server {
 
         // Parse message
         let mut raw_message = Cow::from(params.raw_message);
-        let mut message = params.message.take().ok_or_else(|| {
+        let mut message = params.message.ok_or_else(|| {
             trc::EventType::MessageIngest(trc::MessageIngestEvent::Error)
                 .ctx(trc::Key::Code, 550)
                 .ctx(trc::Key::Reason, "Failed to parse e-mail message.")
         })?;
 
         // Obtain message references and thread name
-        let fields = ThreadFields::scan(&message);
+        let fields = ThreadFields::scan(message);
         let mut thread_result = self
             .find_thread_id(account_id, fields.subject, &fields.message_ids)
             .await?;
@@ -606,26 +617,23 @@ impl EmailIngest for Server {
             _ => false,
         };
 
-        // Encrypt message
-        let do_encrypt = match params.source {
-            IngestSource::Jmap { .. } if params.keywords.contains(&Keyword::Draft) => false,
-            IngestSource::Jmap { .. } | IngestSource::Imap { .. } => {
-                self.core.email.encrypt
-                    && self.core.email.encrypt_append
-                    && account.flags.encrypt_on_append()
-            }
-            IngestSource::Smtp { .. } => self.core.email.encrypt,
-            IngestSource::Restore => false,
+        let encryption = match params.source {
+            IngestSource::Jmap { .. } if params.keywords.contains(&Keyword::Draft) => None,
+            IngestSource::Jmap { .. } | IngestSource::Imap { .. } => account
+                .encryption()
+                .filter(|e| self.core.email.encrypt && e.encrypt_on_append),
+            IngestSource::Smtp { .. } => account.encryption().filter(|_| self.core.email.encrypt),
+            IngestSource::Restore => None,
         };
-        let is_encrypted = if do_encrypt
-            && !message.is_encrypted()
-            && let Some(encrypt_keys) = account.encryption_key()
+        let encrypted_message;
+        let is_encrypted = if let Some(encryption) = encryption
+            && crypto::protection(message) != Protection::Encrypted
         {
-            match message.encrypt(encrypt_keys, account.flags).await {
-                Ok(new_raw_message) => {
-                    raw_message = Cow::from(new_raw_message);
+            match encryption.encrypt(message, now()) {
+                Ok(encrypted) => {
+                    raw_message = Cow::from(encrypted.message);
                     raw_message_len = raw_message.len() as u64;
-                    message = MessageParser::default()
+                    encrypted_message = MessageParser::default()
                         .parse(raw_message.as_ref())
                         .ok_or_else(|| {
                             trc::EventType::MessageIngest(trc::MessageIngestEvent::Error)
@@ -635,23 +643,30 @@ impl EmailIngest for Server {
                                     "Failed to parse encrypted e-mail message.",
                                 )
                         })?;
+                    message = &encrypted_message;
 
-                    // Disable spam training if requested
-                    if !account.flags.can_train_spam_filter() {
+                    if !encryption.train_spam {
                         train_spam = None;
                     }
 
                     true
                 }
-                Err(EncryptMessageError::Error(err)) => {
+                Err(EncryptFailure::Skipped(reason)) => {
+                    trc::event!(
+                        Encryption(trc::EncryptionEvent::EncryptionSkipped),
+                        AccountId = account_id,
+                        Reason = reason.as_str(),
+                    );
+                    false
+                }
+                Err(EncryptFailure::Error(err)) => {
                     trc::bail!(
                         trc::StoreEvent::CryptoError
                             .into_err()
                             .caused_by(trc::location!())
-                            .reason(err)
+                            .ctx(trc::Key::Reason, err.as_str())
                     );
                 }
-                _ => unreachable!(),
             }
         } else {
             false
@@ -670,6 +685,24 @@ impl EmailIngest for Server {
             .await
             .map(|(hash, hold)| (hash, Some(hold)))
             .caused_by(trc::location!())?
+        };
+
+        let sample_blob = if train_spam.is_some()
+            && is_encrypted
+            && params.blob_hash.is_none()
+            && self.core.spam.classifier.is_some()
+        {
+            self.hold_blob(
+                account_id,
+                BlobHash::generate(params.raw_message),
+                params.raw_message,
+                60,
+            )
+            .await
+            .map(Some)
+            .caused_by(trc::location!())?
+        } else {
+            None
         };
 
         // Build write batch
@@ -737,8 +770,13 @@ impl EmailIngest for Server {
             self.add_spam_sample(
                 account_id,
                 batch,
-                params.blob_hash.unwrap_or(&blob_hash).clone(),
-                if params.blob_hash.is_some() {
+                sample_blob
+                    .as_ref()
+                    .map(|(hash, _)| hash)
+                    .or(params.blob_hash)
+                    .unwrap_or(&blob_hash)
+                    .clone(),
+                if sample_blob.is_some() || params.blob_hash.is_some() {
                     params.raw_message.len()
                 } else {
                     raw_message.len()
@@ -768,12 +806,12 @@ impl EmailIngest for Server {
         // SPDX-License-Identifier: LicenseRef-SEL
         #[cfg(feature = "enterprise")]
         batch
-            .index_message(tenant_id, &message, &extra_headers, blob_hash.clone(), data)
+            .index_message(tenant_id, message, &extra_headers, blob_hash.clone(), data)
             .caused_by(trc::location!())?;
         // SPDX-SnippetEnd
         #[cfg(not(feature = "enterprise"))]
         batch
-            .index_message(&message, &extra_headers, blob_hash.clone(), data)
+            .index_message(message, &extra_headers, blob_hash.clone(), data)
             .caused_by(trc::location!())?;
         batch
             .set(
@@ -805,6 +843,9 @@ impl EmailIngest for Server {
 
         if let Some(blob_hold) = blob_hold {
             blob_hold.release(batch);
+        }
+        if let Some((_, sample_hold)) = sample_blob {
+            sample_hold.release(batch);
         }
 
         // Merge threads if necessary
@@ -858,6 +899,7 @@ impl EmailIngest for Server {
                 IngestSource::Jmap { .. } | IngestSource::Restore => MessageIngestEvent::JmapAppend,
                 IngestSource::Imap { .. } => MessageIngestEvent::ImapAppend,
             },
+            encrypted: is_encrypted,
             mailbox_ids: std::mem::take(&mut params.mailbox_ids),
             message_id,
             session_id: params.session_id,
@@ -880,6 +922,7 @@ impl EmailIngest for Server {
             thread_recheck,
             private_commit,
             event,
+            encrypted,
             mailbox_ids,
             message_id,
             session_id,
@@ -910,6 +953,15 @@ impl EmailIngest for Server {
             Size = size,
             Elapsed = start_time.elapsed(),
         );
+
+        if encrypted {
+            trc::event!(
+                Encryption(trc::EncryptionEvent::AtRestEncrypted),
+                SpanId = session_id,
+                AccountId = account_id,
+                DocumentId = document_id,
+            );
+        }
 
         IngestedEmail {
             document_id,
@@ -1048,7 +1100,7 @@ impl EmailIngest for Server {
             prepared,
         } = samples;
         batch.with_account_id(account_id);
-        for sample in prepared {
+        for sample in prepared.into_iter().filter(|sample| !sample.encrypted) {
             self.add_spam_sample(
                 account_id,
                 batch,
@@ -1068,18 +1120,20 @@ impl EmailIngest for Server {
 
         self.message_metadata(account_id, &documents, |document_id, bytes| {
             let sample = SpamSample::from_metadata(bytes, spam.contains(document_id))?;
-            self.add_spam_sample(
-                account_id,
-                batch,
-                sample.hash,
-                sample.size,
-                sample.from,
-                sample.subject,
-                sample.is_spam,
-                true,
-                span_id,
-            );
-            batch.commit_point();
+            if !sample.encrypted {
+                self.add_spam_sample(
+                    account_id,
+                    batch,
+                    sample.hash,
+                    sample.size,
+                    sample.from,
+                    sample.subject,
+                    sample.is_spam,
+                    true,
+                    span_id,
+                );
+                batch.commit_point();
+            }
             Ok(true)
         })
         .await

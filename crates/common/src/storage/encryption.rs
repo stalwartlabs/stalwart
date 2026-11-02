@@ -4,199 +4,209 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::auth::EncryptionKeys;
+use crypto::{
+    EcdhWrapParameters, EncryptError, EncryptOptions, Encrypted, HeaderProtection, KeyError,
+    ParsedKeys, RecipientSet,
+};
 use encodify::base64::LENIENT;
-use registry::schema::structs::PublicKey;
-use sequoia_openpgp::{Cert, parse::Parse, policy::StandardPolicy, types::KeyFlags};
-use std::{borrow::Cow, str::SplitInclusive};
+use mail_parser::Message;
+use registry::schema::{
+    enums::HeaderProtection as RegistryHeaderProtection,
+    structs::{EncryptionSettings, PublicKey},
+};
+use tokio::runtime::{Handle, RuntimeFlavor};
+use utils::cache::CacheItemWeight;
 
-const P: StandardPolicy<'static> = StandardPolicy::new();
+const ENCRYPT_INLINE_MAX: usize = 512 * 1024;
 
-const ARMOR_BEGIN: &str = "-----BEGIN ";
-const ARMOR_END: &str = "-----END";
-const ARMOR_DASHES: &str = "-----";
+#[derive(Debug)]
+pub struct AccountEncryption {
+    pub keys: EncryptionKeys,
+    pub options: EncryptOptions,
+    pub train_spam: bool,
+    pub encrypt_on_append: bool,
+}
+
+#[derive(Debug)]
+pub enum EncryptionKeys {
+    Usable {
+        recipients: RecipientSet,
+        expires_at: Option<u64>,
+    },
+    Unusable(UnusableReason),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EncryptionMethod {
-    PGP,
-    SMIME,
+pub enum UnusableReason {
+    KeyNotFound,
+    Invalid(KeyError),
 }
 
-pub struct EncryptionParams {
-    pub certs: EncryptionKeys,
-    pub method: EncryptionMethod,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    Expired,
+    Unusable(UnusableReason),
 }
 
-pub fn parse_public_key(pk: &PublicKey) -> Result<Option<EncryptionParams>, Cow<'static, str>> {
-    let mut method = None;
-    let mut certs: Vec<Box<[u8]>> = Vec::new();
-    let mut has_usable_pgp_key = false;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncryptFailure {
+    Skipped(SkipReason),
+    Error(EncryptError),
+}
 
-    for block in ArmoredBlocks::new(&pk.key) {
-        let block = block?;
-        if contains_ignore_ascii_case(block.label, "PRIVATE") {
-            return Err("Private keys cannot be used as public keys".into());
+pub trait RecipientEncrypt {
+    fn encrypt_on_runtime(
+        &self,
+        message: &Message<'_>,
+        options: &EncryptOptions,
+    ) -> Result<Encrypted, EncryptError>;
+}
+
+pub trait PublicKeyParse {
+    fn parse_keys(&self, now: u64) -> Result<ParsedKeys, KeyError>;
+}
+
+pub trait ToCrypto {
+    type Output;
+
+    fn to_crypto(self) -> Self::Output;
+}
+
+impl AccountEncryption {
+    pub fn build(settings: &EncryptionSettings, public_key: Option<&PublicKey>, now: u64) -> Self {
+        let mut options = EncryptOptions {
+            header_protection: settings.header_protection.to_crypto(),
+            ..Default::default()
+        };
+        let keys = match public_key {
+            Some(public_key) => match public_key.parse_keys(now).map_err(UnusableReason::Invalid) {
+                Ok(parsed) => {
+                    options.profile = parsed
+                        .set
+                        .inferred_profile(public_key.authenticated_encryption);
+                    if !public_key.strict_key_wrap_encoding {
+                        options.ecdh_wrap_parameters = EcdhWrapParameters::Null;
+                    }
+                    EncryptionKeys::Usable {
+                        recipients: parsed.set,
+                        expires_at: parsed.expires_at,
+                    }
+                }
+                Err(reason) => EncryptionKeys::Unusable(reason),
+            },
+            None => EncryptionKeys::Unusable(UnusableReason::KeyNotFound),
+        };
+        AccountEncryption {
+            keys,
+            options,
+            train_spam: settings.allow_spam_training,
+            encrypt_on_append: settings.encrypt_on_append,
         }
-        let block_method = if contains_ignore_ascii_case(block.label, "CERTIFICATE") {
-            EncryptionMethod::SMIME
-        } else if contains_ignore_ascii_case(block.label, "PGP") {
-            EncryptionMethod::PGP
+    }
+
+    pub fn recipients(&self, now: u64) -> Result<&RecipientSet, SkipReason> {
+        match &self.keys {
+            EncryptionKeys::Usable {
+                recipients,
+                expires_at,
+            } => {
+                if expires_at.is_none_or(|expires_at| expires_at > now) {
+                    Ok(recipients)
+                } else {
+                    Err(SkipReason::Expired)
+                }
+            }
+            EncryptionKeys::Unusable(UnusableReason::Invalid(KeyError::Expired)) => {
+                Err(SkipReason::Expired)
+            }
+            EncryptionKeys::Unusable(reason) => Err(SkipReason::Unusable(*reason)),
+        }
+    }
+
+    pub fn encrypt(&self, message: &Message<'_>, now: u64) -> Result<Encrypted, EncryptFailure> {
+        self.recipients(now)
+            .map_err(EncryptFailure::Skipped)?
+            .encrypt_on_runtime(message, &self.options)
+            .map_err(EncryptFailure::Error)
+    }
+}
+
+impl RecipientEncrypt for RecipientSet {
+    fn encrypt_on_runtime(
+        &self,
+        message: &Message<'_>,
+        options: &EncryptOptions,
+    ) -> Result<Encrypted, EncryptError> {
+        if message.raw().len() >= ENCRYPT_INLINE_MAX
+            && matches!(
+                Handle::try_current().map(|handle| handle.runtime_flavor()),
+                Ok(RuntimeFlavor::MultiThread)
+            )
+        {
+            tokio::task::block_in_place(|| self.encrypt(message, options))
         } else {
-            continue;
-        };
-
-        match method {
-            Some(method) if method != block_method => {
-                return Err("Cannot mix OpenPGP and S/MIME certificates".into());
-            }
-            _ => method = Some(block_method),
-        }
-
-        match block_method {
-            EncryptionMethod::PGP => {
-                let cert = Cert::from_bytes(block.armored.as_bytes())
-                    .map_err(|err| format!("Failed to decode OpenPGP public key: {err}"))?;
-                if cert.is_tsk() {
-                    return Err("Private keys cannot be used as public keys".into());
-                }
-                has_usable_pgp_key |= has_pgp_keys(&cert);
-                certs.push(block.armored.as_bytes().into());
-            }
-            EncryptionMethod::SMIME => {
-                let cert = LENIENT
-                    .decode(block.body)
-                    .map_err(|_| Cow::from("Failed to decode base64 certificate."))?;
-                let is_complete = rasn::der::decode_with_remainder::<rasn_pkix::Certificate>(&cert)
-                    .map_err(|err| format!("Failed to decode X509 certificate: {err}"))?
-                    .1
-                    .is_empty();
-                if !is_complete {
-                    return Err("Unexpected data after X509 certificate".into());
-                }
-                certs.push(cert.into_boxed_slice());
-            }
-        }
-    }
-
-    match method {
-        Some(EncryptionMethod::PGP) if !has_usable_pgp_key => {
-            Err("Could not find any suitable keys in OpenPGP public key".into())
-        }
-        Some(method) => Ok(Some(EncryptionParams {
-            method,
-            certs: certs.into_boxed_slice(),
-        })),
-        None if pk.key.trim().is_empty() => Ok(None),
-        None => Err("No OpenPGP public key or X.509 certificate found".into()),
-    }
-}
-
-struct ArmoredBlock<'x> {
-    label: &'x str,
-    armored: &'x str,
-    body: &'x str,
-}
-
-struct ArmoredBlocks<'x> {
-    text: &'x str,
-    lines: SplitInclusive<'x, char>,
-    offset: usize,
-}
-
-impl<'x> ArmoredBlocks<'x> {
-    fn new(text: &'x str) -> Self {
-        ArmoredBlocks {
-            text,
-            lines: text.split_inclusive('\n'),
-            offset: 0,
-        }
-    }
-
-    fn next_line(&mut self) -> Option<(usize, &'x str)> {
-        let line = self.lines.next()?;
-        let start = self.offset;
-        self.offset += line.len();
-        Some((start, line))
-    }
-
-    fn fail(
-        &mut self,
-        reason: &'static str,
-    ) -> Option<Result<ArmoredBlock<'x>, Cow<'static, str>>> {
-        self.lines = "".split_inclusive('\n');
-        Some(Err(reason.into()))
-    }
-}
-
-impl<'x> Iterator for ArmoredBlocks<'x> {
-    type Item = Result<ArmoredBlock<'x>, Cow<'static, str>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (block_start, label) = loop {
-            let (line_start, line) = self.next_line()?;
-            let begin = line.trim();
-            if begin.is_empty() {
-                continue;
-            }
-            let Some(label) = begin
-                .strip_prefix(ARMOR_BEGIN)
-                .and_then(|label| label.strip_suffix(ARMOR_DASHES))
-                .filter(|label| !label.is_empty())
-            else {
-                return self.fail("Unexpected text outside of a PEM or OpenPGP armor block");
-            };
-            break (line_start + line.len() - line.trim_start().len(), label);
-        };
-        let body_start = self.offset;
-
-        loop {
-            let Some((line_start, line)) = self.next_line() else {
-                return self.fail("PEM or OpenPGP armor block is missing its END line");
-            };
-            let line = line.trim();
-            if let Some(end_label) = line.strip_prefix(ARMOR_END) {
-                if end_label
-                    .strip_prefix(' ')
-                    .and_then(|end_label| end_label.strip_suffix(ARMOR_DASHES))
-                    != Some(label)
-                {
-                    return self
-                        .fail("PEM or OpenPGP armor END line does not match its BEGIN line");
-                }
-                return match (
-                    self.text.get(block_start..self.offset),
-                    self.text.get(body_start..line_start),
-                ) {
-                    (Some(armored), Some(body)) => Some(Ok(ArmoredBlock {
-                        label,
-                        armored,
-                        body,
-                    })),
-                    _ => self.fail("Invalid PEM or OpenPGP armor block"),
-                };
-            } else if line.starts_with(ARMOR_BEGIN) {
-                return self.fail("PEM or OpenPGP armor block is missing its END line");
-            }
+            self.encrypt(message, options)
         }
     }
 }
 
-fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+impl UnusableReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UnusableReason::KeyNotFound => "KeyNotFound",
+            UnusableReason::Invalid(err) => err.as_str(),
+        }
+    }
 }
 
-fn has_pgp_keys(cert: &Cert) -> bool {
-    cert.keys()
-        .with_policy(&P, None)
-        .supported()
-        .alive()
-        .revoked(false)
-        .key_flags(KeyFlags::empty().set_transport_encryption())
-        .next()
-        .is_some()
+impl SkipReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SkipReason::Expired => "Expired",
+            SkipReason::Unusable(reason) => reason.as_str(),
+        }
+    }
+}
+
+impl CacheItemWeight for AccountEncryption {
+    fn weight(&self) -> u64 {
+        (size_of::<AccountEncryption>()
+            + match &self.keys {
+                EncryptionKeys::Usable { recipients, .. } => recipients.heap_size(),
+                EncryptionKeys::Unusable(_) => 0,
+            }) as u64
+    }
+}
+
+impl PublicKeyParse for PublicKey {
+    fn parse_keys(&self, now: u64) -> Result<ParsedKeys, KeyError> {
+        parse_key_text(&self.key, now)
+    }
+}
+
+pub(crate) fn parse_key_text(key: &str, now: u64) -> Result<ParsedKeys, KeyError> {
+    let key = key.trim_ascii();
+    if !key.starts_with("-----")
+        && let Ok(binary) = LENIENT.decode(key.as_bytes())
+        && !binary.is_empty()
+    {
+        crypto::parse_public_keys(&binary, now)
+    } else {
+        crypto::parse_public_keys(key.as_bytes(), now)
+    }
+}
+
+impl ToCrypto for RegistryHeaderProtection {
+    type Output = HeaderProtection;
+
+    fn to_crypto(self) -> HeaderProtection {
+        match self {
+            RegistryHeaderProtection::None => HeaderProtection::None,
+            RegistryHeaderProtection::NoConfidentiality | RegistryHeaderProtection::Baseline => {
+                HeaderProtection::Full
+            }
+        }
+    }
 }
 
 #[cfg(all(test, stalwart_tests))]

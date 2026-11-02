@@ -47,6 +47,7 @@ use store::{
     write::{BatchBuilder, RegistryClass, ValueClass},
 };
 use trc::{AddContext, OutgoingReportEvent};
+use utils::error_chain;
 
 #[derive(Debug, Clone)]
 pub struct TlsRptOptions {
@@ -248,7 +249,7 @@ impl TlsPayload {
                             OutgoingReport(OutgoingReportEvent::SubmissionError),
                             SpanId = span_id,
                             Url = CompactString::from(uri),
-                            Reason = err.to_compact_string(),
+                            Reason = error_chain(&err),
                             Details = "HTTP submission error"
                         );
                     }

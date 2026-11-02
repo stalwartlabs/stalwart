@@ -370,32 +370,33 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
 
     if bp.registry.count_object(ObjectType::Role).await? == 0 {
         let permissions = DefaultPermissions::default();
-        let mut roles = Vec::with_capacity(4);
-        roles.push(Role {
-            description: "User".into(),
-            enabled_permissions: Map::new(permissions.user),
-            ..Default::default()
-        });
-        roles.push(Role {
-            description: "Group".into(),
-            enabled_permissions: Map::new(permissions.group),
-            ..Default::default()
-        });
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
-        roles.push(Role {
-            description: "Tenant Administrator".into(),
-            enabled_permissions: Map::new(permissions.tenant),
-            ..Default::default()
-        });
-        // SPDX-SnippetEnd
-        roles.push(Role {
-            description: "System Administrator".into(),
-            enabled_permissions: Map::new(permissions.superuser),
-            ..Default::default()
-        });
+        let roles = [
+            Role {
+                description: "User".into(),
+                enabled_permissions: Map::new(permissions.user),
+                ..Default::default()
+            },
+            Role {
+                description: "Group".into(),
+                enabled_permissions: Map::new(permissions.group),
+                ..Default::default()
+            },
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            Role {
+                description: "Tenant Administrator".into(),
+                enabled_permissions: Map::new(permissions.tenant),
+                ..Default::default()
+            },
+            // SPDX-SnippetEnd
+            Role {
+                description: "System Administrator".into(),
+                enabled_permissions: Map::new(permissions.superuser),
+                ..Default::default()
+            },
+        ];
         let num_roles = roles.len();
         let mut role_ids = Vec::with_capacity(num_roles);
 

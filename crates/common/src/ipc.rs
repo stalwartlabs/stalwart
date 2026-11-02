@@ -173,6 +173,7 @@ pub enum CacheInvalidation {
         grant_id: u64,
     },
     ActiveSieveScript(u32),
+    ExternalPublicKey(u32),
 }
 
 #[derive(Debug)]

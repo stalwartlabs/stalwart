@@ -8,7 +8,7 @@ use crate::config::smtp::auth::{pem_or_base64_decode, rsa_key_parse};
 use dns_update::{DnsRecord, NamedDnsRecord};
 use encodify::{base64::STANDARD, pem};
 use jiff::{Timestamp, fmt::strtime, tz::TimeZone};
-use mail_auth::crypto::{Ed25519Key, MlDsa44Ed25519Key};
+use mail_auth::crypto::{Ed25519Key, MlDsa44Key};
 use mail_auth::dkim::generate::DkimKeyPair;
 use registry::schema::enums::DkimSignatureType;
 use registry::schema::structs::DkimSignature;
@@ -26,8 +26,8 @@ pub async fn generate_dkim_private_key(
         DkimSignatureType::Dkim1Ed25519Sha256 | DkimSignatureType::Dkim2Ed25519Sha256 => {
             DkimKeyPair::generate_ed25519().map(|key| (key, "PRIVATE KEY"))
         }
-        DkimSignatureType::Dkim2MlDsa44Ed25519Sha512 => {
-            DkimKeyPair::generate_mldsa44_ed25519().map(|key| (key, "PRIVATE KEY"))
+        DkimSignatureType::Dkim2MlDsa44 => {
+            DkimKeyPair::generate_mldsa44().map(|key| (key, "PRIVATE KEY"))
         }
     })
     .await
@@ -70,16 +70,14 @@ pub async fn generate_dkim_public_key(key: &DkimSignature) -> trc::Result<String
                         .reason(err)
                 })
         }
-        DkimSignature::Dkim2MlDsa44Ed25519Sha512(_) => {
-            MlDsa44Ed25519Key::from_pkcs8_der(&decode_private_key(&pem)?)
-                .and_then(|pk| pk.public_key())
-                .map(|pk| STANDARD.encode(pk))
-                .map_err(|err| {
-                    trc::EventType::Dkim(trc::DkimEvent::BuildError)
-                        .into_err()
-                        .reason(err)
-                })
-        }
+        DkimSignature::Dkim2MlDsa44(_) => MlDsa44Key::from_pkcs8_der(&decode_private_key(&pem)?)
+            .and_then(|pk| pk.public_key())
+            .map(|pk| STANDARD.encode(pk))
+            .map_err(|err| {
+                trc::EventType::Dkim(trc::DkimEvent::BuildError)
+                    .into_err()
+                    .reason(err)
+            }),
     }
 }
 
@@ -114,9 +112,9 @@ pub async fn generate_dkim_dns_record(
             &sign.selector,
             format!("v=DKIM1; k=rsa; h=sha256; p={public_key}"),
         ),
-        DkimSignature::Dkim2MlDsa44Ed25519Sha512(sign) => (
+        DkimSignature::Dkim2MlDsa44(sign) => (
             &sign.selector,
-            format!("v=DKIM1; k=mldsa44-ed25519-sha512; p={public_key}"),
+            format!("v=DKIM1; k=mldsa44; p={public_key}"),
         ),
     };
 
@@ -133,8 +131,8 @@ pub fn generate_dkim_dns_record_name(key: &DkimSignature, domain: &str) -> Strin
 /// Generate a DKIM selector from a template string.
 ///
 /// Supported variables:
-/// - `{algorithm}`: signing algorithm in lowercase (`rsa`, `ed25519`, `mldsa44-ed25519`)
-/// - `{hash}`: hash algorithm (`sha256`, `sha512`)
+/// - `{algorithm}`: signing algorithm in lowercase (`rsa`, `ed25519`, `mldsa44`)
+/// - `{hash}`: hash algorithm (`sha256`, or `none` for ML-DSA-44)
 /// - `{version}`: DKIM version number (`1`, `2`)
 /// - `{date-<fmt>}`: current UTC date formatted with strftime specifiers (e.g. `{date-%Y%m%d}`)
 /// - `{epoch}`: current UTC unix timestamp

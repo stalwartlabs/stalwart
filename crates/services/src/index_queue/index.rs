@@ -356,17 +356,18 @@ async fn process_email_items(
                             err.account_id(account_id).document_id(item.id_suffix),
                         )
                     })?;
-                if document.is_empty() {
-                    nothing_to_index(partition, account_id, item.id_suffix);
-                } else {
-                    let fits = budget.admit(&document);
-                    documents.push(document);
-                    if !fits {
-                        return Ok(Consumed::Through {
-                            id_prefix: account_id,
-                            id_suffix: item.id_suffix,
-                        });
+                match document {
+                    Some(document) if !document.is_empty() => {
+                        let fits = budget.admit(&document);
+                        documents.push(document);
+                        if !fits {
+                            return Ok(Consumed::Through {
+                                id_prefix: account_id,
+                                id_suffix: item.id_suffix,
+                            });
+                        }
                     }
+                    _ => nothing_to_index(partition, account_id, item.id_suffix),
                 }
             } else {
                 if let Err(err) =

@@ -86,6 +86,16 @@ persisted_metrics!(
         SmtpDkim2Fail,
         SmtpDmarcPass,
         SmtpDmarcFail,
+        EncryptionAtRestEncrypted,
+        EncryptionEncryptionSkipped,
+        EncryptionGatewayEncrypted,
+        EncryptionGatewayPlaintext,
+        EncryptionGatewayBounced,
+        EncryptionKeyLookup,
+        EncryptionKeyHarvested,
+        EncryptionKeyChange,
+        EncryptionCrlFetchFailed,
+        EncryptionDnssecBogus,
     ]
 );
 
@@ -115,6 +125,7 @@ persisted_metrics!(
         DeliveryTotalTime,
         DeliveryAttemptTime,
         DnsLookupTime,
+        EncryptionKeyLookupTime,
         StoreDataReadTime,
         StoreDataWriteTime,
         StoreBlobReadTime,

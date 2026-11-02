@@ -457,6 +457,20 @@ pub fn is_valid_domain(domain: &str) -> bool {
             .is_some_and(|(_, tld)| RESERVED_TLDS.contains(&tld))
 }
 
+pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let cause_message = cause.to_string();
+        if !cause_message.is_empty() && !message.ends_with(&cause_message) {
+            message.push_str(": ");
+            message.push_str(&cause_message);
+        }
+        source = cause.source();
+    }
+    message
+}
+
 #[cfg(all(test, stalwart_tests))]
 #[rustfmt::skip]
 #[path = "../../../../stalwart-tests/unit/utils/src/tests.rs"]

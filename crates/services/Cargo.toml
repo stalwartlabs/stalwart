@@ -1,6 +1,6 @@
 [package]
 name = "services"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 
 [dependencies]
@@ -9,6 +9,7 @@ common = { path =  "../common" }
 coordinator = { path =  "../coordinator" }
 utils = { path =  "../utils" }
 trc = { path = "../trc" }
+crypto = { path = "../crypto" }
 email = { path = "../email" }
 smtp = { path = "../smtp" }
 groupware = { path = "../groupware" }

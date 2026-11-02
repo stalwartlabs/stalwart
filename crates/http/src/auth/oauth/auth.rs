@@ -620,6 +620,16 @@ async fn authenticate_login(
         Ok(authenticated) => {
             let access_token = authenticated.access_token;
             let account_id = access_token.account_id();
+            if access_token.is_secondary_credential() {
+                trc::event!(
+                    Security(trc::SecurityEvent::Unauthorized),
+                    AccountId = account_id,
+                    SpanId = session.session_id,
+                    Id = access_token.credential_id(),
+                    Reason = "App passwords and API keys cannot be used for OAuth sign-in.",
+                );
+                return Ok(Err(LoginResponse::Failure));
+            }
             if !client.is_first_party() && access_token.is_main_credential_expired() {
                 trc::event!(
                     Auth(trc::AuthEvent::CredentialExpired),

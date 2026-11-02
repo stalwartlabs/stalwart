@@ -7,7 +7,10 @@
 use super::{ImapContext, IntoImapError, ToModSeq};
 use crate::core::{MailboxId, Row, SelectedMailbox, Session, SessionData};
 use common::{
-    MAX_RECEIVED_AT, auth::BuildAccessToken, ipc::PushNotification, network::SessionStream,
+    MAX_RECEIVED_AT,
+    auth::BuildAccessToken,
+    ipc::{EmailPush, PushNotification},
+    network::SessionStream,
 };
 use email::message::ingest::{
     IngestEmail, IngestSource, IngestedEmail,
@@ -223,7 +226,7 @@ impl<T: SessionStream> SessionData<T> {
                     &self.server,
                     IngestEmail {
                         raw_message: &message.message,
-                        message: parsed,
+                        message: parsed.as_ref(),
                         blob_hash: None,
                         access_token: &access_token,
                         mailbox_ids: vec![mailbox_id],
@@ -255,16 +258,28 @@ impl<T: SessionStream> SessionData<T> {
 
         // Broadcast changes
         if let Some(change_id) = last_change_id {
-            self.server
-                .broadcast_push_notification(PushNotification::StateChange(
-                    StateChange::new(account_id)
-                        .with_change_id(change_id)
-                        .with_change(DataType::EmailDelivery)
-                        .with_change(DataType::Email)
-                        .with_change(DataType::Mailbox)
-                        .with_change(DataType::Thread),
-                ))
-                .await;
+            if created.is_empty() {
+                self.server
+                    .broadcast_push_notification(PushNotification::StateChange(
+                        StateChange::new(account_id)
+                            .with_change_id(change_id)
+                            .with_change(DataType::EmailDelivery)
+                            .with_change(DataType::Email)
+                            .with_change(DataType::Mailbox)
+                            .with_change(DataType::Thread),
+                    ))
+                    .await;
+            } else {
+                for row in &created {
+                    self.server
+                        .broadcast_push_notification(PushNotification::EmailPush(EmailPush {
+                            account_id,
+                            email_id: row.id,
+                            change_id,
+                        }))
+                        .await;
+                }
+            }
         }
 
         trc::event!(

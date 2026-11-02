@@ -24,6 +24,7 @@ pub mod delete;
 pub mod enable;
 pub mod expunge;
 pub mod fetch;
+pub mod id;
 pub mod list;
 pub mod login;
 pub mod metadata;

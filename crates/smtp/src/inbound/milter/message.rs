@@ -268,17 +268,12 @@ impl<T: SessionStream> Session<T> {
 
             // Headers
             client
-                .headers(message.headers().iter().map(|(k, v)| {
-                    (
-                        std::str::from_utf8(k).unwrap_or_default(),
-                        std::str::from_utf8(v).unwrap_or_default(),
-                    )
-                }))
+                .headers(message.headers().iter().copied())
                 .await?
                 .assert_continue()?;
 
             // Message body
-            let (action, modifications) = client.body(message.raw_message()).await?;
+            let (action, modifications) = client.body(message.raw_body()).await?;
             action.assert_continue()?;
 
             // Quit

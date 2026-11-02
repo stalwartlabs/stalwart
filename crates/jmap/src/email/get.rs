@@ -202,12 +202,12 @@ impl EmailGet for Server {
         let mut metadata_values = match &metadata {
             Some(metadata) => {
                 let mut documents = MetadataDocuments::default();
-                for document_id in ids.iter().map(Id::document_id) {
+                for &id in &ids {
                     if let Some(email) = cache
-                        .email_by_id(&document_id)
+                        .email_by_jmap_id(id)
                         .filter(|email| access.allows(*email))
                     {
-                        documents.insert(document_id, cache.metadata_kinds(email));
+                        documents.insert(id.document_id(), cache.metadata_kinds(email));
                     }
                 }
                 Some(
@@ -230,7 +230,7 @@ impl EmailGet for Server {
             if needs_metadata {
                 for id in chunk {
                     if cache
-                        .email_by_id(&id.document_id())
+                        .email_by_jmap_id(*id)
                         .is_some_and(|data| access.allows(data))
                     {
                         batch.request(id.document_id());
@@ -245,7 +245,7 @@ impl EmailGet for Server {
 
                 for &id in chunk {
                     let Some(data) = cache
-                        .email_by_id(&id.document_id())
+                        .email_by_jmap_id(id)
                         .filter(|data| access.allows(*data))
                     else {
                         if batch.is_first_round() {

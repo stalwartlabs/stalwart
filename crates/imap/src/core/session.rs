@@ -13,7 +13,7 @@ use common::{
 use compact_str::ToCompactString;
 use imap_proto::{
     ResponseCode, StatusResponse,
-    protocol::{ProtocolVersion, SerializeResponse},
+    protocol::{ProtocolVersion, SerializeResponse, id::ClientId},
     receiver::{MAX_UNAUTHENTICATED_REQUEST_SIZE, Receiver},
 };
 use std::sync::Arc;
@@ -154,6 +154,7 @@ impl<T: SessionStream> Session<T> {
             is_utf8: false,
             is_objectid: false,
             is_uidonly: false,
+            client: ClientId::default(),
             server,
             instance: session.instance,
             session_id: session.session_id,
@@ -215,6 +216,7 @@ impl<T: SessionStream> Session<T> {
             is_utf8: self.is_utf8,
             is_objectid: self.is_objectid,
             is_uidonly: self.is_uidonly,
+            client: self.client,
             session_id: self.session_id,
             in_flight: self.in_flight,
             remote_addr: self.remote_addr,

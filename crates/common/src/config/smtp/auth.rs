@@ -11,7 +11,7 @@ use crate::expr::{
 use compact_str::ToCompactString;
 use encodify::{Error as CodecError, base64::LENIENT, pem};
 use mail_auth::{
-    crypto::{DkimKey, Ed25519Key, HashAlgorithm, MlDsa44Ed25519Key, RsaKey, Sha256, SigningKey},
+    crypto::{DkimKey, Ed25519Key, HashAlgorithm, MlDsa44Key, RsaKey, Sha256, SigningKey},
     dkim::Canonicalization,
     dkim2::{Dkim2Hash, Dkim2Signer, Flag},
     signer::Ready,
@@ -174,9 +174,9 @@ impl DkimSigners {
                 })
                 .await?;
             }
-            DkimSignature::Dkim2MlDsa44Ed25519Sha512(signature) => {
+            DkimSignature::Dkim2MlDsa44(signature) => {
                 self.insert_dkim2(domain, signature, |pem| {
-                    mldsa44_ed25519_key_parse(pem).map(DkimKey::from)
+                    mldsa44_key_parse(pem).map(DkimKey::from)
                 })
                 .await?;
             }
@@ -258,16 +258,16 @@ fn ed25519_key_parse(pem: &str) -> trc::Result<Ed25519Key> {
     })
 }
 
-fn mldsa44_ed25519_key_parse(pem: &str) -> trc::Result<MlDsa44Ed25519Key> {
+fn mldsa44_key_parse(pem: &str) -> trc::Result<MlDsa44Key> {
     let der = pem_or_base64_decode(pem).map_err(|_| {
         trc::DkimEvent::BuildError
-            .reason("Failed to parse ML-DSA-44/Ed25519 private key PEM")
+            .reason("Failed to parse ML-DSA-44 private key PEM")
             .details("Invalid PEM format")
     })?;
-    MlDsa44Ed25519Key::from_pkcs8_der(&der).map_err(|err| {
+    MlDsa44Key::from_pkcs8_der(&der).map_err(|err| {
         trc::DkimEvent::BuildError
             .reason(err)
-            .details("Failed to build ML-DSA-44/Ed25519 key")
+            .details("Failed to build ML-DSA-44 key")
     })
 }
 

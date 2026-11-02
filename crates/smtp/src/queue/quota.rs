@@ -161,6 +161,7 @@ impl MessageWrapper {
 
         if !quota_ids.is_empty() {
             quota_ids.sort_unstable();
+            let queued_bytes = self.message.queued_bytes();
             let mut metadata = Vec::new();
             for entry in std::mem::take(&mut self.message.metadata) {
                 match entry {
@@ -170,7 +171,7 @@ impl MessageWrapper {
                     Metadata::QueueSize { id, key } if quota_ids.binary_search(&id).is_ok() => {
                         batch.add(
                             ValueClass::Queue(QueueClass::QuotaSize(key.into())),
-                            -(self.message.size as i64),
+                            -(queued_bytes as i64),
                         );
                     }
                     _ => {

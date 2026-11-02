@@ -5,7 +5,7 @@
  */
 
 use common::manager::application::Resource;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::{
     StatusCode,
     body::Bytes,
@@ -242,10 +242,8 @@ impl HttpResponse {
         }
     }
 
-    pub fn build(
-        self,
-    ) -> hyper::Response<http_body_util::combinators::BoxBody<hyper::body::Bytes, hyper::Error>>
-    {
+    pub fn build(self) -> hyper::Response<BoxBody<Bytes, hyper::Error>> {
+        let status = self.status;
         match self.body {
             HttpResponseBody::Text(body) => self.builder.body(
                 Full::new(Bytes::from(body))
@@ -288,7 +286,7 @@ impl HttpResponse {
                         .boxed(),
                 ),
         }
-        .unwrap()
+        .unwrap_or_else(|err| build_failed(status, err))
     }
 
     pub fn body(&self) -> &HttpResponseBody {
@@ -302,6 +300,27 @@ impl HttpResponse {
     pub fn headers(&self) -> Option<&hyper::HeaderMap<HeaderValue>> {
         self.builder.headers_ref()
     }
+}
+
+#[cold]
+#[inline(never)]
+fn build_failed(
+    status: StatusCode,
+    err: hyper::http::Error,
+) -> hyper::Response<BoxBody<Bytes, hyper::Error>> {
+    trc::event!(
+        Http(trc::HttpEvent::Error),
+        Details = "Failed to build HTTP response",
+        Code = status.as_u16(),
+        Reason = err.to_string(),
+    );
+    let mut response = hyper::Response::new(
+        Full::new(Bytes::new())
+            .map_err(|never| match never {})
+            .boxed(),
+    );
+    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+    response
 }
 
 impl<T: serde::Serialize> ToHttpResponse for JsonResponse<T> {
@@ -367,3 +386,8 @@ impl ToHttpResponse for JsonProblemResponse {
             )
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../stalwart-tests/unit/http-proto/src/response/tests.rs"]
+mod tests;

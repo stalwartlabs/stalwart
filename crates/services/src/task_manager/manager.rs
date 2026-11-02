@@ -519,7 +519,8 @@ fn is_enabled(task_type: TaskType, roles: &ClusterRoles) -> bool {
         | TaskType::TlsReportWindow
         | TaskType::AcmeRenewal
         | TaskType::DkimManagement
-        | TaskType::DnsManagement => true,
+        | TaskType::DnsManagement
+        | TaskType::ExternalPublicKeyMaintenance => true,
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
         // SPDX-License-Identifier: LicenseRef-SEL

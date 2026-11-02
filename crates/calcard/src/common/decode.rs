@@ -12,7 +12,7 @@ use encodify::{
 use mail_parser::Charset;
 use std::borrow::Cow;
 
-const QUOTED_PRINTABLE_CHARSET: &str = "iso-8859-1";
+const QUOTED_PRINTABLE_CHARSET: Charset = Charset::Windows1252;
 const QUOTED_PRINTABLE: QuotedPrintable = qp::BODY.strict();
 
 #[derive(Debug, PartialEq, Eq)]
@@ -45,16 +45,17 @@ impl ValueDecoder<'_> {
         if self.binary {
             return Decoded::Binary(bytes.into_owned());
         }
-        let default_charset = match self.encoding {
-            Encoding::QuotedPrintable => Some(QUOTED_PRINTABLE_CHARSET),
-            Encoding::Base64 => None,
+        let charset = match (self.charset, self.encoding) {
+            (Some(label), _) => Charset::from_label(label.as_bytes()),
+            (None, Encoding::QuotedPrintable) => {
+                return Decoded::Text(match String::from_utf8(bytes.into_owned()) {
+                    Ok(text) => text,
+                    Err(err) => QUOTED_PRINTABLE_CHARSET.decode_owned(err.into_bytes()),
+                });
+            }
+            (None, Encoding::Base64) => None,
         };
-        match self
-            .charset
-            .or(default_charset)
-            .and_then(|charset| Charset::from_label(charset.as_bytes()))
-            .filter(|charset| *charset != Charset::Utf8)
-        {
+        match charset.filter(|charset| *charset != Charset::Utf8) {
             Some(charset) => Decoded::Text(match bytes {
                 Cow::Borrowed(bytes) => charset.decode(bytes).into_owned(),
                 Cow::Owned(bytes) => charset.decode_owned(bytes),

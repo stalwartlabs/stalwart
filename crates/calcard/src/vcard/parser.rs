@@ -872,6 +872,9 @@ impl PartialDateTime {
             parse_small_digits(iter, &mut self.month, 2, true);
         } else {
             parse_small_digits(iter, &mut self.month, 2, true);
+            if self.year.is_none() && self.month.is_some() && iter.peek() == Some(&&b'-') {
+                iter.next();
+            }
             parse_small_digits(iter, &mut self.day, 2, false);
         }
     }

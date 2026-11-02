@@ -12,7 +12,7 @@ use super::{
 use crate::state_manager::{PushBatch, PushRegistration};
 use calcard::jscalendar::JSCalendarDateTime;
 use common::{Server, ipc::PushNotification, network::webpush::Vapid};
-use compact_str::{CompactString, ToCompactString};
+use compact_str::CompactString;
 use email::push::{PushSubscription, Urgency};
 use jmap_proto::{
     object::email::{EmailProperty, EmailValue},
@@ -30,6 +30,7 @@ use tokio::sync::mpsc;
 use trc::PushSubscriptionEvent;
 use types::id::Id;
 use utils::{
+    error_chain,
     map::vec_map::VecMap,
     outbound::{OutboundClient, OutboundPolicy, Redirects},
 };
@@ -350,7 +351,7 @@ pub(crate) async fn http_request(
                 PushSubscription(PushSubscriptionEvent::Error),
                 Details = "HTTP POST failed",
                 Url = CompactString::from(&details.url),
-                Reason = err.to_compact_string()
+                Reason = error_chain(&err)
             );
 
             false

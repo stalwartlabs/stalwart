@@ -102,16 +102,16 @@ impl TelemetryApi for Server {
                                                 .iter()
                                                 .chain(event.inner.span.as_ref().map_or(([]).iter(), |s| s.keys.iter()))
                                             {
-                                                if let Some(needle) = key_filters.get(key).or(filter.as_ref()) {
-                                                    if needle.matches(value) {
-                                                        matched_keys.insert(*key);
-                                                        if filter.is_some() || matched_keys.len() == key_filters.len() {
-                                                            if let Some(span_id) = event.span_id() {
-                                                                active_span_ids.insert(span_id);
-                                                            }
-                                                            events.push(event);
-                                                            break;
+                                                if let Some(needle) = key_filters.get(key).or(filter.as_ref())
+                                                    && needle.matches(value)
+                                                {
+                                                    matched_keys.insert(*key);
+                                                    if filter.is_some() || matched_keys.len() == key_filters.len() {
+                                                        if let Some(span_id) = event.span_id() {
+                                                            active_span_ids.insert(span_id);
                                                         }
+                                                        events.push(event);
+                                                        break;
                                                     }
                                                 }
                                             }

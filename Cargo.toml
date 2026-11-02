@@ -36,6 +36,7 @@ members = [
     "crates/sieve",
     "crates/jmap-tools",
     "crates/s3",
+    "crates/crypto",
 ]
 default-members = [
     "crates/main",

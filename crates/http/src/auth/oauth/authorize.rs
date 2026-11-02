@@ -335,8 +335,11 @@ pub fn granted_scope(
     let mut scope = String::new();
     for item in requested.unwrap_or_default().split_ascii_whitespace() {
         if let Some(allowed) = allowed {
-            let scope = OAuthScopes::from_name(item);
-            if scope.is_empty() || !allowed.contains(scope) {
+            let known = OAuthScopes::from_name(item);
+            if known.is_empty() {
+                continue;
+            }
+            if !allowed.contains(known) {
                 return Err(ErrorType::InvalidScope);
             }
         }

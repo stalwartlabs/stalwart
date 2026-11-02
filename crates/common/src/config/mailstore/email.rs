@@ -6,6 +6,7 @@
 
 use crate::{
     config::mailstore::limits::{EmailLimits, MAX_HEADER_ENTRIES},
+    gateway::config::GatewayConfig,
     storage::ObjectQuota,
 };
 use ahash::{AHashMap, AHashSet};
@@ -18,13 +19,13 @@ use registry::{
         },
         prelude::ObjectType,
         structs::{
-            AddressBook, Authentication, Calendar, DataRetention, Domain, Email, FileStorage, Jmap,
-            Search, SieveUserInterpreter, SystemSettings,
+            AddressBook, Authentication, Calendar, DataRetention, Domain, Email, Encryption,
+            FileStorage, Jmap, Search, SieveUserInterpreter, SystemSettings,
         },
     },
     types::EnumImpl,
 };
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use store::{
     registry::bootstrap::Bootstrap,
     search::{
@@ -59,7 +60,7 @@ pub struct EmailConfig {
     pub shared_folder: String,
 
     pub encrypt: bool,
-    pub encrypt_append: bool,
+    pub gateway: Option<Arc<GatewayConfig>>,
 
     pub index_batch_size: usize,
     pub index_concurrency: usize,
@@ -96,8 +97,21 @@ pub struct DefaultFolder {
 }
 
 impl EmailConfig {
+    pub fn is_mailbox_name_too_long(&self, name: &str) -> bool {
+        name.len() > self.mailbox_name_max_len
+    }
+
+    #[inline(always)]
+    pub fn gateway_outbound_enabled(&self) -> bool {
+        self.gateway
+            .as_ref()
+            .is_some_and(|gateway| gateway.outbound_enabled)
+    }
+
     pub async fn parse(bp: &mut Bootstrap) -> Self {
         let email = bp.setting_infallible::<Email>().await;
+        let encryption = bp.setting_infallible::<Encryption>().await;
+        let gateway = GatewayConfig::parse(bp, &encryption);
         let dr = bp.setting_infallible::<DataRetention>().await;
         let sieve = bp.setting_infallible::<SieveUserInterpreter>().await;
         let search = bp.setting_infallible::<Search>().await;
@@ -331,8 +345,8 @@ impl EmailConfig {
             changes_max_history: dr.max_changes_history.map(|v| v as usize),
             share_notification_max_history: dr.expunge_share_notify_after.map(|v| v.into_inner()),
             sieve_max_script_name: sieve.max_script_name_length as usize,
-            encrypt: email.encrypt_at_rest,
-            encrypt_append: email.encrypt_on_append,
+            encrypt: encryption.at_rest_enable,
+            gateway,
             index_batch_size: std::cmp::max(search.index_batch_size as usize, 1),
             index_concurrency: std::cmp::max(search.max_concurrent_index_tasks as usize, 1),
             index_fields,

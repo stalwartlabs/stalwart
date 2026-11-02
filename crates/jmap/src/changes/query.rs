@@ -17,6 +17,7 @@ use crate::{
     submission::query::EmailSubmissionQuery,
 };
 use common::{Server, auth::AccessToken};
+use email::cache::{MessageCacheFetch, email::MessageAccess, mailbox::MailboxCacheAccess};
 use jmap_proto::{
     method::{
         changes::{ChangesRequest, ChangesResponse},
@@ -26,8 +27,12 @@ use jmap_proto::{
     request::{QueryChangesRequestMethod, capability::CapabilityIds, method::MethodObject},
 };
 use std::future::Future;
-use store::ahash::AHashSet;
-use types::id::Id;
+use store::{
+    ahash::AHashSet,
+    roaring::{RoaringBitmap, RoaringTreemap},
+};
+use trc::AddContext;
+use types::{acl::Acl, id::Id};
 
 pub trait QueryChanges: Sync + Send {
     fn query_changes(
@@ -48,7 +53,7 @@ impl QueryChanges for Server {
         let mut response;
         let mut is_mutable = true;
         let results;
-        let changes;
+        let mut changes;
         let has_changes;
         let up_to_id;
 
@@ -74,15 +79,52 @@ impl QueryChanges for Server {
                 }
 
                 up_to_id = request.up_to_id;
-                is_mutable = request.filter.iter().any(|f| !f.is_immutable())
+                let collapse_threads = request.arguments.collapse_threads.unwrap_or(false);
+                is_mutable = collapse_threads
+                    || request.filter.iter().any(|f| !f.is_immutable())
                     || request
                         .sort
                         .as_ref()
                         .is_some_and(|sort| sort.iter().any(|s| !s.is_immutable()));
+                let account_id = request.account_id.document_id();
 
                 results = self
                     .email_query((*request).into(), access_token, using)
                     .await?;
+
+                if collapse_threads && has_changes {
+                    let mut touched_threads = RoaringBitmap::new();
+                    let mut changed_ids = RoaringTreemap::new();
+                    for id in changes.created.iter().chain(changes.updated.iter()) {
+                        touched_threads.insert(id.prefix_id());
+                        changed_ids.insert(id.id());
+                    }
+                    touched_threads.extend(changes.destroyed.iter().map(|id| id.prefix_id()));
+                    let cache = self
+                        .get_cached_messages(account_id)
+                        .await
+                        .caused_by(trc::location!())?;
+                    let access = if access_token.is_shared(account_id) {
+                        MessageAccess::Mailboxes(
+                            cache.shared_mailboxes(access_token, Acl::ReadItems),
+                        )
+                    } else {
+                        MessageAccess::All
+                    };
+                    changes.updated.extend(
+                        cache
+                            .emails
+                            .iter()
+                            .filter(|message| {
+                                touched_threads.contains(message.thread_id())
+                                    && access.allows(*message)
+                            })
+                            .map(|message| {
+                                Id::from_parts(message.thread_id(), message.document_id())
+                            })
+                            .filter(|id| !changed_ids.contains(id.id())),
+                    );
+                }
             }
             QueryChangesRequestMethod::Mailbox(mut request) => {
                 // Query changes

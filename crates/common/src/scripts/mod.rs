@@ -60,7 +60,7 @@ impl<T: AsRef<str>> IsMixedCharset for T {
         let mut set: Option<AugmentedScriptSet> = None;
 
         for ch in self.as_ref().chars() {
-            if !ch.is_ascii() {
+            if !ch.is_ascii() && ch.is_alphabetic() {
                 set.get_or_insert_default().intersect_with(ch.into());
             }
         }
@@ -68,3 +68,8 @@ impl<T: AsRef<str>> IsMixedCharset for T {
         set.is_some_and(|set| set.is_empty())
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/common/src/scripts/tests.rs"]
+mod tests;

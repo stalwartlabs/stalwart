@@ -68,6 +68,9 @@ impl<T: SessionStream> Session<T> {
         self.assert_has_permission(Permission::ImapId)?;
 
         let op_start = Instant::now();
+        let arguments = request.parse_id();
+        self.client = arguments.client;
+
         trc::event!(
             Imap(trc::ImapEvent::Id),
             SpanId = self.session_id,
@@ -76,7 +79,7 @@ impl<T: SessionStream> Session<T> {
 
         self.write_bytes(
             StatusResponse::completed(Command::Id)
-                .with_tag(request.tag)
+                .with_tag(arguments.tag)
                 .serialize(
                     concat!(
                         "* ID (\"name\" \"Stalwart\" \"version\" \"1.0.0\" \"vendor\" \"Stalwart Labs LLC\" ",

@@ -16,6 +16,7 @@ use ahash::AHashSet;
 use compact_str::CompactString;
 use std::sync::Arc;
 use tokio_postgres::error::SqlState;
+use utils::error_chain;
 
 use self::sql::SqlStatements;
 
@@ -54,20 +55,6 @@ fn into_error(err: tokio_postgres::error::Error) -> trc::Error {
         }
     }
     local_err
-}
-
-fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut message = err.to_string();
-    let mut source = err.source();
-    while let Some(cause) = source {
-        let cause_message = cause.to_string();
-        if !cause_message.is_empty() && !message.ends_with(&cause_message) {
-            message.push_str(": ");
-            message.push_str(&cause_message);
-        }
-        source = cause.source();
-    }
-    message
 }
 
 pub(crate) const DELETE_CHUNK_SIZE: usize = 1000;

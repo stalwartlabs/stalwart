@@ -48,6 +48,7 @@ use store::write::{BatchBuilder, now};
 use trc::AddContext;
 use types::{
     acl::Acl,
+    id::Id,
     type_state::{DataType, StateChange},
 };
 use utils::map::vec_map::VecMap;
@@ -119,15 +120,15 @@ impl JmapEmailCopy for Server {
         let mut metadata_writer = MetadataWriter::new(metadata, account_id);
         let mut preload = MetadataPreload::default();
         let mut source_ids = Vec::with_capacity(request.create.len());
-        for document_id in request
+        for source_id in request
             .create
             .values()
             .filter_map(|create| create.source_id(EmailProperty::Id))
-            .map(|source_id| source_id.document_id())
         {
+            let document_id = source_id.document_id();
             source_ids.push(document_id);
             let Some(email) = from_cache
-                .email_by_id(&document_id)
+                .email_by_jmap_id(source_id)
                 .filter(|email| from_access.allows(*email))
             else {
                 continue;
@@ -235,7 +236,7 @@ impl JmapEmailCopy for Server {
             }
 
             if !from_cache
-                .email_by_id(&from_message_id.document_id())
+                .email_by_jmap_id(from_message_id)
                 .is_some_and(|email| from_access.allows(email))
             {
                 response.not_created.append(
@@ -375,15 +376,21 @@ impl JmapEmailCopy for Server {
                         destroy_ids.push(MaybeInvalid::Value(from_message_id));
                     }
                 }
-                Err(err) => {
-                    response.not_created.append(
-                        id,
-                        match err {
-                            CopyMessageError::OverQuota => SetError::over_quota(),
-                            CopyMessageError::AlreadyExists(existing) => SetError::already_exists()
-                                .with_existing_id(types::id::Id::from(existing)),
-                        },
-                    );
+                Err(CopyMessageError::OverQuota) => {
+                    response.not_created.append(id, SetError::over_quota());
+                }
+                Err(CopyMessageError::AlreadyExists(existing)) => {
+                    let existing_id = self
+                        .get_cached_messages(account_id)
+                        .await?
+                        .email_by_id(&existing)
+                        .map_or_else(
+                            || Id::from(existing),
+                            |email| Id::from_parts(email.thread_id(), existing),
+                        );
+                    response
+                        .not_created
+                        .append(id, SetError::already_exists().with_existing_id(existing_id));
                 }
             }
         }

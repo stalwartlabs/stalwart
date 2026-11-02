@@ -9,6 +9,7 @@ use crate::{
     outbound::error::{AssertReply, ClientError, ClientResult},
     queue::{Error, ErrorDetails, HostResponse, MessageWrapper, Status},
 };
+use common::Server;
 use directory::Credentials;
 use encodify::base64::STANDARD;
 use memchr::memchr_iter;
@@ -32,6 +33,7 @@ use tokio::{
 };
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use trc::DeliveryEvent;
+use types::blob_hash::BlobHash;
 
 const READ_BUFFER_SIZE: usize = 8192;
 const WRITE_BUFFER_SIZE: usize = 65536;
@@ -206,43 +208,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin> SmtpClient<T> {
         bdat_cmd: &mut Option<String>,
         params: &SessionParams<'_>,
     ) -> Result<(), Status<HostResponse<Box<str>>, ErrorDetails>> {
-        let raw_message = params
-            .message_blob
-            .get_or_try_init(|| async {
-                match params
-                    .server
-                    .blob_store()
-                    .get_blob(message.message.blob_hash.as_slice(), 0..usize::MAX)
-                    .await
-                {
-                    Ok(Some(raw_message)) => Ok(raw_message),
-                    Ok(None) => {
-                        trc::event!(
-                            Queue(trc::QueueEvent::BlobNotFound),
-                            SpanId = message.span_id,
-                            BlobId = message.message.blob_hash.to_hex(),
-                            CausedBy = trc::location!()
-                        );
-                        Err(Status::TemporaryFailure(Box::new(ErrorDetails {
-                            entity: "localhost".into(),
-                            details: Error::Io("Queue system error.".into()),
-                        })))
-                    }
-                    Err(err) => {
-                        trc::error!(
-                            err.span_id(message.span_id)
-                                .details("Failed to fetch blobId")
-                                .caused_by(trc::location!())
-                        );
-
-                        Err(Status::TemporaryFailure(Box::new(ErrorDetails {
-                            entity: "localhost".into(),
-                            details: Error::Io("Queue system error.".into()),
-                        })))
-                    }
-                }
-            })
-            .await?;
+        let recipient_blob;
+        let raw_message = match params.recipient_blob {
+            Some(blob) => {
+                recipient_blob = message.read_blob(params.server, &blob.hash).await?;
+                recipient_blob.as_slice()
+            }
+            None => params
+                .message_blob
+                .get_or_try_init(|| message.read_blob(params.server, &message.message.blob_hash))
+                .await?
+                .as_slice(),
+        };
 
         tokio::time::timeout(params.conn_strategy.timeout_data, async {
             if let Some(bdat_cmd) = bdat_cmd {
@@ -796,8 +773,49 @@ pub(crate) fn from_error_details(err: &Error) -> trc::Error {
             .details("DANE Error")
             .ctx(trc::Key::Reason, err.clone()),
         Error::MtaStsError(err) => event.details("MTA-STS Error").reason(err),
+        Error::EncryptionError(err) => event.details("Encryption Error").reason(err),
         Error::RateLimited => event.details("Rate Limited"),
         Error::ConcurrencyLimited => event.details("Concurrency Limited"),
         Error::Io(err) => event.details("I/O Error").reason(err),
+    }
+}
+
+impl MessageWrapper {
+    async fn read_blob(
+        &self,
+        server: &Server,
+        hash: &BlobHash,
+    ) -> Result<Vec<u8>, Status<HostResponse<Box<str>>, ErrorDetails>> {
+        match server
+            .blob_store()
+            .get_blob(hash.as_slice(), 0..usize::MAX)
+            .await
+        {
+            Ok(Some(raw_message)) => Ok(raw_message),
+            Ok(None) => {
+                trc::event!(
+                    Queue(trc::QueueEvent::BlobNotFound),
+                    SpanId = self.span_id,
+                    BlobId = hash.to_hex(),
+                    CausedBy = trc::location!()
+                );
+                Err(Status::TemporaryFailure(Box::new(ErrorDetails {
+                    entity: "localhost".into(),
+                    details: Error::Io("Queue system error.".into()),
+                })))
+            }
+            Err(err) => {
+                trc::error!(
+                    err.span_id(self.span_id)
+                        .details("Failed to fetch blobId")
+                        .caused_by(trc::location!())
+                );
+
+                Err(Status::TemporaryFailure(Box::new(ErrorDetails {
+                    entity: "localhost".into(),
+                    details: Error::Io("Queue system error.".into()),
+                })))
+            }
+        }
     }
 }

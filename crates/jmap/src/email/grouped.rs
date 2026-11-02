@@ -33,7 +33,7 @@ impl QueuedEmail {
     pub fn params<'x>(
         &'x self,
         raw_message: &'x [u8],
-        message: Option<Message<'x>>,
+        message: Option<&'x Message<'x>>,
         access_token: &'x AccessToken,
         session_id: u64,
     ) -> IngestEmail<'x> {
@@ -78,7 +78,7 @@ impl<'a, R: AsRef<[u8]>> GroupedIngest<'a, R> {
         server: &'x Server,
         email: &'x QueuedEmail,
         raw_message: &'x [u8],
-        message: Option<Message<'x>>,
+        message: Option<&'x Message<'x>>,
         key: ThreadKey,
     ) -> impl Future<Output = trc::Result<()>> + 'x {
         self.group.ingest(
@@ -117,7 +117,7 @@ impl<'a, R: AsRef<[u8]>> GroupedIngest<'a, R> {
                         let message = MessageParser::new().parse(raw_message);
                         let result = Box::pin(server.email_ingest(email.params(
                             raw_message,
-                            message,
+                            message.as_ref(),
                             self.access_token,
                             self.session_id,
                         )))

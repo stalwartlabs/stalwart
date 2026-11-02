@@ -9,10 +9,13 @@ use super::{
     participants::ArchivedParticipantEntry,
 };
 use calcard::icalendar::{
-    ArchivedICalendar, ArchivedICalendarProperty, ICalendar, ICalendarComponent, ICalendarEntry,
-    ICalendarParameterName, ICalendarParameterValue, ICalendarParticipationRole, ICalendarProperty,
+    ArchivedICalendar, ArchivedICalendarComponentType, ArchivedICalendarEntry,
+    ArchivedICalendarProperty, ICalendar, ICalendarComponent, ICalendarComponentType,
+    ICalendarEntry, ICalendarParameterName, ICalendarParameterValue, ICalendarParticipationRole,
+    ICalendarProperty,
 };
 use common::{Server, auth::AccountInfo};
+use jmap_tools::{JsonPointer, JsonPointerItem, Key, Null, Value};
 use std::borrow::Cow;
 use store::{
     ValueKey,
@@ -104,18 +107,52 @@ impl CalendarAddresses {
         };
         let has_series = scheduling_components().any(is_series);
         let mut ownership = EventOwnership::NoOwner;
-        for entry in scheduling_components()
-            .filter(|component| is_series(component) == has_series)
-            .flat_map(|component| component.entries.iter())
-            .filter(|entry| entry.is_owner_entry())
+        for component in
+            scheduling_components().filter(|component| is_series(component) == has_series)
         {
-            if entry
-                .calendar_address()
-                .is_some_and(|address| self.contains(address))
+            for entry in component
+                .entries
+                .iter()
+                .filter(|entry| entry.is_owner_entry())
             {
-                return EventOwnership::Owner;
+                if entry
+                    .calendar_address()
+                    .is_some_and(|address| self.contains(address))
+                {
+                    return EventOwnership::Owner;
+                }
+                ownership = EventOwnership::NotOwner;
             }
-            ownership = EventOwnership::NotOwner;
+            if ownership == EventOwnership::NoOwner {
+                for participant in component
+                    .component_ids
+                    .iter()
+                    .filter_map(|id| ical.components.get(*id as usize))
+                    .filter(|sub| sub.component_type == ICalendarComponentType::Participant)
+                    .filter(|sub| {
+                        sub.entries
+                            .iter()
+                            .any(|entry| entry.sets_owner_role(PARTICIPANT_OWNER_PATH))
+                    })
+                {
+                    if participant.entries.iter().any(|entry| {
+                        entry.name == ICalendarProperty::CalendarAddress
+                            && entry
+                                .calendar_address()
+                                .is_some_and(|address| self.contains(address))
+                    }) {
+                        return EventOwnership::Owner;
+                    }
+                    ownership = EventOwnership::NotOwner;
+                }
+                if component
+                    .entries
+                    .iter()
+                    .any(|entry| entry.sets_owner_role(EVENT_OWNER_PATH))
+                {
+                    ownership = EventOwnership::NotOwner;
+                }
+            }
         }
 
         ownership
@@ -130,24 +167,61 @@ impl CalendarAddresses {
         let has_series =
             scheduling_components().any(|component| !component.is_recurrence_override());
         let mut ownership = EventOwnership::NoOwner;
-        for entry in scheduling_components()
+        for component in scheduling_components()
             .filter(|component| component.is_recurrence_override() != has_series)
-            .flat_map(|component| component.entries.iter())
-            .filter(|entry| match entry.name {
+        {
+            for entry in component.entries.iter().filter(|entry| match entry.name {
                 ArchivedICalendarProperty::Organizer => true,
                 ArchivedICalendarProperty::Attendee => entry.has_owner_role(),
                 _ => false,
-            })
-        {
-            if entry
-                .values
-                .first()
-                .and_then(|value| value.as_text())
-                .is_some_and(|address| self.contains(address))
-            {
-                return EventOwnership::Owner;
+            }) {
+                if entry
+                    .values
+                    .first()
+                    .and_then(|value| value.as_text())
+                    .is_some_and(|address| self.contains(address))
+                {
+                    return EventOwnership::Owner;
+                }
+                ownership = EventOwnership::NotOwner;
             }
-            ownership = EventOwnership::NotOwner;
+            if ownership == EventOwnership::NoOwner {
+                for participant in component
+                    .component_ids
+                    .iter()
+                    .filter_map(|id| ical.components.get(id.to_native() as usize))
+                    .filter(|sub| {
+                        matches!(
+                            sub.component_type,
+                            ArchivedICalendarComponentType::Participant
+                        )
+                    })
+                    .filter(|sub| {
+                        sub.entries
+                            .iter()
+                            .any(|entry| entry.sets_owner_role(PARTICIPANT_OWNER_PATH))
+                    })
+                {
+                    if participant.entries.iter().any(|entry| {
+                        matches!(entry.name, ArchivedICalendarProperty::CalendarAddress)
+                            && entry
+                                .values
+                                .first()
+                                .and_then(|value| value.as_text())
+                                .is_some_and(|address| self.contains(address))
+                    }) {
+                        return EventOwnership::Owner;
+                    }
+                    ownership = EventOwnership::NotOwner;
+                }
+                if component
+                    .entries
+                    .iter()
+                    .any(|entry| entry.sets_owner_role(EVENT_OWNER_PATH))
+                {
+                    ownership = EventOwnership::NotOwner;
+                }
+            }
         }
 
         ownership
@@ -178,6 +252,94 @@ impl OwnerEntry for ICalendarEntry {
             }
             _ => false,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OwnerPathItem {
+    Key(&'static str),
+    AnyKey,
+}
+
+const PARTICIPANT_OWNER_PATH: &[OwnerPathItem] =
+    &[OwnerPathItem::Key("roles"), OwnerPathItem::Key("owner")];
+const EVENT_OWNER_PATH: &[OwnerPathItem] = &[
+    OwnerPathItem::Key("participants"),
+    OwnerPathItem::AnyKey,
+    OwnerPathItem::Key("roles"),
+    OwnerPathItem::Key("owner"),
+];
+
+trait OwnerRoleJsprop {
+    fn sets_owner_role(&self, path: &[OwnerPathItem]) -> bool;
+}
+
+impl OwnerRoleJsprop for ICalendarEntry {
+    fn sets_owner_role(&self, path: &[OwnerPathItem]) -> bool {
+        self.name == ICalendarProperty::Jsprop
+            && self
+                .parameter(&ICalendarParameterName::Jsptr)
+                .and_then(|pointer| pointer.as_text())
+                .zip(self.values.first().and_then(|value| value.as_text()))
+                .is_some_and(|(pointer, value)| jsprop_sets_owner_role(pointer, value, path))
+    }
+}
+
+impl OwnerRoleJsprop for ArchivedICalendarEntry {
+    fn sets_owner_role(&self, path: &[OwnerPathItem]) -> bool {
+        matches!(self.name, ArchivedICalendarProperty::Jsprop)
+            && self
+                .parameters(&ICalendarParameterName::Jsptr)
+                .next()
+                .and_then(|pointer| pointer.as_text())
+                .zip(self.values.first().and_then(|value| value.as_text()))
+                .is_some_and(|(pointer, value)| jsprop_sets_owner_role(pointer, value, path))
+    }
+}
+
+fn jsprop_sets_owner_role(pointer: &str, value: &str, path: &[OwnerPathItem]) -> bool {
+    let Some(OwnerPathItem::Key(first)) = path.first() else {
+        return false;
+    };
+    if !pointer
+        .strip_prefix('/')
+        .unwrap_or(pointer)
+        .starts_with(first)
+    {
+        return false;
+    }
+
+    let pointer = JsonPointer::<Null>::parse(pointer);
+    let mut rest = path;
+    for item in pointer.as_slice() {
+        let Some((expected, tail)) = rest.split_first() else {
+            return false;
+        };
+        let matches = match (expected, item) {
+            (OwnerPathItem::Key(name), JsonPointerItem::Key(key)) => key == name,
+            (OwnerPathItem::AnyKey, JsonPointerItem::Key(_) | JsonPointerItem::Number(_)) => true,
+            _ => false,
+        };
+        if !matches {
+            return false;
+        }
+        rest = tail;
+    }
+
+    Value::<Null, Null>::parse_json(value).is_ok_and(|value| value_sets_owner_role(&value, rest))
+}
+
+fn value_sets_owner_role(value: &Value<'_, Null, Null>, path: &[OwnerPathItem]) -> bool {
+    match path.split_first() {
+        None => value.as_bool() == Some(true),
+        Some((OwnerPathItem::Key(name), rest)) => value
+            .as_object_and_get(&Key::Borrowed(name))
+            .is_some_and(|value| value_sets_owner_role(value, rest)),
+        Some((OwnerPathItem::AnyKey, rest)) => value.as_object().is_some_and(|object| {
+            object
+                .values()
+                .any(|value| value_sets_owner_role(value, rest))
+        }),
     }
 }
 

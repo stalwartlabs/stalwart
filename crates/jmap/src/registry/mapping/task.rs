@@ -90,7 +90,8 @@ pub(crate) async fn task_set(
             | TaskType::SpamFilterMaintenance
             | TaskType::AcmeRenewal
             | TaskType::DkimManagement
-            | TaskType::DnsManagement => true,
+            | TaskType::DnsManagement
+            | TaskType::ExternalPublicKeyMaintenance => true,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL

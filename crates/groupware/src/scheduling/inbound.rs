@@ -131,9 +131,11 @@ pub fn itip_process_message(
         // Handle organizer and attendees updates
         match method {
             ICalendarMethod::Request => {
-                let mut is_full_update = false;
+                let full_update_sequence = itip_snapshots
+                    .components
+                    .get(&InstanceId::Main)
+                    .map(|snapshot| snapshot.sequence.unwrap_or_default());
                 for (instance_id, itip_snapshot) in &itip_snapshots.components {
-                    is_full_update = is_full_update || instance_id == &InstanceId::Main;
                     let itip_component = &itip.components[itip_snapshot.comp_id as usize];
 
                     if let Some(snapshot) = snapshots.components.get(instance_id) {
@@ -194,9 +196,11 @@ pub fn itip_process_message(
                     }
                 }
 
-                if is_full_update {
+                if let Some(sequence) = full_update_sequence {
                     for (instance_id, snapshot) in &snapshots.components {
-                        if !itip_snapshots.components.contains_key(instance_id) {
+                        if snapshot.sequence.unwrap_or_default() <= sequence
+                            && !itip_snapshots.components.contains_key(instance_id)
+                        {
                             // Remove instance
                             merge_actions.push(MergeAction::RemoveComponent {
                                 component_id: snapshot.comp_id,

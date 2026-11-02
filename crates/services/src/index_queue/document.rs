@@ -31,21 +31,28 @@ pub(crate) async fn build_email_document(
     account_id: u32,
     document_id: u32,
     row: MetadataRow,
-) -> trc::Result<IndexDocument> {
+) -> trc::Result<Option<IndexDocument>> {
     let metadata = row.unarchive().caused_by(trc::location!())?;
-    let raw_message = server
+    let Some(raw_message) = server
         .blob_store()
         .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
         .await
         .caused_by(trc::location!())?
-        .ok_or_else(|| {
+    else {
+        trc::error!(
             trc::StoreEvent::NotFound
                 .into_err()
-                .details("Blob not found")
-        })?;
+                .account_id(account_id)
+                .document_id(document_id)
+                .ctx(trc::Key::Index, SearchIndex::Email.name())
+                .details("E-mail blob not found, message skipped by the indexer")
+                .caused_by(trc::location!())
+        );
+        return Ok(None);
+    };
 
     if !metadata.has_extractable_attachments() {
-        return email_document(&server.core, &row, account_id, document_id, &raw_message);
+        return email_document(&server.core, &row, account_id, document_id, &raw_message).map(Some);
     }
 
     let core = server.core.clone();
@@ -59,6 +66,7 @@ pub(crate) async fn build_email_document(
             .details("Email indexing task failed")
             .caused_by(trc::location!())
     })?
+    .map(Some)
 }
 
 fn email_document(
@@ -166,8 +174,12 @@ pub(crate) async fn build_tracing_span_document(
     use registry::schema::structs::Trace;
     use store::write::{TelemetryClass, ValueClass};
 
-    server
-        .tracing_store()
+    let store = server.tracing_store();
+    if store.is_none() {
+        return Ok(None);
+    }
+
+    store
         .get_value::<Trace>(ValueKey::from(ValueClass::Telemetry(TelemetryClass::Span(
             span_id,
         ))))

@@ -9,6 +9,7 @@ pub mod alarm;
 pub mod destroy_account;
 pub mod dkim;
 pub mod dns;
+pub mod external_public_keys;
 pub mod grantee_cleanup;
 pub mod imip;
 pub mod maintenance;

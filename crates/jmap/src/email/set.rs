@@ -58,8 +58,7 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::MessageParser;
-use std::future::Future;
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, future::Future, iter};
 use store::{
     ahash::AHashMap,
     roaring::RoaringBitmap,
@@ -176,6 +175,7 @@ impl EmailSet for Server {
             let has_body_structure =
                 object.contains_key(&Key::Property(EmailProperty::BodyStructure));
             let mut builder = MessageBuilder::new();
+            let mut related_parts = Vec::new();
             let mut attachment_memory = Vec::new();
             let mut mailboxes = Vec::new();
             let mut keywords = Vec::new();
@@ -415,6 +415,7 @@ impl EmailSet for Server {
                                 let mut charset = None;
                                 let mut subparts = None;
                                 let mut has_size = false;
+                                let mut has_cid = false;
                                 let mut headers: Vec<(Cow<str>, HeaderType)> = Vec::new();
 
                                 if let Some(obj) = value.into_object() {
@@ -473,6 +474,7 @@ impl EmailSet for Server {
                                                 ));
                                             }
                                             (EmailProperty::Cid, Value::Str(value)) => {
+                                                has_cid = true;
                                                 headers.push((
                                                     "Content-ID".into(),
                                                     MessageId::new(value).into(),
@@ -620,6 +622,20 @@ impl EmailSet for Server {
                                     _ => (),
                                 }
 
+                                let is_related = has_cid
+                                    && matches!(property, EmailProperty::Attachments)
+                                    && content_disposition
+                                        .as_deref()
+                                        .is_none_or(|d| !d.eq_ignore_ascii_case("attachment"))
+                                    && content_type.split_once('/').is_some_and(|(top, _)| {
+                                        hashify::set_ignore_case!(
+                                            top.as_bytes(),
+                                            "image",
+                                            "audio",
+                                            "video"
+                                        )
+                                    });
+
                                 // Set Content-Type and Content-Disposition
                                 let is_text = content_type
                                     .as_bytes()
@@ -682,7 +698,12 @@ impl EmailSet for Server {
                                     });
                                 }
                                 // Retrieve contents
-                                parts.push(MimePart {
+                                let target = if is_related {
+                                    &mut related_parts
+                                } else {
+                                    &mut parts
+                                };
+                                target.push(MimePart {
                                     headers,
                                     contents: if !is_multipart {
                                         if let Some(blob_id) = blob_id {
@@ -749,7 +770,7 @@ impl EmailSet for Server {
 
                                 // Check attachment sizes
                                 if !is_multipart {
-                                    size_attachments += parts.last().unwrap().size();
+                                    size_attachments += target.last().unwrap().size();
                                     if self.core.email.mail_attachments_max_size > 0
                                         && size_attachments
                                             > self.core.email.mail_attachments_max_size
@@ -791,7 +812,7 @@ impl EmailSet for Server {
                                 builder.html_body = parts.pop();
                             }
                             EmailProperty::Attachments => {
-                                builder.attachments = parts.into();
+                                builder.attachments = (!parts.is_empty()).then_some(parts);
                             }
                             _ => {
                                 builder.body = parts.pop();
@@ -924,6 +945,25 @@ impl EmailSet for Server {
                 None => None,
             };
 
+            if !related_parts.is_empty() {
+                match builder.html_body.take() {
+                    Some(html_body) => {
+                        builder.html_body = Some(MimePart::new(
+                            ContentType::new("multipart/related").attribute("type", "text/html"),
+                            iter::once(html_body)
+                                .chain(related_parts)
+                                .collect::<Vec<_>>(),
+                        ));
+                    }
+                    None => {
+                        builder
+                            .attachments
+                            .get_or_insert_default()
+                            .extend(related_parts);
+                    }
+                }
+            }
+
             match builder
                 .headers
                 .iter()
@@ -993,7 +1033,7 @@ impl EmailSet for Server {
                     train_classifier: true,
                 };
                 let result = grouped
-                    .ingest(self, &email, &raw_message, message, key)
+                    .ingest(self, &email, &raw_message, message.as_ref(), key)
                     .await;
                 grouped.queue(
                     email,
@@ -1020,7 +1060,7 @@ impl EmailSet for Server {
                 let result = self
                     .email_ingest(IngestEmail {
                         raw_message: &raw_message,
-                        message,
+                        message: message.as_ref(),
                         blob_hash: None,
                         access_token: import_access_token.as_ref().unwrap_or(access_token),
                         mailbox_ids: mailboxes,
@@ -1103,11 +1143,12 @@ impl EmailSet for Server {
 
                 // Obtain message data
                 let Some(data) = cache.message_data(document_id).filter(|data| {
-                    can_read_mailbox_ids.as_ref().is_none_or(|ids| {
-                        data.mailboxes
-                            .iter()
-                            .any(|mailbox| ids.contains(mailbox.mailbox_id))
-                    })
+                    data.thread_id == id.prefix_id()
+                        && can_read_mailbox_ids.as_ref().is_none_or(|ids| {
+                            data.mailboxes
+                                .iter()
+                                .any(|mailbox| ids.contains(mailbox.mailbox_id))
+                        })
                 }) else {
                     response.not_updated.append(id, SetError::not_found());
                     continue 'update;
@@ -1549,7 +1590,7 @@ impl EmailSet for Server {
                 let document_id = destroy_id.document_id();
 
                 match cache
-                    .email_by_id(&document_id)
+                    .email_by_jmap_id(destroy_id)
                     .filter(|message| can_read.allows(*message))
                 {
                     Some(message) if can_destroy.allows(message) => {
