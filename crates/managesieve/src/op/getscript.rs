@@ -56,7 +56,6 @@ impl<T: SessionStream> Session<T> {
             .caused_by(trc::location!())?;
         let script = self
             .server
-            .blob_store()
             .get_blob(sieve.blob_hash.0.as_ref(), 0..usize::MAX)
             .await
             .caused_by(trc::location!())?

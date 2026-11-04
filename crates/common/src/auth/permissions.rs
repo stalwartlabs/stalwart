@@ -304,6 +304,7 @@ impl Default for DefaultPermissions {
                     default.superuser.push(permission);
                 }
                 // SPDX-SnippetEnd
+                Permission::SysSymmetricKeyDestroy => {}
                 Permission::FetchAnyBlob | Permission::LiveDeliveryTest => {
                     default.superuser.push(permission);
                     // SPDX-SnippetBegin

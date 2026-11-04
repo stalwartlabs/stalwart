@@ -20,6 +20,7 @@ use crate::receiver::{ArgumentBytes, Request, Token, bad};
 use super::{parse_date, parse_number, parse_sequence_set};
 
 const FILTERS_INIT_LEN: usize = 16;
+const MAX_FILTER_DEPTH: usize = 32;
 
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
@@ -439,7 +440,7 @@ pub fn parse_filters(
 
                     },
                     "OR" => {
-                        if filters_stack.len() > 10 {
+                        if filters_stack.len() >= MAX_FILTER_DEPTH {
                             return Err(Cow::from("Too many nested filters"));
                         }
 
@@ -450,7 +451,7 @@ pub fn parse_filters(
                         continue;
                     },
                     "NOT" => {
-                        if filters_stack.len() > 10 {
+                        if filters_stack.len() >= MAX_FILTER_DEPTH {
                             return Err(Cow::from("Too many nested filters"));
                         }
 
@@ -468,7 +469,7 @@ pub fn parse_filters(
                 filters_len += 1;
             }
             Token::ParenthesisOpen => {
-                if filters_stack.len() > 10 {
+                if filters_stack.len() >= MAX_FILTER_DEPTH {
                     return Err(Cow::from("Too many nested filters"));
                 }
 

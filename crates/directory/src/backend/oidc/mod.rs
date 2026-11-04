@@ -207,6 +207,9 @@ impl ExternalScopes {
     pub const CONTACTS: Self = Self(1 << 1);
     pub const CALENDARS: Self = Self(1 << 2);
     pub const FILES: Self = Self(1 << 3);
+    pub const SECURITY: Self = Self(1 << 4);
+    pub const SETTINGS: Self = Self(1 << 5);
+    pub const FULL: Self = Self(1 << 6);
     pub const ALL: Self = Self(Self::MAIL.0 | Self::CONTACTS.0 | Self::CALENDARS.0 | Self::FILES.0);
 
     const NAMES: [(Self, &'static str); 4] = [
@@ -224,6 +227,9 @@ impl ExternalScopes {
             "urn:ietf:params:oauth:scope:contacts" => ExternalScopes::CONTACTS,
             "urn:ietf:params:oauth:scope:calendars" => ExternalScopes::CALENDARS,
             "urn:ietf:params:oauth:scope:files" => ExternalScopes::FILES,
+            "urn:stalwart:oauth:scope:security" => ExternalScopes::SECURITY,
+            "urn:stalwart:oauth:scope:settings" => ExternalScopes::SETTINGS,
+            "urn:stalwart:oauth:scope:full" => ExternalScopes::FULL,
         )
         .copied()
         .unwrap_or_default()

@@ -18,7 +18,7 @@ use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use compact_str::{CompactString, format_compact};
-use registry::schema::{enums::CompressionAlgo, structs::Application};
+use registry::schema::structs::Application;
 use serde::Deserialize;
 use std::{
     borrow::Cow,
@@ -30,6 +30,7 @@ use std::{
     },
     time::Duration,
 };
+use store::write::blob_codec::{BlobKeyring, BlobOpts};
 use store::{
     registry::{RegistryObject, bootstrap::Bootstrap},
     write::{BatchBuilder, BlobLink, BlobOp, blob::BlobLinkValue, now},
@@ -132,17 +133,19 @@ impl WebApplications {
         self.routes.load().contains_key(prefix)
     }
 
+    pub fn is_application_client_id(&self, client_id: &str) -> bool {
+        self.applications
+            .load()
+            .iter()
+            .any(|app| app.oauth_client_id.as_deref() == Some(client_id))
+    }
+
     pub fn is_first_party_client(
         &self,
         client_id: &str,
         policy: Option<AppOriginPolicy<'_>>,
     ) -> bool {
-        if self
-            .applications
-            .load()
-            .iter()
-            .any(|app| app.oauth_client_id.as_deref() == Some(client_id))
-        {
+        if self.is_application_client_id(client_id) {
             return true;
         }
         let (Some(policy), Some(client_id)) = (policy, AppClientId::parse(client_id)) else {
@@ -376,7 +379,11 @@ impl WebApplicationManager {
         } else {
             match server
                 .blob_store()
-                .get_blob(self.blob_key.as_slice(), 0..usize::MAX)
+                .get_blob(
+                    self.blob_key.as_slice(),
+                    0..usize::MAX,
+                    &BlobKeyring::default(),
+                )
                 .await
             {
                 Ok(cached) => cached,
@@ -572,7 +579,7 @@ impl WebApplicationManager {
     async fn cache(&self, server: &Server, bundle: &[u8]) -> trc::Result<()> {
         server
             .blob_store()
-            .put_blob(self.blob_key.as_slice(), bundle, CompressionAlgo::None)
+            .put_blob(self.blob_key.as_slice(), bundle, &BlobOpts::PLAIN)
             .await
             .caused_by(trc::location!())?;
 

@@ -34579,6 +34579,11 @@ impl ObjectImpl for Email {
                 1,
             ));
         }
+        if let Some(value) = &self.blob_encryption_key {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::BlobEncryptionKey));
+            }
+        }
         let value = &self.default_folders;
         for value in value.values() {
             value.validate(errors);
@@ -34647,7 +34652,9 @@ impl ObjectImpl for Email {
         errors.len() == neb
     }
 
-    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.foreign_key(ObjectType::SymmetricKey, self.blob_encryption_key, None);
+    }
 }
 
 impl Pickle for Email {
@@ -34676,7 +34683,10 @@ impl Pickle for Email {
         if self.max_public_keys.is_some() {
             bitmap |= 1 << 7;
         }
-        let block = crate::pickle::begin_block(out, 19, 8, bitmap);
+        if self.blob_encryption_key.is_some() {
+            bitmap |= 1 << 8;
+        }
+        let block = crate::pickle::begin_block(out, 20, 9, bitmap);
         self.max_attachment_size.pickle(out);
         self.max_message_size.pickle(out);
         self.max_mailbox_depth.pickle(out);
@@ -34711,6 +34721,9 @@ impl Pickle for Email {
         self.max_flag_length.pickle(out);
         self.max_header_size.pickle(out);
         self.max_header_count.pickle(out);
+        if let Some(value) = &self.blob_encryption_key {
+            value.pickle(out);
+        }
         crate::pickle::end_block(out, block);
     }
 
@@ -34833,6 +34846,15 @@ impl Pickle for Email {
         } else {
             5000u64
         };
+        let field19: Option<Id> = if block.has(19) {
+            if block.flag(8) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
         stream.close_block(block);
         Some(Self {
             max_attachment_size: field0,
@@ -34857,6 +34879,7 @@ impl Pickle for Email {
             max_flag_length: field16,
             max_header_size: field17,
             max_header_count: field18,
+            blob_encryption_key: field19,
         })
     }
 }
@@ -34869,6 +34892,7 @@ impl Default for Email {
             max_mailbox_depth: 10u64,
             max_mailbox_name_length: 255u64,
             compression_algorithm: CompressionAlgo::Lz4,
+            blob_encryption_key: Default::default(),
             default_folders: Default::default(),
             max_messages: Default::default(),
             max_submissions: Some(500u64),
@@ -34896,7 +34920,7 @@ impl IntoValue for Email {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(19);
+        let mut map = jmap_tools::Map::with_capacity(20);
         map.insert_unchecked(
             Property::MaxAttachmentSize,
             self.max_attachment_size.into_value_with(opts),
@@ -34916,6 +34940,10 @@ impl IntoValue for Email {
         map.insert_unchecked(
             Property::CompressionAlgorithm,
             self.compression_algorithm.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::BlobEncryptionKey,
+            self.blob_encryption_key.into_value_with(opts),
         );
         map.insert_unchecked(
             Property::DefaultFolders,
@@ -34996,6 +35024,7 @@ impl RegistryJsonPropertyPatch for Email {
             Some(Property::CompressionAlgorithm) => {
                 self.compression_algorithm.patch(pointer, value)
             }
+            Some(Property::BlobEncryptionKey) => self.blob_encryption_key.patch(pointer, value),
             Some(Property::DefaultFolders) => self.default_folders.patch(pointer, value),
             Some(Property::MaxMessages) => self.max_messages.patch(pointer, value),
             Some(Property::MaxSubmissions) => self.max_submissions.patch(pointer, value),
@@ -36828,10 +36857,17 @@ impl ObjectImpl for FileStorage {
                 errors.push(ValidationError::min_value(Property::MaxFolders, 1));
             }
         }
+        if let Some(value) = &self.blob_encryption_key {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::BlobEncryptionKey));
+            }
+        }
         errors.len() == neb
     }
 
-    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.foreign_key(ObjectType::SymmetricKey, self.blob_encryption_key, None);
+    }
 }
 
 impl Pickle for FileStorage {
@@ -36843,12 +36879,19 @@ impl Pickle for FileStorage {
         if self.max_folders.is_some() {
             bitmap |= 1 << 1;
         }
-        let block = crate::pickle::begin_block(out, 3, 2, bitmap);
+        if self.blob_encryption_key.is_some() {
+            bitmap |= 1 << 2;
+        }
+        let block = crate::pickle::begin_block(out, 5, 3, bitmap);
         self.max_size.pickle(out);
         if let Some(value) = &self.max_files {
             value.pickle(out);
         }
         if let Some(value) = &self.max_folders {
+            value.pickle(out);
+        }
+        self.compression_algorithm.pickle(out);
+        if let Some(value) = &self.blob_encryption_key {
             value.pickle(out);
         }
         crate::pickle::end_block(out, block);
@@ -36882,11 +36925,27 @@ impl Pickle for FileStorage {
         } else {
             Default::default()
         };
+        let field3: CompressionAlgo = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            CompressionAlgo::Lz4
+        };
+        let field4: Option<Id> = if block.has(4) {
+            if block.flag(2) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
         stream.close_block(block);
         Some(Self {
             max_size: field0,
             max_files: field1,
             max_folders: field2,
+            compression_algorithm: field3,
+            blob_encryption_key: field4,
         })
     }
 }
@@ -36897,6 +36956,8 @@ impl Default for FileStorage {
             max_size: 26214400,
             max_files: Default::default(),
             max_folders: Default::default(),
+            compression_algorithm: CompressionAlgo::Lz4,
+            blob_encryption_key: Default::default(),
         }
     }
 }
@@ -36907,10 +36968,18 @@ impl IntoValue for FileStorage {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(5);
+        let mut map = jmap_tools::Map::with_capacity(7);
         map.insert_unchecked(Property::MaxSize, self.max_size.into_value_with(opts));
         map.insert_unchecked(Property::MaxFiles, self.max_files.into_value_with(opts));
         map.insert_unchecked(Property::MaxFolders, self.max_folders.into_value_with(opts));
+        map.insert_unchecked(
+            Property::CompressionAlgorithm,
+            self.compression_algorithm.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::BlobEncryptionKey,
+            self.blob_encryption_key.into_value_with(opts),
+        );
         JmapValue::Object(map)
     }
 }
@@ -36925,6 +36994,10 @@ impl RegistryJsonPropertyPatch for FileStorage {
             Some(Property::MaxSize) => self.max_size.patch(pointer, value),
             Some(Property::MaxFiles) => self.max_files.patch(pointer, value),
             Some(Property::MaxFolders) => self.max_folders.patch(pointer, value),
+            Some(Property::CompressionAlgorithm) => {
+                self.compression_algorithm.patch(pointer, value)
+            }
+            Some(Property::BlobEncryptionKey) => self.blob_encryption_key.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -51616,9 +51689,6 @@ impl Pickle for OAuthClient {
         if self.logo.is_some() {
             bitmap |= 1 << 4;
         }
-        if self.first_party {
-            bitmap |= 1 << 5;
-        }
         let block = crate::pickle::begin_block(out, 13, 6, bitmap);
         self.client_id.pickle(out);
         if let Some(value) = &self.description {
@@ -51730,7 +51800,6 @@ impl Pickle for OAuthClient {
         } else {
             Default::default()
         };
-        let field10: bool = if block.has(10) { block.flag(5) } else { false };
         let field11: Map<OAuthScope> = if block.has(11) {
             Pickle::unpickle(stream)?
         } else {
@@ -51761,7 +51830,6 @@ impl Pickle for OAuthClient {
             redirect_uris: field7,
             post_logout_redirect_uris: field8,
             logo: field9,
-            first_party: field10,
             scopes: field11,
             grant_types: field12,
         })
@@ -51786,7 +51854,6 @@ impl Default for OAuthClient {
             redirect_uris: Default::default(),
             post_logout_redirect_uris: Default::default(),
             logo: Default::default(),
-            first_party: false,
             scopes: Default::default(),
             grant_types: Map::new(vec![
                 OAuthGrantType::AuthorizationCode,
@@ -51802,7 +51869,7 @@ impl IntoValue for OAuthClient {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(15);
+        let mut map = jmap_tools::Map::with_capacity(14);
         map.insert_unchecked(Property::ClientId, self.client_id.into_value_with(opts));
         map.insert_unchecked(
             Property::Description,
@@ -51839,7 +51906,6 @@ impl IntoValue for OAuthClient {
             self.post_logout_redirect_uris.into_value_with(opts),
         );
         map.insert_unchecked(Property::Logo, self.logo.into_value_with(opts));
-        map.insert_unchecked(Property::FirstParty, self.first_party.into_value_with(opts));
         map.insert_unchecked(Property::Scopes, self.scopes.into_value_with(opts));
         map.insert_unchecked(Property::GrantTypes, self.grant_types.into_value_with(opts));
         JmapValue::Object(map)
@@ -51876,7 +51942,9 @@ impl RegistryJsonPropertyPatch for OAuthClient {
                 self.post_logout_redirect_uris.patch(pointer, value)
             }
             Some(Property::Logo) => self.logo.patch(pointer, value),
-            Some(Property::FirstParty) => self.first_party.patch(pointer, value),
+            Some(property @ Property::FirstParty) => {
+                Ok(MaybeUnpatched::Unpatched { property, value })
+            }
             Some(Property::Scopes) => self.scopes.patch(pointer, value),
             Some(Property::GrantTypes) => self.grant_types.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
@@ -68760,6 +68828,140 @@ impl RegistryJsonPropertyPatch for SubAddressingCustom {
     }
 }
 
+impl ObjectImpl for SymmetricKey {
+    const FLAGS: u64 = OBJ_SEQ_ID;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::SymmetricKey;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.description;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Description));
+        }
+        let value = &self.key;
+        value.validate(errors);
+        let value = &self.fingerprint;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Fingerprint));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        if let Some(source) = self.key.external_source() {
+            errors.push(ValidationError::invalid(Property::Key, source));
+        }
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Pickle for SymmetricKey {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 4, 0, 0);
+        self.description.pickle(out);
+        self.cipher.pickle(out);
+        self.key.pickle(out);
+        self.fingerprint.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        if stream.version() > Self::VERSION {
+            return None;
+        }
+        let block = stream.open_block()?;
+        let field0: String = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: SymmetricCipher = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            SymmetricCipher::Aes256Gcm
+        };
+        let field2: SecretKey = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field3: String = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            description: field0,
+            cipher: field1,
+            key: field2,
+            fingerprint: field3,
+        })
+    }
+}
+
+impl Default for SymmetricKey {
+    fn default() -> Self {
+        Self {
+            description: Default::default(),
+            cipher: SymmetricCipher::Aes256Gcm,
+            key: Default::default(),
+            fingerprint: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for SymmetricKey {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(6);
+        map.insert_unchecked(
+            Property::Description,
+            self.description.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Cipher, self.cipher.into_value_with(opts));
+        map.insert_unchecked(Property::Key, self.key.into_value_with(opts));
+        map.insert_unchecked(
+            Property::Fingerprint,
+            self.fingerprint.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for SymmetricKey {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Description) => self
+                .description
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Cipher) => self.cipher.patch(pointer.assert_read_only()?, value),
+            Some(Property::Key) => self.key.patch(pointer.assert_read_only()?, value),
+            Some(Property::Fingerprint) => pointer.assert_server_set(),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl ObjectImpl for SystemSettings {
     const FLAGS: u64 = OBJ_SINGLETON;
     const VERSION: u8 = 0;
@@ -69181,6 +69383,7 @@ impl ObjectImpl for Task {
             Task::DmarcReportWindow(inner) => inner.validate(errors),
             Task::TlsReportWindow(inner) => inner.validate(errors),
             Task::ExternalPublicKeyMaintenance(inner) => inner.validate(errors),
+            Task::BlobRecode(inner) => inner.validate(errors),
         }
     }
 
@@ -69243,6 +69446,9 @@ impl ObjectImpl for Task {
             Task::DmarcReportWindow(_) => {}
             Task::TlsReportWindow(_) => {}
             Task::ExternalPublicKeyMaintenance(_) => {}
+            Task::BlobRecode(object) => {
+                object.index(i);
+            }
         }
     }
 }
@@ -69342,6 +69548,10 @@ impl Pickle for Task {
                 18u16.pickle(out);
                 inner.pickle(out);
             }
+            Task::BlobRecode(inner) => {
+                19u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -69379,6 +69589,7 @@ impl Pickle for Task {
             16 => Pickle::unpickle(stream).map(Task::DmarcReportWindow),
             17 => Pickle::unpickle(stream).map(Task::TlsReportWindow),
             18 => Pickle::unpickle(stream).map(Task::ExternalPublicKeyMaintenance),
+            19 => Pickle::unpickle(stream).map(Task::BlobRecode),
             _ => None,
         }
     }
@@ -69537,6 +69748,13 @@ impl IntoValue for Task {
                 );
                 obj
             }
+            Task::BlobRecode(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("BlobRecode".into()));
+                obj
+            }
         }
     }
 }
@@ -69594,6 +69812,7 @@ impl RegistryJsonPatch for Task {
                 TaskType::ExternalPublicKeyMaintenance => {
                     *self = Task::ExternalPublicKeyMaintenance(Default::default())
                 }
+                TaskType::BlobRecode => *self = Task::BlobRecode(Default::default()),
             }
         }
         match self {
@@ -69626,6 +69845,7 @@ impl RegistryJsonPatch for Task {
             Task::DmarcReportWindow(inner) => inner.patch(pointer, value),
             Task::TlsReportWindow(inner) => inner.patch(pointer, value),
             Task::ExternalPublicKeyMaintenance(inner) => inner.patch(pointer, value),
+            Task::BlobRecode(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -69662,6 +69882,7 @@ impl Task {
             Task::DmarcReportWindow(_) => TaskType::DmarcReportWindow,
             Task::TlsReportWindow(_) => TaskType::TlsReportWindow,
             Task::ExternalPublicKeyMaintenance(_) => TaskType::ExternalPublicKeyMaintenance,
+            Task::BlobRecode(_) => TaskType::BlobRecode,
         }
     }
 }
@@ -69760,6 +69981,309 @@ impl RegistryJsonPropertyPatch for TaskAccountMaintenance {
                 .patch(pointer.assert_read_only()?, value),
             Some(Property::Status) => self.status.patch(pointer, value),
             Some(Property::Due) => pointer.assert_server_set(),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl TaskBlobRecode {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.encryption;
+        value.validate(errors);
+        let value = &self.status;
+        value.validate(errors);
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        self.encryption.index(i);
+    }
+}
+
+impl Pickle for TaskBlobRecode {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.shard_index.is_some() {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 4, 1, bitmap);
+        self.compression.pickle(out);
+        self.encryption.pickle(out);
+        if let Some(value) = &self.shard_index {
+            value.pickle(out);
+        }
+        self.status.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: TaskBlobRecodeCompression = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            TaskBlobRecodeCompression::Keep
+        };
+        let field1: TaskBlobRecodeEncryption = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            TaskBlobRecodeEncryption::Keep
+        };
+        let field2: Option<u64> = if block.has(2) {
+            if block.flag(0) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field3: TaskStatus = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            compression: field0,
+            encryption: field1,
+            shard_index: field2,
+            status: field3,
+        })
+    }
+}
+
+impl Default for TaskBlobRecode {
+    fn default() -> Self {
+        Self {
+            compression: TaskBlobRecodeCompression::Keep,
+            encryption: TaskBlobRecodeEncryption::Keep,
+            shard_index: Default::default(),
+            status: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for TaskBlobRecode {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(6);
+        map.insert_unchecked(
+            Property::Compression,
+            self.compression.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Encryption, self.encryption.into_value_with(opts));
+        map.insert_unchecked(Property::ShardIndex, self.shard_index.into_value_with(opts));
+        map.insert_unchecked(Property::Status, self.status.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for TaskBlobRecode {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Compression) => {
+                self.compression.patch(pointer.assert_read_only()?, value)
+            }
+            Some(Property::Encryption) => self.encryption.patch(pointer.assert_read_only()?, value),
+            Some(Property::ShardIndex) => self.shard_index.patch(pointer, value),
+            Some(Property::Status) => self.status.patch(pointer, value),
+            Some(Property::Due) => pointer.assert_server_set(),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl TaskBlobRecodeEncryption {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            TaskBlobRecodeEncryption::Keep => true,
+            TaskBlobRecodeEncryption::Disable => true,
+            TaskBlobRecodeEncryption::Encrypt(inner) => inner.validate(errors),
+        }
+    }
+
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        match self {
+            TaskBlobRecodeEncryption::Keep => {}
+            TaskBlobRecodeEncryption::Disable => {}
+            TaskBlobRecodeEncryption::Encrypt(object) => {
+                object.index(i);
+            }
+        }
+    }
+}
+
+impl Default for TaskBlobRecodeEncryption {
+    fn default() -> Self {
+        TaskBlobRecodeEncryption::Keep
+    }
+}
+
+impl Pickle for TaskBlobRecodeEncryption {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            TaskBlobRecodeEncryption::Keep => {
+                0u16.pickle(out);
+            }
+            TaskBlobRecodeEncryption::Disable => {
+                1u16.pickle(out);
+            }
+            TaskBlobRecodeEncryption::Encrypt(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(TaskBlobRecodeEncryption::Keep),
+            1 => Some(TaskBlobRecodeEncryption::Disable),
+            2 => Pickle::unpickle(stream).map(TaskBlobRecodeEncryption::Encrypt),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for TaskBlobRecodeEncryption {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            TaskBlobRecodeEncryption::Keep => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Keep".into()));
+                JmapValue::Object(obj)
+            }
+            TaskBlobRecodeEncryption::Disable => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Disable".into()));
+                JmapValue::Object(obj)
+            }
+            TaskBlobRecodeEncryption::Encrypt(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Encrypt".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for TaskBlobRecodeEncryption {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                TaskBlobRecodeEncryptionType::Keep => *self = TaskBlobRecodeEncryption::Keep,
+                TaskBlobRecodeEncryptionType::Disable => *self = TaskBlobRecodeEncryption::Disable,
+                TaskBlobRecodeEncryptionType::Encrypt => {
+                    *self = TaskBlobRecodeEncryption::Encrypt(Default::default())
+                }
+            }
+        }
+        match self {
+            TaskBlobRecodeEncryption::Keep => pointer.assert_eof(),
+            TaskBlobRecodeEncryption::Disable => pointer.assert_eof(),
+            TaskBlobRecodeEncryption::Encrypt(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl TaskBlobRecodeEncryption {
+    pub fn object_type(&self) -> TaskBlobRecodeEncryptionType {
+        match self {
+            TaskBlobRecodeEncryption::Keep => TaskBlobRecodeEncryptionType::Keep,
+            TaskBlobRecodeEncryption::Disable => TaskBlobRecodeEncryptionType::Disable,
+            TaskBlobRecodeEncryption::Encrypt(_) => TaskBlobRecodeEncryptionType::Encrypt,
+        }
+    }
+}
+
+impl TaskBlobRecodeKey {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.key_id;
+        if !value.is_valid() {
+            errors.push(ValidationError::required(Property::KeyId));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.foreign_key(ObjectType::SymmetricKey, self.key_id.into(), None);
+    }
+}
+
+impl Pickle for TaskBlobRecodeKey {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 1, 0, 0);
+        self.key_id.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: Id = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self { key_id: field0 })
+    }
+}
+
+impl Default for TaskBlobRecodeKey {
+    fn default() -> Self {
+        Self {
+            key_id: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for TaskBlobRecodeKey {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::KeyId, self.key_id.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for TaskBlobRecodeKey {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::KeyId) => self.key_id.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

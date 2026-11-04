@@ -45,7 +45,12 @@ pub async fn insert_test_data(server: &Server) {
     let future = one_year_from_now_u64();
     for message in sample_raw_messages() {
         let (hash, _) = server
-            .put_temporary_blob(u32::MAX, message.as_bytes(), future)
+            .put_temporary_blob(
+                u32::MAX,
+                message.as_bytes(),
+                future,
+                &server.core.blob.email,
+            )
             .await
             .unwrap();
         hashes.push(hash);

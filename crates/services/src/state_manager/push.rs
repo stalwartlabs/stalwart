@@ -368,22 +368,26 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                             for id in ids.iter() {
                                 if let Some(subscription) = push_servers.get_mut(id) {
                                     if subscription.server.expires > current_time {
-                                        if let Some(mut notification) =
-                                            notification.filter_types(&subscription.server.types)
-                                        {
-                                            if let PushNotification::EmailPush(email_push) =
-                                                &notification
-                                                && !subscription
+                                        let as_state_change;
+                                        let candidate = match &notification {
+                                            PushNotification::EmailPush(email_push)
+                                                if !subscription
                                                     .server
                                                     .email_push
                                                     .iter()
-                                                    .any(|ep| ep.account_id == account_id)
+                                                    .any(|ep| ep.account_id == account_id) =>
                                             {
-                                                notification = PushNotification::StateChange(
+                                                as_state_change = PushNotification::StateChange(
                                                     email_push.to_state_change(),
                                                 );
+                                                &as_state_change
                                             }
+                                            _ => &notification,
+                                        };
 
+                                        if let Some(notification) =
+                                            candidate.filter_types(&subscription.server.types)
+                                        {
                                             subscription.pending.push(notification);
                                             let last_request = subscription.last_request.elapsed();
 

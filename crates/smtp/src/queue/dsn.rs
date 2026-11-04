@@ -449,7 +449,6 @@ impl DsnSigning {
 impl MessageWrapper {
     async fn returned_part(&self, server: &Server) -> ReturnedPart {
         let mut buf = match server
-            .blob_store()
             .get_blob(self.message.blob_hash.as_slice(), 0..MAX_DKIM2_HEADER_SIZE)
             .await
         {

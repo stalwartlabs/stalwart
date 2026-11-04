@@ -11,7 +11,7 @@ use common::{
 };
 use directory::core::secret::{hash_secret, is_password_hash};
 use jmap_proto::error::set::SetError;
-use registry::schema::{enums::Permission, structs::OAuthClient};
+use registry::schema::{enums::Permission, prelude::Property, structs::OAuthClient};
 use trc::AddContext;
 
 pub fn is_superuser(access_token: &AccessToken) -> bool {
@@ -32,10 +32,24 @@ pub async fn validate_oauth_client_object(
     access_token: &AccessToken,
     client: &mut OAuthClient,
 ) -> ValidationResult {
-    if let Err((property, err)) = validate_oauth_client(client, is_superuser(access_token)) {
+    let is_superuser = is_superuser(access_token);
+    if let Err((property, err)) = validate_oauth_client(client, is_superuser) {
         return Ok(Err(SetError::invalid_properties()
             .with_property(property)
             .with_description(err.error_description.unwrap_or(err.error))));
+    }
+    if !is_superuser
+        && server
+            .inner
+            .data
+            .applications
+            .is_application_client_id(&client.client_id)
+    {
+        return Ok(Err(SetError::invalid_properties()
+            .with_property(Property::ClientId)
+            .with_description(
+                "Only a superuser can register the client id of a web application.",
+            )));
     }
 
     if let Some(secret) = client.secret.as_mut()

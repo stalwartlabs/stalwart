@@ -747,12 +747,17 @@ impl Server {
             return Ok(self.get_default_directory());
         };
 
-        match (claims.domain(), claims.iss.as_deref()) {
-            (Some(domain_name), _) => self.get_directory_for_domain(domain_name).await,
-            (None, Some(issuer)) => Ok(self
-                .get_directory_for_issuer(issuer)
-                .or_else(|| self.get_default_directory())),
-            (None, None) => Ok(self.get_default_directory()),
+        if let Some(directory) = claims
+            .iss
+            .as_deref()
+            .and_then(|issuer| self.get_directory_for_issuer(issuer))
+        {
+            return Ok(Some(directory));
+        }
+
+        match claims.domain() {
+            Some(domain_name) => self.get_directory_for_domain(domain_name).await,
+            None => Ok(self.get_default_directory()),
         }
     }
 

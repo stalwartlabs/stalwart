@@ -9,7 +9,7 @@ use crate::auth::authenticate::Authenticator;
 use common::{
     Server,
     auth::oauth::{
-        CLIENT_ID_MAX_LEN,
+        CLIENT_ID_MAX_LEN, SCOPE_FULL,
         client::ResolvedClient,
         client_id::{ClientMeta, encode_client_id},
         registration::{
@@ -75,7 +75,7 @@ impl ClientRegistrationHandler for Server {
         session: HttpSessionData,
     ) -> trc::Result<HttpResponse> {
         let body = fetch_body(req, 20 * 1024, session.session_id).await;
-        let request = serde_json::from_slice::<ClientRegistrationRequest>(
+        let mut request = serde_json::from_slice::<ClientRegistrationRequest>(
             body.as_deref().unwrap_or_default(),
         )
         .map_err(|err| {
@@ -106,11 +106,26 @@ impl ClientRegistrationHandler for Server {
             self.is_http_anonymous_request_allowed(session.remote_ip)
                 .await?;
 
+            let scopes = OAuthScopes::parse(request.scope.as_deref().unwrap_or_default());
+            if scopes.contains(OAuthScopes::FULL)
+                && let Some(scope) = &mut request.scope
+            {
+                *scope = scope
+                    .split_ascii_whitespace()
+                    .filter(|name| *name != SCOPE_FULL)
+                    .fold(String::with_capacity(scope.len()), |mut out, name| {
+                        if !out.is_empty() {
+                            out.push(' ');
+                        }
+                        out.push_str(name);
+                        out
+                    });
+            }
             let client_id = encode_client_id(
                 self.core.oauth.oauth_key.as_bytes(),
                 &ClientMeta {
                     redirect_uris: request.redirect_uris.clone(),
-                    scopes: OAuthScopes::parse(request.scope.as_deref().unwrap_or_default()),
+                    scopes: scopes.without(OAuthScopes::FULL),
                     client_name: request.client_name.clone(),
                 },
             )
@@ -227,7 +242,6 @@ impl ClientRegistrationHandler for Server {
             redirect_uris: request.redirect_uris.clone().into(),
             logo: request.logo_uri.clone(),
             created_at: UTCDateTime::now(),
-            first_party: false,
             scopes: scopes.into(),
             grant_types: grant_types.into(),
             ..Default::default()

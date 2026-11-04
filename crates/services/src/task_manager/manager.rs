@@ -507,7 +507,7 @@ fn is_enabled(task_type: TaskType, roles: &ClusterRoles) -> bool {
         #[cfg(feature = "enterprise")]
         TaskType::TenantMaintenance => roles.account_maintenance,
         // SPDX-SnippetEnd
-        TaskType::StoreMaintenance => roles.store_maintenance,
+        TaskType::StoreMaintenance | TaskType::BlobRecode => roles.store_maintenance,
         TaskType::SpamFilterMaintenance => roles.spam_training,
         TaskType::CalendarAlarmEmail
         | TaskType::CalendarAlarmNotification

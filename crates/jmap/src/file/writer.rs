@@ -719,7 +719,13 @@ impl<'x> FileNodeWriter<'x> {
             };
             let (hash, hold) = self
                 .server
-                .hold_blob(self.account_id, blob_id.hash.clone(), &bytes, 60)
+                .hold_blob(
+                    self.account_id,
+                    blob_id.hash.clone(),
+                    &bytes,
+                    60,
+                    &self.server.core.blob.file,
+                )
                 .await
                 .caused_by(trc::location!())?;
             hold.commit(&mut self.batch);
@@ -735,7 +741,13 @@ impl<'x> FileNodeWriter<'x> {
             };
             let (hash, hold) = self
                 .server
-                .hold_blob(self.account_id, BlobHash::generate(&bytes), &bytes, 60)
+                .hold_blob(
+                    self.account_id,
+                    BlobHash::generate(&bytes),
+                    &bytes,
+                    60,
+                    &self.server.core.blob.file,
+                )
                 .await
                 .caused_by(trc::location!())?;
             hold.commit(&mut self.batch);

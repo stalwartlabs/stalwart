@@ -6,7 +6,6 @@
 
 use super::{GrantType, scope::OAuthScopes};
 use crate::Server;
-use registry::schema::enums::OAuthClientKind;
 use serde::{Deserialize, Serialize};
 use trc::{AuthEvent, EventType};
 
@@ -84,7 +83,7 @@ impl Server {
         if (token_info.grant_type == GrantType::RefreshToken
             && !stored.is_current(presented.generation))
             || (token_info.credential_expired
-                && stored.grant.client_kind != OAuthClientKind::FirstParty)
+                && !OAuthScopes::from_grant(&stored.grant).allows_expired_credential())
         {
             return Ok(OAuthIntrospect::default());
         }

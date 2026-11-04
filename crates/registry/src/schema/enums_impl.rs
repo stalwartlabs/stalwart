@@ -1829,6 +1829,7 @@ impl EnumImpl for CompressionAlgo {
             CompressionAlgo,
             b"lz4" => CompressionAlgo::Lz4,
             b"none" => CompressionAlgo::None,
+            b"zstd" => CompressionAlgo::Zstd,
         }
         .copied()
     }
@@ -1837,6 +1838,7 @@ impl EnumImpl for CompressionAlgo {
         match self {
             CompressionAlgo::Lz4 => "lz4",
             CompressionAlgo::None => "none",
+            CompressionAlgo::Zstd => "zstd",
         }
     }
 
@@ -1848,11 +1850,12 @@ impl EnumImpl for CompressionAlgo {
         match id {
             0 => Some(CompressionAlgo::Lz4),
             1 => Some(CompressionAlgo::None),
+            2 => Some(CompressionAlgo::Zstd),
             _ => None,
         }
     }
 
-    const COUNT: usize = 2;
+    const COUNT: usize = 3;
 }
 
 impl serde::Serialize for CompressionAlgo {
@@ -8023,6 +8026,9 @@ impl EnumImpl for OAuthScope {
             b"contacts" => OAuthScope::Contacts,
             b"calendars" => OAuthScope::Calendars,
             b"files" => OAuthScope::Files,
+            b"full" => OAuthScope::Full,
+            b"security" => OAuthScope::Security,
+            b"settings" => OAuthScope::Settings,
         }
         .copied()
     }
@@ -8033,6 +8039,9 @@ impl EnumImpl for OAuthScope {
             OAuthScope::Contacts => "contacts",
             OAuthScope::Calendars => "calendars",
             OAuthScope::Files => "files",
+            OAuthScope::Full => "full",
+            OAuthScope::Security => "security",
+            OAuthScope::Settings => "settings",
         }
     }
 
@@ -8046,11 +8055,14 @@ impl EnumImpl for OAuthScope {
             1 => Some(OAuthScope::Contacts),
             2 => Some(OAuthScope::Calendars),
             3 => Some(OAuthScope::Files),
+            4 => Some(OAuthScope::Full),
+            5 => Some(OAuthScope::Security),
+            6 => Some(OAuthScope::Settings),
             _ => None,
         }
     }
 
-    const COUNT: usize = 4;
+    const COUNT: usize = 7;
 }
 
 impl serde::Serialize for OAuthScope {
@@ -9027,6 +9039,11 @@ impl EnumImpl for Permission {
             b"sysStoreLookupUpdate" => Permission::SysStoreLookupUpdate,
             b"sysStoreLookupDestroy" => Permission::SysStoreLookupDestroy,
             b"sysStoreLookupQuery" => Permission::SysStoreLookupQuery,
+            b"sysSymmetricKeyGet" => Permission::SysSymmetricKeyGet,
+            b"sysSymmetricKeyCreate" => Permission::SysSymmetricKeyCreate,
+            b"sysSymmetricKeyUpdate" => Permission::SysSymmetricKeyUpdate,
+            b"sysSymmetricKeyDestroy" => Permission::SysSymmetricKeyDestroy,
+            b"sysSymmetricKeyQuery" => Permission::SysSymmetricKeyQuery,
             b"sysSystemSettingsGet" => Permission::SysSystemSettingsGet,
             b"sysSystemSettingsUpdate" => Permission::SysSystemSettingsUpdate,
             b"taskCalendarAlarmEmail" => Permission::TaskCalendarAlarmEmail,
@@ -9048,6 +9065,7 @@ impl EnumImpl for Permission {
             b"taskDmarcReportWindow" => Permission::TaskDmarcReportWindow,
             b"taskTlsReportWindow" => Permission::TaskTlsReportWindow,
             b"taskExternalPublicKeyMaintenance" => Permission::TaskExternalPublicKeyMaintenance,
+            b"taskBlobRecode" => Permission::TaskBlobRecode,
             b"sysTaskGet" => Permission::SysTaskGet,
             b"sysTaskCreate" => Permission::SysTaskCreate,
             b"sysTaskUpdate" => Permission::SysTaskUpdate,
@@ -9662,6 +9680,11 @@ impl EnumImpl for Permission {
             b"sysStoreLookupUpdate" => Permission::SysStoreLookupUpdate,
             b"sysStoreLookupDestroy" => Permission::SysStoreLookupDestroy,
             b"sysStoreLookupQuery" => Permission::SysStoreLookupQuery,
+            b"sysSymmetricKeyGet" => Permission::SysSymmetricKeyGet,
+            b"sysSymmetricKeyCreate" => Permission::SysSymmetricKeyCreate,
+            b"sysSymmetricKeyUpdate" => Permission::SysSymmetricKeyUpdate,
+            b"sysSymmetricKeyDestroy" => Permission::SysSymmetricKeyDestroy,
+            b"sysSymmetricKeyQuery" => Permission::SysSymmetricKeyQuery,
             b"sysSystemSettingsGet" => Permission::SysSystemSettingsGet,
             b"sysSystemSettingsUpdate" => Permission::SysSystemSettingsUpdate,
             b"taskCalendarAlarmEmail" => Permission::TaskCalendarAlarmEmail,
@@ -9681,6 +9704,7 @@ impl EnumImpl for Permission {
             b"taskDmarcReportWindow" => Permission::TaskDmarcReportWindow,
             b"taskTlsReportWindow" => Permission::TaskTlsReportWindow,
             b"taskExternalPublicKeyMaintenance" => Permission::TaskExternalPublicKeyMaintenance,
+            b"taskBlobRecode" => Permission::TaskBlobRecode,
             b"sysTaskGet" => Permission::SysTaskGet,
             b"sysTaskCreate" => Permission::SysTaskCreate,
             b"sysTaskUpdate" => Permission::SysTaskUpdate,
@@ -10394,6 +10418,11 @@ impl EnumImpl for Permission {
             Permission::SysStoreLookupUpdate => "sysStoreLookupUpdate",
             Permission::SysStoreLookupDestroy => "sysStoreLookupDestroy",
             Permission::SysStoreLookupQuery => "sysStoreLookupQuery",
+            Permission::SysSymmetricKeyGet => "sysSymmetricKeyGet",
+            Permission::SysSymmetricKeyCreate => "sysSymmetricKeyCreate",
+            Permission::SysSymmetricKeyUpdate => "sysSymmetricKeyUpdate",
+            Permission::SysSymmetricKeyDestroy => "sysSymmetricKeyDestroy",
+            Permission::SysSymmetricKeyQuery => "sysSymmetricKeyQuery",
             Permission::SysSystemSettingsGet => "sysSystemSettingsGet",
             Permission::SysSystemSettingsUpdate => "sysSystemSettingsUpdate",
             Permission::TaskCalendarAlarmEmail => "taskCalendarAlarmEmail",
@@ -10425,6 +10454,7 @@ impl EnumImpl for Permission {
             Permission::TaskDmarcReportWindow => "taskDmarcReportWindow",
             Permission::TaskTlsReportWindow => "taskTlsReportWindow",
             Permission::TaskExternalPublicKeyMaintenance => "taskExternalPublicKeyMaintenance",
+            Permission::TaskBlobRecode => "taskBlobRecode",
             Permission::SysTaskGet => "sysTaskGet",
             Permission::SysTaskCreate => "sysTaskCreate",
             Permission::SysTaskUpdate => "sysTaskUpdate",
@@ -11161,6 +11191,11 @@ impl EnumImpl for Permission {
             583 => Some(Permission::SysStoreLookupUpdate),
             584 => Some(Permission::SysStoreLookupDestroy),
             585 => Some(Permission::SysStoreLookupQuery),
+            656 => Some(Permission::SysSymmetricKeyGet),
+            657 => Some(Permission::SysSymmetricKeyCreate),
+            658 => Some(Permission::SysSymmetricKeyUpdate),
+            659 => Some(Permission::SysSymmetricKeyDestroy),
+            660 => Some(Permission::SysSymmetricKeyQuery),
             586 => Some(Permission::SysSystemSettingsGet),
             587 => Some(Permission::SysSystemSettingsUpdate),
             588 => Some(Permission::TaskCalendarAlarmEmail),
@@ -11192,6 +11227,7 @@ impl EnumImpl for Permission {
             604 => Some(Permission::TaskDmarcReportWindow),
             605 => Some(Permission::TaskTlsReportWindow),
             655 => Some(Permission::TaskExternalPublicKeyMaintenance),
+            661 => Some(Permission::TaskBlobRecode),
             606 => Some(Permission::SysTaskGet),
             607 => Some(Permission::SysTaskCreate),
             608 => Some(Permission::SysTaskUpdate),
@@ -11254,7 +11290,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 656;
+    const COUNT: usize = 662;
 }
 
 impl Permission {
@@ -12017,6 +12053,12 @@ impl Permission {
         Permission::SysSmimeTrustAnchorDestroy,
         Permission::SysSmimeTrustAnchorQuery,
         Permission::TaskExternalPublicKeyMaintenance,
+        Permission::SysSymmetricKeyGet,
+        Permission::SysSymmetricKeyCreate,
+        Permission::SysSymmetricKeyUpdate,
+        Permission::SysSymmetricKeyDestroy,
+        Permission::SysSymmetricKeyQuery,
+        Permission::TaskBlobRecode,
     ];
 }
 
@@ -15143,6 +15185,58 @@ impl<'de> serde::Deserialize<'de> for SubAddressingType {
     }
 }
 
+impl EnumImpl for SymmetricCipher {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            SymmetricCipher,
+            b"aes256Gcm" => SymmetricCipher::Aes256Gcm,
+            b"chacha20Poly1305" => SymmetricCipher::Chacha20Poly1305,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            SymmetricCipher::Aes256Gcm => "aes256Gcm",
+            SymmetricCipher::Chacha20Poly1305 => "chacha20Poly1305",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(SymmetricCipher::Aes256Gcm),
+            1 => Some(SymmetricCipher::Chacha20Poly1305),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for SymmetricCipher {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SymmetricCipher {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for TaskAccountMaintenanceType {
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
@@ -15195,6 +15289,119 @@ impl serde::Serialize for TaskAccountMaintenanceType {
 }
 
 impl<'de> serde::Deserialize<'de> for TaskAccountMaintenanceType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for TaskBlobRecodeCompression {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            TaskBlobRecodeCompression,
+            b"keep" => TaskBlobRecodeCompression::Keep,
+            b"disable" => TaskBlobRecodeCompression::Disable,
+            b"lz4" => TaskBlobRecodeCompression::Lz4,
+            b"zstd" => TaskBlobRecodeCompression::Zstd,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            TaskBlobRecodeCompression::Keep => "keep",
+            TaskBlobRecodeCompression::Disable => "disable",
+            TaskBlobRecodeCompression::Lz4 => "lz4",
+            TaskBlobRecodeCompression::Zstd => "zstd",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(TaskBlobRecodeCompression::Keep),
+            1 => Some(TaskBlobRecodeCompression::Disable),
+            2 => Some(TaskBlobRecodeCompression::Lz4),
+            3 => Some(TaskBlobRecodeCompression::Zstd),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for TaskBlobRecodeCompression {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TaskBlobRecodeCompression {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for TaskBlobRecodeEncryptionType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            TaskBlobRecodeEncryptionType,
+            b"Keep" => TaskBlobRecodeEncryptionType::Keep,
+            b"Disable" => TaskBlobRecodeEncryptionType::Disable,
+            b"Encrypt" => TaskBlobRecodeEncryptionType::Encrypt,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            TaskBlobRecodeEncryptionType::Keep => "Keep",
+            TaskBlobRecodeEncryptionType::Disable => "Disable",
+            TaskBlobRecodeEncryptionType::Encrypt => "Encrypt",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(TaskBlobRecodeEncryptionType::Keep),
+            1 => Some(TaskBlobRecodeEncryptionType::Disable),
+            2 => Some(TaskBlobRecodeEncryptionType::Encrypt),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for TaskBlobRecodeEncryptionType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TaskBlobRecodeEncryptionType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -15593,6 +15800,7 @@ impl EnumImpl for TaskType {
             b"DmarcReportWindow" => TaskType::DmarcReportWindow,
             b"TlsReportWindow" => TaskType::TlsReportWindow,
             b"ExternalPublicKeyMaintenance" => TaskType::ExternalPublicKeyMaintenance,
+            b"BlobRecode" => TaskType::BlobRecode,
         }
         .copied()
     }
@@ -15620,6 +15828,7 @@ impl EnumImpl for TaskType {
             b"DmarcReportWindow" => TaskType::DmarcReportWindow,
             b"TlsReportWindow" => TaskType::TlsReportWindow,
             b"ExternalPublicKeyMaintenance" => TaskType::ExternalPublicKeyMaintenance,
+            b"BlobRecode" => TaskType::BlobRecode,
         }
         .copied()
     }
@@ -15655,6 +15864,7 @@ impl EnumImpl for TaskType {
             TaskType::DmarcReportWindow => "DmarcReportWindow",
             TaskType::TlsReportWindow => "TlsReportWindow",
             TaskType::ExternalPublicKeyMaintenance => "ExternalPublicKeyMaintenance",
+            TaskType::BlobRecode => "BlobRecode",
         }
     }
 
@@ -15693,11 +15903,12 @@ impl EnumImpl for TaskType {
             16 => Some(TaskType::DmarcReportWindow),
             17 => Some(TaskType::TlsReportWindow),
             18 => Some(TaskType::ExternalPublicKeyMaintenance),
+            19 => Some(TaskType::BlobRecode),
             _ => None,
         }
     }
 
-    const COUNT: usize = 19;
+    const COUNT: usize = 20;
 }
 
 impl TaskType {
@@ -15731,6 +15942,7 @@ impl TaskType {
         TaskType::DmarcReportWindow,
         TaskType::TlsReportWindow,
         TaskType::ExternalPublicKeyMaintenance,
+        TaskType::BlobRecode,
     ];
 }
 

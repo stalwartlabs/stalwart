@@ -34,7 +34,6 @@ pub(crate) async fn build_email_document(
 ) -> trc::Result<Option<IndexDocument>> {
     let metadata = row.unarchive().caused_by(trc::location!())?;
     let Some(raw_message) = server
-        .blob_store()
         .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
         .await
         .caused_by(trc::location!())?

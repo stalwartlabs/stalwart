@@ -41,6 +41,7 @@ pub mod assert;
 pub mod batch;
 pub mod bitpack;
 pub mod blob;
+pub mod blob_codec;
 pub mod compress;
 pub mod counter;
 pub mod key;

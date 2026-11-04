@@ -188,7 +188,13 @@ impl SieveScriptSet for Server {
                                 .ctx(trc::Key::Reason, "Created script carries no blob.")
                         })?;
                         let (blob_hash, blob_hold) = self
-                            .hold_blob(account_id, BlobHash::generate(blob), blob, 60)
+                            .hold_blob(
+                                account_id,
+                                BlobHash::generate(blob),
+                                blob,
+                                60,
+                                &self.core.blob.email,
+                            )
                             .await?;
                         sieve.blob_hash = blob_hash;
                         let blob_size = sieve.size as usize;
@@ -384,7 +390,13 @@ impl SieveScriptSet for Server {
                             // Store blob
                             let sieve = &mut result.builder.changes_mut().unwrap();
                             let (blob_hash, blob_hold) = self
-                                .hold_blob(account_id, BlobHash::generate(&blob), &blob, 60)
+                                .hold_blob(
+                                    account_id,
+                                    BlobHash::generate(&blob),
+                                    &blob,
+                                    60,
+                                    &self.core.blob.email,
+                                )
                                 .await?;
                             sieve.blob_hash = blob_hash;
                             blob_hold.release(&mut batch);

@@ -307,7 +307,7 @@ impl Authorization {
 
     pub fn consent_scopes(&self) -> OAuthScopes {
         if self.client.allowed_scopes().is_some() {
-            OAuthScopes::parse(self.scope.as_deref().unwrap_or_default()).interoperable()
+            OAuthScopes::parse(self.scope.as_deref().unwrap_or_default()).grantable()
         } else {
             OAuthScopes::NONE
         }
@@ -380,6 +380,9 @@ fn scope_label(scope: &str) -> Option<&'static str> {
         "urn:ietf:params:oauth:scope:contacts" => "Read and manage your contacts",
         "urn:ietf:params:oauth:scope:calendars" => "Read and manage your calendars",
         "urn:ietf:params:oauth:scope:files" => "Read and manage your files",
+        "urn:stalwart:oauth:scope:security" => "Manage your passwords, 2FA, API keys and connected apps",
+        "urn:stalwart:oauth:scope:settings" => "Manage your account settings and encryption keys",
+        "urn:stalwart:oauth:scope:full" => LABEL_FULL_ACCESS,
     )
     .copied()
 }

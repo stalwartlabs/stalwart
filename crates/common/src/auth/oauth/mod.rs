@@ -29,6 +29,9 @@ pub const SCOPE_MAIL: &str = "urn:ietf:params:oauth:scope:mail";
 pub const SCOPE_CONTACTS: &str = "urn:ietf:params:oauth:scope:contacts";
 pub const SCOPE_CALENDARS: &str = "urn:ietf:params:oauth:scope:calendars";
 pub const SCOPE_FILES: &str = "urn:ietf:params:oauth:scope:files";
+pub const SCOPE_SECURITY: &str = "urn:stalwart:oauth:scope:security";
+pub const SCOPE_SETTINGS: &str = "urn:stalwart:oauth:scope:settings";
+pub const SCOPE_FULL: &str = "urn:stalwart:oauth:scope:full";
 
 const SUPPORTED_SCOPES: &[&str] = &[
     SCOPE_OPENID,
@@ -36,6 +39,9 @@ const SUPPORTED_SCOPES: &[&str] = &[
     SCOPE_MAIL,
     SCOPE_CONTACTS,
     SCOPE_CALENDARS,
+    SCOPE_SECURITY,
+    SCOPE_SETTINGS,
+    SCOPE_FULL,
     SCOPE_FILES,
 ];
 

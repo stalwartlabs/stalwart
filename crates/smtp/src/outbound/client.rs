@@ -786,11 +786,7 @@ impl MessageWrapper {
         server: &Server,
         hash: &BlobHash,
     ) -> Result<Vec<u8>, Status<HostResponse<Box<str>>, ErrorDetails>> {
-        match server
-            .blob_store()
-            .get_blob(hash.as_slice(), 0..usize::MAX)
-            .await
-        {
+        match server.get_blob(hash.as_slice(), 0..usize::MAX).await {
             Ok(Some(raw_message)) => Ok(raw_message),
             Ok(None) => {
                 trc::event!(

@@ -4,43 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::{BlobStore, CompressionAlgo, Store, U32_LEN};
-use std::{borrow::Cow, ops::Range, time::Instant};
+use crate::{
+    BlobStore, Store,
+    write::blob_codec::{BlobKeyring, BlobOpts},
+};
+use std::{ops::Range, time::Instant};
+
 use trc::{AddContext, StoreEvent};
 
-const MAGIC_MARKER: u8 = 0xa0;
-const LZ4_MARKER: u8 = MAGIC_MARKER | 0x01;
-//const ZSTD_MARKER: u8 = MAGIC_MARKER | 0x02;
-const NONE_MARKER: u8 = 0x00;
-
-fn decode<'x>(key: &[u8], data: &'x [u8]) -> trc::Result<Cow<'x, [u8]>> {
-    match data.split_last() {
-        Some((&LZ4_MARKER, payload)) => lz4_flex::decompress_size_prepended(payload)
-            .map(Cow::Owned)
-            .map_err(|err| {
-                trc::StoreEvent::DecompressError
-                    .reason(err)
-                    .ctx(trc::Key::Key, key)
-                    .ctx(trc::Key::CausedBy, trc::location!())
-            }),
-        Some((&NONE_MARKER, payload)) => Ok(Cow::Borrowed(payload)),
-        Some(_) => {
-            trc::event!(Store(StoreEvent::BlobMissingMarker), Key = key);
-            Ok(Cow::Borrowed(data))
-        }
-        None => Ok(Cow::Borrowed(data)),
-    }
-}
-
-fn store_uncompressed(data: &[u8]) -> Vec<u8> {
-    let mut uncompressed = Vec::with_capacity(data.len() + 1);
-    uncompressed.extend_from_slice(data);
-    uncompressed.push(NONE_MARKER);
-    uncompressed
-}
-
 impl BlobStore {
-    pub async fn get_blob(&self, key: &[u8], range: Range<usize>) -> trc::Result<Option<Vec<u8>>> {
+    pub async fn get_blob(
+        &self,
+        key: &[u8],
+        range: Range<usize>,
+        keys: &BlobKeyring,
+    ) -> trc::Result<Option<Vec<u8>>> {
         #[cfg(stalwart_tests)]
         {
             crate::dispatch::StoreOps::count_blob_get();
@@ -60,18 +38,11 @@ impl BlobStore {
             Size = result.as_ref().map_or(0, |data| data.len()),
         );
 
-        let Some(mut data) = result else {
+        let Some(data) = result else {
             return Ok(None);
         };
 
-        let mut data = match decode(key, &data)? {
-            Cow::Owned(decompressed) => decompressed,
-            Cow::Borrowed(payload) => {
-                let len = payload.len();
-                data.truncate(len);
-                data
-            }
-        };
+        let mut data = keys.decode(key, data)?;
 
         if range.start == 0 {
             if range.end > data.len() {
@@ -89,7 +60,7 @@ impl BlobStore {
         }
     }
 
-    async fn get_raw_blob(&self, key: &[u8]) -> trc::Result<Option<Vec<u8>>> {
+    pub async fn get_raw_blob(&self, key: &[u8]) -> trc::Result<Option<Vec<u8>>> {
         match &self {
             BlobStore::Store(store) => match store {
                 #[cfg(feature = "sqlite")]
@@ -125,38 +96,40 @@ impl BlobStore {
         }
     }
 
-    pub async fn put_blob(
+    pub fn put_blob(
         &self,
         key: &[u8],
         data: &[u8],
-        compression: CompressionAlgo,
-    ) -> trc::Result<()> {
-        let data = match compression {
-            CompressionAlgo::Lz4 => {
-                let mut compressed =
-                    vec![
-                        LZ4_MARKER;
-                        lz4_flex::block::get_maximum_output_size(data.len()) + U32_LEN + 1
-                    ];
+        opts: &BlobOpts,
+    ) -> impl Future<Output = trc::Result<()>> {
+        self.write_blob(key, opts.encode(key, data))
+    }
 
-                // Compress the data
-                let compressed_len =
-                    lz4_flex::compress_into(data, &mut compressed[U32_LEN..]).unwrap();
+    pub async fn replace_blob(&self, key: &[u8], data: &[u8], opts: &BlobOpts) -> trc::Result<()> {
+        let data = opts.encode(key, data)?;
+        match self.shard_for(key) {
+            BlobStore::Fs(store) => store
+                .replace_blob(key, &data)
+                .await
+                .caused_by(trc::location!()),
+            store => store.write_blob(key, Ok(data)).await,
+        }
+    }
 
-                if compressed_len + U32_LEN < data.len() {
-                    // Prepend the length of the uncompressed data
-                    compressed[..U32_LEN].copy_from_slice(&(data.len() as u32).to_le_bytes());
+    fn shard_for(&self, key: &[u8]) -> &BlobStore {
+        match self {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            BlobStore::Sharded(store) => store.get_store(key),
+            // SPDX-SnippetEnd
+            store => store,
+        }
+    }
 
-                    // Truncate to the actual size
-                    compressed.truncate(compressed_len + U32_LEN + 1);
-                    compressed
-                } else {
-                    store_uncompressed(data)
-                }
-            }
-            CompressionAlgo::None => store_uncompressed(data),
-        };
-
+    async fn write_blob(&self, key: &[u8], data: trc::Result<Vec<u8>>) -> trc::Result<()> {
+        let data = data?;
         #[cfg(stalwart_tests)]
         {
             crate::dispatch::StoreOps::count_blob_put(data.len());

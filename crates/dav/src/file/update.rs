@@ -194,7 +194,7 @@ impl FileUpdateRequestHandler for Server {
 
             // Write blob
             let (blob_hash, blob_hold) = self
-                .hold_blob(account_id, blob_hash, bytes, 60)
+                .hold_blob(account_id, blob_hash, bytes, 60, &self.core.blob.file)
                 .await
                 .caused_by(trc::location!())?;
 
@@ -283,7 +283,13 @@ impl FileUpdateRequestHandler for Server {
 
             // Write blob
             let (blob_hash, blob_hold) = self
-                .hold_blob(account_id, BlobHash::generate(bytes), bytes, 60)
+                .hold_blob(
+                    account_id,
+                    BlobHash::generate(bytes),
+                    bytes,
+                    60,
+                    &self.core.blob.file,
+                )
                 .await
                 .caused_by(trc::location!())?;
 

@@ -514,7 +514,11 @@ impl Server {
                             }
                             // SPDX-SnippetEnd
                             ObjectType::Role => {
-                                role_ids.push(linked_object.id().document_id());
+                                let parent_id = linked_object.id().document_id();
+                                if self.core.network.security.is_default_role(parent_id) {
+                                    changes.insert(CacheInvalidation::Role(parent_id));
+                                }
+                                role_ids.push(parent_id);
                             }
                             _ => {}
                         }
@@ -589,6 +593,7 @@ impl Server {
         #[cfg(feature = "enterprise")]
         let mut tenant_logos = IdFilter::default();
         // SPDX-SnippetEnd
+        let mut default_role_changed = false;
 
         for change in changes {
             match change {
@@ -630,6 +635,7 @@ impl Server {
                 // SPDX-SnippetEnd
                 CacheInvalidation::Role(id) => {
                     cache.roles.remove(id);
+                    default_role_changed |= self.core.network.security.is_default_role(*id);
                 }
                 CacheInvalidation::List(id) => {
                     cache.lists.remove(id);
@@ -690,15 +696,20 @@ impl Server {
         tenant_logos.seal();
         // SPDX-SnippetEnd
 
-        match http_auth_accounts.0.as_slice() {
-            [] => {}
-            &[account_id] => {
-                cache.http_auth.retain(move |v| v.account_id != account_id);
-            }
-            _ => {
-                cache
-                    .http_auth
-                    .retain(|v| !http_auth_accounts.contains(v.account_id));
+        if default_role_changed {
+            cache.access_tokens.clear();
+            cache.http_auth.retain(|_| false);
+        } else {
+            match http_auth_accounts.0.as_slice() {
+                [] => {}
+                &[account_id] => {
+                    cache.http_auth.retain(move |v| v.account_id != account_id);
+                }
+                _ => {
+                    cache
+                        .http_auth
+                        .retain(|v| !http_auth_accounts.contains(v.account_id));
+                }
             }
         }
 

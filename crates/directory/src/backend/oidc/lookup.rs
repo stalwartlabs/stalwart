@@ -314,7 +314,7 @@ impl OpenIdDirectory {
         } else {
             match self.config.unscoped_tokens {
                 OidcUnscopedTokenPolicy::Reject => Err(OidcError::AuthorizationFailed(
-                    "Token carries none of the urn:ietf:params:oauth:scope:{mail,contacts,calendars,files} scopes and unscopedTokens is set to reject".to_string(),
+                    "Token carries none of the urn:ietf:params:oauth:scope:{mail,contacts,calendars,files} or urn:stalwart:oauth:scope:{full,security,settings} scopes and unscopedTokens is set to reject".to_string(),
                 )),
                 OidcUnscopedTokenPolicy::Interoperable => {
                     Ok(TokenAccess::Scoped(ExternalScopes::ALL))

@@ -269,7 +269,13 @@ impl VacationResponseSet for Server {
                 // Upload new blob
                 let script = self.build_script(obj.changes_mut().unwrap())?;
                 let (blob_hash, blob_hold) = self
-                    .hold_blob(account_id, BlobHash::generate(&script), &script, 60)
+                    .hold_blob(
+                        account_id,
+                        BlobHash::generate(&script),
+                        &script,
+                        60,
+                        &self.core.blob.email,
+                    )
                     .await?;
                 obj.changes_mut().unwrap().blob_hash = blob_hash;
                 blob_hold.release(&mut batch);

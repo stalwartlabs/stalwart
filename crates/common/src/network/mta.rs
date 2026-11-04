@@ -484,7 +484,6 @@ impl Server {
     pub async fn spam_model_reload(&self) -> trc::Result<()> {
         if self.core.spam.classifier.is_some() {
             if let Some(model) = self
-                .blob_store()
                 .get_blob(SPAM_CLASSIFIER_KEY, 0..usize::MAX)
                 .await
                 .and_then(|archive| match archive {

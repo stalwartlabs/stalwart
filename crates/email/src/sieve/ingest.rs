@@ -981,7 +981,6 @@ impl SieveScriptIngest for Server {
         script_object: &ArchivedSieveScript,
     ) -> trc::Result<ActiveScript> {
         let script_bytes = self
-            .blob_store()
             .get_blob(script_object.blob_hash.0.as_ref(), 0..usize::MAX)
             .await
             .caused_by(trc::location!())?

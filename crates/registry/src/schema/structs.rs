@@ -3048,6 +3048,8 @@ pub struct Email {
     pub max_mailbox_name_length: u64,
     #[serde(rename = "compressionAlgorithm")]
     pub compression_algorithm: CompressionAlgo,
+    #[serde(rename = "blobEncryptionKey")]
+    pub blob_encryption_key: Option<Id>,
     #[serde(rename = "defaultFolders")]
     pub default_folders: VecMap<SpecialUse, EmailFolder>,
     #[serde(rename = "maxMessages")]
@@ -3249,6 +3251,10 @@ pub struct FileStorage {
     pub max_files: Option<u64>,
     #[serde(rename = "maxFolders")]
     pub max_folders: Option<u64>,
+    #[serde(rename = "compressionAlgorithm")]
+    pub compression_algorithm: CompressionAlgo,
+    #[serde(rename = "blobEncryptionKey")]
+    pub blob_encryption_key: Option<Id>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4503,8 +4509,6 @@ pub struct OAuthClient {
     #[serde(rename = "postLogoutRedirectUris")]
     pub post_logout_redirect_uris: Map<String>,
     pub logo: Option<String>,
-    #[serde(rename = "firstParty")]
-    pub first_party: bool,
     pub scopes: Map<OAuthScope>,
     #[serde(rename = "grantTypes")]
     pub grant_types: Map<OAuthGrantType>,
@@ -5986,6 +5990,15 @@ pub struct SubAddressingCustom {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct SymmetricKey {
+    pub description: String,
+    pub cipher: SymmetricCipher,
+    pub key: SecretKey,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SystemSettings {
     #[serde(rename = "defaultHostname")]
     pub default_hostname: String,
@@ -6040,6 +6053,7 @@ pub enum Task {
     DmarcReportWindow(TaskReportWindow),
     TlsReportWindow(TaskReportWindow),
     ExternalPublicKeyMaintenance(TaskExternalPublicKeyMaintenance),
+    BlobRecode(TaskBlobRecode),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6050,6 +6064,31 @@ pub struct TaskAccountMaintenance {
     #[serde(rename = "maintenanceType")]
     pub maintenance_type: TaskAccountMaintenanceType,
     pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskBlobRecode {
+    pub compression: TaskBlobRecodeCompression,
+    pub encryption: TaskBlobRecodeEncryption,
+    #[serde(rename = "shardIndex")]
+    pub shard_index: Option<u64>,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum TaskBlobRecodeEncryption {
+    Keep,
+    Disable,
+    Encrypt(TaskBlobRecodeKey),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskBlobRecodeKey {
+    #[serde(rename = "keyId")]
+    pub key_id: Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

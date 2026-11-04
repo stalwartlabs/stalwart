@@ -128,6 +128,7 @@ impl EnumImpl for ObjectType {
             b"SpamTrainingSample" => ObjectType::SpamTrainingSample,
             b"SpfReportSettings" => ObjectType::SpfReportSettings,
             b"StoreLookup" => ObjectType::StoreLookup,
+            b"SymmetricKey" => ObjectType::SymmetricKey,
             b"SystemSettings" => ObjectType::SystemSettings,
             b"Task" => ObjectType::Task,
             b"TaskManager" => ObjectType::TaskManager,
@@ -253,6 +254,7 @@ impl EnumImpl for ObjectType {
             b"SpamTrainingSample" => ObjectType::SpamTrainingSample,
             b"SpfReportSettings" => ObjectType::SpfReportSettings,
             b"StoreLookup" => ObjectType::StoreLookup,
+            b"SymmetricKey" => ObjectType::SymmetricKey,
             b"SystemSettings" => ObjectType::SystemSettings,
             b"Task" => ObjectType::Task,
             b"TaskManager" => ObjectType::TaskManager,
@@ -415,6 +417,7 @@ impl EnumImpl for ObjectType {
             ObjectType::SpamTrainingSample => "SpamTrainingSample",
             ObjectType::SpfReportSettings => "SpfReportSettings",
             ObjectType::StoreLookup => "StoreLookup",
+            ObjectType::SymmetricKey => "SymmetricKey",
             ObjectType::SystemSettings => "SystemSettings",
             ObjectType::Task => "Task",
             ObjectType::TaskManager => "TaskManager",
@@ -598,6 +601,7 @@ impl EnumImpl for ObjectType {
             105 => Some(ObjectType::SpamTrainingSample),
             106 => Some(ObjectType::SpfReportSettings),
             107 => Some(ObjectType::StoreLookup),
+            123 => Some(ObjectType::SymmetricKey),
             108 => Some(ObjectType::SystemSettings),
             109 => Some(ObjectType::Task),
             110 => Some(ObjectType::TaskManager),
@@ -629,7 +633,7 @@ impl EnumImpl for ObjectType {
         }
     }
 
-    const COUNT: usize = 123;
+    const COUNT: usize = 124;
 }
 
 impl serde::Serialize for ObjectType {
@@ -765,6 +769,7 @@ impl EnumImpl for Property {
             b"bindDn" => Property::BindDn,
             b"bindSecret" => Property::BindSecret,
             b"blobCleanupSchedule" => Property::BlobCleanupSchedule,
+            b"blobEncryptionKey" => Property::BlobEncryptionKey,
             b"blobId" => Property::BlobId,
             b"blobSize" => Property::BlobSize,
             b"blobStore" => Property::BlobStore,
@@ -789,6 +794,7 @@ impl EnumImpl for Property {
             b"challengeType" => Property::ChallengeType,
             b"chunkSize" => Property::ChunkSize,
             b"chunking" => Property::Chunking,
+            b"cipher" => Property::Cipher,
             b"claimGroups" => Property::ClaimGroups,
             b"claimName" => Property::ClaimName,
             b"claimUsername" => Property::ClaimUsername,
@@ -811,6 +817,7 @@ impl EnumImpl for Property {
             b"commandTimeout" => Property::CommandTimeout,
             b"comment" => Property::Comment,
             b"compartmentOcid" => Property::CompartmentOcid,
+            b"compression" => Property::Compression,
             b"compressionAlgorithm" => Property::CompressionAlgorithm,
             b"condition" => Property::Condition,
             b"config" => Property::Config,
@@ -953,6 +960,7 @@ impl EnumImpl for Property {
             b"enabledPermissions" => Property::EnabledPermissions,
             b"encryptAtRest" => Property::EncryptAtRest,
             b"encryptOnAppend" => Property::EncryptOnAppend,
+            b"encryption" => Property::Encryption,
             b"encryptionAtRest" => Property::EncryptionAtRest,
             b"encryptionKey" => Property::EncryptionKey,
             b"envId" => Property::EnvId,
@@ -1143,6 +1151,7 @@ impl EnumImpl for Property {
             b"jitter" => Property::Jitter,
             b"keepAlive" => Property::KeepAlive,
             b"key" => Property::Key,
+            b"keyId" => Property::KeyId,
             b"keyName" => Property::KeyName,
             b"keyPrefix" => Property::KeyPrefix,
             b"keyRefreshInterval" => Property::KeyRefreshInterval,
@@ -1822,6 +1831,7 @@ impl EnumImpl for Property {
             b"bindDn" => Property::BindDn,
             b"bindSecret" => Property::BindSecret,
             b"blobCleanupSchedule" => Property::BlobCleanupSchedule,
+            b"blobEncryptionKey" => Property::BlobEncryptionKey,
             b"blobId" => Property::BlobId,
             b"blobSize" => Property::BlobSize,
             b"blobStore" => Property::BlobStore,
@@ -1840,6 +1850,7 @@ impl EnumImpl for Property {
             b"challengeType" => Property::ChallengeType,
             b"chunkSize" => Property::ChunkSize,
             b"chunking" => Property::Chunking,
+            b"cipher" => Property::Cipher,
             b"claimGroups" => Property::ClaimGroups,
             b"claimName" => Property::ClaimName,
             b"claimUsername" => Property::ClaimUsername,
@@ -1862,6 +1873,7 @@ impl EnumImpl for Property {
             b"commandTimeout" => Property::CommandTimeout,
             b"comment" => Property::Comment,
             b"compartmentOcid" => Property::CompartmentOcid,
+            b"compression" => Property::Compression,
             b"compressionAlgorithm" => Property::CompressionAlgorithm,
             b"condition" => Property::Condition,
             b"config" => Property::Config,
@@ -1997,6 +2009,7 @@ impl EnumImpl for Property {
             b"enabledPermissions" => Property::EnabledPermissions,
             b"encryptAtRest" => Property::EncryptAtRest,
             b"encryptOnAppend" => Property::EncryptOnAppend,
+            b"encryption" => Property::Encryption,
             b"encryptionAtRest" => Property::EncryptionAtRest,
             b"encryptionKey" => Property::EncryptionKey,
             b"envId" => Property::EnvId,
@@ -2169,6 +2182,7 @@ impl EnumImpl for Property {
             b"issuerUrl" => Property::IssuerUrl,
             b"jitter" => Property::Jitter,
             b"key" => Property::Key,
+            b"keyId" => Property::KeyId,
             b"keyName" => Property::KeyName,
             b"keyPrefix" => Property::KeyPrefix,
             b"keyRefreshInterval" => Property::KeyRefreshInterval,
@@ -2845,6 +2859,7 @@ impl EnumImpl for Property {
             Property::BindDn => "bindDn",
             Property::BindSecret => "bindSecret",
             Property::BlobCleanupSchedule => "blobCleanupSchedule",
+            Property::BlobEncryptionKey => "blobEncryptionKey",
             Property::BlobId => "blobId",
             Property::BlobSize => "blobSize",
             Property::BlobStore => "blobStore",
@@ -2887,6 +2902,7 @@ impl EnumImpl for Property {
             Property::ChallengeType => "challengeType",
             Property::ChunkSize => "chunkSize",
             Property::Chunking => "chunking",
+            Property::Cipher => "cipher",
             Property::ClaimGroups => "claimGroups",
             Property::ClaimName => "claimName",
             Property::ClaimUsername => "claimUsername",
@@ -2909,6 +2925,7 @@ impl EnumImpl for Property {
             Property::CommandTimeout => "commandTimeout",
             Property::Comment => "comment",
             Property::CompartmentOcid => "compartmentOcid",
+            Property::Compression => "compression",
             Property::CompressionAlgorithm => "compressionAlgorithm",
             Property::Condition => "condition",
             Property::Config => "config",
@@ -3078,6 +3095,7 @@ impl EnumImpl for Property {
             Property::EnabledPermissions => "enabledPermissions",
             Property::EncryptAtRest => "encryptAtRest",
             Property::EncryptOnAppend => "encryptOnAppend",
+            Property::Encryption => "encryption",
             Property::EncryptionAtRest => "encryptionAtRest",
             Property::EncryptionKey => "encryptionKey",
             Property::EnvId => "envId",
@@ -3346,6 +3364,7 @@ impl EnumImpl for Property {
             Property::KeepAlive => "keepAlive",
             // SPDX-SnippetEnd
             Property::Key => "key",
+            Property::KeyId => "keyId",
             Property::KeyName => "keyName",
             Property::KeyPrefix => "keyPrefix",
             Property::KeyRefreshInterval => "keyRefreshInterval",
@@ -4223,6 +4242,7 @@ impl EnumImpl for Property {
             553 => Some(Property::BindDn),
             554 => Some(Property::BindSecret),
             238 => Some(Property::BlobCleanupSchedule),
+            1057 => Some(Property::BlobEncryptionKey),
             74 => Some(Property::BlobId),
             763 => Some(Property::BlobSize),
             153 => Some(Property::BlobStore),
@@ -4265,6 +4285,7 @@ impl EnumImpl for Property {
             10 => Some(Property::ChallengeType),
             756 => Some(Property::ChunkSize),
             614 => Some(Property::Chunking),
+            1058 => Some(Property::Cipher),
             709 => Some(Property::ClaimGroups),
             708 => Some(Property::ClaimName),
             706 => Some(Property::ClaimUsername),
@@ -4287,6 +4308,7 @@ impl EnumImpl for Property {
             631 => Some(Property::CommandTimeout),
             280 => Some(Property::Comment),
             398 => Some(Property::CompartmentOcid),
+            1059 => Some(Property::Compression),
             431 => Some(Property::CompressionAlgorithm),
             48 => Some(Property::Condition),
             1011 => Some(Property::Config),
@@ -4456,6 +4478,7 @@ impl EnumImpl for Property {
             731 => Some(Property::EnabledPermissions),
             430 => Some(Property::EncryptAtRest),
             429 => Some(Property::EncryptOnAppend),
+            1060 => Some(Property::Encryption),
             9 => Some(Property::EncryptionAtRest),
             724 => Some(Property::EncryptionKey),
             740 => Some(Property::EnvId),
@@ -4724,6 +4747,7 @@ impl EnumImpl for Property {
             46 => Some(Property::KeepAlive),
             // SPDX-SnippetEnd
             375 => Some(Property::Key),
+            1061 => Some(Property::KeyId),
             406 => Some(Property::KeyName),
             141 => Some(Property::KeyPrefix),
             1028 => Some(Property::KeyRefreshInterval),
@@ -5465,7 +5489,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 1057;
+    const COUNT: usize = 1062;
 }
 
 impl serde::Serialize for Property {
@@ -5637,6 +5661,7 @@ impl ObjectType {
             ObjectType::SpamTrainingSample => SpamTrainingSample::FLAGS,
             ObjectType::SpfReportSettings => SpfReportSettings::FLAGS,
             ObjectType::StoreLookup => StoreLookup::FLAGS,
+            ObjectType::SymmetricKey => SymmetricKey::FLAGS,
             ObjectType::SystemSettings => SystemSettings::FLAGS,
             ObjectType::Task => Task::FLAGS,
             ObjectType::TaskManager => TaskManager::FLAGS,
@@ -6184,6 +6209,7 @@ impl ObjectType {
             ObjectType::SpamTrainingSample => Permission::SysSpamTrainingSampleGet,
             ObjectType::SpfReportSettings => Permission::SysSpfReportSettingsGet,
             ObjectType::StoreLookup => Permission::SysStoreLookupGet,
+            ObjectType::SymmetricKey => Permission::SysSymmetricKeyGet,
             ObjectType::SystemSettings => Permission::SysSystemSettingsGet,
             ObjectType::Task => Permission::SysTaskGet,
             ObjectType::TaskManager => Permission::SysTaskManagerGet,
@@ -6292,6 +6318,7 @@ impl ObjectType {
             ObjectType::SpamTag => Permission::SysSpamTagQuery,
             ObjectType::SpamTrainingSample => Permission::SysSpamTrainingSampleQuery,
             ObjectType::StoreLookup => Permission::SysStoreLookupQuery,
+            ObjectType::SymmetricKey => Permission::SysSymmetricKeyQuery,
             ObjectType::Task => Permission::SysTaskQuery,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -6462,6 +6489,7 @@ impl ObjectType {
             ObjectType::SpamTrainingSample => Permission::SysSpamTrainingSampleCreate,
             ObjectType::SpfReportSettings => Permission::SysSpfReportSettingsUpdate,
             ObjectType::StoreLookup => Permission::SysStoreLookupCreate,
+            ObjectType::SymmetricKey => Permission::SysSymmetricKeyCreate,
             ObjectType::SystemSettings => Permission::SysSystemSettingsUpdate,
             ObjectType::Task => Permission::SysTaskCreate,
             ObjectType::TaskManager => Permission::SysTaskManagerUpdate,
@@ -6641,6 +6669,7 @@ impl ObjectType {
             ObjectType::SpamTrainingSample => unreachable!(),
             ObjectType::SpfReportSettings => Permission::SysSpfReportSettingsUpdate,
             ObjectType::StoreLookup => Permission::SysStoreLookupUpdate,
+            ObjectType::SymmetricKey => Permission::SysSymmetricKeyUpdate,
             ObjectType::SystemSettings => Permission::SysSystemSettingsUpdate,
             ObjectType::Task => Permission::SysTaskUpdate,
             ObjectType::TaskManager => Permission::SysTaskManagerUpdate,
@@ -6820,6 +6849,7 @@ impl ObjectType {
             ObjectType::SpamTrainingSample => Permission::SysSpamTrainingSampleDestroy,
             ObjectType::SpfReportSettings => Permission::SysSpfReportSettingsUpdate,
             ObjectType::StoreLookup => Permission::SysStoreLookupDestroy,
+            ObjectType::SymmetricKey => Permission::SysSymmetricKeyDestroy,
             ObjectType::SystemSettings => Permission::SysSystemSettingsUpdate,
             ObjectType::Task => Permission::SysTaskDestroy,
             ObjectType::TaskManager => Permission::SysTaskManagerUpdate,
@@ -7289,6 +7319,7 @@ impl ObjectInner {
             ObjectInner::SpamTrainingSample(obj) => obj.to_pickled_vec(),
             ObjectInner::SpfReportSettings(obj) => obj.to_pickled_vec(),
             ObjectInner::StoreLookup(obj) => obj.to_pickled_vec(),
+            ObjectInner::SymmetricKey(obj) => obj.to_pickled_vec(),
             ObjectInner::SystemSettings(obj) => obj.to_pickled_vec(),
             ObjectInner::Task(obj) => obj.to_pickled_vec(),
             ObjectInner::TaskManager(obj) => obj.to_pickled_vec(),
@@ -7667,6 +7698,9 @@ impl ObjectInner {
             ObjectType::StoreLookup => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::StoreLookup(Box::new(obj)))
             }
+            ObjectType::SymmetricKey => {
+                Pickle::unpickle(stream).map(|obj| ObjectInner::SymmetricKey(Box::new(obj)))
+            }
             ObjectType::SystemSettings => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::SystemSettings(Box::new(obj)))
             }
@@ -8012,6 +8046,8 @@ impl ObjectInner {
                 .map(|obj| ObjectInner::SpfReportSettings(Box::new(obj))),
             ObjectType::StoreLookup => StoreLookup::deserialize(deserializer)
                 .map(|obj| ObjectInner::StoreLookup(Box::new(obj))),
+            ObjectType::SymmetricKey => SymmetricKey::deserialize(deserializer)
+                .map(|obj| ObjectInner::SymmetricKey(Box::new(obj))),
             ObjectType::SystemSettings => SystemSettings::deserialize(deserializer)
                 .map(|obj| ObjectInner::SystemSettings(Box::new(obj))),
             ObjectType::Task => {
@@ -8256,6 +8292,7 @@ impl Object {
             ObjectInner::SpamTrainingSample(_) => SpamTrainingSample::FLAGS,
             ObjectInner::SpfReportSettings(_) => SpfReportSettings::FLAGS,
             ObjectInner::StoreLookup(_) => StoreLookup::FLAGS,
+            ObjectInner::SymmetricKey(_) => SymmetricKey::FLAGS,
             ObjectInner::SystemSettings(_) => SystemSettings::FLAGS,
             ObjectInner::Task(_) => Task::FLAGS,
             ObjectInner::TaskManager(_) => TaskManager::FLAGS,
@@ -8435,6 +8472,7 @@ impl Object {
             ObjectInner::SpamTrainingSample(_) => ObjectType::SpamTrainingSample,
             ObjectInner::SpfReportSettings(_) => ObjectType::SpfReportSettings,
             ObjectInner::StoreLookup(_) => ObjectType::StoreLookup,
+            ObjectInner::SymmetricKey(_) => ObjectType::SymmetricKey,
             ObjectInner::SystemSettings(_) => ObjectType::SystemSettings,
             ObjectInner::Task(_) => ObjectType::Task,
             ObjectInner::TaskManager(_) => ObjectType::TaskManager,
@@ -8666,6 +8704,7 @@ impl Object {
             ObjectInner::SpamTrainingSample(obj) => obj.validate(errors),
             ObjectInner::SpfReportSettings(obj) => obj.validate(errors),
             ObjectInner::StoreLookup(obj) => obj.validate(errors),
+            ObjectInner::SymmetricKey(obj) => obj.validate(errors),
             ObjectInner::SystemSettings(obj) => obj.validate(errors),
             ObjectInner::Task(obj) => obj.validate(errors),
             ObjectInner::TaskManager(obj) => obj.validate(errors),
@@ -8724,6 +8763,7 @@ impl Object {
             ObjectInner::OidcProvider(obj) => obj.validate_inline_secrets(errors),
             ObjectInner::SearchStore(obj) => obj.validate_inline_secrets(errors),
             ObjectInner::StoreLookup(obj) => obj.validate_inline_secrets(errors),
+            ObjectInner::SymmetricKey(obj) => obj.validate_inline_secrets(errors),
             ObjectInner::Tracer(obj) => obj.validate_inline_secrets(errors),
             ObjectInner::TracingStore(obj) => obj.validate_inline_secrets(errors),
             ObjectInner::WebHook(obj) => obj.validate_inline_secrets(errors),
@@ -8881,6 +8921,7 @@ impl Object {
             ObjectInner::SpamTrainingSample(obj) => obj.index(i),
             ObjectInner::SpfReportSettings(obj) => obj.index(i),
             ObjectInner::StoreLookup(obj) => obj.index(i),
+            ObjectInner::SymmetricKey(obj) => obj.index(i),
             ObjectInner::SystemSettings(obj) => obj.index(i),
             ObjectInner::Task(obj) => obj.index(i),
             ObjectInner::TaskManager(obj) => obj.index(i),
@@ -9064,6 +9105,7 @@ impl Object {
             ObjectInner::SpamTrainingSample(obj) => obj.patch(pointer, value),
             ObjectInner::SpfReportSettings(obj) => obj.patch(pointer, value),
             ObjectInner::StoreLookup(obj) => obj.patch(pointer, value),
+            ObjectInner::SymmetricKey(obj) => obj.patch(pointer, value),
             ObjectInner::SystemSettings(obj) => obj.patch(pointer, value),
             ObjectInner::Task(obj) => obj.patch(pointer, value),
             ObjectInner::TaskManager(obj) => obj.patch(pointer, value),
@@ -9249,6 +9291,7 @@ impl IntoValue for Object {
             ObjectInner::SpamTrainingSample(obj) => (*obj).into_value_with(opts),
             ObjectInner::SpfReportSettings(obj) => (*obj).into_value_with(opts),
             ObjectInner::StoreLookup(obj) => (*obj).into_value_with(opts),
+            ObjectInner::SymmetricKey(obj) => (*obj).into_value_with(opts),
             ObjectInner::SystemSettings(obj) => (*obj).into_value_with(opts),
             ObjectInner::Task(obj) => (*obj).into_value_with(opts),
             ObjectInner::TaskManager(obj) => (*obj).into_value_with(opts),
@@ -9432,6 +9475,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::SpamTrainingSample => ObjectInner::SpamTrainingSample(Box::default()),
             ObjectType::SpfReportSettings => ObjectInner::SpfReportSettings(Box::default()),
             ObjectType::StoreLookup => ObjectInner::StoreLookup(Box::default()),
+            ObjectType::SymmetricKey => ObjectInner::SymmetricKey(Box::default()),
             ObjectType::SystemSettings => ObjectInner::SystemSettings(Box::default()),
             ObjectType::Task => ObjectInner::Task(Box::default()),
             ObjectType::TaskManager => ObjectInner::TaskManager(Box::default()),
@@ -11167,6 +11211,21 @@ impl From<Object> for StoreLookup {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::StoreLookup(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<SymmetricKey> for ObjectInner {
+    fn from(value: SymmetricKey) -> Self {
+        ObjectInner::SymmetricKey(Box::new(value))
+    }
+}
+
+impl From<Object> for SymmetricKey {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::SymmetricKey(obj) => *obj,
             _ => unreachable!(),
         }
     }

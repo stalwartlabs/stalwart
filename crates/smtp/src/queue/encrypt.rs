@@ -24,7 +24,9 @@ use crypto::{EcdhWrapParameters, EncryptOptions, Protection, RecipientIds};
 use mail_parser::MessageParser;
 use registry::schema::enums::CompressionAlgo;
 use std::{borrow::Cow, sync::Arc};
-use store::write::{BatchBuilder, BlobLink, BlobOp, blob::BlobLinkValue, now};
+use store::write::{
+    BatchBuilder, BlobLink, BlobOp, blob::BlobLinkValue, blob_codec::BlobOpts, now,
+};
 use trc::EncryptionEvent;
 use types::blob_hash::BlobHash;
 
@@ -306,10 +308,14 @@ impl PendingCopies {
     }
 
     pub(crate) async fn put(&mut self, server: &Server) -> trc::Result<()> {
+        let opts = BlobOpts::new(
+            CompressionAlgo::None,
+            server.core.blob.email.encryption.clone(),
+        );
         for (hash, raw) in self.copies.drain(..) {
             server
                 .blob_store()
-                .put_blob(hash.as_slice(), &raw, CompressionAlgo::None)
+                .put_blob(hash.as_slice(), &raw, &opts)
                 .await?;
         }
         self.bytes = 0;

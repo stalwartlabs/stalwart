@@ -27,6 +27,7 @@ use crate::registry::{
         report::report_set,
         sieve::validate_sieve_script,
         spam_sample::spam_sample_set,
+        symmetric_key::validate_symmetric_key,
         task::task_set,
         tls::{validate_acme_directory, validate_acme_provider, validate_certificate},
     },
@@ -54,7 +55,8 @@ use registry::{
         prelude::{OBJ_FILTER_ACCOUNT, OBJ_SINGLETON, Object, ObjectInner, ObjectType, Property},
         structs::{
             Account, Certificate, DkimSignature, DnsServer, Domain, ExternalPublicKey, KeySource,
-            PublicKey, Role, Task, TaskExternalPublicKeyMaintenance, TaskStatus, UserAccount,
+            PublicKey, Role, SymmetricKey, Task, TaskExternalPublicKeyMaintenance, TaskStatus,
+            UserAccount,
         },
     },
     types::id::ObjectId,
@@ -396,6 +398,9 @@ async fn registry_object_set(
             }
             ObjectInner::DkimSignature(key) => {
                 validate_dkim_signature(key, modification.as_dkim_signature()).await?
+            }
+            ObjectInner::SymmetricKey(key) => {
+                validate_symmetric_key(key, modification.as_symmetric_key()).await?
             }
             ObjectInner::Domain(domain) => {
                 validate_domain(
@@ -887,6 +892,7 @@ impl RegistrySet for Server {
             | ObjectType::Certificate
             | ObjectType::ExternalPublicKey
             | ObjectType::SmimeTrustAnchor
+            | ObjectType::SymmetricKey
             | ObjectType::Directory
             | ObjectType::DnsServer
             | ObjectType::EventTracingLevel
@@ -1104,6 +1110,16 @@ impl Modification {
             Modification::Create { .. } => None,
             Modification::Update { id, object } => match &object.inner {
                 ObjectInner::PublicKey(key) => Some((*id, key)),
+                _ => None,
+            },
+        }
+    }
+
+    fn as_symmetric_key(&self) -> Option<&SymmetricKey> {
+        match self {
+            Modification::Create { .. } => None,
+            Modification::Update { object, .. } => match &object.inner {
+                ObjectInner::SymmetricKey(key) => Some(key),
                 _ => None,
             },
         }

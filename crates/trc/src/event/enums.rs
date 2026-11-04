@@ -6,8 +6,8 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 668;
-pub const TOTAL_METRIC_COUNT: usize = 398;
+pub const TOTAL_EVENT_COUNT: usize = 670;
+pub const TOTAL_METRIC_COUNT: usize = 399;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
@@ -899,6 +899,7 @@ pub enum StoreEvent {
     PoolError = 509,
     DataCorruption = 494,
     DecompressError = 497,
+    DecryptError = 668,
     DeserializeError = 498,
     NotFound = 507,
     NotConfigured = 506,
@@ -918,6 +919,7 @@ pub enum StoreEvent {
     HttpStoreFetch = 475,
     AutoExpunge = 348,
     BlobStorePurged = 353,
+    BlobStoreRecoded = 669,
     DataStorePurged = 352,
 }
 
@@ -1401,6 +1403,7 @@ pub enum MetricType {
     StorePoolError = 296,
     StoreDataCorruption = 297,
     StoreDecompressError = 298,
+    StoreDecryptError = 398,
     StoreDeserializeError = 299,
     StoreNotFound = 300,
     StoreNotConfigured = 301,

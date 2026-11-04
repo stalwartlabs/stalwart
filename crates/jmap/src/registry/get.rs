@@ -130,6 +130,7 @@ impl RegistryGet for Server {
             | ObjectType::Certificate
             | ObjectType::ExternalPublicKey
             | ObjectType::SmimeTrustAnchor
+            | ObjectType::SymmetricKey
             | ObjectType::Coordinator
             | ObjectType::DataRetention
             | ObjectType::DataStore

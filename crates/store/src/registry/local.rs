@@ -47,6 +47,10 @@ impl RegistryStoreInner {
                 .ok()
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            env_update_role_permissions: std::env::var("STALWART_UPDATE_ROLE_PERMISSIONS")
+                .ok()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
             env_recovery_admin: std::env::var("STALWART_RECOVERY_ADMIN")
                 .ok()
                 .and_then(|v| {

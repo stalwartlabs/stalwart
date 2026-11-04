@@ -43,6 +43,7 @@ use auth::oauth::config::OAuthConfig;
 use calcard::common::timezone::Tz;
 use compact_str::CompactString;
 use config::{
+    blob::BlobConfig,
     groupware::GroupwareConfig,
     mailstore::jmap::JmapConfig,
     metadata::MetadataConfig,
@@ -640,6 +641,7 @@ pub struct Core {
     pub groupware: GroupwareConfig,
     pub metadata: MetadataConfig,
     pub metrics: Metrics,
+    pub blob: BlobConfig,
 
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>

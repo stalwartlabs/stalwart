@@ -11,6 +11,7 @@ use crate::task_manager::{
     tasks::{
         acme::AcmeTask,
         alarm::SendAlarmTask,
+        blob_recode::BlobRecodeTask,
         destroy_account::DestroyAccountTask,
         dkim::DkimManagementTask,
         dns::DnsManagementTask,
@@ -371,5 +372,6 @@ async fn execute(server: &Server, task: &Task, server_instance: Arc<ServerInstan
         Task::ExternalPublicKeyMaintenance(task) => {
             server.external_public_key_maintenance(task).await
         }
+        Task::BlobRecode(task) => server.blob_recode(task).await,
     }
 }

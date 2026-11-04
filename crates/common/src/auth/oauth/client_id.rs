@@ -82,7 +82,7 @@ pub fn decode_client_id(key: &[u8], client_id: &str) -> Option<ClientMeta> {
     for _ in 0..uri_count {
         redirect_uris.push(take_string(&mut bytes)?);
     }
-    let scopes = OAuthScopes::from_bits(u8::try_from(bytes.read_leb128::<u64>()?).ok()?);
+    let scopes = OAuthScopes::from_bits(u16::try_from(bytes.read_leb128::<u64>()?).ok()?);
     let client_name = take_string(&mut bytes)?;
 
     Some(ClientMeta {

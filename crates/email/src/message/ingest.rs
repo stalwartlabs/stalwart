@@ -681,6 +681,7 @@ impl EmailIngest for Server {
                 BlobHash::generate(raw_message.as_ref()),
                 raw_message.as_ref(),
                 60,
+                &self.core.blob.email,
             )
             .await
             .map(|(hash, hold)| (hash, Some(hold)))
@@ -697,6 +698,7 @@ impl EmailIngest for Server {
                 BlobHash::generate(params.raw_message),
                 params.raw_message,
                 60,
+                &self.core.blob.email,
             )
             .await
             .map(Some)

@@ -95,6 +95,7 @@ impl Core {
     fn backup_blobs(&self, dest: &Path, subspace: Subspace, schema_version: u32) -> TaskHandle {
         let store = self.storage.data.clone();
         let blob_store = self.storage.blob.clone();
+        let blob_keys = self.blob.keys.clone();
         let (handle, writer) = spawn_writer(
             dest.join(format!("subspace_{}", subspace.name())),
             subspace,
@@ -138,7 +139,7 @@ impl Core {
 
                 for hash in blobs {
                     if let Some(blob) = blob_store
-                        .get_blob(hash.as_slice(), 0..usize::MAX)
+                        .get_blob(hash.as_slice(), 0..usize::MAX, &blob_keys)
                         .await
                         .failed("Failed to get blob")
                     {

@@ -87,6 +87,7 @@ pub(crate) async fn task_set(
         let is_client_task = match task_type {
             TaskType::AccountMaintenance
             | TaskType::StoreMaintenance
+            | TaskType::BlobRecode
             | TaskType::SpamFilterMaintenance
             | TaskType::AcmeRenewal
             | TaskType::DkimManagement

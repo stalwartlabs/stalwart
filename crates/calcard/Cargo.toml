@@ -1,7 +1,7 @@
 [package]
 name = "calcard"
 description = "iCalendar/JSCalendar and vCard/JSContact parsing, building and conversion library"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false

@@ -6,6 +6,7 @@
 
 pub mod acme;
 pub mod alarm;
+pub mod blob_recode;
 pub mod destroy_account;
 pub mod dkim;
 pub mod dns;

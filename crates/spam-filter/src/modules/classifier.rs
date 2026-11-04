@@ -40,7 +40,9 @@ use store::ahash::{AHashMap, AHashSet, RandomState};
 #[cfg(stalwart_tests)]
 use store::rand::SeedableRng;
 use store::rand::{rngs::StdRng, seq::SliceRandom};
-use store::write::{ArchiveCompression, BlobLink, Compression, RegistryClass, now};
+use store::write::{
+    ArchiveCompression, BlobLink, Compression, RegistryClass, blob_codec::BlobOpts, now,
+};
 use store::{
     Deserialize, IterateParams, Serialize, ValueKey,
     write::{
@@ -139,7 +141,6 @@ impl SpamClassifier for Server {
         // Fetch or build trainer
         let mut trainer = if !retrain
             && let Some(trainer) = self
-                .blob_store()
                 .get_blob(SPAM_TRAINER_KEY, 0..usize::MAX)
                 .await
                 .and_then(|archive| match archive {
@@ -398,7 +399,6 @@ impl SpamClassifier for Server {
                     None
                 };
                 let Some(raw_message) = self
-                    .blob_store()
                     .get_blob(sample.sample.hash.as_slice(), 0..usize::MAX)
                     .await
                     .caused_by(trc::location!())?
@@ -572,11 +572,12 @@ impl SpamClassifier for Server {
                     .caused_by(trc::location!())
             })?;
 
+        let model_opts = BlobOpts::compressed(self.core.blob.email.compression);
         self.blob_store()
             .put_blob(
                 SPAM_TRAINER_KEY,
                 &trainer_bytes.caused_by(trc::location!())?,
-                self.core.email.compression,
+                &model_opts,
             )
             .await
             .caused_by(trc::location!())?;
@@ -584,7 +585,7 @@ impl SpamClassifier for Server {
             .put_blob(
                 SPAM_CLASSIFIER_KEY,
                 &classifier_bytes.caused_by(trc::location!())?,
-                self.core.email.compression,
+                &model_opts,
             )
             .await
             .caused_by(trc::location!())?;

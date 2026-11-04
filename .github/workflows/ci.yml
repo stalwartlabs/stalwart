@@ -41,7 +41,7 @@ jobs:
       contents: read
       attestations: write
       packages: write
-    needs: [linux]
+    needs: [linux, windows, macos, freebsd]
     if: github.event_name == 'push' || inputs.Docker
     steps:
       - name: Install Cosign

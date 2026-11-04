@@ -8,7 +8,7 @@ use super::AccessToken;
 use crate::{
     Server,
     auth::{
-        AccessScope, AccessTo, AccessTokenInner, AccountCache, ChangedBy, GrantClient, Permissions,
+        AccessScope, AccessTo, AccessTokenInner, AccountCache, ChangedBy, Permissions,
         RECOVERY_ADMIN_ID, TokenScope,
         oauth::scope::{OAuthScopes, scope_data_types},
         permissions::{BuildPermissions, PermissionsListBuilder},
@@ -642,17 +642,16 @@ impl AccessToken {
                         .into_err()
                         .ctx(trc::Key::AccountId, access_token.inner.account_id)
                         .reason("Credential expired."));
-                } else if matches!(
-                    access_token.token_scope,
-                    Some(TokenScope::Grant {
-                        client: GrantClient::ThirdParty,
-                        ..
-                    })
-                ) {
+                } else if access_token
+                    .token_scope
+                    .is_some_and(|token_scope| !token_scope.allows_expired_credential())
+                {
                     return Err(trc::AuthEvent::CredentialExpired
                         .into_err()
                         .ctx(trc::Key::AccountId, access_token.inner.account_id)
-                        .reason("Main credential expired, third-party grant refused."));
+                        .reason(
+                            "Main credential expired, grant scopes do not allow a password change.",
+                        ));
                 } else {
                     trc::event!(
                         Auth(trc::AuthEvent::CredentialExpired),

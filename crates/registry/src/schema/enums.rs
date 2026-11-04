@@ -346,6 +346,7 @@ pub enum CompressionAlgo {
     #[default]
     Lz4 = 0,
     None = 1,
+    Zstd = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1707,6 +1708,9 @@ pub enum OAuthScope {
     Contacts = 1,
     Calendars = 2,
     Files = 3,
+    Full = 4,
+    Security = 5,
+    Settings = 6,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2442,6 +2446,11 @@ pub enum Permission {
     SysStoreLookupUpdate = 583,
     SysStoreLookupDestroy = 584,
     SysStoreLookupQuery = 585,
+    SysSymmetricKeyGet = 656,
+    SysSymmetricKeyCreate = 657,
+    SysSymmetricKeyUpdate = 658,
+    SysSymmetricKeyDestroy = 659,
+    SysSymmetricKeyQuery = 660,
     SysSystemSettingsGet = 586,
     SysSystemSettingsUpdate = 587,
     TaskCalendarAlarmEmail = 588,
@@ -2473,6 +2482,7 @@ pub enum Permission {
     TaskDmarcReportWindow = 604,
     TaskTlsReportWindow = 605,
     TaskExternalPublicKeyMaintenance = 655,
+    TaskBlobRecode = 661,
     SysTaskGet = 606,
     SysTaskCreate = 607,
     SysTaskUpdate = 608,
@@ -3124,6 +3134,14 @@ pub enum SubAddressingType {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum SymmetricCipher {
+    #[default]
+    Aes256Gcm = 0,
+    Chacha20Poly1305 = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum TaskAccountMaintenanceType {
     #[default]
     Purge = 0,
@@ -3131,6 +3149,25 @@ pub enum TaskAccountMaintenanceType {
     RecalculateImapUid = 2,
     RecalculateQuota = 3,
     RebuildShares = 4,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum TaskBlobRecodeCompression {
+    #[default]
+    Keep = 0,
+    Disable = 1,
+    Lz4 = 2,
+    Zstd = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum TaskBlobRecodeEncryptionType {
+    #[default]
+    Keep = 0,
+    Disable = 1,
+    Encrypt = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -3237,6 +3274,7 @@ pub enum TaskType {
     DmarcReportWindow = 16,
     TlsReportWindow = 17,
     ExternalPublicKeyMaintenance = 18,
+    BlobRecode = 19,
 }
 
 // SPDX-SnippetBegin

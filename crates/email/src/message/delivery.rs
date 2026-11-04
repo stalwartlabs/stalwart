@@ -108,9 +108,6 @@ impl MailDelivery for Server {
     async fn deliver_message(&self, message: IngestMessage) -> LocalDeliveryResult {
         // Read message
         let raw_message = match self
-            .core
-            .storage
-            .blob
             .get_blob(message.message_blob.as_slice(), 0..usize::MAX)
             .await
         {

@@ -531,7 +531,7 @@ impl MessageWrapper {
             .put_blob(
                 self.message.blob_hash.as_slice(),
                 message.as_ref(),
-                server.core.email.compression,
+                &server.core.blob.email,
             )
             .await
         {

@@ -5,7 +5,7 @@
  */
 
 use super::{SwapKey, pointer::SwapPointer};
-use registry::schema::enums::CompressionAlgo;
+use store::write::blob_codec::{BlobKeyring, BlobOpts};
 use store::{
     BlobStore, Store, rand,
     write::{BatchBuilder, BlobLink, BlobOp, blob::BlobLinkValue, now},
@@ -89,7 +89,7 @@ impl BlobSwapStore {
         let slot_hash = key.slot_hash(slot);
 
         self.blob
-            .put_blob(slot_hash.as_slice(), data, CompressionAlgo::None)
+            .put_blob(slot_hash.as_slice(), data, &BlobOpts::PLAIN)
             .await
             .caused_by(trc::location!())?;
         let pointer =
@@ -101,7 +101,7 @@ impl BlobSwapStore {
         .await?;
 
         self.blob
-            .put_blob(pointer_hash.as_slice(), &pointer, CompressionAlgo::None)
+            .put_blob(pointer_hash.as_slice(), &pointer, &BlobOpts::PLAIN)
             .await
             .caused_by(trc::location!())?;
 
@@ -128,30 +128,43 @@ impl BlobSwapStore {
     }
 
     async fn read_pointer(&self, key: SwapKey) -> trc::Result<Option<(SwapPointer, BlobSlot)>> {
-        self.blob
-            .get_blob(key.blob_hash().as_slice(), 0..usize::MAX)
+        match self
+            .blob
+            .get_blob(
+                key.blob_hash().as_slice(),
+                0..usize::MAX,
+                &BlobKeyring::default(),
+            )
             .await
-            .caused_by(trc::location!())
-            .map(|pointer| {
-                pointer
-                    .as_deref()
-                    .and_then(SwapPointer::parse)
-                    .and_then(|pointer| Some((pointer, BlobSlot::of(&pointer)?)))
-            })
+        {
+            Ok(pointer) => Ok(pointer
+                .as_deref()
+                .and_then(SwapPointer::parse)
+                .and_then(|pointer| Some((pointer, BlobSlot::of(&pointer)?)))),
+            Err(err) if BlobSwapStore::is_unreadable(&err) => Ok(None),
+            Err(err) => Err(err.caused_by(trc::location!())),
+        }
     }
 
     async fn read_slot(&self, key: SwapKey, slot: BlobSlot) -> trc::Result<Option<Vec<u8>>> {
         match self
             .blob
-            .get_blob(key.slot_hash(slot).as_slice(), 0..usize::MAX)
+            .get_blob(
+                key.slot_hash(slot).as_slice(),
+                0..usize::MAX,
+                &BlobKeyring::default(),
+            )
             .await
         {
             Ok(data) => Ok(data),
-            Err(err) if err.matches(trc::EventType::Store(trc::StoreEvent::DecompressError)) => {
-                Ok(None)
-            }
+            Err(err) if BlobSwapStore::is_unreadable(&err) => Ok(None),
             Err(err) => Err(err.caused_by(trc::location!())),
         }
+    }
+
+    fn is_unreadable(err: &trc::Error) -> bool {
+        err.matches(trc::EventType::Store(trc::StoreEvent::DecompressError))
+            || err.matches(trc::EventType::Store(trc::StoreEvent::DecryptError))
     }
 
     async fn link(&self, blobs: &[(BlobHash, usize)]) -> trc::Result<()> {

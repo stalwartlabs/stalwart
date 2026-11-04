@@ -62,6 +62,7 @@ pub struct ApplicationClient {
 pub enum ResolvedClient {
     Stateless(ClientMeta),
     Registered(Box<OAuthClient>),
+    RegisteredApplication(Box<OAuthClient>),
     Application(ApplicationClient),
     Cimd(Option<Box<CimdClient>>),
 }
@@ -105,7 +106,7 @@ impl Server {
 
             match self.registered_oauth_client(client_id).await? {
                 Err(ClientRejection::Unknown) if is_https => {}
-                result => return Ok(result.map(ResolvedClient::Registered)),
+                result => return Ok(result.map(|client| self.registered_client(client))),
             }
 
             let url = match self.check_cimd_policy(client_id) {
@@ -125,7 +126,28 @@ impl Server {
             Ok(self
                 .registered_oauth_client(client_id)
                 .await?
-                .map(ResolvedClient::Registered))
+                .map(|client| self.registered_client(client)))
+        }
+    }
+
+    fn registered_client(&self, client: Box<OAuthClient>) -> ResolvedClient {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if client.member_tenant_id.is_some() {
+            return ResolvedClient::Registered(client);
+        }
+        // SPDX-SnippetEnd
+        if self
+            .inner
+            .data
+            .applications
+            .is_application_client_id(&client.client_id)
+        {
+            ResolvedClient::RegisteredApplication(client)
+        } else {
+            ResolvedClient::Registered(client)
         }
     }
 
@@ -297,18 +319,20 @@ impl ResolvedClient {
     pub fn kind(&self) -> OAuthClientKind {
         match self {
             ResolvedClient::Stateless(_) => OAuthClientKind::Dynamic,
-            ResolvedClient::Registered(client) if client.first_party => OAuthClientKind::FirstParty,
             ResolvedClient::Registered(_) => OAuthClientKind::Registered,
-            ResolvedClient::Application(_) => OAuthClientKind::FirstParty,
+            ResolvedClient::RegisteredApplication(_) | ResolvedClient::Application(_) => {
+                OAuthClientKind::FirstParty
+            }
             ResolvedClient::Cimd(_) => OAuthClientKind::MetadataDocument,
         }
     }
 
-    pub fn is_first_party(&self) -> bool {
+    pub fn granted_scopes(&self, requested: OAuthScopes) -> OAuthScopes {
         match self {
-            ResolvedClient::Application(_) => true,
-            ResolvedClient::Registered(client) => client.first_party,
-            ResolvedClient::Stateless(_) | ResolvedClient::Cimd(_) => false,
+            ResolvedClient::RegisteredApplication(_) | ResolvedClient::Application(_) => {
+                requested | OAuthScopes::FULL
+            }
+            _ => requested,
         }
     }
 
@@ -326,7 +350,7 @@ impl ResolvedClient {
             // SPDX-SnippetEnd
             #[cfg(not(feature = "enterprise"))]
             ResolvedClient::Registered(_) => true,
-            ResolvedClient::Application(_) => true,
+            ResolvedClient::RegisteredApplication(_) | ResolvedClient::Application(_) => true,
             ResolvedClient::Stateless(_) | ResolvedClient::Cimd(_) => false,
         }
     }
@@ -341,6 +365,7 @@ impl ResolvedClient {
                 .member_tenant_id
                 .is_none_or(|owner| tenant_id == Some(owner.document_id())),
             ResolvedClient::Stateless(_)
+            | ResolvedClient::RegisteredApplication(_)
             | ResolvedClient::Application(_)
             | ResolvedClient::Cimd(_) => true,
         }
@@ -350,7 +375,9 @@ impl ResolvedClient {
     pub fn display_name(&self) -> Option<&str> {
         match self {
             ResolvedClient::Stateless(meta) => meta.client_name.as_deref(),
-            ResolvedClient::Registered(client) => client.description.as_deref(),
+            ResolvedClient::Registered(client) | ResolvedClient::RegisteredApplication(client) => {
+                client.description.as_deref()
+            }
             ResolvedClient::Application(app) => app.client_name.as_deref(),
             ResolvedClient::Cimd(client) => client.as_ref()?.client_name.as_deref(),
         }
@@ -358,10 +385,12 @@ impl ResolvedClient {
 
     pub fn display_logo(&self) -> Option<&str> {
         match self {
-            ResolvedClient::Registered(client) => client
-                .logo
-                .as_deref()
-                .filter(|logo| logo.starts_with(LOGO_DATA_URI_PREFIX)),
+            ResolvedClient::Registered(client) | ResolvedClient::RegisteredApplication(client) => {
+                client
+                    .logo
+                    .as_deref()
+                    .filter(|logo| logo.starts_with(LOGO_DATA_URI_PREFIX))
+            }
             ResolvedClient::Application(app) => app.logo_uri.as_deref(),
             ResolvedClient::Stateless(_) | ResolvedClient::Cimd(_) => None,
         }
@@ -377,7 +406,9 @@ impl ResolvedClient {
     pub fn redirect_uris(&self) -> &[String] {
         match self {
             ResolvedClient::Stateless(meta) => &meta.redirect_uris,
-            ResolvedClient::Registered(client) => client.redirect_uris.as_slice(),
+            ResolvedClient::Registered(client) | ResolvedClient::RegisteredApplication(client) => {
+                client.redirect_uris.as_slice()
+            }
             ResolvedClient::Application(app) => &app.redirect_uris,
             ResolvedClient::Cimd(Some(client)) => &client.redirect_uris,
             ResolvedClient::Cimd(None) => &[],
@@ -393,21 +424,26 @@ impl ResolvedClient {
     }
 
     pub fn allowed_scopes(&self) -> Option<OAuthScopes> {
-        if self.is_first_party() {
-            return None;
-        }
         let scopes = match self {
+            ResolvedClient::RegisteredApplication(_) | ResolvedClient::Application(_) => {
+                return None;
+            }
             ResolvedClient::Stateless(meta) => meta.scopes,
             ResolvedClient::Registered(client) => OAuthScopes::from_registry(client.scopes.iter()),
             ResolvedClient::Cimd(Some(client)) => client.scopes,
-            ResolvedClient::Cimd(None) | ResolvedClient::Application(_) => OAuthScopes::NONE,
+            ResolvedClient::Cimd(None) => OAuthScopes::NONE,
+        };
+        let scopes = if self.is_verified() {
+            scopes
+        } else {
+            scopes.without(OAuthScopes::FULL)
         };
         Some(scopes | OAuthScopes::ALWAYS_ALLOWED)
     }
 
     pub fn secret_hash(&self) -> Option<&str> {
         match self {
-            ResolvedClient::Registered(client) => {
+            ResolvedClient::Registered(client) | ResolvedClient::RegisteredApplication(client) => {
                 client.secret.as_deref().filter(|secret| !secret.is_empty())
             }
             _ => None,
@@ -420,7 +456,9 @@ impl ResolvedClient {
 
     pub fn allows_grant(&self, grant: OAuthGrantType) -> bool {
         match self {
-            ResolvedClient::Registered(client) => client.grant_types.contains(&grant),
+            ResolvedClient::Registered(client) | ResolvedClient::RegisteredApplication(client) => {
+                client.grant_types.contains(&grant)
+            }
             ResolvedClient::Stateless(_)
             | ResolvedClient::Application(_)
             | ResolvedClient::Cimd(_) => grant != OAuthGrantType::DeviceCode,

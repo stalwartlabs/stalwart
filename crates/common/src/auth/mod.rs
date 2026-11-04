@@ -177,20 +177,8 @@ pub struct AccessToken {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenScope {
-    Grant {
-        grant_id: u64,
-        scopes: OAuthScopes,
-        client: GrantClient,
-    },
-    External {
-        scopes: OAuthScopes,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GrantClient {
-    FirstParty,
-    ThirdParty,
+    Grant { grant_id: u64, scopes: OAuthScopes },
+    External { scopes: OAuthScopes },
 }
 
 const _: () = assert!(size_of::<TokenScope>() <= 16);

@@ -301,7 +301,7 @@ pub fn validate_cimd_document(
             .scope
             .as_deref()
             .map_or(OAuthScopes::INTEROPERABLE, |scope| {
-                OAuthScopes::parse(scope).interoperable()
+                OAuthScopes::parse(scope).grantable()
             }),
     })
 }

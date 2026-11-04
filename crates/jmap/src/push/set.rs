@@ -94,7 +94,10 @@ impl PushSubscriptionSet for Server {
 
         // Process creates
         'create: for (id, object) in request.unwrap_create() {
-            let mut push = PushSubscription::default();
+            let mut push = PushSubscription {
+                types: Bitmap::all(),
+                ..Default::default()
+            };
 
             if subscriptions.subscriptions.len()
                 >= self.object_quota(account.object_quotas(), StorageQuota::MaxPushSubscriptions)
@@ -415,10 +418,6 @@ fn validate_push_value(
                 .with_property(property.clone())
                 .with_description("Field could not be set."));
         }
-    }
-
-    if is_create && push.types.is_empty() {
-        push.types = Bitmap::all();
     }
 
     Ok(())

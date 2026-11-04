@@ -467,6 +467,9 @@ pub fn parse_oauth_scope(scope: &str) -> Option<OAuthScope> {
         "urn:ietf:params:oauth:scope:contacts" => OAuthScope::Contacts,
         "urn:ietf:params:oauth:scope:calendars" => OAuthScope::Calendars,
         "urn:ietf:params:oauth:scope:files" => OAuthScope::Files,
+        "urn:stalwart:oauth:scope:security" => OAuthScope::Security,
+        "urn:stalwart:oauth:scope:settings" => OAuthScope::Settings,
+        "urn:stalwart:oauth:scope:full" => OAuthScope::Full,
     )
     .copied()
 }
@@ -510,22 +513,13 @@ pub fn validate_oauth_client(
             ),
         ));
     }
-    if client.first_party {
-        if !is_superuser {
-            return Err((
-                Property::FirstParty,
-                ClientRegistrationError::invalid_client_metadata(
-                    "Only a superuser can register a first-party client.",
-                ),
-            ));
-        } else if client.redirect_uris.is_empty() {
-            return Err((
-                Property::RedirectUris,
-                ClientRegistrationError::invalid_redirect_uri(
-                    "A first-party client requires at least one redirect URI.",
-                ),
-            ));
-        }
+    if !is_superuser && client.scopes.contains(&OAuthScope::Full) {
+        return Err((
+            Property::Scopes,
+            ClientRegistrationError::invalid_client_metadata(
+                "Only a superuser can register a client with full access.",
+            ),
+        ));
     }
     Ok(())
 }

@@ -226,8 +226,8 @@ impl AccountCapabilities for AccessToken {
 
 pub fn capability_scopes(capability: Capability) -> OAuthScopes {
     match capability {
-        Capability::Core
-        | Capability::Blob
+        Capability::Core => OAuthScopes::INTEROPERABLE | OAuthScopes::STALWART,
+        Capability::Blob
         | Capability::Quota
         | Capability::Principals
         | Capability::PrincipalsOwner
@@ -245,7 +245,7 @@ pub fn capability_scopes(capability: Capability) -> OAuthScopes {
             OAuthScopes::CALENDARS
         }
         Capability::FileNode => OAuthScopes::FILES,
-        Capability::Stalwart => OAuthScopes::NONE,
+        Capability::Stalwart => OAuthScopes::STALWART,
     }
 }
 

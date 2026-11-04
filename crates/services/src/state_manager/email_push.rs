@@ -130,7 +130,6 @@ pub async fn build_email_push_object(
 
     let blob = if filter_blob || needs.blob {
         let Some(blob) = server
-            .blob_store()
             .get_blob(metadata.blob_hash().as_slice(), 0..usize::MAX)
             .await
             .caused_by(trc::location!())?

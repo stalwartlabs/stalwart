@@ -5,9 +5,10 @@
  */
 
 use super::{
-    SCOPE_CALENDARS, SCOPE_CONTACTS, SCOPE_FILES, SCOPE_MAIL, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
+    SCOPE_CALENDARS, SCOPE_CONTACTS, SCOPE_FILES, SCOPE_FULL, SCOPE_MAIL, SCOPE_OFFLINE_ACCESS,
+    SCOPE_OPENID, SCOPE_SECURITY, SCOPE_SETTINGS,
 };
-use crate::auth::{GrantClient, Permissions, TokenScope};
+use crate::auth::{Permissions, TokenScope};
 use directory::backend::oidc::ExternalScopes;
 use registry::{
     schema::enums::{OAuthScope, Permission},
@@ -30,19 +31,22 @@ use utils::map::bitmap::Bitmap;
     Hash,
 )]
 #[repr(transparent)]
-pub struct OAuthScopes(u8);
+pub struct OAuthScopes(u16);
 
-const SCOPE_NAMES: [(OAuthScopes, &str); 6] = [
+const SCOPE_NAMES: [(OAuthScopes, &str); 9] = [
     (OAuthScopes::OPENID, SCOPE_OPENID),
     (OAuthScopes::OFFLINE_ACCESS, SCOPE_OFFLINE_ACCESS),
     (OAuthScopes::MAIL, SCOPE_MAIL),
     (OAuthScopes::CONTACTS, SCOPE_CONTACTS),
     (OAuthScopes::CALENDARS, SCOPE_CALENDARS),
     (OAuthScopes::FILES, SCOPE_FILES),
+    (OAuthScopes::SECURITY, SCOPE_SECURITY),
+    (OAuthScopes::SETTINGS, SCOPE_SETTINGS),
+    (OAuthScopes::FULL, SCOPE_FULL),
 ];
 
-const INTEROPERABLE_SHIFT: u32 = 2;
-const INTEROPERABLE_COMBINATIONS: usize = 1 << 4;
+const SCOPED_SHIFT: u32 = 2;
+const SCOPED_COMBINATIONS: usize = 1 << 6;
 
 impl OAuthScopes {
     pub const NONE: Self = Self(0);
@@ -52,22 +56,29 @@ impl OAuthScopes {
     pub const CONTACTS: Self = Self(1 << 3);
     pub const CALENDARS: Self = Self(1 << 4);
     pub const FILES: Self = Self(1 << 5);
+    pub const SECURITY: Self = Self(1 << 6);
+    pub const SETTINGS: Self = Self(1 << 7);
+    pub const FULL: Self = Self(1 << 8);
     pub const ALWAYS_ALLOWED: Self = Self(Self::OPENID.0 | Self::OFFLINE_ACCESS.0);
     pub const INTEROPERABLE: Self =
         Self(Self::MAIL.0 | Self::CONTACTS.0 | Self::CALENDARS.0 | Self::FILES.0);
-    pub const ALL: Self = Self(Self::ALWAYS_ALLOWED.0 | Self::INTEROPERABLE.0);
+    pub const STALWART: Self = Self(Self::SECURITY.0 | Self::SETTINGS.0 | Self::FULL.0);
+    pub const GRANTABLE: Self = Self(Self::INTEROPERABLE.0 | Self::STALWART.0);
+    pub const ALL: Self = Self(Self::ALWAYS_ALLOWED.0 | Self::GRANTABLE.0);
     pub const DAV: Self = Self(Self::CONTACTS.0 | Self::CALENDARS.0 | Self::FILES.0);
+    pub const EXPIRED_CREDENTIAL: Self = Self(Self::SECURITY.0 | Self::FULL.0);
+    const SCOPED: Self = Self(Self::INTEROPERABLE.0 | Self::SECURITY.0 | Self::SETTINGS.0);
 
-    pub const fn from_bits(bits: u8) -> Self {
+    pub const fn from_bits(bits: u16) -> Self {
         Self(bits & Self::ALL.0)
     }
 
-    pub const fn bits(self) -> u8 {
+    pub const fn bits(self) -> u16 {
         self.0
     }
 
     pub const fn from_external(scopes: ExternalScopes) -> Self {
-        Self((scopes.bits() << INTEROPERABLE_SHIFT) & Self::INTEROPERABLE.0)
+        Self(((scopes.bits() as u16) << SCOPED_SHIFT) & Self::GRANTABLE.0)
     }
 
     pub fn from_name(name: &str) -> Self {
@@ -80,6 +91,9 @@ impl OAuthScopes {
             "urn:ietf:params:oauth:scope:contacts" => OAuthScopes::CONTACTS,
             "urn:ietf:params:oauth:scope:calendars" => OAuthScopes::CALENDARS,
             "urn:ietf:params:oauth:scope:files" => OAuthScopes::FILES,
+            "urn:stalwart:oauth:scope:security" => OAuthScopes::SECURITY,
+            "urn:stalwart:oauth:scope:settings" => OAuthScopes::SETTINGS,
+            "urn:stalwart:oauth:scope:full" => OAuthScopes::FULL,
         )
         .copied()
         .unwrap_or_default()
@@ -104,6 +118,9 @@ impl OAuthScopes {
                 (Self::CONTACTS, OAuthScope::Contacts),
                 (Self::CALENDARS, OAuthScope::Calendars),
                 (Self::FILES, OAuthScope::Files),
+                (Self::SECURITY, OAuthScope::Security),
+                (Self::SETTINGS, OAuthScope::Settings),
+                (Self::FULL, OAuthScope::Full),
             ]
             .into_iter()
             .filter(|(bit, _)| self.contains(*bit))
@@ -124,8 +141,16 @@ impl OAuthScopes {
         self.0 == 0
     }
 
-    pub const fn interoperable(self) -> Self {
-        Self(self.0 & Self::INTEROPERABLE.0)
+    pub const fn grantable(self) -> Self {
+        Self(self.0 & Self::GRANTABLE.0)
+    }
+
+    pub const fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    pub const fn allows_expired_credential(self) -> bool {
+        self.intersects(Self::EXPIRED_CREDENTIAL)
     }
 
     pub fn names(self) -> impl Iterator<Item = &'static str> {
@@ -136,7 +161,7 @@ impl OAuthScopes {
     }
 
     pub fn to_wire(self) -> String {
-        let mut out = String::with_capacity(128);
+        let mut out = String::with_capacity(256);
         for name in self.names() {
             if !out.is_empty() {
                 out.push(' ');
@@ -146,8 +171,8 @@ impl OAuthScopes {
         out
     }
 
-    const fn interoperable_index(self) -> usize {
-        ((self.0 & Self::INTEROPERABLE.0) >> INTEROPERABLE_SHIFT) as usize
+    const fn scoped_index(self) -> usize {
+        ((self.0 & Self::SCOPED.0) >> SCOPED_SHIFT) as usize
     }
 }
 
@@ -158,6 +183,9 @@ impl From<OAuthScope> for OAuthScopes {
             OAuthScope::Contacts => Self::CONTACTS,
             OAuthScope::Calendars => Self::CALENDARS,
             OAuthScope::Files => Self::FILES,
+            OAuthScope::Security => Self::SECURITY,
+            OAuthScope::Settings => Self::SETTINGS,
+            OAuthScope::Full => Self::FULL,
         }
     }
 }
@@ -185,17 +213,22 @@ impl BitAnd for OAuthScopes {
 }
 
 macro_rules! permission_scopes {
-    ($($scopes:expr => [$($permission:ident),+ $(,)?]),+ $(,)?) => {
+    ($($(#[$attr:meta])* $scopes:path => [$($permission:ident),+ $(,)?]),+ $(,)?) => {
         pub const fn permission_scopes(permission: Permission) -> OAuthScopes {
             match permission {
-                $($(Permission::$permission)|+ => $scopes,)+
+                $($(#[$attr])* $(Permission::$permission)|+ => $scopes,)+
                 _ => OAuthScopes::NONE,
             }
         }
 
-        static SCOPE_PERMISSIONS: [Permissions; INTEROPERABLE_COMBINATIONS] = {
-            let mut table = [const { Permissions::new() }; INTEROPERABLE_COMBINATIONS];
-            $($(insert_scoped(&mut table, Permission::$permission as usize, $scopes);)+)+
+        static SCOPE_PERMISSIONS: [Permissions; SCOPED_COMBINATIONS] = {
+            let mut table = [const { Permissions::new() }; SCOPED_COMBINATIONS];
+            $(
+                $(#[$attr])*
+                {
+                    $(insert_scoped(&mut table, Permission::$permission as usize, $scopes);)+
+                }
+            )+
             table
         };
     };
@@ -297,6 +330,10 @@ permission_scopes!(
         SieveRenameScript,
         SieveCheckScript,
         SieveHaveSpace,
+        SysSpamTrainingSampleGet,
+        SysSpamTrainingSampleCreate,
+        SysSpamTrainingSampleDestroy,
+        SysSpamTrainingSampleQuery,
     ],
     OAuthScopes::CALENDARS => [
         CalendarAlarmsSend,
@@ -429,17 +466,55 @@ permission_scopes!(
         DavPrincipalSearch,
         DavPrincipalSearchPropSet,
     ],
+    OAuthScopes::SECURITY => [
+        SysAccountPasswordGet,
+        SysAccountPasswordUpdate,
+        SysAppPasswordGet,
+        SysAppPasswordCreate,
+        SysAppPasswordUpdate,
+        SysAppPasswordDestroy,
+        SysAppPasswordQuery,
+        SysApiKeyGet,
+        SysApiKeyCreate,
+        SysApiKeyUpdate,
+        SysApiKeyDestroy,
+        SysApiKeyQuery,
+        SysOAuthGrantGet,
+        SysOAuthGrantDestroy,
+        SysOAuthGrantQuery,
+    ],
+    OAuthScopes::SETTINGS => [
+        SysAccountSettingsGet,
+        SysAccountSettingsUpdate,
+        SysPublicKeyGet,
+        SysPublicKeyCreate,
+        SysPublicKeyUpdate,
+        SysPublicKeyDestroy,
+        SysPublicKeyQuery,
+    ],
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    OAuthScopes::SETTINGS => [
+        SysMaskedEmailGet,
+        SysMaskedEmailCreate,
+        SysMaskedEmailUpdate,
+        SysMaskedEmailDestroy,
+        SysMaskedEmailQuery,
+    ],
+    // SPDX-SnippetEnd
 );
 
 const fn insert_scoped(
-    table: &mut [Permissions; INTEROPERABLE_COMBINATIONS],
+    table: &mut [Permissions; SCOPED_COMBINATIONS],
     permission: usize,
     scopes: OAuthScopes,
 ) {
     let always = scopes.intersects(OAuthScopes::OPENID);
     let mut idx = 0;
-    while idx < INTEROPERABLE_COMBINATIONS {
-        if always || OAuthScopes((idx as u8) << INTEROPERABLE_SHIFT).intersects(scopes) {
+    while idx < SCOPED_COMBINATIONS {
+        if always || OAuthScopes((idx as u16) << SCOPED_SHIFT).intersects(scopes) {
             table[idx].insert(permission);
         }
         idx += 1;
@@ -447,7 +522,7 @@ const fn insert_scoped(
 }
 
 pub fn scope_permissions(scopes: OAuthScopes) -> &'static Permissions {
-    &SCOPE_PERMISSIONS[scopes.interoperable_index()]
+    &SCOPE_PERMISSIONS[scopes.scoped_index()]
 }
 
 impl TokenScope {
@@ -462,11 +537,20 @@ impl TokenScope {
     #[inline]
     pub const fn restricted_scopes(self) -> Option<OAuthScopes> {
         match self {
-            TokenScope::Grant {
-                client: GrantClient::FirstParty,
-                ..
-            } => None,
+            TokenScope::Grant { scopes, .. } | TokenScope::External { scopes }
+                if scopes.contains(OAuthScopes::FULL) =>
+            {
+                None
+            }
             TokenScope::Grant { scopes, .. } | TokenScope::External { scopes } => Some(scopes),
+        }
+    }
+
+    #[inline]
+    pub const fn allows_expired_credential(self) -> bool {
+        match self {
+            TokenScope::Grant { scopes, .. } => scopes.allows_expired_credential(),
+            TokenScope::External { .. } => true,
         }
     }
 
@@ -485,8 +569,8 @@ macro_rules! data_type_scopes {
             }
         }
 
-        static SCOPE_DATA_TYPES: [u64; INTEROPERABLE_COMBINATIONS] = {
-            let mut table = [0u64; INTEROPERABLE_COMBINATIONS];
+        static SCOPE_DATA_TYPES: [u64; SCOPED_COMBINATIONS] = {
+            let mut table = [0u64; SCOPED_COMBINATIONS];
             $($(insert_data_type(&mut table, DataType::$data_type as u64, $scopes);)+)+
             table
         };
@@ -525,13 +609,13 @@ data_type_scopes!(
 );
 
 const fn insert_data_type(
-    table: &mut [u64; INTEROPERABLE_COMBINATIONS],
+    table: &mut [u64; SCOPED_COMBINATIONS],
     data_type: u64,
     scopes: OAuthScopes,
 ) {
     let mut idx = 0;
-    while idx < INTEROPERABLE_COMBINATIONS {
-        if OAuthScopes((idx as u8) << INTEROPERABLE_SHIFT).intersects(scopes) {
+    while idx < SCOPED_COMBINATIONS {
+        if OAuthScopes((idx as u16) << SCOPED_SHIFT).intersects(scopes) {
             table[idx] |= 1 << data_type;
         }
         idx += 1;
@@ -539,7 +623,7 @@ const fn insert_data_type(
 }
 
 pub fn scope_data_types(scopes: OAuthScopes) -> Bitmap<DataType> {
-    Bitmap::from_bits(SCOPE_DATA_TYPES[scopes.interoperable_index()])
+    Bitmap::from_bits(SCOPE_DATA_TYPES[scopes.scoped_index()])
 }
 
 #[cfg(all(test, stalwart_tests))]

@@ -12,10 +12,10 @@ use aws_lc_rs::{
 use registry::{
     schema::{
         enums::*,
-        prelude::{ObjectType, SocketAddr},
+        prelude::{Id, Object, ObjectType, SocketAddr},
         structs::*,
     },
-    types::{duration::Duration, error::Error, list::List, map::Map},
+    types::{EnumImpl, duration::Duration, error::Error, id::ObjectId, list::List, map::Map},
 };
 use std::str::FromStr;
 use store::{
@@ -440,6 +440,8 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                 ))
                 .await?;
         }
+    } else if bp.registry.update_role_permissions() {
+        update_role_permissions(bp).await?;
     }
 
     if bp
@@ -546,6 +548,95 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                 status: TaskStatus::now(),
             }));
             bp.data_store.write_batch(&mut batch).await?;
+        }
+    }
+
+    Ok(())
+}
+
+const V1_0_0_LAST_PERMISSION: Permission = Permission::SysWebHookQuery;
+
+async fn update_role_permissions(bp: &mut Bootstrap) -> trc::Result<()> {
+    let authentication = bp.setting::<Authentication>().await?;
+    let permissions = DefaultPermissions::default();
+    let mut roles: Vec<(Id, &[Permission])> = Vec::new();
+
+    for (role_ids, defaults) in [
+        (
+            authentication.default_user_role_ids.as_slice(),
+            permissions.user.as_slice(),
+        ),
+        (
+            authentication.default_group_role_ids.as_slice(),
+            permissions.group.as_slice(),
+        ),
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        (
+            authentication.default_tenant_role_ids.as_slice(),
+            permissions.tenant.as_slice(),
+        ),
+        // SPDX-SnippetEnd
+        (
+            authentication.default_admin_role_ids.as_slice(),
+            permissions.superuser.as_slice(),
+        ),
+    ] {
+        for role_id in role_ids {
+            if !roles.iter().any(|(id, _)| id == role_id) {
+                roles.push((*role_id, defaults));
+            }
+        }
+    }
+
+    let baseline = V1_0_0_LAST_PERMISSION.to_id();
+    for (role_id, defaults) in roles {
+        let object_id = ObjectId::new(ObjectType::Role, role_id);
+        let Some(old_object) = bp.registry.get(object_id).await? else {
+            continue;
+        };
+        let mut role = Role::from(old_object.clone());
+        let mut added = Vec::new();
+        for permission in defaults {
+            if permission.to_id() > baseline
+                && !role.enabled_permissions.contains(permission)
+                && !role.disabled_permissions.contains(permission)
+            {
+                role.enabled_permissions.push_unchecked(*permission);
+                added.push(permission.as_str());
+            }
+        }
+        if added.is_empty() {
+            continue;
+        }
+
+        let description = role.description.clone();
+        let new_object = Object {
+            inner: role.into(),
+            revision: old_object.revision,
+        };
+        match bp
+            .registry
+            .write(RegistryWrite::update(role_id, &new_object, &old_object))
+            .await?
+        {
+            RegistryWriteResult::Success(_) => {
+                trc::event!(
+                    Server(trc::ServerEvent::Startup),
+                    Details = "Added new permissions to default role",
+                    Id = role_id.id(),
+                    Name = description,
+                    Contents = added
+                );
+            }
+            err => {
+                bp.build_error(
+                    object_id,
+                    format!("Failed to add new permissions to default role: {err}"),
+                );
+            }
         }
     }
 

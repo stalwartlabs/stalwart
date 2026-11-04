@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "calcard"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "encodify",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aes-gcm-siv",
  "ahash",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "coordinator"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-nats",
  "deadpool",
@@ -1240,7 +1240,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aes 0.9.3",
  "aws-lc-rs",
@@ -1436,7 +1436,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "dav"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "calcard",
  "common",
@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "dav-proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "calcard",
  "compact_str",
@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "directory"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "argon2",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "email"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "bytecount",
  "common",
@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "groupware"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "calcard",
@@ -2655,7 +2655,7 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-stream",
  "common",
@@ -2731,7 +2731,7 @@ dependencies = [
 
 [[package]]
 name = "http_proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "common",
  "compact_str",
@@ -3156,7 +3156,7 @@ checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "imap"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "common",
@@ -3180,7 +3180,7 @@ dependencies = [
 
 [[package]]
 name = "imap_proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "compact_str",
@@ -3428,7 +3428,7 @@ dependencies = [
 
 [[package]]
 name = "jmap"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-stream",
  "calcard",
@@ -3478,7 +3478,7 @@ dependencies = [
 
 [[package]]
 name = "jmap-tools"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "rkyv",
  "serde",
@@ -3487,7 +3487,7 @@ dependencies = [
 
 [[package]]
 name = "jmap_proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "calcard",
@@ -3956,7 +3956,7 @@ dependencies = [
 
 [[package]]
 name = "managesieve"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "common",
  "compact_str",
@@ -4243,7 +4243,7 @@ dependencies = [
 
 [[package]]
 name = "nlp"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "hashify",
@@ -4864,7 +4864,7 @@ dependencies = [
 
 [[package]]
 name = "pop3"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "common",
  "compact_str",
@@ -5513,7 +5513,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "registry"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "compact_str",
@@ -5892,7 +5892,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "s3"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -5991,7 +5991,7 @@ dependencies = [
 
 [[package]]
 name = "scim"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "common",
  "compact_str",
@@ -6015,7 +6015,7 @@ dependencies = [
 
 [[package]]
 name = "scim-proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "hashify",
  "serde",
@@ -6258,7 +6258,7 @@ dependencies = [
 
 [[package]]
 name = "services"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -6429,7 +6429,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sieve-rs"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "bumpalo",
@@ -6548,7 +6548,7 @@ dependencies = [
 
 [[package]]
 name = "smtp"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "blake3",
@@ -6589,7 +6589,7 @@ dependencies = [
 
 [[package]]
 name = "smtp-proto"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "memchr",
  "rkyv",
@@ -6598,7 +6598,7 @@ dependencies = [
 
 [[package]]
 name = "smtp-report"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "flate2",
  "hashify",
@@ -6674,7 +6674,7 @@ dependencies = [
 
 [[package]]
 name = "spam-filter"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "common",
  "compact_str",
@@ -6811,7 +6811,7 @@ dependencies = [
 
 [[package]]
 name = "stalwart"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "common",
  "coordinator",
@@ -6819,7 +6819,7 @@ dependencies = [
  "directory",
  "email",
  "groupware",
- "http 1.0.2",
+ "http 1.0.3",
  "http_proto",
  "imap",
  "jmap",
@@ -6849,7 +6849,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -7012,7 +7012,7 @@ checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
 name = "telemetry"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "bytes",
@@ -7057,7 +7057,7 @@ dependencies = [
 
 [[package]]
 name = "text-extract"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aws-lc-rs",
  "encoding_rs",
@@ -7488,7 +7488,7 @@ dependencies = [
 
 [[package]]
 name = "trc"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "compact_str",
@@ -7571,7 +7571,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "types"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "blake3",
  "compact_str",
@@ -7787,7 +7787,7 @@ checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 
 [[package]]
 name = "utils"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash",
  "arcstr",

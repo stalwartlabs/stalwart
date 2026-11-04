@@ -7,7 +7,7 @@
 use super::{scope::OAuthScopes, token::TokenGrant};
 use crate::{
     Server,
-    auth::{AccessToken, GrantClient, RECOVERY_ADMIN_ID, TokenScope},
+    auth::{AccessToken, RECOVERY_ADMIN_ID, TokenScope},
     cache::invalidate::CacheInvalidationBuilder,
     ipc::CacheInvalidation,
 };
@@ -107,12 +107,18 @@ impl TokenScope {
     pub fn from_grant(grant_id: u64, grant: &OAuthGrant) -> Self {
         TokenScope::Grant {
             grant_id,
-            scopes: OAuthScopes::from_registry(grant.scopes.iter()),
-            client: if grant.client_kind == OAuthClientKind::FirstParty {
-                GrantClient::FirstParty
-            } else {
-                GrantClient::ThirdParty
-            },
+            scopes: OAuthScopes::from_grant(grant),
+        }
+    }
+}
+
+impl OAuthScopes {
+    pub fn from_grant(grant: &OAuthGrant) -> Self {
+        let scopes = OAuthScopes::from_registry(grant.scopes.iter());
+        if grant.client_kind == OAuthClientKind::FirstParty {
+            scopes | OAuthScopes::FULL
+        } else {
+            scopes
         }
     }
 }
@@ -181,7 +187,6 @@ impl Server {
                 Ok(TokenScope::Grant {
                     grant_id,
                     scopes: OAuthScopes::ALL,
-                    client: GrantClient::FirstParty,
                 })
             }
             _ => Err(trc::AuthEvent::TokenExpired

@@ -62,7 +62,7 @@ impl FileNodeCopy for Server {
         if account_id == from_account_id {
             return Err(trc::JmapEvent::InvalidArguments
                 .into_err()
-                .details("From accountId is equal to fromAccountId"));
+                .details("accountId must differ from fromAccountId"));
         }
 
         let metadata = ObjectMetadata::new(self, access_token, using, MetadataType::FileNode);

@@ -1,6 +1,6 @@
 [package]
 name = "groupware"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 
 [dependencies]
@@ -15,7 +15,7 @@ calcard = { path = "../calcard", features = ["rkyv"] }
 jmap-tools = { path = "../jmap-tools" }
 hashify = "0.3"
 text-extract = { path = "../text-extract" }
-tokio = { version = "1.54", features = ["net", "macros"] }
+tokio = { version = "1.54", features = ["net", "macros", "sync", "time"] }
 rkyv.workspace = true
 percent-encoding = "2.3.2"
 compact_str = "0.10.0"

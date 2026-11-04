@@ -67,7 +67,7 @@ impl ShardedBlob {
     }
 
     #[inline(always)]
-    fn get_store(&self, key: &[u8]) -> &BlobStore {
+    pub(crate) fn get_store(&self, key: &[u8]) -> &BlobStore {
         &self.stores[self.shard_of(key)]
     }
 

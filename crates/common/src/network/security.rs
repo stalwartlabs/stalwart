@@ -223,6 +223,21 @@ impl Security {
             BlockReason::Manual | BlockReason::Other => None,
         }
     }
+
+    pub fn is_default_role(&self, role_id: u32) -> bool {
+        let contains = |ids: &[Id]| ids.iter().any(|id| id.document_id() == role_id);
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if contains(&self.default_role_ids_tenant) {
+            return true;
+        }
+        // SPDX-SnippetEnd
+        contains(&self.default_role_ids_user)
+            || contains(&self.default_role_ids_group)
+            || contains(&self.default_role_ids_admin)
+    }
 }
 
 impl Server {

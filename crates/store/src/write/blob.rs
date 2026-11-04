@@ -16,9 +16,16 @@ use registry::{
 };
 use std::time::Instant;
 use trc::{AddContext, StoreEvent};
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+use registry::schema::prelude::ObjectType;
+// SPDX-SnippetEnd
 use types::{
     blob::BlobClass,
     blob_hash::{BLOB_HASH_LEN, BlobHash},
+    collection::Collection,
 };
 use utils::codec::leb128::{Leb128, Leb128Reader, Leb128Writer};
 
@@ -277,6 +284,93 @@ impl Store {
         );
 
         Ok(())
+    }
+}
+
+impl Store {
+    pub async fn user_blob_hashes(&self, shard_index: u8) -> trc::Result<Vec<BlobHash>> {
+        const TEMP_LINK: usize = BLOB_HASH_LEN + U32_LEN + U64_LEN;
+        const DOC_LINK: usize = BLOB_HASH_LEN + U64_LEN + 1;
+        const ID_LINK: usize = BLOB_HASH_LEN + U64_LEN;
+        const COLLECTION_OFFSET: usize = BLOB_HASH_LEN + U32_LEN;
+
+        let mut from_hash = BlobHash::default();
+        let mut to_hash = BlobHash::new_max();
+        from_hash.0[0] = shard_index;
+        to_hash.0[0] = shard_index;
+        let from_key = ValueKey {
+            account_id: 0,
+            collection: 0,
+            document_id: 0,
+            class: ValueClass::Blob(BlobOp::Commit { hash: from_hash }),
+        };
+        let to_key = ValueKey {
+            account_id: u32::MAX,
+            collection: u8::MAX,
+            document_id: u32::MAX,
+            class: ValueClass::Blob(BlobOp::Link {
+                hash: to_hash,
+                to: BlobLink::Document,
+            }),
+        };
+
+        let mut hashes: Vec<BlobHash> = Vec::new();
+        let mut committed: Option<BlobHash> = None;
+        self.iterate(
+            IterateParams::new(from_key, to_key).ascending(),
+            |key, value| {
+                let hash = key
+                    .get(0..BLOB_HASH_LEN)
+                    .and_then(|hash| BlobHash::try_from_hash_slice(hash).ok())
+                    .ok_or_else(|| {
+                        trc::Error::corrupted_key(key, value.into(), trc::location!())
+                    })?;
+                let is_user_data = match key.len() {
+                    BLOB_HASH_LEN => {
+                        committed = Some(hash);
+                        return Ok(true);
+                    }
+                    DOC_LINK => key.get(COLLECTION_OFFSET).is_some_and(|collection| {
+                        matches!(
+                            Collection::from(*collection),
+                            Collection::Email | Collection::SieveScript | Collection::FileNode
+                        )
+                    }),
+                    ID_LINK => true,
+                    TEMP_LINK => BlobLinkValue::is_archived_item(value),
+                    _ => false,
+                };
+                if is_user_data && committed.as_ref() == Some(&hash) && hashes.last() != Some(&hash)
+                {
+                    hashes.push(hash);
+                }
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
+        Ok(hashes)
+    }
+}
+
+impl BlobLinkValue {
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn is_archived_item(value: &[u8]) -> bool {
+        value.len() > MAX_LEB128_U64_LEN
+            && value
+                .split_last_chunk::<OBJECT_ID_LEN>()
+                .and_then(|(_, object_id)| ObjectId::deserialize(object_id).ok())
+                .is_some_and(|object_id| object_id.object() == ObjectType::ArchivedItem)
+    }
+    // SPDX-SnippetEnd
+
+    #[cfg(not(feature = "enterprise"))]
+    fn is_archived_item(_value: &[u8]) -> bool {
+        false
     }
 }
 

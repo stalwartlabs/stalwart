@@ -131,6 +131,7 @@ impl<T: SessionStream> Session<T> {
                     BlobHash::generate(&script_bytes),
                     &script_bytes,
                     60,
+                    &self.server.core.blob.email,
                 )
                 .await?;
 
@@ -179,6 +180,7 @@ impl<T: SessionStream> Session<T> {
                     BlobHash::generate(&script_bytes),
                     &script_bytes,
                     60,
+                    &self.server.core.blob.email,
                 )
                 .await?;
 

@@ -2,9 +2,57 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.0.3] - 2026-11-04
+
+**Third-party apps (not the WebUI) need the new Stalwart OAuth scopes.** Apps signing in through Stalwart or an external OpenID Connect provider could not manage app passwords, API keys or account settings. This access is now granted by the scopes `urn:stalwart:oauth:scope:security`, `urn:stalwart:oauth:scope:settings` and `urn:stalwart:oauth:scope:full`:
+- Apps registered in Stalwart: add the scopes the app needs to its OAuthClient `scopes` (only a superuser can allow `full`), and have the app request them.
+- Apps signing in through an external OpenID Connect provider: create the scopes in the provider and assign them to the apps that need them.
+- WebUI: no action needed.
+
+**Add the new permissions to the default roles (not a breaking change).** This release adds new permissions, and default roles are created only on the first start of a new installation, so on an upgraded server they are missing and the features they control stay unavailable. Restart the server once with the environment variable `STALWART_UPDATE_ROLE_PERMISSIONS=true` to add them, then remove the variable. See [Default roles on upgraded servers](https://stalw.art/docs/auth/authorization/permissions#default-roles-on-upgraded-servers) for details.
+
+## Added
+- Blob storage:
+  - Blob encryption at rest. Blobs can be encrypted by the server with symmetric keys (AES-256-GCM or ChaCha20-Poly1305) defined as `SymmetricKey` objects.
+  - Zstandard compression for blobs (`zstd` in `compressionAlgorithm`).
+  - `BlobRecode` task, which rewrites stored blobs with a chosen compression and encryption.
+- `STALWART_UPDATE_ROLE_PERMISSIONS` environment variable. When set to `true` (or `1`), startup adds to each default role every permission introduced after v1.0.0 that a new install would give that role and that the role is missing.
+- OAuth: Stalwart scopes `urn:stalwart:oauth:scope:security`, `urn:stalwart:oauth:scope:settings` and `urn:stalwart:oauth:scope:full`, so clients signing in through Stalwart or an external OpenID Connect provider can manage app passwords, API keys and account settings.
+
+## Fixed
+- JMAP:
+  - `/copy` methods called with the same `accountId` and `fromAccountId` return a clear error message.
+  - `PushSubscription` objects created with an empty `types` list no longer receive `StateChange` notifications, and `EmailPush` notifications are delivered regardless of `types`.
+- IMAP `SEARCH` accepts up to 32 levels of nested filters, so free-text searches from Apple Mail no longer fail with `Too many nested filters`.
+- OIDC: Bearer tokens are routed to the OpenID Connect directory whose issuer matches before the domain in their claims is tried, so a claim naming a domain the server does not host no longer sends the token to the default directory.
+- Security: Editing a default role, or a role nested in one, now invalidates the cached access tokens of accounts and groups that use the default role sets.
+
 ## [1.0.2] - 2026-11-02
 
 **Encryption at rest must be re-enabled after upgrading.** The algorithm is now chosen from each user's key, so the per-account cipher choice of earlier versions (AES-128, AES-256, AES-256-GCM, ChaCha20-Poly1305) no longer exists, and accounts that had encryption at rest enabled are set to `Disabled` on upgrade. Until a user (or an administrator) selects their public key again under the account's encryption settings, new messages for that account are stored unencrypted. Registered public keys and messages already encrypted are not affected. The server-wide settings also moved: `Email.encryptAtRest` is replaced by `atRestEnable` in the new `Encryption` settings (enabled by default, so servers that had disabled it must disable it again), and `Email.encryptOnAppend` by the per-account `encryptOnAppend` setting. See the [encryption at rest documentation](https://stalw.art/docs/encryption/at-rest) for details.
+
+**Administrators of upgraded servers must be granted the new permissions.** Default roles are created only when a server is first installed, so on servers upgraded from an earlier version the System Administrator role does not include the permissions added in this release, and the Encryption, External Public Keys and S/MIME Trust Anchors sections stay hidden. Find the role id with `x:Role/get` (it is the id in `defaultAdminRoleIds`, returned by `x:Authentication/get` with `"ids": ["singleton"]`, that is not the User role), then grant the permissions with:
+
+```bash
+curl -u admin:PASSWORD -H 'Content-Type: application/json' https://mail.example.org/jmap/ -d '{
+  "using": ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"],
+  "methodCalls": [["x:Role/set", {"update": {"ROLE_ID": {
+    "enabledPermissions/sysEncryptionGet": true,
+    "enabledPermissions/sysEncryptionUpdate": true,
+    "enabledPermissions/sysExternalPublicKeyGet": true,
+    "enabledPermissions/sysExternalPublicKeyCreate": true,
+    "enabledPermissions/sysExternalPublicKeyUpdate": true,
+    "enabledPermissions/sysExternalPublicKeyDestroy": true,
+    "enabledPermissions/sysExternalPublicKeyQuery": true,
+    "enabledPermissions/sysSmimeTrustAnchorGet": true,
+    "enabledPermissions/sysSmimeTrustAnchorCreate": true,
+    "enabledPermissions/sysSmimeTrustAnchorUpdate": true,
+    "enabledPermissions/sysSmimeTrustAnchorDestroy": true,
+    "enabledPermissions/sysSmimeTrustAnchorQuery": true,
+    "enabledPermissions/taskExternalPublicKeyMaintenance": true
+  }}}, "0"]]
+}'
+```
 
 ## Added
 - Encryption:

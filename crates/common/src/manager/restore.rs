@@ -7,12 +7,12 @@
 use super::backup::MAGIC_MARKER;
 use crate::{Core, DATABASE_SCHEMA_VERSION};
 use lz4_flex::frame::FrameDecoder;
-use registry::schema::enums::CompressionAlgo;
 use std::{
     fs::File,
     io::{BufReader, ErrorKind, Read},
     path::{Path, PathBuf},
 };
+use store::write::blob_codec::BlobOpts;
 use store::{
     BlobStore, IterateParams, Shape, Store, Subspace, U32_LEN,
     write::{
@@ -65,8 +65,9 @@ impl Core {
         for path in paths {
             let storage = self.storage.clone();
             let blob_store = self.storage.blob.clone();
+            let blob_opts = self.blob.email.clone();
             tasks.push(tokio::spawn(async move {
-                restore_file(storage.data, blob_store, &path).await;
+                restore_file(storage.data, blob_store, blob_opts, &path).await;
             }));
         }
 
@@ -106,7 +107,7 @@ async fn subspace_has_data(store: &Store, subspace: Subspace) -> bool {
     has_data
 }
 
-async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
+async fn restore_file(store: Store, blob_store: BlobStore, blob_opts: BlobOpts, path: &Path) {
     println!("Importing database dump from {}.", path.to_str().unwrap());
 
     let mut reader = KeyValueReader::new(path);
@@ -116,7 +117,7 @@ async fn restore_file(store: Store, blob_store: BlobStore, path: &Path) {
         Subspace::Blobs => {
             while let Some((key, value)) = reader.next() {
                 blob_store
-                    .put_blob(&key, &value, CompressionAlgo::Lz4)
+                    .put_blob(&key, &value, &blob_opts)
                     .await
                     .failed("Failed to write blob");
             }

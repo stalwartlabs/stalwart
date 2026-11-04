@@ -27,6 +27,7 @@ use common::{
         oauth::{
             DEVICE_CODE_LEN, USER_CODE_ALPHABET, USER_CODE_LEN,
             client::{RequestOrigin, ResolveContext, ResolveMode, ResolvedClient},
+            scope::OAuthScopes,
             supported_scopes,
         },
     },
@@ -601,6 +602,7 @@ async fn authenticate_login(
     server: &Server,
     session: &HttpSessionData,
     client: &ResolvedClient,
+    scopes: OAuthScopes,
     username: String,
     secret: String,
     mfa_token: Option<String>,
@@ -630,7 +632,9 @@ async fn authenticate_login(
                 );
                 return Ok(Err(LoginResponse::Failure));
             }
-            if !client.is_first_party() && access_token.is_main_credential_expired() {
+            if access_token.is_main_credential_expired()
+                && !client.granted_scopes(scopes).allows_expired_credential()
+            {
                 trc::event!(
                     Auth(trc::AuthEvent::CredentialExpired),
                     AccountId = account_id,
@@ -768,6 +772,7 @@ impl ConsentHandler for Server {
             self,
             session,
             &authorization.client,
+            OAuthScopes::parse(authorization.scope.as_deref().unwrap_or_default()),
             credentials.account_name,
             credentials.account_secret,
             credentials.mfa_token,
@@ -1013,6 +1018,7 @@ async fn approve_device(
                 server,
                 session,
                 &client,
+                OAuthScopes::parse(oauth.scope.as_ref().map_or("", |scope| scope.as_str())),
                 account_name,
                 account_secret,
                 mfa_token,

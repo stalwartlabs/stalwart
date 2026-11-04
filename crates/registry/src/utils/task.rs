@@ -47,6 +47,7 @@ impl Task {
             // SPDX-SnippetEnd
             Task::ShareRevokeCleanup(task) => task.status = status,
             Task::ExternalPublicKeyMaintenance(task) => task.status = status,
+            Task::BlobRecode(task) => task.status = status,
         }
     }
 
@@ -80,6 +81,7 @@ impl Task {
             // SPDX-SnippetEnd
             Task::ShareRevokeCleanup(task) => &task.status,
             Task::ExternalPublicKeyMaintenance(task) => &task.status,
+            Task::BlobRecode(task) => &task.status,
         }
     }
 
@@ -132,12 +134,14 @@ impl Task {
             // SPDX-SnippetEnd
             Task::ShareRevokeCleanup(_) => Permission::TaskShareRevokeCleanup,
             Task::ExternalPublicKeyMaintenance(_) => Permission::TaskExternalPublicKeyMaintenance,
+            Task::BlobRecode(_) => Permission::TaskBlobRecode,
         }
     }
 
     pub fn singleton_key(&self) -> Option<(u16, u64)> {
         match self {
             Task::ExternalPublicKeyMaintenance(_) => Some((0, u64::MAX)),
+            Task::BlobRecode(task) => Some((0, task.shard_index.unwrap_or(u64::MAX))),
             Task::AcmeRenewal(task) | Task::DkimManagement(task) => Some((0, task.domain_id.id())),
             Task::DmarcReportWindow(task) | Task::TlsReportWindow(task) => {
                 Some((0, task.window_end.timestamp().cast_unsigned()))

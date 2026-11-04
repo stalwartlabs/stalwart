@@ -114,6 +114,11 @@ impl RegistryStore {
     }
 
     #[inline(always)]
+    pub fn update_role_permissions(&self) -> bool {
+        self.0.env_update_role_permissions
+    }
+
+    #[inline(always)]
     pub fn is_bootstrap_mode(&self) -> bool {
         self.0.store.is_ephemeral()
     }

@@ -74,7 +74,6 @@ pub(crate) async fn build_file_document(
         FileContentKind::Html => 0..limits.max_text_size.saturating_mul(HTML_INPUT_FACTOR),
     };
     let Some(contents) = server
-        .blob_store()
         .get_blob(file.blob_hash.0.as_slice(), range)
         .await
         .caused_by(trc::location!())?

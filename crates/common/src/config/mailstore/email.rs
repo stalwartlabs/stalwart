@@ -13,10 +13,7 @@ use ahash::{AHashMap, AHashSet};
 use nlp::language::Language;
 use registry::{
     schema::{
-        enums::{
-            CompressionAlgo, SearchCalendarField, SearchContactField, SearchEmailField,
-            StorageQuota,
-        },
+        enums::{SearchCalendarField, SearchContactField, SearchEmailField, StorageQuota},
         prelude::ObjectType,
         structs::{
             AddressBook, Authentication, Calendar, DataRetention, Domain, Email, Encryption,
@@ -68,7 +65,6 @@ pub struct EmailConfig {
     pub extract_limits: ExtractLimits,
 
     pub max_objects: ObjectQuota,
-    pub compression: CompressionAlgo,
 
     pub account_purge_frequency: SimpleCron,
     pub data_purge_frequency: SimpleCron,
@@ -366,7 +362,6 @@ impl EmailConfig {
             account_purge_frequency: dr.expunge_schedule.into(),
             data_purge_frequency: dr.data_cleanup_schedule.into(),
             blob_purge_frequency: dr.blob_cleanup_schedule.into(),
-            compression: email.compression_algorithm,
             default_domain_id: system.default_domain_id.id() as u32,
             default_domain_name,
         }

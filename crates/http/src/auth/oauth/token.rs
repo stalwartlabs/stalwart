@@ -475,7 +475,7 @@ impl TokenHandler for Server {
         }
 
         if token_info.credential_expired
-            && !client.is_first_party()
+            && !OAuthScopes::from_grant(&stored.grant).allows_expired_credential()
             && stored.is_current(presented.generation)
         {
             return Ok(TokenResponse::error(ErrorType::InvalidGrant));
@@ -510,14 +510,14 @@ impl TokenHandler for Server {
     async fn issue_new_grant(&self, request: NewGrantRequest<'_>) -> trc::Result<TokenResponse> {
         let account_id = request.account_id;
         let scope = request.scope.unwrap_or_default();
-        let scopes = OAuthScopes::parse(scope);
+        let scopes = request.client.granted_scopes(OAuthScopes::parse(scope));
         let access_token = self
             .access_token(account_id)
             .await
             .caused_by(trc::location!())?;
         let credential_version = access_token.credential_version();
         if credential_version != request.credential_version
-            || (!request.client.is_first_party() && access_token.is_main_credential_expired())
+            || (access_token.is_main_credential_expired() && !scopes.allows_expired_credential())
         {
             return Ok(TokenResponse::error(ErrorType::InvalidGrant));
         }
@@ -527,7 +527,7 @@ impl TokenHandler for Server {
                 client_id: request.client_id,
                 client_name: request.client.display_name(),
                 client_kind: request.client.kind(),
-                scopes: scopes.interoperable(),
+                scopes: scopes.grantable(),
                 remote_ip: request.remote_ip,
             })
             .await

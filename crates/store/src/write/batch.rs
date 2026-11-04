@@ -986,7 +986,7 @@ impl BatchBuilder {
                 index,
                 id_prefix: account_id,
                 id_suffix: document_id,
-                created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0).unwrap_or_default(),
+                created_at: SnowflakeIdGenerator::global_id().unwrap_or_default(),
             }),
             vec![1u8],
         )
@@ -1004,7 +1004,7 @@ impl BatchBuilder {
                 index,
                 id_prefix: account_id,
                 id_suffix: document_id,
-                created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0).unwrap_or_default(),
+                created_at: SnowflakeIdGenerator::global_id().unwrap_or_default(),
             }),
             vec![0u8],
         )
@@ -1017,8 +1017,7 @@ impl BatchBuilder {
                     index: SearchIndex::Tracing,
                     id_prefix: (id >> 32) as u32,
                     id_suffix: QueueDocumentId::Assigned(id as u32),
-                    created_at: SnowflakeIdGenerator::global_id_with_sequence_id(0)
-                        .unwrap_or_default(),
+                    created_at: SnowflakeIdGenerator::global_id().unwrap_or_default(),
                 }),
                 vec![1u8],
             )

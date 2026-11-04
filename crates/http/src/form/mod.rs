@@ -167,7 +167,13 @@ impl FormHandler for Server {
 
             // Reserve and write blob
             let (message_blob, blob_hold) = self
-                .hold_blob(u32::MAX, BlobHash::generate(&message), &message, 60)
+                .hold_blob(
+                    u32::MAX,
+                    BlobHash::generate(&message),
+                    &message,
+                    60,
+                    &self.core.blob.email,
+                )
                 .await
                 .caused_by(trc::location!())?;
 
